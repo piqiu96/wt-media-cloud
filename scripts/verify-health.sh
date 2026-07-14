@@ -7,6 +7,13 @@ GOCACHE="${GOCACHE:-$(pwd)/.cache/go-build}"
 export WT_MEDIA_CLOUD_HTTP_ADDR="$ADDR"
 export GOCACHE
 
+case "$GO_BIN" in
+  */go/bin/go)
+    GOROOT="$(CDPATH= cd -- "$(dirname -- "$GO_BIN")/.." && pwd)"
+    export GOROOT
+    ;;
+esac
+
 "$GO_BIN" test ./...
 
 "$GO_BIN" run ./cmd/server &

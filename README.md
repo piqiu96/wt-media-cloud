@@ -25,3 +25,11 @@ Runtime configuration:
 - `internal/infra`: database, logger, object storage, and scheduler adapters.
 - `contracts`: Cloud-owned contracts.
 - `web`: unified business Web source.
+
+## M0 Verification
+
+Use Go 1.26.5 for M0 Cloud verification. From this repository:
+
+```text
+GO_BIN=../../devenv/go26/go/bin/go scripts/verify-health.sh
+```
