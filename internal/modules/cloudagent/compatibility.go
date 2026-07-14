@@ -5,8 +5,8 @@ import "strconv"
 const (
 	APIName                      = "cloud-agent"
 	MajorVersion                 = "v1"
-	ContractRevision             = "2026.07.14.1"
-	MinimumAgentContractRevision = "2026.07.14.1"
+	ContractRevision             = "2026.07.14.2"
+	MinimumAgentContractRevision = "2026.07.14.2"
 )
 
 type Compatibility struct {
