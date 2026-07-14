@@ -1,0 +1,6 @@
+.cache/
+.DS_Store
+bin/
+dist/
+web/dist/
+*.log
