@@ -80,6 +80,15 @@ func TestRoutesUpdateStatuses(t *testing.T) {
 	}
 }
 
+func TestRoutesBindValidatedProfile(t *testing.T) {
+	engine, cookie, _ := newMediaAccountRouteTest(t)
+	accountID := createRouteAccount(t, engine, cookie, "douyin")
+	response := performMediaJSON(engine, "PATCH", "/api/v1/media-accounts/"+accountID+"/profile", `{"browser_profile_id":"profile-1"}`, cookie)
+	if response.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(response.Result().Body()), `"browser_profile_id":"profile-1"`) {
+		t.Fatalf("status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
 func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore) {
 	t.Helper()
 	identityStore := identity.NewMemoryStore()
@@ -94,11 +103,11 @@ func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = operator
 	engine := server.New()
 	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
 	store := newMemoryStore()
-	RegisterRoutes(engine, NewService(store), identityService)
+	resolver := &fakeProfileResolver{profiles: map[string]string{"profile-1": operator.ID}, inactive: map[string]bool{}}
+	RegisterRoutes(engine, NewService(store, WithProfileResolver(resolver)), identityService)
 	login := performMediaJSON(engine, "POST", "/api/v1/auth/login", `{"username":"operator","password":"a-long-operator-password"}`, "")
 	if login.Result().StatusCode() != consts.StatusOK {
 		t.Fatalf("login status = %d, body = %s", login.Result().StatusCode(), login.Result().Body())

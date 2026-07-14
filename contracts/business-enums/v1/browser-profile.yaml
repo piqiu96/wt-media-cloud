@@ -1,0 +1,6 @@
+schema_version: 1
+revision: "2026.07.14.3"
+bit_account_statuses: [bound]
+profile_local_statuses: [active, local_missing, archived]
+profile_scan_statuses: [ready, confirmed]
+profile_diff_kinds: [added, changed, missing]

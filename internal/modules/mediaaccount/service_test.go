@@ -183,6 +183,31 @@ func TestServiceRejectsTaggingAnotherUsersAccount(t *testing.T) {
 	}
 }
 
+func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
+	store := newMemoryStore()
+	resolver := &fakeProfileResolver{profiles: map[string]string{"profile-1": "user-1", "profile-2": "user-2"}, inactive: map[string]bool{}}
+	service := newTestServiceWithProfiles(store, resolver)
+	actor := identity.PublicUser{ID: "user-1", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, GameIDs: []string{"game-a"}}
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformDouyin})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformDouyin})
+
+	bound, err := service.BindProfile(actor, first.ID, "profile-1")
+	if err != nil || bound.BrowserProfileID != "profile-1" {
+		t.Fatalf("BindProfile() account=%#v error=%v", bound, err)
+	}
+	if _, err := service.BindProfile(actor, second.ID, "profile-1"); !errors.Is(err, ErrProfilePlatformTaken) {
+		t.Fatalf("same platform bind error = %v", err)
+	}
+	if _, err := service.BindProfile(actor, second.ID, "profile-2"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("cross-user bind error = %v", err)
+	}
+	resolver.inactive["profile-3"] = true
+	resolver.profiles["profile-3"] = "user-1"
+	if _, err := service.BindProfile(actor, second.ID, "profile-3"); !errors.Is(err, ErrProfileUnavailable) {
+		t.Fatalf("inactive bind error = %v", err)
+	}
+}
+
 func assertAccountIDs(t *testing.T, service *Service, actor identity.PublicUser, filter AccountFilter, want ...string) {
 	t.Helper()
 	accounts, err := service.ListAccounts(actor, filter)
@@ -211,6 +236,15 @@ func newTestService(store Store) *Service {
 	return NewService(store, WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
 		next++
 		return prefix + "-" + string(rune('0'+next))
+	}))
+}
+
+func newTestServiceWithProfiles(store Store, resolver ProfileResolver) *Service {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	next := 0
+	return NewService(store, WithProfileResolver(resolver), WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
+		next++
+		return prefix + "-profile-test-" + string(rune('0'+next))
 	}))
 }
 
@@ -250,6 +284,15 @@ func (s *memoryStore) Find(id string) (AccountRecord, bool, error) {
 func (s *memoryStore) FindByIdentity(userID string, platform Platform, platformAccountID string) (AccountRecord, bool, error) {
 	for _, record := range s.records {
 		if record.UserID == userID && record.Platform == platform && record.PlatformAccountID == platformAccountID && record.IdentificationStatus == IdentificationIdentified {
+			return record, true, nil
+		}
+	}
+	return AccountRecord{}, false, nil
+}
+
+func (s *memoryStore) FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error) {
+	for _, record := range s.records {
+		if record.BrowserProfileID == profileID && record.Platform == platform {
 			return record, true, nil
 		}
 	}
@@ -342,4 +385,14 @@ func matchesTags(accountTags map[string]struct{}, anyTags, allTags, excludeTags 
 		}
 	}
 	return true
+}
+
+type fakeProfileResolver struct {
+	profiles map[string]string
+	inactive map[string]bool
+}
+
+func (r *fakeProfileResolver) ResolveProfile(profileID string) (userID string, active bool, found bool, err error) {
+	userID, found = r.profiles[profileID]
+	return userID, !r.inactive[profileID], found, nil
 }

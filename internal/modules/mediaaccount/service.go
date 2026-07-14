@@ -49,10 +49,12 @@ const (
 )
 
 var (
-	ErrForbidden        = errors.New("media account operation is forbidden")
-	ErrInvalidInput     = errors.New("media account input is invalid")
-	ErrNotFound         = errors.New("media account was not found")
-	ErrDuplicateAccount = errors.New("media account already exists for this user and platform")
+	ErrForbidden            = errors.New("media account operation is forbidden")
+	ErrInvalidInput         = errors.New("media account input is invalid")
+	ErrNotFound             = errors.New("media account was not found")
+	ErrDuplicateAccount     = errors.New("media account already exists for this user and platform")
+	ErrProfileUnavailable   = errors.New("browser profile is unavailable")
+	ErrProfilePlatformTaken = errors.New("browser profile already has an account for this platform")
 )
 
 // Account is the API-safe representation. Cookie values are intentionally
@@ -118,6 +120,7 @@ type Store interface {
 	Create(AccountRecord) error
 	Find(id string) (AccountRecord, bool, error)
 	FindByIdentity(userID string, platform Platform, platformAccountID string) (AccountRecord, bool, error)
+	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
 	Update(AccountRecord) error
 	List(AccountQuery) ([]AccountRecord, error)
 	AddTags(userID string, accountIDs, tags []string, createdAt time.Time) error
@@ -127,9 +130,14 @@ type Store interface {
 }
 
 type Service struct {
-	store Store
-	now   func() time.Time
-	newID func(string) string
+	store    Store
+	profiles ProfileResolver
+	now      func() time.Time
+	newID    func(string) string
+}
+
+type ProfileResolver interface {
+	ResolveProfile(profileID string) (userID string, active bool, found bool, err error)
 }
 
 type Option func(*Service)
@@ -140,6 +148,10 @@ func WithClock(now func() time.Time) Option {
 
 func WithIDGenerator(newID func(string) string) Option {
 	return func(service *Service) { service.newID = newID }
+}
+
+func WithProfileResolver(resolver ProfileResolver) Option {
+	return func(service *Service) { service.profiles = resolver }
 }
 
 func NewService(store Store, options ...Option) *Service {
@@ -329,6 +341,43 @@ func (s *Service) AddTags(actor identity.PublicUser, accountIDs, tags []string) 
 
 func (s *Service) RemoveTags(actor identity.PublicUser, accountIDs, tags []string) error {
 	return s.changeTags(actor, accountIDs, tags, false)
+}
+
+func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID string) (Account, error) {
+	record, err := s.authorizedRecord(actor, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" || s.profiles == nil {
+		return Account{}, ErrProfileUnavailable
+	}
+	userID, active, found, err := s.profiles.ResolveProfile(profileID)
+	if err != nil {
+		return Account{}, err
+	}
+	if !found || !active {
+		return Account{}, ErrProfileUnavailable
+	}
+	if userID != record.UserID {
+		return Account{}, ErrForbidden
+	}
+	existing, found, err := s.store.FindByProfilePlatform(profileID, record.Platform)
+	if err != nil {
+		return Account{}, err
+	}
+	if found && existing.ID != record.ID {
+		return Account{}, ErrProfilePlatformTaken
+	}
+	record.BrowserProfileID = profileID
+	record.UpdatedAt = s.now()
+	if err := s.store.Update(record); err != nil {
+		return Account{}, err
+	}
+	if err := s.audit(actor.ID, "media_account.profile.bind", record.ID, map[string]string{"browser_profile_id": profileID}); err != nil {
+		return Account{}, err
+	}
+	return record.Account, nil
 }
 
 func (s *Service) changeTags(actor identity.PublicUser, accountIDs, tags []string, add bool) error {

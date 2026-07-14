@@ -1,0 +1,11 @@
+schema_version: 1
+revision: "2026.07.14.3"
+errors:
+  bitbrowser_identity_unverifiable: {http_status: 409}
+  bitbrowser_identity_mismatch: {http_status: 409}
+  profile_scan_not_found: {http_status: 404}
+  profile_scan_expired: {http_status: 410}
+  profile_scan_not_ready: {http_status: 409}
+  profile_store_error: {http_status: 500}
+  browser_profile_unavailable: {http_status: 409}
+  profile_platform_account_taken: {http_status: 409}

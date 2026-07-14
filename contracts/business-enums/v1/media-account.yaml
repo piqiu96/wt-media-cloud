@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.07.14.2"
+revision: "2026.07.14.3"
 platforms: [douyin, bilibili, baijiahao]
 identification_statuses: [pending_identification, identified, duplicate]
 business_statuses: [enabled, disabled, retired]

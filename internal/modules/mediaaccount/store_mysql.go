@@ -48,6 +48,13 @@ func (s *MySQLStore) FindByIdentity(userID string, platform Platform, platformAc
 	)
 }
 
+func (s *MySQLStore) FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error) {
+	return s.find(
+		`SELECT `+accountColumns+` FROM media_accounts WHERE browser_profile_id = ? AND platform = ? LIMIT 1`,
+		profileID, platform,
+	)
+}
+
 func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error) {
 	record, err := scanAccount(s.db.QueryRow(query, args...))
 	if errors.Is(err, sql.ErrNoRows) {

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.07.14.2
+  version: 2026.07.14.3
 paths:
   /api/v1/media-accounts:
     get:
@@ -128,6 +128,23 @@ paths:
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/media-accounts/{account_id}/profile:
+    patch:
+      operationId: bindMediaAccountProfile
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [browser_profile_id]
+              properties: {browser_profile_id: {type: string}}
+      responses:
+        '200': {description: Same-user active Profile bound to the account.}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Profile unavailable or already used by this platform.}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

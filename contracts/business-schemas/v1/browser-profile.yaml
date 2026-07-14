@@ -1,0 +1,33 @@
+schema_version: 1
+revision: "2026.07.14.3"
+schemas:
+  BrowserProfile:
+    type: object
+    required: [id, user_id, bit_profile_id, owner_user_id, name, local_status, last_synced_at]
+    properties:
+      id: {type: string}
+      user_id: {type: string}
+      bit_profile_id: {type: string}
+      owner_user_id: {type: string, source: BitBrowser.userId}
+      name: {type: string}
+      seq: {type: integer}
+      group_id: {type: string}
+      group_name: {type: string}
+      bit_status: {type: string}
+      bit_updated_at: {type: string}
+      local_status: {type: string, enum: [active, local_missing, archived]}
+      last_synced_at: {type: string, format: date-time}
+    forbidden_properties: [cookie, password, proxy_username, proxy_password, oper_user_id, main_user_id]
+  BitAccountBinding:
+    type: object
+    required: [user_id, owner_user_id, status]
+    properties:
+      user_id: {type: string}
+      owner_user_id: {type: string}
+      status: {type: string, enum: [bound]}
+      bound_at: {type: string, format: date-time}
+      last_verified_at: {type: string, format: date-time}
+sync_policy:
+  scan_is_staged: true
+  confirmation_required: true
+  automatic_rebind: false

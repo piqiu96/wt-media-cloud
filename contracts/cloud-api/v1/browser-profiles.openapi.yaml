@@ -1,0 +1,60 @@
+openapi: 3.0.3
+info: {title: WT Media Cloud Browser Profile API, version: 2026.07.14.3}
+paths:
+  /api/v1/bit-browser/profile-scans:
+    post:
+      operationId: submitProfileScan
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/SnapshotInput'}}}
+      responses:
+        '201': {description: Secret-free scan staged; formal Profile data is unchanged.}
+        '409': {description: Empty, mixed, missing, or mismatched BitBrowser identity.}
+  /api/v1/bit-browser/profile-scans/{scan_id}:
+    get:
+      operationId: getProfileScan
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Current user's staged scan and Diff.}
+        '404': {description: Scan not found.}
+  /api/v1/bit-browser/profile-scans/{scan_id}/confirm:
+    post:
+      operationId: confirmProfileScan
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: User identity and formal Profile mirror applied transactionally.}
+        '409': {description: Scan not ready or identity mismatch.}
+        '410': {description: Scan expired.}
+  /api/v1/browser-profiles:
+    get:
+      operationId: listBrowserProfiles
+      security: [{sessionCookie: []}]
+      parameters: [{in: query, name: user_id, schema: {type: string}, description: Technician-only global filter.}]
+      responses:
+        '200': {description: Visible confirmed Profile mirrors.}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  schemas:
+    SnapshotInput:
+      type: object
+      required: [owner_user_id, profiles]
+      properties:
+        owner_user_id: {type: string}
+        profiles: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ProfileInput'}}
+    ProfileInput:
+      type: object
+      required: [bit_profile_id, owner_user_id]
+      additionalProperties: false
+      properties:
+        bit_profile_id: {type: string}
+        owner_user_id: {type: string}
+        name: {type: string}
+        seq: {type: integer}
+        group_id: {type: string}
+        group_name: {type: string}
+        bit_status: {type: string}
+        bit_updated_at: {type: string}

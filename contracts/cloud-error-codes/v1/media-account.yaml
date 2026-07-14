@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.07.14.2"
+revision: "2026.07.14.3"
 errors:
   authentication_required: {http_status: 401}
   forbidden: {http_status: 403}
@@ -7,3 +7,5 @@ errors:
   media_account_not_found: {http_status: 404}
   duplicate_media_account: {http_status: 409}
   media_account_store_error: {http_status: 500}
+  browser_profile_unavailable: {http_status: 409}
+  profile_platform_account_taken: {http_status: 409}

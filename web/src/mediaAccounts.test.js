@@ -52,4 +52,15 @@ describe('media account client', () => {
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts/tags/add', expect.objectContaining({ credentials: 'include' }))
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/tags/remove', expect.objectContaining({ credentials: 'include' }))
   })
+
+  it('binds a confirmed browser profile', async () => {
+	const fetch = vi.fn(async () => response({ id: 'account-1', browser_profile_id: 'profile-1' }))
+	const client = createMediaAccountClient({ fetch })
+
+	await client.bindProfile('account-1', 'profile-1')
+
+	expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts/account-1/profile', expect.objectContaining({
+	  method: 'PATCH', credentials: 'include', body: JSON.stringify({ browser_profile_id: 'profile-1' }),
+	}))
+  })
 })

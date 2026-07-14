@@ -61,6 +61,10 @@ export function createMediaAccountClient({ fetch = globalThis.fetch } = {}) {
       })
     },
 
+    async bindProfile(accountId, browserProfileId) {
+      return write(`/api/v1/media-accounts/${accountId}/profile`, { browser_profile_id: browserProfileId }, 'PATCH')
+    },
+
     async addTags(accountIds, tags) {
       return write('/api/v1/media-accounts/tags/add', { account_ids: accountIds, tags })
     },

@@ -36,6 +36,10 @@ type tagsRequest struct {
 	Tags       []string `json:"tags"`
 }
 
+type bindProfileRequest struct {
+	BrowserProfileID string `json:"browser_profile_id"`
+}
+
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service) {
 	h.POST("/api/v1/media-accounts", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -127,6 +131,23 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		common.JSONData(c, consts.StatusOK, account)
 	})
+
+	h.PATCH("/api/v1/media-accounts/:account_id/profile", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req bindProfileRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		account, err := service.BindProfile(actor, c.Param("account_id"), req.BrowserProfileID)
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.JSONData(c, consts.StatusOK, account)
+	})
 }
 
 func changeTags(c *hertzapp.RequestContext, service *Service, identityService *identity.Service, add bool) {
@@ -166,6 +187,10 @@ func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 		common.JSONError(c, consts.StatusNotFound, "media_account_not_found", "media account was not found")
 	case errors.Is(err, ErrDuplicateAccount):
 		common.JSONError(c, consts.StatusConflict, "duplicate_media_account", "this user already has the platform account")
+	case errors.Is(err, ErrProfilePlatformTaken):
+		common.JSONError(c, consts.StatusConflict, "profile_platform_account_taken", "this Profile already has an account for the platform")
+	case errors.Is(err, ErrProfileUnavailable):
+		common.JSONError(c, consts.StatusConflict, "browser_profile_unavailable", "browser Profile is missing or inactive")
 	case errors.Is(err, ErrInvalidInput):
 		common.JSONError(c, consts.StatusBadRequest, "invalid_media_account_request", "media account request is invalid")
 	default:
