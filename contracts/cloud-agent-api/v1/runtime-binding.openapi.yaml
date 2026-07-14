@@ -1,0 +1,109 @@
+openapi: 3.1.0
+info:
+  title: WT Media Local Agent Runtime Binding API
+  version: 2026.07.14.5
+paths:
+  /api/v1/local-agent/binding-tickets:
+    post:
+      operationId: createLocalAgentBindingTicket
+      summary: Mint a short-lived one-use ticket from the active user session.
+      responses:
+        "201":
+          description: One-use ticket. The raw token is returned only in this response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BindingTicketEnvelope"}
+        "401": {description: Active user session required.}
+  /api/v1/local-agent/nodes/register:
+    post:
+      operationId: registerBoundLocalAgentNode
+      summary: Consume a binding ticket and issue a node credential once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RegisterLocalNode"}
+      responses:
+        "201": {description: Bound node and one-time node credential response.}
+        "401": {description: Ticket or bound session invalid.}
+        "409": {description: Agent contract incompatible.}
+  /api/v1/local-agent/nodes/{node_id}/runtime-report:
+    post:
+      operationId: reportLocalAgentRuntime
+      security: [{nodeBearer: []}]
+      parameters:
+        - in: path
+          name: node_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RuntimeReport"}
+      responses:
+        "200": {description: Runtime report accepted.}
+        "401": {description: Node credential or bound session invalid.}
+        "409": {description: Profile ownership mismatch.}
+components:
+  securitySchemes:
+    nodeBearer:
+      type: http
+      scheme: bearer
+  schemas:
+    BindingTicketEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [ticket_id, binding_token, expires_at]
+          properties:
+            ticket_id: {type: string}
+            binding_token: {type: string, writeOnly: true}
+            expires_at: {type: string, format: date-time}
+    RegisterLocalNode:
+      type: object
+      required: [binding_token, agent_id, device_id, agent_version, contract_major_version, contract_revision]
+      properties:
+        binding_token: {type: string, writeOnly: true}
+        agent_id: {type: string}
+        device_id: {type: string}
+        agent_version: {type: string}
+        contract_major_version: {type: string, const: v1}
+        contract_revision: {type: string}
+      additionalProperties: false
+    RuntimeReport:
+      type: object
+      required: [operating_system, cpu_architecture, agent_version, python_version, ffmpeg, workdir_status, disk, bitbrowser_status]
+      properties:
+        operating_system: {type: string, enum: [macos, windows, linux, unsupported]}
+        cpu_architecture: {type: string, enum: [x86_64, arm64, unsupported]}
+        agent_version: {type: string}
+        python_version: {type: string}
+        ffmpeg: {$ref: "#/components/schemas/DependencyFact"}
+        workdir_status: {$ref: "#/components/schemas/RuntimeStatus"}
+        disk:
+          type: object
+          required: [status, free_megabytes]
+          properties:
+            status: {$ref: "#/components/schemas/RuntimeStatus"}
+            free_megabytes: {type: integer, minimum: 0}
+          additionalProperties: false
+        bitbrowser_status: {type: string, enum: [normal, unreachable, identity_unverifiable, not_installed, needs_upgrade, user_action_required]}
+        owner_user_id: {type: string}
+        bit_profile_ids:
+          type: array
+          uniqueItems: true
+          items: {type: string}
+      additionalProperties: false
+    DependencyFact:
+      type: object
+      required: [status]
+      properties:
+        status: {$ref: "#/components/schemas/RuntimeStatus"}
+        version: {type: string}
+      additionalProperties: false
+    RuntimeStatus:
+      type: string
+      enum: [normal, abnormal, not_installed, needs_upgrade, unreachable, user_action_required]

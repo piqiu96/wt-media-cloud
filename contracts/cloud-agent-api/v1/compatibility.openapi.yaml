@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Compatibility API
-  version: 2026.07.14.4
+  version: 2026.07.14.5
   description: Minimal M1-C1 Cloud-owned contract for Cloud-Agent version compatibility.
 paths:
   /api/v1/cloud-agent/compatibility:
@@ -40,10 +40,10 @@ components:
           const: v1
         contract_revision:
           type: string
-          const: 2026.07.14.4
+          const: 2026.07.14.5
         minimum_agent_contract_revision:
           type: string
-          const: 2026.07.14.4
+          const: 2026.07.14.5
         compatible_agent_major_versions:
           type: array
           items:
