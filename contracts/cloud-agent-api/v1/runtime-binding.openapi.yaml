@@ -24,7 +24,11 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/RegisterLocalNode"}
       responses:
-        "201": {description: Bound node and one-time node credential response.}
+        "201":
+          description: Bound node and one-time node credential response.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RegistrationEnvelope"}
         "401": {description: Ticket or bound session invalid.}
         "409": {description: Agent contract incompatible.}
   /api/v1/local-agent/nodes/{node_id}/runtime-report:
@@ -60,7 +64,7 @@ components:
           required: [ticket_id, binding_token, expires_at]
           properties:
             ticket_id: {type: string}
-            binding_token: {type: string, writeOnly: true}
+            binding_token: {type: string, description: Returned once and never persisted in plaintext.}
             expires_at: {type: string, format: date-time}
     RegisterLocalNode:
       type: object
@@ -73,6 +77,31 @@ components:
         contract_major_version: {type: string, const: v1}
         contract_revision: {type: string}
       additionalProperties: false
+    RegistrationEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [node, node_credential]
+          properties:
+            node:
+              type: object
+              required: [id, agent_id, device_id, user_id, mode, agent_version, contract_major_version, contract_revision, status, registered_at, last_heartbeat_at]
+              properties:
+                id: {type: string}
+                agent_id: {type: string}
+                device_id: {type: string}
+                user_id: {type: string}
+                mode: {type: string, const: local}
+                agent_version: {type: string}
+                contract_major_version: {type: string}
+                contract_revision: {type: string}
+                status: {type: string, enum: [online, draining, replaced]}
+                registered_at: {type: string, format: date-time}
+                last_heartbeat_at: {type: string, format: date-time}
+              additionalProperties: false
+            node_credential: {type: string, description: Returned once and never persisted in plaintext.}
     RuntimeReport:
       type: object
       required: [operating_system, cpu_architecture, agent_version, python_version, ffmpeg, workdir_status, disk, bitbrowser_status]
