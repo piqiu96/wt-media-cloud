@@ -196,21 +196,11 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(credential) == "" || !validReport(report) {
 		return ErrInvalidInput
 	}
-	node, ok, err := s.store.FindNodeByCredentialHash(secretHash(credential))
+	node, err := s.AuthenticateNode(nodeID, credential)
 	if err != nil {
 		return err
-	}
-	if !ok || node.ID != nodeID || node.Mode != "local" || node.Status == AgentStatusReplaced {
-		return ErrNodeCredentialInvalid
 	}
 	now := s.now()
-	active, err := s.store.IsSessionActive(node.SessionID, node.UserID, now)
-	if err != nil {
-		return err
-	}
-	if !active {
-		return ErrBoundSessionInvalid
-	}
 	if report.BitBrowserStatus == "normal" {
 		profileIDs := uniqueSorted(report.BitProfileIDs)
 		if len(profileIDs) != len(report.BitProfileIDs) {
@@ -228,6 +218,30 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 	node.LastHeartbeatAt = now
 	node.Status = cloudagent.AgentStatusOnline
 	return s.store.ApplyRuntimeReport(node, report, now)
+}
+
+// AuthenticateNode verifies the bearer node credential and the bound active
+// user session for other Cloud security modules. It never exposes the hash.
+func (s *Service) AuthenticateNode(nodeID, credential string) (AgentNode, error) {
+	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(credential) == "" {
+		return AgentNode{}, ErrNodeCredentialInvalid
+	}
+	node, ok, err := s.store.FindNodeByCredentialHash(secretHash(credential))
+	if err != nil {
+		return AgentNode{}, err
+	}
+	if !ok || node.ID != nodeID || node.Mode != "local" || node.Status == AgentStatusReplaced {
+		return AgentNode{}, ErrNodeCredentialInvalid
+	}
+	now := s.now()
+	active, err := s.store.IsSessionActive(node.SessionID, node.UserID, now)
+	if err != nil {
+		return AgentNode{}, err
+	}
+	if !active {
+		return AgentNode{}, ErrBoundSessionInvalid
+	}
+	return node, nil
 }
 
 func validReport(report RuntimeReport) bool {

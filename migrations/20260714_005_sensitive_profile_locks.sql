@@ -1,0 +1,42 @@
+CREATE TABLE sensitive_browser_tasks (
+    id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    profile_id VARCHAR(64) NOT NULL,
+    bit_profile_id VARCHAR(255) NOT NULL,
+    node_id VARCHAR(64) NOT NULL,
+    operation VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_sensitive_browser_tasks_node_status (node_id, status, created_at),
+    KEY idx_sensitive_browser_tasks_profile_status (profile_id, status, created_at),
+    CONSTRAINT fk_sensitive_browser_task_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_sensitive_browser_task_profile FOREIGN KEY (profile_id) REFERENCES browser_profiles(id),
+    CONSTRAINT fk_sensitive_browser_task_node FOREIGN KEY (node_id) REFERENCES local_agent_nodes(id),
+    CONSTRAINT chk_sensitive_browser_task_operation CHECK (operation IN ('assisted_publication', 'interaction', 'authenticated_account_check', 'cookie_read', 'cookie_write', 'profile_mutation', 'proxy_mutation')),
+    CONSTRAINT chk_sensitive_browser_task_status CHECK (status IN ('authorized', 'running', 'completed', 'review_required'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE sensitive_profile_permits (
+    id VARCHAR(64) NOT NULL,
+    task_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    profile_id VARCHAR(64) NOT NULL,
+    node_id VARCHAR(64) NOT NULL,
+    operation VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    credential_hash CHAR(64) NOT NULL,
+    acquired_at DATETIME(6) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    finished_at DATETIME(6) NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_sensitive_profile_permit_credential_hash (credential_hash),
+    KEY idx_sensitive_profile_permit_profile_time (profile_id, acquired_at),
+    KEY idx_sensitive_profile_permit_task (task_id, status),
+    CONSTRAINT fk_sensitive_profile_permit_task FOREIGN KEY (task_id) REFERENCES sensitive_browser_tasks(id),
+    CONSTRAINT fk_sensitive_profile_permit_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_sensitive_profile_permit_profile FOREIGN KEY (profile_id) REFERENCES browser_profiles(id),
+    CONSTRAINT fk_sensitive_profile_permit_node FOREIGN KEY (node_id) REFERENCES local_agent_nodes(id),
+    CONSTRAINT chk_sensitive_profile_permit_status CHECK (status IN ('active', 'released', 'review_required'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

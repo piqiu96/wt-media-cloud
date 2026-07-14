@@ -17,6 +17,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
+	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
@@ -52,7 +53,9 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: cfg.SessionCookieSecure})
-	runtimebinding.RegisterRoutes(engine, runtimebinding.NewService(runtimebinding.NewMySQLStore(db)), identityService)
+	runtimeService := runtimebinding.NewService(runtimebinding.NewMySQLStore(db))
+	runtimebinding.RegisterRoutes(engine, runtimeService, identityService)
+	profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(db), runtimeService))
 	profileStore := profilebinding.NewMySQLStore(db)
 	profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService)
 	mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(db), mediaaccount.WithProfileResolver(profileStore)), identityService)
