@@ -22,6 +22,7 @@ func NewServer() *Server {
 	engine := server.Default(server.WithHostPorts(cfg.HTTPAddr))
 
 	registerHealthRoutes(engine)
+	cloudagent.RegisterRoutes(engine, cloudagent.NewRegistry())
 
 	return &Server{engine: engine, addr: cfg.HTTPAddr}
 }
@@ -38,8 +39,5 @@ func registerHealthRoutes(h *server.Hertz) {
 	})
 	h.GET("/api/v1/health", func(ctx context.Context, c *hertzapp.RequestContext) {
 		common.JSONData(c, consts.StatusOK, map[string]string{"status": "ok"})
-	})
-	h.GET("/api/v1/cloud-agent/compatibility", func(ctx context.Context, c *hertzapp.RequestContext) {
-		common.JSONData(c, consts.StatusOK, cloudagent.CurrentCompatibility())
 	})
 }

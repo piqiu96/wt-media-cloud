@@ -1,0 +1,140 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cloud-Agent Registration And Heartbeat API
+  version: 2026.07.14.2
+  description: M1-C2 Cloud-owned contract for Agent node registration and heartbeat.
+paths:
+  /api/v1/cloud-agent/agents/register:
+    post:
+      operationId: registerCloudAgent
+      summary: Register an Agent node with Cloud.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterAgentRequest"
+      responses:
+        "200":
+          description: Registered Agent node.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnvelope"
+  /api/v1/cloud-agent/agents/{agent_id}/heartbeat:
+    post:
+      operationId: heartbeatCloudAgent
+      summary: Update Agent node heartbeat.
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HeartbeatRequest"
+      responses:
+        "200":
+          description: Updated Agent node.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnvelope"
+  /api/v1/cloud-agent/agents/{agent_id}:
+    get:
+      operationId: getCloudAgent
+      summary: Get Agent node status.
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent node status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentEnvelope"
+components:
+  schemas:
+    RegisterAgentRequest:
+      type: object
+      required:
+        - agent_id
+        - mode
+        - version
+        - contract_major_version
+        - contract_revision
+      properties:
+        agent_id:
+          type: string
+        mode:
+          type: string
+          enum: [local, cloud]
+        version:
+          type: string
+        contract_major_version:
+          type: string
+          const: v1
+        contract_revision:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+    HeartbeatRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [online, draining]
+    AgentEnvelope:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: "#/components/schemas/AgentNode"
+    AgentNode:
+      type: object
+      required:
+        - agent_id
+        - mode
+        - version
+        - contract_major_version
+        - contract_revision
+        - status
+        - registered_at
+        - last_heartbeat_at
+      properties:
+        agent_id:
+          type: string
+        mode:
+          type: string
+          enum: [local, cloud]
+        version:
+          type: string
+        contract_major_version:
+          type: string
+          const: v1
+        contract_revision:
+          type: string
+        status:
+          type: string
+          enum: [online, draining]
+        registered_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        capabilities:
+          type: array
+          items:
+            type: string
