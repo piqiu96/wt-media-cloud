@@ -11,10 +11,10 @@ func TestCurrentCompatibility(t *testing.T) {
 	if got.MajorVersion != "v1" {
 		t.Fatalf("MajorVersion = %q", got.MajorVersion)
 	}
-	if got.ContractRevision != "2026.07.14.5" {
+	if got.ContractRevision != "2026.07.14.6" {
 		t.Fatalf("ContractRevision = %q", got.ContractRevision)
 	}
-	if got.MinimumAgentContractRevision != "2026.07.14.5" {
+	if got.MinimumAgentContractRevision != "2026.07.14.6" {
 		t.Fatalf("MinimumAgentContractRevision = %q", got.MinimumAgentContractRevision)
 	}
 }
@@ -26,9 +26,9 @@ func TestIsAgentCompatible(t *testing.T) {
 		revision string
 		want     bool
 	}{
-		{name: "current", major: "v1", revision: "2026.07.14.5", want: true},
-		{name: "newer compatible revision", major: "v1", revision: "2026.07.14.6", want: true},
-		{name: "prior revision", major: "v1", revision: "2026.07.14.4", want: false},
+		{name: "current", major: "v1", revision: "2026.07.14.6", want: true},
+		{name: "newer compatible revision", major: "v1", revision: "2026.07.14.7", want: true},
+		{name: "prior revision", major: "v1", revision: "2026.07.14.5", want: false},
 		{name: "older revision", major: "v1", revision: "2026.07.13.1", want: false},
 		{name: "wrong major", major: "v2", revision: "2026.07.14.1", want: false},
 		{name: "malformed revision", major: "v1", revision: "2026-07-14", want: false},

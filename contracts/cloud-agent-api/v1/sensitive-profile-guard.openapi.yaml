@@ -1,0 +1,101 @@
+openapi: 3.1.0
+info:
+  title: WT Media Sensitive Profile Guard API
+  version: 2026.07.14.6
+paths:
+  /api/v1/local-agent/sensitive-tasks/{task_id}/preflight:
+    post:
+      operationId: preflightSensitiveProfileTask
+      security: [{nodeBearer: []}]
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id]
+              properties: {node_id: {type: string}}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Granted, waiting, or review-required outcome.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PreflightEnvelope"}
+        "401": {description: Node/session credential invalid.}
+        "403": {description: Task assignment mismatch.}
+        "404": {description: Pre-authorized task not found.}
+        "409": {description: Fresh matching runtime unavailable.}
+  /api/v1/local-agent/sensitive-permits/{permit_id}/renew:
+    post:
+      operationId: renewSensitiveProfilePermit
+      security: [{nodeBearer: [], permitCredential: []}]
+      parameters:
+        - in: path
+          name: permit_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id, lease_seconds]
+              properties:
+                node_id: {type: string}
+                lease_seconds: {type: integer, minimum: 1, maximum: 120}
+              additionalProperties: false
+      responses:
+        "200": {description: Active permit renewed, capped at two minutes.}
+        "401": {description: Node/session/permit credential invalid.}
+  /api/v1/local-agent/sensitive-permits/{permit_id}/finish:
+    post:
+      operationId: finishSensitiveProfilePermit
+      security: [{nodeBearer: [], permitCredential: []}]
+      parameters:
+        - in: path
+          name: permit_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id, outcome]
+              properties:
+                node_id: {type: string}
+                outcome: {type: string, enum: [completed, result_uncertain]}
+              additionalProperties: false
+      responses:
+        "200": {description: Permit cleanly released or moved to review-required.}
+        "401": {description: Node/session/permit credential invalid.}
+components:
+  securitySchemes:
+    nodeBearer: {type: http, scheme: bearer}
+    permitCredential:
+      type: apiKey
+      in: header
+      name: X-Profile-Permit
+  schemas:
+    PreflightEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [outcome, profile_id]
+          properties:
+            outcome: {type: string, enum: [granted, waiting, review_required]}
+            permit_id: {type: string}
+            permit_credential: {type: string, description: Returned only for a newly granted permit and never stored in plaintext.}
+            profile_id: {type: string}
+            expires_at: {type: string, format: date-time}
+          additionalProperties: false

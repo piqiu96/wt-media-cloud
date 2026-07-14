@@ -1,0 +1,9 @@
+schema_version: 1
+revision: "2026.07.14.5"
+errors:
+  sensitive_credential_invalid: {http_status: 401}
+  invalid_sensitive_preflight: {http_status: 400}
+  sensitive_task_not_found: {http_status: 404}
+  sensitive_task_assignment_mismatch: {http_status: 403}
+  profile_runtime_unavailable: {http_status: 409}
+  profile_guard_store_error: {http_status: 500}
