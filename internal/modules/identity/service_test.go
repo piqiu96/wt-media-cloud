@@ -2,6 +2,7 @@ package identity
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,5 +100,97 @@ func TestOnlyTechnicianCanCreateUsersAndAssignGameScopes(t *testing.T) {
 	}
 	if !service.CanAccessGame(technician.ID, "any-game") {
 		t.Fatalf("technician must have global game access")
+	}
+}
+
+func TestUserCanChangeOwnPasswordAndTechnicianCanResetIt(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	technician, err := service.BootstrapTechnician("tech", "a-long-initial-password")
+	if err != nil {
+		t.Fatalf("BootstrapTechnician() error = %v", err)
+	}
+	operator, err := service.CreateUser(technician.ID, CreateUserInput{
+		Username: "operator",
+		Password: "a-long-operator-password",
+		Role:     RoleOperator,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	if err := service.ChangeOwnPassword(operator.ID, "a-long-operator-password", "a-new-operator-password"); err != nil {
+		t.Fatalf("ChangeOwnPassword() error = %v", err)
+	}
+	if _, err := service.Login("operator", "a-long-operator-password"); !errors.Is(err, ErrAuthenticationFailed) {
+		t.Fatalf("old password Login() error = %v", err)
+	}
+	if _, err := service.Login("operator", "a-new-operator-password"); err != nil {
+		t.Fatalf("new password Login() error = %v", err)
+	}
+
+	if err := service.ResetPassword(technician.ID, operator.ID, "a-reset-operator-password"); err != nil {
+		t.Fatalf("ResetPassword() error = %v", err)
+	}
+	if _, err := service.Login("operator", "a-reset-operator-password"); err != nil {
+		t.Fatalf("reset password Login() error = %v", err)
+	}
+}
+
+func TestTechnicianCanUpdateRoleAndGameScopes(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	technician, err := service.BootstrapTechnician("tech", "a-long-initial-password")
+	if err != nil {
+		t.Fatalf("BootstrapTechnician() error = %v", err)
+	}
+	operator, err := service.CreateUser(technician.ID, CreateUserInput{
+		Username: "operator",
+		Password: "a-long-operator-password",
+		Role:     RoleOperator,
+		GameIDs:  []string{"game-a"},
+	})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	updated, err := service.UpdateUserAccess(technician.ID, operator.ID, RoleSeniorOperator, []string{"game-b"})
+	if err != nil {
+		t.Fatalf("UpdateUserAccess() error = %v", err)
+	}
+	if updated.Role != RoleSeniorOperator || len(updated.GameIDs) != 1 || updated.GameIDs[0] != "game-b" {
+		t.Fatalf("updated user = %+v", updated)
+	}
+	if service.CanAccessGame(operator.ID, "game-a") || !service.CanAccessGame(operator.ID, "game-b") {
+		t.Fatalf("updated game scope is not enforced")
+	}
+}
+
+func TestAuditEventsNeverContainPasswordOrSessionMaterial(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store, WithTokenGenerator(func() string { return "raw-session-secret" }))
+	technician, err := service.BootstrapTechnician("tech", "a-long-initial-password")
+	if err != nil {
+		t.Fatalf("BootstrapTechnician() error = %v", err)
+	}
+	if _, err := service.CreateUser(technician.ID, CreateUserInput{
+		Username: "operator",
+		Password: "a-long-operator-password",
+		Role:     RoleOperator,
+	}); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if _, err := service.Login("tech", "a-long-initial-password"); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	for _, event := range store.AuditEvents() {
+		encoded := event.Action + event.TargetID
+		for key, value := range event.Summary {
+			encoded += key + value
+		}
+		for _, secret := range []string{"a-long-initial-password", "a-long-operator-password", "raw-session-secret", "password_hash", "token_hash"} {
+			if strings.Contains(encoded, secret) {
+				t.Fatalf("audit event leaked %q: %+v", secret, event)
+			}
+		}
 	}
 }

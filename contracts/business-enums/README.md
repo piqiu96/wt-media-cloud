@@ -1,5 +1,7 @@
 # Business Enums
 
-Reserved for Cloud-owned shared enum definitions.
+Cloud-owned shared enum definitions.
 
-M0 status: placeholder only; no formal enum definition is active.
+## Active Definitions
+
+- `v1/identity.yaml`: M2-C1 fixed roles and user statuses.

@@ -1,0 +1,8 @@
+schema_version: 1
+revision: "2026.07.14.1"
+errors:
+  authentication_required: {http_status: 401}
+  forbidden: {http_status: 403}
+  username_taken: {http_status: 409}
+  invalid_identity_request: {http_status: 400}
+  identity_store_error: {http_status: 500}

@@ -7,7 +7,11 @@ import (
 )
 
 func main() {
-	server := app.NewServer()
+	server, err := app.NewServer()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer server.Close()
 	if err := server.Run(); err != nil {
 		log.Fatal(err)
 	}

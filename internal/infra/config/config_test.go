@@ -23,3 +23,17 @@ func TestLoadOverridesHTTPAddr(t *testing.T) {
 		t.Fatalf("HTTPAddr = %q, want override", cfg.HTTPAddr)
 	}
 }
+
+func TestLoadIdentityConfiguration(t *testing.T) {
+	t.Setenv("WT_MEDIA_INITIAL_TECHNICIAN_USERNAME", "tech")
+	t.Setenv("WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD", "initial-secret")
+	t.Setenv("WT_MEDIA_SESSION_COOKIE_SECURE", "false")
+
+	cfg := Load()
+	if cfg.InitialTechnicianUsername != "tech" || cfg.InitialTechnicianPassword != "initial-secret" {
+		t.Fatalf("identity bootstrap config = %+v", cfg)
+	}
+	if cfg.SessionCookieSecure {
+		t.Fatalf("SessionCookieSecure = true, want false")
+	}
+}

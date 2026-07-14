@@ -1,5 +1,7 @@
 # Cloud API Contracts
 
-Reserved for Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
+Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 
-M0 status: placeholder only; no formal API definition is active.
+## Active Contracts
+
+- `v1/identity.openapi.yaml`: M2-C1 login, current user, user administration, password, and session endpoints.

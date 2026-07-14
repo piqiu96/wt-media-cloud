@@ -1,5 +1,7 @@
 # Business Schemas
 
-Reserved for Cloud-owned shared business object schemas.
+Cloud-owned shared business object schemas.
 
-M0 status: placeholder only; no formal business schema is active.
+## Active Definitions
+
+- `v1/identity.yaml`: M2-C1 public user schema without password or session material.

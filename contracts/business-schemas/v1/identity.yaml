@@ -1,0 +1,15 @@
+schema_version: 1
+revision: "2026.07.14.1"
+schemas:
+  PublicUser:
+    type: object
+    required: [id, username, role, status, game_ids]
+    properties:
+      id: {type: string}
+      username: {type: string}
+      role: {type: string, enum: [operator, senior_operator, technician]}
+      status: {type: string, enum: [enabled, disabled]}
+      game_ids:
+        type: array
+        items: {type: string}
+    forbidden_properties: [password, password_hash, session_token, token_hash]
