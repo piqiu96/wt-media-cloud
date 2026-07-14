@@ -9,3 +9,4 @@ Use `WT_MEDIA_MYSQL_DSN` for the Cloud process database connection once SQL repo
 ## Active Migrations
 
 - `20260714_001_identity.sql`: M2-C1 users, game scopes, single-session records, and audit logs.
+- `20260714_002_media_accounts.sql`: M2-C2 user/game-owned media accounts, identification/status fields, secret Cookie storage, and simple account tags.
