@@ -16,10 +16,10 @@ func TestMySQLStoreCreatesStagedScanTransactionally(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO profile_sync_scans`)).
-		WithArgs(scan.ID, scan.UserID, scan.OwnerUserID, scan.Status, sqlmock.AnyArg(), scan.CreatedAt, scan.ExpiresAt, nil).
+		WithArgs(scan.ID, scan.UserID, scan.MainUserID, scan.Status, sqlmock.AnyArg(), scan.CreatedAt, scan.ExpiresAt, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO profile_sync_candidates`)).
-		WithArgs(scan.ID, scan.Profiles[0].ID, scan.Profiles[0].BitProfileID, scan.Profiles[0].OwnerUserID, scan.Profiles[0].Name, scan.Profiles[0].Seq, nil, nil, nil, nil, scan.Profiles[0].CreatedAt, scan.Profiles[0].UpdatedAt).
+		WithArgs(scan.ID, scan.Profiles[0].ID, scan.Profiles[0].BitProfileID, scan.Profiles[0].MainUserID, scan.Profiles[0].ProfileUserID, scan.Profiles[0].Name, scan.Profiles[0].Seq, nil, nil, nil, nil, scan.Profiles[0].CreatedAt, scan.Profiles[0].UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -32,13 +32,13 @@ func TestMySQLStoreFindsBindingAndProfiles(t *testing.T) {
 	store, mock, closeDB := newMockStore(t)
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, bit_owner_user_id, bit_account_status, bit_account_bound_at, bit_account_last_verified_at FROM users WHERE id = ?`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, bit_main_user_id, bit_account_status, bit_account_bound_at, bit_account_last_verified_at FROM users WHERE id = ?`)).
 		WithArgs("user-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "bit_owner_user_id", "bit_account_status", "bit_account_bound_at", "bit_account_last_verified_at"}).
-			AddRow("user-1", "bit-user-1", "bound", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "bit_main_user_id", "bit_account_status", "bit_account_bound_at", "bit_account_last_verified_at"}).
+			AddRow("user-1", "main-user-1", "bound", now, now))
 
 	binding, found, err := store.FindBinding("user-1")
-	if err != nil || !found || binding.OwnerUserID != "bit-user-1" {
+	if err != nil || !found || binding.MainUserID != "main-user-1" {
 		t.Fatalf("FindBinding() binding=%#v found=%v error=%v", binding, found, err)
 	}
 
@@ -58,11 +58,11 @@ func TestMySQLStoreAppliesConfirmedScanTransactionally(t *testing.T) {
 	scan.Status = ScanConfirmed
 	at := scan.CreatedAt.Add(time.Minute)
 	scan.ConfirmedAt = &at
-	binding := BitAccountBinding{UserID: scan.UserID, OwnerUserID: scan.OwnerUserID, Status: BitAccountBound, BoundAt: &scan.CreatedAt, LastVerifiedAt: &at}
+	binding := BitAccountBinding{UserID: scan.UserID, MainUserID: scan.MainUserID, Status: BitAccountBound, BoundAt: &scan.CreatedAt, LastVerifiedAt: &at}
 
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET bit_owner_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_owner_user_id IS NULL OR bit_owner_user_id = ?)`)).
-		WithArgs(binding.OwnerUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.OwnerUserID).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`)).
+		WithArgs(binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO browser_profiles`)).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (?) AND local_status <> ?`)).
@@ -95,14 +95,14 @@ func newMockStore(t *testing.T) (*MySQLStore, sqlmock.Sqlmock, func()) {
 
 func mysqlTestScan() ProfileScan {
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
-	profile := BrowserProfile{ID: "profile-1", UserID: "user-1", BitProfileID: "bit-profile-1", OwnerUserID: "bit-user-1", Name: "窗口一", Seq: 1, LocalStatus: ProfileActive, LastSyncedAt: now, CreatedAt: now, UpdatedAt: now}
-	return ProfileScan{ID: "scan-1", UserID: "user-1", OwnerUserID: "bit-user-1", Status: ScanReady, Profiles: []BrowserProfile{profile}, Diff: []ProfileDiff{{Kind: DiffAdded, BitProfileID: profile.BitProfileID, ProfileID: profile.ID, Fields: []string{}}}, CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
+	profile := BrowserProfile{ID: "profile-1", UserID: "user-1", BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", Name: "窗口一", Seq: 1, LocalStatus: ProfileActive, LastSyncedAt: now, CreatedAt: now, UpdatedAt: now}
+	return ProfileScan{ID: "scan-1", UserID: "user-1", MainUserID: "main-user-1", Status: ScanReady, Profiles: []BrowserProfile{profile}, Diff: []ProfileDiff{{Kind: DiffAdded, BitProfileID: profile.BitProfileID, ProfileID: profile.ID, Fields: []string{}}}, CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
 }
 
 func profileColumns() []string {
-	return []string{"id", "user_id", "bit_profile_id", "owner_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "local_status", "last_synced_at", "created_at", "updated_at"}
+	return []string{"id", "user_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "local_status", "last_synced_at", "created_at", "updated_at"}
 }
 
 func profileValues(profile BrowserProfile) []driver.Value {
-	return []driver.Value{profile.ID, profile.UserID, profile.BitProfileID, profile.OwnerUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
+	return []driver.Value{profile.ID, profile.UserID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
 }

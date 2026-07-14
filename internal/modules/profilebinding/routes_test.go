@@ -14,7 +14,7 @@ import (
 
 func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
 	engine, cookie, store := newProfileRouteTest(t)
-	created := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"owner_user_id":"bit-user-1","profiles":[{"bit_profile_id":"p1","owner_user_id":"bit-user-1","name":"窗口一"}]}`, cookie)
+	created := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-1","profile_user_id":"bit-user-1","name":"窗口一"}]}`, cookie)
 	if created.Result().StatusCode() != consts.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.Result().StatusCode(), created.Result().Body())
 	}
@@ -39,7 +39,7 @@ func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
 
 func TestProfileRoutesRejectMixedIdentity(t *testing.T) {
 	engine, cookie, _ := newProfileRouteTest(t)
-	response := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"owner_user_id":"bit-user-1","profiles":[{"bit_profile_id":"p1","owner_user_id":"bit-user-2"}]}`, cookie)
+	response := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-2","profile_user_id":"bit-user-2"}]}`, cookie)
 	if response.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(response.Result().Body()), "bitbrowser_identity_unverifiable") {
 		t.Fatalf("status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
 	}

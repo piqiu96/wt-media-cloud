@@ -1,15 +1,16 @@
 ALTER TABLE users
-    ADD COLUMN bit_owner_user_id VARCHAR(255) NULL,
+    ADD COLUMN bit_main_user_id VARCHAR(255) NULL,
     ADD COLUMN bit_account_status VARCHAR(32) NULL,
     ADD COLUMN bit_account_bound_at DATETIME(6) NULL,
     ADD COLUMN bit_account_last_verified_at DATETIME(6) NULL,
-    ADD UNIQUE KEY uq_users_bit_owner_user_id (bit_owner_user_id);
+    ADD KEY idx_users_bit_main_user_id (bit_main_user_id);
 
 CREATE TABLE browser_profiles (
     id VARCHAR(64) NOT NULL,
     user_id VARCHAR(64) NOT NULL,
     bit_profile_id VARCHAR(255) NOT NULL,
-    owner_user_id VARCHAR(255) NOT NULL,
+    main_user_id VARCHAR(255) NOT NULL,
+    profile_user_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL DEFAULT '',
     seq INT NOT NULL DEFAULT 0,
     group_id VARCHAR(255) NULL,
@@ -24,6 +25,7 @@ CREATE TABLE browser_profiles (
     UNIQUE KEY uq_browser_profiles_user_bit_profile (user_id, bit_profile_id),
     UNIQUE KEY uq_browser_profiles_bit_profile (bit_profile_id),
     KEY idx_browser_profiles_user_status (user_id, local_status),
+    KEY idx_browser_profiles_main_user (main_user_id, local_status),
     CONSTRAINT fk_browser_profiles_user FOREIGN KEY (user_id) REFERENCES users (id),
     CONSTRAINT chk_browser_profiles_local_status CHECK (local_status IN ('active', 'local_missing', 'archived'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -31,7 +33,7 @@ CREATE TABLE browser_profiles (
 CREATE TABLE profile_sync_scans (
     id VARCHAR(64) NOT NULL,
     user_id VARCHAR(64) NOT NULL,
-    owner_user_id VARCHAR(255) NOT NULL,
+    main_user_id VARCHAR(255) NOT NULL,
     status VARCHAR(32) NOT NULL,
     diff_json JSON NOT NULL,
     created_at DATETIME(6) NOT NULL,
@@ -47,7 +49,8 @@ CREATE TABLE profile_sync_candidates (
     scan_id VARCHAR(64) NOT NULL,
     profile_id VARCHAR(64) NOT NULL,
     bit_profile_id VARCHAR(255) NOT NULL,
-    owner_user_id VARCHAR(255) NOT NULL,
+    main_user_id VARCHAR(255) NOT NULL,
+    profile_user_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL DEFAULT '',
     seq INT NOT NULL DEFAULT 0,
     group_id VARCHAR(255) NULL,

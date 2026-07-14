@@ -63,8 +63,8 @@ func (s *memoryStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, er
 	return node, ok, nil
 }
 
-func (s *memoryStore) ValidateRuntimeProfiles(userID, ownerUserID string, profileIDs []string) (bool, error) {
-	if ownerUserID != "bit-owner-1" {
+func (s *memoryStore) ValidateRuntimeProfiles(userID, mainUserID string, profileIDs []string) (bool, error) {
+	if mainUserID != "main-user-1" {
 		return false, nil
 	}
 	for _, profileID := range profileIDs {
@@ -183,11 +183,11 @@ func TestRuntimeReportValidatesOwnerAndEveryActiveProfile(t *testing.T) {
 		t.Fatalf("applied node/report = %+v / %+v", store.appliedNode, store.appliedReport)
 	}
 
-	report.OwnerUserID = "wrong-owner"
+	report.MainUserID = "wrong-main"
 	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); !errors.Is(err, ErrProfileOwnershipMismatch) {
 		t.Fatalf("owner mismatch error = %v", err)
 	}
-	report.OwnerUserID = "bit-owner-1"
+	report.MainUserID = "main-user-1"
 	report.BitProfileIDs = append(report.BitProfileIDs, "unknown-profile")
 	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); !errors.Is(err, ErrProfileOwnershipMismatch) {
 		t.Fatalf("profile mismatch error = %v", err)
@@ -204,7 +204,7 @@ func validRuntimeReport() RuntimeReport {
 		WorkdirStatus:    "normal",
 		Disk:             DiskFact{Status: "normal", FreeMegabytes: 8192},
 		BitBrowserStatus: "normal",
-		OwnerUserID:      "bit-owner-1",
+		MainUserID:       "main-user-1",
 		BitProfileIDs:    []string{"profile-1", "profile-2"},
 	}
 }

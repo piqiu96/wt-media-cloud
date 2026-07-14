@@ -92,7 +92,7 @@ type RuntimeReport struct {
 	WorkdirStatus    string         `json:"workdir_status"`
 	Disk             DiskFact       `json:"disk"`
 	BitBrowserStatus string         `json:"bitbrowser_status"`
-	OwnerUserID      string         `json:"owner_user_id,omitempty"`
+	MainUserID       string         `json:"main_user_id,omitempty"`
 	BitProfileIDs    []string       `json:"bit_profile_ids,omitempty"`
 }
 
@@ -102,7 +102,7 @@ type Store interface {
 	IsSessionActive(sessionID, userID string, at time.Time) (bool, error)
 	SaveNode(AgentNode) error
 	FindNodeByCredentialHash(hash string) (AgentNode, bool, error)
-	ValidateRuntimeProfiles(userID, ownerUserID string, profileIDs []string) (bool, error)
+	ValidateRuntimeProfiles(userID, mainUserID string, profileIDs []string) (bool, error)
 	ApplyRuntimeReport(node AgentNode, report RuntimeReport, at time.Time) error
 }
 
@@ -206,7 +206,7 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 		if len(profileIDs) != len(report.BitProfileIDs) {
 			return ErrInvalidInput
 		}
-		valid, err := s.store.ValidateRuntimeProfiles(node.UserID, report.OwnerUserID, profileIDs)
+		valid, err := s.store.ValidateRuntimeProfiles(node.UserID, report.MainUserID, profileIDs)
 		if err != nil {
 			return err
 		}
@@ -254,9 +254,9 @@ func validReport(report RuntimeReport) bool {
 		return false
 	}
 	if report.BitBrowserStatus == "normal" {
-		return strings.TrimSpace(report.OwnerUserID) != "" && len(report.BitProfileIDs) > 0 && allNonEmpty(report.BitProfileIDs)
+		return strings.TrimSpace(report.MainUserID) != "" && len(report.BitProfileIDs) > 0 && allNonEmpty(report.BitProfileIDs)
 	}
-	return report.OwnerUserID == "" && len(report.BitProfileIDs) == 0
+	return report.MainUserID == "" && len(report.BitProfileIDs) == 0
 }
 
 func validDependency(value DependencyFact) bool {

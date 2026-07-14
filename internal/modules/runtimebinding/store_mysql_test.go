@@ -59,13 +59,13 @@ func TestMySQLStoreConsumesBindingTicketTransactionally(t *testing.T) {
 func TestMySQLStoreValidatesBoundOwnerAndEveryActiveProfile(t *testing.T) {
 	store, mock, closeDB := newRuntimeMockStore(t)
 	defer closeDB()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT bit_owner_user_id FROM users WHERE id = ? AND status = 'enabled'`)).
-		WithArgs("user-1").WillReturnRows(sqlmock.NewRows([]string{"bit_owner_user_id"}).AddRow("bit-owner-1"))
-	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM browser_profiles WHERE user_id = \? AND owner_user_id = \? AND local_status = 'active' AND bit_profile_id IN \(\?, \?\)`).
-		WithArgs("user-1", "bit-owner-1", "profile-1", "profile-2").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`)).
+		WithArgs("user-1").WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id"}).AddRow("main-user-1"))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM browser_profiles WHERE user_id = \? AND main_user_id = \? AND local_status = 'active' AND bit_profile_id IN \(\?, \?\)`).
+		WithArgs("user-1", "main-user-1", "profile-1", "profile-2").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 
-	valid, err := store.ValidateRuntimeProfiles("user-1", "bit-owner-1", []string{"profile-1", "profile-2"})
+	valid, err := store.ValidateRuntimeProfiles("user-1", "main-user-1", []string{"profile-1", "profile-2"})
 	if err != nil || !valid {
 		t.Fatalf("ValidateRuntimeProfiles() valid=%v error=%v", valid, err)
 	}
@@ -79,12 +79,12 @@ func TestMySQLStoreAppliesRuntimePresenceTransactionally(t *testing.T) {
 	report := validRuntimeReport()
 
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE local_agent_nodes SET status = ?, last_heartbeat_at = ?, operating_system = ?, cpu_architecture = ?, agent_version = ?, python_version = ?, ffmpeg_status = ?, ffmpeg_version = ?, workdir_status = ?, disk_status = ?, disk_free_megabytes = ?, bitbrowser_status = ?, reported_owner_user_id = ?, updated_at = ? WHERE id = ?`)).
-		WithArgs(node.Status, now, report.OperatingSystem, report.CPUArchitecture, report.AgentVersion, report.PythonVersion, report.FFmpeg.Status, report.FFmpeg.Version, report.WorkdirStatus, report.Disk.Status, report.Disk.FreeMegabytes, report.BitBrowserStatus, report.OwnerUserID, now, node.ID).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE local_agent_nodes SET status = ?, last_heartbeat_at = ?, operating_system = ?, cpu_architecture = ?, agent_version = ?, python_version = ?, ffmpeg_status = ?, ffmpeg_version = ?, workdir_status = ?, disk_status = ?, disk_free_megabytes = ?, bitbrowser_status = ?, reported_main_user_id = ?, updated_at = ? WHERE id = ?`)).
+		WithArgs(node.Status, now, report.OperatingSystem, report.CPUArchitecture, report.AgentVersion, report.PythonVersion, report.FFmpeg.Status, report.FFmpeg.Version, report.WorkdirStatus, report.Disk.Status, report.Disk.FreeMegabytes, report.BitBrowserStatus, report.MainUserID, now, node.ID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	for _, profileID := range report.BitProfileIDs {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO browser_profile_runtime_presence`)).
-			WithArgs(sqlmock.AnyArg(), node.ID, node.UserID, report.OwnerUserID, "visible", now, now, now, profileID, node.UserID, report.OwnerUserID).
+			WithArgs(sqlmock.AnyArg(), node.ID, node.UserID, report.MainUserID, "visible", now, now, now, profileID, node.UserID, report.MainUserID).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
 	mock.ExpectExec(`UPDATE browser_profile_runtime_presence SET status = 'not_visible'.*bit_profile_id NOT IN \(\?, \?\)`).

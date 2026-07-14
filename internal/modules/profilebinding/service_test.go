@@ -15,8 +15,8 @@ func TestSubmitScanStagesDiffWithoutFormalMutation(t *testing.T) {
 	actor := profileActor("user-1")
 
 	scan, err := service.SubmitScan(actor, SnapshotInput{
-		OwnerUserID: "bit-user-1",
-		Profiles:    []ProfileInput{{BitProfileID: "bit-profile-1", OwnerUserID: "bit-user-1", Name: "窗口一", Seq: 1}},
+		MainUserID: "main-user-1",
+		Profiles:   []ProfileInput{{BitProfileID: "bit-profile-1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一", Seq: 1}},
 	})
 	if err != nil {
 		t.Fatalf("SubmitScan() error = %v", err)
@@ -33,10 +33,11 @@ func TestSubmitScanRejectsUnverifiableIdentity(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := profileActor("user-1")
 	cases := []SnapshotInput{
-		{OwnerUserID: "bit-user-1"},
-		{OwnerUserID: "", Profiles: []ProfileInput{{BitProfileID: "p1", OwnerUserID: ""}}},
-		{OwnerUserID: "bit-user-1", Profiles: []ProfileInput{{BitProfileID: "p1", OwnerUserID: "bit-user-2"}}},
-		{OwnerUserID: "bit-user-1", Profiles: []ProfileInput{{BitProfileID: "", OwnerUserID: "bit-user-1"}}},
+		{MainUserID: "main-user-1"},
+		{MainUserID: "", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: ""}}},
+		{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-2"}}},
+		{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "", MainUserID: "main-user-1"}}},
+		{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}}},
 	}
 	for _, input := range cases {
 		if _, err := service.SubmitScan(actor, input); !errors.Is(err, ErrIdentityUnverifiable) {
@@ -47,12 +48,12 @@ func TestSubmitScanRejectsUnverifiableIdentity(t *testing.T) {
 
 func TestSubmitScanRejectsExistingBindingMismatch(t *testing.T) {
 	store := newMemoryStore()
-	store.bindings["user-1"] = BitAccountBinding{UserID: "user-1", OwnerUserID: "bit-user-1", Status: BitAccountBound}
+	store.bindings["user-1"] = BitAccountBinding{UserID: "user-1", MainUserID: "main-user-1", Status: BitAccountBound}
 	service := newTestService(store)
 
 	_, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
-		OwnerUserID: "bit-user-2",
-		Profiles:    []ProfileInput{{BitProfileID: "p1", OwnerUserID: "bit-user-2"}},
+		MainUserID: "main-user-2",
+		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-2", MainUserID: "main-user-2"}},
 	})
 	if !errors.Is(err, ErrIdentityMismatch) {
 		t.Fatalf("SubmitScan() error = %v", err)
@@ -67,8 +68,11 @@ func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
 	service := newTestService(store)
 	actor := profileActor("user-1")
 	scan, _ := service.SubmitScan(actor, SnapshotInput{
-		OwnerUserID: "bit-user-1",
-		Profiles:    []ProfileInput{{BitProfileID: "p1", OwnerUserID: "bit-user-1", Name: "窗口一", GroupID: "g1", GroupName: "运营组"}},
+		MainUserID: "main-user-1",
+		Profiles: []ProfileInput{
+			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一", GroupID: "g1", GroupName: "运营组"},
+			{BitProfileID: "p2", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "窗口二"},
+		},
 	})
 
 	confirmed, err := service.ConfirmScan(actor, scan.ID)
@@ -79,11 +83,11 @@ func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
 		t.Fatalf("confirmed scan = %#v", confirmed)
 	}
 	binding := store.bindings[actor.ID]
-	if binding.OwnerUserID != "bit-user-1" || binding.Status != BitAccountBound || binding.BoundAt == nil {
+	if binding.MainUserID != "main-user-1" || binding.Status != BitAccountBound || binding.BoundAt == nil {
 		t.Fatalf("binding = %#v", binding)
 	}
 	profiles := store.profileList(actor.ID)
-	if len(profiles) != 1 || profiles[0].BitProfileID != "p1" || profiles[0].LocalStatus != ProfileActive {
+	if len(profiles) != 2 || profiles[0].BitProfileID != "p1" || profiles[0].ProfileUserID != "bit-user-1" || profiles[1].ProfileUserID != "bit-user-2" {
 		t.Fatalf("profiles = %#v", profiles)
 	}
 }
@@ -93,8 +97,8 @@ func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
 	service := newTestService(store)
 	actor := profileActor("user-1")
 	scan, _ := service.SubmitScan(actor, SnapshotInput{
-		OwnerUserID: "bit-user-1",
-		Profiles:    []ProfileInput{{BitProfileID: "p1", OwnerUserID: "bit-user-1"}},
+		MainUserID: "main-user-1",
+		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}},
 	})
 
 	if _, err := service.ConfirmScan(profileActor("user-2"), scan.ID); !errors.Is(err, ErrForbidden) {
@@ -119,16 +123,16 @@ func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
 
 func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	store := newMemoryStore()
-	store.bindings["user-1"] = BitAccountBinding{UserID: "user-1", OwnerUserID: "bit-user-1", Status: BitAccountBound}
-	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: "user-1", BitProfileID: "p1", OwnerUserID: "bit-user-1", Name: "旧名称", LocalStatus: ProfileActive}
-	store.profiles["profile-old-2"] = BrowserProfile{ID: "profile-old-2", UserID: "user-1", BitProfileID: "p2", OwnerUserID: "bit-user-1", Name: "即将缺失", LocalStatus: ProfileActive}
+	store.bindings["user-1"] = BitAccountBinding{UserID: "user-1", MainUserID: "main-user-1", Status: BitAccountBound}
+	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: "user-1", BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "旧名称", LocalStatus: ProfileActive}
+	store.profiles["profile-old-2"] = BrowserProfile{ID: "profile-old-2", UserID: "user-1", BitProfileID: "p2", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "即将缺失", LocalStatus: ProfileActive}
 	service := newTestService(store)
 
 	scan, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
-		OwnerUserID: "bit-user-1",
+		MainUserID: "main-user-1",
 		Profiles: []ProfileInput{
-			{BitProfileID: "p1", OwnerUserID: "bit-user-1", Name: "新名称"},
-			{BitProfileID: "p3", OwnerUserID: "bit-user-1", Name: "新增"},
+			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "新名称"},
+			{BitProfileID: "p3", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "新增"},
 		},
 	})
 	if err != nil {

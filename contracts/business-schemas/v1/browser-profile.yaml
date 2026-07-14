@@ -1,14 +1,15 @@
 schema_version: 1
-revision: "2026.07.14.3"
+revision: "2026.07.14.4"
 schemas:
   BrowserProfile:
     type: object
-    required: [id, user_id, bit_profile_id, owner_user_id, name, local_status, last_synced_at]
+    required: [id, user_id, bit_profile_id, main_user_id, profile_user_id, name, local_status, last_synced_at]
     properties:
       id: {type: string}
       user_id: {type: string}
       bit_profile_id: {type: string}
-      owner_user_id: {type: string, source: BitBrowser.userId}
+      main_user_id: {type: string, source: BitBrowser.mainUserId}
+      profile_user_id: {type: string, source: BitBrowser.userId}
       name: {type: string}
       seq: {type: integer}
       group_id: {type: string}
@@ -17,13 +18,13 @@ schemas:
       bit_updated_at: {type: string}
       local_status: {type: string, enum: [active, local_missing, archived]}
       last_synced_at: {type: string, format: date-time}
-    forbidden_properties: [cookie, password, proxy_username, proxy_password, oper_user_id, main_user_id]
+    forbidden_properties: [cookie, password, proxy_username, proxy_password, oper_user_id]
   BitAccountBinding:
     type: object
-    required: [user_id, owner_user_id, status]
+    required: [user_id, main_user_id, status]
     properties:
       user_id: {type: string}
-      owner_user_id: {type: string}
+      main_user_id: {type: string}
       status: {type: string, enum: [bound]}
       bound_at: {type: string, format: date-time}
       last_verified_at: {type: string, format: date-time}

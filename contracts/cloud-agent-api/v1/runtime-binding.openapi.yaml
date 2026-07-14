@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Local Agent Runtime Binding API
-  version: 2026.07.14.5
+  version: 2026.07.14.7
 paths:
   /api/v1/local-agent/binding-tickets:
     post:
@@ -48,7 +48,7 @@ paths:
       responses:
         "200": {description: Runtime report accepted.}
         "401": {description: Node credential or bound session invalid.}
-        "409": {description: Profile ownership mismatch.}
+        "409": {description: Profile main account or assigned Profile mismatch.}
 components:
   securitySchemes:
     nodeBearer:
@@ -120,7 +120,7 @@ components:
             free_megabytes: {type: integer, minimum: 0}
           additionalProperties: false
         bitbrowser_status: {type: string, enum: [normal, unreachable, identity_unverifiable, not_installed, needs_upgrade, user_action_required]}
-        owner_user_id: {type: string}
+        main_user_id: {type: string, description: Normalized from BitBrowser mainUserId when bitbrowser_status is normal.}
         bit_profile_ids:
           type: array
           uniqueItems: true

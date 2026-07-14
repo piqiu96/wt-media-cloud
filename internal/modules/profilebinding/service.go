@@ -54,43 +54,45 @@ var (
 
 type BitAccountBinding struct {
 	UserID         string           `json:"user_id"`
-	OwnerUserID    string           `json:"owner_user_id"`
+	MainUserID     string           `json:"main_user_id"`
 	Status         BitAccountStatus `json:"status"`
 	BoundAt        *time.Time       `json:"bound_at,omitempty"`
 	LastVerifiedAt *time.Time       `json:"last_verified_at,omitempty"`
 }
 
 type BrowserProfile struct {
-	ID           string             `json:"id"`
-	UserID       string             `json:"user_id"`
-	BitProfileID string             `json:"bit_profile_id"`
-	OwnerUserID  string             `json:"owner_user_id"`
-	Name         string             `json:"name"`
-	Seq          int                `json:"seq,omitempty"`
-	GroupID      string             `json:"group_id,omitempty"`
-	GroupName    string             `json:"group_name,omitempty"`
-	BitStatus    string             `json:"bit_status,omitempty"`
-	BitUpdatedAt string             `json:"bit_updated_at,omitempty"`
-	LocalStatus  ProfileLocalStatus `json:"local_status"`
-	LastSyncedAt time.Time          `json:"last_synced_at"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
+	ID            string             `json:"id"`
+	UserID        string             `json:"user_id"`
+	BitProfileID  string             `json:"bit_profile_id"`
+	MainUserID    string             `json:"main_user_id"`
+	ProfileUserID string             `json:"profile_user_id"`
+	Name          string             `json:"name"`
+	Seq           int                `json:"seq,omitempty"`
+	GroupID       string             `json:"group_id,omitempty"`
+	GroupName     string             `json:"group_name,omitempty"`
+	BitStatus     string             `json:"bit_status,omitempty"`
+	BitUpdatedAt  string             `json:"bit_updated_at,omitempty"`
+	LocalStatus   ProfileLocalStatus `json:"local_status"`
+	LastSyncedAt  time.Time          `json:"last_synced_at"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
 type ProfileInput struct {
-	BitProfileID string `json:"bit_profile_id"`
-	OwnerUserID  string `json:"owner_user_id"`
-	Name         string `json:"name"`
-	Seq          int    `json:"seq"`
-	GroupID      string `json:"group_id"`
-	GroupName    string `json:"group_name"`
-	BitStatus    string `json:"bit_status"`
-	BitUpdatedAt string `json:"bit_updated_at"`
+	BitProfileID  string `json:"bit_profile_id"`
+	MainUserID    string `json:"main_user_id"`
+	ProfileUserID string `json:"profile_user_id"`
+	Name          string `json:"name"`
+	Seq           int    `json:"seq"`
+	GroupID       string `json:"group_id"`
+	GroupName     string `json:"group_name"`
+	BitStatus     string `json:"bit_status"`
+	BitUpdatedAt  string `json:"bit_updated_at"`
 }
 
 type SnapshotInput struct {
-	OwnerUserID string         `json:"owner_user_id"`
-	Profiles    []ProfileInput `json:"profiles"`
+	MainUserID string         `json:"main_user_id"`
+	Profiles   []ProfileInput `json:"profiles"`
 }
 
 type ProfileDiff struct {
@@ -103,7 +105,7 @@ type ProfileDiff struct {
 type ProfileScan struct {
 	ID          string           `json:"id"`
 	UserID      string           `json:"user_id"`
-	OwnerUserID string           `json:"owner_user_id"`
+	MainUserID  string           `json:"main_user_id"`
 	Status      ScanStatus       `json:"status"`
 	Profiles    []BrowserProfile `json:"profiles"`
 	Diff        []ProfileDiff    `json:"diff"`
@@ -158,15 +160,15 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 	if !validActor(actor) {
 		return ProfileScan{}, ErrForbidden
 	}
-	ownerUserID := strings.TrimSpace(input.OwnerUserID)
-	if ownerUserID == "" || len(input.Profiles) == 0 {
+	mainUserID := strings.TrimSpace(input.MainUserID)
+	if mainUserID == "" || len(input.Profiles) == 0 {
 		return ProfileScan{}, ErrIdentityUnverifiable
 	}
 	binding, hasBinding, err := s.store.FindBinding(actor.ID)
 	if err != nil {
 		return ProfileScan{}, err
 	}
-	if hasBinding && binding.OwnerUserID != ownerUserID {
+	if hasBinding && binding.MainUserID != mainUserID {
 		return ProfileScan{}, ErrIdentityMismatch
 	}
 	existing, err := s.store.ListProfiles(actor.ID)
@@ -184,8 +186,9 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 	diff := make([]ProfileDiff, 0)
 	for _, item := range input.Profiles {
 		bitProfileID := strings.TrimSpace(item.BitProfileID)
-		itemOwner := strings.TrimSpace(item.OwnerUserID)
-		if bitProfileID == "" || itemOwner == "" || itemOwner != ownerUserID {
+		itemMainUserID := strings.TrimSpace(item.MainUserID)
+		profileUserID := strings.TrimSpace(item.ProfileUserID)
+		if bitProfileID == "" || itemMainUserID == "" || profileUserID == "" || itemMainUserID != mainUserID {
 			return ProfileScan{}, ErrIdentityUnverifiable
 		}
 		if _, duplicate := seen[bitProfileID]; duplicate {
@@ -193,20 +196,21 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 		}
 		seen[bitProfileID] = struct{}{}
 		candidate := BrowserProfile{
-			ID:           s.newID("browser_profile"),
-			UserID:       actor.ID,
-			BitProfileID: bitProfileID,
-			OwnerUserID:  ownerUserID,
-			Name:         strings.TrimSpace(item.Name),
-			Seq:          item.Seq,
-			GroupID:      strings.TrimSpace(item.GroupID),
-			GroupName:    strings.TrimSpace(item.GroupName),
-			BitStatus:    strings.TrimSpace(item.BitStatus),
-			BitUpdatedAt: strings.TrimSpace(item.BitUpdatedAt),
-			LocalStatus:  ProfileActive,
-			LastSyncedAt: now,
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			ID:            s.newID("browser_profile"),
+			UserID:        actor.ID,
+			BitProfileID:  bitProfileID,
+			MainUserID:    mainUserID,
+			ProfileUserID: profileUserID,
+			Name:          strings.TrimSpace(item.Name),
+			Seq:           item.Seq,
+			GroupID:       strings.TrimSpace(item.GroupID),
+			GroupName:     strings.TrimSpace(item.GroupName),
+			BitStatus:     strings.TrimSpace(item.BitStatus),
+			BitUpdatedAt:  strings.TrimSpace(item.BitUpdatedAt),
+			LocalStatus:   ProfileActive,
+			LastSyncedAt:  now,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}
 		if current, ok := existingByBitID[bitProfileID]; ok {
 			candidate.ID = current.ID
@@ -232,7 +236,7 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 		return diff[i].Kind < diff[j].Kind
 	})
 	scan := ProfileScan{
-		ID: s.newID("profile_scan"), UserID: actor.ID, OwnerUserID: ownerUserID,
+		ID: s.newID("profile_scan"), UserID: actor.ID, MainUserID: mainUserID,
 		Status: ScanReady, Profiles: candidates, Diff: diff, CreatedAt: now, ExpiresAt: now.Add(s.scanTTL),
 	}
 	if err := s.store.CreateScan(scan); err != nil {
@@ -271,12 +275,12 @@ func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (Profile
 	if err != nil {
 		return ProfileScan{}, err
 	}
-	if found && binding.OwnerUserID != scan.OwnerUserID {
+	if found && binding.MainUserID != scan.MainUserID {
 		return ProfileScan{}, ErrIdentityMismatch
 	}
 	if !found {
 		boundAt := now
-		binding = BitAccountBinding{UserID: actor.ID, OwnerUserID: scan.OwnerUserID, Status: BitAccountBound, BoundAt: &boundAt}
+		binding = BitAccountBinding{UserID: actor.ID, MainUserID: scan.MainUserID, Status: BitAccountBound, BoundAt: &boundAt}
 	}
 	verifiedAt := now
 	binding.LastVerifiedAt = &verifiedAt
@@ -325,8 +329,11 @@ func validActor(actor identity.PublicUser) bool {
 
 func changedFields(current, candidate BrowserProfile) []string {
 	fields := make([]string, 0, 7)
-	if current.OwnerUserID != candidate.OwnerUserID {
-		fields = append(fields, "owner_user_id")
+	if current.MainUserID != candidate.MainUserID {
+		fields = append(fields, "main_user_id")
+	}
+	if current.ProfileUserID != candidate.ProfileUserID {
+		fields = append(fields, "profile_user_id")
 	}
 	if current.Name != candidate.Name {
 		fields = append(fields, "name")

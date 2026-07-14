@@ -106,29 +106,29 @@ func (s *MySQLStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, err
 	return node, true, nil
 }
 
-func (s *MySQLStore) ValidateRuntimeProfiles(userID, ownerUserID string, profileIDs []string) (bool, error) {
+func (s *MySQLStore) ValidateRuntimeProfiles(userID, mainUserID string, profileIDs []string) (bool, error) {
 	if len(profileIDs) == 0 {
 		return false, nil
 	}
-	var boundOwner sql.NullString
-	err := s.db.QueryRow(`SELECT bit_owner_user_id FROM users WHERE id = ? AND status = 'enabled'`, userID).Scan(&boundOwner)
+	var boundMain sql.NullString
+	err := s.db.QueryRow(`SELECT bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`, userID).Scan(&boundMain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if !boundOwner.Valid || boundOwner.String != ownerUserID {
+	if !boundMain.Valid || boundMain.String != mainUserID {
 		return false, nil
 	}
 	args := make([]any, 0, 2+len(profileIDs))
-	args = append(args, userID, ownerUserID)
+	args = append(args, userID, mainUserID)
 	for _, id := range profileIDs {
 		args = append(args, id)
 	}
 	var count int
 	err = s.db.QueryRow(
-		`SELECT COUNT(*) FROM browser_profiles WHERE user_id = ? AND owner_user_id = ? AND local_status = 'active' AND bit_profile_id IN (`+placeholders(len(profileIDs))+`)`, args...,
+		`SELECT COUNT(*) FROM browser_profiles WHERE user_id = ? AND main_user_id = ? AND local_status = 'active' AND bit_profile_id IN (`+placeholders(len(profileIDs))+`)`, args...,
 	).Scan(&count)
 	return count == len(profileIDs), err
 }
@@ -140,10 +140,10 @@ func (s *MySQLStore) ApplyRuntimeReport(node AgentNode, report RuntimeReport, at
 	}
 	defer tx.Rollback()
 	result, err := tx.Exec(
-		`UPDATE local_agent_nodes SET status = ?, last_heartbeat_at = ?, operating_system = ?, cpu_architecture = ?, agent_version = ?, python_version = ?, ffmpeg_status = ?, ffmpeg_version = ?, workdir_status = ?, disk_status = ?, disk_free_megabytes = ?, bitbrowser_status = ?, reported_owner_user_id = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE local_agent_nodes SET status = ?, last_heartbeat_at = ?, operating_system = ?, cpu_architecture = ?, agent_version = ?, python_version = ?, ffmpeg_status = ?, ffmpeg_version = ?, workdir_status = ?, disk_status = ?, disk_free_megabytes = ?, bitbrowser_status = ?, reported_main_user_id = ?, updated_at = ? WHERE id = ?`,
 		node.Status, at, report.OperatingSystem, report.CPUArchitecture, report.AgentVersion, report.PythonVersion,
 		report.FFmpeg.Status, nullIfEmpty(report.FFmpeg.Version), report.WorkdirStatus, report.Disk.Status,
-		report.Disk.FreeMegabytes, report.BitBrowserStatus, nullIfEmpty(report.OwnerUserID), at, node.ID,
+		report.Disk.FreeMegabytes, report.BitBrowserStatus, nullIfEmpty(report.MainUserID), at, node.ID,
 	)
 	if err != nil {
 		return err
@@ -156,9 +156,9 @@ func (s *MySQLStore) ApplyRuntimeReport(node AgentNode, report RuntimeReport, at
 	}
 	for _, bitProfileID := range report.BitProfileIDs {
 		_, err := tx.Exec(
-			`INSERT INTO browser_profile_runtime_presence (id, profile_id, bit_profile_id, node_id, user_id, owner_user_id, status, last_seen_at, created_at, updated_at) SELECT ?, bp.id, bp.bit_profile_id, ?, ?, ?, ?, ?, ?, ? FROM browser_profiles bp WHERE bp.bit_profile_id = ? AND bp.user_id = ? AND bp.owner_user_id = ? AND bp.local_status = 'active' ON DUPLICATE KEY UPDATE node_id = VALUES(node_id), user_id = VALUES(user_id), owner_user_id = VALUES(owner_user_id), status = VALUES(status), last_seen_at = VALUES(last_seen_at), updated_at = VALUES(updated_at)`,
-			common.NewID("profile-runtime"), node.ID, node.UserID, report.OwnerUserID, "visible", at, at, at,
-			bitProfileID, node.UserID, report.OwnerUserID,
+			`INSERT INTO browser_profile_runtime_presence (id, profile_id, bit_profile_id, node_id, user_id, main_user_id, status, last_seen_at, created_at, updated_at) SELECT ?, bp.id, bp.bit_profile_id, ?, ?, ?, ?, ?, ?, ? FROM browser_profiles bp WHERE bp.bit_profile_id = ? AND bp.user_id = ? AND bp.main_user_id = ? AND bp.local_status = 'active' ON DUPLICATE KEY UPDATE node_id = VALUES(node_id), user_id = VALUES(user_id), main_user_id = VALUES(main_user_id), status = VALUES(status), last_seen_at = VALUES(last_seen_at), updated_at = VALUES(updated_at)`,
+			common.NewID("profile-runtime"), node.ID, node.UserID, report.MainUserID, "visible", at, at, at,
+			bitProfileID, node.UserID, report.MainUserID,
 		)
 		if err != nil {
 			return err

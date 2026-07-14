@@ -1,4 +1,4 @@
-const profileFields = ['bit_profile_id', 'owner_user_id', 'name', 'seq', 'group_id', 'group_name', 'bit_status', 'bit_updated_at']
+const profileFields = ['bit_profile_id', 'main_user_id', 'profile_user_id', 'name', 'seq', 'group_id', 'group_name', 'bit_status', 'bit_updated_at']
 
 function safeProfile(profile) {
   return Object.fromEntries(profileFields.filter((key) => profile[key] !== undefined).map((key) => [key, profile[key]]))
@@ -25,7 +25,7 @@ export function createProfileBindingClient({ fetch = globalThis.fetch } = {}) {
   return {
     submit(snapshot) {
       return write('/api/v1/bit-browser/profile-scans', {
-        owner_user_id: snapshot.owner_user_id,
+        main_user_id: snapshot.main_user_id,
         profiles: (snapshot.profiles || []).map(safeProfile),
       })
     },

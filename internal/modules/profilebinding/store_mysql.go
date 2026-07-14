@@ -10,7 +10,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/common"
 )
 
-const profileColumnsSQL = `id, user_id, bit_profile_id, owner_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, local_status, last_synced_at, created_at, updated_at`
+const profileColumnsSQL = `id, user_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, local_status, last_synced_at, created_at, updated_at`
 
 type MySQLStore struct{ db *sql.DB }
 
@@ -18,21 +18,21 @@ func NewMySQLStore(db *sql.DB) *MySQLStore { return &MySQLStore{db: db} }
 
 func (s *MySQLStore) FindBinding(userID string) (BitAccountBinding, bool, error) {
 	var binding BitAccountBinding
-	var ownerUserID, status sql.NullString
+	var mainUserID, status sql.NullString
 	var boundAt, verifiedAt sql.NullTime
 	err := s.db.QueryRow(
-		`SELECT id, bit_owner_user_id, bit_account_status, bit_account_bound_at, bit_account_last_verified_at FROM users WHERE id = ?`, userID,
-	).Scan(&binding.UserID, &ownerUserID, &status, &boundAt, &verifiedAt)
+		`SELECT id, bit_main_user_id, bit_account_status, bit_account_bound_at, bit_account_last_verified_at FROM users WHERE id = ?`, userID,
+	).Scan(&binding.UserID, &mainUserID, &status, &boundAt, &verifiedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return BitAccountBinding{}, false, nil
 	}
 	if err != nil {
 		return BitAccountBinding{}, false, err
 	}
-	if !ownerUserID.Valid || ownerUserID.String == "" {
+	if !mainUserID.Valid || mainUserID.String == "" {
 		return BitAccountBinding{}, false, nil
 	}
-	binding.OwnerUserID = ownerUserID.String
+	binding.MainUserID = mainUserID.String
 	binding.Status = BitAccountStatus(status.String)
 	if boundAt.Valid {
 		value := boundAt.Time
@@ -86,15 +86,15 @@ func (s *MySQLStore) CreateScan(scan ProfileScan) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(
-		`INSERT INTO profile_sync_scans (id, user_id, owner_user_id, status, diff_json, created_at, expires_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		scan.ID, scan.UserID, scan.OwnerUserID, scan.Status, diffJSON, scan.CreatedAt, scan.ExpiresAt, scan.ConfirmedAt,
+		`INSERT INTO profile_sync_scans (id, user_id, main_user_id, status, diff_json, created_at, expires_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		scan.ID, scan.UserID, scan.MainUserID, scan.Status, diffJSON, scan.CreatedAt, scan.ExpiresAt, scan.ConfirmedAt,
 	); err != nil {
 		return err
 	}
 	for _, profile := range scan.Profiles {
 		if _, err := tx.Exec(
-			`INSERT INTO profile_sync_candidates (scan_id, profile_id, bit_profile_id, owner_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			scan.ID, profile.ID, profile.BitProfileID, profile.OwnerUserID, profile.Name, profile.Seq,
+			`INSERT INTO profile_sync_candidates (scan_id, profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			scan.ID, profile.ID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
 			profile.CreatedAt, profile.UpdatedAt,
 		); err != nil {
@@ -109,8 +109,8 @@ func (s *MySQLStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	var diffJSON []byte
 	var confirmedAt sql.NullTime
 	err := s.db.QueryRow(
-		`SELECT id, user_id, owner_user_id, status, diff_json, created_at, expires_at, confirmed_at FROM profile_sync_scans WHERE id = ?`, scanID,
-	).Scan(&scan.ID, &scan.UserID, &scan.OwnerUserID, &scan.Status, &diffJSON, &scan.CreatedAt, &scan.ExpiresAt, &confirmedAt)
+		`SELECT id, user_id, main_user_id, status, diff_json, created_at, expires_at, confirmed_at FROM profile_sync_scans WHERE id = ?`, scanID,
+	).Scan(&scan.ID, &scan.UserID, &scan.MainUserID, &scan.Status, &diffJSON, &scan.CreatedAt, &scan.ExpiresAt, &confirmedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProfileScan{}, false, nil
 	}
@@ -125,7 +125,7 @@ func (s *MySQLStore) FindScan(scanID string) (ProfileScan, bool, error) {
 		scan.ConfirmedAt = &value
 	}
 	rows, err := s.db.Query(
-		`SELECT profile_id, bit_profile_id, owner_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, created_at, updated_at FROM profile_sync_candidates WHERE scan_id = ? ORDER BY bit_profile_id`, scanID,
+		`SELECT profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, created_at, updated_at FROM profile_sync_candidates WHERE scan_id = ? ORDER BY bit_profile_id`, scanID,
 	)
 	if err != nil {
 		return ProfileScan{}, false, err
@@ -134,7 +134,7 @@ func (s *MySQLStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	for rows.Next() {
 		var profile BrowserProfile
 		var groupID, groupName, bitStatus, bitUpdatedAt sql.NullString
-		if err := rows.Scan(&profile.ID, &profile.BitProfileID, &profile.OwnerUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
 			return ProfileScan{}, false, err
 		}
 		profile.UserID = scan.UserID
@@ -156,8 +156,8 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 	}
 	defer tx.Rollback()
 	result, err := tx.Exec(
-		`UPDATE users SET bit_owner_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_owner_user_id IS NULL OR bit_owner_user_id = ?)`,
-		binding.OwnerUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.OwnerUserID,
+		`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`,
+		binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID,
 	)
 	if err != nil {
 		return err
@@ -170,8 +170,8 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 	}
 	for _, profile := range scan.Profiles {
 		if _, err := tx.Exec(
-			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE owner_user_id = VALUES(owner_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
-			profile.ID, profile.UserID, profile.BitProfileID, profile.OwnerUserID, profile.Name, profile.Seq,
+			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE main_user_id = VALUES(main_user_id), profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
+			profile.ID, profile.UserID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
 			ProfileActive, at, profile.CreatedAt, at,
 		); err != nil {
@@ -205,7 +205,7 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 		}
 		return ErrScanNotReady
 	}
-	summary, _ := json.Marshal(map[string]any{"owner_user_id": scan.OwnerUserID, "profile_count": len(scan.Profiles)})
+	summary, _ := json.Marshal(map[string]any{"main_user_id": scan.MainUserID, "profile_count": len(scan.Profiles)})
 	if _, err := tx.Exec(
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		common.NewID("audit"), scan.UserID, "bitbrowser.profile_scan.confirm", "profile_sync_scan", scan.ID, summary, at,
@@ -220,7 +220,7 @@ type scanner interface{ Scan(...any) error }
 func scanProfile(row scanner) (BrowserProfile, error) {
 	var profile BrowserProfile
 	var groupID, groupName, bitStatus, bitUpdatedAt sql.NullString
-	err := row.Scan(&profile.ID, &profile.UserID, &profile.BitProfileID, &profile.OwnerUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
+	err := row.Scan(&profile.ID, &profile.UserID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
 	if err != nil {
 		return BrowserProfile{}, err
 	}

@@ -1,5 +1,5 @@
 openapi: 3.0.3
-info: {title: WT Media Cloud Browser Profile API, version: 2026.07.14.3}
+info: {title: WT Media Cloud Browser Profile API, version: 2026.07.14.4}
 paths:
   /api/v1/bit-browser/profile-scans:
     post:
@@ -10,7 +10,7 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/SnapshotInput'}}}
       responses:
         '201': {description: Secret-free scan staged; formal Profile data is unchanged.}
-        '409': {description: Empty, mixed, missing, or mismatched BitBrowser identity.}
+        '409': {description: Empty, mixed, missing, or mismatched BitBrowser main identity.}
   /api/v1/bit-browser/profile-scans/{scan_id}:
     get:
       operationId: getProfileScan
@@ -41,17 +41,18 @@ components:
   schemas:
     SnapshotInput:
       type: object
-      required: [owner_user_id, profiles]
+      required: [main_user_id, profiles]
       properties:
-        owner_user_id: {type: string}
+        main_user_id: {type: string, description: Normalized from BitBrowser mainUserId.}
         profiles: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ProfileInput'}}
     ProfileInput:
       type: object
-      required: [bit_profile_id, owner_user_id]
+      required: [bit_profile_id, main_user_id, profile_user_id]
       additionalProperties: false
       properties:
         bit_profile_id: {type: string}
-        owner_user_id: {type: string}
+        main_user_id: {type: string, description: Must equal the snapshot main_user_id.}
+        profile_user_id: {type: string, description: Normalized from BitBrowser userId for Profile/sub-account audit.}
         name: {type: string}
         seq: {type: integer}
         group_id: {type: string}

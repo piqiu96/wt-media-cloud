@@ -8,12 +8,15 @@ describe('profile binding client', () => {
   it('submits only normalized secret-free snapshot fields', async () => {
     const fetch = vi.fn(async () => response({ id: 'scan-1', status: 'ready', diff: [] }))
     const client = createProfileBindingClient({ fetch })
-    const raw = { owner_user_id: 'bit-user-1', profiles: [{ bit_profile_id: 'p1', owner_user_id: 'bit-user-1', name: '窗口', cookie: 'secret', proxyPassword: 'secret' }] }
+    const raw = { main_user_id: 'main-user-1', profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', cookie: 'secret', proxyPassword: 'secret' }] }
 
     await client.submit(raw)
 
     const body = JSON.parse(fetch.mock.calls[0][1].body)
-    expect(body.profiles[0]).toEqual({ bit_profile_id: 'p1', owner_user_id: 'bit-user-1', name: '窗口' })
+    expect(body).toEqual({
+      main_user_id: 'main-user-1',
+      profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口' }],
+    })
     expect(fetch.mock.calls[0][1].credentials).toBe('include')
   })
 
