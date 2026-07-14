@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/infra/config"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 )
 
 type Server struct {
@@ -37,5 +38,8 @@ func registerHealthRoutes(h *server.Hertz) {
 	})
 	h.GET("/api/v1/health", func(ctx context.Context, c *hertzapp.RequestContext) {
 		common.JSONData(c, consts.StatusOK, map[string]string{"status": "ok"})
+	})
+	h.GET("/api/v1/cloud-agent/compatibility", func(ctx context.Context, c *hertzapp.RequestContext) {
+		common.JSONData(c, consts.StatusOK, cloudagent.CurrentCompatibility())
 	})
 }

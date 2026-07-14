@@ -1,6 +1,6 @@
 # Cloud Contracts
 
-Cloud owns the following contract areas. M0 keeps directories only as ownership placeholders; no formal OpenAPI, schema, DTO, event, or error-code definitions are active yet.
+Cloud owns the following contract areas.
 
 - `cloud-api`
 - `cloud-agent-api`
@@ -8,3 +8,8 @@ Cloud owns the following contract areas. M0 keeps directories only as ownership 
 - `task-schemas`
 - `business-enums`
 - `cloud-error-codes`
+
+M1 status:
+
+- `cloud-agent-api/v1` is active for Cloud-Agent contract compatibility only.
+- Other contract areas remain ownership placeholders until their owning CHGs activate them.
