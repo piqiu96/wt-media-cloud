@@ -22,7 +22,7 @@ func NewServer() *Server {
 	engine := server.Default(server.WithHostPorts(cfg.HTTPAddr))
 
 	registerHealthRoutes(engine)
-	cloudagent.RegisterRoutes(engine, cloudagent.NewRegistry())
+	cloudagent.RegisterRoutes(engine, cloudagent.NewRegistry(), cloudagent.NewTaskStore())
 
 	return &Server{engine: engine, addr: cfg.HTTPAddr}
 }

@@ -1,0 +1,43 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cloud-Agent Task Lease API
+  version: 2026.07.14.3
+  description: M1-C3 Cloud-owned contract for noop task creation, Agent claim, lease, and idempotency.
+paths:
+  /api/v1/tasks/noop:
+    post:
+      operationId: createNoopTask
+      summary: Create a noop task idempotently.
+  /api/v1/cloud-agent/tasks/claim:
+    post:
+      operationId: claimCloudAgentTask
+      summary: Claim one pending noop task for an Agent.
+  /api/v1/cloud-agent/tasks/{task_id}:
+    get:
+      operationId: getCloudAgentTask
+      summary: Get task state.
+components:
+  schemas:
+    Task:
+      type: object
+      required:
+        - task_id
+        - task_type
+        - status
+        - created_at
+      properties:
+        task_id:
+          type: string
+        task_type:
+          type: string
+          const: noop_task
+        status:
+          type: string
+          enum: [pending, leased]
+        idempotency_key:
+          type: string
+        agent_id:
+          type: string
+        lease_expires_at:
+          type: string
+          format: date-time
