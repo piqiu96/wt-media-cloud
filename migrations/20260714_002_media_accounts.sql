@@ -6,7 +6,7 @@ CREATE TABLE media_accounts (
     platform_account_id VARCHAR(255) NULL,
     name VARCHAR(255) NULL,
     avatar_url VARCHAR(2048) NULL,
-    browser_profile_id VARCHAR(255) NULL,
+    browser_profile_id VARCHAR(64) NULL,
     identification_status VARCHAR(32) NOT NULL DEFAULT 'pending_identification',
     duplicate_of_account_id VARCHAR(64) NULL,
     business_status VARCHAR(32) NOT NULL DEFAULT 'enabled',
@@ -29,7 +29,7 @@ CREATE TABLE media_accounts (
     CONSTRAINT chk_media_accounts_identification CHECK (identification_status IN ('pending_identification', 'identified', 'duplicate')),
     CONSTRAINT chk_media_accounts_business_status CHECK (business_status IN ('enabled', 'disabled', 'retired')),
     CONSTRAINT chk_media_accounts_login_status CHECK (login_status IN ('unknown', 'normal', 'not_logged_in', 'verification_needed', 'expired', 'restricted', 'account_mismatch', 'environment_error'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE media_account_tags (
     id VARCHAR(64) NOT NULL,
@@ -42,4 +42,4 @@ CREATE TABLE media_account_tags (
     KEY idx_media_account_tags_name (user_id, tag_name, media_account_id),
     CONSTRAINT fk_media_account_tags_user FOREIGN KEY (user_id) REFERENCES users (id),
     CONSTRAINT fk_media_account_tags_account FOREIGN KEY (media_account_id) REFERENCES media_accounts (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

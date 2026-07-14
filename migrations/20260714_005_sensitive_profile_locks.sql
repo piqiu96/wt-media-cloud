@@ -16,7 +16,7 @@ CREATE TABLE sensitive_browser_tasks (
     CONSTRAINT fk_sensitive_browser_task_node FOREIGN KEY (node_id) REFERENCES local_agent_nodes(id),
     CONSTRAINT chk_sensitive_browser_task_operation CHECK (operation IN ('assisted_publication', 'interaction', 'authenticated_account_check', 'cookie_read', 'cookie_write', 'profile_mutation', 'proxy_mutation')),
     CONSTRAINT chk_sensitive_browser_task_status CHECK (status IN ('authorized', 'running', 'completed', 'review_required'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE sensitive_profile_permits (
     id VARCHAR(64) NOT NULL,
@@ -39,4 +39,4 @@ CREATE TABLE sensitive_profile_permits (
     CONSTRAINT fk_sensitive_profile_permit_profile FOREIGN KEY (profile_id) REFERENCES browser_profiles(id),
     CONSTRAINT fk_sensitive_profile_permit_node FOREIGN KEY (node_id) REFERENCES local_agent_nodes(id),
     CONSTRAINT chk_sensitive_profile_permit_status CHECK (status IN ('active', 'released', 'review_required'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

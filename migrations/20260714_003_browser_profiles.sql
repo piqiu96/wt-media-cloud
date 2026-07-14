@@ -26,7 +26,7 @@ CREATE TABLE browser_profiles (
     KEY idx_browser_profiles_user_status (user_id, local_status),
     CONSTRAINT fk_browser_profiles_user FOREIGN KEY (user_id) REFERENCES users (id),
     CONSTRAINT chk_browser_profiles_local_status CHECK (local_status IN ('active', 'local_missing', 'archived'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE profile_sync_scans (
     id VARCHAR(64) NOT NULL,
@@ -41,7 +41,7 @@ CREATE TABLE profile_sync_scans (
     KEY idx_profile_sync_scans_user_created (user_id, created_at),
     CONSTRAINT fk_profile_sync_scans_user FOREIGN KEY (user_id) REFERENCES users (id),
     CONSTRAINT chk_profile_sync_scans_status CHECK (status IN ('ready', 'confirmed'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE profile_sync_candidates (
     scan_id VARCHAR(64) NOT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE profile_sync_candidates (
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (scan_id, bit_profile_id),
     CONSTRAINT fk_profile_sync_candidates_scan FOREIGN KEY (scan_id) REFERENCES profile_sync_scans (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 ALTER TABLE media_accounts
     ADD CONSTRAINT fk_media_accounts_browser_profile FOREIGN KEY (browser_profile_id) REFERENCES browser_profiles (id);

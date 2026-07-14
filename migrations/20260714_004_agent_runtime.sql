@@ -11,7 +11,7 @@ CREATE TABLE local_agent_binding_tickets (
     KEY idx_local_agent_binding_ticket_expiry (expires_at, used_at),
     CONSTRAINT fk_local_agent_binding_ticket_user FOREIGN KEY (user_id) REFERENCES users(id),
     CONSTRAINT fk_local_agent_binding_ticket_session FOREIGN KEY (session_id) REFERENCES user_sessions(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE local_agent_nodes (
     id VARCHAR(64) NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE local_agent_nodes (
     CONSTRAINT fk_local_agent_node_session FOREIGN KEY (session_id) REFERENCES user_sessions(id),
     CONSTRAINT chk_local_agent_node_mode CHECK (mode = 'local'),
     CONSTRAINT chk_local_agent_node_status CHECK (status IN ('online', 'draining', 'replaced'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE browser_profile_runtime_presence (
     id VARCHAR(64) NOT NULL,
@@ -67,4 +67,4 @@ CREATE TABLE browser_profile_runtime_presence (
     CONSTRAINT fk_browser_profile_runtime_presence_node FOREIGN KEY (node_id) REFERENCES local_agent_nodes(id),
     CONSTRAINT fk_browser_profile_runtime_presence_user FOREIGN KEY (user_id) REFERENCES users(id),
     CONSTRAINT chk_browser_profile_runtime_presence_status CHECK (status IN ('visible', 'not_visible'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
