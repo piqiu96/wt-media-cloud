@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -44,6 +45,10 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	h.POST("/api/v1/auth/login", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req loginRequest
 		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		if context, err := service.AuthenticateContext(string(c.Cookie(SessionCookieName))); err == nil && context.User.Username == strings.TrimSpace(req.Username) {
+			common.JSONData(c, consts.StatusOK, context.User)
 			return
 		}
 		result, err := service.Login(req.Username, req.Password)

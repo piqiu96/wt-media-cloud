@@ -30,6 +30,25 @@ func TestLoginUsesHttpOnlyCookieAndReplacementRejectsOldSession(t *testing.T) {
 		t.Fatalf("login response leaked secret material: %s", first.Result().Body())
 	}
 
+	idempotent := ut.PerformRequest(
+		engine.Engine,
+		"POST",
+		"/api/v1/auth/login",
+		&ut.Body{Body: bytes.NewBufferString(`{"username":"tech","password":"a-long-initial-password"}`), Len: len(`{"username":"tech","password":"a-long-initial-password"}`)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "Cookie", Value: firstCookie},
+	)
+	if idempotent.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("idempotent login status = %d, body = %s", idempotent.Result().StatusCode(), idempotent.Result().Body())
+	}
+	if setCookie := string(idempotent.Result().Header.Peek("Set-Cookie")); setCookie != "" {
+		t.Fatalf("idempotent login unexpectedly replaced cookie: %q", setCookie)
+	}
+	stillMe := ut.PerformRequest(engine.Engine, "GET", "/api/v1/auth/me", nil, ut.Header{Key: "Cookie", Value: firstCookie})
+	if stillMe.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("idempotent login invalidated session status = %d, body = %s", stillMe.Result().StatusCode(), stillMe.Result().Body())
+	}
+
 	second := performJSON(engine, "POST", "/api/v1/auth/login", `{"username":"tech","password":"a-long-initial-password"}`)
 	secondCookie := string(second.Result().Header.Peek("Set-Cookie"))
 	if secondCookie == "" || secondCookie == firstCookie {
