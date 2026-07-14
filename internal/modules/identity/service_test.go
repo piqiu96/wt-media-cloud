@@ -48,6 +48,25 @@ func TestNewLoginInvalidatesPriorSession(t *testing.T) {
 	}
 }
 
+func TestAuthenticateContextReturnsServerSideSessionIdentity(t *testing.T) {
+	service := NewService(NewMemoryStore(), WithTokenGenerator(func() string { return "session-token" }))
+	if _, err := service.BootstrapTechnician("tech", "a-long-initial-password"); err != nil {
+		t.Fatalf("BootstrapTechnician() error = %v", err)
+	}
+	login, err := service.Login("tech", "a-long-initial-password")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	context, err := service.AuthenticateContext(login.Token)
+	if err != nil {
+		t.Fatalf("AuthenticateContext() error = %v", err)
+	}
+	if context.User.ID != login.User.ID || context.Session.ID == "" || context.Session.TokenHash == "" {
+		t.Fatalf("context = %+v", context)
+	}
+}
+
 func TestDisabledUserCannotAuthenticate(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	technician, err := service.BootstrapTechnician("tech", "a-long-initial-password")

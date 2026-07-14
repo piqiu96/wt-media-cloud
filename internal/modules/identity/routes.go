@@ -148,12 +148,20 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 // AuthenticateRequest resolves the server-side session Cookie for other Cloud
 // business modules. Callers never receive the raw session token.
 func AuthenticateRequest(c *hertzapp.RequestContext, service *Service) (PublicUser, bool) {
-	actor, err := service.Authenticate(string(c.Cookie(SessionCookieName)))
+	context, ok := AuthenticateRequestContext(c, service)
+	return context.User, ok
+}
+
+// AuthenticateRequestContext is for trusted Cloud modules that must bind a
+// resource to the current server-side session ID. It never returns the raw
+// Cookie token to an API response.
+func AuthenticateRequestContext(c *hertzapp.RequestContext, service *Service) (AuthContext, bool) {
+	context, err := service.AuthenticateContext(string(c.Cookie(SessionCookieName)))
 	if err != nil {
 		writeIdentityError(c, err)
-		return PublicUser{}, false
+		return AuthContext{}, false
 	}
-	return actor, true
+	return context, true
 }
 
 func writeIdentityError(c *hertzapp.RequestContext, err error) {

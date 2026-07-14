@@ -72,6 +72,13 @@ type LoginResult struct {
 	User  PublicUser
 }
 
+// AuthContext exposes server-side session identity to trusted Cloud modules
+// without returning the raw session token to an API consumer.
+type AuthContext struct {
+	User    PublicUser
+	Session Session
+}
+
 type CreateUserInput struct {
 	Username string
 	Password string
@@ -248,24 +255,32 @@ func (s *Service) Login(username, password string) (LoginResult, error) {
 }
 
 func (s *Service) Authenticate(token string) (PublicUser, error) {
+	context, err := s.AuthenticateContext(token)
+	if err != nil {
+		return PublicUser{}, err
+	}
+	return context.User, nil
+}
+
+func (s *Service) AuthenticateContext(token string) (AuthContext, error) {
 	if token == "" {
-		return PublicUser{}, ErrSessionInvalid
+		return AuthContext{}, ErrSessionInvalid
 	}
 	session, ok, err := s.store.FindSessionByTokenHash(tokenHash(token))
 	if err != nil {
-		return PublicUser{}, err
+		return AuthContext{}, err
 	}
 	if !ok || session.InvalidAt != nil {
-		return PublicUser{}, ErrSessionInvalid
+		return AuthContext{}, ErrSessionInvalid
 	}
 	user, ok, err := s.store.FindUser(session.UserID)
 	if err != nil {
-		return PublicUser{}, err
+		return AuthContext{}, err
 	}
 	if !ok || user.Status != UserStatusEnabled {
-		return PublicUser{}, ErrSessionInvalid
+		return AuthContext{}, ErrSessionInvalid
 	}
-	return publicUser(user), nil
+	return AuthContext{User: publicUser(user), Session: session}, nil
 }
 
 func (s *Service) Logout(token string) error {
