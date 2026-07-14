@@ -65,3 +65,26 @@ func TestClaimAfterLeaseExpiry(t *testing.T) {
 		t.Fatalf("AgentID = %q", claimed.AgentID)
 	}
 }
+
+func TestReportRequiresLeasedAgent(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := NewTaskStoreWithClock(func() time.Time { return now }, func() string { return "task_1" })
+	task := store.CreateNoop(CreateTaskRequest{})
+	_, err := store.Claim(ClaimTaskRequest{AgentID: "agent-1", LeaseSeconds: 30})
+	if err != nil {
+		t.Fatalf("Claim returned error: %v", err)
+	}
+
+	_, err = store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-2", Status: TaskRunning, Progress: 10})
+	if !errors.Is(err, ErrTaskAgentMismatch) {
+		t.Fatalf("err = %v", err)
+	}
+
+	updated, err := store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-1", Status: TaskSucceeded, Progress: 100})
+	if err != nil {
+		t.Fatalf("Report returned error: %v", err)
+	}
+	if updated.Status != TaskSucceeded || updated.Progress != 100 {
+		t.Fatalf("unexpected report: %+v", updated)
+	}
+}

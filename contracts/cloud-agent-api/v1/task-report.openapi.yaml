@@ -1,0 +1,29 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cloud-Agent Task Report API
+  version: 2026.07.14.4
+  description: M1-C4 Cloud-owned contract for task status reporting.
+paths:
+  /api/v1/cloud-agent/tasks/{task_id}/report:
+    post:
+      operationId: reportCloudAgentTask
+      summary: Report task status from the leased Agent.
+components:
+  schemas:
+    ReportTaskRequest:
+      type: object
+      required:
+        - agent_id
+        - status
+      properties:
+        agent_id:
+          type: string
+        status:
+          type: string
+          enum: [running, succeeded, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        message:
+          type: string

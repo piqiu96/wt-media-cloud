@@ -12,14 +12,18 @@ const (
 	TaskTypeNoop  = "noop_task"
 	TaskPending   = "pending"
 	TaskLeased    = "leased"
+	TaskRunning   = "running"
+	TaskSucceeded = "succeeded"
+	TaskFailed    = "failed"
 	DefaultLeaseS = 60
 )
 
 var (
-	ErrTaskNotFound   = errors.New("task not found")
-	ErrNoPendingTask  = errors.New("no pending task")
-	ErrTaskLeaseTaken = errors.New("task lease taken")
-	ErrInvalidTask    = errors.New("invalid task")
+	ErrTaskNotFound      = errors.New("task not found")
+	ErrNoPendingTask     = errors.New("no pending task")
+	ErrTaskLeaseTaken    = errors.New("task lease taken")
+	ErrInvalidTask       = errors.New("invalid task")
+	ErrTaskAgentMismatch = errors.New("task agent mismatch")
 )
 
 type CreateTaskRequest struct {
@@ -39,6 +43,16 @@ type Task struct {
 	AgentID        string `json:"agent_id,omitempty"`
 	CreatedAt      string `json:"created_at"`
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	Progress       int    `json:"progress,omitempty"`
+	Message        string `json:"message,omitempty"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+}
+
+type ReportTaskRequest struct {
+	AgentID  string `json:"agent_id"`
+	Status   string `json:"status"`
+	Progress int    `json:"progress"`
+	Message  string `json:"message"`
 }
 
 type TaskStore struct {
@@ -129,6 +143,28 @@ func (s *TaskStore) Get(taskID string) (Task, error) {
 	return task, nil
 }
 
+func (s *TaskStore) Report(taskID string, req ReportTaskRequest) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if req.AgentID == "" || !validTaskReportStatus(req.Status) || req.Progress < 0 || req.Progress > 100 {
+		return Task{}, ErrInvalidTask
+	}
+	task, ok := s.tasks[taskID]
+	if !ok {
+		return Task{}, ErrTaskNotFound
+	}
+	if task.AgentID != req.AgentID {
+		return Task{}, ErrTaskAgentMismatch
+	}
+	task.Status = req.Status
+	task.Progress = req.Progress
+	task.Message = req.Message
+	task.UpdatedAt = s.now().Format(time.RFC3339)
+	s.tasks[task.TaskID] = task
+	return task, nil
+}
+
 func leaseExpired(task Task, now time.Time) bool {
 	if task.Status != TaskLeased || task.LeaseExpiresAt == "" {
 		return false
@@ -138,4 +174,8 @@ func leaseExpired(task Task, now time.Time) bool {
 		return true
 	}
 	return !expiresAt.After(now)
+}
+
+func validTaskReportStatus(status string) bool {
+	return status == TaskRunning || status == TaskSucceeded || status == TaskFailed
 }

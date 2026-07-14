@@ -53,6 +53,14 @@ func RegisterRoutes(h *server.Hertz, registry *Registry, tasks *TaskStore) {
 		task, err := tasks.Get(c.Param("task_id"))
 		writeTaskResult(c, task, err)
 	})
+	h.POST("/api/v1/cloud-agent/tasks/:task_id/report", func(ctx context.Context, c *hertzapp.RequestContext) {
+		var req ReportTaskRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		task, err := tasks.Report(c.Param("task_id"), req)
+		writeTaskResult(c, task, err)
+	})
 }
 
 func writeAgentResult(c *hertzapp.RequestContext, node AgentNode, err error) {
@@ -80,6 +88,8 @@ func writeTaskResult(c *hertzapp.RequestContext, task Task, err error) {
 		common.JSONError(c, consts.StatusConflict, "no_pending_task", "no claimable task is available")
 	case errors.Is(err, ErrTaskNotFound):
 		common.JSONError(c, consts.StatusNotFound, "task_not_found", "task is not found")
+	case errors.Is(err, ErrTaskAgentMismatch):
+		common.JSONError(c, consts.StatusConflict, "task_agent_mismatch", "agent does not hold this task lease")
 	default:
 		common.JSONError(c, consts.StatusInternalServerError, "task_store_error", "task operation failed")
 	}
