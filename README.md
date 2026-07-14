@@ -21,7 +21,7 @@ Runtime configuration:
 - `WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD`: one-time initial technician password; no default is provided
 - `WT_MEDIA_SESSION_COOKIE_SECURE`: secure-cookie flag, default `true`; set `false` only for local HTTP development
 
-Apply `migrations/20260714_001_identity.sql` before enabling the M2-C1 identity API with `WT_MEDIA_MYSQL_DSN`.
+Apply `migrations/20260714_001_identity.sql` and then `migrations/20260714_002_media_accounts.sql` before enabling the M2 identity and media-account APIs with `WT_MEDIA_MYSQL_DSN`.
 
 ## Key Directories
 

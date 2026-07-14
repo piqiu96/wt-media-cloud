@@ -1,0 +1,28 @@
+schema_version: 1
+revision: "2026.07.14.2"
+schemas:
+  MediaAccount:
+    type: object
+    required: [id, user_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+    properties:
+      id: {type: string}
+      user_id: {type: string}
+      game_id: {type: string}
+      platform: {type: string, enum: [douyin, bilibili, baijiahao]}
+      platform_account_id: {type: string, nullable: true}
+      name: {type: string, nullable: true}
+      avatar_url: {type: string, nullable: true}
+      browser_profile_id: {type: string, nullable: true}
+      identification_status: {type: string, enum: [pending_identification, identified, duplicate]}
+      duplicate_of_account_id: {type: string, nullable: true}
+      business_status: {type: string, enum: [enabled, disabled, retired]}
+      login_status: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
+      cookie_status: {type: string, nullable: true}
+      active_cookie_updated_at: {type: string, format: date-time, nullable: true}
+      last_checked_at: {type: string, format: date-time, nullable: true}
+      tags: {type: array, items: {type: string}}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
+    forbidden_properties: [original_cookie, active_cookie]
+identity_key: {scope: user, fields: [user_id, platform, platform_account_id]}
+assignment: {owner_field: user_id, game_cardinality: one, owner_handoff_supported: false}

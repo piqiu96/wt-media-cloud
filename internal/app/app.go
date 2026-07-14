@@ -15,6 +15,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 )
 
 type Server struct {
@@ -49,6 +50,7 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: cfg.SessionCookieSecure})
+	mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(db)), identityService)
 	return result, nil
 }
 

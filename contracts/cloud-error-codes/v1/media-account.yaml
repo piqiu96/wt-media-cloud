@@ -1,0 +1,9 @@
+schema_version: 1
+revision: "2026.07.14.2"
+errors:
+  authentication_required: {http_status: 401}
+  forbidden: {http_status: 403}
+  invalid_media_account_request: {http_status: 400}
+  media_account_not_found: {http_status: 404}
+  duplicate_media_account: {http_status: 409}
+  media_account_store_error: {http_status: 500}

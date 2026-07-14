@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: WT Media Cloud Media Account API
+  version: 2026.07.14.2
+paths:
+  /api/v1/media-accounts:
+    get:
+      operationId: listMediaAccounts
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: user_id, schema: {type: string}}
+        - {in: query, name: game_id, schema: {type: string}}
+        - {in: query, name: platform, schema: {$ref: '#/components/schemas/Platform'}}
+        - {in: query, name: any_tags, schema: {type: string}, description: Comma-separated tags; at least one must match.}
+        - {in: query, name: all_tags, schema: {type: string}, description: Comma-separated tags; every tag must match.}
+        - {in: query, name: exclude_tags, schema: {type: string}, description: Comma-separated tags; none may match.}
+      responses:
+        '200':
+          description: Accounts visible to the current user. Cookie fields are never returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountListResponse'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      operationId: createMediaAccount
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateMediaAccountRequest'}
+      responses:
+        '201':
+          description: Pending-identification account created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/media-accounts/{account_id}:
+    parameters:
+      - in: path
+        name: account_id
+        required: true
+        schema: {type: string}
+    get:
+      operationId: getMediaAccount
+      security: [{sessionCookie: []}]
+      responses:
+        '200':
+          description: Visible media account.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountResponse'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateMediaAccountStatus
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateMediaAccountRequest'}
+      responses:
+        '200':
+          description: Business and/or login status updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/media-accounts/{account_id}/identify:
+    post:
+      operationId: identifyMediaAccount
+      security: [{sessionCookie: []}]
+      parameters:
+        - in: path
+          name: account_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IdentifyMediaAccountRequest'}
+      responses:
+        '200':
+          description: Account identity backfilled.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Duplicate identity exists for this user and platform; candidate is marked duplicate.}
+  /api/v1/media-accounts/tags/add:
+    post:
+      operationId: addMediaAccountTags
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TagsRequest'}
+      responses:
+        '200': {description: Tags added idempotently.}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/media-accounts/tags/remove:
+    post:
+      operationId: removeMediaAccountTags
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TagsRequest'}
+      responses:
+        '200': {description: Tags removed idempotently.}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  responses:
+    AuthenticationRequired: {description: Missing, invalid, or superseded session.}
+    Forbidden: {description: User ownership, role, or game scope forbids the operation.}
+    InvalidRequest: {description: Invalid media account request.}
+    NotFound: {description: Media account not found.}
+  schemas:
+    Platform: {type: string, enum: [douyin, bilibili, baijiahao]}
+    BusinessStatus: {type: string, enum: [enabled, disabled, retired]}
+    LoginStatus: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
+    IdentificationStatus: {type: string, enum: [pending_identification, identified, duplicate]}
+    CreateMediaAccountRequest:
+      type: object
+      required: [game_id, platform]
+      properties:
+        user_id: {type: string, description: Technician-only target; otherwise omitted or current user.}
+        game_id: {type: string, maxLength: 128}
+        platform: {$ref: '#/components/schemas/Platform'}
+        original_cookie: {type: string, format: password, writeOnly: true}
+    UpdateMediaAccountRequest:
+      type: object
+      properties:
+        business_status: {$ref: '#/components/schemas/BusinessStatus'}
+        login_status: {$ref: '#/components/schemas/LoginStatus'}
+      minProperties: 1
+    IdentifyMediaAccountRequest:
+      type: object
+      required: [platform_account_id, login_status]
+      properties:
+        platform_account_id: {type: string, maxLength: 255}
+        name: {type: string, maxLength: 255}
+        avatar_url: {type: string, maxLength: 2048}
+        login_status: {$ref: '#/components/schemas/LoginStatus'}
+    TagsRequest:
+      type: object
+      required: [account_ids, tags]
+      properties:
+        account_ids: {type: array, minItems: 1, items: {type: string}}
+        tags: {type: array, minItems: 1, items: {type: string, maxLength: 64}}
+    MediaAccount:
+      type: object
+      required: [id, user_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+      properties:
+        id: {type: string}
+        user_id: {type: string}
+        game_id: {type: string}
+        platform: {$ref: '#/components/schemas/Platform'}
+        platform_account_id: {type: string}
+        name: {type: string}
+        avatar_url: {type: string}
+        browser_profile_id: {type: string, description: Nullable C3 reference; C2 does not bind it.}
+        identification_status: {$ref: '#/components/schemas/IdentificationStatus'}
+        duplicate_of_account_id: {type: string}
+        business_status: {$ref: '#/components/schemas/BusinessStatus'}
+        login_status: {$ref: '#/components/schemas/LoginStatus'}
+        cookie_status: {type: string}
+        active_cookie_updated_at: {type: string, format: date-time}
+        last_checked_at: {type: string, format: date-time}
+        tags: {type: array, items: {type: string}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MediaAccountResponse:
+      type: object
+      required: [data]
+      properties: {data: {$ref: '#/components/schemas/MediaAccount'}}
+    MediaAccountListResponse:
+      type: object
+      required: [data]
+      properties: {data: {type: array, items: {$ref: '#/components/schemas/MediaAccount'}}}

@@ -1,0 +1,6 @@
+schema_version: 1
+revision: "2026.07.14.2"
+platforms: [douyin, bilibili, baijiahao]
+identification_statuses: [pending_identification, identified, duplicate]
+business_statuses: [enabled, disabled, retired]
+login_statuses: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]

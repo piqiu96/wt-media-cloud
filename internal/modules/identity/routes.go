@@ -56,7 +56,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	})
 
 	h.GET("/api/v1/auth/me", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := authenticateRequest(c, service)
+		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
 			return
 		}
@@ -74,7 +74,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	})
 
 	h.POST("/api/v1/users", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := authenticateRequest(c, service)
+		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
 			return
 		}
@@ -91,7 +91,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	})
 
 	h.PATCH("/api/v1/users/:user_id", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := authenticateRequest(c, service)
+		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
 			return
 		}
@@ -112,7 +112,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	})
 
 	h.POST("/api/v1/users/:user_id/reset-password", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := authenticateRequest(c, service)
+		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
 			return
 		}
@@ -128,7 +128,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	})
 
 	h.POST("/api/v1/auth/change-password", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := authenticateRequest(c, service)
+		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
 			return
 		}
@@ -145,7 +145,9 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 	})
 }
 
-func authenticateRequest(c *hertzapp.RequestContext, service *Service) (PublicUser, bool) {
+// AuthenticateRequest resolves the server-side session Cookie for other Cloud
+// business modules. Callers never receive the raw session token.
+func AuthenticateRequest(c *hertzapp.RequestContext, service *Service) (PublicUser, bool) {
 	actor, err := service.Authenticate(string(c.Cookie(SessionCookieName)))
 	if err != nil {
 		writeIdentityError(c, err)
