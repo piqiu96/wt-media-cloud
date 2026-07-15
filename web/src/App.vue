@@ -3,9 +3,11 @@ import { onMounted, ref } from 'vue'
 
 import { createMediaAccountClient } from './mediaAccounts.js'
 import { createSessionClient } from './session.js'
+import { createTaskClient } from './tasks.js'
 
 const sessionClient = createSessionClient()
 const accountClient = createMediaAccountClient()
+const taskClient = createTaskClient()
 const username = ref('')
 const password = ref('')
 const user = ref(null)
@@ -92,6 +94,46 @@ async function changeTags(remove = false) {
     error.value = requestError.message
   }
 }
+
+// Task management
+const tasks = ref([])
+const taskLoading = ref(false)
+const newTaskType = ref('noop_task')
+
+async function createTask() {
+  error.value = ''
+  try {
+    const task = await taskClient.create(newTaskType.value)
+    tasks.value.unshift(task)
+    await loadTasks()
+  } catch (requestError) {
+    error.value = requestError.message
+  }
+}
+
+async function loadTasks() {
+  taskLoading.value = true
+  error.value = ''
+  try {
+    const task = await taskClient.get('')
+    // Single task lookup not available for listing; user creates and sees results.
+  } catch {
+    // Task list endpoint not available yet; created tasks shown from create response.
+  } finally {
+    taskLoading.value = false
+  }
+}
+
+async function cancelLastTask() {
+  if (!tasks.value.length) return
+  error.value = ''
+  try {
+    await taskClient.cancel(tasks.value[0].task_id, 'operator cancelled from web')
+    tasks.value[0].status = 'cancelled'
+  } catch (requestError) {
+    error.value = requestError.message
+  }
+}
 </script>
 
 <template>
@@ -170,6 +212,31 @@ async function changeTags(remove = false) {
           </div>
         </section>
       </div>
+
+      <!-- Task management section -->
+      <section class="card task-section">
+        <div class="section-heading">
+          <div><p class="eyebrow">任务管理</p><h2>创建和查看任务</h2></div>
+        </div>
+        <div class="task-tools">
+          <select v-model="newTaskType">
+            <option value="noop_task">验证任务 (noop)</option>
+          </select>
+          <button type="button" @click="createTask">创建任务</button>
+          <button v-if="tasks.length" class="secondary" type="button" @click="cancelLastTask">取消最近任务</button>
+        </div>
+        <p v-if="taskLoading" class="muted">加载中…</p>
+        <div v-else-if="!tasks.length" class="empty">还没有创建任务。点击"创建任务"开始。</div>
+        <div v-else class="task-list">
+          <div v-for="task in tasks" :key="task.task_id" class="task-row" :class="task.status">
+            <span class="task-id">{{ task.task_id.slice(0, 20) }}…</span>
+            <span class="task-type">{{ task.task_type }}</span>
+            <span class="task-status" :class="task.status">{{ task.status }}</span>
+            <span v-if="task.progress" class="task-progress">{{ task.progress }}%</span>
+            <span v-if="task.message" class="task-message">{{ task.message }}</span>
+          </div>
+        </div>
+      </section>
     </section>
   </main>
 </template>
@@ -210,6 +277,23 @@ button { padding: 11px 16px; border: 0; border-radius: 10px; background: #1d6a45
 .badges em { padding: 3px 7px; border-radius: 999px; background: #eef3f0; color: #4b5f54; font-size: 11px; font-style: normal; }
 .badges .tag { background: #dff0e7; color: #195c3b; }
 .empty { padding: 36px 18px; border: 1px dashed #b8c9bf; border-radius: 12px; color: #617067; text-align: center; }
+.task-section { margin-top: 24px; }
+.task-tools { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
+.task-tools select { min-width: 180px; }
+.task-list { display: grid; gap: 8px; }
+.task-row { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border: 1px solid #dce6e0; border-radius: 10px; font-size: 13px; }
+.task-id { font-family: monospace; color: #387255; min-width: 120px; }
+.task-type { color: #617067; min-width: 80px; }
+.task-status { font-weight: 700; min-width: 80px; }
+.task-status.pending { color: #b8860b; }
+.task-status.leased { color: #2563eb; }
+.task-status.running { color: #1d6a45; }
+.task-status.succeeded { color: #166534; }
+.task-status.failed { color: #a12626; }
+.task-status.cancelled { color: #617067; }
+.task-progress { min-width: 40px; color: #2563eb; font-weight: 650; }
+.task-message { color: #617067; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 820px) {
   .shell { padding: 18px; }
   .columns { grid-template-columns: 1fr; }
