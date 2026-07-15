@@ -21,7 +21,13 @@ Runtime configuration:
 - `WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD`: one-time initial technician password; no default is provided
 - `WT_MEDIA_SESSION_COOKIE_SECURE`: secure-cookie flag, default `true`; set `false` only for local HTTP development
 
-Apply migrations `20260714_001_identity.sql` through `20260714_003_browser_profiles.sql` in order before enabling the M2 identity, media-account, and Browser Profile APIs with `WT_MEDIA_MYSQL_DSN`.
+Apply migrations with:
+
+```text
+WT_MEDIA_MYSQL_DSN='user:password@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&loc=UTC' scripts/migrate.sh
+```
+
+The migration command creates the DSN database when missing, records applied versions in `schema_migrations`, and skips already applied migrations on repeat runs.
 
 ## Key Directories
 
@@ -36,5 +42,16 @@ Apply migrations `20260714_001_identity.sql` through `20260714_003_browser_profi
 Use Go 1.26.5 for M0 Cloud verification. From this repository:
 
 ```text
-GO_BIN=../../devenv/go26/go/bin/go scripts/verify-health.sh
+scripts/bootstrap.sh
+scripts/test.sh
+scripts/build.sh
+WT_MEDIA_CLOUD_HTTP_ADDR=127.0.0.1:18080 scripts/verify-health.sh
+```
+
+For foreground process management in a local terminal:
+
+```text
+WT_MEDIA_CLOUD_HTTP_ADDR=127.0.0.1:18080 scripts/start.sh
+WT_MEDIA_CLOUD_HTTP_ADDR=127.0.0.1:18080 scripts/health.sh
+scripts/stop.sh
 ```

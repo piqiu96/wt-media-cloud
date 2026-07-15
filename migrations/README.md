@@ -4,7 +4,13 @@ MySQL migration files belong here.
 
 M0 intentionally does not define business tables. Future CHGs add migrations with their owning contracts and acceptance evidence.
 
-Use `WT_MEDIA_MYSQL_DSN` for the Cloud process database connection once SQL repositories are enabled.
+Use `WT_MEDIA_MYSQL_DSN` for the Cloud process database connection and migration command:
+
+```text
+WT_MEDIA_MYSQL_DSN='user:password@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&loc=UTC' scripts/migrate.sh
+```
+
+The command creates the DSN database when missing, applies files in lexical order, records applied versions in `schema_migrations`, and skips already applied migrations on repeat runs.
 
 ## Active Migrations
 

@@ -4,8 +4,10 @@ set -eu
 GO_BIN="${GO_BIN:-go}"
 ADDR="${WT_MEDIA_CLOUD_HTTP_ADDR:-127.0.0.1:18080}"
 GOCACHE="${GOCACHE:-$(pwd)/.cache/go-build}"
+GOPATH="${WT_MEDIA_CLOUD_GOPATH:-${GOPATH:-$(pwd)/.cache/go-path}}"
 export WT_MEDIA_CLOUD_HTTP_ADDR="$ADDR"
 export GOCACHE
+export GOPATH
 
 case "$GO_BIN" in
   */go/bin/go)
