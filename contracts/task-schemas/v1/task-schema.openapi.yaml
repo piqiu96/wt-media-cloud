@@ -1,0 +1,151 @@
+openapi: 3.1.0
+info:
+  title: WT Media Universal Task Schema
+  version: 2026.07.15.1
+  description: >
+    M1-R1 Cloud-owned formal task schema contract. Defines the universal task
+    model, status state machine, task types, report contract, and error codes.
+    All non-noop business executors must lock this contract revision before
+    treating task payloads and results as formal contracts.
+paths: {}
+components:
+  schemas:
+    TaskStatus:
+      type: string
+      enum:
+        - pending
+        - leased
+        - running
+        - succeeded
+        - failed
+        - cancelled
+      description: >
+        Formal task lifecycle state machine.
+        pending → leased → running → succeeded
+                    running → failed
+                    leased → pending (lease expired)
+                    (any non-terminal) → cancelled
+
+    TaskType:
+      type: string
+      enum:
+        - noop_task
+      description: >
+        Registered task type enumeration. Additional types are added by
+        contract revision bumps as business executors are introduced.
+
+    Task:
+      type: object
+      required:
+        - task_id
+        - task_type
+        - status
+        - created_at
+      properties:
+        task_id:
+          type: string
+          description: Unique task identifier, e.g. "task_a1b2c3d4".
+        task_type:
+          $ref: "#/components/schemas/TaskType"
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        idempotency_key:
+          type: string
+          description: >
+            Optional client-provided key. When present, a Create with the same
+            key returns the existing task instead of creating a duplicate.
+        agent_id:
+          type: string
+          description: Agent that currently holds or last held this task lease.
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp of task creation (RFC 3339).
+        lease_expires_at:
+          type: string
+          format: date-time
+          description: Expiration timestamp of the current lease (RFC 3339).
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Progress percentage from 0-100.
+        message:
+          type: string
+          description: Human-readable status or error message.
+        updated_at:
+          type: string
+          format: date-time
+          description: Timestamp of last status update (RFC 3339).
+        error_code:
+          type: string
+          description: >
+            Machine-readable error code set when status is 'failed'.
+            Defined by the executor that produced the failure.
+
+    CreateTaskRequest:
+      type: object
+      properties:
+        task_type:
+          $ref: "#/components/schemas/TaskType"
+          description: >
+            Task type discriminator. Defaults to noop_task when omitted.
+        idempotency_key:
+          type: string
+          description: Optional idempotency key for safe retry.
+
+    ClaimTaskRequest:
+      type: object
+      required:
+        - agent_id
+      properties:
+        agent_id:
+          type: string
+          description: Registered agent identifier.
+        lease_seconds:
+          type: integer
+          minimum: 1
+          default: 60
+          description: Requested lease duration in seconds.
+
+    ReportTaskRequest:
+      type: object
+      required:
+        - agent_id
+        - status
+      properties:
+        agent_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        message:
+          type: string
+        error_code:
+          type: string
+          description: >
+            Required when status is 'failed'. Identifies the executor-level
+            error condition.
+
+    CancelTaskRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Reason for cancellation.
+
+    TaskErrorCode:
+      type: string
+      enum:
+        - task_not_found
+        - no_pending_task
+        - task_lease_taken
+        - invalid_task
+        - task_agent_mismatch
+        - task_already_terminal
+        - invalid_task_status
+        - invalid_task_type
+      description: Sentinel error codes for the universal task model.

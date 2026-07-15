@@ -5,7 +5,7 @@ import "strconv"
 const (
 	APIName                      = "cloud-agent"
 	MajorVersion                 = "v1"
-	ContractRevision             = "2026.07.14.7"
+	ContractRevision             = "2026.07.15.1"
 	MinimumAgentContractRevision = "2026.07.14.7"
 )
 

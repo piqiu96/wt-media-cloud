@@ -6,30 +6,42 @@ import (
 	"time"
 )
 
-func TestCreateNoopIsIdempotent(t *testing.T) {
+func TestCreateIsIdempotent(t *testing.T) {
 	store := NewTaskStoreWithClock(
 		func() time.Time { return time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC) },
 		func() string { return "task_1" },
 	)
 
-	first := store.CreateNoop(CreateTaskRequest{IdempotencyKey: "key-1"})
-	second := store.CreateNoop(CreateTaskRequest{IdempotencyKey: "key-1"})
+	first := store.Create(CreateTaskRequest{TaskType: "noop_task", IdempotencyKey: "key-1"})
+	second := store.Create(CreateTaskRequest{TaskType: "noop_task", IdempotencyKey: "key-1"})
 
 	if first.TaskID != "task_1" || second.TaskID != first.TaskID {
 		t.Fatalf("expected idempotent task, got %+v and %+v", first, second)
 	}
 }
 
+func TestCreateDefaultsToNoop(t *testing.T) {
+	store := NewTaskStoreWithClock(
+		func() time.Time { return time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC) },
+		func() string { return "task_1" },
+	)
+
+	task := store.Create(CreateTaskRequest{})
+	if task.TaskType != "noop_task" || task.Status != "pending" {
+		t.Fatalf("unexpected defaults: %+v", task)
+	}
+}
+
 func TestClaimAllowsOnlyOneAgentDuringLease(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := NewTaskStoreWithClock(func() time.Time { return now }, func() string { return "task_1" })
-	store.CreateNoop(CreateTaskRequest{})
+	store.Create(CreateTaskRequest{})
 
 	claimed, err := store.Claim(ClaimTaskRequest{AgentID: "agent-1", LeaseSeconds: 30})
 	if err != nil {
 		t.Fatalf("Claim returned error: %v", err)
 	}
-	if claimed.Status != TaskLeased || claimed.AgentID != "agent-1" {
+	if claimed.Status != "leased" || claimed.AgentID != "agent-1" {
 		t.Fatalf("unexpected claim: %+v", claimed)
 	}
 
@@ -50,7 +62,7 @@ func TestClaimAllowsOnlyOneAgentDuringLease(t *testing.T) {
 func TestClaimAfterLeaseExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := NewTaskStoreWithClock(func() time.Time { return now }, func() string { return "task_1" })
-	store.CreateNoop(CreateTaskRequest{})
+	store.Create(CreateTaskRequest{})
 	_, err := store.Claim(ClaimTaskRequest{AgentID: "agent-1", LeaseSeconds: 1})
 	if err != nil {
 		t.Fatalf("Claim returned error: %v", err)
@@ -69,22 +81,58 @@ func TestClaimAfterLeaseExpiry(t *testing.T) {
 func TestReportRequiresLeasedAgent(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := NewTaskStoreWithClock(func() time.Time { return now }, func() string { return "task_1" })
-	task := store.CreateNoop(CreateTaskRequest{})
+	task := store.Create(CreateTaskRequest{})
 	_, err := store.Claim(ClaimTaskRequest{AgentID: "agent-1", LeaseSeconds: 30})
 	if err != nil {
 		t.Fatalf("Claim returned error: %v", err)
 	}
 
-	_, err = store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-2", Status: TaskRunning, Progress: 10})
+	_, err = store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-2", Status: "running", Progress: 10})
 	if !errors.Is(err, ErrTaskAgentMismatch) {
 		t.Fatalf("err = %v", err)
 	}
 
-	updated, err := store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-1", Status: TaskSucceeded, Progress: 100})
+	updated, err := store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-1", Status: "succeeded", Progress: 100})
 	if err != nil {
 		t.Fatalf("Report returned error: %v", err)
 	}
-	if updated.Status != TaskSucceeded || updated.Progress != 100 {
+	if updated.Status != "succeeded" || updated.Progress != 100 {
 		t.Fatalf("unexpected report: %+v", updated)
+	}
+}
+
+func TestCancelNonTerminalTask(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := NewTaskStoreWithClock(func() time.Time { return now }, func() string { return "task_1" })
+	task := store.Create(CreateTaskRequest{})
+
+	cancelled, err := store.Cancel(task.TaskID, CancelTaskRequest{Message: "operator cancelled"})
+	if err != nil {
+		t.Fatalf("Cancel returned error: %v", err)
+	}
+	if cancelled.Status != "cancelled" {
+		t.Fatalf("expected cancelled, got %q", cancelled.Status)
+	}
+
+	// Cancel again on terminal task should error.
+	_, err = store.Cancel(task.TaskID, CancelTaskRequest{})
+	if !errors.Is(err, ErrTaskAlreadyTerminal) {
+		t.Fatalf("expected ErrTaskAlreadyTerminal, got %v", err)
+	}
+}
+
+func TestTerminalTaskRejectsReport(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := NewTaskStoreWithClock(func() time.Time { return now }, func() string { return "task_1" })
+	task := store.Create(CreateTaskRequest{})
+	store.Claim(ClaimTaskRequest{AgentID: "agent-1", LeaseSeconds: 30})
+
+	// Report succeeded.
+	store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-1", Status: "succeeded", Progress: 100})
+
+	// Report again should fail.
+	_, err := store.Report(task.TaskID, ReportTaskRequest{AgentID: "agent-1", Status: "running", Progress: 50})
+	if !errors.Is(err, ErrTaskAlreadyTerminal) {
+		t.Fatalf("expected ErrTaskAlreadyTerminal, got %v", err)
 	}
 }

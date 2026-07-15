@@ -34,12 +34,21 @@ func RegisterRoutes(h *server.Hertz, registry *Registry, tasks *TaskStore) {
 		node, err := registry.Get(c.Param("agent_id"))
 		writeAgentResult(c, node, err)
 	})
+	// Generic task creation (supports any task_type).
+	h.POST("/api/v1/tasks", func(ctx context.Context, c *hertzapp.RequestContext) {
+		var req CreateTaskRequest
+		if len(c.Request.Body()) > 0 && !common.DecodeJSON(c, &req) {
+			return
+		}
+		common.JSONData(c, consts.StatusOK, tasks.Create(req))
+	})
+	// Deprecated: use POST /api/v1/tasks instead.
 	h.POST("/api/v1/tasks/noop", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req CreateTaskRequest
 		if len(c.Request.Body()) > 0 && !common.DecodeJSON(c, &req) {
 			return
 		}
-		common.JSONData(c, consts.StatusOK, tasks.CreateNoop(req))
+		common.JSONData(c, consts.StatusOK, tasks.Create(req))
 	})
 	h.POST("/api/v1/cloud-agent/tasks/claim", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req ClaimTaskRequest
@@ -59,6 +68,14 @@ func RegisterRoutes(h *server.Hertz, registry *Registry, tasks *TaskStore) {
 			return
 		}
 		task, err := tasks.Report(c.Param("task_id"), req)
+		writeTaskResult(c, task, err)
+	})
+	h.POST("/api/v1/cloud-agent/tasks/:task_id/cancel", func(ctx context.Context, c *hertzapp.RequestContext) {
+		var req CancelTaskRequest
+		if len(c.Request.Body()) > 0 && !common.DecodeJSON(c, &req) {
+			return
+		}
+		task, err := tasks.Cancel(c.Param("task_id"), req)
 		writeTaskResult(c, task, err)
 	})
 }
@@ -90,6 +107,8 @@ func writeTaskResult(c *hertzapp.RequestContext, task Task, err error) {
 		common.JSONError(c, consts.StatusNotFound, "task_not_found", "task is not found")
 	case errors.Is(err, ErrTaskAgentMismatch):
 		common.JSONError(c, consts.StatusConflict, "task_agent_mismatch", "agent does not hold this task lease")
+	case errors.Is(err, ErrTaskAlreadyTerminal):
+		common.JSONError(c, consts.StatusConflict, "task_already_terminal", "task is already in a terminal state")
 	default:
 		common.JSONError(c, consts.StatusInternalServerError, "task_store_error", "task operation failed")
 	}
