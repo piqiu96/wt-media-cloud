@@ -25,7 +25,7 @@ const tagInput = ref('')
 onMounted(async () => {
   try {
     user.value = await sessionClient.me()
-    gameId.value = user.value.game_ids[0] || ''
+    gameId.value = (user.value.game_ids || [])[0] || ''
     await loadAccounts()
   } catch {
     user.value = null
@@ -39,7 +39,7 @@ async function login() {
   try {
     user.value = await sessionClient.login(username.value, password.value)
     password.value = ''
-    gameId.value = user.value.game_ids[0] || ''
+    gameId.value = (user.value.game_ids || [])[0] || ''
     await loadAccounts()
   } catch (requestError) {
     error.value = requestError.message
