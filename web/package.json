@@ -11,7 +11,8 @@
     "pinia": "^4.0.2",
     "tdesign-icons-vue-next": "^0.4.6",
     "tdesign-vue-next": "^1.20.3",
-    "vue": "3.5.18"
+    "vue": "3.5.18",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "6.0.1",
