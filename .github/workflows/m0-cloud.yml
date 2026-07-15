@@ -9,6 +9,19 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root123
+          MYSQL_DATABASE: wt_media_m0_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot123"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,5 +32,25 @@ jobs:
           go-version: "1.26.5"
           cache: true
 
-      - name: Verify M0 Cloud health
-        run: scripts/verify-health.sh
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Bootstrap Cloud and Web
+        run: scripts/bootstrap.sh
+
+      - name: Test Cloud and Web
+        run: scripts/test.sh
+
+      - name: Apply MySQL migrations
+        env:
+          WT_MEDIA_MYSQL_DSN: root:root123@tcp(127.0.0.1:3306)/wt_media_m0_ci?parseTime=true&multiStatements=true
+        run: |
+          scripts/migrate.sh
+          scripts/migrate.sh
+
+      - name: Build Cloud and Web
+        run: scripts/build.sh
