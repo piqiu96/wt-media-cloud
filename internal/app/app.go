@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/infra/config"
@@ -30,6 +33,9 @@ type Server struct {
 func NewServer() (*Server, error) {
 	cfg := config.Load()
 	engine := server.Default(server.WithHostPorts(cfg.HTTPAddr))
+
+	// Request logging and trace ID middleware.
+	engine.Use(traceAndLogMiddleware())
 
 	registerHealthRoutes(engine)
 
@@ -73,7 +79,7 @@ func NewServer() (*Server, error) {
 }
 
 func (s *Server) Run() error {
-	log.Printf("wt-media-cloud listening on %s", s.addr)
+	hlog.Infof("wt-media-cloud listening on %s", s.addr)
 	s.engine.Spin()
 	return nil
 }
@@ -109,4 +115,25 @@ func registerHealthRoutes(h *server.Hertz) {
 	h.GET("/api/v1/health", func(ctx context.Context, c *hertzapp.RequestContext) {
 		common.JSONData(c, consts.StatusOK, map[string]string{"status": "ok"})
 	})
+}
+
+// traceAndLogMiddleware injects a trace ID into each request and logs it.
+func traceAndLogMiddleware() hertzapp.HandlerFunc {
+	return func(ctx context.Context, c *hertzapp.RequestContext) {
+		start := time.Now()
+		traceID := generateTraceID()
+		c.Set("trace_id", traceID)
+
+		c.Next(ctx)
+
+		status := c.Response.StatusCode()
+		elapsed := time.Since(start)
+		hlog.CtxInfof(ctx, "[%s] %s %s %d %v", traceID, string(c.Method()), string(c.Path()), status, elapsed)
+	}
+}
+
+func generateTraceID() string {
+	bytes := make([]byte, 8)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
 }
