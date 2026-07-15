@@ -32,33 +32,43 @@ func NewServer() (*Server, error) {
 	engine := server.Default(server.WithHostPorts(cfg.HTTPAddr))
 
 	registerHealthRoutes(engine)
-	cloudagent.RegisterRoutes(engine, cloudagent.NewRegistry(), cloudagent.NewTaskStore())
 
 	result := &Server{engine: engine, addr: cfg.HTTPAddr}
-	if cfg.MySQLDSN == "" {
-		if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {
-			return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
+
+	var taskStore *cloudagent.MySQLTaskStore
+	var agentRegistry *cloudagent.MySQLRegistry
+
+	if cfg.MySQLDSN != "" {
+		db, err := database.OpenMySQL(cfg.MySQLDSN)
+		if err != nil {
+			return nil, fmt.Errorf("open mysql: %w", err)
 		}
-		return result, nil
+		result.db = db
+		taskStore = cloudagent.NewMySQLTaskStore(db)
+		agentRegistry = cloudagent.NewMySQLRegistry(db)
+	} else {
+		taskStore = cloudagent.NewMySQLTaskStore(nil)
+		agentRegistry = cloudagent.NewMySQLRegistry(nil)
 	}
 
-	db, err := database.OpenMySQL(cfg.MySQLDSN)
-	if err != nil {
-		return nil, fmt.Errorf("open mysql: %w", err)
+	cloudagent.RegisterRoutes(engine, agentRegistry, taskStore)
+
+	if result.db != nil {
+		identityService := identity.NewService(identity.NewMySQLStore(result.db))
+		if err := bootstrapIdentity(identityService, cfg.InitialTechnicianUsername, cfg.InitialTechnicianPassword); err != nil {
+			result.db.Close()
+			return nil, err
+		}
+		identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: cfg.SessionCookieSecure})
+		runtimeService := runtimebinding.NewService(runtimebinding.NewMySQLStore(result.db))
+		runtimebinding.RegisterRoutes(engine, runtimeService, identityService)
+		profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(result.db), runtimeService))
+		profileStore := profilebinding.NewMySQLStore(result.db)
+		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService)
+		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore)), identityService)
+	} else if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {
+		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}
-	result.db = db
-	identityService := identity.NewService(identity.NewMySQLStore(db))
-	if err := bootstrapIdentity(identityService, cfg.InitialTechnicianUsername, cfg.InitialTechnicianPassword); err != nil {
-		db.Close()
-		return nil, err
-	}
-	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: cfg.SessionCookieSecure})
-	runtimeService := runtimebinding.NewService(runtimebinding.NewMySQLStore(db))
-	runtimebinding.RegisterRoutes(engine, runtimeService, identityService)
-	profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(db), runtimeService))
-	profileStore := profilebinding.NewMySQLStore(db)
-	profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService)
-	mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(db), mediaaccount.WithProfileResolver(profileStore)), identityService)
 	return result, nil
 }
 

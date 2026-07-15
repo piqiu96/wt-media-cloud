@@ -10,7 +10,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/common"
 )
 
-func RegisterRoutes(h *server.Hertz, registry *Registry, tasks *TaskStore) {
+func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskStore) {
 	h.GET("/api/v1/cloud-agent/compatibility", func(ctx context.Context, c *hertzapp.RequestContext) {
 		common.JSONData(c, consts.StatusOK, CurrentCompatibility())
 	})
