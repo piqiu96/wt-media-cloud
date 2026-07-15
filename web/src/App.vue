@@ -155,7 +155,7 @@ async function cancelLastTask() {
         <div>
           <p class="eyebrow">媒体账号工作台</p>
           <h1>{{ user.username }}</h1>
-          <p class="muted">{{ user.role }} · {{ user.game_ids.length ? user.game_ids.join('、') : '全局范围' }}</p>
+          <p class="muted">{{ user.role }} · {{ user.game_ids?.length ? user.game_ids.join('、') : '全局范围' }}</p>
         </div>
         <button class="secondary" type="button" @click="logout">退出登录</button>
       </header>
