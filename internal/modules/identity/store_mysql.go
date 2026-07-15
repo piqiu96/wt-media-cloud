@@ -188,6 +188,51 @@ func (s *MySQLStore) AppendAudit(event AuditEvent) error {
 	return err
 }
 
+func (s *MySQLStore) ListUsers() ([]User, error) {
+	rows, err := s.db.Query("SELECT id, username, password_hash, role, status, created_at, updated_at FROM users ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		scopes, err := s.db.Query("SELECT game_id FROM user_game_scopes WHERE user_id = ?", u.ID)
+		if err == nil {
+			for scopes.Next() {
+				var gid string
+				scopes.Scan(&gid)
+				u.GameIDs = append(u.GameIDs, gid)
+			}
+			scopes.Close()
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+func (s *MySQLStore) ListAuditLogs(limit int) ([]AuditEvent, error) {
+	rows, err := s.db.Query("SELECT id, actor_user_id, action, target_type, target_id, summary_json, created_at FROM audit_logs ORDER BY created_at DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []AuditEvent
+	for rows.Next() {
+		var e AuditEvent
+		var summaryJSON string
+		if err := rows.Scan(&e.ID, &e.ActorUserID, &e.Action, &e.TargetType, &e.TargetID, &summaryJSON, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		json.Unmarshal([]byte(summaryJSON), &e.Summary)
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
 func duplicateKey(err error) bool {
 	var mysqlErr *mysqlDriver.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062

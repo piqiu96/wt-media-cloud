@@ -20,7 +20,7 @@ const routes = [
       { path: 'browser-users', name: 'BrowserUsers', component: () => import('../views/placeholders/ComingSoon.vue') },
       { path: 'compose-strategy', name: 'ComposeStrategy', component: () => import('../views/placeholders/ComingSoon.vue') },
       { path: 'comment-templates', name: 'CommentTemplates', component: () => import('../views/placeholders/ComingSoon.vue') },
-      { path: 'users', name: 'Users', component: () => import('../views/placeholders/ComingSoon.vue') },
+      { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'agent', name: 'AgentStatus', component: () => import('../views/AgentStatus.vue'), meta: { desktopOnly: true } },
       { path: 'logs', name: 'LocalLogs', component: () => import('../views/LocalLogs.vue'), meta: { desktopOnly: true } },
     ],

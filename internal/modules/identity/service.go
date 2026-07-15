@@ -101,11 +101,13 @@ type Store interface {
 	CreateUser(User) error
 	FindUser(id string) (User, bool, error)
 	FindUserByUsername(username string) (User, bool, error)
+	ListUsers() ([]User, error)
 	UpdateUser(User) error
 	CreateSession(Session) error
 	FindSessionByTokenHash(tokenHash string) (Session, bool, error)
 	InvalidateUserSessions(userID string, at time.Time) error
 	AppendAudit(AuditEvent) error
+	ListAuditLogs(limit int) ([]AuditEvent, error)
 }
 
 type Service struct {
@@ -376,6 +378,26 @@ func (s *Service) updatePassword(user User, newPassword string) error {
 	return s.store.InvalidateUserSessions(user.ID, user.UpdatedAt)
 }
 
+func (s *Service) ListUsers() ([]PublicUser, error) {
+	users, err := s.store.ListUsers()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]PublicUser, 0, len(users))
+	for _, u := range users {
+		result = append(result, publicUser(u))
+	}
+	return result, nil
+}
+
+func (s *Service) ListAuditLogs(limit int) ([]AuditEvent, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	return s.store.ListAuditLogs(limit)
+}
+
+
 func (s *Service) UpdateUserAccess(actorID, userID string, role Role, gameIDs []string) (PublicUser, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
@@ -478,7 +500,7 @@ type memoryStore struct {
 	users    map[string]User
 	byName   map[string]string
 	sessions map[string]Session
-	audits   []AuditEvent
+	auditLogs []AuditEvent
 }
 
 func NewMemoryStore() *memoryStore {
@@ -523,6 +545,16 @@ func (s *memoryStore) FindUserByUsername(username string) (User, bool, error) {
 	return cloneUser(s.users[id]), true, nil
 }
 
+func (s *memoryStore) ListUsers() ([]User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]User, 0, len(s.users))
+	for _, u := range s.users {
+		result = append(result, u)
+	}
+	return result, nil
+}
+
 func (s *memoryStore) UpdateUser(user User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -563,15 +595,29 @@ func (s *memoryStore) InvalidateUserSessions(userID string, at time.Time) error 
 func (s *memoryStore) AppendAudit(event AuditEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.audits = append(s.audits, cloneAuditEvent(event))
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
 	return nil
+}
+
+func (s *memoryStore) ListAuditLogs(limit int) ([]AuditEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(s.auditLogs)
+	if limit > n {
+		limit = n
+	}
+	result := make([]AuditEvent, limit)
+	for i := 0; i < limit; i++ {
+		result[i] = s.auditLogs[n-1-i]
+	}
+	return result, nil
 }
 
 func (s *memoryStore) AuditEvents() []AuditEvent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	result := make([]AuditEvent, len(s.audits))
-	for i, event := range s.audits {
+	result := make([]AuditEvent, len(s.auditLogs))
+	for i, event := range s.auditLogs {
 		result[i] = cloneAuditEvent(event)
 	}
 	return result

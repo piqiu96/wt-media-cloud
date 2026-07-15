@@ -148,6 +148,35 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		c.SetCookie(SessionCookieName, "", -1, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
 		common.JSONData(c, consts.StatusOK, map[string]string{"status": "password_changed"})
 	})
+
+	h.GET("/api/v1/users", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		if actor.Role != RoleTechnician {
+			writeIdentityError(c, ErrForbidden)
+			return
+		}
+		users, err := service.ListUsers()
+		if err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.JSONData(c, consts.StatusOK, users)
+	})
+	h.GET("/api/v1/audit-logs", func(ctx context.Context, c *hertzapp.RequestContext) {
+		_, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		logs, err := service.ListAuditLogs(50)
+		if err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.JSONData(c, consts.StatusOK, logs)
+	})
 }
 
 // AuthenticateRequest resolves the server-side session Cookie for other Cloud
