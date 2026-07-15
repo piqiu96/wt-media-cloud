@@ -105,22 +105,8 @@ async function createTask() {
   try {
     const task = await taskClient.create(newTaskType.value)
     tasks.value.unshift(task)
-    await loadTasks()
   } catch (requestError) {
     error.value = requestError.message
-  }
-}
-
-async function loadTasks() {
-  taskLoading.value = true
-  error.value = ''
-  try {
-    const task = await taskClient.get('')
-    // Single task lookup not available for listing; user creates and sees results.
-  } catch {
-    // Task list endpoint not available yet; created tasks shown from create response.
-  } finally {
-    taskLoading.value = false
   }
 }
 
@@ -134,169 +120,187 @@ async function cancelLastTask() {
     error.value = requestError.message
   }
 }
+
+const statusMap = {
+  pending: { label: '待执行', theme: 'warning' },
+  leased: { label: '已领取', theme: 'primary' },
+  running: { label: '执行中', theme: 'primary' },
+  succeeded: { label: '已完成', theme: 'success' },
+  failed: { label: '失败', theme: 'danger' },
+  cancelled: { label: '已取消', theme: 'default' },
+}
+
+const accountColumns = [
+  { colKey: 'name', title: '账号', width: 200 },
+  { colKey: 'platform', title: '平台', width: 100 },
+  { colKey: 'game_id', title: '游戏', width: 120 },
+  { colKey: 'identification_status', title: '识别状态', width: 120 },
+  { colKey: 'business_status', title: '业务状态', width: 120 },
+]
+
+const taskColumns = [
+  { colKey: 'task_id', title: '任务 ID', width: 200 },
+  { colKey: 'task_type', title: '类型', width: 100 },
+  { colKey: 'status', title: '状态', width: 120 },
+  { colKey: 'progress', title: '进度', width: 100 },
+  { colKey: 'message', title: '消息' },
+]
 </script>
 
 <template>
-  <main class="shell">
-    <section v-if="loading" class="card compact">正在检查会话…</section>
-    <section v-else-if="!user" class="card login-card">
-      <p class="eyebrow">WT MEDIA CLOUD</p>
-      <h1>登录运营平台</h1>
-      <form @submit.prevent="login">
-        <label>用户名<input v-model.trim="username" autocomplete="username" required /></label>
-        <label>密码<input v-model="password" type="password" autocomplete="current-password" required /></label>
-        <p v-if="error" class="error">{{ error }}</p>
-        <button type="submit">登录</button>
-      </form>
-    </section>
+  <t-loading :loading="loading" :show-overlay="true" size="large">
+    <div v-if="!user" class="login-wrapper">
+      <t-card :bordered="true" class="login-card">
+        <template #title>
+          <span style="font-weight: 700; letter-spacing: 0.04em">WT MEDIA CLOUD</span>
+        </template>
+        <template #subtitle>
+          <span style="color: var(--td-text-color-secondary)">登录运营平台</span>
+        </template>
+        <t-form @submit="login">
+          <t-form-item label="用户名">
+            <t-input v-model="username" placeholder="请输入用户名" autocomplete="username" />
+          </t-form-item>
+          <t-form-item label="密码">
+            <t-input v-model="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+          </t-form-item>
+          <t-form-item v-if="error">
+            <t-alert :message="error" theme="error" />
+          </t-form-item>
+          <t-form-item>
+            <t-button type="submit" theme="primary" block>登录</t-button>
+          </t-form-item>
+        </t-form>
+      </t-card>
+    </div>
 
-    <section v-else class="workspace">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">媒体账号工作台</p>
-          <h1>{{ user.username }}</h1>
-          <p class="muted">{{ user.role }} · {{ user.game_ids?.length ? user.game_ids.join('、') : '全局范围' }}</p>
-        </div>
-        <button class="secondary" type="button" @click="logout">退出登录</button>
-      </header>
-
-      <p v-if="error" class="error banner">{{ error }}</p>
-
-      <div class="columns">
-        <section class="card create-card">
-          <p class="eyebrow">新增账号</p>
-          <h2>创建待识别记录</h2>
-          <form @submit.prevent="createAccount">
-            <label v-if="user.role === 'technician'">目标用户 ID<input v-model.trim="targetUserId" placeholder="留空则归当前用户" /></label>
-            <label>游戏 ID<input v-model.trim="gameId" required /></label>
-            <label>平台
-              <select v-model="platform">
-                <option value="douyin">抖音</option>
-                <option value="bilibili">B站</option>
-                <option value="baijiahao">百家号</option>
-              </select>
-            </label>
-            <label>原始 Cookie（可选）<textarea v-model="originalCookie" rows="4" autocomplete="off" /></label>
-            <p class="hint">Cookie 仅随本次请求提交，不在页面或浏览器存储中保留。</p>
-            <button type="submit">创建账号</button>
-          </form>
-        </section>
-
-        <section class="card list-card">
-          <div class="section-heading">
-            <div><p class="eyebrow">账号列表</p><h2>{{ accounts.length }} 个账号</h2></div>
-            <button class="secondary" type="button" @click="loadAccounts">刷新</button>
+    <div v-else class="workspace-wrapper">
+      <t-layout>
+        <t-header class="topbar">
+          <div>
+            <h2 style="margin:0">{{ user.username }}</h2>
+            <p style="margin:4px 0 0; color: var(--td-text-color-secondary); font-size: 12px">
+              {{ user.role }}
+              <template v-if="user.game_ids?.length"> · {{ user.game_ids.join('、') }}</template>
+              <template v-else> · 全局范围</template>
+            </p>
           </div>
-
-          <div class="tag-tools">
-            <input v-model.trim="tagInput" placeholder="标签，多个用逗号分隔" />
-            <button type="button" @click="changeTags(false)">添加标签</button>
-            <button class="secondary" type="button" @click="changeTags(true)">移除标签</button>
+          <div style="display:flex; gap:8px">
+            <t-button theme="default" @click="createTask">创建测试任务</t-button>
+            <t-button theme="default" @click="logout">退出登录</t-button>
           </div>
+        </t-header>
 
-          <p v-if="accountLoading" class="muted">正在加载账号…</p>
-          <p v-else-if="!accounts.length" class="empty">还没有媒体账号。先创建一条待识别记录。</p>
-          <div v-else class="account-list">
-            <label v-for="account in accounts" :key="account.id" class="account-row">
-              <input v-model="selectedAccountIds" type="checkbox" :value="account.id" />
-              <span class="account-main">
-                <strong>{{ account.name || account.platform_account_id || '待识别账号' }}</strong>
-                <small>{{ account.platform }} · {{ account.game_id }} · {{ account.user_id }}</small>
-                <span class="badges">
-                  <em>{{ account.identification_status }}</em>
-                  <em>{{ account.business_status }}</em>
-                  <em v-for="tag in account.tags" :key="tag" class="tag">{{ tag }}</em>
-                </span>
-              </span>
-            </label>
-          </div>
-        </section>
-      </div>
+        <t-content style="padding: 24px">
+          <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
 
-      <!-- Task management section -->
-      <section class="card task-section">
-        <div class="section-heading">
-          <div><p class="eyebrow">任务管理</p><h2>创建和查看任务</h2></div>
-        </div>
-        <div class="task-tools">
-          <select v-model="newTaskType">
-            <option value="noop_task">验证任务 (noop)</option>
-          </select>
-          <button type="button" @click="createTask">创建任务</button>
-          <button v-if="tasks.length" class="secondary" type="button" @click="cancelLastTask">取消最近任务</button>
-        </div>
-        <p v-if="taskLoading" class="muted">加载中…</p>
-        <div v-else-if="!tasks.length" class="empty">还没有创建任务。点击"创建任务"开始。</div>
-        <div v-else class="task-list">
-          <div v-for="task in tasks" :key="task.task_id" class="task-row" :class="task.status">
-            <span class="task-id">{{ task.task_id.slice(0, 20) }}…</span>
-            <span class="task-type">{{ task.task_type }}</span>
-            <span class="task-status" :class="task.status">{{ task.status }}</span>
-            <span v-if="task.progress" class="task-progress">{{ task.progress }}%</span>
-            <span v-if="task.message" class="task-message">{{ task.message }}</span>
-          </div>
-        </div>
-      </section>
-    </section>
-  </main>
+          <t-tabs default-value="accounts" style="margin-bottom:24px">
+            <t-tab-panel value="accounts" label="账号管理" destroy-on-hide>
+              <div style="display:grid; grid-template-columns: 360px 1fr; gap:24px">
+                <t-card title="新增账号" :bordered="true">
+                  <t-form @submit="createAccount">
+                    <t-form-item v-if="user.role === 'technician'" label="目标用户 ID">
+                      <t-input v-model="targetUserId" placeholder="留空则归当前用户" />
+                    </t-form-item>
+                    <t-form-item label="游戏 ID">
+                      <t-input v-model="gameId" />
+                    </t-form-item>
+                    <t-form-item label="平台">
+                      <t-select v-model="platform">
+                        <t-option value="douyin" label="抖音" />
+                        <t-option value="bilibili" label="B站" />
+                        <t-option value="baijiahao" label="百家号" />
+                      </t-select>
+                    </t-form-item>
+                    <t-form-item label="原始 Cookie（可选）">
+                      <t-textarea v-model="originalCookie" :rows="3" placeholder="Cookie 仅随本次请求提交" />
+                    </t-form-item>
+                    <t-form-item>
+                      <t-button type="submit" theme="primary">创建账号</t-button>
+                    </t-form-item>
+                  </t-form>
+                </t-card>
+
+                <t-card :title="`账号列表 (${accounts.length})`" :bordered="true">
+                  <template #actions>
+                    <t-button theme="default" size="small" @click="loadAccounts">刷新</t-button>
+                  </template>
+                  <div style="display:flex; gap:8px; margin-bottom:16px">
+                    <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" />
+                    <t-button size="small" @click="changeTags(false)">添加标签</t-button>
+                    <t-button size="small" theme="default" @click="changeTags(true)">移除标签</t-button>
+                  </div>
+                  <t-table
+                    v-if="accounts.length"
+                    :data="accounts"
+                    :columns="accountColumns"
+                    :selected-row-keys="selectedAccountIds"
+                    :row-key="(r) => r.id"
+                    @select-change="(keys) => { selectedAccountIds = keys }"
+                    size="small"
+                    hover
+                  >
+                    <template #name="{ row }">
+                      <div>
+                        <div>{{ row.name || row.platform_account_id || '待识别' }}</div>
+                        <div style="display:flex; gap:4px; margin-top:4px">
+                          <t-tag v-for="tag in row.tags || []" :key="tag" size="small" theme="primary" variant="light">{{ tag }}</t-tag>
+                        </div>
+                      </div>
+                    </template>
+                    <template #identification_status="{ row }">
+                      <t-tag :theme="row.identification_status === 'identified' ? 'success' : 'warning'" size="small">{{ row.identification_status }}</t-tag>
+                    </template>
+                    <template #business_status="{ row }">
+                      <t-tag :theme="row.business_status === 'active' ? 'success' : 'default'" size="small">{{ row.business_status }}</t-tag>
+                    </template>
+                  </t-table>
+                  <t-empty v-else description="还没有媒体账号" />
+                </t-card>
+              </div>
+            </t-tab-panel>
+
+            <t-tab-panel value="tasks" label="任务管理" destroy-on-hide>
+              <t-card title="创建和查看任务" :bordered="true">
+                <div style="display:flex; gap:12px; margin-bottom:16px">
+                  <t-select v-model="newTaskType" style="width:200px">
+                    <t-option value="noop_task" label="验证任务 (noop)" />
+                  </t-select>
+                  <t-button @click="createTask">创建任务</t-button>
+                  <t-button v-if="tasks.length" theme="default" @click="cancelLastTask">取消最近任务</t-button>
+                </div>
+
+                <t-table
+                  v-if="tasks.length"
+                  :data="tasks"
+                  :columns="taskColumns"
+                  size="small"
+                  hover
+                >
+                  <template #status="{ row }">
+                    <t-tag :theme="(statusMap[row.status] || {}).theme || 'default'" size="small">
+                      {{ (statusMap[row.status] || {}).label || row.status }}
+                    </t-tag>
+                  </template>
+                  <template #progress="{ row }">
+                    <t-progress v-if="row.progress" :percentage="row.progress" :stroke-width="8" />
+                    <span v-else style="color:var(--td-text-color-secondary)">-</span>
+                  </template>
+                </t-table>
+                <t-empty v-else description="还没有创建任务" />
+              </t-card>
+            </t-tab-panel>
+          </t-tabs>
+        </t-content>
+      </t-layout>
+    </div>
+  </t-loading>
 </template>
 
 <style>
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #13231b; background: #edf3ef; }
-* { box-sizing: border-box; }
-body { margin: 0; }
-button, input, select, textarea { font: inherit; }
-.shell { min-height: 100vh; padding: 32px; }
-.card { padding: 30px; border: 1px solid #c9d7cf; border-radius: 18px; background: #fff; box-shadow: 0 18px 50px rgba(26, 56, 39, .08); }
-.compact, .login-card { width: min(440px, 100%); margin: 10vh auto 0; }
-.workspace { width: min(1180px, 100%); margin: 0 auto; }
-.topbar, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-.topbar { margin-bottom: 28px; }
-.columns { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 24px; align-items: start; }
-.eyebrow { margin: 0 0 8px; color: #387255; font-size: 12px; font-weight: 750; letter-spacing: .14em; }
-h1, h2 { margin: 0; }
-h1 { font-size: 28px; }
-h2 { font-size: 21px; }
-form { display: grid; gap: 18px; margin-top: 24px; }
-label { display: grid; gap: 8px; font-size: 14px; font-weight: 650; }
-input, select, textarea { width: 100%; padding: 11px 13px; border: 1px solid #aebfb5; border-radius: 10px; background: #fff; color: inherit; }
-textarea { resize: vertical; }
-button { padding: 11px 16px; border: 0; border-radius: 10px; background: #1d6a45; color: #fff; font-weight: 700; cursor: pointer; }
-.secondary { background: #e5eee9; color: #174b34; }
-.muted, .hint, small { color: #617067; }
-.muted { margin: 6px 0 0; }
-.hint { margin: -8px 0 0; font-size: 12px; line-height: 1.5; }
-.error { margin: 0; color: #a12626; font-size: 14px; }
-.banner { margin-bottom: 18px; padding: 12px 14px; border-radius: 10px; background: #fff0f0; }
-.tag-tools { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 10px; margin: 22px 0; }
-.account-list { display: grid; gap: 10px; }
-.account-row { grid-template-columns: 20px minmax(0, 1fr); align-items: start; padding: 14px; border: 1px solid #dce6e0; border-radius: 12px; }
-.account-row > input { margin-top: 3px; }
-.account-main { display: grid; gap: 5px; }
-.badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.badges em { padding: 3px 7px; border-radius: 999px; background: #eef3f0; color: #4b5f54; font-size: 11px; font-style: normal; }
-.badges .tag { background: #dff0e7; color: #195c3b; }
-.empty { padding: 36px 18px; border: 1px dashed #b8c9bf; border-radius: 12px; color: #617067; text-align: center; }
-.task-section { margin-top: 24px; }
-.task-tools { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
-.task-tools select { min-width: 180px; }
-.task-list { display: grid; gap: 8px; }
-.task-row { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border: 1px solid #dce6e0; border-radius: 10px; font-size: 13px; }
-.task-id { font-family: monospace; color: #387255; min-width: 120px; }
-.task-type { color: #617067; min-width: 80px; }
-.task-status { font-weight: 700; min-width: 80px; }
-.task-status.pending { color: #b8860b; }
-.task-status.leased { color: #2563eb; }
-.task-status.running { color: #1d6a45; }
-.task-status.succeeded { color: #166534; }
-.task-status.failed { color: #a12626; }
-.task-status.cancelled { color: #617067; }
-.task-progress { min-width: 40px; color: #2563eb; font-weight: 650; }
-.task-message { color: #617067; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-@media (max-width: 820px) {
-  .shell { padding: 18px; }
-  .columns { grid-template-columns: 1fr; }
-  .tag-tools { grid-template-columns: 1fr; }
-}
+body { margin: 0; background: var(--td-bg-color-page); }
+.login-wrapper { display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 24px; }
+.login-card { width: 400px; }
+.workspace-wrapper { min-height: 100vh; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: var(--td-bg-color-container); border-bottom: 1px solid var(--td-component-stroke); }
 </style>
