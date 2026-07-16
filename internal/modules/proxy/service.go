@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -243,16 +245,35 @@ func (s *Service) Delete(id string) error {
 	return s.store.Delete(id)
 }
 
-// TriggerCheck marks a proxy for re-check (actual detection done by Agent).
+// TriggerCheck performs a basic TCP connectivity check on the proxy.
+// Full protocol-level check requires Agent-side execution.
 func (s *Service) TriggerCheck(id string) error {
-	_, ok, err := s.store.FindByID(id)
+	proxy, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return ErrNotFound
 	}
+	now := s.now()
+	result := checkTCPConnect(proxy.Host, proxy.Port)
+	proxy.LastCheckAt = &now
+	proxy.LastCheckResult = result
+	if err := s.store.Update(proxy); err != nil {
+		return err
+	}
 	return nil
+}
+
+// checkTCPConnect attempts a basic TCP dial to validate host:port reachability.
+func checkTCPConnect(host string, port int) string {
+	addr := fmt.Sprintf("%s:%d", host, port)
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return fmt.Sprintf("unreachable: %v", err)
+	}
+	conn.Close()
+	return "reachable"
 }
 
 // SetQuota creates or updates a per-platform quota for a proxy.

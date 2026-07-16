@@ -67,6 +67,17 @@ async function deleteProxy(proxy) {
   }
 }
 
+function onFileSelected(e) {
+  const file = e.target?.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    importText.value = reader.result
+    e.target.value = ''
+  }
+  reader.readAsText(file)
+}
+
 async function previewImport() {
   const lines = importText.value.split("\n").map(l => l.trim()).filter(Boolean)
   if (!lines.length) return
@@ -224,7 +235,12 @@ function formatTime(t) {
       <p style="margin-bottom:8px; color:var(--td-text-color-secondary); font-size:13px">
         支持格式: host:port、host:port:user:pass、protocol://user:pass@host:port，每行一个
       </p>
-      <t-textarea v-model="importText" :rows="6" placeholder="粘贴代理文本，每行一个..." />
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
+        <t-button size="small" variant="outline" @click="$refs.fileInput.click()">选择文件</t-button>
+        <span style="font-size:12px; color:var(--td-text-color-secondary)">支持 .txt / .csv 格式</span>
+        <input ref="fileInput" type="file" accept=".txt,.csv" style="display:none" @change="onFileSelected" />
+      </div>
+      <t-textarea v-model="importText" :rows="6" placeholder="粘贴代理文本，每行一个，或点击上方选择文件导入..." />
       <t-button v-if="importText.trim()" size="small" style="margin-top:8px" @click="previewImport">预览解析</t-button>
 
       <t-table v-if="importPreview.length" :data="importPreview" :columns="[

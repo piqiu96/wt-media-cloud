@@ -1,1 +1,0 @@
-import{c as o}from"./http-2apInDL2.js";const t=o();function a(){return{async login(e,n){return t.post("/auth/login",{username:e,password:n})},async me(){return t.get("/auth/me")},async logout(){return t.post("/auth/logout")}}}export{a as createSessionClient};
