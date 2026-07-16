@@ -30,6 +30,9 @@ components:
       type: string
       enum:
         - noop_task
+        - cookie_read_task
+        - cookie_write_task
+        - account_check_task
       description: >
         Registered task type enumeration. Additional types are added by
         contract revision bumps as business executors are introduced.

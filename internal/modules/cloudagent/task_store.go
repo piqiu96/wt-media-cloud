@@ -75,13 +75,22 @@ func IsTerminal(s TaskStatus) bool {
 type TaskType int
 
 const (
-	TaskTypeNoop TaskType = iota // 0: built-in verification task
+	TaskTypeNoop           TaskType = iota // 0: built-in verification task
+	TaskTypeCookieRead                     // 1: read cookies from BitBrowser Profile
+	TaskTypeCookieWrite                    // 2: write cookies to BitBrowser Profile
+	TaskTypeAccountCheck                   // 3: check platform login status
 )
 
 func (t TaskType) String() string {
 	switch t {
 	case TaskTypeNoop:
 		return "noop_task"
+	case TaskTypeCookieRead:
+		return "cookie_read_task"
+	case TaskTypeCookieWrite:
+		return "cookie_write_task"
+	case TaskTypeAccountCheck:
+		return "account_check_task"
 	default:
 		return fmt.Sprintf("unknown(%d)", t)
 	}
@@ -91,6 +100,12 @@ func ParseTaskType(s string) (TaskType, bool) {
 	switch s {
 	case "noop_task":
 		return TaskTypeNoop, true
+	case "cookie_read_task":
+		return TaskTypeCookieRead, true
+	case "cookie_write_task":
+		return TaskTypeCookieWrite, true
+	case "account_check_task":
+		return TaskTypeAccountCheck, true
 	default:
 		return TaskTypeNoop, false
 	}
