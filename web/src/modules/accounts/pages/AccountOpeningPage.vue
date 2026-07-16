@@ -52,10 +52,42 @@ async function executeOpening() {
   executing.value = true
   error.value = ""
 
+  // Check proxy capacity before starting
+  if (proxies.value.length < openingRows.value.length) {
+    const ok = confirm(`活跃代理数量 (${proxies.value.length}) 不足待开户数量 (${openingRows.value.length})。继续执行后部分账号将无代理可用，是否继续？`)
+    if (!ok) {
+      executing.value = false
+      return
+    }
+  }
+
   for (const row of openingRows.value) {
     row.status = "creating"
     try {
       // Step 1: Create media account
+      const account = await accountClient.create({
+        gameId: row.game_id,
+        platform: row.platform,
+        originalCookie: row.raw,
+      })
+      row.account = account
+      row.status = "created"
+    } catch (e) {
+      row.status = "failed"
+      row.error = e.message
+    }
+  }
+  executing.value = false
+}
+
+async function retryFailed() {
+  const failed = openingRows.value.filter(r => r.status === "failed")
+  if (!failed.length) return
+  executing.value = true
+  for (const row of failed) {
+    row.status = "creating"
+    row.error = ""
+    try {
       const account = await accountClient.create({
         gameId: row.game_id,
         platform: row.platform,
@@ -155,6 +187,11 @@ const stats = computed(() => {
         <template #account="{ row }">{{ row.account?.id || '-' }}</template>
         <template #error="{ row }">{{ row.error || '-' }}</template>
       </t-table>
+      <t-space style="margin-top:12px" v-if="stats.failed > 0 && !executing">
+        <t-button theme="primary" size="small" :disabled="executing" @click="retryFailed">
+          重试失败项 ({{ stats.failed }})
+        </t-button>
+      </t-space>
     </t-card>
   </t-loading>
 </template>
