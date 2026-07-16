@@ -315,6 +315,23 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 	if !validActor(actor) {
 		return ErrForbidden
 	}
+	// Only technician or the owning user can delete a profile.
+	profiles, err := s.store.ListProfiles(actor.ID)
+	if err != nil {
+		return err
+	}
+	if actor.Role != identity.RoleTechnician {
+		found := false
+		for _, p := range profiles {
+			if p.ID == profileID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ErrForbidden
+		}
+	}
 	return s.store.DeleteProfile(profileID)
 }
 

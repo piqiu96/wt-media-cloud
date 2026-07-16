@@ -88,6 +88,8 @@ func writeAgentResult(c *hertzapp.RequestContext, node AgentNode, err error) {
 		common.Conflict(c, 30005, "Agent 合同版本不兼容")
 	case errors.Is(err, ErrAgentNotFound):
 		common.NotFound(c, 30004, "Agent 未注册")
+	case errors.Is(err, ErrSessionInvalid):
+		common.Conflict(c, 11001, "用户会话已失效，Agent 停止工作")
 	default:
 		common.InternalError(c, "Agent 注册服务内部错误")
 	}

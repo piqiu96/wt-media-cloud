@@ -15,6 +15,7 @@ var (
 	ErrAgentNotFound     = errors.New("agent not found")
 	ErrInvalidAgent      = errors.New("invalid agent")
 	ErrIncompatibleAgent = errors.New("incompatible agent contract")
+	ErrSessionInvalid    = errors.New("agent session was invalidated by user re-login")
 )
 
 type RegisterAgentRequest struct {

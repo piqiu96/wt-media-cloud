@@ -73,6 +73,13 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
     if (!response.ok && result === null) {
       throw new ApiError({ errcode: 50000, message: `HTTP ${response.status}` })
     }
+
+    // 401 → redirect to login (skip for login endpoint itself)
+    if (response.status === 401 && !path.startsWith('/auth/login')) {
+      const returnUrl = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/login?redirect=${returnUrl}`
+    }
+
     return result
   }
 

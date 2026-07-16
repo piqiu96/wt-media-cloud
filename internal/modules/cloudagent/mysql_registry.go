@@ -75,6 +75,24 @@ func (r *MySQLRegistry) Heartbeat(agentID string, req HeartbeatRequest) (AgentNo
 	}
 
 	now := r.now()
+
+	// Check session validity for local agents: if the bound session was invalidated,
+	// reject the heartbeat so the agent stops claiming new tasks.
+	if status == AgentStatusOnline {
+		var sessionValid bool
+		err := r.db.QueryRow(
+			`SELECT COUNT(*) > 0 FROM local_agent_nodes n
+			 JOIN user_sessions s ON n.session_id = s.id
+			 WHERE n.agent_id = ? AND n.mode = 'local' AND s.invalidated_at IS NULL`,
+			agentID,
+		).Scan(&sessionValid)
+		if err == nil && !sessionValid {
+			r.db.Exec(`UPDATE agent_nodes SET status = 'draining' WHERE agent_id = ?`, agentID)
+			r.db.Exec(`UPDATE local_agent_nodes SET status = 'replaced' WHERE agent_id = ?`, agentID)
+			return AgentNode{}, ErrSessionInvalid
+		}
+	}
+
 	result, err := r.db.Exec(
 		`UPDATE agent_nodes SET status = ?, last_heartbeat_at = ? WHERE agent_id = ?`,
 		status, now, agentID,
