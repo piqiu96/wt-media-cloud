@@ -23,6 +23,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
+	"github.com/wt-media/wt-media-cloud/internal/infra/scheduler"
 )
 
 type Server struct {
@@ -77,6 +78,12 @@ func NewServer() (*Server, error) {
 	} else if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}
+
+	// Start background schedulers
+	if result.db != nil {
+		scheduler.StartProxyExpiryChecker(result.db, 6*time.Hour)
+	}
+
 	return result, nil
 }
 

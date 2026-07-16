@@ -297,6 +297,24 @@ func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (Profile
 	return scan, nil
 }
 
+// RejectScan marks a scan as rejected without applying changes.
+func (s *Service) RejectScan(actor identity.PublicUser, scanID string) error {
+	if !validActor(actor) {
+		return ErrForbidden
+	}
+	scan, found, err := s.store.FindScan(scanID)
+	if err != nil {
+		return err
+	}
+	if !found || scan.UserID != actor.ID {
+		return ErrScanNotFound
+	}
+	if scan.Status != ScanReady {
+		return ErrScanNotReady
+	}
+	return nil
+}
+
 func (s *Service) ListProfiles(actor identity.PublicUser, userID string) ([]BrowserProfile, error) {
 	if !validActor(actor) {
 		return nil, ErrForbidden

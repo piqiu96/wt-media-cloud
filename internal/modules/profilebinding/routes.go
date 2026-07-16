@@ -51,6 +51,17 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		common.Success(c, scan)
 	})
+	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/reject", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if err := service.RejectScan(actor, c.Param("scan_id")); err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.NoContent(c)
+	})
 	h.GET("/api/v1/browser-profiles", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
