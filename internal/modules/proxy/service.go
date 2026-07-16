@@ -256,6 +256,33 @@ func (s *Service) TriggerCheck(id string) error {
 }
 
 // SetQuota creates or updates a per-platform quota for a proxy.
+// DefaultMaxProfiles is the default limit when no per-proxy quota is configured.
+const DefaultMaxProfiles = 3
+
+// CheckQuota verifies a proxy has capacity for the given platform.
+// currentAssigned is the number of profiles already using this proxy for the platform.
+func (s *Service) CheckQuota(proxyID, platform string, currentAssigned int) (bool, error) {
+	proxy, ok, err := s.store.FindByID(proxyID)
+	if err != nil {
+		return false, err
+	}
+	if !ok || proxy.BusinessStatus != BizActive {
+		return false, nil
+	}
+	quotas, err := s.store.ListQuotas(proxyID)
+	if err != nil {
+		return false, err
+	}
+	maxProfiles := DefaultMaxProfiles
+	for _, q := range quotas {
+		if q.Platform == platform {
+			maxProfiles = q.MaxProfiles
+			break
+		}
+	}
+	return currentAssigned < maxProfiles, nil
+}
+
 func (s *Service) SetQuota(proxyID, platform string, maxProfiles int) (PlatformQuota, error) {
 	_, ok, err := s.store.FindByID(proxyID)
 	if err != nil {

@@ -24,6 +24,7 @@ const detailProfile = ref(null)
 const scanning = ref(false)
 const scanDetailVisible = ref(false)
 const currentScan = ref(null)
+const identityError = ref("")
 const selectedTab = ref("changed")
 
 let currentUser = null
@@ -53,8 +54,12 @@ async function createProfile() {
     await bindingClient.createProfile(newProfile.value)
     showCreate.value = false
     newProfile.value = { name: "", group_name: "", seq: 1 }
+    identityError.value = ""
     await loadProfiles()
   } catch (e) {
+    if (e.errcode === 23002 || e.errcode === 23003) {
+      identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
+    }
     error.value = e.message
   } finally {
     creating.value = false
@@ -125,8 +130,12 @@ async function triggerScan() {
     currentScan.value = scan
     scanDetailVisible.value = true
     selectedTab.value = "changed"
+    identityError.value = ""
     await loadProfiles()
   } catch (e) {
+    if (e.errcode === 23002 || e.errcode === 23003) {
+      identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
+    }
     error.value = e.message
   } finally {
     scanning.value = false
@@ -152,6 +161,12 @@ async function confirmScan() {
   } catch (e) {
     error.value = e.message
   }
+}
+
+async function rejectScan() {
+  if (!currentScan.value) return
+  currentScan.value = null
+  scanDetailVisible.value = false
 }
 
 function getDiff(scan) {
@@ -218,6 +233,7 @@ const diffColumns = [
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <t-alert v-if="identityError" :message="identityError" theme="warning" style="margin-bottom:16px" closable @close="identityError=''" />
 
     <div class="action-bar">
       <t-space>
@@ -322,6 +338,7 @@ const diffColumns = [
         <t-space>
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="primary" @click="confirmScan">确认变更</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>
       </template>
     </t-drawer>
