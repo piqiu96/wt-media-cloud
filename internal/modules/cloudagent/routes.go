@@ -33,6 +33,11 @@ func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskSt
 		node, err := registry.Get(c.Param("agent_id"))
 		writeAgentResult(c, node, err)
 	})
+	// Task stats for dashboard
+	h.GET("/api/v1/tasks/stats", func(ctx context.Context, c *hertzapp.RequestContext) {
+		common.Success(c, tasks.CountByStatus())
+	})
+
 	// Generic task creation (supports any task_type).
 	h.POST("/api/v1/tasks", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req CreateTaskRequest

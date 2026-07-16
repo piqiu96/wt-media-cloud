@@ -314,6 +314,17 @@ func (s *TaskStore) Report(taskID string, req ReportTaskRequest) (Task, error) {
 }
 
 // Cancel marks a task as cancelled. Only non-terminal tasks can be cancelled.
+// CountByStatus returns task counts grouped by status.
+func (s *TaskStore) CountByStatus() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts := map[string]int{}
+	for _, task := range s.tasks {
+		counts[task.Status]++
+	}
+	return counts
+}
+
 func (s *TaskStore) Cancel(taskID string, req CancelTaskRequest) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -178,6 +178,27 @@ func (s *MySQLTaskStore) Report(taskID string, req ReportTaskRequest) (Task, err
 	return s.Get(taskID)
 }
 
+// CountByStatus returns task counts grouped by status from MySQL.
+func (s *MySQLTaskStore) CountByStatus() map[string]int {
+	counts := map[string]int{"pending": 0, "running": 0, "succeeded": 0, "failed": 0, "cancelled": 0}
+	if s.db == nil {
+		return s.mem.CountByStatus()
+	}
+	rows, err := s.db.Query(`SELECT status, COUNT(*) FROM tasks GROUP BY status`)
+	if err != nil {
+		return counts
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err == nil {
+			counts[status] = count
+		}
+	}
+	return counts
+}
+
 func (s *MySQLTaskStore) Cancel(taskID string, req CancelTaskRequest) (Task, error) {
 	if s.db == nil {
 		return s.mem.Cancel(taskID, req)
