@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createSessionClient } from './session.js'
+import { createSessionClient } from './shared/api/session.js'
 
 describe('session client', () => {
   it('uses the HttpOnly cookie and never persists credentials', async () => {

@@ -8,7 +8,6 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
@@ -41,7 +40,7 @@ func RegisterRoutes(h *server.Hertz, service *Service) {
 			writeGuardError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, outcome)
+		common.Success(c, outcome)
 	})
 
 	h.POST("/api/v1/local-agent/sensitive-permits/:permit_id/renew", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -60,7 +59,7 @@ func RegisterRoutes(h *server.Hertz, service *Service) {
 			writeGuardError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, map[string]any{"status": "renewed", "expires_at": expiresAt})
+		common.Success(c, map[string]any{"status": "renewed", "expires_at": expiresAt})
 	})
 
 	h.POST("/api/v1/local-agent/sensitive-permits/:permit_id/finish", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -78,7 +77,7 @@ func RegisterRoutes(h *server.Hertz, service *Service) {
 			writeGuardError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, map[string]string{"status": string(req.Outcome)})
+		common.NoContent(c)
 	})
 }
 
@@ -94,16 +93,16 @@ func bearerCredential(header string) (string, bool) {
 func writeGuardError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, runtimebinding.ErrNodeCredentialInvalid), errors.Is(err, runtimebinding.ErrBoundSessionInvalid), errors.Is(err, ErrPermitCredentialInvalid):
-		common.JSONError(c, consts.StatusUnauthorized, "sensitive_credential_invalid", "node, session, or Profile permit credential is invalid")
+		common.Unauthorized(c, 11001, "凭证无效，请重新登录")
 	case errors.Is(err, ErrInvalidInput):
-		common.JSONError(c, consts.StatusBadRequest, "invalid_sensitive_preflight", "sensitive task preflight request is invalid")
+		common.BadRequest(c, 10001, "敏感任务预检请求格式错误")
 	case errors.Is(err, ErrTaskNotFound):
-		common.JSONError(c, consts.StatusNotFound, "sensitive_task_not_found", "sensitive task authorization was not found")
+		common.NotFound(c, 20004, "敏感任务不存在")
 	case errors.Is(err, ErrTaskAssignmentMismatch):
-		common.JSONError(c, consts.StatusForbidden, "sensitive_task_assignment_mismatch", "sensitive task is not assigned to this node and user")
+		common.Forbidden(c, 11003, "敏感任务未分配给此节点")
 	case errors.Is(err, ErrRuntimeUnavailable):
-		common.JSONError(c, consts.StatusConflict, "profile_runtime_unavailable", "fresh matching Profile runtime presence is unavailable")
+		common.Conflict(c, 23003, "Profile 运行环境不可用")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "profile_guard_store_error", "sensitive Profile guard operation failed")
+		common.InternalError(c, "Profile 守卫服务内部错误")
 	}
 }

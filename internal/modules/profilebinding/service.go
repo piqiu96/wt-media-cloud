@@ -72,6 +72,10 @@ type BrowserProfile struct {
 	GroupName     string             `json:"group_name,omitempty"`
 	BitStatus     string             `json:"bit_status,omitempty"`
 	BitUpdatedAt  string             `json:"bit_updated_at,omitempty"`
+	ProxyType     string             `json:"proxy_type,omitempty"`
+	ProxyHost     string             `json:"proxy_host,omitempty"`
+	ProxyPort     int                `json:"proxy_port,omitempty"`
+	Remark        string             `json:"remark,omitempty"`
 	LocalStatus   ProfileLocalStatus `json:"local_status"`
 	LastSyncedAt  time.Time          `json:"last_synced_at"`
 	CreatedAt     time.Time          `json:"created_at"`
@@ -120,6 +124,7 @@ type Store interface {
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time) error
+	DeleteProfile(id string) error
 }
 
 type Service struct {
@@ -304,6 +309,13 @@ func (s *Service) ListProfiles(actor identity.PublicUser, userID string) ([]Brow
 		return nil, ErrForbidden
 	}
 	return s.store.ListProfiles(userID)
+}
+
+func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) error {
+	if !validActor(actor) {
+		return ErrForbidden
+	}
+	return s.store.DeleteProfile(profileID)
 }
 
 func (s *Service) GetActiveProfile(actor identity.PublicUser, profileID string) (BrowserProfile, error) {

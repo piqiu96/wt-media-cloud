@@ -7,7 +7,6 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
@@ -55,7 +54,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusCreated, account)
+		common.Created(c, account)
 	})
 
 	h.GET("/api/v1/media-accounts", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -75,7 +74,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, accounts)
+		common.Success(c, accounts)
 	})
 
 	h.POST("/api/v1/media-accounts/tags/add", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -95,7 +94,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, account)
+		common.Success(c, account)
 	})
 
 	h.PATCH("/api/v1/media-accounts/:account_id", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -112,7 +111,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, account)
+		common.Success(c, account)
 	})
 
 	h.POST("/api/v1/media-accounts/:account_id/identify", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -129,7 +128,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, account)
+		common.Success(c, account)
 	})
 
 	h.PATCH("/api/v1/media-accounts/:account_id/profile", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -146,7 +145,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, account)
+		common.Success(c, account)
 	})
 }
 
@@ -169,7 +168,7 @@ func changeTags(c *hertzapp.RequestContext, service *Service, identityService *i
 		writeMediaAccountError(c, err)
 		return
 	}
-	common.JSONData(c, consts.StatusOK, map[string]string{"status": "updated"})
+	common.NoContent(c)
 }
 
 func commaValues(value string) []string {
@@ -182,18 +181,18 @@ func commaValues(value string) []string {
 func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ErrForbidden):
-		common.JSONError(c, consts.StatusForbidden, "forbidden", "the current user cannot access this media account")
+		common.Forbidden(c, 11003, "没有权限访问此媒体账号")
 	case errors.Is(err, ErrNotFound):
-		common.JSONError(c, consts.StatusNotFound, "media_account_not_found", "media account was not found")
+		common.NotFound(c, 20004, "媒体账号不存在")
 	case errors.Is(err, ErrDuplicateAccount):
-		common.JSONError(c, consts.StatusConflict, "duplicate_media_account", "this user already has the platform account")
+		common.Conflict(c, 20009, "此平台账号已存在")
 	case errors.Is(err, ErrProfilePlatformTaken):
-		common.JSONError(c, consts.StatusConflict, "profile_platform_account_taken", "this Profile already has an account for the platform")
+		common.Conflict(c, 23001, "此浏览器环境已绑定其他平台账号")
 	case errors.Is(err, ErrProfileUnavailable):
-		common.JSONError(c, consts.StatusConflict, "browser_profile_unavailable", "browser Profile is missing or inactive")
+		common.Conflict(c, 23001, "浏览器环境不可用")
 	case errors.Is(err, ErrInvalidInput):
-		common.JSONError(c, consts.StatusBadRequest, "invalid_media_account_request", "media account request is invalid")
+		common.BadRequest(c, 10001, "媒体账号信息格式错误")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "media_account_store_error", "media account operation failed")
+		common.InternalError(c, "媒体账号服务内部错误")
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
+	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
@@ -72,6 +73,7 @@ func NewServer() (*Server, error) {
 		profileStore := profilebinding.NewMySQLStore(result.db)
 		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService)
 		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore)), identityService)
+		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService)
 	} else if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}
@@ -113,16 +115,17 @@ func registerHealthRoutes(h *server.Hertz) {
 		c.String(consts.StatusOK, "ok")
 	})
 	h.GET("/api/v1/health", func(ctx context.Context, c *hertzapp.RequestContext) {
-		common.JSONData(c, consts.StatusOK, map[string]string{"status": "ok"})
+		common.Success(c, map[string]string{"status": "ok"})
 	})
 }
 
-// traceAndLogMiddleware injects a trace ID into each request and logs it.
+// traceAndLogMiddleware injects a trace ID and logid into each request and logs it.
 func traceAndLogMiddleware() hertzapp.HandlerFunc {
 	return func(ctx context.Context, c *hertzapp.RequestContext) {
 		start := time.Now()
 		traceID := generateTraceID()
 		c.Set("trace_id", traceID)
+		c.Set("logid", traceID)
 
 		c.Next(ctx)
 
@@ -135,5 +138,5 @@ func traceAndLogMiddleware() hertzapp.HandlerFunc {
 func generateTraceID() string {
 	bytes := make([]byte, 8)
 	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	return "lg" + hex.EncodeToString(bytes)
 }

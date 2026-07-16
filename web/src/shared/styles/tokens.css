@@ -1,0 +1,14 @@
+/* WT Media Design Tokens — 基于 TDesign 的语义化状态颜色 */
+/* 使用 TDesign 的 Design Token 变量，不引入自定义色板 */
+
+:root {
+  /* Status Colors — 严格按决策 0007 定义 */
+  --wt-status-running:   var(--td-brand-color);       /* Blue   — running, pending, queued */
+  --wt-status-success:   var(--td-success-color);     /* Green  — success, normal */
+  --td-success-color: #00a870;
+  --wt-status-warning:   var(--td-warning-color);     /* Orange — warning, pending_review */
+  --wt-status-error:     var(--td-error-color);       /* Red    — failed, error */
+  --td-error-color: #d54941;
+  --wt-status-disabled:  var(--td-text-color-disabled); /* Gray — discarded, cancelled, expired */
+  --wt-status-automated: #722ed1;                      /* Purple — automated, ai_generated */
+}

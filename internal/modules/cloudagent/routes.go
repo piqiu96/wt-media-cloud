@@ -6,13 +6,12 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 )
 
 func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskStore) {
 	h.GET("/api/v1/cloud-agent/compatibility", func(ctx context.Context, c *hertzapp.RequestContext) {
-		common.JSONData(c, consts.StatusOK, CurrentCompatibility())
+		common.Success(c, CurrentCompatibility())
 	})
 	h.POST("/api/v1/cloud-agent/agents/register", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req RegisterAgentRequest
@@ -40,15 +39,14 @@ func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskSt
 		if len(c.Request.Body()) > 0 && !common.DecodeJSON(c, &req) {
 			return
 		}
-		common.JSONData(c, consts.StatusOK, tasks.Create(req))
+		common.Created(c, tasks.Create(req))
 	})
-	// Deprecated: use POST /api/v1/tasks instead.
 	h.POST("/api/v1/tasks/noop", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req CreateTaskRequest
 		if len(c.Request.Body()) > 0 && !common.DecodeJSON(c, &req) {
 			return
 		}
-		common.JSONData(c, consts.StatusOK, tasks.Create(req))
+		common.Created(c, tasks.Create(req))
 	})
 	h.POST("/api/v1/cloud-agent/tasks/claim", func(ctx context.Context, c *hertzapp.RequestContext) {
 		var req ClaimTaskRequest
@@ -83,33 +81,33 @@ func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskSt
 func writeAgentResult(c *hertzapp.RequestContext, node AgentNode, err error) {
 	switch {
 	case err == nil:
-		common.JSONData(c, consts.StatusOK, node)
+		common.Success(c, node)
 	case errors.Is(err, ErrInvalidAgent):
-		common.JSONError(c, consts.StatusBadRequest, "invalid_agent", "agent registration or heartbeat is invalid")
+		common.BadRequest(c, 30004, "Agent 注册信息无效")
 	case errors.Is(err, ErrIncompatibleAgent):
-		common.JSONError(c, consts.StatusConflict, "incompatible_agent_contract", "agent contract version is incompatible")
+		common.Conflict(c, 30005, "Agent 合同版本不兼容")
 	case errors.Is(err, ErrAgentNotFound):
-		common.JSONError(c, consts.StatusNotFound, "agent_not_found", "agent is not registered")
+		common.NotFound(c, 30004, "Agent 未注册")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "agent_registry_error", "agent registry operation failed")
+		common.InternalError(c, "Agent 注册服务内部错误")
 	}
 }
 
 func writeTaskResult(c *hertzapp.RequestContext, task Task, err error) {
 	switch {
 	case err == nil:
-		common.JSONData(c, consts.StatusOK, task)
+		common.Success(c, task)
 	case errors.Is(err, ErrInvalidTask):
-		common.JSONError(c, consts.StatusBadRequest, "invalid_task", "task request is invalid")
+		common.BadRequest(c, 10001, "任务请求格式错误")
 	case errors.Is(err, ErrNoPendingTask):
-		common.JSONError(c, consts.StatusConflict, "no_pending_task", "no claimable task is available")
+		common.Conflict(c, 30001, "当前没有可领取的任务")
 	case errors.Is(err, ErrTaskNotFound):
-		common.JSONError(c, consts.StatusNotFound, "task_not_found", "task is not found")
+		common.NotFound(c, 20004, "任务不存在")
 	case errors.Is(err, ErrTaskAgentMismatch):
-		common.JSONError(c, consts.StatusConflict, "task_agent_mismatch", "agent does not hold this task lease")
+		common.Conflict(c, 30002, "Agent 与当前任务负责人不匹配")
 	case errors.Is(err, ErrTaskAlreadyTerminal):
-		common.JSONError(c, consts.StatusConflict, "task_already_terminal", "task is already in a terminal state")
+		common.Conflict(c, 30003, "任务已处于终态")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "task_store_error", "task operation failed")
+		common.InternalError(c, "任务服务内部错误")
 	}
 }

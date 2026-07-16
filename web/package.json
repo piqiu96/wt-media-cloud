@@ -4,10 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "build": "vite build"
+    "dev": "vite",
+    "dev:desktop": "vite --config vite.config.desktop.js",
+    "build": "vite build",
+    "build:cloud": "vite build --config vite.config.cloud.js",
+    "build:desktop": "vite build --config vite.config.desktop.js",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
     "pinia": "^4.0.2",
     "tdesign-icons-vue-next": "^0.4.6",
     "tdesign-vue-next": "^1.20.3",

@@ -6,7 +6,6 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
@@ -26,7 +25,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeProfileError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusCreated, scan)
+		common.Created(c, scan)
 	})
 	h.GET("/api/v1/bit-browser/profile-scans/:scan_id", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -38,7 +37,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeProfileError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, scan)
+		common.Success(c, scan)
 	})
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/confirm", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -50,7 +49,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeProfileError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, scan)
+		common.Success(c, scan)
 	})
 	h.GET("/api/v1/browser-profiles", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -62,25 +61,69 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeProfileError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, profiles)
+		common.Success(c, profiles)
+	})
+	h.POST("/api/v1/browser-profiles", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		_ = actor
+		common.Created(c, map[string]string{"status": "task_created"})
+	})
+	h.POST("/api/v1/browser-profiles/:id/open", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		_ = actor
+		common.Success(c, map[string]string{"status": "open_requested", "profile_id": c.Param("id")})
+	})
+	h.POST("/api/v1/browser-profiles/:id/close", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		_ = actor
+		common.Success(c, map[string]string{"status": "close_requested", "profile_id": c.Param("id")})
+	})
+	h.PATCH("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		_ = actor
+		common.Success(c, map[string]string{"status": "update_requested", "profile_id": c.Param("id")})
+	})
+	h.DELETE("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		_ = actor
+		if err := service.DeleteProfile(actor, c.Param("id")); err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.NoContent(c)
 	})
 }
 
 func writeProfileError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ErrForbidden):
-		common.JSONError(c, consts.StatusForbidden, "forbidden", "the current user cannot perform this Profile operation")
+		common.Forbidden(c, 11003, "没有权限执行此 Profile 操作")
 	case errors.Is(err, ErrIdentityUnverifiable):
-		common.JSONError(c, consts.StatusConflict, "bitbrowser_identity_unverifiable", "BitBrowser Profile identity cannot be verified")
+		common.Conflict(c, 23002, "BitBrowser Profile 身份无法验证")
 	case errors.Is(err, ErrIdentityMismatch):
-		common.JSONError(c, consts.StatusConflict, "bitbrowser_identity_mismatch", "BitBrowser identity does not match the bound user")
+		common.Conflict(c, 23002, "BitBrowser 身份与绑定用户不匹配")
 	case errors.Is(err, ErrScanNotFound), errors.Is(err, ErrProfileNotFound):
-		common.JSONError(c, consts.StatusNotFound, "profile_scan_not_found", "Profile scan or Profile was not found")
+		common.NotFound(c, 20004, "Profile 扫描或 Profile 不存在")
 	case errors.Is(err, ErrScanExpired):
-		common.JSONError(c, consts.StatusGone, "profile_scan_expired", "Profile scan has expired")
+		common.Failure(c, 410, 20004, "Profile 扫描已过期", nil)
 	case errors.Is(err, ErrScanNotReady):
-		common.JSONError(c, consts.StatusConflict, "profile_scan_not_ready", "Profile scan is not ready")
+		common.Conflict(c, 20009, "Profile 扫描未就绪")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "profile_store_error", "Profile operation failed")
+		common.InternalError(c, "Profile 服务内部错误")
 	}
 }

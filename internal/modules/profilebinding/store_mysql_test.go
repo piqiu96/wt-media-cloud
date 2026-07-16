@@ -100,9 +100,9 @@ func mysqlTestScan() ProfileScan {
 }
 
 func profileColumns() []string {
-	return []string{"id", "user_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "local_status", "last_synced_at", "created_at", "updated_at"}
+	return []string{"id", "user_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "local_status", "last_synced_at", "created_at", "updated_at"}
 }
 
 func profileValues(profile BrowserProfile) []driver.Value {
-	return []driver.Value{profile.ID, profile.UserID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
+	return []driver.Value{profile.ID, profile.UserID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
 }

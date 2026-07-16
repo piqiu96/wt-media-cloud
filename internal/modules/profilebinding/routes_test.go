@@ -40,7 +40,7 @@ func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
 func TestProfileRoutesRejectMixedIdentity(t *testing.T) {
 	engine, cookie, _ := newProfileRouteTest(t)
 	response := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-2","profile_user_id":"bit-user-2"}]}`, cookie)
-	if response.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(response.Result().Body()), "bitbrowser_identity_unverifiable") {
+		if response.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(response.Result().Body()), `"errcode":23002`) {
 		t.Fatalf("status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
 	}
 }

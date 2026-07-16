@@ -8,7 +8,6 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/protocol"
-	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 )
 
@@ -48,7 +47,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			return
 		}
 		if context, err := service.AuthenticateContext(string(c.Cookie(SessionCookieName))); err == nil && context.User.Username == strings.TrimSpace(req.Username) {
-			common.JSONData(c, consts.StatusOK, context.User)
+			common.Success(c, context.User)
 			return
 		}
 		result, err := service.Login(req.Username, req.Password)
@@ -57,7 +56,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			return
 		}
 		c.SetCookie(SessionCookieName, result.Token, 0, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
-		common.JSONData(c, consts.StatusOK, result.User)
+		common.Success(c, result.User)
 	})
 
 	h.GET("/api/v1/auth/me", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -65,7 +64,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		if !ok {
 			return
 		}
-		common.JSONData(c, consts.StatusOK, actor)
+		common.Success(c, actor)
 	})
 
 	h.POST("/api/v1/auth/logout", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -75,7 +74,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			return
 		}
 		c.SetCookie(SessionCookieName, "", -1, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
-		common.JSONData(c, consts.StatusOK, map[string]string{"status": "logged_out"})
+		common.NoContent(c)
 	})
 
 	h.POST("/api/v1/users", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -92,7 +91,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusCreated, user)
+		common.Created(c, user)
 	})
 
 	h.PATCH("/api/v1/users/:user_id", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -113,7 +112,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, user)
+		common.Success(c, user)
 	})
 
 	h.POST("/api/v1/users/:user_id/reset-password", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -129,7 +128,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, map[string]string{"status": "password_reset"})
+		common.NoContent(c)
 	})
 
 	h.POST("/api/v1/auth/change-password", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -146,7 +145,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			return
 		}
 		c.SetCookie(SessionCookieName, "", -1, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
-		common.JSONData(c, consts.StatusOK, map[string]string{"status": "password_changed"})
+		common.NoContent(c)
 	})
 
 	h.GET("/api/v1/users", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -163,7 +162,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, users)
+		common.Success(c, users)
 	})
 	h.GET("/api/v1/audit-logs", func(ctx context.Context, c *hertzapp.RequestContext) {
 		_, ok := AuthenticateRequest(c, service)
@@ -175,7 +174,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, logs)
+		common.Success(c, logs)
 	})
 }
 
@@ -201,14 +200,14 @@ func AuthenticateRequestContext(c *hertzapp.RequestContext, service *Service) (A
 func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ErrAuthenticationFailed), errors.Is(err, ErrSessionInvalid):
-		common.JSONError(c, consts.StatusUnauthorized, "authentication_required", "authentication is required or has expired")
+		common.Unauthorized(c, 11001, "请先登录或凭证已过期")
 	case errors.Is(err, ErrForbidden):
-		common.JSONError(c, consts.StatusForbidden, "forbidden", "the current user cannot perform this operation")
+		common.Forbidden(c, 11003, "没有权限执行此操作")
 	case errors.Is(err, ErrUsernameTaken):
-		common.JSONError(c, consts.StatusConflict, "username_taken", "username is already in use")
+		common.Conflict(c, 20001, "用户名已被使用")
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrBootstrapUnavailable):
-		common.JSONError(c, consts.StatusBadRequest, "invalid_identity_request", "identity request is invalid")
+		common.BadRequest(c, 10001, "用户信息格式错误")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "identity_store_error", "identity operation failed")
+		common.InternalError(c, "用户服务内部错误")
 	}
 }

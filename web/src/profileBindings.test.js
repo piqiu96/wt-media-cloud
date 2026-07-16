@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createProfileBindingClient } from './profileBindings.js'
+import { createProfileBindingClient } from './shared/api/profileBindings.js'
 
 const response = (data) => ({ ok: true, json: async () => ({ data }) })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createMediaAccountClient } from './mediaAccounts.js'
+import { createMediaAccountClient } from './shared/api/mediaAccounts.js'
 
 function response(data) {
   return { ok: true, json: async () => ({ data }) }

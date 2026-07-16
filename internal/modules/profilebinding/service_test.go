@@ -229,6 +229,11 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 	return nil
 }
 
+func (s *memoryStore) DeleteProfile(id string) error {
+	delete(s.profiles, id)
+	return nil
+}
+
 func (s *memoryStore) profileList(userID string) []BrowserProfile {
 	var result []BrowserProfile
 	for _, profile := range s.profiles {

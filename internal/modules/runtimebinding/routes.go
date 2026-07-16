@@ -7,7 +7,6 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
@@ -24,7 +23,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeRuntimeError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusCreated, grant)
+		common.Created(c, grant)
 	})
 
 	h.POST("/api/v1/local-agent/nodes/register", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -37,7 +36,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeRuntimeError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusCreated, registration)
+		common.Created(c, registration)
 	})
 
 	h.POST("/api/v1/local-agent/nodes/:node_id/runtime-report", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -54,7 +53,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeRuntimeError(c, err)
 			return
 		}
-		common.JSONData(c, consts.StatusOK, map[string]string{"status": "reported"})
+		common.NoContent(c)
 	})
 }
 
@@ -70,20 +69,20 @@ func bearerCredential(header string) (string, bool) {
 func writeRuntimeError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ErrInvalidInput):
-		common.JSONError(c, consts.StatusBadRequest, "invalid_runtime_report", "local Agent binding or runtime report is invalid")
+		common.BadRequest(c, 10001, "运行时报告格式错误")
 	case errors.Is(err, ErrForbidden):
-		common.JSONError(c, consts.StatusForbidden, "runtime_binding_forbidden", "local Agent binding is forbidden")
+		common.Forbidden(c, 11003, "没有绑定此节点的权限")
 	case errors.Is(err, ErrBindingTicketInvalid):
-		common.JSONError(c, consts.StatusUnauthorized, "binding_ticket_invalid", "local Agent binding ticket is invalid or expired")
+		common.Unauthorized(c, 11001, "绑定票据无效或已过期")
 	case errors.Is(err, ErrBoundSessionInvalid):
-		common.JSONError(c, consts.StatusUnauthorized, "bound_session_invalid", "the local Agent user session is no longer active")
+		common.Unauthorized(c, 11001, "用户会话已失效")
 	case errors.Is(err, ErrNodeCredentialInvalid):
-		common.JSONError(c, consts.StatusUnauthorized, "node_credential_invalid", "local Agent node credential is invalid")
+		common.Unauthorized(c, 11001, "节点凭证无效")
 	case errors.Is(err, ErrProfileOwnershipMismatch):
-		common.JSONError(c, consts.StatusConflict, "profile_runtime_ownership_mismatch", "reported Profiles do not match the bound user and BitBrowser owner")
+		common.Conflict(c, 23003, "上报的 Profile 与绑定用户不匹配")
 	case errors.Is(err, cloudagent.ErrIncompatibleAgent):
-		common.JSONError(c, consts.StatusConflict, "incompatible_agent_contract", "Agent contract version is incompatible")
+		common.Conflict(c, 30005, "Agent 合同版本不兼容")
 	default:
-		common.JSONError(c, consts.StatusInternalServerError, "runtime_binding_store_error", "local Agent runtime binding operation failed")
+		common.InternalError(c, "运行时绑定服务内部错误")
 	}
 }

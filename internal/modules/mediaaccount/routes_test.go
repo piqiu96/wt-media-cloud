@@ -57,7 +57,7 @@ func TestRoutesIdentifyDuplicateAndManageTags(t *testing.T) {
 		t.Fatalf("identify status = %d, body = %s", identified.Result().StatusCode(), identified.Result().Body())
 	}
 	duplicate := performMediaJSON(engine, "POST", "/api/v1/media-accounts/"+secondID+"/identify", `{"platform_account_id":"platform-42","name":"duplicate","login_status":"normal"}`, cookie)
-	if duplicate.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(duplicate.Result().Body()), "duplicate_media_account") {
+	if duplicate.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(duplicate.Result().Body()), `"errcode":20009`) {
 		t.Fatalf("duplicate status = %d, body = %s", duplicate.Result().StatusCode(), duplicate.Result().Body())
 	}
 
