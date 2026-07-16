@@ -16,7 +16,7 @@ export function createCloudRouter() {
         { path: "finished-media", name: "FinishedMedia", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "publish", name: "Publish", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
-        { path: "execute-tasks", name: "ExecuteTasks", component: () => import("../../shared/ui/ComingSoon.vue") },
+        { path: "execute-tasks", name: "ExecuteTasks", component: () => import("../../modules/tasks/pages/TasksPage.vue") },
         { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue") },
         { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue") },

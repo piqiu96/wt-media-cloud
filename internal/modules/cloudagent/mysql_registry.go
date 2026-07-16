@@ -33,7 +33,7 @@ func (r *MySQLRegistry) Register(req RegisterAgentRequest) (AgentNode, error) {
 		return AgentNode{}, ErrIncompatibleAgent
 	}
 
-	now := r.now().Format(time.RFC3339)
+	now := r.now()
 	caps, _ := json.Marshal(req.Capabilities)
 
 	_, err := r.db.Exec(
@@ -74,7 +74,7 @@ func (r *MySQLRegistry) Heartbeat(agentID string, req HeartbeatRequest) (AgentNo
 		return AgentNode{}, ErrInvalidAgent
 	}
 
-	now := r.now().Format(time.RFC3339)
+	now := r.now()
 	result, err := r.db.Exec(
 		`UPDATE agent_nodes SET status = ?, last_heartbeat_at = ? WHERE agent_id = ?`,
 		status, now, agentID,
