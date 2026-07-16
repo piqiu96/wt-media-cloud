@@ -131,6 +131,23 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		common.Success(c, account)
 	})
 
+	// Cookie export: returns original and active cookie for the account.
+	h.GET("/api/v1/media-accounts/:account_id/cookies", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		account, err := service.GetAccountRecord(actor, c.Param("account_id"))
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, map[string]interface{}{
+			"original_cookie": account.OriginalCookie,
+			"active_cookie":   account.ActiveCookie,
+		})
+	})
+
 	h.PATCH("/api/v1/media-accounts/:account_id/profile", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {

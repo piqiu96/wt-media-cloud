@@ -164,18 +164,28 @@ async function importCookie() {
   }
 }
 
-function exportOriginalCookie(account) {
-  const c = account.original_cookie
-  if (!c) { alert("无原始 Cookie"); return }
-  navigator.clipboard.writeText(c)
-  alert("原始 Cookie 已复制")
+async function exportOriginalCookie(account) {
+  try {
+    const cookies = await accountClient.fetchCookies(account.id)
+    const c = cookies?.original_cookie
+    if (!c) { alert("无原始 Cookie"); return }
+    await navigator.clipboard.writeText(c)
+    alert("原始 Cookie 已复制到剪贴板")
+  } catch (e) {
+    alert("获取 Cookie 失败: " + e.message)
+  }
 }
 
-function exportActiveCookie(account) {
-  const c = account.active_cookie
-  if (!c) { alert("无活跃 Cookie"); return }
-  navigator.clipboard.writeText(c)
-  alert("活跃 Cookie 已复制")
+async function exportActiveCookie(account) {
+  try {
+    const cookies = await accountClient.fetchCookies(account.id)
+    const c = cookies?.active_cookie
+    if (!c) { alert("无活跃 Cookie"); return }
+    await navigator.clipboard.writeText(c)
+    alert("活跃 Cookie 已复制到剪贴板")
+  } catch (e) {
+    alert("获取 Cookie 失败: " + e.message)
+  }
 }
 
 // --- Stats ---

@@ -202,6 +202,12 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	return record.Account, nil
 }
 
+// GetAccountRecord returns the full account record including cookies.
+// Intended only for trusted operations like cookie export.
+func (s *Service) GetAccountRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
+	return s.authorizedRecord(actor, accountID)
+}
+
 func (s *Service) GetAccount(actor identity.PublicUser, accountID string) (Account, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {

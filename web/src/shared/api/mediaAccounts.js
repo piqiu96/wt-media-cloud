@@ -36,5 +36,8 @@ export function createMediaAccountClient() {
     removeTags(accountIds, tags) {
       return api.post('/media-accounts/tags/remove', { account_ids: accountIds, tags })
     },
+    fetchCookies(accountId) {
+      return api.get(`/media-accounts/${accountId}/cookies`)
+    },
   }
 }
