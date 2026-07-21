@@ -150,9 +150,7 @@ const stats = computed(() => {
         { colKey: 'proxy', title: '分配代理' },
         { colKey: 'status', title: '状态', width: 100 },
       ]" size="small" hover>
-        <template #raw="{ row }">
-          <span :title="row.raw">{{ row.raw.substring(0, 40) }}...</span>
-        </template>
+        <template #raw="{ row }"><span>Cookie {{ row.id }}</span></template>
         <template #proxy="{ row }">
           <span>{{ row.proxy ? row.proxy.host + ':' + row.proxy.port : '待分配' }}</span>
         </template>
@@ -180,7 +178,7 @@ const stats = computed(() => {
         { colKey: 'account', title: '账号 ID' },
         { colKey: 'error', title: '错误信息' },
       ]" size="small" hover>
-        <template #raw="{ row }"><span :title="row.raw">{{ row.raw.substring(0, 40) }}...</span></template>
+        <template #raw="{ row }"><span>Cookie {{ row.id }}</span></template>
         <template #status="{ row }">
           <t-tag :theme="row.status === 'created' ? 'success' : 'danger'" size="small">{{ row.status }}</t-tag>
         </template>
