@@ -9,16 +9,26 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 )
 
 type TaskCreator interface {
 	Create(cloudagent.CreateTaskRequest) cloudagent.Task
 }
+type ProfileLookup interface {
+	GetProfile(string) (profilebinding.BrowserProfile, bool, error)
+}
 
-func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, taskStores ...TaskCreator) {
+func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, deps ...any) {
 	var tasks TaskCreator
-	if len(taskStores) > 0 {
-		tasks = taskStores[0]
+	var profiles ProfileLookup
+	for _, dep := range deps {
+		if value, ok := dep.(TaskCreator); ok {
+			tasks = value
+		}
+		if value, ok := dep.(ProfileLookup); ok {
+			profiles = value
+		}
 	}
 	h.GET("/api/v1/proxies", func(ctx context.Context, c *hertzapp.RequestContext) {
 		_, ok := identity.AuthenticateRequest(c, identityService)
@@ -160,6 +170,43 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			IdempotencyKey: "proxy-check:" + actor.ID + ":" + proxy.ID + ":" + common.NewID("attempt"),
 			Payload:        map[string]any{"proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password},
 		})
+		common.Created(c, task)
+	})
+
+	h.POST("/api/v1/proxies/:id/assign", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if tasks == nil || profiles == nil {
+			common.Failure(c, 503, 30006, "任务服务不可用", nil)
+			return
+		}
+		var req struct {
+			ProfileID string `json:"profile_id"`
+		}
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		profile, found, err := profiles.GetProfile(req.ProfileID)
+		if err != nil {
+			common.InternalError(c, "Profile 查询失败")
+			return
+		}
+		if !found || profile.UserID != actor.ID || profile.LocalStatus != profilebinding.ProfileActive {
+			common.Forbidden(c, 11003, "没有权限分配此 Profile")
+			return
+		}
+		proxy, err := service.Get(c.Param("id"))
+		if err != nil {
+			writeProxyError(c, err)
+			return
+		}
+		if proxy.BusinessStatus != BizActive {
+			common.Conflict(c, 23004, "代理不可用")
+			return
+		}
+		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeProxyMutation.String(), IdempotencyKey: "proxy-assign:" + actor.ID + ":" + profile.ID + ":" + proxy.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID, "proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password}})
 		common.Created(c, task)
 	})
 

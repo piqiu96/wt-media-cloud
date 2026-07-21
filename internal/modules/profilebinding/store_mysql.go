@@ -75,6 +75,18 @@ func (s *MySQLStore) ResolveProfile(profileID string) (string, bool, bool, error
 	return userID, status == ProfileActive, true, nil
 }
 
+func (s *MySQLStore) GetProfile(profileID string) (BrowserProfile, bool, error) {
+	row := s.db.QueryRow(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE id = ?`, profileID)
+	profile, err := scanProfile(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BrowserProfile{}, false, nil
+	}
+	if err != nil {
+		return BrowserProfile{}, false, err
+	}
+	return profile, true, nil
+}
+
 func (s *MySQLStore) CreateScan(scan ProfileScan) error {
 	diffJSON, err := json.Marshal(scan.Diff)
 	if err != nil {

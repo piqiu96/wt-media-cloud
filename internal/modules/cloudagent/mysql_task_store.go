@@ -241,6 +241,15 @@ func (s *MySQLTaskStore) projectResult(task Task) error {
 		}
 		_, err := s.db.Exec(`UPDATE browser_profiles SET bit_status = ?, updated_at = ? WHERE id = ?`, status, now, cloudProfileID)
 		return err
+	case TaskTypeProxyMutation.String():
+		cloudProfileID, _ := task.Result["cloud_profile_id"].(string)
+		host, _ := task.Result["proxy_host"].(string)
+		port, _ := task.Result["proxy_port"].(float64)
+		if cloudProfileID == "" || host == "" {
+			return nil
+		}
+		_, err := s.db.Exec(`UPDATE browser_profiles SET proxy_host = ?, proxy_port = ?, updated_at = ? WHERE id = ?`, host, int(port), now, cloudProfileID)
+		return err
 	default:
 		return nil
 	}
