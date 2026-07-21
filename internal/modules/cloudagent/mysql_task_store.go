@@ -227,6 +227,20 @@ func (s *MySQLTaskStore) projectResult(task Task) error {
 		}
 		_, err := s.db.Exec(`UPDATE proxy_configs SET last_check_result = ?, last_check_at = ?, updated_at = ? WHERE id = ?`, connectivity, now, now, proxyID)
 		return err
+	case TaskTypeProfileOpen.String(), TaskTypeProfileClose.String(), TaskTypeProfileUpdate.String():
+		cloudProfileID, _ := task.Result["cloud_profile_id"].(string)
+		if cloudProfileID == "" {
+			return nil
+		}
+		status := "updated"
+		if task.TaskType == TaskTypeProfileOpen.String() {
+			status = "open"
+		}
+		if task.TaskType == TaskTypeProfileClose.String() {
+			status = "closed"
+		}
+		_, err := s.db.Exec(`UPDATE browser_profiles SET bit_status = ?, updated_at = ? WHERE id = ?`, status, now, cloudProfileID)
+		return err
 	default:
 		return nil
 	}

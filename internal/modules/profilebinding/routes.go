@@ -99,29 +99,32 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
-		if _, err := service.GetActiveProfile(actor, c.Param("id")); err != nil {
+		profile, err := service.GetActiveProfile(actor, c.Param("id"))
+		if err != nil {
 			writeProfileError(c, err)
 			return
 		}
-		createProfileTask(c, tasks, cloudagent.TaskTypeProfileOpen.String(), actor.ID, map[string]any{"profile_id": c.Param("id")})
+		createProfileTask(c, tasks, cloudagent.TaskTypeProfileOpen.String(), actor.ID, map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID})
 	})
 	h.POST("/api/v1/browser-profiles/:id/close", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		if _, err := service.GetActiveProfile(actor, c.Param("id")); err != nil {
+		profile, err := service.GetActiveProfile(actor, c.Param("id"))
+		if err != nil {
 			writeProfileError(c, err)
 			return
 		}
-		createProfileTask(c, tasks, cloudagent.TaskTypeProfileClose.String(), actor.ID, map[string]any{"profile_id": c.Param("id")})
+		createProfileTask(c, tasks, cloudagent.TaskTypeProfileClose.String(), actor.ID, map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID})
 	})
 	h.PATCH("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		if _, err := service.GetActiveProfile(actor, c.Param("id")); err != nil {
+		profile, err := service.GetActiveProfile(actor, c.Param("id"))
+		if err != nil {
 			writeProfileError(c, err)
 			return
 		}
@@ -129,7 +132,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &input) {
 			return
 		}
-		input["profile_id"] = c.Param("id")
+		input["cloud_profile_id"] = profile.ID
+		input["profile_id"] = profile.BitProfileID
 		createProfileTask(c, tasks, cloudagent.TaskTypeProfileUpdate.String(), actor.ID, input)
 	})
 	h.DELETE("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
