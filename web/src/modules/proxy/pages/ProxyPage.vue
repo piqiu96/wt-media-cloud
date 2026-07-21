@@ -43,7 +43,9 @@ async function loadProxies() {
     if (searchSupplier.value) params.supplier = searchSupplier.value
     if (searchRegion.value) params.region = searchRegion.value
     if (searchText.value) params.search = searchText.value
-    proxies.value = await proxyClient.list(params)
+    const result = await proxyClient.list(params)
+    // Be defensive while older Cloud instances may still return data: null.
+    proxies.value = Array.isArray(result) ? result : (Array.isArray(result?.list) ? result.list : [])
   } catch (e) {
     error.value = e.message
   } finally {

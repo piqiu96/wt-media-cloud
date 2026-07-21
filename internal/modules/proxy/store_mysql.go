@@ -78,7 +78,8 @@ func (s *MySQLStore) List(filter ProxyFilter) ([]ProxyConfig, error) {
 	}
 	defer rows.Close()
 
-	var results []ProxyConfig
+	// Keep collection endpoints JSON-array shaped even when the database is empty.
+	results := make([]ProxyConfig, 0)
 	for rows.Next() {
 		p, err := scanProxy(rows)
 		if err != nil {
