@@ -87,7 +87,7 @@ func (s *MySQLTaskStore) Get(taskID string) (Task, error) {
 	return s.scanTask(s.db.QueryRow(
 		`SELECT task_id, task_type, status, COALESCE(idempotency_key,''), COALESCE(agent_id,''),
 		        created_at, COALESCE(lease_expires_at,''), progress, COALESCE(message,''),
-		        COALESCE(updated_at,''), COALESCE(error_code,''), payload_json
+		        COALESCE(updated_at,''), COALESCE(error_code,''), payload_json, result_json
 		 FROM tasks WHERE task_id = ?`, taskID,
 	))
 }
@@ -108,7 +108,7 @@ func (s *MySQLTaskStore) Claim(req ClaimTaskRequest) (Task, error) {
 	task, err := s.scanTask(s.db.QueryRow(
 		`SELECT task_id, task_type, status, COALESCE(idempotency_key,''), COALESCE(agent_id,''),
 		        created_at, COALESCE(lease_expires_at,''), progress, COALESCE(message,''),
-		        COALESCE(updated_at,''), COALESCE(error_code,''), payload_json
+		        COALESCE(updated_at,''), COALESCE(error_code,''), payload_json, result_json
 		 FROM tasks WHERE agent_id = ? AND status = 'leased' AND lease_expires_at > ?`,
 		req.AgentID, now,
 	))
@@ -158,9 +158,9 @@ func (s *MySQLTaskStore) Report(taskID string, req ReportTaskRequest) (Task, err
 
 	now := s.now()
 	result, err := s.db.Exec(
-		`UPDATE tasks SET status = ?, progress = ?, message = ?, error_code = ?, updated_at = ?
+		`UPDATE tasks SET status = ?, progress = ?, message = ?, error_code = ?, result_json = ?, updated_at = ?
 		 WHERE task_id = ? AND agent_id = ? AND status NOT IN ('succeeded','failed','cancelled')`,
-		req.Status, req.Progress, req.Message, req.ErrorCode, now, taskID, req.AgentID,
+		req.Status, req.Progress, req.Message, req.ErrorCode, jsonValue(req.Result), now, taskID, req.AgentID,
 	)
 	if err != nil {
 		return s.mem.Report(taskID, req)
@@ -230,12 +230,12 @@ func (s *MySQLTaskStore) scanTask(row *sql.Row) (Task, error) {
 	var t Task
 	var idempotencyKey, agentID, leaseExpiresAt, message, updatedAt, errorCode string
 	var progress int
-	var payload []byte
+	var payload, result []byte
 	err := row.Scan(
 		&t.TaskID, &t.TaskType, &t.Status,
 		&idempotencyKey, &agentID,
 		&t.CreatedAt, &leaseExpiresAt, &progress, &message,
-		&updatedAt, &errorCode, &payload,
+		&updatedAt, &errorCode, &payload, &result,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrTaskNotFound
@@ -252,6 +252,9 @@ func (s *MySQLTaskStore) scanTask(row *sql.Row) (Task, error) {
 	t.ErrorCode = ifNotEmpty(errorCode)
 	if len(payload) > 0 {
 		_ = json.Unmarshal(payload, &t.Payload)
+	}
+	if len(result) > 0 {
+		_ = json.Unmarshal(result, &t.Result)
 	}
 	return t, nil
 }

@@ -179,15 +179,17 @@ type Task struct {
 	UpdatedAt      string         `json:"updated_at,omitempty"`
 	ErrorCode      string         `json:"error_code,omitempty"`
 	Payload        map[string]any `json:"payload,omitempty"`
+	Result         map[string]any `json:"result,omitempty"`
 }
 
 // ReportTaskRequest is used by an agent to report task progress or result.
 type ReportTaskRequest struct {
-	AgentID   string `json:"agent_id"`
-	Status    string `json:"status"`
-	Progress  int    `json:"progress"`
-	Message   string `json:"message"`
-	ErrorCode string `json:"error_code,omitempty"`
+	AgentID   string         `json:"agent_id"`
+	Status    string         `json:"status"`
+	Progress  int            `json:"progress"`
+	Message   string         `json:"message"`
+	ErrorCode string         `json:"error_code,omitempty"`
+	Result    map[string]any `json:"result,omitempty"`
 }
 
 // CancelTaskRequest is used to cancel a pending or running task.
@@ -352,6 +354,9 @@ func (s *TaskStore) Report(taskID string, req ReportTaskRequest) (Task, error) {
 	task.UpdatedAt = s.now().Format(time.RFC3339)
 	if req.ErrorCode != "" {
 		task.ErrorCode = req.ErrorCode
+	}
+	if req.Result != nil {
+		task.Result = clonePayload(req.Result)
 	}
 	s.tasks[task.TaskID] = task
 	return task, nil
