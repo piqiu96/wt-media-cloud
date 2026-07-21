@@ -7,16 +7,24 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service) {
+type TaskCreator interface {
+	Create(cloudagent.CreateTaskRequest) cloudagent.Task
+}
+
+func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, taskStores ...TaskCreator) {
+	var tasks TaskCreator
+	if len(taskStores) > 0 {
+		tasks = taskStores[0]
+	}
 	h.GET("/api/v1/proxies", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := identity.AuthenticateRequest(c, identityService)
+		_, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		_ = actor
 		proxies, err := service.List(ProxyFilter{
 			BusinessStatus: c.Query("business_status"),
 			Supplier:       c.Query("supplier"),
@@ -134,15 +142,25 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 	})
 
 	h.POST("/api/v1/proxies/:id/check", func(ctx context.Context, c *hertzapp.RequestContext) {
-		_, ok := identity.AuthenticateRequest(c, identityService)
+		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		if err := service.TriggerCheck(c.Param("id")); err != nil {
+		proxy, err := service.Get(c.Param("id"))
+		if err != nil {
 			writeProxyError(c, err)
 			return
 		}
-		common.NoContent(c)
+		if tasks == nil {
+			common.Failure(c, 503, 30006, "任务服务不可用", nil)
+			return
+		}
+		task := tasks.Create(cloudagent.CreateTaskRequest{
+			TaskType:       cloudagent.TaskTypeProxyCheck.String(),
+			IdempotencyKey: "proxy-check:" + actor.ID + ":" + proxy.ID + ":" + common.NewID("attempt"),
+			Payload:        map[string]any{"proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password},
+		})
+		common.Created(c, task)
 	})
 
 	h.POST("/api/v1/proxies/:id/quotas", func(ctx context.Context, c *hertzapp.RequestContext) {

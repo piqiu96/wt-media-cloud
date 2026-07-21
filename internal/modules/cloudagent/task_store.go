@@ -84,6 +84,7 @@ const (
 	TaskTypeProfileOpen                   // 5: open BitBrowser Profile
 	TaskTypeProfileClose                  // 6: close BitBrowser Profile
 	TaskTypeProfileUpdate                 // 7: update BitBrowser Profile
+	TaskTypeProxyCheck                    // 8: verify proxy through Agent
 )
 
 func (t TaskType) String() string {
@@ -104,6 +105,8 @@ func (t TaskType) String() string {
 		return "profile_close_task"
 	case TaskTypeProfileUpdate:
 		return "profile_update_task"
+	case TaskTypeProxyCheck:
+		return "proxy_check_task"
 	default:
 		return fmt.Sprintf("unknown(%d)", t)
 	}
@@ -127,6 +130,8 @@ func ParseTaskType(s string) (TaskType, bool) {
 		return TaskTypeProfileClose, true
 	case "profile_update_task":
 		return TaskTypeProfileUpdate, true
+	case "proxy_check_task":
+		return TaskTypeProxyCheck, true
 	default:
 		return TaskTypeNoop, false
 	}
