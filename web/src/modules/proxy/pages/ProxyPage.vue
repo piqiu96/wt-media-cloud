@@ -8,6 +8,8 @@ const proxies = ref([])
 const loading = ref(true)
 const error = ref("")
 const taskNotice = ref("")
+const failedCheckProxy = ref(null)
+const queuedTaskId = ref("")
 
 // Search
 const searchSupplier = ref("")
@@ -115,8 +117,23 @@ function openDetail(proxy) {
 
 async function triggerCheck(proxy) {
   try {
-    const task = await proxyClient.triggerCheck(proxy.id)
-    taskNotice.value = `已创建代理检测任务（${task.task_id || "待执行"}），完成后刷新结果。`
+    const result = await proxyClient.check(proxy.id)
+    failedCheckProxy.value = null
+    taskNotice.value = `代理检测完成：${result.last_check_result || "未知"}`
+    await loadProxies()
+  } catch (e) {
+    error.value = e.message
+    failedCheckProxy.value = proxy
+  }
+}
+
+async function queueBackgroundCheck() {
+  if (!failedCheckProxy.value) return
+  try {
+    const task = await proxyClient.backgroundCheck(failedCheckProxy.value.id)
+    queuedTaskId.value = task.task_id || ""
+    taskNotice.value = `已创建后台检测任务（${task.task_id || "待执行"}）。`
+    failedCheckProxy.value = null
   } catch (e) {
     error.value = e.message
   }
@@ -161,7 +178,12 @@ function formatTime(t) {
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <t-alert v-if="failedCheckProxy" theme="warning" style="margin-bottom:16px">
+      同步检测失败时才需要后台任务：
+      <t-button size="small" variant="text" @click="queueBackgroundCheck">后台重试</t-button>
+    </t-alert>
     <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
+    <t-button v-if="queuedTaskId" size="small" variant="outline" style="margin:-8px 0 16px" @click="$router.push(`/execute-tasks?task_id=${encodeURIComponent(queuedTaskId)}`)">查看任务进度</t-button>
 
     <!-- 搜索/过滤栏 -->
     <t-card class="search-bar" :bordered="true">

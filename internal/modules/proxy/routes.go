@@ -22,12 +22,16 @@ type ProfileLookup interface {
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, deps ...any) {
 	var tasks TaskCreator
 	var profiles ProfileLookup
+	var checker SyncProxyChecker
 	for _, dep := range deps {
 		if value, ok := dep.(TaskCreator); ok {
 			tasks = value
 		}
 		if value, ok := dep.(ProfileLookup); ok {
 			profiles = value
+		}
+		if value, ok := dep.(SyncProxyChecker); ok {
+			checker = value
 		}
 	}
 	h.GET("/api/v1/proxies", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -152,6 +156,33 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 	})
 
 	h.POST("/api/v1/proxies/:id/check", func(ctx context.Context, c *hertzapp.RequestContext) {
+		_, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		proxy, err := service.Get(c.Param("id"))
+		if err != nil {
+			writeProxyError(c, err)
+			return
+		}
+		if checker == nil {
+			common.Failure(c, 503, 30006, "Agent 同步检查服务不可用", nil)
+			return
+		}
+		result, err := checker.Check(ctx, ProxyCheckInput{ProxyID: proxy.ID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port})
+		if err != nil {
+			common.Failure(c, 503, 30007, "Agent 同步检查失败", nil)
+			return
+		}
+		updated, err := service.RecordCheckResult(proxy.ID, result.Connectivity)
+		if err != nil {
+			writeProxyError(c, err)
+			return
+		}
+		common.Success(c, updated)
+	})
+
+	h.POST("/api/v1/proxies/:id/check/background", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return

@@ -1,11 +1,29 @@
 <script setup>
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { createTaskClient } from '../../../shared/api/tasks.js'
 
 const taskClient = createTaskClient()
 const tasks = ref([])
 const newTaskType = ref('noop_task')
 const error = ref('')
+let pollTimer
+
+async function loadTaskFromQuery() {
+  const taskId = new URLSearchParams(window.location.search).get('task_id')
+  if (!taskId) return
+  try {
+    const task = await taskClient.get(taskId)
+    tasks.value = [task]
+    if (['pending', 'leased', 'running'].includes(task.status)) {
+      pollTimer = window.setInterval(async () => {
+        try { tasks.value = [await taskClient.get(taskId)] } catch (e) { error.value = e.message }
+      }, 2000)
+    }
+  } catch (e) { error.value = e.message }
+}
+
+onMounted(loadTaskFromQuery)
+onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 
 async function createTask() {
   error.value = ''

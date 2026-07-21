@@ -74,7 +74,7 @@ func NewServer() (*Server, error) {
 		profileStore := profilebinding.NewMySQLStore(result.db)
 		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore)
 		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore)), identityService, taskStore)
-		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore)
+		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv())
 	} else if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}

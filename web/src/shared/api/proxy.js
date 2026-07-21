@@ -25,8 +25,11 @@ export function createProxyClient() {
     bulkImport(lines) {
       return api.post('/proxies/import', { lines })
     },
-    triggerCheck(id) {
+    check(id) {
       return api.post(`/proxies/${id}/check`)
+    },
+    backgroundCheck(id) {
+      return api.post(`/proxies/${id}/check/background`)
     },
     setQuota(proxyId, platform, maxProfiles) {
       return api.post(`/proxies/${proxyId}/quotas`, { platform, max_profiles: maxProfiles })
