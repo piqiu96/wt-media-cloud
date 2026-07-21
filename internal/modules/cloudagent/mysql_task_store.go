@@ -2,6 +2,7 @@ package cloudagent
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -61,10 +62,10 @@ func (s *MySQLTaskStore) Create(req CreateTaskRequest) Task {
 	}
 
 	_, err := s.db.Exec(
-		`INSERT INTO tasks (task_id, task_type, status, idempotency_key, created_at)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO tasks (task_id, task_type, status, idempotency_key, payload_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE task_id=task_id`,
-		taskID, taskType, status, req.IdempotencyKey, now,
+		taskID, taskType, status, req.IdempotencyKey, jsonValue(req.Payload), now,
 	)
 	if err != nil {
 		return s.mem.Create(req)
@@ -75,6 +76,7 @@ func (s *MySQLTaskStore) Create(req CreateTaskRequest) Task {
 		Status:         status,
 		IdempotencyKey: req.IdempotencyKey,
 		CreatedAt:      now.Format(time.RFC3339),
+		Payload:        clonePayload(req.Payload),
 	}
 }
 
@@ -85,7 +87,7 @@ func (s *MySQLTaskStore) Get(taskID string) (Task, error) {
 	return s.scanTask(s.db.QueryRow(
 		`SELECT task_id, task_type, status, COALESCE(idempotency_key,''), COALESCE(agent_id,''),
 		        created_at, COALESCE(lease_expires_at,''), progress, COALESCE(message,''),
-		        COALESCE(updated_at,''), COALESCE(error_code,'')
+		        COALESCE(updated_at,''), COALESCE(error_code,''), payload_json
 		 FROM tasks WHERE task_id = ?`, taskID,
 	))
 }
@@ -106,7 +108,7 @@ func (s *MySQLTaskStore) Claim(req ClaimTaskRequest) (Task, error) {
 	task, err := s.scanTask(s.db.QueryRow(
 		`SELECT task_id, task_type, status, COALESCE(idempotency_key,''), COALESCE(agent_id,''),
 		        created_at, COALESCE(lease_expires_at,''), progress, COALESCE(message,''),
-		        COALESCE(updated_at,''), COALESCE(error_code,'')
+		        COALESCE(updated_at,''), COALESCE(error_code,''), payload_json
 		 FROM tasks WHERE agent_id = ? AND status = 'leased' AND lease_expires_at > ?`,
 		req.AgentID, now,
 	))
@@ -228,11 +230,12 @@ func (s *MySQLTaskStore) scanTask(row *sql.Row) (Task, error) {
 	var t Task
 	var idempotencyKey, agentID, leaseExpiresAt, message, updatedAt, errorCode string
 	var progress int
+	var payload []byte
 	err := row.Scan(
 		&t.TaskID, &t.TaskType, &t.Status,
 		&idempotencyKey, &agentID,
 		&t.CreatedAt, &leaseExpiresAt, &progress, &message,
-		&updatedAt, &errorCode,
+		&updatedAt, &errorCode, &payload,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrTaskNotFound
@@ -247,7 +250,21 @@ func (s *MySQLTaskStore) scanTask(row *sql.Row) (Task, error) {
 	t.Message = ifNotEmpty(message)
 	t.UpdatedAt = ifNotEmpty(updatedAt)
 	t.ErrorCode = ifNotEmpty(errorCode)
+	if len(payload) > 0 {
+		_ = json.Unmarshal(payload, &t.Payload)
+	}
 	return t, nil
+}
+
+func jsonValue(payload map[string]any) any {
+	if payload == nil {
+		return nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func ifNotEmpty(s string) string {

@@ -7,10 +7,19 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service) {
+type TaskCreator interface {
+	Create(cloudagent.CreateTaskRequest) cloudagent.Task
+}
+
+func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, taskStores ...TaskCreator) {
+	var tasks TaskCreator
+	if len(taskStores) > 0 {
+		tasks = taskStores[0]
+	}
 	h.POST("/api/v1/bit-browser/profile-scans", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -79,32 +88,49 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
-		_ = actor
-		common.Created(c, map[string]string{"status": "task_created"})
+		var input map[string]any
+		if !common.DecodeJSON(c, &input) {
+			return
+		}
+		createProfileTask(c, tasks, cloudagent.TaskTypeProfileCreate.String(), actor.ID, input)
 	})
 	h.POST("/api/v1/browser-profiles/:id/open", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		_ = actor
-		common.Success(c, map[string]string{"status": "open_requested", "profile_id": c.Param("id")})
+		if _, err := service.GetActiveProfile(actor, c.Param("id")); err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		createProfileTask(c, tasks, cloudagent.TaskTypeProfileOpen.String(), actor.ID, map[string]any{"profile_id": c.Param("id")})
 	})
 	h.POST("/api/v1/browser-profiles/:id/close", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		_ = actor
-		common.Success(c, map[string]string{"status": "close_requested", "profile_id": c.Param("id")})
+		if _, err := service.GetActiveProfile(actor, c.Param("id")); err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		createProfileTask(c, tasks, cloudagent.TaskTypeProfileClose.String(), actor.ID, map[string]any{"profile_id": c.Param("id")})
 	})
 	h.PATCH("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		_ = actor
-		common.Success(c, map[string]string{"status": "update_requested", "profile_id": c.Param("id")})
+		if _, err := service.GetActiveProfile(actor, c.Param("id")); err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		var input map[string]any
+		if !common.DecodeJSON(c, &input) {
+			return
+		}
+		input["profile_id"] = c.Param("id")
+		createProfileTask(c, tasks, cloudagent.TaskTypeProfileUpdate.String(), actor.ID, input)
 	})
 	h.DELETE("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -118,6 +144,16 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		common.NoContent(c)
 	})
+}
+
+func createProfileTask(c *hertzapp.RequestContext, tasks TaskCreator, taskType, actorID string, payload map[string]any) {
+	if tasks == nil {
+		common.Failure(c, 503, 30006, "任务服务不可用", nil)
+		return
+	}
+	idempotency := taskType + ":" + actorID + ":" + common.NewID("attempt")
+	task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: taskType, IdempotencyKey: idempotency, Payload: payload})
+	common.Created(c, task)
 }
 
 func writeProfileError(c *hertzapp.RequestContext, err error) {

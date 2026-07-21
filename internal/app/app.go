@@ -16,6 +16,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/infra/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
+	"github.com/wt-media/wt-media-cloud/internal/infra/scheduler"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
@@ -23,7 +24,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
-	"github.com/wt-media/wt-media-cloud/internal/infra/scheduler"
 )
 
 type Server struct {
@@ -72,7 +72,7 @@ func NewServer() (*Server, error) {
 		runtimebinding.RegisterRoutes(engine, runtimeService, identityService)
 		profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(result.db), runtimeService))
 		profileStore := profilebinding.NewMySQLStore(result.db)
-		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService)
+		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore)
 		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore)), identityService)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService)
 	} else if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {

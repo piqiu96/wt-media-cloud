@@ -1,6 +1,7 @@
 package cloudagent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -75,10 +76,14 @@ func IsTerminal(s TaskStatus) bool {
 type TaskType int
 
 const (
-	TaskTypeNoop           TaskType = iota // 0: built-in verification task
-	TaskTypeCookieRead                     // 1: read cookies from BitBrowser Profile
-	TaskTypeCookieWrite                    // 2: write cookies to BitBrowser Profile
-	TaskTypeAccountCheck                   // 3: check platform login status
+	TaskTypeNoop          TaskType = iota // 0: built-in verification task
+	TaskTypeCookieRead                    // 1: read cookies from BitBrowser Profile
+	TaskTypeCookieWrite                   // 2: write cookies to BitBrowser Profile
+	TaskTypeAccountCheck                  // 3: check platform login status
+	TaskTypeProfileCreate                 // 4: create BitBrowser Profile
+	TaskTypeProfileOpen                   // 5: open BitBrowser Profile
+	TaskTypeProfileClose                  // 6: close BitBrowser Profile
+	TaskTypeProfileUpdate                 // 7: update BitBrowser Profile
 )
 
 func (t TaskType) String() string {
@@ -91,6 +96,14 @@ func (t TaskType) String() string {
 		return "cookie_write_task"
 	case TaskTypeAccountCheck:
 		return "account_check_task"
+	case TaskTypeProfileCreate:
+		return "profile_create_task"
+	case TaskTypeProfileOpen:
+		return "profile_open_task"
+	case TaskTypeProfileClose:
+		return "profile_close_task"
+	case TaskTypeProfileUpdate:
+		return "profile_update_task"
 	default:
 		return fmt.Sprintf("unknown(%d)", t)
 	}
@@ -106,6 +119,14 @@ func ParseTaskType(s string) (TaskType, bool) {
 		return TaskTypeCookieWrite, true
 	case "account_check_task":
 		return TaskTypeAccountCheck, true
+	case "profile_create_task":
+		return TaskTypeProfileCreate, true
+	case "profile_open_task":
+		return TaskTypeProfileOpen, true
+	case "profile_close_task":
+		return TaskTypeProfileClose, true
+	case "profile_update_task":
+		return TaskTypeProfileUpdate, true
 	default:
 		return TaskTypeNoop, false
 	}
@@ -116,20 +137,21 @@ const (
 )
 
 var (
-	ErrTaskNotFound         = errors.New("task not found")
-	ErrNoPendingTask        = errors.New("no pending task")
-	ErrTaskLeaseTaken       = errors.New("task lease taken")
-	ErrInvalidTask          = errors.New("invalid task")
-	ErrTaskAgentMismatch    = errors.New("task agent mismatch")
-	ErrTaskAlreadyTerminal  = errors.New("task already in terminal state")
-	ErrInvalidStatus        = errors.New("invalid task status")
-	ErrInvalidTaskType      = errors.New("invalid task type")
+	ErrTaskNotFound        = errors.New("task not found")
+	ErrNoPendingTask       = errors.New("no pending task")
+	ErrTaskLeaseTaken      = errors.New("task lease taken")
+	ErrInvalidTask         = errors.New("invalid task")
+	ErrTaskAgentMismatch   = errors.New("task agent mismatch")
+	ErrTaskAlreadyTerminal = errors.New("task already in terminal state")
+	ErrInvalidStatus       = errors.New("invalid task status")
+	ErrInvalidTaskType     = errors.New("invalid task type")
 )
 
 // CreateTaskRequest is used to create a new task.
 type CreateTaskRequest struct {
-	TaskType       string `json:"task_type"`
-	IdempotencyKey string `json:"idempotency_key"`
+	TaskType       string         `json:"task_type"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	Payload        map[string]any `json:"payload,omitempty"`
 }
 
 // ClaimTaskRequest is used by an agent to claim a pending task.
@@ -140,25 +162,26 @@ type ClaimTaskRequest struct {
 
 // Task is the formal universal task model.
 type Task struct {
-	TaskID         string `json:"task_id"`
-	TaskType       string `json:"task_type"`
-	Status         string `json:"status"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	AgentID        string `json:"agent_id,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
-	Progress       int    `json:"progress,omitempty"`
-	Message        string `json:"message,omitempty"`
-	UpdatedAt      string `json:"updated_at,omitempty"`
-	ErrorCode      string `json:"error_code,omitempty"`
+	TaskID         string         `json:"task_id"`
+	TaskType       string         `json:"task_type"`
+	Status         string         `json:"status"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	AgentID        string         `json:"agent_id,omitempty"`
+	CreatedAt      string         `json:"created_at"`
+	LeaseExpiresAt string         `json:"lease_expires_at,omitempty"`
+	Progress       int            `json:"progress,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	UpdatedAt      string         `json:"updated_at,omitempty"`
+	ErrorCode      string         `json:"error_code,omitempty"`
+	Payload        map[string]any `json:"payload,omitempty"`
 }
 
 // ReportTaskRequest is used by an agent to report task progress or result.
 type ReportTaskRequest struct {
-	AgentID  string `json:"agent_id"`
-	Status   string `json:"status"`
-	Progress int    `json:"progress"`
-	Message  string `json:"message"`
+	AgentID   string `json:"agent_id"`
+	Status    string `json:"status"`
+	Progress  int    `json:"progress"`
+	Message   string `json:"message"`
 	ErrorCode string `json:"error_code,omitempty"`
 }
 
@@ -217,12 +240,28 @@ func (s *TaskStore) Create(req CreateTaskRequest) Task {
 		Status:         TaskStatusPending.String(),
 		IdempotencyKey: req.IdempotencyKey,
 		CreatedAt:      s.now().Format(time.RFC3339),
+		Payload:        clonePayload(req.Payload),
 	}
 	s.tasks[task.TaskID] = task
 	if req.IdempotencyKey != "" {
 		s.idempotency[req.IdempotencyKey] = task.TaskID
 	}
 	return task
+}
+
+func clonePayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	var copied map[string]any
+	if json.Unmarshal(raw, &copied) != nil {
+		return nil
+	}
+	return copied
 }
 
 // Claim attempts to claim a pending task for the given agent.
