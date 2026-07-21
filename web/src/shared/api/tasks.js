@@ -16,5 +16,8 @@ export function createTaskClient() {
     cancel(taskId, message = '') {
       return api.post(`/cloud-agent/tasks/${encodeURIComponent(taskId)}/cancel`, { message })
     },
+    retry(taskId) {
+      return api.post(`/cloud-agent/tasks/${encodeURIComponent(taskId)}/retry`, {})
+    },
   }
 }

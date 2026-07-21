@@ -28,6 +28,14 @@ async function cancelLastTask() {
   }
 }
 
+async function retryTask(task) {
+  error.value = ''
+  try {
+    const retry = await taskClient.retry(task.task_id)
+    tasks.value.unshift(retry)
+  } catch (e) { error.value = e.message }
+}
+
 const statusMap = {
   pending: { label: '待执行', theme: 'warning' },
   leased: { label: '已领取', theme: 'primary' },
@@ -43,6 +51,7 @@ const columns = [
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'progress', title: '进度', width: 150 },
   { colKey: 'message', title: '消息' },
+  { colKey: 'op', title: '操作', width: 90 },
 ]
 </script>
 
@@ -56,11 +65,14 @@ const columns = [
       <t-button @click="createTask">创建任务</t-button>
       <t-button v-if="tasks.length" theme="default" @click="cancelLastTask">取消最近任务</t-button>
     </div>
-    <t-table v-if="tasks.length" :data="tasks" :columns="columns" size="small" hover>
+  <t-table v-if="tasks.length" :data="tasks" :columns="columns" size="small" hover>
       <template #status="{ row }">
         <t-tag :theme="(statusMap[row.status] || {}).theme || 'default'" size="small">
           {{ (statusMap[row.status] || {}).label || row.status }}
         </t-tag>
+      </template>
+      <template #op="{ row }">
+        <t-button v-if="row.status === 'failed' || row.status === 'cancelled'" size="small" variant="text" @click="retryTask(row)">重试</t-button>
       </template>
       <template #progress="{ row }">
         <t-progress v-if="row.progress" :percentage="row.progress" :stroke-width="8" />
