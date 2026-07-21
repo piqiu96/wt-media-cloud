@@ -63,6 +63,9 @@ func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskSt
 	})
 	h.GET("/api/v1/cloud-agent/tasks/:task_id", func(ctx context.Context, c *hertzapp.RequestContext) {
 		task, err := tasks.Get(c.Param("task_id"))
+		if err == nil {
+			task = redactTask(task)
+		}
 		writeTaskResult(c, task, err)
 	})
 	h.POST("/api/v1/cloud-agent/tasks/:task_id/report", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -85,6 +88,23 @@ func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskSt
 		task, err := tasks.Retry(c.Param("task_id"))
 		writeTaskResult(c, task, err)
 	})
+}
+
+func redactTask(task Task) Task {
+	if task.Payload == nil {
+		return task
+	}
+	copy := map[string]any{}
+	for key, value := range task.Payload {
+		switch key {
+		case "password", "proxy_password", "cookie", "cookies", "original_cookie", "active_cookie", "token", "sms_token":
+			copy[key] = "[REDACTED]"
+		default:
+			copy[key] = value
+		}
+	}
+	task.Payload = copy
+	return task
 }
 
 func writeAgentResult(c *hertzapp.RequestContext, node AgentNode, err error) {
