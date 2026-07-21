@@ -217,6 +217,11 @@ func (s *MySQLTaskStore) projectResult(task Task) error {
 		if accountID == "" || status == "" {
 			return nil
 		}
+		switch status {
+		case "normal", "not_logged_in", "verification_needed", "expired", "restricted", "account_mismatch", "environment_error":
+		default:
+			status = "environment_error"
+		}
 		_, err := s.db.Exec(`UPDATE media_accounts SET login_status = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`, status, now, now, accountID)
 		return err
 	case TaskTypeProxyCheck.String():
@@ -224,6 +229,9 @@ func (s *MySQLTaskStore) projectResult(task Task) error {
 		connectivity, _ := task.Result["connectivity"].(string)
 		if proxyID == "" || connectivity == "" {
 			return nil
+		}
+		if connectivity == "reachable" {
+			connectivity = "ok"
 		}
 		_, err := s.db.Exec(`UPDATE proxy_configs SET last_check_result = ?, last_check_at = ?, updated_at = ? WHERE id = ?`, connectivity, now, now, proxyID)
 		return err
