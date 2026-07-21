@@ -72,9 +72,10 @@ func TestMySQLStoreAppliesConfirmedScanTransactionally(t *testing.T) {
 		WithArgs(ScanConfirmed, at, scan.ID, scan.UserID, ScanReady).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO audit_logs`)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO audit_logs`)).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := store.ApplyScan(scan, binding, at); err != nil {
+	if err := store.ApplyScan(scan, binding, at, auditMainAccountBind); err != nil {
 		t.Fatalf("ApplyScan() error = %v", err)
 	}
 }

@@ -149,7 +149,7 @@ func (s *MySQLStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	return scan, true, nil
 }
 
-func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time) error {
+func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -210,6 +210,13 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 	if _, err := tx.Exec(
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		common.NewID("audit"), scan.UserID, "bitbrowser.profile_scan.confirm", "profile_sync_scan", scan.ID, summary, at,
+	); err != nil {
+		return err
+	}
+	bindingSummary, _ := json.Marshal(map[string]any{"main_user_id": scan.MainUserID, "profile_count": len(scan.Profiles), "result": "verified"})
+	if _, err := tx.Exec(
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		common.NewID("audit"), scan.UserID, bindingAuditAction, "user", scan.UserID, bindingSummary, at,
 	); err != nil {
 		return err
 	}

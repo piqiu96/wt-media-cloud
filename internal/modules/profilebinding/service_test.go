@@ -86,9 +86,26 @@ func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
 	if binding.MainUserID != "main-user-1" || binding.Status != BitAccountBound || binding.BoundAt == nil {
 		t.Fatalf("binding = %#v", binding)
 	}
+	if len(store.audits) != 2 || store.audits[1].Action != auditMainAccountBind {
+		t.Fatalf("binding audits = %#v", store.audits)
+	}
 	profiles := store.profileList(actor.ID)
 	if len(profiles) != 2 || profiles[0].BitProfileID != "p1" || profiles[0].ProfileUserID != "bit-user-1" || profiles[1].ProfileUserID != "bit-user-2" {
 		t.Fatalf("profiles = %#v", profiles)
+	}
+
+	rescan, err := service.SubmitScan(actor, SnapshotInput{
+		MainUserID: "main-user-1",
+		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmScan(actor, rescan.ID); err != nil {
+		t.Fatal(err)
+	}
+	if store.audits[len(store.audits)-1].Action != auditMainAccountRebind {
+		t.Fatalf("rescan binding audit = %#v", store.audits[len(store.audits)-1])
 	}
 }
 
@@ -179,6 +196,7 @@ type memoryStore struct {
 	bindings map[string]BitAccountBinding
 	profiles map[string]BrowserProfile
 	scans    map[string]ProfileScan
+	audits   []identity.AuditEvent
 }
 
 func newMemoryStore() *memoryStore {
@@ -204,7 +222,7 @@ func (s *memoryStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	return cloneScan(scan), ok, nil
 }
 
-func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time) error {
+func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error {
 	s.bindings[binding.UserID] = binding
 	seen := map[string]struct{}{}
 	for _, candidate := range scan.Profiles {
@@ -226,6 +244,10 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 	scan.Status = ScanConfirmed
 	scan.ConfirmedAt = &at
 	s.scans[scan.ID] = cloneScan(scan)
+	s.audits = append(s.audits,
+		identity.AuditEvent{Action: "bitbrowser.profile_scan.confirm", TargetType: "profile_sync_scan", TargetID: scan.ID, Summary: map[string]string{"main_user_id": scan.MainUserID}},
+		identity.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: scan.UserID, Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "verified"}},
+	)
 	return nil
 }
 

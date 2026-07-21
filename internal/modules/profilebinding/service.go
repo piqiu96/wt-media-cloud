@@ -52,6 +52,11 @@ var (
 	ErrProfileInactive      = errors.New("browser profile is not active")
 )
 
+const (
+	auditMainAccountBind   = "bitbrowser.main_account.bind"
+	auditMainAccountRebind = "bitbrowser.main_account.rebind"
+)
+
 type BitAccountBinding struct {
 	UserID         string           `json:"user_id"`
 	MainUserID     string           `json:"main_user_id"`
@@ -123,7 +128,7 @@ type Store interface {
 	ListProfiles(userID string) ([]BrowserProfile, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
-	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time) error
+	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
 }
 
@@ -291,7 +296,11 @@ func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (Profile
 	binding.LastVerifiedAt = &verifiedAt
 	scan.Status = ScanConfirmed
 	scan.ConfirmedAt = &now
-	if err := s.store.ApplyScan(scan, binding, now); err != nil {
+	bindingAuditAction := auditMainAccountBind
+	if found {
+		bindingAuditAction = auditMainAccountRebind
+	}
+	if err := s.store.ApplyScan(scan, binding, now, bindingAuditAction); err != nil {
 		return ProfileScan{}, err
 	}
 	return scan, nil
