@@ -166,6 +166,28 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		common.Created(c, task)
 	})
 
+	h.POST("/api/v1/media-accounts/:account_id/cookies/read", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if tasks == nil {
+			common.Failure(c, 503, 30006, "任务服务不可用", nil)
+			return
+		}
+		record, err := service.GetAccountRecord(actor, c.Param("account_id"))
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		if record.BrowserProfileID == "" {
+			writeMediaAccountError(c, ErrProfileUnavailable)
+			return
+		}
+		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + actor.ID + ":" + record.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}})
+		common.Created(c, task)
+	})
+
 	// Cookie export: returns original and active cookie for the account.
 	h.GET("/api/v1/media-accounts/:account_id/cookies", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
