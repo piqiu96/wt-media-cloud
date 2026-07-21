@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createProfileBindingClient } from './shared/api/profileBindings.js'
 
-const response = (data) => ({ ok: true, json: async () => ({ data }) })
+const response = (data) => ({ ok: true, json: async () => ({ errcode: 0, data }) })
 
 describe('profile binding client', () => {
   it('submits only normalized secret-free snapshot fields', async () => {
@@ -28,6 +28,6 @@ describe('profile binding client', () => {
     await client.listProfiles()
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/bit-browser/profile-scans/scan-1/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles', { credentials: 'include' })
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 })

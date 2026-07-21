@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMediaAccountClient } from './shared/api/mediaAccounts.js'
 
 function response(data) {
-  return { ok: true, json: async () => ({ data }) }
+  return { ok: true, json: async () => ({ errcode: 0, data }) }
 }
 
 describe('media account client', () => {
@@ -15,7 +15,7 @@ describe('media account client', () => {
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?platform=douyin&all_tags=launch%2Cvip',
-      { credentials: 'include' },
+      expect.objectContaining({ credentials: 'include' }),
     )
   })
 
