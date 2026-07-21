@@ -10,6 +10,7 @@ const profiles = ref([])
 const scans = ref([])
 const loading = ref(true)
 const error = ref("")
+const taskNotice = ref("")
 
 // Create dialog
 const showCreate = ref(false)
@@ -51,7 +52,8 @@ async function loadProfiles() {
 async function createProfile() {
   creating.value = true
   try {
-    await bindingClient.createProfile(newProfile.value)
+    const task = await bindingClient.createProfile(newProfile.value)
+    taskNotice.value = `已创建 Profile 任务（${task.task_id || "待执行"}），需要 Local Agent 执行后才会出现在列表。`
     showCreate.value = false
     newProfile.value = { name: "", group_name: "", seq: 1 }
     identityError.value = ""
@@ -68,7 +70,8 @@ async function createProfile() {
 
 async function openProfile(profile) {
   try {
-    await bindingClient.openProfile(profile.id)
+    const task = await bindingClient.openProfile(profile.id)
+    taskNotice.value = `已创建打开任务（${task.task_id || "待执行"}）。`
   } catch (e) {
     error.value = e.message
   }
@@ -76,7 +79,8 @@ async function openProfile(profile) {
 
 async function closeProfile(profile) {
   try {
-    await bindingClient.closeProfile(profile.id)
+    const task = await bindingClient.closeProfile(profile.id)
+    taskNotice.value = `已创建关闭任务（${task.task_id || "待执行"}）。`
   } catch (e) {
     error.value = e.message
   }
@@ -233,6 +237,7 @@ const diffColumns = [
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
     <t-alert v-if="identityError" :message="identityError" theme="warning" style="margin-bottom:16px" closable @close="identityError=''" />
 
     <div class="action-bar">
