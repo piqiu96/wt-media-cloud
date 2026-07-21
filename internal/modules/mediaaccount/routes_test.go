@@ -47,6 +47,14 @@ func TestRoutesEnforceGameScope(t *testing.T) {
 	}
 }
 
+func TestRoutesRejectOutOfScopeGameList(t *testing.T) {
+	engine, cookie, _ := newMediaAccountRouteTest(t)
+	response := ut.PerformRequest(engine.Engine, "GET", "/api/v1/media-accounts?game_id=game-b", nil, ut.Header{Key: "Cookie", Value: cookie})
+	if response.Result().StatusCode() != consts.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
 func TestRoutesIdentifyDuplicateAndManageTags(t *testing.T) {
 	engine, cookie, _ := newMediaAccountRouteTest(t)
 	firstID := createRouteAccount(t, engine, cookie, "douyin")
