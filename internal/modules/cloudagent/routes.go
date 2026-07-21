@@ -81,6 +81,10 @@ func RegisterRoutes(h *server.Hertz, registry *MySQLRegistry, tasks *MySQLTaskSt
 		task, err := tasks.Cancel(c.Param("task_id"), req)
 		writeTaskResult(c, task, err)
 	})
+	h.POST("/api/v1/cloud-agent/tasks/:task_id/retry", func(ctx context.Context, c *hertzapp.RequestContext) {
+		task, err := tasks.Retry(c.Param("task_id"))
+		writeTaskResult(c, task, err)
+	})
 }
 
 func writeAgentResult(c *hertzapp.RequestContext, node AgentNode, err error) {
@@ -114,6 +118,8 @@ func writeTaskResult(c *hertzapp.RequestContext, task Task, err error) {
 		common.Conflict(c, 30002, "Agent 与当前任务负责人不匹配")
 	case errors.Is(err, ErrTaskAlreadyTerminal):
 		common.Conflict(c, 30003, "任务已处于终态")
+	case errors.Is(err, ErrTaskNotRetryable):
+		common.Conflict(c, 30007, "当前任务不可重试")
 	default:
 		common.InternalError(c, "任务服务内部错误")
 	}

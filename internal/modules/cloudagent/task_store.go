@@ -150,6 +150,7 @@ var (
 	ErrTaskAlreadyTerminal = errors.New("task already in terminal state")
 	ErrInvalidStatus       = errors.New("invalid task status")
 	ErrInvalidTaskType     = errors.New("invalid task type")
+	ErrTaskNotRetryable    = errors.New("task is not retryable")
 )
 
 // CreateTaskRequest is used to create a new task.
@@ -318,6 +319,22 @@ func (s *TaskStore) Get(taskID string) (Task, error) {
 		return Task{}, ErrTaskNotFound
 	}
 	return task, nil
+}
+
+func (s *TaskStore) Retry(taskID string) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	original, ok := s.tasks[taskID]
+	if !ok {
+		return Task{}, ErrTaskNotFound
+	}
+	if original.Status != TaskStatusFailed.String() && original.Status != TaskStatusCancelled.String() {
+		return Task{}, ErrTaskNotRetryable
+	}
+	retryID := s.newID()
+	retry := Task{TaskID: retryID, TaskType: original.TaskType, Status: TaskStatusPending.String(), IdempotencyKey: original.IdempotencyKey + ":retry:" + retryID, CreatedAt: s.now().Format(time.RFC3339), Payload: clonePayload(original.Payload)}
+	s.tasks[retryID] = retry
+	return retry, nil
 }
 
 // Report updates task status from an agent. Validates state transitions.

@@ -92,6 +92,26 @@ func (s *MySQLTaskStore) Get(taskID string) (Task, error) {
 	))
 }
 
+func (s *MySQLTaskStore) Retry(taskID string) (Task, error) {
+	if s.db == nil {
+		return s.mem.Retry(taskID)
+	}
+	original, err := s.Get(taskID)
+	if err != nil {
+		return Task{}, err
+	}
+	if original.Status != TaskStatusFailed.String() && original.Status != TaskStatusCancelled.String() {
+		return Task{}, ErrTaskNotRetryable
+	}
+	retryID := common.NewID("task")
+	now := s.now()
+	_, err = s.db.Exec(`INSERT INTO tasks (task_id, task_type, status, idempotency_key, payload_json, created_at) VALUES (?, ?, 'pending', ?, ?, ?)`, retryID, original.TaskType, original.IdempotencyKey+":retry:"+retryID, jsonValue(original.Payload), now)
+	if err != nil {
+		return Task{}, err
+	}
+	return s.Get(retryID)
+}
+
 func (s *MySQLTaskStore) Claim(req ClaimTaskRequest) (Task, error) {
 	if s.db == nil {
 		return s.mem.Claim(req)
