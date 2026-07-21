@@ -177,7 +177,39 @@ func (s *MySQLTaskStore) Report(taskID string, req ReportTaskRequest) (Task, err
 		}
 		return task, ErrTaskAlreadyTerminal
 	}
-	return s.Get(taskID)
+	updated, err := s.Get(taskID)
+	if err == nil && req.Status == TaskStatusSucceeded.String() && req.Result != nil {
+		_ = s.projectResult(updated)
+	}
+	return updated, err
+}
+
+// projectResult records only verified, non-secret summaries in Cloud-owned business tables.
+func (s *MySQLTaskStore) projectResult(task Task) error {
+	if s.db == nil || task.Result == nil {
+		return nil
+	}
+	now := s.now()
+	switch task.TaskType {
+	case TaskTypeAccountCheck.String():
+		accountID, _ := task.Result["account_id"].(string)
+		status, _ := task.Result["check_result"].(string)
+		if accountID == "" || status == "" {
+			return nil
+		}
+		_, err := s.db.Exec(`UPDATE media_accounts SET login_status = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`, status, now, now, accountID)
+		return err
+	case TaskTypeProxyCheck.String():
+		proxyID, _ := task.Result["proxy_id"].(string)
+		connectivity, _ := task.Result["connectivity"].(string)
+		if proxyID == "" || connectivity == "" {
+			return nil
+		}
+		_, err := s.db.Exec(`UPDATE proxy_configs SET last_check_result = ?, last_check_at = ?, updated_at = ? WHERE id = ?`, connectivity, now, now, proxyID)
+		return err
+	default:
+		return nil
+	}
 }
 
 // CountByStatus returns task counts grouped by status from MySQL.
