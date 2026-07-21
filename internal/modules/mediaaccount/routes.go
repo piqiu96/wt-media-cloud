@@ -8,6 +8,7 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
@@ -39,7 +40,15 @@ type bindProfileRequest struct {
 	BrowserProfileID string `json:"browser_profile_id"`
 }
 
-func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service) {
+type TaskCreator interface {
+	Create(cloudagent.CreateTaskRequest) cloudagent.Task
+}
+
+func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, taskStores ...TaskCreator) {
+	var tasks TaskCreator
+	if len(taskStores) > 0 {
+		tasks = taskStores[0]
+	}
 	h.POST("/api/v1/media-accounts", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -129,6 +138,32 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			return
 		}
 		common.Success(c, account)
+	})
+
+	h.POST("/api/v1/media-accounts/:account_id/check", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if tasks == nil {
+			common.Failure(c, 503, 30006, "任务服务不可用", nil)
+			return
+		}
+		record, err := service.GetAccountRecord(actor, c.Param("account_id"))
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		if record.BrowserProfileID == "" {
+			writeMediaAccountError(c, ErrProfileUnavailable)
+			return
+		}
+		task := tasks.Create(cloudagent.CreateTaskRequest{
+			TaskType:       cloudagent.TaskTypeAccountCheck.String(),
+			IdempotencyKey: "account-check:" + actor.ID + ":" + record.ID + ":" + common.NewID("attempt"),
+			Payload:        map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform, "platform_account_id": record.PlatformAccountID},
+		})
+		common.Created(c, task)
 	})
 
 	// Cookie export: returns original and active cookie for the account.
