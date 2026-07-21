@@ -258,6 +258,21 @@ func (s *MySQLTaskStore) projectResult(task Task) error {
 		}
 		_, err := s.db.Exec(`UPDATE browser_profiles SET proxy_host = ?, proxy_port = ?, updated_at = ? WHERE id = ?`, host, int(port), now, cloudProfileID)
 		return err
+	case TaskTypeCookieRead.String(), TaskTypeCookieWrite.String():
+		accountID, _ := task.Result["account_id"].(string)
+		if accountID == "" {
+			return nil
+		}
+		status := "read"
+		if task.TaskType == TaskTypeCookieWrite.String() {
+			status = "active"
+		}
+		if status == "active" {
+			_, err := s.db.Exec(`UPDATE media_accounts SET cookie_status = ?, active_cookie_updated_at = ?, updated_at = ? WHERE id = ?`, status, now, now, accountID)
+			return err
+		}
+		_, err := s.db.Exec(`UPDATE media_accounts SET cookie_status = ?, updated_at = ? WHERE id = ?`, status, now, accountID)
+		return err
 	default:
 		return nil
 	}
