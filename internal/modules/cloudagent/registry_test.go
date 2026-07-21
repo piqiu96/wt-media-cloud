@@ -2,8 +2,11 @@ package cloudagent
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestRegistryRegisterAndHeartbeat(t *testing.T) {
@@ -62,5 +65,32 @@ func TestRegistryHeartbeatUnknownAgent(t *testing.T) {
 	_, err := registry.Heartbeat("missing", HeartbeatRequest{})
 	if !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestMySQLRegistryInvalidatedLocalSessionDrainsNode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	registry := NewMySQLRegistry(db)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) > 0 FROM local_agent_nodes n
+				 JOIN user_sessions s ON n.session_id = s.id
+				 WHERE n.agent_id = ? AND n.mode = 'local' AND s.invalidated_at IS NULL`)).
+		WithArgs("agent-local-1").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*) > 0"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE agent_nodes SET status = 'draining' WHERE agent_id = ?`)).
+		WithArgs("agent-local-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE local_agent_nodes SET status = 'replaced' WHERE agent_id = ?`)).
+		WithArgs("agent-local-1").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	_, err = registry.Heartbeat("agent-local-1", HeartbeatRequest{Status: AgentStatusOnline})
+	if !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("Heartbeat() error = %v, want ErrSessionInvalid", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
