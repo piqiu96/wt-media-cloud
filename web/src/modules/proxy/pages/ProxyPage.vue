@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue"
+import { onMounted, ref } from "vue"
 import { createProxyClient } from "../../../shared/api/proxy.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 
@@ -7,6 +7,7 @@ const proxyClient = createProxyClient()
 const proxies = ref([])
 const loading = ref(true)
 const error = ref("")
+const taskNotice = ref("")
 
 // Search
 const searchSupplier = ref("")
@@ -30,6 +31,8 @@ const quotaProxyId = ref("")
 const quotaPlatform = ref("douyin")
 const quotaMax = ref(1)
 const savingQuota = ref(false)
+
+onMounted(() => { loadProxies() })
 
 async function loadProxies() {
   error.value = ""
@@ -108,6 +111,15 @@ function openDetail(proxy) {
   detailVisible.value = true
 }
 
+async function triggerCheck(proxy) {
+  try {
+    const task = await proxyClient.triggerCheck(proxy.id)
+    taskNotice.value = `已创建代理检测任务（${task.task_id || "待执行"}），完成后刷新结果。`
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
 function openQuota(proxy) {
   quotaProxyId.value = proxy.id
   quotaPlatform.value = "douyin"
@@ -147,6 +159,7 @@ function formatTime(t) {
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
 
     <!-- 搜索/过滤栏 -->
     <t-card class="search-bar" :bordered="true">
@@ -221,6 +234,7 @@ function formatTime(t) {
           ]" @click="(v) => updateStatus(row, v)">
             <t-button size="small" variant="text">状态</t-button>
           </t-dropdown>
+          <t-button size="small" variant="text" @click="triggerCheck(row)">检测</t-button>
           <t-button size="small" variant="text" @click="openQuota(row)">配额</t-button>
           <t-button size="small" variant="text" theme="danger" @click="deleteProxy(row)">删除</t-button>
         </t-space>
