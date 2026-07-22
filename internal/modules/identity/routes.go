@@ -282,8 +282,12 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		common.NoContent(c)
 	})
 	h.GET("/api/v1/audit-logs", func(ctx context.Context, c *hertzapp.RequestContext) {
-		_, ok := AuthenticateRequest(c, service)
+		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
+			return
+		}
+		if actor.Role != RoleAdmin {
+			writeIdentityError(c, ErrForbidden)
 			return
 		}
 		logs, err := service.ListAuditLogs(50)

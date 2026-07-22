@@ -14,4 +14,20 @@ describe('UsersPage product surface', () => {
     expect(source).toContain("value=\"admin\"")
     expect(source).not.toContain('technician')
   })
+
+  it('clears every plaintext password field when the one-time result closes', () => {
+    const clearFunction = source.match(/function clearOneTimePassword\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
+    expect(clearFunction).toContain("oneTimePassword.value = ''")
+    expect(clearFunction).toContain("userForm.value.password = ''")
+    expect(clearFunction).toContain("newPassword.value = ''")
+  })
+
+  it('declares one-time passwords as readable response fields', () => {
+    const businessSchema = readFileSync(new URL('../../../../../../contracts/business-schemas/v1/identity.yaml', import.meta.url), 'utf8')
+    const openapiSchema = readFileSync(new URL('../../../../../../contracts/cloud-api/v1/identity.openapi.yaml', import.meta.url), 'utf8')
+    expect(businessSchema.match(/one_time_password: \{[^}]*\}/)?.[0]).not.toContain('writeOnly')
+    for (const declaration of openapiSchema.match(/one_time_password: \{[^}]*\}/g) || []) {
+      expect(declaration).not.toContain('writeOnly')
+    }
+  })
 })

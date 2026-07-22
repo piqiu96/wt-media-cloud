@@ -159,7 +159,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Failure(c, 503, 30006, "任务服务不可用", nil)
 			return
 		}
-		record, err := service.GetAccountRecord(actor, c.Param("account_id"))
+		record, err := service.GetOwnedAccountRecord(actor, c.Param("account_id"))
 		if err != nil {
 			writeMediaAccountError(c, err)
 			return
@@ -185,7 +185,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Failure(c, 503, 30006, "任务服务不可用", nil)
 			return
 		}
-		record, err := service.GetAccountRecord(actor, c.Param("account_id"))
+		record, err := service.GetOwnedAccountRecord(actor, c.Param("account_id"))
 		if err != nil {
 			writeMediaAccountError(c, err)
 			return

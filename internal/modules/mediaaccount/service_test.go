@@ -76,6 +76,52 @@ func TestServiceAdminCanAssignGlobalAccount(t *testing.T) {
 	}
 }
 
+func TestServiceSeniorCanCreateAndManageSameTeamGameAccount(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identity.TeamID(10)
+	users := fakeUserResolver{users: map[identity.UserID]identity.PublicUser{
+		2: {ID: 2, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a"}},
+	}}
+	service := NewService(store, WithUserResolver(users))
+	actor := mediaActor(1, teamID, identity.RoleSeniorOperator)
+
+	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: 2, GameID: "game-a", Platform: PlatformDouyin})
+	if err != nil {
+		t.Fatalf("CreateAccount(same team/game) error=%v", err)
+	}
+	if _, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{BusinessStatus: BusinessDisabled}); err != nil {
+		t.Fatalf("UpdateAccount(same team/game) error=%v", err)
+	}
+}
+
+func TestFullCookieRecordRejectsSeniorForAnotherUsersAccount(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identity.TeamID(10)
+	store.records["account-1"] = AccountRecord{
+		Account:        Account{ID: "account-1", UserID: 2, TeamID: &teamID, GameID: "game-a"},
+		OriginalCookie: "secret-cookie",
+	}
+	service := NewService(store)
+	senior := mediaActor(1, teamID, identity.RoleSeniorOperator)
+	admin := identity.PublicUser{ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
+
+	if _, err := service.GetAccountRecord(senior, "account-1"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("GetAccountRecord(senior) error=%v, want ErrForbidden", err)
+	}
+	if record, err := service.GetAccountRecord(admin, "account-1"); err != nil || record.OriginalCookie != "secret-cookie" {
+		t.Fatalf("GetAccountRecord(admin) record=%+v error=%v", record, err)
+	}
+	owner := mediaActor(2, teamID, identity.RoleOperator)
+	if _, err := service.GetOwnedAccountRecord(owner, "account-1"); err != nil {
+		t.Fatalf("GetOwnedAccountRecord(owner) error=%v", err)
+	}
+	for name, actor := range map[string]identity.PublicUser{"senior": senior, "admin": admin} {
+		if _, err := service.GetOwnedAccountRecord(actor, "account-1"); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("GetOwnedAccountRecord(%s) error=%v, want ErrForbidden", name, err)
+		}
+	}
+}
+
 func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)

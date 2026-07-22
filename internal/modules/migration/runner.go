@@ -67,6 +67,10 @@ func Apply(ctx context.Context, db *sql.DB, migrations []Migration) ([]AppliedMi
 			return applied, err
 		}
 		applied = append(applied, AppliedMigration{Version: migration.Version, Name: migration.Name})
+		appliedVersions, err = appliedVersionSet(ctx, db)
+		if err != nil {
+			return applied, fmt.Errorf("refresh applied migrations after %s: %w", migration.Version, err)
+		}
 	}
 	return applied, nil
 }

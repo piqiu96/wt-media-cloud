@@ -140,7 +140,7 @@ func TestNonAdminCannotUseUserAndTeamAdministrationRoutes(t *testing.T) {
 	login := performJSON(engine, "POST", "/api/v1/auth/login", `{"username":"operator","password":"a-long-operator-password"}`)
 	cookie := string(login.Result().Header.Peek("Set-Cookie"))
 
-	for _, path := range []string{"/api/v1/users", "/api/v1/operation-teams"} {
+	for _, path := range []string{"/api/v1/users", "/api/v1/operation-teams", "/api/v1/audit-logs"} {
 		response := ut.PerformRequest(engine.Engine, "GET", path, nil, ut.Header{Key: "Cookie", Value: cookie})
 		if response.Result().StatusCode() != consts.StatusForbidden {
 			t.Fatalf("GET %s status=%d body=%s", path, response.Result().StatusCode(), response.Result().Body())

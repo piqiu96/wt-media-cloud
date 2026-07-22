@@ -185,7 +185,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	}
 	teamID := actor.TeamID
 	if userID != actor.ID {
-		if actor.Role != identity.RoleAdmin || s.users == nil {
+		if s.users == nil {
 			return Account{}, ErrForbidden
 		}
 		target, found, err := s.users.ResolveUser(userID)
@@ -231,7 +231,27 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 // GetAccountRecord returns the full account record including cookies.
 // Intended only for trusted operations like cookie export.
 func (s *Service) GetAccountRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
-	return s.authorizedRecord(actor, accountID)
+	record, err := s.authorizedRecord(actor, accountID)
+	if err != nil {
+		return AccountRecord{}, err
+	}
+	if actor.ID != record.UserID && actor.Role != identity.RoleAdmin {
+		return AccountRecord{}, ErrForbidden
+	}
+	return record, nil
+}
+
+// GetOwnedAccountRecord authorizes a local sensitive operation. Even admins
+// and senior operators must not operate another user's Desktop resources.
+func (s *Service) GetOwnedAccountRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
+	record, err := s.authorizedRecord(actor, accountID)
+	if err != nil {
+		return AccountRecord{}, err
+	}
+	if actor.ID != record.UserID {
+		return AccountRecord{}, ErrForbidden
+	}
+	return record, nil
 }
 
 func (s *Service) GetAccount(actor identity.PublicUser, accountID string) (Account, error) {

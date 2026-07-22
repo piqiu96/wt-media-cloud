@@ -365,3 +365,135 @@ func TestPublicUserCanAccessUsesRoleTeamAndGameIntersection(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicUserCanAccessOwnedResourceUsesRoleAndTeamOnly(t *testing.T) {
+	teamA := TeamID(10)
+	teamB := TeamID(20)
+	admin := PublicUser{ID: 1, Role: RoleAdmin, Status: UserStatusEnabled}
+	senior := PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA}
+	operator := PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA}
+
+	if !admin.CanAccessOwnedResource(99, &teamB) {
+		t.Fatal("admin cannot access non-game resource")
+	}
+	if !senior.CanAccessOwnedResource(99, &teamA) || senior.CanAccessOwnedResource(99, &teamB) {
+		t.Fatal("senior non-game resource scope is not limited to own team")
+	}
+	if !operator.CanAccessOwnedResource(operator.ID, &teamA) || operator.CanAccessOwnedResource(99, &teamA) {
+		t.Fatal("operator non-game resource scope is not limited to self")
+	}
+}
+
+func TestAccessUpdatesAuditTeamAndGames(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	teamA, _ := service.CreateTeam(admin.ID, "旧组")
+	teamB, _ := service.CreateTeam(admin.ID, "新组")
+	operator, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &teamA.ID, GameIDs: []string{"game-a", "game-b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &teamB.ID, []string{"game-c", "game-b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var createSummary, updateSummary map[string]string
+	for _, event := range store.AuditEvents() {
+		switch event.Action {
+		case "user.create":
+			createSummary = event.Summary
+		case "user.access.update":
+			updateSummary = event.Summary
+		}
+	}
+	for name, summary := range map[string]map[string]string{"create": createSummary, "update": updateSummary} {
+		if summary["team_id"] == "" || summary["game_ids"] == "" {
+			t.Fatalf("%s audit does not trace team and game scope: %#v", name, summary)
+		}
+	}
+}
+
+type failingIdentityStore struct {
+	Store
+	failAudit      bool
+	failInvalidate bool
+}
+
+func (s *failingIdentityStore) AppendAudit(event AuditEvent) error {
+	if s.failAudit {
+		return errors.New("audit unavailable")
+	}
+	return s.Store.AppendAudit(event)
+}
+
+func (s *failingIdentityStore) InvalidateUserSessions(userID UserID, at time.Time) error {
+	if s.failInvalidate {
+		return errors.New("session invalidation unavailable")
+	}
+	return s.Store.InvalidateUserSessions(userID, at)
+}
+
+func (s *failingIdentityStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent) error {
+	if s.failAudit {
+		return errors.New("audit unavailable")
+	}
+	if s.failInvalidate {
+		return errors.New("session invalidation unavailable")
+	}
+	return s.Store.UpdateUserAndInvalidateSessions(user, event)
+}
+
+func TestUpdateUserAccessFailureDoesNotLeaveChangedAccessWithLiveSession(t *testing.T) {
+	base := NewMemoryStore()
+	store := &failingIdentityStore{Store: base}
+	service := NewService(store, WithTokenGenerator(func() string { return "operator-session" }))
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	oldTeam, _ := service.CreateTeam(admin.ID, "旧组")
+	newTeam, _ := service.CreateTeam(admin.ID, "新组")
+	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+	})
+	login, _ := service.Login("operator-a", "a-long-operator-password")
+	store.failAudit = true
+
+	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"}); err == nil {
+		t.Fatal("UpdateUserAccess() error = nil")
+	}
+	stored, _, _ := base.FindUser(operator.ID)
+	if stored.Role != RoleOperator || stored.TeamID == nil || *stored.TeamID != oldTeam.ID || len(stored.GameIDs) != 1 || stored.GameIDs[0] != "game-a" {
+		t.Fatalf("failed access update changed persisted scope: %+v", stored)
+	}
+	if _, err := service.Authenticate(login.Token); err != nil {
+		t.Fatalf("failed access update invalidated unchanged session: %v", err)
+	}
+}
+
+func TestResetPasswordFailureDoesNotLeaveNewPasswordWithLiveOldSession(t *testing.T) {
+	base := NewMemoryStore()
+	store := &failingIdentityStore{Store: base}
+	service := NewService(store, WithTokenGenerator(func() string { return "operator-session" }))
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team, _ := service.CreateTeam(admin.ID, "密码组")
+	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{"game-a"},
+	})
+	login, _ := service.Login("operator-a", "a-long-operator-password")
+	store.failInvalidate = true
+
+	if err := service.ResetPassword(admin.ID, operator.ID, "a-reset-operator-password"); err == nil {
+		t.Fatal("ResetPassword() error = nil")
+	}
+	stored, _, _ := base.FindUser(operator.ID)
+	if service.passwords.Compare([]byte(stored.PasswordHash), []byte("a-long-operator-password")) != nil {
+		t.Fatal("failed reset changed persisted password")
+	}
+	if _, err := service.Authenticate(login.Token); err != nil {
+		t.Fatalf("failed reset invalidated unchanged session: %v", err)
+	}
+}

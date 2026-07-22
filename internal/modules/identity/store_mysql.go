@@ -124,6 +124,31 @@ func (s *MySQLStore) UpdateUser(user User) error {
 	}
 	defer tx.Rollback()
 
+	if err := updateUserTx(tx, user); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := updateUserTx(tx, user); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND invalidated_at IS NULL`, user.UpdatedAt, user.ID); err != nil {
+		return err
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateUserTx(tx *sql.Tx, user User) error {
 	result, err := tx.Exec(
 		`UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, team_id = ?, updated_at = ? WHERE id = ?`,
 		user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, user.UpdatedAt, user.ID,
@@ -152,7 +177,7 @@ func (s *MySQLStore) UpdateUser(user User) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *MySQLStore) DeleteUser(userID UserID) error {
@@ -255,6 +280,9 @@ func (s *MySQLStore) UpdateTeam(team OperationTeam) error {
 func (s *MySQLStore) DeleteTeam(teamID TeamID) error {
 	result, err := s.db.Exec(`DELETE FROM operation_teams WHERE id = ?`, teamID)
 	if err != nil {
+		if foreignKeyReferenced(err) {
+			return ErrTeamInUse
+		}
 		return err
 	}
 	rows, err := result.RowsAffected()
@@ -272,8 +300,9 @@ func (s *MySQLStore) TeamHasReferences(teamID TeamID) (bool, error) {
 	err := s.db.QueryRow(`SELECT
         (SELECT COUNT(*) FROM users WHERE team_id = ?) +
         (SELECT COUNT(*) FROM media_accounts WHERE team_id = ?) +
-        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?)`,
-		teamID, teamID, teamID,
+        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM profile_sync_scans WHERE team_id = ?)`,
+		teamID, teamID, teamID, teamID,
 	).Scan(&count)
 	return count > 0, err
 }
@@ -315,11 +344,19 @@ func (s *MySQLStore) InvalidateUserSessions(userID UserID, at time.Time) error {
 }
 
 func (s *MySQLStore) AppendAudit(event AuditEvent) error {
+	return appendAuditTx(s.db, event)
+}
+
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func appendAuditTx(exec sqlExecer, event AuditEvent) error {
 	summary, err := json.Marshal(event.Summary)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(
+	_, err = exec.Exec(
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), ?, ?)`,
 		event.ID, event.ActorUserID, event.Action, event.TargetType, event.TargetID, summary, event.CreatedAt,
 	)
@@ -383,4 +420,9 @@ func (s *MySQLStore) ListAuditLogs(limit int) ([]AuditEvent, error) {
 func duplicateKey(err error) bool {
 	var mysqlErr *mysqlDriver.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
+}
+
+func foreignKeyReferenced(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1451
 }

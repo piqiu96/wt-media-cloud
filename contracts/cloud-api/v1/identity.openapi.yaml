@@ -278,7 +278,7 @@ components:
           required: [user, one_time_password]
           properties:
             user: {$ref: '#/components/schemas/PublicUser'}
-            one_time_password: {type: string, writeOnly: true}
+            one_time_password: {type: string}
     PasswordResetResponse:
       type: object
       required: [data]
@@ -287,7 +287,7 @@ components:
           type: object
           required: [one_time_password]
           properties:
-            one_time_password: {type: string, writeOnly: true}
+            one_time_password: {type: string}
     UserListResponse:
       type: object
       required: [data]

@@ -27,4 +27,4 @@ schemas:
     type: object
     required: [one_time_password]
     properties:
-      one_time_password: {type: string, writeOnly: true}
+      one_time_password: {type: string}

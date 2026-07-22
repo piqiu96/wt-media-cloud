@@ -1,11 +1,13 @@
 package identity
 
 import (
+	"errors"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
 func TestMySQLStoreCreateUserPersistsGameScopesAtomically(t *testing.T) {
@@ -63,5 +65,82 @@ func TestMySQLStoreInvalidatesPriorSessions(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
+func TestMySQLStoreTeamHasReferencesIncludesHistoricalProfileScans(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	teamID := TeamID(17)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT
+        (SELECT COUNT(*) FROM users WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM media_accounts WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM profile_sync_scans WHERE team_id = ?)`)).
+		WithArgs(teamID, teamID, teamID, teamID).
+		WillReturnRows(sqlmock.NewRows([]string{"references"}).AddRow(1))
+
+	referenced, err := NewMySQLStore(db).TeamHasReferences(teamID)
+	if err != nil {
+		t.Fatalf("TeamHasReferences() error = %v", err)
+	}
+	if !referenced {
+		t.Fatal("TeamHasReferences() = false, want true for historical profile scan")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
+func TestMySQLStoreRollsBackUserAndSessionsWhenAuditFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 22, 15, 0, 0, 0, time.UTC)
+	teamID := TeamID(8)
+	user := User{ID: 2, Username: "operator", PasswordHash: "hash", Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a"}, UpdatedAt: now}
+	event := AuditEvent{ID: "audit-1", ActorUserID: 1, Action: "user.access.update", TargetType: "user", TargetID: "2", Summary: map[string]string{"team_id": "8", "game_ids": "game-a"}, CreatedAt: now}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, team_id = ?, updated_at = ? WHERE id = ?`)).
+		WithArgs(user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, user.UpdatedAt, user.ID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM user_game_scopes WHERE user_id = ?`)).
+		WithArgs(user.ID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO user_game_scopes (user_id, game_id, created_at) VALUES (?, ?, ?)`)).
+		WithArgs(user.ID, "game-a", user.UpdatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND invalidated_at IS NULL`)).
+		WithArgs(user.UpdatedAt, user.ID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO audit_logs`)).
+		WillReturnError(errors.New("audit unavailable"))
+	mock.ExpectRollback()
+
+	if err := NewMySQLStore(db).UpdateUserAndInvalidateSessions(user, event); err == nil {
+		t.Fatal("UpdateUserAndInvalidateSessions() error = nil")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
+func TestMySQLStoreMapsTeamForeignKeyReferenceToTeamInUse(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM operation_teams WHERE id = ?`)).
+		WithArgs(TeamID(8)).
+		WillReturnError(&mysqlDriver.MySQLError{Number: 1451, Message: "referenced"})
+
+	if err := NewMySQLStore(db).DeleteTeam(TeamID(8)); !errors.Is(err, ErrTeamInUse) {
+		t.Fatalf("DeleteTeam() error=%v, want ErrTeamInUse", err)
 	}
 }

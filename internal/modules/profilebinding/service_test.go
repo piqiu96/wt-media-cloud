@@ -65,6 +65,42 @@ func TestSubmitScanRejectsExistingBindingMismatch(t *testing.T) {
 	}
 }
 
+func TestSeniorCanManageSameTeamProfileCloudRecordButNotLocalOperation(t *testing.T) {
+	store := newMemoryStore()
+	teamA := identity.TeamID(10)
+	teamB := identity.TeamID(20)
+	store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA, LocalStatus: ProfileActive}
+	store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB, LocalStatus: ProfileActive}
+	service := newTestService(store)
+	actor := identity.PublicUser{ID: 1, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &teamA}
+
+	profiles, err := service.ListProfiles(actor, 2)
+	if err != nil || len(profiles) != 1 || profiles[0].ID != "same-team" {
+		t.Fatalf("ListProfiles(same team) profiles=%+v error=%v", profiles, err)
+	}
+	if err := service.DeleteProfile(actor, "same-team"); err != nil {
+		t.Fatalf("DeleteProfile(same team) error=%v", err)
+	}
+	if _, err := service.GetActiveProfile(actor, "other-team"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("GetActiveProfile(other owner) error=%v, want ErrForbidden", err)
+	}
+}
+
+func TestSeniorCanReviewSameTeamScanButCannotConfirmIt(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identity.TeamID(10)
+	store.scans["scan-same-team"] = ProfileScan{ID: "scan-same-team", UserID: 2, TeamID: &teamID, Status: ScanReady, ExpiresAt: time.Now().Add(time.Hour)}
+	service := newTestService(store)
+	actor := identity.PublicUser{ID: 1, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &teamID}
+
+	if _, err := service.GetScan(actor, "scan-same-team"); err != nil {
+		t.Fatalf("GetScan(same team) error=%v", err)
+	}
+	if _, err := service.ConfirmScan(actor, "scan-same-team"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ConfirmScan(other owner) error=%v, want ErrForbidden", err)
+	}
+}
+
 func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
@@ -214,6 +250,11 @@ func (s *memoryStore) FindBinding(userID identity.UserID) (BitAccountBinding, bo
 
 func (s *memoryStore) ListProfiles(userID identity.UserID) ([]BrowserProfile, error) {
 	return s.profileList(userID), nil
+}
+
+func (s *memoryStore) GetProfile(profileID string) (BrowserProfile, bool, error) {
+	profile, found := s.profiles[profileID]
+	return profile, found, nil
 }
 
 func (s *memoryStore) CreateScan(scan ProfileScan) error {

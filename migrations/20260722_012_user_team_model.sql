@@ -18,6 +18,8 @@ ALTER TABLE users
 
 UPDATE users SET role = 'admin' WHERE role = 'technician';
 
+DELETE scopes FROM user_game_scopes scopes JOIN users user ON user.id = scopes.user_id WHERE user.role = 'admin';
+
 UPDATE users
 SET team_id = (SELECT id FROM operation_teams WHERE name = '迁移默认分组')
 WHERE role IN ('operator', 'senior_operator');
@@ -66,6 +68,7 @@ SELECT IF(
     AND (SELECT COUNT(*) FROM users WHERE role IN ('operator', 'senior_operator') AND team_id IS NULL) = 0
     AND (SELECT COUNT(*) FROM user_game_scopes WHERE user_uid IS NULL) = 0
     AND (SELECT COUNT(*) FROM user_sessions WHERE user_uid IS NULL) = 0
+    AND (SELECT COUNT(*) FROM audit_logs WHERE actor_user_id IS NOT NULL AND actor_user_uid IS NULL) = 0
     AND (SELECT COUNT(*) FROM media_accounts WHERE user_uid IS NULL) = 0
     AND (SELECT COUNT(*) FROM media_account_tags WHERE user_uid IS NULL) = 0
     AND (SELECT COUNT(*) FROM browser_profiles WHERE user_uid IS NULL) = 0

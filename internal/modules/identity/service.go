@@ -107,6 +107,21 @@ func (u PublicUser) CanAccess(ownerID UserID, teamID *TeamID, gameID string) boo
 	return u.Role == RoleOperator && u.ID == ownerID
 }
 
+// CanAccessOwnedResource applies the shared scope rule for resources, such as
+// Browser Profiles, that do not belong to a game.
+func (u PublicUser) CanAccessOwnedResource(ownerID UserID, teamID *TeamID) bool {
+	if u.Status != UserStatusEnabled {
+		return false
+	}
+	if u.Role == RoleAdmin {
+		return true
+	}
+	if u.Role == RoleSeniorOperator {
+		return u.TeamID != nil && teamID != nil && *u.TeamID == *teamID
+	}
+	return u.Role == RoleOperator && u.ID == ownerID
+}
+
 // AuthContext exposes server-side session identity to trusted Cloud modules
 // without returning the raw session token to an API consumer.
 type AuthContext struct {
@@ -139,6 +154,7 @@ type Store interface {
 	FindUserByUsername(username string) (User, bool, error)
 	ListUsers() ([]User, error)
 	UpdateUser(User) error
+	UpdateUserAndInvalidateSessions(User, AuditEvent) error
 	DeleteUser(UserID) error
 	CreateTeam(OperationTeam) (TeamID, error)
 	FindTeam(TeamID) (OperationTeam, bool, error)
@@ -230,7 +246,9 @@ func (s *Service) CreateUser(actorID UserID, input CreateUserInput) (PublicUser,
 	if err != nil {
 		return PublicUser{}, err
 	}
-	if err := s.audit(actor.ID, "user.create", "user", user.ID, map[string]string{"role": string(user.Role), "username": user.Username}); err != nil {
+	if err := s.audit(actor.ID, "user.create", "user", user.ID, map[string]string{
+		"role": string(user.Role), "username": user.Username, "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
+	}); err != nil {
 		return PublicUser{}, err
 	}
 	return user, nil
@@ -402,10 +420,11 @@ func (s *Service) ChangeOwnPassword(userID UserID, currentPassword, newPassword 
 	if !ok || user.Status != UserStatusEnabled || s.passwords.Compare([]byte(user.PasswordHash), []byte(currentPassword)) != nil {
 		return ErrAuthenticationFailed
 	}
-	if err := s.updatePassword(user, newPassword); err != nil {
+	updated, err := s.passwordUpdatedUser(user, newPassword)
+	if err != nil {
 		return err
 	}
-	return s.audit(user.ID, "user.password.change", "user", user.ID, map[string]string{"result": "changed"})
+	return s.store.UpdateUserAndInvalidateSessions(updated, s.newAuditEvent(user.ID, "user.password.change", "user", user.ID, map[string]string{"result": "changed"}))
 }
 
 func (s *Service) ResetPassword(actorID, userID UserID, newPassword string) error {
@@ -423,26 +442,24 @@ func (s *Service) ResetPassword(actorID, userID UserID, newPassword string) erro
 	if !ok {
 		return ErrInvalidInput
 	}
-	if err := s.updatePassword(user, newPassword); err != nil {
-		return err
-	}
-	return s.audit(actor.ID, "user.password.reset", "user", user.ID, map[string]string{"result": "reset"})
-}
-
-func (s *Service) updatePassword(user User, newPassword string) error {
-	if len(newPassword) < 12 {
-		return ErrInvalidInput
-	}
-	hash, err := s.passwords.Hash([]byte(newPassword), bcrypt.DefaultCost)
+	updated, err := s.passwordUpdatedUser(user, newPassword)
 	if err != nil {
 		return err
 	}
+	return s.store.UpdateUserAndInvalidateSessions(updated, s.newAuditEvent(actor.ID, "user.password.reset", "user", user.ID, map[string]string{"result": "reset"}))
+}
+
+func (s *Service) passwordUpdatedUser(user User, newPassword string) (User, error) {
+	if len(newPassword) < 12 {
+		return User{}, ErrInvalidInput
+	}
+	hash, err := s.passwords.Hash([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
 	user.PasswordHash = string(hash)
 	user.UpdatedAt = s.now()
-	if err := s.store.UpdateUser(user); err != nil {
-		return err
-	}
-	return s.store.InvalidateUserSessions(user.ID, user.UpdatedAt)
+	return user, nil
 }
 
 func (s *Service) ListUsers() ([]PublicUser, error) {
@@ -603,6 +620,7 @@ func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *Te
 		return PublicUser{}, ErrInvalidInput
 	}
 	normalizedGameIDs := normalizeGameIDs(gameIDs)
+	teamName := ""
 	if role == RoleAdmin {
 		if teamID != nil || len(normalizedGameIDs) != 0 {
 			return PublicUser{}, ErrInvalidInput
@@ -611,31 +629,26 @@ func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *Te
 		if teamID == nil || *teamID <= 0 || len(normalizedGameIDs) == 0 {
 			return PublicUser{}, ErrInvalidInput
 		}
-		if _, found, err := s.store.FindTeam(*teamID); err != nil {
+		if team, found, err := s.store.FindTeam(*teamID); err != nil {
 			return PublicUser{}, err
 		} else if !found {
 			return PublicUser{}, ErrInvalidInput
+		} else {
+			teamName = team.Name
 		}
 	}
 	user.Role = role
 	user.TeamID = cloneTeamID(teamID)
 	user.GameIDs = normalizedGameIDs
 	user.UpdatedAt = s.now()
-	if err := s.store.UpdateUser(user); err != nil {
-		return PublicUser{}, err
-	}
-	if err := s.audit(actor.ID, "user.access.update", "user", user.ID, map[string]string{"role": string(role)}); err != nil {
-		return PublicUser{}, err
-	}
-	if err := s.store.InvalidateUserSessions(user.ID, user.UpdatedAt); err != nil {
+	event := s.newAuditEvent(actor.ID, "user.access.update", "user", user.ID, map[string]string{
+		"role": string(role), "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
+	})
+	if err := s.store.UpdateUserAndInvalidateSessions(user, event); err != nil {
 		return PublicUser{}, err
 	}
 	if user.TeamID != nil {
-		team, _, err := s.store.FindTeam(*user.TeamID)
-		if err != nil {
-			return PublicUser{}, err
-		}
-		user.TeamName = team.Name
+		user.TeamName = teamName
 	} else {
 		user.TeamName = ""
 	}
@@ -643,7 +656,11 @@ func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *Te
 }
 
 func (s *Service) audit(actorID UserID, action, targetType string, targetID UserID, summary map[string]string) error {
-	return s.store.AppendAudit(AuditEvent{
+	return s.store.AppendAudit(s.newAuditEvent(actorID, action, targetType, targetID, summary))
+}
+
+func (s *Service) newAuditEvent(actorID UserID, action, targetType string, targetID UserID, summary map[string]string) AuditEvent {
+	return AuditEvent{
 		ID:          s.newID("audit"),
 		ActorUserID: actorID,
 		Action:      action,
@@ -651,7 +668,7 @@ func (s *Service) audit(actorID UserID, action, targetType string, targetID User
 		TargetID:    strconv.FormatInt(int64(targetID), 10),
 		Summary:     summary,
 		CreatedAt:   s.now(),
-	})
+	}
 }
 
 func (s *Service) CanAccessGame(userID UserID, gameID string) bool {
@@ -691,6 +708,13 @@ func cloneTeamID(value *TeamID) *TeamID {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func formatTeamID(value *TeamID) string {
+	if value == nil {
+		return "none"
+	}
+	return strconv.FormatInt(int64(*value), 10)
 }
 
 func validStatus(status UserStatus) bool {
@@ -818,6 +842,33 @@ func (s *memoryStore) UpdateUser(user User) error {
 		return ErrInvalidInput
 	}
 	s.users[user.ID] = cloneUser(user)
+	return nil
+}
+
+func (s *memoryStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.users[user.ID]
+	if !ok {
+		return ErrInvalidInput
+	}
+	if current.Username != user.Username {
+		if _, exists := s.byName[user.Username]; exists {
+			return ErrUsernameTaken
+		}
+		delete(s.byName, current.Username)
+		s.byName[user.Username] = user.ID
+	}
+	user.GameIDs = append([]string(nil), user.GameIDs...)
+	s.users[user.ID] = user
+	for hash, session := range s.sessions {
+		if session.UserID == user.ID && session.InvalidAt == nil {
+			at := user.UpdatedAt
+			session.InvalidAt = &at
+			s.sessions[hash] = session
+		}
+	}
+	s.auditLogs = append(s.auditLogs, event)
 	return nil
 }
 

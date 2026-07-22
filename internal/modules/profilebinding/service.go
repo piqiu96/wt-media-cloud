@@ -128,6 +128,7 @@ type ProfileScan struct {
 type Store interface {
 	FindBinding(userID identity.UserID) (BitAccountBinding, bool, error)
 	ListProfiles(userID identity.UserID) ([]BrowserProfile, error)
+	GetProfile(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
@@ -266,7 +267,7 @@ func (s *Service) GetScan(actor identity.PublicUser, scanID string) (ProfileScan
 	if !found {
 		return ProfileScan{}, ErrScanNotFound
 	}
-	if !validActor(actor) || scan.UserID != actor.ID {
+	if !validActor(actor) || !actor.CanAccessOwnedResource(scan.UserID, scan.TeamID) {
 		return ProfileScan{}, ErrForbidden
 	}
 	return scan, nil
@@ -276,6 +277,9 @@ func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (Profile
 	scan, err := s.GetScan(actor, scanID)
 	if err != nil {
 		return ProfileScan{}, err
+	}
+	if scan.UserID != actor.ID {
+		return ProfileScan{}, ErrForbidden
 	}
 	if scan.Status != ScanReady {
 		return ProfileScan{}, ErrScanNotReady
@@ -318,8 +322,11 @@ func (s *Service) RejectScan(actor identity.PublicUser, scanID string) error {
 	if err != nil {
 		return err
 	}
-	if !found || scan.UserID != actor.ID {
+	if !found {
 		return ErrScanNotFound
+	}
+	if scan.UserID != actor.ID {
+		return ErrForbidden
 	}
 	if scan.Status != ScanReady {
 		return ErrScanNotReady
@@ -340,12 +347,9 @@ func (s *Service) ListProfiles(actor identity.PublicUser, userID identity.UserID
 	}
 	visible := profiles[:0]
 	for _, profile := range profiles {
-		if actor.Role == identity.RoleAdmin || actor.ID == profile.UserID || (actor.Role == identity.RoleSeniorOperator && actor.TeamID != nil && profile.TeamID != nil && *actor.TeamID == *profile.TeamID) {
+		if actor.CanAccessOwnedResource(profile.UserID, profile.TeamID) {
 			visible = append(visible, profile)
 		}
-	}
-	if userID != actor.ID && actor.Role == identity.RoleOperator {
-		return nil, ErrForbidden
 	}
 	return visible, nil
 }
@@ -354,40 +358,37 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 	if !validActor(actor) {
 		return ErrForbidden
 	}
-	// Only an admin or the owning user can delete a profile.
-	profiles, err := s.store.ListProfiles(actor.ID)
+	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
 	if err != nil {
 		return err
 	}
-	if actor.Role != identity.RoleAdmin {
-		found := false
-		for _, p := range profiles {
-			if p.ID == profileID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return ErrForbidden
-		}
+	if !found {
+		return ErrProfileNotFound
+	}
+	if !actor.CanAccessOwnedResource(profile.UserID, profile.TeamID) {
+		return ErrForbidden
 	}
 	return s.store.DeleteProfile(profileID)
 }
 
 func (s *Service) GetActiveProfile(actor identity.PublicUser, profileID string) (BrowserProfile, error) {
-	profiles, err := s.ListProfiles(actor, 0)
+	if !validActor(actor) {
+		return BrowserProfile{}, ErrForbidden
+	}
+	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
 	if err != nil {
 		return BrowserProfile{}, err
 	}
-	for _, profile := range profiles {
-		if profile.ID == profileID {
-			if profile.LocalStatus != ProfileActive {
-				return BrowserProfile{}, ErrProfileInactive
-			}
-			return profile, nil
-		}
+	if !found {
+		return BrowserProfile{}, ErrProfileNotFound
 	}
-	return BrowserProfile{}, ErrProfileNotFound
+	if profile.UserID != actor.ID {
+		return BrowserProfile{}, ErrForbidden
+	}
+	if profile.LocalStatus != ProfileActive {
+		return BrowserProfile{}, ErrProfileInactive
+	}
+	return profile, nil
 }
 
 func validActor(actor identity.PublicUser) bool {

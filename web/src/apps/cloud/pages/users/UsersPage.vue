@@ -162,6 +162,8 @@ function showOneTimePassword(password) {
 
 function clearOneTimePassword() {
   oneTimePassword.value = ''
+  userForm.value.password = ''
+  newPassword.value = ''
 }
 
 async function copyPassword() {

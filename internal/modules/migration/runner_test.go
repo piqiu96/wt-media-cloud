@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -29,6 +30,71 @@ func TestLoadDirSortsSQLMigrations(t *testing.T) {
 	}
 }
 
+func TestApplyRefreshesVersionsRecordedByEarlierMigration(t *testing.T) {
+	db, mock, closeDB := newMockDB(t)
+	defer closeDB()
+
+	mock.ExpectExec(regexp.QuoteMeta("CREATE TABLE IF NOT EXISTS schema_migrations")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT version FROM schema_migrations")).
+		WillReturnRows(sqlmock.NewRows([]string{"version"}))
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT IGNORE INTO schema_migrations")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO schema_migrations")).
+		WithArgs("000_bootstrap_existing", "existing").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT version FROM schema_migrations")).
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).
+			AddRow("000_bootstrap_existing").
+			AddRow("20260714_001_identity"))
+
+	applied, err := Apply(context.Background(), db, []Migration{
+		{Version: "000_bootstrap_existing", Name: "existing", SQL: "INSERT IGNORE INTO schema_migrations (version) VALUES ('20260714_001_identity');"},
+		{Version: "20260714_001_identity", Name: "identity", SQL: "CREATE TABLE users (id INT);"},
+	})
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if len(applied) != 1 || applied[0].Version != "000_bootstrap_existing" {
+		t.Fatalf("Apply() applied = %#v, want bootstrap only", applied)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestBootstrapRecordsHistoricalVersionOnlyWhenItsLegacyTableExists(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "migrations", "000_bootstrap_existing.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read bootstrap migration: %v", err)
+	}
+	sql := string(content)
+
+	for version, table := range map[string]string{
+		"20260714_001_identity":                "users",
+		"20260714_002_media_accounts":          "media_accounts",
+		"20260714_003_browser_profiles":        "browser_profiles",
+		"20260714_004_agent_runtime":           "local_agent_binding_tickets",
+		"20260714_005_sensitive_profile_locks": "sensitive_browser_tasks",
+	} {
+		versionAt := strings.Index(sql, "'"+version+"'")
+		if versionAt < 0 {
+			t.Fatalf("bootstrap missing version %s", version)
+		}
+		nextStatement := strings.Index(sql[versionAt:], ";")
+		if nextStatement < 0 {
+			t.Fatalf("bootstrap statement for %s has no terminator", version)
+		}
+		statement := sql[versionAt : versionAt+nextStatement]
+		if !strings.Contains(statement, "information_schema.tables") || !strings.Contains(statement, "table_name = '"+table+"'") {
+			t.Errorf("bootstrap statement for %s is not guarded by legacy table %s: %s", version, table, statement)
+		}
+	}
+}
+
 func TestApplyRunsOnlyPendingMigrationStatements(t *testing.T) {
 	db, mock, closeDB := newMockDB(t)
 	defer closeDB()
@@ -46,6 +112,10 @@ func TestApplyRunsOnlyPendingMigrationStatements(t *testing.T) {
 		WithArgs("20260714_002_second", "second").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT version FROM schema_migrations")).
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).
+			AddRow("20260714_001_first").
+			AddRow("20260714_002_second"))
 
 	applied, err := Apply(context.Background(), db, []Migration{
 		{Version: "20260714_001_first", Name: "first", SQL: "CREATE TABLE first (id INT);"},
