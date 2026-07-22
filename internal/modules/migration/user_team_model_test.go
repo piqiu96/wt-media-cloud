@@ -1,0 +1,52 @@
+package migration
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestUserTeamModelMigration(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "migrations", "20260722_012_user_team_model.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(content)
+
+	requiredFragments := []string{
+		"CREATE TABLE operation_teams",
+		"legacy_id VARCHAR(64)",
+		"BIGINT UNSIGNED NOT NULL AUTO_INCREMENT",
+		"UPDATE users SET role = 'admin' WHERE role = 'technician'",
+		"CHECK ((role = 'admin' AND team_id IS NULL) OR (role IN ('operator', 'senior_operator') AND team_id IS NOT NULL))",
+		"ALTER TABLE media_accounts",
+		"ADD COLUMN team_id BIGINT UNSIGNED",
+		"ALTER TABLE browser_profiles",
+	}
+	for _, fragment := range requiredFragments {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("migration missing %q", fragment)
+		}
+	}
+
+	for _, table := range []string{
+		"user_game_scopes",
+		"user_sessions",
+		"audit_logs",
+		"media_accounts",
+		"media_account_tags",
+		"browser_profiles",
+		"profile_sync_scans",
+		"local_agent_binding_tickets",
+		"local_agent_nodes",
+		"browser_profile_runtime_presence",
+		"sensitive_browser_tasks",
+		"sensitive_profile_permits",
+	} {
+		if !strings.Contains(sql, "ALTER TABLE "+table) {
+			t.Errorf("migration does not migrate user reference in %s", table)
+		}
+	}
+}
