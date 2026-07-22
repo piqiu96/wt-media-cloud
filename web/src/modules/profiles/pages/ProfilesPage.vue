@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from "vue"
+import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
@@ -30,20 +31,18 @@ const selectedTab = ref("changed")
 
 let currentUser = null
 
-async function currentLocalNodeId() {
-  const isDesktop = typeof window !== "undefined" && (
-    window.__TAURI_INTERNALS__ || location.port === "5174"
-  )
-  if (!isDesktop) return ""
-  try {
-    const resp = await fetch("http://127.0.0.1:8765/api/v1/status", { method: "GET", mode: "cors" })
-    if (!resp.ok) return ""
-    const body = await resp.json().catch(() => ({}))
-    const data = body?.data ?? body
-    return data?.node_id || ""
-  } catch {
-    return ""
+async function desktopLocalAgentService() {
+  if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
+    throw new Error("BitBrowser 扫描只能在 Desktop 客户端执行")
   }
+  const { invoke } = await import("@tauri-apps/api/core")
+  return createLocalAgentService({ invoke })
+}
+
+async function currentLocalNodeId() {
+  const service = await desktopLocalAgentService()
+  const status = await service.status()
+  return status.node_id || ""
 }
 
 function localTrustMessage(e) {
@@ -131,32 +130,16 @@ async function triggerScan() {
   scanning.value = true
   error.value = ""
   try {
-    // Detect environment: Desktop (has local Agent) or Cloud
-    const isDesktop = typeof window !== "undefined" && (
-      window.__TAURI_INTERNALS__ || location.port === "5174"
-    )
-    if (!isDesktop) {
-      throw new Error("BitBrowser 扫描只能在 Desktop 端执行")
+    const localAgent = await desktopLocalAgentService()
+    const status = await localAgent.status()
+    if (!status.node_id) {
+      throw new Error("当前Desktop尚未绑定可信本机节点，请先到环境状态页重新检测")
     }
-
-    // 1. Call Local Agent directly (Desktop only — same machine, no CORS for localhost)
-    let snapshot
-    const scanResp = await fetch("http://127.0.0.1:8765/api/v1/bit-browser/profile-scans", {
-      method: "POST",
-      mode: "cors",
-    })
-    if (!scanResp.ok) {
-      const body = await scanResp.json().catch(() => ({}))
-      const msg = body?.error?.message || body?.error?.code || "Agent 不可达"
-      throw new Error(`BitBrowser 扫描失败: ${msg}`)
-    }
-    snapshot = await scanResp.json()
-
-    // 2. Submit scan result to Cloud for diff
+    const snapshot = await localAgent.profileScan()
     const scan = await bindingClient.submit({
       main_user_id: snapshot.main_user_id || currentUser?.id,
       profiles: snapshot.profiles || [],
-    })
+    }, { nodeId: status.node_id })
     currentScan.value = scan
     scanDetailVisible.value = true
     selectedTab.value = "changed"

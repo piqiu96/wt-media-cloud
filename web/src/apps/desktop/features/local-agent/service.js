@@ -8,6 +8,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   stop: "local_agent_stop",
   taskStatus: "local_agent_task_status",
   bind: "local_agent_bind",
+  profileScan: "local_agent_profile_scan",
 });
 
 const DEFAULT_STATUS = Object.freeze({
@@ -86,6 +87,9 @@ export function createLocalAgentService({ invoke }) {
       const result = await invoke(LOCAL_AGENT_COMMANDS.bind);
       return normalizeBoundNode(result);
     },
+    async profileScan() {
+      return invoke(LOCAL_AGENT_COMMANDS.profileScan);
+    },
   };
 }
 
@@ -117,6 +121,9 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
     },
     async bind() {
       return { id: "node-mock", agent_id: current.agent_id, user_id: "user-mock", status: "bound" };
+    },
+    async profileScan() {
+      return { main_user_id: current.main_user_id || "main-user-mock", profiles: [] };
     },
   };
 }
