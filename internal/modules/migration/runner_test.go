@@ -79,6 +79,9 @@ func TestBootstrapRecordsHistoricalVersionOnlyWhenItsLegacyTableExists(t *testin
 		"20260714_003_browser_profiles":        "browser_profiles",
 		"20260714_004_agent_runtime":           "local_agent_binding_tickets",
 		"20260714_005_sensitive_profile_locks": "sensitive_browser_tasks",
+		"20260715_006_tasks":                   "tasks",
+		"20260715_007_agent_registry":          "agent_nodes",
+		"20260716_008_proxy_configs":           "proxy_configs",
 	} {
 		versionAt := strings.Index(sql, "'"+version+"'")
 		if versionAt < 0 {
@@ -91,6 +94,21 @@ func TestBootstrapRecordsHistoricalVersionOnlyWhenItsLegacyTableExists(t *testin
 		statement := sql[versionAt : versionAt+nextStatement]
 		if !strings.Contains(statement, "information_schema.tables") || !strings.Contains(statement, "table_name = '"+table+"'") {
 			t.Errorf("bootstrap statement for %s is not guarded by legacy table %s: %s", version, table, statement)
+		}
+	}
+	for version, column := range map[string]string{
+		"20260721_009_task_payload":         "payload_json",
+		"20260721_010_profile_proxy_fields": "proxy_type",
+		"20260721_011_task_result":          "result_json",
+	} {
+		versionAt := strings.Index(sql, "'"+version+"'")
+		if versionAt < 0 {
+			t.Fatalf("bootstrap missing version %s", version)
+		}
+		nextStatement := strings.Index(sql[versionAt:], ";")
+		statement := sql[versionAt : versionAt+nextStatement]
+		if !strings.Contains(statement, "information_schema.columns") || !strings.Contains(statement, "column_name = '"+column+"'") {
+			t.Errorf("bootstrap statement for %s is not guarded by column %s: %s", version, column, statement)
 		}
 	}
 }

@@ -25,12 +25,12 @@ func TestLoadOverridesHTTPAddr(t *testing.T) {
 }
 
 func TestLoadIdentityConfiguration(t *testing.T) {
-	t.Setenv("WT_MEDIA_INITIAL_TECHNICIAN_USERNAME", "tech")
-	t.Setenv("WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD", "initial-secret")
+	t.Setenv("WT_MEDIA_INITIAL_ADMIN_USERNAME", "admin")
+	t.Setenv("WT_MEDIA_INITIAL_ADMIN_PASSWORD", "initial-secret")
 	t.Setenv("WT_MEDIA_SESSION_COOKIE_SECURE", "false")
 
 	cfg := Load()
-	if cfg.InitialTechnicianUsername != "tech" || cfg.InitialTechnicianPassword != "initial-secret" {
+	if cfg.InitialAdminUsername != "admin" || cfg.InitialAdminPassword != "initial-secret" {
 		t.Fatalf("identity bootstrap config = %+v", cfg)
 	}
 	if cfg.SessionCookieSecure {

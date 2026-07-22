@@ -185,6 +185,9 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	}
 	teamID := actor.TeamID
 	if userID != actor.ID {
+		if actor.Role != identity.RoleAdmin {
+			return Account{}, ErrForbidden
+		}
 		if s.users == nil {
 			return Account{}, ErrForbidden
 		}

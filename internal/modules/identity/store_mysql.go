@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -30,6 +31,42 @@ func (s *MySQLStore) CreateUser(user User) (UserID, error) {
 	}
 	defer tx.Rollback()
 
+	userID, err := createUserTx(tx, user)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
+func (s *MySQLStore) CreateUserWithAudit(user User, event AuditEvent) (UserID, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	userID, err := createUserTx(tx, user)
+	if err != nil {
+		return 0, err
+	}
+	if event.ActorUserID == 0 {
+		event.ActorUserID = userID
+	}
+	if event.TargetID == "" || event.TargetID == "0" {
+		event.TargetID = strconv.FormatInt(int64(userID), 10)
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
+func createUserTx(tx *sql.Tx, user User) (UserID, error) {
 	result, err := tx.Exec(
 		`INSERT INTO users (legacy_id, username, password_hash, role, status, team_id, created_at, updated_at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`,
 		user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, user.CreatedAt, user.UpdatedAt,
@@ -52,9 +89,6 @@ func (s *MySQLStore) CreateUser(user User) (UserID, error) {
 		); err != nil {
 			return 0, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
 	}
 	return user.ID, nil
 }
@@ -216,6 +250,54 @@ func (s *MySQLStore) DeleteUser(userID UserID) error {
 	return tx.Commit()
 }
 
+func (s *MySQLStore) DeleteUserWithAudit(userID UserID, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var references int
+	if err := tx.QueryRow(`SELECT
+        (SELECT COUNT(*) FROM user_sessions WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = ?) +
+        (SELECT COUNT(*) FROM media_accounts WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM local_agent_binding_tickets WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM local_agent_nodes WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM browser_profile_runtime_presence WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
+		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
+	).Scan(&references); err != nil {
+		return err
+	}
+	if references > 0 {
+		return ErrTeamInUse
+	}
+	if _, err := tx.Exec(`DELETE FROM user_game_scopes WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	result, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID)
+	if err != nil {
+		if foreignKeyReferenced(err) {
+			return ErrTeamInUse
+		}
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrInvalidInput
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *MySQLStore) CreateTeam(team OperationTeam) (TeamID, error) {
 	result, err := s.db.Exec(
 		`INSERT INTO operation_teams (name, created_at, updated_at) VALUES (?, ?, ?)`,
@@ -229,6 +311,35 @@ func (s *MySQLStore) CreateTeam(team OperationTeam) (TeamID, error) {
 	}
 	id, err := result.LastInsertId()
 	return TeamID(id), err
+}
+
+func (s *MySQLStore) CreateTeamWithAudit(team OperationTeam, event AuditEvent) (TeamID, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`INSERT INTO operation_teams (name, created_at, updated_at) VALUES (?, ?, ?)`, team.Name, team.CreatedAt, team.UpdatedAt)
+	if err != nil {
+		if duplicateKey(err) {
+			return 0, ErrTeamNameTaken
+		}
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if event.TargetID == "" || event.TargetID == "0" {
+		event.TargetID = strconv.FormatInt(id, 10)
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return TeamID(id), nil
 }
 
 func (s *MySQLStore) FindTeam(teamID TeamID) (OperationTeam, bool, error) {
@@ -277,6 +388,31 @@ func (s *MySQLStore) UpdateTeam(team OperationTeam) error {
 	return nil
 }
 
+func (s *MySQLStore) UpdateTeamWithAudit(team OperationTeam, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE operation_teams SET name = ?, updated_at = ? WHERE id = ?`, team.Name, team.UpdatedAt, team.ID)
+	if err != nil {
+		if duplicateKey(err) {
+			return ErrTeamNameTaken
+		}
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrInvalidInput
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *MySQLStore) DeleteTeam(teamID TeamID) error {
 	result, err := s.db.Exec(`DELETE FROM operation_teams WHERE id = ?`, teamID)
 	if err != nil {
@@ -293,6 +429,31 @@ func (s *MySQLStore) DeleteTeam(teamID TeamID) error {
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+func (s *MySQLStore) DeleteTeamWithAudit(teamID TeamID, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`DELETE FROM operation_teams WHERE id = ?`, teamID)
+	if err != nil {
+		if foreignKeyReferenced(err) {
+			return ErrTeamInUse
+		}
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrInvalidInput
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *MySQLStore) TeamHasReferences(teamID TeamID) (bool, error) {
@@ -380,18 +541,22 @@ func (s *MySQLStore) ListUsers() ([]User, error) {
 			value := TeamID(teamID.Int64)
 			u.TeamID = &value
 		}
-		scopes, err := s.db.Query("SELECT game_id FROM user_game_scopes WHERE user_id = ?", u.ID)
-		if err == nil {
-			for scopes.Next() {
-				var gid string
-				scopes.Scan(&gid)
-				u.GameIDs = append(u.GameIDs, gid)
-			}
-			scopes.Close()
-		}
 		users = append(users, u)
 	}
-	return users, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range users {
+		gameIDs, err := s.findGameIDs(users[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		users[i].GameIDs = gameIDs
+	}
+	return users, nil
 }
 
 func (s *MySQLStore) ListAuditLogs(limit int) ([]AuditEvent, error) {

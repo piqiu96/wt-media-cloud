@@ -128,6 +128,7 @@ type ProfileScan struct {
 type Store interface {
 	FindBinding(userID identity.UserID) (BitAccountBinding, bool, error)
 	ListProfiles(userID identity.UserID) ([]BrowserProfile, error)
+	ListAllProfiles() ([]BrowserProfile, error)
 	GetProfile(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
@@ -338,10 +339,15 @@ func (s *Service) ListProfiles(actor identity.PublicUser, userID identity.UserID
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
-	if userID <= 0 {
-		userID = actor.ID
+	var profiles []BrowserProfile
+	var err error
+	if userID > 0 {
+		profiles, err = s.store.ListProfiles(userID)
+	} else if actor.Role == identity.RoleAdmin || actor.Role == identity.RoleSeniorOperator {
+		profiles, err = s.store.ListAllProfiles()
+	} else {
+		profiles, err = s.store.ListProfiles(actor.ID)
 	}
-	profiles, err := s.store.ListProfiles(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +371,7 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 	if !found {
 		return ErrProfileNotFound
 	}
-	if !actor.CanAccessOwnedResource(profile.UserID, profile.TeamID) {
+	if actor.Role != identity.RoleAdmin && profile.UserID != actor.ID {
 		return ErrForbidden
 	}
 	return s.store.DeleteProfile(profileID)

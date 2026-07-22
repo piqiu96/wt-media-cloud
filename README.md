@@ -17,8 +17,9 @@ Runtime configuration:
 
 - `WT_MEDIA_CLOUD_HTTP_ADDR`: listen address, default `:8080`
 - `WT_MEDIA_MYSQL_DSN`: MySQL DSN for the Cloud database
-- `WT_MEDIA_INITIAL_TECHNICIAN_USERNAME`: one-time initial technician username for an empty identity database
-- `WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD`: one-time initial technician password; no default is provided
+- `WT_MEDIA_INITIAL_ADMIN_USERNAME`: one-time initial administrator username for an empty identity database
+- `WT_MEDIA_INITIAL_ADMIN_PASSWORD`: one-time initial administrator password; no default is provided
+- Legacy `WT_MEDIA_INITIAL_TECHNICIAN_*` names remain accepted when the new admin variables are unset.
 - `WT_MEDIA_SESSION_COOKIE_SECURE`: secure-cookie flag, default `true`; set `false` only for local HTTP development
 
 Apply migrations with:

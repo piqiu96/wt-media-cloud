@@ -1,3 +1,23 @@
+CREATE TEMPORARY TABLE m2_a1_preflight_guard (
+    valid TINYINT NOT NULL,
+    CONSTRAINT chk_m2_a1_preflight_guard CHECK (valid = 1)
+);
+
+INSERT INTO m2_a1_preflight_guard (valid)
+SELECT IF(
+    (SELECT COUNT(*)
+     FROM user_game_scopes scopes
+     JOIN users user ON user.id = scopes.user_id
+     WHERE user.role IN ('technician', 'admin')) = 0,
+    IF((SELECT COUNT(*)
+        FROM users user
+        WHERE user.role IN ('operator', 'senior_operator')
+          AND NOT EXISTS (SELECT 1 FROM user_game_scopes scopes WHERE scopes.user_id = user.id)) = 0, 1, 0),
+    0
+);
+
+DROP TEMPORARY TABLE m2_a1_preflight_guard;
+
 CREATE TABLE operation_teams (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name VARCHAR(64) NOT NULL,
@@ -17,8 +37,6 @@ ALTER TABLE users
     ADD COLUMN team_id BIGINT UNSIGNED NULL;
 
 UPDATE users SET role = 'admin' WHERE role = 'technician';
-
-DELETE scopes FROM user_game_scopes scopes JOIN users user ON user.id = scopes.user_id WHERE user.role = 'admin';
 
 UPDATE users
 SET team_id = (SELECT id FROM operation_teams WHERE name = '迁移默认分组')

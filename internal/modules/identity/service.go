@@ -150,17 +150,22 @@ type AuditEvent struct {
 type Store interface {
 	CountUsers() (int, error)
 	CreateUser(User) (UserID, error)
+	CreateUserWithAudit(User, AuditEvent) (UserID, error)
 	FindUser(id UserID) (User, bool, error)
 	FindUserByUsername(username string) (User, bool, error)
 	ListUsers() ([]User, error)
 	UpdateUser(User) error
 	UpdateUserAndInvalidateSessions(User, AuditEvent) error
 	DeleteUser(UserID) error
+	DeleteUserWithAudit(UserID, AuditEvent) error
 	CreateTeam(OperationTeam) (TeamID, error)
+	CreateTeamWithAudit(OperationTeam, AuditEvent) (TeamID, error)
 	FindTeam(TeamID) (OperationTeam, bool, error)
 	ListTeams() ([]OperationTeam, error)
 	UpdateTeam(OperationTeam) error
+	UpdateTeamWithAudit(OperationTeam, AuditEvent) error
 	DeleteTeam(TeamID) error
+	DeleteTeamWithAudit(TeamID, AuditEvent) error
 	TeamHasReferences(TeamID) (bool, error)
 	CreateSession(Session) error
 	FindSessionByTokenHash(tokenHash string) (Session, bool, error)
@@ -224,14 +229,17 @@ func (s *Service) BootstrapAdmin(username, password string) (PublicUser, error) 
 	if count != 0 {
 		return PublicUser{}, ErrBootstrapUnavailable
 	}
-	user, err := s.createUser(CreateUserInput{Username: username, Password: password, Role: RoleAdmin})
+	user, teamName, err := s.prepareUser(CreateUserInput{Username: username, Password: password, Role: RoleAdmin})
 	if err != nil {
 		return PublicUser{}, err
 	}
-	if err := s.audit(user.ID, "user.bootstrap", "user", user.ID, map[string]string{"role": string(user.Role)}); err != nil {
+	event := s.newAuditEvent(0, "user.bootstrap", "user", 0, map[string]string{"role": string(user.Role)})
+	userID, err := s.store.CreateUserWithAudit(user, event)
+	if err != nil {
 		return PublicUser{}, err
 	}
-	return user, nil
+	user.ID, user.TeamName = userID, teamName
+	return publicUser(user), nil
 }
 
 func (s *Service) CreateUser(actorID UserID, input CreateUserInput) (PublicUser, error) {
@@ -242,51 +250,55 @@ func (s *Service) CreateUser(actorID UserID, input CreateUserInput) (PublicUser,
 	if !isAdmin(actor) {
 		return PublicUser{}, ErrForbidden
 	}
-	user, err := s.createUser(input)
+	user, teamName, err := s.prepareUser(input)
 	if err != nil {
 		return PublicUser{}, err
 	}
-	if err := s.audit(actor.ID, "user.create", "user", user.ID, map[string]string{
+	event := s.newAuditEvent(actor.ID, "user.create", "user", 0, map[string]string{
 		"role": string(user.Role), "username": user.Username, "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
-	}); err != nil {
+	})
+	userID, err := s.store.CreateUserWithAudit(user, event)
+	if err != nil {
 		return PublicUser{}, err
 	}
-	return user, nil
+	user.ID, user.TeamName = userID, teamName
+	return publicUser(user), nil
 }
 
-func (s *Service) createUser(input CreateUserInput) (PublicUser, error) {
+func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 	username := strings.TrimSpace(input.Username)
 	if username == "" || len(username) > 64 || len(input.Password) < 12 || !validRole(input.Role) {
-		return PublicUser{}, ErrInvalidInput
+		return User{}, "", ErrInvalidInput
 	}
 	_, found, err := s.store.FindUserByUsername(username)
 	if err != nil {
-		return PublicUser{}, err
+		return User{}, "", err
 	}
 	if found {
-		return PublicUser{}, ErrUsernameTaken
+		return User{}, "", ErrUsernameTaken
 	}
 	hash, err := s.passwords.Hash([]byte(input.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return PublicUser{}, err
+		return User{}, "", err
 	}
 	gameIDs := normalizeGameIDs(input.GameIDs)
+	teamName := ""
 	if input.Role == RoleAdmin {
 		if input.TeamID != nil || len(gameIDs) != 0 {
-			return PublicUser{}, ErrInvalidInput
+			return User{}, "", ErrInvalidInput
 		}
 	} else {
 		if input.TeamID == nil || *input.TeamID <= 0 || len(gameIDs) == 0 {
-			return PublicUser{}, ErrInvalidInput
+			return User{}, "", ErrInvalidInput
 		}
 		team, found, err := s.store.FindTeam(*input.TeamID)
 		if err != nil {
-			return PublicUser{}, err
+			return User{}, "", err
 		}
 		if !found {
-			return PublicUser{}, ErrInvalidInput
+			return User{}, "", ErrInvalidInput
 		}
-		_ = team
+		teamName = team.Name
 	}
 	now := s.now()
 	user := User{
@@ -299,19 +311,7 @@ func (s *Service) createUser(input CreateUserInput) (PublicUser, error) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	userID, err := s.store.CreateUser(user)
-	if err != nil {
-		return PublicUser{}, err
-	}
-	user.ID = userID
-	if user.TeamID != nil {
-		team, _, err := s.store.FindTeam(*user.TeamID)
-		if err != nil {
-			return PublicUser{}, err
-		}
-		user.TeamName = team.Name
-	}
-	return publicUser(user), nil
+	return user, teamName, nil
 }
 
 func (s *Service) Login(username, password string) (LoginResult, error) {
@@ -385,31 +385,15 @@ func (s *Service) Logout(token string) error {
 }
 
 func (s *Service) SetUserStatus(actorID, userID UserID, status UserStatus) error {
-	actor, ok, err := s.store.FindUser(actorID)
-	if err != nil {
-		return err
-	}
-	if !isAdmin(actor) || actorID == userID {
-		return ErrForbidden
-	}
 	user, ok, err := s.store.FindUser(userID)
 	if err != nil {
 		return err
 	}
-	if !ok || !validStatus(status) {
+	if !ok {
 		return ErrInvalidInput
 	}
-	user.Status = status
-	user.UpdatedAt = s.now()
-	if err := s.store.UpdateUser(user); err != nil {
-		return err
-	}
-	if status == UserStatusDisabled {
-		if err := s.store.InvalidateUserSessions(user.ID, user.UpdatedAt); err != nil {
-			return err
-		}
-	}
-	return s.audit(actor.ID, "user.status.update", "user", user.ID, map[string]string{"status": string(status)})
+	_, err = s.updateUser(actorID, userID, user.Role, user.TeamID, user.GameIDs, status, "user.status.update")
+	return err
 }
 
 func (s *Service) ChangeOwnPassword(userID UserID, currentPassword, newPassword string) error {
@@ -504,14 +488,12 @@ func (s *Service) CreateTeam(actorID UserID, name string) (OperationTeam, error)
 	}
 	now := s.now()
 	team := OperationTeam{Name: name, CreatedAt: now, UpdatedAt: now}
-	teamID, err := s.store.CreateTeam(team)
+	event := s.newAuditEvent(actor.ID, "operation_team.create", "operation_team", 0, map[string]string{"name": team.Name})
+	teamID, err := s.store.CreateTeamWithAudit(team, event)
 	if err != nil {
 		return OperationTeam{}, err
 	}
 	team.ID = teamID
-	if err := s.audit(actor.ID, "operation_team.create", "operation_team", UserID(team.ID), map[string]string{"name": team.Name}); err != nil {
-		return OperationTeam{}, err
-	}
 	return team, nil
 }
 
@@ -547,10 +529,8 @@ func (s *Service) RenameTeam(actorID UserID, teamID TeamID, name string) (Operat
 	}
 	team.Name = name
 	team.UpdatedAt = s.now()
-	if err := s.store.UpdateTeam(team); err != nil {
-		return OperationTeam{}, err
-	}
-	if err := s.audit(actor.ID, "operation_team.rename", "operation_team", UserID(team.ID), map[string]string{"name": team.Name}); err != nil {
+	event := s.newAuditEvent(actor.ID, "operation_team.rename", "operation_team", UserID(team.ID), map[string]string{"name": team.Name})
+	if err := s.store.UpdateTeamWithAudit(team, event); err != nil {
 		return OperationTeam{}, err
 	}
 	return team, nil
@@ -576,10 +556,8 @@ func (s *Service) DeleteTeam(actorID UserID, teamID TeamID) error {
 	if referenced {
 		return ErrTeamInUse
 	}
-	if err := s.store.DeleteTeam(teamID); err != nil {
-		return err
-	}
-	return s.audit(actor.ID, "operation_team.delete", "operation_team", UserID(teamID), map[string]string{"result": "deleted"})
+	event := s.newAuditEvent(actor.ID, "operation_team.delete", "operation_team", UserID(teamID), map[string]string{"result": "deleted"})
+	return s.store.DeleteTeamWithAudit(teamID, event)
 }
 
 func (s *Service) DeleteUser(actorID, userID UserID) error {
@@ -595,13 +573,21 @@ func (s *Service) DeleteUser(actorID, userID UserID) error {
 	} else if !found {
 		return ErrInvalidInput
 	}
-	if err := s.store.DeleteUser(userID); err != nil {
-		return err
-	}
-	return s.audit(actor.ID, "user.delete", "user", userID, map[string]string{"result": "deleted"})
+	event := s.newAuditEvent(actor.ID, "user.delete", "user", userID, map[string]string{"result": "deleted"})
+	return s.store.DeleteUserWithAudit(userID, event)
 }
 
 func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string) (PublicUser, error) {
+	return s.updateUser(actorID, userID, role, teamID, gameIDs, "", "user.access.update")
+}
+
+// UpdateUser applies the complete admin form as one validated transaction so
+// callers never observe a partial role/team/game/status update.
+func (s *Service) UpdateUser(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string, status UserStatus) (PublicUser, error) {
+	return s.updateUser(actorID, userID, role, teamID, gameIDs, status, "user.update")
+}
+
+func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string, status UserStatus, action string) (PublicUser, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return PublicUser{}, err
@@ -617,6 +603,12 @@ func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *Te
 		return PublicUser{}, err
 	}
 	if !ok {
+		return PublicUser{}, ErrInvalidInput
+	}
+	if status == "" {
+		status = user.Status
+	}
+	if !validStatus(status) || (actorID == userID && status != user.Status) {
 		return PublicUser{}, ErrInvalidInput
 	}
 	normalizedGameIDs := normalizeGameIDs(gameIDs)
@@ -638,11 +630,12 @@ func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *Te
 		}
 	}
 	user.Role = role
+	user.Status = status
 	user.TeamID = cloneTeamID(teamID)
 	user.GameIDs = normalizedGameIDs
 	user.UpdatedAt = s.now()
-	event := s.newAuditEvent(actor.ID, "user.access.update", "user", user.ID, map[string]string{
-		"role": string(role), "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
+	event := s.newAuditEvent(actor.ID, action, "user", user.ID, map[string]string{
+		"role": string(role), "status": string(status), "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
 	})
 	if err := s.store.UpdateUserAndInvalidateSessions(user, event); err != nil {
 		return PublicUser{}, err
@@ -805,6 +798,33 @@ func (s *memoryStore) CreateUser(user User) (UserID, error) {
 	return user.ID, nil
 }
 
+func (s *memoryStore) CreateUserWithAudit(user User, event AuditEvent) (UserID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.byName[user.Username]; exists {
+		return 0, ErrUsernameTaken
+	}
+	user.ID = s.nextUserID
+	s.nextUserID++
+	if user.TeamID != nil {
+		team, ok := s.teams[*user.TeamID]
+		if !ok {
+			return 0, ErrInvalidInput
+		}
+		user.TeamName = team.Name
+	}
+	if event.ActorUserID == 0 {
+		event.ActorUserID = user.ID
+	}
+	if event.TargetID == "" || event.TargetID == "0" {
+		event.TargetID = strconv.FormatInt(int64(user.ID), 10)
+	}
+	s.users[user.ID] = cloneUser(user)
+	s.byName[user.Username] = user.ID
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
+	return user.ID, nil
+}
+
 func (s *memoryStore) FindUser(id UserID) (User, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -889,6 +909,24 @@ func (s *memoryStore) DeleteUser(userID UserID) error {
 	return nil
 }
 
+func (s *memoryStore) DeleteUserWithAudit(userID UserID, event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, exists := s.users[userID]
+	if !exists {
+		return ErrInvalidInput
+	}
+	for _, session := range s.sessions {
+		if session.UserID == userID {
+			return ErrTeamInUse
+		}
+	}
+	delete(s.users, userID)
+	delete(s.byName, user.Username)
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
+	return nil
+}
+
 func (s *memoryStore) CreateTeam(team OperationTeam) (TeamID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -899,6 +937,23 @@ func (s *memoryStore) CreateTeam(team OperationTeam) (TeamID, error) {
 	s.nextTeamID++
 	s.teams[team.ID] = team
 	s.teamNames[team.Name] = team.ID
+	return team.ID, nil
+}
+
+func (s *memoryStore) CreateTeamWithAudit(team OperationTeam, event AuditEvent) (TeamID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.teamNames[team.Name]; exists {
+		return 0, ErrTeamNameTaken
+	}
+	team.ID = s.nextTeamID
+	s.nextTeamID++
+	if event.TargetID == "" || event.TargetID == "0" {
+		event.TargetID = strconv.FormatInt(int64(team.ID), 10)
+	}
+	s.teams[team.ID] = team
+	s.teamNames[team.Name] = team.ID
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
 	return team.ID, nil
 }
 
@@ -936,6 +991,23 @@ func (s *memoryStore) UpdateTeam(team OperationTeam) error {
 	return nil
 }
 
+func (s *memoryStore) UpdateTeamWithAudit(team OperationTeam, event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, exists := s.teams[team.ID]
+	if !exists {
+		return ErrInvalidInput
+	}
+	if existingID, exists := s.teamNames[team.Name]; exists && existingID != team.ID {
+		return ErrTeamNameTaken
+	}
+	delete(s.teamNames, previous.Name)
+	s.teams[team.ID] = team
+	s.teamNames[team.Name] = team.ID
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
+	return nil
+}
+
 func (s *memoryStore) DeleteTeam(teamID TeamID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -945,6 +1017,24 @@ func (s *memoryStore) DeleteTeam(teamID TeamID) error {
 	}
 	delete(s.teams, teamID)
 	delete(s.teamNames, team.Name)
+	return nil
+}
+
+func (s *memoryStore) DeleteTeamWithAudit(teamID TeamID, event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team, exists := s.teams[teamID]
+	if !exists {
+		return ErrInvalidInput
+	}
+	for _, user := range s.users {
+		if user.TeamID != nil && *user.TeamID == teamID {
+			return ErrTeamInUse
+		}
+	}
+	delete(s.teams, teamID)
+	delete(s.teamNames, team.Name)
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
 	return nil
 }
 

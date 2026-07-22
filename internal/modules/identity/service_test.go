@@ -337,6 +337,48 @@ func TestUpdateUserAccessTransfersCurrentTeamAndInvalidatesSession(t *testing.T)
 	}
 }
 
+func TestUpdateUserRejectsInvalidStatusWithoutChangingAccess(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	oldTeam, _ := service.CreateTeam(admin.ID, "旧组")
+	newTeam, _ := service.CreateTeam(admin.ID, "新组")
+	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+	})
+
+	if _, err := service.UpdateUser(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"}, UserStatus("invalid")); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("UpdateUser() error = %v, want ErrInvalidInput", err)
+	}
+	stored, _, _ := service.store.FindUser(operator.ID)
+	if stored.Role != RoleOperator || stored.Status != UserStatusEnabled || stored.TeamID == nil || *stored.TeamID != oldTeam.ID || len(stored.GameIDs) != 1 || stored.GameIDs[0] != "game-a" {
+		t.Fatalf("invalid combined update changed persisted user: %+v", stored)
+	}
+}
+
+func TestUpdateUserCommitsAccessAndStatusTogetherAndInvalidatesSession(t *testing.T) {
+	service := NewService(NewMemoryStore(), WithTokenGenerator(func() string { return "operator-session" }))
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	oldTeam, _ := service.CreateTeam(admin.ID, "旧组")
+	newTeam, _ := service.CreateTeam(admin.ID, "新组")
+	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+	})
+	login, _ := service.Login("operator-a", "a-long-operator-password")
+
+	updated, err := service.UpdateUser(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"}, UserStatusDisabled)
+	if err != nil {
+		t.Fatalf("UpdateUser() error = %v", err)
+	}
+	if updated.Role != RoleSeniorOperator || updated.Status != UserStatusDisabled || updated.TeamID == nil || *updated.TeamID != newTeam.ID {
+		t.Fatalf("updated = %+v", updated)
+	}
+	if _, err := service.Authenticate(login.Token); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("Authenticate(old session) error = %v, want ErrSessionInvalid", err)
+	}
+}
+
 func TestPublicUserCanAccessUsesRoleTeamAndGameIntersection(t *testing.T) {
 	teamA := TeamID(10)
 	teamB := TeamID(20)
@@ -423,6 +465,41 @@ type failingIdentityStore struct {
 	failInvalidate bool
 }
 
+func (s *failingIdentityStore) CreateUserWithAudit(user User, event AuditEvent) (UserID, error) {
+	if s.failAudit {
+		return 0, errors.New("audit unavailable")
+	}
+	return s.Store.CreateUserWithAudit(user, event)
+}
+
+func (s *failingIdentityStore) DeleteUserWithAudit(userID UserID, event AuditEvent) error {
+	if s.failAudit {
+		return errors.New("audit unavailable")
+	}
+	return s.Store.DeleteUserWithAudit(userID, event)
+}
+
+func (s *failingIdentityStore) CreateTeamWithAudit(team OperationTeam, event AuditEvent) (TeamID, error) {
+	if s.failAudit {
+		return 0, errors.New("audit unavailable")
+	}
+	return s.Store.CreateTeamWithAudit(team, event)
+}
+
+func (s *failingIdentityStore) UpdateTeamWithAudit(team OperationTeam, event AuditEvent) error {
+	if s.failAudit {
+		return errors.New("audit unavailable")
+	}
+	return s.Store.UpdateTeamWithAudit(team, event)
+}
+
+func (s *failingIdentityStore) DeleteTeamWithAudit(teamID TeamID, event AuditEvent) error {
+	if s.failAudit {
+		return errors.New("audit unavailable")
+	}
+	return s.Store.DeleteTeamWithAudit(teamID, event)
+}
+
 func (s *failingIdentityStore) AppendAudit(event AuditEvent) error {
 	if s.failAudit {
 		return errors.New("audit unavailable")
@@ -470,6 +547,41 @@ func TestUpdateUserAccessFailureDoesNotLeaveChangedAccessWithLiveSession(t *test
 	}
 	if _, err := service.Authenticate(login.Token); err != nil {
 		t.Fatalf("failed access update invalidated unchanged session: %v", err)
+	}
+}
+
+func TestCreateUserAuditFailureDoesNotPersistUser(t *testing.T) {
+	base := NewMemoryStore()
+	store := &failingIdentityStore{Store: base}
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team, _ := service.CreateTeam(admin.ID, "运营组")
+	store.failAudit = true
+
+	if _, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{"game-a"},
+	}); err == nil {
+		t.Fatal("CreateUser() error = nil")
+	}
+	if _, found, _ := base.FindUserByUsername("operator-a"); found {
+		t.Fatal("failed audited create persisted user")
+	}
+}
+
+func TestCreateTeamAuditFailureDoesNotPersistTeam(t *testing.T) {
+	base := NewMemoryStore()
+	store := &failingIdentityStore{Store: base}
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	store.failAudit = true
+
+	if _, err := service.CreateTeam(admin.ID, "失败组"); err == nil {
+		t.Fatal("CreateTeam() error = nil")
+	}
+	teams, _ := base.ListTeams()
+	if len(teams) != 0 {
+		t.Fatalf("failed audited team create persisted teams: %+v", teams)
 	}
 }
 

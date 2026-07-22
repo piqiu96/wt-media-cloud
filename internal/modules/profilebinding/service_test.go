@@ -65,7 +65,7 @@ func TestSubmitScanRejectsExistingBindingMismatch(t *testing.T) {
 	}
 }
 
-func TestSeniorCanManageSameTeamProfileCloudRecordButNotLocalOperation(t *testing.T) {
+func TestSeniorCanViewButCannotMutateSameTeamProfileCloudRecord(t *testing.T) {
 	store := newMemoryStore()
 	teamA := identity.TeamID(10)
 	teamB := identity.TeamID(20)
@@ -74,15 +74,63 @@ func TestSeniorCanManageSameTeamProfileCloudRecordButNotLocalOperation(t *testin
 	service := newTestService(store)
 	actor := identity.PublicUser{ID: 1, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &teamA}
 
-	profiles, err := service.ListProfiles(actor, 2)
+	profiles, err := service.ListProfiles(actor, 0)
 	if err != nil || len(profiles) != 1 || profiles[0].ID != "same-team" {
 		t.Fatalf("ListProfiles(same team) profiles=%+v error=%v", profiles, err)
 	}
-	if err := service.DeleteProfile(actor, "same-team"); err != nil {
-		t.Fatalf("DeleteProfile(same team) error=%v", err)
+	if err := service.DeleteProfile(actor, "same-team"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("DeleteProfile(same team) error=%v, want ErrForbidden", err)
 	}
 	if _, err := service.GetActiveProfile(actor, "other-team"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("GetActiveProfile(other owner) error=%v, want ErrForbidden", err)
+	}
+}
+
+func TestDefaultProfileListAppliesRoleVisibility(t *testing.T) {
+	teamA := identity.TeamID(10)
+	teamB := identity.TeamID(20)
+	for name, tc := range map[string]struct {
+		actor identity.PublicUser
+		want  []string
+	}{
+		"admin":    {actor: identity.PublicUser{ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}, want: []string{"other-team", "own", "same-team"}},
+		"senior":   {actor: identity.PublicUser{ID: 1, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &teamA}, want: []string{"own", "same-team"}},
+		"operator": {actor: identity.PublicUser{ID: 1, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &teamA}, want: []string{"own"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newMemoryStore()
+			store.profiles["own"] = BrowserProfile{ID: "own", UserID: 1, TeamID: &teamA}
+			store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA}
+			store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB}
+			profiles, err := newTestService(store).ListProfiles(tc.actor, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids := make([]string, len(profiles))
+			for i := range profiles {
+				ids[i] = profiles[i].ID
+			}
+			sort.Strings(ids)
+			if strings.Join(ids, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("visible profiles=%v, want %v", ids, tc.want)
+			}
+		})
+	}
+}
+
+func TestProfileOwnerAndAdminCanDeleteCloudRecord(t *testing.T) {
+	for name, actor := range map[string]identity.PublicUser{
+		"owner": profileActor("user-2"),
+		"admin": {ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newMemoryStore()
+			teamID := identity.TeamID(2)
+			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, LocalStatus: ProfileActive}
+			if err := newTestService(store).DeleteProfile(actor, "profile"); err != nil {
+				t.Fatalf("DeleteProfile() error=%v", err)
+			}
+		})
 	}
 }
 
@@ -250,6 +298,14 @@ func (s *memoryStore) FindBinding(userID identity.UserID) (BitAccountBinding, bo
 
 func (s *memoryStore) ListProfiles(userID identity.UserID) ([]BrowserProfile, error) {
 	return s.profileList(userID), nil
+}
+
+func (s *memoryStore) ListAllProfiles() ([]BrowserProfile, error) {
+	profiles := make([]BrowserProfile, 0, len(s.profiles))
+	for _, profile := range s.profiles {
+		profiles = append(profiles, profile)
+	}
+	return profiles, nil
 }
 
 func (s *memoryStore) GetProfile(profileID string) (BrowserProfile, bool, error) {

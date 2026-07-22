@@ -130,6 +130,33 @@ func TestMySQLStoreRollsBackUserAndSessionsWhenAuditFails(t *testing.T) {
 	}
 }
 
+func TestMySQLStoreRollsBackCreatedUserWhenAuditFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	now := time.Date(2026, 7, 22, 16, 0, 0, 0, time.UTC)
+	user := User{Username: "operator", PasswordHash: "hash", Role: RoleOperator, Status: UserStatusEnabled, GameIDs: []string{"game-a"}, CreatedAt: now, UpdatedAt: now}
+	event := AuditEvent{ID: "audit-1", ActorUserID: 1, Action: "user.create", TargetType: "user", Summary: map[string]string{"role": "operator"}, CreatedAt: now}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO users (legacy_id, username, password_hash, role, status, team_id, created_at, updated_at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`)).
+		WithArgs(user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, now, now).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO user_game_scopes (user_id, game_id, created_at) VALUES (?, ?, ?)`)).
+		WithArgs(UserID(2), "game-a", now).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO audit_logs`)).WillReturnError(errors.New("audit unavailable"))
+	mock.ExpectRollback()
+
+	if _, err := NewMySQLStore(db).CreateUserWithAudit(user, event); err == nil {
+		t.Fatal("CreateUserWithAudit() error = nil")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
 func TestMySQLStoreMapsTeamForeignKeyReferenceToTeamInUse(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

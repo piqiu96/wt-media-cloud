@@ -76,7 +76,7 @@ func TestServiceAdminCanAssignGlobalAccount(t *testing.T) {
 	}
 }
 
-func TestServiceSeniorCanCreateAndManageSameTeamGameAccount(t *testing.T) {
+func TestServiceSeniorCanManageButCannotCreateSameTeamGameAccountForAnotherUser(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identity.TeamID(10)
 	users := fakeUserResolver{users: map[identity.UserID]identity.PublicUser{
@@ -85,11 +85,13 @@ func TestServiceSeniorCanCreateAndManageSameTeamGameAccount(t *testing.T) {
 	service := NewService(store, WithUserResolver(users))
 	actor := mediaActor(1, teamID, identity.RoleSeniorOperator)
 
-	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: 2, GameID: "game-a", Platform: PlatformDouyin})
-	if err != nil {
-		t.Fatalf("CreateAccount(same team/game) error=%v", err)
+	if _, err := service.CreateAccount(actor, CreateAccountInput{UserID: 2, GameID: "game-a", Platform: PlatformDouyin}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("CreateAccount(same team/game) error=%v, want ErrForbidden", err)
 	}
-	if _, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{BusinessStatus: BusinessDisabled}); err != nil {
+	store.records["account-2"] = AccountRecord{Account: Account{
+		ID: "account-2", UserID: 2, TeamID: &teamID, GameID: "game-a", Platform: PlatformDouyin,
+	}}
+	if _, err := service.UpdateAccount(actor, "account-2", UpdateAccountInput{BusinessStatus: BusinessDisabled}); err != nil {
 		t.Fatalf("UpdateAccount(same team/game) error=%v", err)
 	}
 }

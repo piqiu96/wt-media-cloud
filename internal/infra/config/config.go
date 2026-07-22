@@ -9,22 +9,22 @@ import (
 )
 
 type Config struct {
-	HTTPAddr                  string
-	MySQLDSN                  string
-	InitialTechnicianUsername string
-	InitialTechnicianPassword string
-	SessionCookieSecure       bool
-	LogLevel                  string
+	HTTPAddr             string
+	MySQLDSN             string
+	InitialAdminUsername string
+	InitialAdminPassword string
+	SessionCookieSecure  bool
+	LogLevel             string
 }
 
 func Load() Config {
 	cfg := Config{
-		HTTPAddr:                  env("WT_MEDIA_CLOUD_HTTP_ADDR", ":8080"),
-		MySQLDSN:                  os.Getenv("WT_MEDIA_MYSQL_DSN"),
-		InitialTechnicianUsername: os.Getenv("WT_MEDIA_INITIAL_TECHNICIAN_USERNAME"),
-		InitialTechnicianPassword: os.Getenv("WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD"),
-		SessionCookieSecure:       envBool("WT_MEDIA_SESSION_COOKIE_SECURE", true),
-		LogLevel:                  env("WT_MEDIA_LOG_LEVEL", "info"),
+		HTTPAddr:             env("WT_MEDIA_CLOUD_HTTP_ADDR", ":8080"),
+		MySQLDSN:             os.Getenv("WT_MEDIA_MYSQL_DSN"),
+		InitialAdminUsername: envFirst("WT_MEDIA_INITIAL_ADMIN_USERNAME", "WT_MEDIA_INITIAL_TECHNICIAN_USERNAME"),
+		InitialAdminPassword: envFirst("WT_MEDIA_INITIAL_ADMIN_PASSWORD", "WT_MEDIA_INITIAL_TECHNICIAN_PASSWORD"),
+		SessionCookieSecure:  envBool("WT_MEDIA_SESSION_COOKIE_SECURE", true),
+		LogLevel:             env("WT_MEDIA_LOG_LEVEL", "info"),
 	}
 
 	// Apply log level.
@@ -45,10 +45,19 @@ func Load() Config {
 }
 
 func (c Config) Validate() error {
-	if c.MySQLDSN == "" && (c.InitialTechnicianUsername != "" || c.InitialTechnicianPassword != "") {
+	if c.MySQLDSN == "" && (c.InitialAdminUsername != "" || c.InitialAdminPassword != "") {
 		return fmt.Errorf("initial admin requires WT_MEDIA_MYSQL_DSN")
 	}
 	return nil
+}
+
+func envFirst(keys ...string) string {
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func envBool(key string, fallback bool) bool {

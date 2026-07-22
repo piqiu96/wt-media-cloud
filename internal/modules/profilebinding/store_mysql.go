@@ -47,7 +47,15 @@ func (s *MySQLStore) FindBinding(userID identity.UserID) (BitAccountBinding, boo
 }
 
 func (s *MySQLStore) ListProfiles(userID identity.UserID) ([]BrowserProfile, error) {
-	rows, err := s.db.Query(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE user_id = ? ORDER BY bit_profile_id`, userID)
+	return s.listProfiles(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE user_id = ? ORDER BY bit_profile_id`, userID)
+}
+
+func (s *MySQLStore) ListAllProfiles() ([]BrowserProfile, error) {
+	return s.listProfiles(`SELECT ` + profileColumnsSQL + ` FROM browser_profiles ORDER BY bit_profile_id`)
+}
+
+func (s *MySQLStore) listProfiles(query string, args ...any) ([]BrowserProfile, error) {
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
