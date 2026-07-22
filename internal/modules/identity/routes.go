@@ -125,7 +125,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			return
 		}
 		user, err := service.UpdateUserAccess(actor.ID, userID, req.Role, req.TeamID, req.GameIDs)
-		if err == nil && req.Status != "" {
+		if err == nil && req.Status != "" && req.Status != user.Status {
 			err = service.SetUserStatus(actor.ID, userID, req.Status)
 			user.Status = req.Status
 		}

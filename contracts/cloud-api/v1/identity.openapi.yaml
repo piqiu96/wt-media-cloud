@@ -112,7 +112,7 @@ paths:
           required: true
           schema: {type: integer, format: int64}
       responses:
-        '204': {description: Unreferenced user deleted.}
+        '200': {description: Unreferenced user deleted.}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: User still has sessions, audit, or business references.}
   /api/v1/users/{user_id}/reset-password:
@@ -188,7 +188,7 @@ paths:
       operationId: deleteOperationTeam
       security: [{sessionCookie: []}]
       responses:
-        '204': {description: Unreferenced team deleted.}
+        '200': {description: Unreferenced team deleted.}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: Team is referenced by users or historical business objects.}
 components:

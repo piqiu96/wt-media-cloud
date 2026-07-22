@@ -110,6 +110,10 @@ func TestAdminManagesTeamsAndUsersWithOneTimePassword(t *testing.T) {
 	if listed.Result().StatusCode() != consts.StatusOK || strings.Contains(string(listed.Result().Body()), "one_time_password") || strings.Contains(string(listed.Result().Body()), "a-long-operator-password") {
 		t.Fatalf("list users status=%d body=%s", listed.Result().StatusCode(), listed.Result().Body())
 	}
+	updated := performIdentityJSON(engine, "PATCH", fmt.Sprintf("/api/v1/users/%d", userEnvelope.Data.User.ID), fmt.Sprintf(`{"role":"senior_operator","team_id":%d,"status":"disabled","game_ids":["game-b"]}`, teamID), cookie)
+	if updated.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(updated.Result().Body()), `"role":"senior_operator"`) || !strings.Contains(string(updated.Result().Body()), `"status":"disabled"`) {
+		t.Fatalf("update user status=%d body=%s", updated.Result().StatusCode(), updated.Result().Body())
+	}
 
 	reset := performIdentityJSON(engine, "POST", fmt.Sprintf("/api/v1/users/%d/reset-password", userEnvelope.Data.User.ID), `{"new_password":"a-reset-operator-password"}`, cookie)
 	if reset.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(reset.Result().Body()), `"one_time_password":"a-reset-operator-password"`) {
