@@ -132,6 +132,7 @@ type Store interface {
 	GetProfile(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
+	ConfirmMainIdentity(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
 }
@@ -275,6 +276,14 @@ func (s *Service) GetScan(actor identity.PublicUser, scanID string) (ProfileScan
 }
 
 func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (ProfileScan, error) {
+	return s.confirmScan(actor, scanID, true)
+}
+
+func (s *Service) ConfirmMainIdentity(actor identity.PublicUser, scanID string) (ProfileScan, error) {
+	return s.confirmScan(actor, scanID, false)
+}
+
+func (s *Service) confirmScan(actor identity.PublicUser, scanID string, applyProfiles bool) (ProfileScan, error) {
 	scan, err := s.GetScan(actor, scanID)
 	if err != nil {
 		return ProfileScan{}, err
@@ -308,7 +317,12 @@ func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (Profile
 	if found {
 		bindingAuditAction = auditMainAccountRebind
 	}
-	if err := s.store.ApplyScan(scan, binding, now, bindingAuditAction); err != nil {
+	if applyProfiles {
+		err = s.store.ApplyScan(scan, binding, now, bindingAuditAction)
+	} else {
+		err = s.store.ConfirmMainIdentity(scan, binding, now, bindingAuditAction)
+	}
+	if err != nil {
 		return ProfileScan{}, err
 	}
 	return scan, nil

@@ -30,6 +30,29 @@ const selectedTab = ref("changed")
 
 let currentUser = null
 
+async function currentLocalNodeId() {
+  const isDesktop = typeof window !== "undefined" && (
+    window.__TAURI_INTERNALS__ || location.port === "5174"
+  )
+  if (!isDesktop) return ""
+  try {
+    const resp = await fetch("http://127.0.0.1:8765/api/v1/status", { method: "GET", mode: "cors" })
+    if (!resp.ok) return ""
+    const body = await resp.json().catch(() => ({}))
+    const data = body?.data ?? body
+    return data?.node_id || ""
+  } catch {
+    return ""
+  }
+}
+
+function localTrustMessage(e) {
+  if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
+    return "当前Desktop、Local Agent或BitBrowser身份未通过可信检查，已阻止本地敏感操作。请在Desktop环境状态页重新检测并确认主账号后重试。"
+  }
+  return e.message
+}
+
 onMounted(async () => {
   try {
     currentUser = await sessionClient.me()
@@ -52,7 +75,8 @@ async function loadProfiles() {
 async function createProfile() {
   creating.value = true
   try {
-    const task = await bindingClient.createProfile(newProfile.value)
+    const nodeId = await currentLocalNodeId()
+    const task = await bindingClient.createProfile(newProfile.value, { nodeId })
     taskNotice.value = `已创建 Profile 任务（${task.task_id || "待执行"}），需要 Local Agent 执行后才会出现在列表。`
     showCreate.value = false
     newProfile.value = { name: "", group_name: "", seq: 1 }
@@ -62,7 +86,7 @@ async function createProfile() {
     if (e.errcode === 23002 || e.errcode === 23003) {
       identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
     }
-    error.value = e.message
+    error.value = localTrustMessage(e)
   } finally {
     creating.value = false
   }
@@ -70,19 +94,21 @@ async function createProfile() {
 
 async function openProfile(profile) {
   try {
-    const task = await bindingClient.openProfile(profile.id)
+    const nodeId = await currentLocalNodeId()
+    const task = await bindingClient.openProfile(profile.id, { nodeId })
     taskNotice.value = `已创建打开任务（${task.task_id || "待执行"}）。`
   } catch (e) {
-    error.value = e.message
+    error.value = localTrustMessage(e)
   }
 }
 
 async function closeProfile(profile) {
   try {
-    const task = await bindingClient.closeProfile(profile.id)
+    const nodeId = await currentLocalNodeId()
+    const task = await bindingClient.closeProfile(profile.id, { nodeId })
     taskNotice.value = `已创建关闭任务（${task.task_id || "待执行"}）。`
   } catch (e) {
-    error.value = e.message
+    error.value = localTrustMessage(e)
   }
 }
 
@@ -162,6 +188,18 @@ async function confirmScan() {
     currentScan.value = null
     scanDetailVisible.value = false
     await loadProfiles()
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function confirmMainIdentity() {
+  if (!currentScan.value) return
+  try {
+    await bindingClient.confirmMainIdentity(currentScan.value.id)
+    taskNotice.value = "已确认当前BitBrowser主账号身份；Profile变更尚未同步。"
+    currentScan.value = null
+    scanDetailVisible.value = false
   } catch (e) {
     error.value = e.message
   }
@@ -342,7 +380,8 @@ const diffColumns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="primary" @click="confirmScan">确认变更</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="primary" @click="confirmMainIdentity">仅确认主账号</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="confirmScan">确认同步窗口</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>
       </template>

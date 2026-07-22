@@ -70,9 +70,9 @@ type CreateProxyInput struct {
 }
 
 type BulkImportRow struct {
-	Raw     string `json:"raw"`
+	Raw     string            `json:"raw"`
 	Parsed  *CreateProxyInput `json:"parsed,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Error   string            `json:"error,omitempty"`
 }
 
 type Store interface {
@@ -247,22 +247,22 @@ func (s *Service) Delete(id string) error {
 
 // TriggerCheck performs a basic TCP connectivity check on the proxy.
 // Full protocol-level check requires Agent-side execution.
-func (s *Service) TriggerCheck(id string) error {
-	proxy, ok, err := s.store.FindByID(id)
+func (s *Service) TriggerCheck(id string) (ProxyConfig, error) {
+	p, ok, err := s.store.FindByID(id)
 	if err != nil {
-		return err
+		return ProxyConfig{}, err
 	}
 	if !ok {
-		return ErrNotFound
+		return ProxyConfig{}, ErrNotFound
 	}
 	now := s.now()
-	result := checkTCPConnect(proxy.Host, proxy.Port)
-	proxy.LastCheckAt = &now
-	proxy.LastCheckResult = result
-	if err := s.store.Update(proxy); err != nil {
-		return err
+	result := checkTCPConnect(p.Host, p.Port)
+	p.LastCheckAt = &now
+	p.LastCheckResult = result
+	if err := s.store.Update(p); err != nil {
+		return ProxyConfig{}, err
 	}
-	return nil
+	return p, nil
 }
 
 // checkTCPConnect attempts a basic TCP dial to validate host:port reachability.

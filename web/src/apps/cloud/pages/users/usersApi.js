@@ -37,6 +37,21 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
     deleteTeam(teamId) {
       return api.delete(`/operation-teams/${teamId}`)
     },
+    listGames(filters = {}) {
+      return api.get('/games', {
+        keyword: filters.keyword,
+        status: filters.status,
+      })
+    },
+    createGame(input) {
+      return api.post('/games', { id: input.id, name: input.name, remark: input.remark })
+    },
+    updateGame(gameId, input) {
+      return api.patch(`/games/${gameId}`, { name: input.name, status: input.status, remark: input.remark })
+    },
+    deleteGame(gameId) {
+      return api.delete(`/games/${gameId}`)
+    },
   }
 }
 

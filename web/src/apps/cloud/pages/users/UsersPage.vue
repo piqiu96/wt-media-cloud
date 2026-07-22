@@ -5,19 +5,16 @@ import { createUsersClient } from './usersApi.js'
 const client = createUsersClient()
 const users = ref([])
 const teams = ref([])
+const games = ref([])
 const loading = ref(true)
 const error = ref('')
 
 const filters = ref({ uid: '', username: '', role: '', teamId: '', status: '', gameId: '' })
+const pagination = ref({ current: 1, pageSize: 10 })
 const userDialogVisible = ref(false)
 const editingUser = ref(null)
 const userForm = ref(emptyUserForm())
 const savingUser = ref(false)
-
-const teamDialogVisible = ref(false)
-const editingTeam = ref(null)
-const teamName = ref('')
-const savingTeam = ref(false)
 
 const passwordDialogVisible = ref(false)
 const oneTimePassword = ref('')
@@ -25,6 +22,14 @@ const passwordTarget = ref(null)
 const newPassword = ref('')
 
 const roleLabels = { admin: '管理员', senior_operator: '高级运营', operator: '普通运营' }
+const enabledGames = computed(() => games.value.filter((game) => game.status === 'enabled'))
+const gameNameMap = computed(() => new Map(games.value.map((game) => [game.id, game.name])))
+const requiresScope = computed(() => userForm.value.role !== 'admin')
+const pagedUsers = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return users.value.slice(start, start + pagination.value.pageSize)
+})
+
 const columns = [
   { colKey: 'id', title: 'UID', width: 90 },
   { colKey: 'username', title: '用户名', width: 150 },
@@ -34,8 +39,6 @@ const columns = [
   { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'operations', title: '操作', width: 280, fixed: 'right' },
 ]
-
-const requiresScope = computed(() => userForm.value.role !== 'admin')
 
 onMounted(loadAll)
 
@@ -47,11 +50,17 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [userRows, teamRows] = await Promise.all([client.listUsers(filters.value), client.listTeams()])
+    const [userRows, teamRows, gameRows] = await Promise.all([
+      client.listUsers(filters.value),
+      client.listTeams(),
+      client.listGames(),
+    ])
     users.value = userRows || []
     teams.value = teamRows || []
+    games.value = gameRows || []
+    pagination.value.current = 1
   } catch (e) {
-    error.value = e.message
+    error.value = friendlyError(e)
   } finally {
     loading.value = false
   }
@@ -62,8 +71,9 @@ async function applyFilters() {
   error.value = ''
   try {
     users.value = await client.listUsers(filters.value) || []
+    pagination.value.current = 1
   } catch (e) {
-    error.value = e.message
+    error.value = friendlyError(e)
   } finally {
     loading.value = false
   }
@@ -94,8 +104,20 @@ function openEditUser(user) {
 }
 
 async function saveUser() {
-  if (!userForm.value.role || (requiresScope.value && (!userForm.value.teamId || !userForm.value.gameIds.length))) {
-    error.value = '普通运营和高级运营必须选择运营分组及至少一个游戏'
+  if (!userForm.value.role) {
+    error.value = '请选择用户角色'
+    return
+  }
+  if (!editingUser.value && userForm.value.password.length < 6) {
+    error.value = '密码至少需要6位'
+    return
+  }
+  if (requiresScope.value && !userForm.value.teamId) {
+    error.value = '普通运营和高级运营必须选择运营分组'
+    return
+  }
+  if (requiresScope.value && !userForm.value.gameIds.length) {
+    error.value = '普通运营和高级运营必须选择至少一个游戏'
     return
   }
   savingUser.value = true
@@ -110,7 +132,7 @@ async function saveUser() {
     userDialogVisible.value = false
     await loadAll()
   } catch (e) {
-    error.value = e.message
+    error.value = friendlyError(e)
   } finally {
     savingUser.value = false
   }
@@ -126,7 +148,7 @@ async function toggleUser(user) {
     })
     await loadAll()
   } catch (e) {
-    error.value = e.message
+    error.value = friendlyError(e)
   }
 }
 
@@ -136,7 +158,7 @@ async function deleteUser(user) {
     await client.deleteUser(user.id)
     await loadAll()
   } catch (e) {
-    error.value = e.message
+    error.value = friendlyError(e)
   }
 }
 
@@ -147,12 +169,16 @@ function openPasswordReset(user) {
 }
 
 async function resetPassword() {
+  if (newPassword.value.length < 6) {
+    error.value = '密码至少需要6位'
+    return
+  }
   try {
     const result = await client.resetPassword(passwordTarget.value.id, newPassword.value)
     passwordDialogVisible.value = false
     showOneTimePassword(result.one_time_password)
   } catch (e) {
-    error.value = e.message
+    error.value = friendlyError(e)
   }
 }
 
@@ -170,40 +196,14 @@ async function copyPassword() {
   await navigator.clipboard.writeText(oneTimePassword.value)
 }
 
-function openCreateTeam() {
-  editingTeam.value = null
-  teamName.value = ''
-  teamDialogVisible.value = true
+function friendlyError(e) {
+  return e?.message || '操作失败，请检查输入后重试'
 }
 
-function openRenameTeam(team) {
-  editingTeam.value = team
-  teamName.value = team.name
-  teamDialogVisible.value = true
-}
-
-async function saveTeam() {
-  savingTeam.value = true
-  try {
-    if (editingTeam.value) await client.renameTeam(editingTeam.value.id, teamName.value)
-    else await client.createTeam(teamName.value)
-    teamDialogVisible.value = false
-    await loadAll()
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    savingTeam.value = false
-  }
-}
-
-async function deleteTeam(team) {
-  if (!window.confirm(`确定删除运营分组 ${team.name}？`)) return
-  try {
-    await client.deleteTeam(team.id)
-    await loadAll()
-  } catch (e) {
-    error.value = e.message
-  }
+function gameScopeText(gameIds) {
+  gameIds = Array.isArray(gameIds) ? gameIds : []
+  if (!gameIds.length) return '全部游戏'
+  return gameIds.map((id) => gameNameMap.value.get(id) || id).join(', ')
 }
 </script>
 
@@ -211,7 +211,7 @@ async function deleteTeam(team) {
   <t-loading :loading="loading" :show-overlay="true" size="small">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
 
-    <t-card title="用户与权限" :bordered="true" style="margin-bottom:16px">
+    <t-card title="用户管理" :bordered="true">
       <template #actions>
         <t-button theme="primary" size="small" @click="openCreateUser">新建用户</t-button>
         <t-button theme="default" size="small" style="margin-left:8px" @click="loadAll">刷新</t-button>
@@ -228,7 +228,9 @@ async function deleteTeam(team) {
         <t-select v-model="filters.teamId" placeholder="运营分组" clearable>
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
         </t-select>
-        <t-input v-model="filters.gameId" placeholder="游戏 ID" clearable />
+        <t-select v-model="filters.gameId" placeholder="游戏" clearable>
+          <t-option v-for="game in games" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
+        </t-select>
         <t-select v-model="filters.status" placeholder="状态" clearable>
           <t-option value="enabled" label="启用" />
           <t-option value="disabled" label="停用" />
@@ -237,10 +239,10 @@ async function deleteTeam(team) {
         <t-button size="small" variant="text" @click="clearFilters">清空</t-button>
       </div>
 
-      <t-table :data="users" :columns="columns" size="small" hover row-key="id">
+      <t-table :data="pagedUsers" :columns="columns" size="small" hover row-key="id">
         <template #role="{ row }"><t-tag size="small">{{ roleLabels[row.role] || row.role }}</t-tag></template>
         <template #team_name="{ row }">{{ row.team_name || '全局' }}</template>
-        <template #game_ids="{ row }">{{ row.game_ids?.length ? row.game_ids.join(', ') : '全部游戏' }}</template>
+        <template #game_ids="{ row }">{{ gameScopeText(row.game_ids) }}</template>
         <template #status="{ row }"><t-tag :theme="row.status === 'enabled' ? 'success' : 'danger'" size="small">{{ row.status === 'enabled' ? '启用' : '停用' }}</t-tag></template>
         <template #operations="{ row }">
           <t-space>
@@ -251,19 +253,9 @@ async function deleteTeam(team) {
           </t-space>
         </template>
       </t-table>
-    </t-card>
-
-    <t-card title="运营分组" :bordered="true">
-      <template #actions><t-button size="small" @click="openCreateTeam">新建分组</t-button></template>
-      <t-list :split="true">
-        <t-list-item v-for="team in teams" :key="team.id">
-          <span>#{{ team.id }} {{ team.name }}</span>
-          <template #action>
-            <t-button size="small" variant="text" @click="openRenameTeam(team)">重命名</t-button>
-            <t-button size="small" variant="text" theme="danger" @click="deleteTeam(team)">删除</t-button>
-          </template>
-        </t-list-item>
-      </t-list>
+      <div class="pagination-row">
+        <t-pagination v-model:current="pagination.current" v-model:page-size="pagination.pageSize" :total="users.length" :page-size-options="[10, 20, 50]" />
+      </div>
     </t-card>
 
     <t-dialog v-model:visible="userDialogVisible" :header="editingUser ? '编辑用户' : '新建用户'" :confirm-btn="{ loading: savingUser }" @confirm="saveUser">
@@ -281,13 +273,11 @@ async function deleteTeam(team) {
           <t-select v-model="userForm.teamId"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select>
         </t-form-item>
         <t-form-item v-if="requiresScope" label="游戏范围">
-          <t-tag-input v-model="userForm.gameIds" placeholder="输入游戏 ID 后回车" />
+          <t-select v-model="userForm.gameIds" multiple filterable placeholder="请选择已启用游戏">
+            <t-option v-for="game in enabledGames" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
+          </t-select>
         </t-form-item>
       </t-form>
-    </t-dialog>
-
-    <t-dialog v-model:visible="teamDialogVisible" :header="editingTeam ? '重命名运营分组' : '新建运营分组'" :confirm-btn="{ loading: savingTeam }" @confirm="saveTeam">
-      <t-form><t-form-item label="分组名称"><t-input v-model="teamName" /></t-form-item></t-form>
     </t-dialog>
 
     <t-dialog v-model:visible="passwordDialogVisible" header="重置密码" @confirm="resetPassword">
@@ -306,5 +296,6 @@ async function deleteTeam(team) {
 <style scoped>
 .filter-row { display:grid; grid-template-columns:auto repeat(6, minmax(110px, 1fr)) auto auto; gap:8px; align-items:center; margin-bottom:16px; }
 .filter-title { color:var(--td-text-color-secondary); }
+.pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
 @media (max-width: 1200px) { .filter-row { grid-template-columns:repeat(3, minmax(140px, 1fr)); } }
 </style>

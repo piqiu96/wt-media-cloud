@@ -107,6 +107,30 @@ func (s *MySQLStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, err
 	return node, true, nil
 }
 
+func (s *MySQLStore) CheckLocalTrust(userID identity.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
+	var trusted bool
+	err := s.db.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1
+			FROM local_agent_nodes n
+			JOIN users u ON u.id = n.user_id
+			JOIN user_sessions s ON s.id = n.session_id
+			WHERE n.id = ?
+			  AND n.user_id = ?
+			  AND n.mode = 'local'
+			  AND n.status = 'online'
+			  AND n.last_heartbeat_at >= ?
+			  AND s.invalidated_at IS NULL
+			  AND u.status = 'enabled'
+			  AND u.bit_main_user_id IS NOT NULL
+			  AND n.bitbrowser_status = 'normal'
+			  AND n.reported_main_user_id = u.bit_main_user_id
+		)`,
+		nodeID, userID, at.Add(-freshness),
+	).Scan(&trusted)
+	return trusted, err
+}
+
 func (s *MySQLStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	if len(profileIDs) == 0 {
 		return false, nil

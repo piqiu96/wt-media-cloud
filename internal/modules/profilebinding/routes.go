@@ -4,23 +4,29 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
 type TaskCreator interface {
 	Create(cloudagent.CreateTaskRequest) cloudagent.Task
 }
 
-func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, taskStores ...TaskCreator) {
-	var tasks TaskCreator
-	if len(taskStores) > 0 {
-		tasks = taskStores[0]
-	}
+type LocalTrustChecker interface {
+	CheckLocalTrust(userID identity.UserID, nodeID string) error
+}
+
+type localSensitiveRequest struct {
+	NodeID string `json:"node_id"`
+}
+
+func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, tasks TaskCreator, trust LocalTrustChecker) {
 	h.POST("/api/v1/bit-browser/profile-scans", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -55,6 +61,18 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			return
 		}
 		scan, err := service.ConfirmScan(actor, c.Param("scan_id"))
+		if err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.Success(c, scan)
+	})
+	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/confirm-main-identity", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		scan, err := service.ConfirmMainIdentity(actor, c.Param("scan_id"))
 		if err != nil {
 			writeProfileError(c, err)
 			return
@@ -102,6 +120,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &input) {
 			return
 		}
+		nodeID, ok := extractNodeID(input)
+		if !ok {
+			writeProfileError(c, runtimebinding.ErrInvalidInput)
+			return
+		}
+		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
+			return
+		}
 		createProfileTask(c, tasks, cloudagent.TaskTypeProfileCreate.String(), actor.ID, input)
 	})
 	h.POST("/api/v1/browser-profiles/:id/open", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -114,6 +140,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeProfileError(c, err)
 			return
 		}
+		nodeID, ok := decodeLocalSensitiveNode(c)
+		if !ok {
+			writeProfileError(c, runtimebinding.ErrInvalidInput)
+			return
+		}
+		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
+			return
+		}
 		createProfileTask(c, tasks, cloudagent.TaskTypeProfileOpen.String(), actor.ID, map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID})
 	})
 	h.POST("/api/v1/browser-profiles/:id/close", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -124,6 +158,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		profile, err := service.GetActiveProfile(actor, c.Param("id"))
 		if err != nil {
 			writeProfileError(c, err)
+			return
+		}
+		nodeID, ok := decodeLocalSensitiveNode(c)
+		if !ok {
+			writeProfileError(c, runtimebinding.ErrInvalidInput)
+			return
+		}
+		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
 			return
 		}
 		createProfileTask(c, tasks, cloudagent.TaskTypeProfileClose.String(), actor.ID, map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID})
@@ -140,6 +182,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		var input map[string]any
 		if !common.DecodeJSON(c, &input) {
+			return
+		}
+		nodeID, ok := extractNodeID(input)
+		if !ok {
+			writeProfileError(c, runtimebinding.ErrInvalidInput)
+			return
+		}
+		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
 			return
 		}
 		input["cloud_profile_id"] = profile.ID
@@ -160,6 +210,48 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 	})
 }
 
+func extractNodeID(input map[string]any) (string, bool) {
+	raw, ok := input["node_id"]
+	delete(input, "node_id")
+	if !ok {
+		return "", false
+	}
+	nodeID := strings.TrimSpace(strconvAny(raw))
+	return nodeID, nodeID != ""
+}
+
+func decodeLocalSensitiveNode(c *hertzapp.RequestContext) (string, bool) {
+	var req localSensitiveRequest
+	if !common.DecodeJSON(c, &req) {
+		return "", false
+	}
+	nodeID := strings.TrimSpace(req.NodeID)
+	return nodeID, nodeID != ""
+}
+
+func checkLocalTrust(c *hertzapp.RequestContext, trust LocalTrustChecker, userID identity.UserID, nodeID string) bool {
+	if trust == nil {
+		writeProfileError(c, runtimebinding.ErrLocalTrustUnavailable)
+		return false
+	}
+	if err := trust.CheckLocalTrust(userID, nodeID); err != nil {
+		writeProfileError(c, err)
+		return false
+	}
+	return true
+}
+
+func strconvAny(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return ""
+	}
+}
+
 func createProfileTask(c *hertzapp.RequestContext, tasks TaskCreator, taskType string, actorID identity.UserID, payload map[string]any) {
 	if tasks == nil {
 		common.Failure(c, 503, 30006, "任务服务不可用", nil)
@@ -172,6 +264,12 @@ func createProfileTask(c *hertzapp.RequestContext, tasks TaskCreator, taskType s
 
 func writeProfileError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, runtimebinding.ErrInvalidInput):
+		common.BadRequest(c, 10001, "本地敏感操作请求缺少可信节点")
+	case errors.Is(err, runtimebinding.ErrBoundSessionInvalid), errors.Is(err, runtimebinding.ErrNodeCredentialInvalid):
+		common.Unauthorized(c, 11001, "本机会话已失效，请重新登录并绑定Desktop")
+	case errors.Is(err, runtimebinding.ErrLocalTrustUnavailable), errors.Is(err, runtimebinding.ErrProfileOwnershipMismatch):
+		common.Conflict(c, 23003, "当前Desktop、Local Agent或BitBrowser身份不可信，已阻止本地敏感操作")
 	case errors.Is(err, ErrForbidden):
 		common.Forbidden(c, 11003, "没有权限执行此 Profile 操作")
 	case errors.Is(err, ErrIdentityUnverifiable):

@@ -1,11 +1,14 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isDesktop } from '../utils.js'
+import { createSessionClient } from '../shared/api/session.js'
 
 const route = useRoute()
 const router = useRouter()
 const collapsed = ref(false)
+const sessionClient = createSessionClient()
+const currentUser = ref(null)
 
 const menuItems = [
   { title: '工作台', path: '/', icon: 'dashboard' },
@@ -36,7 +39,9 @@ const menuItems = [
   { title: '评论模板', path: '/comment-templates', icon: 'comment' },
 
   { group: '系统' },
-  { title: '用户与权限', path: '/users', icon: 'secure' },
+  { title: '用户管理', path: '/users', icon: 'user-setting' },
+  { title: '运营分组', path: '/operation-teams', icon: 'organization' },
+  { title: '游戏管理', path: '/games', icon: 'gamepad' },
 ]
 
 const desktopItems = [
@@ -45,12 +50,60 @@ const desktopItems = [
   { title: '本地日志', path: '/logs', icon: 'file' },
 ]
 
-const allItems = computed(() => {
-  return isDesktop() ? [...menuItems, ...desktopItems] : menuItems
+const adminOnlyPaths = new Set(['/users', '/operation-teams', '/games'])
+const desktopHiddenPaths = new Set(['/users', '/operation-teams', '/games'])
+
+onMounted(async () => {
+  try {
+    currentUser.value = await sessionClient.me()
+  } catch {
+    currentUser.value = null
+  }
 })
+
+const allItems = computed(() => {
+  const hiddenPaths = new Set()
+  if (isDesktop()) {
+    for (const path of desktopHiddenPaths) hiddenPaths.add(path)
+  }
+  if (currentUser.value?.role !== 'admin') {
+    for (const path of adminOnlyPaths) hiddenPaths.add(path)
+  }
+  const sourceItems = isDesktop() ? [...menuItems, ...desktopItems] : menuItems
+  return removeEmptyGroups(sourceItems.filter((item) => !item.path || !hiddenPaths.has(item.path)))
+})
+
+function removeEmptyGroups(items) {
+  const result = []
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index]
+    if (item.group && !item.path) {
+      let hasVisibleChild = false
+      for (let nextIndex = index + 1; nextIndex < items.length; nextIndex += 1) {
+        const next = items[nextIndex]
+        if (next.group && !next.path) break
+        if (next.path) {
+          hasVisibleChild = true
+          break
+        }
+      }
+      if (!hasVisibleChild) continue
+    }
+    result.push(item)
+  }
+  return result
+}
 
 function navigate(path) {
   if (path) router.push(path)
+}
+
+async function logout() {
+  try {
+    await sessionClient.logout()
+  } finally {
+    router.push('/login')
+  }
 }
 </script>
 
@@ -90,7 +143,7 @@ function navigate(path) {
           </t-breadcrumb>
         </div>
         <div style="display:flex; gap:8px">
-          <t-button variant="text" @click="router.push('/login')">退出</t-button>
+          <t-button variant="text" @click="logout">退出</t-button>
         </div>
       </t-header>
 

@@ -3,6 +3,7 @@ import { createPinia } from "pinia"
 import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
 import App from "./App.vue"
+import { canUseDesktop } from "../../utils.js"
 import "tdesign-vue-next/es/style/index.css"
 
 const app = createApp(App)
@@ -28,7 +29,13 @@ router.beforeEach(async (to, from, next) => {
 
   try {
     const { createSessionClient } = await import("../../shared/api/session.js")
-    await createSessionClient().me()
+    const sessionClient = createSessionClient()
+    const user = await sessionClient.me()
+    if (!canUseDesktop(user)) {
+      await sessionClient.logout().catch(() => {})
+      next("/login?desktop_role_forbidden=1")
+      return
+    }
     next()
   } catch {
     next("/login")

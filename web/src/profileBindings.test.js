@@ -30,4 +30,15 @@ describe('profile binding client', () => {
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/bit-browser/profile-scans/scan-1/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
+
+  it('sends node id for local sensitive profile entries', async () => {
+    const fetch = vi.fn(async () => response({ task_id: 'task-1' }))
+    const client = createProfileBindingClient({ fetch })
+
+    await client.createProfile({ name: '窗口一' }, { nodeId: 'node-1' })
+    await client.openProfile('profile-1', { nodeId: 'node-1' })
+
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: '窗口一', node_id: 'node-1' })
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ node_id: 'node-1' })
+  })
 })

@@ -1,6 +1,12 @@
 const INITIAL_STATE = Object.freeze({
+  nodeId: "",
   agentId: null,
   status: "unknown",
+  bitbrowserStatus: "unknown",
+  mainUserId: "",
+  operatingSystem: "",
+  cpuArchitecture: "",
+  agentVersion: "",
   currentTaskId: null,
   pendingResultCount: 0,
   lastEventName: null,
@@ -11,8 +17,14 @@ function clone(value) {
 }
 
 function applyStatus(state, status) {
+  state.nodeId = status.node_id;
   state.agentId = status.agent_id;
   state.status = status.status;
+  state.bitbrowserStatus = status.bitbrowser_status;
+  state.mainUserId = status.main_user_id;
+  state.operatingSystem = status.operating_system;
+  state.cpuArchitecture = status.cpu_architecture;
+  state.agentVersion = status.agent_version;
   state.currentTaskId = status.current_task_id;
   state.pendingResultCount = status.pending_result_count;
   return state;

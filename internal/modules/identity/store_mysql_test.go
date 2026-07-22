@@ -68,6 +68,29 @@ func TestMySQLStoreInvalidatesPriorSessions(t *testing.T) {
 	}
 }
 
+func TestMySQLStoreDetectsActiveSession(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND invalidated_at IS NULL`)).
+		WithArgs(UserID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	active, err := NewMySQLStore(db).HasActiveSession(UserID(1))
+	if err != nil {
+		t.Fatalf("HasActiveSession() error = %v", err)
+	}
+	if !active {
+		t.Fatal("HasActiveSession() = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
 func TestMySQLStoreTeamHasReferencesIncludesHistoricalProfileScans(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

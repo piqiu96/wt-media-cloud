@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
-func TestLoginUsesHttpOnlyCookieAndReplacementRejectsOldSession(t *testing.T) {
+func TestLoginUsesHttpOnlyCookieAndRequiresReplacementConfirmation(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	if _, err := service.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
 		t.Fatalf("BootstrapAdmin() error = %v", err)
@@ -51,7 +51,16 @@ func TestLoginUsesHttpOnlyCookieAndReplacementRejectsOldSession(t *testing.T) {
 		t.Fatalf("idempotent login invalidated session status = %d, body = %s", stillMe.Result().StatusCode(), stillMe.Result().Body())
 	}
 
-	second := performJSON(engine, "POST", "/api/v1/auth/login", `{"username":"admin","password":"a-long-initial-password"}`)
+	blocked := performJSON(engine, "POST", "/api/v1/auth/login", `{"username":"admin","password":"a-long-initial-password"}`)
+	if blocked.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(blocked.Result().Body()), `"errcode":20010`) {
+		t.Fatalf("unconfirmed replacement status = %d, body = %s", blocked.Result().StatusCode(), blocked.Result().Body())
+	}
+	stillMeAfterBlocked := ut.PerformRequest(engine.Engine, "GET", "/api/v1/auth/me", nil, ut.Header{Key: "Cookie", Value: firstCookie})
+	if stillMeAfterBlocked.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("unconfirmed replacement invalidated old session status = %d, body = %s", stillMeAfterBlocked.Result().StatusCode(), stillMeAfterBlocked.Result().Body())
+	}
+
+	second := performJSON(engine, "POST", "/api/v1/auth/login", `{"username":"admin","password":"a-long-initial-password","replace_existing":true}`)
 	secondCookie := string(second.Result().Header.Peek("Set-Cookie"))
 	if secondCookie == "" || secondCookie == firstCookie {
 		t.Fatalf("replacement Set-Cookie = %q", secondCookie)

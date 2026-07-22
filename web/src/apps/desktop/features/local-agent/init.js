@@ -4,6 +4,7 @@
 import { createLocalAgentService, createMockLocalAgentService } from "./service.js"
 import { createLocalAgentStore } from "./store.js"
 import { createLocalAgentStatusPage } from "./local-agent-status.js"
+import { createSessionClient } from "../../../../shared/api/session.js"
 
 function createHttpLocalAgentService() {
   const BASE = "http://127.0.0.1:8765"
@@ -18,7 +19,7 @@ function createHttpLocalAgentService() {
     }
   }
 
-  const DEFAULT = { agent_id: "local-agent-dev", status: "stopped", current_task_id: null, current_task_progress: null, current_task_status: null, pending_result_count: 0 }
+  const DEFAULT = { node_id: "", agent_id: "local-agent-dev", status: "stopped", bitbrowser_status: "unknown", main_user_id: "", operating_system: "", cpu_architecture: "", agent_version: "", current_task_id: null, current_task_progress: null, current_task_status: null, pending_result_count: 0 }
 
   return {
     async status() {
@@ -26,8 +27,14 @@ function createHttpLocalAgentService() {
       const src = body?.data ?? body
       if (src) {
         return {
+          node_id: String(src.node_id ?? DEFAULT.node_id),
           agent_id: String(src.agent_id ?? DEFAULT.agent_id),
           status: String(src.status ?? DEFAULT.status),
+          bitbrowser_status: String(src.bitbrowser_status ?? DEFAULT.bitbrowser_status),
+          main_user_id: String(src.main_user_id ?? DEFAULT.main_user_id),
+          operating_system: String(src.operating_system ?? DEFAULT.operating_system),
+          cpu_architecture: String(src.cpu_architecture ?? DEFAULT.cpu_architecture),
+          agent_version: String(src.agent_version ?? DEFAULT.agent_version),
           current_task_id: src.current_task_id ?? null,
           current_task_progress: src.current_task_progress ?? null,
           current_task_status: src.current_task_status ?? null,
@@ -61,6 +68,12 @@ export async function createDesktopStatusPreview() {
   const store = createLocalAgentStore({ service })
   await store.refresh()
   const snapshot = store.snapshot()
+  let cloudUser = null
+  try {
+    cloudUser = await createSessionClient().me()
+  } catch {
+    cloudUser = null
+  }
   console.info(`wt-media-desktop local agent: ${snapshot.status}`)
-  return createLocalAgentStatusPage(snapshot)
+  return createLocalAgentStatusPage(snapshot, { cloudUser })
 }

@@ -8,6 +8,7 @@ import "tdesign-vue-next/es/style/index.css"
 const app = createApp(App)
 const pinia = createPinia()
 const router = createCloudRouter()
+const adminOnlyPaths = new Set(["/users", "/operation-teams", "/games"])
 
 app.use(pinia)
 app.use(TDesign)
@@ -22,7 +23,11 @@ router.beforeEach(async (to, from, next) => {
 
   try {
     const { createSessionClient } = await import("../../shared/api/session.js")
-    await createSessionClient().me()
+    const user = await createSessionClient().me()
+    if (adminOnlyPaths.has(to.path) && user.role !== "admin") {
+      next("/")
+      return
+    }
     next()
   } catch {
     next("/login")

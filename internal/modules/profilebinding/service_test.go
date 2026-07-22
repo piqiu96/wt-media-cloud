@@ -195,6 +195,37 @@ func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
 	}
 }
 
+func TestConfirmMainIdentityBindsUserWithoutApplyingProfiles(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := profileActor("user-1")
+	scan, _ := service.SubmitScan(actor, SnapshotInput{
+		MainUserID: "main-user-1",
+		Profiles: []ProfileInput{
+			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一"},
+			{BitProfileID: "p2", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "窗口二"},
+		},
+	})
+
+	confirmed, err := service.ConfirmMainIdentity(actor, scan.ID)
+	if err != nil {
+		t.Fatalf("ConfirmMainIdentity() error = %v", err)
+	}
+	if confirmed.Status != ScanConfirmed || confirmed.ConfirmedAt == nil {
+		t.Fatalf("confirmed scan = %#v", confirmed)
+	}
+	binding := store.bindings[actor.ID]
+	if binding.MainUserID != "main-user-1" || binding.Status != BitAccountBound || binding.BoundAt == nil || binding.LastVerifiedAt == nil {
+		t.Fatalf("binding = %#v", binding)
+	}
+	if len(store.profiles) != 0 {
+		t.Fatalf("identity-only confirmation applied profiles: %#v", store.profiles)
+	}
+	if len(store.audits) != 1 || store.audits[0].Action != auditMainAccountBind {
+		t.Fatalf("audits = %#v", store.audits)
+	}
+}
+
 func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
@@ -348,6 +379,17 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 	s.audits = append(s.audits,
 		identity.AuditEvent{Action: "bitbrowser.profile_scan.confirm", TargetType: "profile_sync_scan", TargetID: scan.ID, Summary: map[string]string{"main_user_id": scan.MainUserID}},
 		identity.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(scan.UserID), 10), Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "verified"}},
+	)
+	return nil
+}
+
+func (s *memoryStore) ConfirmMainIdentity(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error {
+	s.bindings[binding.UserID] = binding
+	scan.Status = ScanConfirmed
+	scan.ConfirmedAt = &at
+	s.scans[scan.ID] = cloneScan(scan)
+	s.audits = append(s.audits,
+		identity.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(scan.UserID), 10), Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "identity_verified", "identity_only": "true"}},
 	)
 	return nil
 }

@@ -4,10 +4,17 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(new URL('./UsersPage.vue', import.meta.url), 'utf8')
 
 describe('UsersPage product surface', () => {
-  it('shows numeric UID, team administration, filters, edit operations and one-time password result', () => {
-    for (const required of ['UID', '运营分组', '筛选', '编辑用户', '重置密码', '一次性密码', '停用', '删除']) {
+  it('shows numeric UID, filters, pagination, edit operations and one-time password result', () => {
+    for (const required of ['用户管理', 'UID', '运营分组', '筛选', '编辑用户', '重置密码', '一次性密码', '停用', '删除', 't-pagination']) {
       expect(source).toContain(required)
     }
+  })
+
+  it('uses configured game options instead of free text game IDs', () => {
+    expect(source).toContain('请选择已启用游戏')
+    expect(source).toContain('enabledGames')
+    expect(source).toContain('Array.isArray(gameIds) ? gameIds : []')
+    expect(source).not.toContain('输入游戏 ID 后回车')
   })
 
   it('uses admin and no longer exposes the retired technician role', () => {

@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { createSessionClient } from '../../../shared/api/session.js'
+import { canUseDesktop, isDesktop } from '../../../utils.js'
 
 const router = useRouter()
 const sessionClient = createSessionClient()
@@ -11,8 +12,18 @@ const loading = ref(true)
 const error = ref('')
 
 onMounted(async () => {
+  if (isDesktop() && new URLSearchParams(window.location.search).has('desktop_role_forbidden')) {
+    error.value = '当前角色不能登录 Desktop，请使用 Cloud Web 管理。'
+    loading.value = false
+    return
+  }
   try {
-    await sessionClient.me()
+    const user = await sessionClient.me()
+    if (isDesktop() && !canUseDesktop(user)) {
+      await sessionClient.logout().catch(() => {})
+      error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+      return
+    }
     router.push('/')
   } catch {
     // Not logged in, show form
@@ -24,9 +35,34 @@ onMounted(async () => {
 async function login() {
   error.value = ''
   try {
-    await sessionClient.login(username.value, password.value)
+    const user = await sessionClient.login(username.value, password.value)
+    if (isDesktop() && !canUseDesktop(user)) {
+      await sessionClient.logout().catch(() => {})
+      error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+      return
+    }
     router.push('/')
   } catch (e) {
+    if (e.errcode === 20010) {
+      const confirmed = window.confirm('当前账号已在其他位置登录。确认替换旧会话后，旧 Web、Desktop 和 Agent 将不能继续发起新的敏感操作。是否继续？')
+      if (!confirmed) {
+        error.value = '已取消登录，旧会话保持有效。'
+        return
+      }
+      try {
+        const user = await sessionClient.login(username.value, password.value, { replaceExisting: true })
+        if (isDesktop() && !canUseDesktop(user)) {
+          await sessionClient.logout().catch(() => {})
+          error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+          return
+        }
+        router.push('/')
+        return
+      } catch (replaceError) {
+        error.value = replaceError.message
+        return
+      }
+    }
     error.value = e.message
   }
 }

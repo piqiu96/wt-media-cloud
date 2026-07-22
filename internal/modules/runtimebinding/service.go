@@ -22,6 +22,7 @@ var (
 	ErrBindingTicketInvalid     = errors.New("binding ticket is invalid or expired")
 	ErrBoundSessionInvalid      = errors.New("bound session is no longer active")
 	ErrNodeCredentialInvalid    = errors.New("node credential is invalid")
+	ErrLocalTrustUnavailable    = errors.New("local runtime trust is unavailable")
 	ErrProfileOwnershipMismatch = errors.New("runtime profiles do not match confirmed ownership")
 )
 
@@ -102,6 +103,7 @@ type Store interface {
 	IsSessionActive(sessionID string, userID identity.UserID, at time.Time) (bool, error)
 	SaveNode(AgentNode) error
 	FindNodeByCredentialHash(hash string) (AgentNode, bool, error)
+	CheckLocalTrust(userID identity.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error)
 	ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error)
 	ApplyRuntimeReport(node AgentNode, report RuntimeReport, at time.Time) error
 }
@@ -112,6 +114,7 @@ type Service struct {
 	newID     func(string) string
 	newSecret func() string
 	ticketTTL time.Duration
+	freshness time.Duration
 }
 
 type Option func(*Service)
@@ -122,6 +125,9 @@ func WithSecretGenerator(newSecret func() string) Option {
 	return func(s *Service) { s.newSecret = newSecret }
 }
 func WithTicketTTL(ttl time.Duration) Option { return func(s *Service) { s.ticketTTL = ttl } }
+func WithFreshness(freshness time.Duration) Option {
+	return func(s *Service) { s.freshness = freshness }
+}
 
 func NewService(store Store, options ...Option) *Service {
 	service := &Service{
@@ -130,6 +136,7 @@ func NewService(store Store, options ...Option) *Service {
 		newID:     common.NewID,
 		newSecret: randomSecret,
 		ticketTTL: 5 * time.Minute,
+		freshness: 90 * time.Second,
 	}
 	for _, option := range options {
 		option(service)
@@ -190,6 +197,20 @@ func (s *Service) RegisterLocal(input RegisterLocalInput) (Registration, error) 
 		return Registration{}, err
 	}
 	return Registration{Node: node, NodeCredential: credential}, nil
+}
+
+func (s *Service) CheckLocalTrust(userID identity.UserID, nodeID string) error {
+	if userID <= 0 || strings.TrimSpace(nodeID) == "" {
+		return ErrInvalidInput
+	}
+	trusted, err := s.store.CheckLocalTrust(userID, strings.TrimSpace(nodeID), s.now(), s.freshness)
+	if err != nil {
+		return err
+	}
+	if !trusted {
+		return ErrLocalTrustUnavailable
+	}
+	return nil
 }
 
 func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport) error {

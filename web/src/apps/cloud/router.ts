@@ -25,6 +25,8 @@ export function createCloudRouter() {
         { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue") },
         { path: "users", name: "Users", component: () => import("./pages/users/UsersPage.vue") },
+        { path: "operation-teams", name: "OperationTeams", component: () => import("./pages/users/TeamsPage.vue") },
+        { path: "games", name: "Games", component: () => import("./pages/users/GamesPage.vue") },
         // 不包含 /agent, /logs — 这些是 Desktop-only
       ],
     },

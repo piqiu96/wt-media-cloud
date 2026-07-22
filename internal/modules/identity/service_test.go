@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestNewLoginInvalidatesPriorSession(t *testing.T) {
+func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T) {
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	tokens := []string{"session-first", "session-second"}
 	service := NewService(
@@ -28,9 +28,19 @@ func TestNewLoginInvalidatesPriorSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Login() error = %v", err)
 	}
-	second, err := service.Login("admin", "a-long-initial-password")
+	if _, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{}); !errors.Is(err, ErrSessionReplaceNeeded) {
+		t.Fatalf("unconfirmed LoginWithOptions() error = %v, want ErrSessionReplaceNeeded", err)
+	}
+	stillActive, err := service.Authenticate(first.Token)
 	if err != nil {
-		t.Fatalf("second Login() error = %v", err)
+		t.Fatalf("unconfirmed replacement invalidated first token: %v", err)
+	}
+	if stillActive.Username != "admin" {
+		t.Fatalf("stillActive = %+v", stillActive)
+	}
+	second, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{ReplaceExisting: true})
+	if err != nil {
+		t.Fatalf("confirmed LoginWithOptions() error = %v", err)
 	}
 	if first.Token == second.Token {
 		t.Fatalf("replacement login reused token %q", first.Token)
@@ -311,6 +321,41 @@ func TestOnlyAdminManagesTeamsAndReferencedTeamCannotBeDeleted(t *testing.T) {
 	}
 }
 
+func TestReferencedGameCannotBeDisabledOrDeleted(t *testing.T) {
+	store := newGameMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team, _ := service.CreateTeam(admin.ID, "火影组")
+	game, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	if err != nil {
+		t.Fatalf("CreateGame() error = %v", err)
+	}
+	if _, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{game.ID},
+	}); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	if _, err := service.UpdateGame(admin.ID, game.ID, game.Name, GameStatusDisabled, ""); !errors.Is(err, ErrGameInUse) {
+		t.Fatalf("UpdateGame(disable referenced) error = %v, want ErrGameInUse", err)
+	}
+	if err := service.DeleteGame(admin.ID, game.ID); !errors.Is(err, ErrGameInUse) {
+		t.Fatalf("DeleteGame(referenced) error = %v, want ErrGameInUse", err)
+	}
+
+	empty, err := service.CreateGame(admin.ID, "delta", "三角洲", "")
+	if err != nil {
+		t.Fatalf("CreateGame(empty) error = %v", err)
+	}
+	if _, err := service.UpdateGame(admin.ID, empty.ID, empty.Name, GameStatusDisabled, ""); err != nil {
+		t.Fatalf("UpdateGame(disable empty) error = %v", err)
+	}
+	if err := service.DeleteGame(admin.ID, empty.ID); err != nil {
+		t.Fatalf("DeleteGame(empty) error = %v", err)
+	}
+}
+
 func TestUpdateUserAccessTransfersCurrentTeamAndInvalidatesSession(t *testing.T) {
 	service := NewService(NewMemoryStore(), WithTokenGenerator(func() string { return "operator-session" }))
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
@@ -463,6 +508,77 @@ type failingIdentityStore struct {
 	Store
 	failAudit      bool
 	failInvalidate bool
+}
+
+type gameMemoryStore struct {
+	*memoryStore
+	games map[string]OperationGame
+}
+
+func newGameMemoryStore() *gameMemoryStore {
+	return &gameMemoryStore{memoryStore: NewMemoryStore(), games: make(map[string]OperationGame)}
+}
+
+func (s *gameMemoryStore) CreateGameWithAudit(game OperationGame, event AuditEvent) error {
+	if _, exists := s.games[game.ID]; exists {
+		return ErrGameIDTaken
+	}
+	for _, existing := range s.games {
+		if existing.Name == game.Name {
+			return ErrGameNameTaken
+		}
+	}
+	s.games[game.ID] = game
+	return s.AppendAudit(event)
+}
+
+func (s *gameMemoryStore) FindGame(id string) (OperationGame, bool, error) {
+	game, ok := s.games[id]
+	return game, ok, nil
+}
+
+func (s *gameMemoryStore) ListGames() ([]OperationGame, error) {
+	result := make([]OperationGame, 0, len(s.games))
+	for _, game := range s.games {
+		result = append(result, game)
+	}
+	return result, nil
+}
+
+func (s *gameMemoryStore) UpdateGameWithAudit(game OperationGame, event AuditEvent) error {
+	if _, exists := s.games[game.ID]; !exists {
+		return ErrInvalidInput
+	}
+	for _, existing := range s.games {
+		if existing.ID != game.ID && existing.Name == game.Name {
+			return ErrGameNameTaken
+		}
+	}
+	s.games[game.ID] = game
+	return s.AppendAudit(event)
+}
+
+func (s *gameMemoryStore) DeleteGameWithAudit(id string, event AuditEvent) error {
+	if _, exists := s.games[id]; !exists {
+		return ErrInvalidInput
+	}
+	delete(s.games, id)
+	return s.AppendAudit(event)
+}
+
+func (s *gameMemoryStore) GameHasReferences(id string) (bool, error) {
+	users, err := s.ListUsers()
+	if err != nil {
+		return false, err
+	}
+	for _, user := range users {
+		for _, gameID := range user.GameIDs {
+			if gameID == id {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (s *failingIdentityStore) CreateUserWithAudit(user User, event AuditEvent) (UserID, error) {

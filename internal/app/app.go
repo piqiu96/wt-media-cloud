@@ -72,7 +72,7 @@ func NewServer() (*Server, error) {
 		runtimebinding.RegisterRoutes(engine, runtimeService, identityService)
 		profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(result.db), runtimeService))
 		profileStore := profilebinding.NewMySQLStore(result.db)
-		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore)
+		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore, runtimeService)
 		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore), mediaaccount.WithUserResolver(identityService)), identityService, taskStore)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv())
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {

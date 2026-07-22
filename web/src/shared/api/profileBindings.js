@@ -21,20 +21,23 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     confirm(scanId) {
       return api.post(`/bit-browser/profile-scans/${scanId}/confirm`, {})
     },
+    confirmMainIdentity(scanId) {
+      return api.post(`/bit-browser/profile-scans/${scanId}/confirm-main-identity`, {})
+    },
     listProfiles() {
       return api.get('/browser-profiles')
     },
-    createProfile(config) {
-      return api.post('/browser-profiles', config)
+    createProfile(config, options = {}) {
+      return api.post('/browser-profiles', { ...config, node_id: options.nodeId })
     },
-    openProfile(id) {
-      return api.post(`/browser-profiles/${id}/open`, {})
+    openProfile(id, options = {}) {
+      return api.post(`/browser-profiles/${id}/open`, { node_id: options.nodeId })
     },
-    closeProfile(id) {
-      return api.post(`/browser-profiles/${id}/close`, {})
+    closeProfile(id, options = {}) {
+      return api.post(`/browser-profiles/${id}/close`, { node_id: options.nodeId })
     },
-    updateProfile(id, config) {
-      return api.patch(`/browser-profiles/${id}`, config)
+    updateProfile(id, config, options = {}) {
+      return api.patch(`/browser-profiles/${id}`, { ...config, node_id: options.nodeId })
     },
     deleteProfile(id) {
       return api.delete(`/browser-profiles/${id}`)

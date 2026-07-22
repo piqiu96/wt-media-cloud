@@ -64,6 +64,16 @@ func (s *memoryStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, er
 	return node, ok, nil
 }
 
+func (s *memoryStore) CheckLocalTrust(userID identity.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
+	for _, node := range s.nodes {
+		if node.ID == nodeID && node.UserID == userID && node.Status == cloudagent.AgentStatusOnline &&
+			node.LastHeartbeatAt.After(at.Add(-freshness)) && s.activeSessions[runtimeKey(node.SessionID, userID)] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *memoryStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	if mainUserID != "main-user-1" {
 		return false, nil
@@ -163,6 +173,27 @@ func TestRuntimeReportRejectsCredentialForReplacedNode(t *testing.T) {
 	err := service.ReportRuntime("old-node", "old-node-secret", validRuntimeReport())
 	if !errors.Is(err, ErrNodeCredentialInvalid) {
 		t.Fatalf("ReportRuntime() error = %v", err)
+	}
+}
+
+func TestCheckLocalTrustRequiresFreshOnlineNodeAndActiveSession(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := newMemoryStore()
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	store.nodes["node-secret"] = AgentNode{ID: "node-1", Mode: "local", Status: cloudagent.AgentStatusOnline, UserID: identity.UserID(1), SessionID: "session-1", LastHeartbeatAt: now}
+	service := testService(store, &now)
+
+	if err := service.CheckLocalTrust(identity.UserID(1), "node-1"); err != nil {
+		t.Fatalf("CheckLocalTrust() error = %v", err)
+	}
+	store.activeSessions[runtimeKey("session-1", 1)] = false
+	if err := service.CheckLocalTrust(identity.UserID(1), "node-1"); !errors.Is(err, ErrLocalTrustUnavailable) {
+		t.Fatalf("inactive session error = %v", err)
+	}
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	now = now.Add(2 * time.Minute)
+	if err := service.CheckLocalTrust(identity.UserID(1), "node-1"); !errors.Is(err, ErrLocalTrustUnavailable) {
+		t.Fatalf("stale node error = %v", err)
 	}
 }
 

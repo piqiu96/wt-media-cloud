@@ -27,15 +27,25 @@ onMounted(async () => {
           {{ page.agentId }}
         </t-descriptions-item>
         <t-descriptions-item label="运行状态">
-          <BusinessStatus :status="page.primaryStatus.toLowerCase()" />
+          <BusinessStatus :status="page.localStatusKey" :label="page.primaryStatus" />
         </t-descriptions-item>
-        <t-descriptions-item label="当前任务" :span="1">
-          {{ page.currentTaskText }}
+        <t-descriptions-item label="Cloud登录">
+          {{ page.cloudStatusText }}
         </t-descriptions-item>
-        <t-descriptions-item label="待回传结果" :span="1">
-          {{ page.pendingResultText }}
+        <t-descriptions-item label="BitBrowser">
+          {{ page.bitbrowserStatusText }}
+        </t-descriptions-item>
+        <t-descriptions-item label="主账号ID">
+          {{ page.mainUserText }}
+        </t-descriptions-item>
+        <t-descriptions-item label="运行环境">
+          {{ page.runtimeText }}
+        </t-descriptions-item>
+        <t-descriptions-item label="可执行结论">
+          <BusinessStatus :status="page.trustStatus" :label="page.trustText" />
         </t-descriptions-item>
       </t-descriptions>
+      <t-alert v-if="page" :message="page.trustReason" theme="info" style="margin-top:16px" />
 
       <t-empty v-else-if="!loading" description="Agent 不可达" />
     </t-card>

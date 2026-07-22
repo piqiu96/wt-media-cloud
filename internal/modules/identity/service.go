@@ -42,7 +42,14 @@ var (
 	ErrUsernameTaken        = errors.New("username is already in use")
 	ErrTeamNameTaken        = errors.New("team name is already in use")
 	ErrTeamInUse            = errors.New("team is still referenced")
+	ErrGameIDTaken          = errors.New("game id is already in use")
+	ErrInvalidGameID        = errors.New("game id is invalid")
+	ErrGameNameTaken        = errors.New("game name is already in use")
+	ErrGameInUse            = errors.New("game is still referenced")
+	ErrGameUnavailable      = errors.New("game is not available")
+	ErrPasswordTooShort     = errors.New("password is too short")
 	ErrBootstrapUnavailable = errors.New("initial admin cannot be created")
+	ErrSessionReplaceNeeded = errors.New("active session replacement requires confirmation")
 )
 
 type OperationTeam struct {
@@ -50,6 +57,22 @@ type OperationTeam struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type GameStatus string
+
+const (
+	GameStatusEnabled  GameStatus = "enabled"
+	GameStatusDisabled GameStatus = "disabled"
+)
+
+type OperationGame struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Status    GameStatus `json:"status"`
+	Remark    string     `json:"remark"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type User struct {
@@ -88,6 +111,10 @@ type Session struct {
 type LoginResult struct {
 	Token string
 	User  PublicUser
+}
+
+type LoginOptions struct {
+	ReplaceExisting bool
 }
 
 // CanAccess applies the single Cloud data-scope rule shared by business modules.
@@ -169,9 +196,19 @@ type Store interface {
 	TeamHasReferences(TeamID) (bool, error)
 	CreateSession(Session) error
 	FindSessionByTokenHash(tokenHash string) (Session, bool, error)
+	HasActiveSession(userID UserID) (bool, error)
 	InvalidateUserSessions(userID UserID, at time.Time) error
 	AppendAudit(AuditEvent) error
 	ListAuditLogs(limit int) ([]AuditEvent, error)
+}
+
+type operationGameStore interface {
+	CreateGameWithAudit(OperationGame, AuditEvent) error
+	FindGame(string) (OperationGame, bool, error)
+	ListGames() ([]OperationGame, error)
+	UpdateGameWithAudit(OperationGame, AuditEvent) error
+	DeleteGameWithAudit(string, AuditEvent) error
+	GameHasReferences(string) (bool, error)
 }
 
 type Service struct {
@@ -267,8 +304,11 @@ func (s *Service) CreateUser(actorID UserID, input CreateUserInput) (PublicUser,
 
 func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 	username := strings.TrimSpace(input.Username)
-	if username == "" || len(username) > 64 || len(input.Password) < 12 || !validRole(input.Role) {
+	if username == "" || len(username) > 64 || !validRole(input.Role) {
 		return User{}, "", ErrInvalidInput
+	}
+	if len(input.Password) < 6 {
+		return User{}, "", ErrPasswordTooShort
 	}
 	_, found, err := s.store.FindUserByUsername(username)
 	if err != nil {
@@ -299,6 +339,9 @@ func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 			return User{}, "", ErrInvalidInput
 		}
 		teamName = team.Name
+		if err := s.ensureGamesAssignable(gameIDs); err != nil {
+			return User{}, "", err
+		}
 	}
 	now := s.now()
 	user := User{
@@ -315,6 +358,10 @@ func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 }
 
 func (s *Service) Login(username, password string) (LoginResult, error) {
+	return s.LoginWithOptions(username, password, LoginOptions{ReplaceExisting: true})
+}
+
+func (s *Service) LoginWithOptions(username, password string, options LoginOptions) (LoginResult, error) {
 	user, ok, err := s.store.FindUserByUsername(strings.TrimSpace(username))
 	if err != nil {
 		return LoginResult{}, err
@@ -323,6 +370,13 @@ func (s *Service) Login(username, password string) (LoginResult, error) {
 		return LoginResult{}, ErrAuthenticationFailed
 	}
 	now := s.now()
+	hasActive, err := s.store.HasActiveSession(user.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	if hasActive && !options.ReplaceExisting {
+		return LoginResult{}, ErrSessionReplaceNeeded
+	}
 	if err := s.store.InvalidateUserSessions(user.ID, now); err != nil {
 		return LoginResult{}, err
 	}
@@ -335,7 +389,7 @@ func (s *Service) Login(username, password string) (LoginResult, error) {
 	}); err != nil {
 		return LoginResult{}, err
 	}
-	if err := s.audit(user.ID, "user.login", "user", user.ID, map[string]string{"username": user.Username}); err != nil {
+	if err := s.audit(user.ID, "user.login", "user", user.ID, map[string]string{"username": user.Username, "replace_existing": strconv.FormatBool(hasActive)}); err != nil {
 		return LoginResult{}, err
 	}
 	return LoginResult{Token: token, User: publicUser(user)}, nil
@@ -434,8 +488,8 @@ func (s *Service) ResetPassword(actorID, userID UserID, newPassword string) erro
 }
 
 func (s *Service) passwordUpdatedUser(user User, newPassword string) (User, error) {
-	if len(newPassword) < 12 {
-		return User{}, ErrInvalidInput
+	if len(newPassword) < 6 {
+		return User{}, ErrPasswordTooShort
 	}
 	hash, err := s.passwords.Hash([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
@@ -444,6 +498,23 @@ func (s *Service) passwordUpdatedUser(user User, newPassword string) (User, erro
 	user.PasswordHash = string(hash)
 	user.UpdatedAt = s.now()
 	return user, nil
+}
+
+func (s *Service) ensureGamesAssignable(gameIDs []string) error {
+	gameStore, ok := s.store.(operationGameStore)
+	if !ok {
+		return nil
+	}
+	for _, gameID := range gameIDs {
+		game, found, err := gameStore.FindGame(gameID)
+		if err != nil {
+			return err
+		}
+		if !found || game.Status != GameStatusEnabled {
+			return ErrGameUnavailable
+		}
+	}
+	return nil
 }
 
 func (s *Service) ListUsers() ([]PublicUser, error) {
@@ -560,6 +631,112 @@ func (s *Service) DeleteTeam(actorID UserID, teamID TeamID) error {
 	return s.store.DeleteTeamWithAudit(teamID, event)
 }
 
+func (s *Service) CreateGame(actorID UserID, id, name, remark string) (OperationGame, error) {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return OperationGame{}, err
+	}
+	gameStore, okStore := s.store.(operationGameStore)
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	remark = strings.TrimSpace(remark)
+	if !ok || !isAdmin(actor) || !okStore || name == "" || len(name) > 128 || len(remark) > 255 {
+		return OperationGame{}, ErrInvalidInput
+	}
+	if !validGameID(id) {
+		return OperationGame{}, ErrInvalidGameID
+	}
+	if _, exists, err := gameStore.FindGame(id); err != nil {
+		return OperationGame{}, err
+	} else if exists {
+		return OperationGame{}, ErrGameIDTaken
+	}
+	now := s.now()
+	game := OperationGame{ID: id, Name: name, Status: GameStatusEnabled, Remark: remark, CreatedAt: now, UpdatedAt: now}
+	event := s.newAuditEvent(actor.ID, "operation_game.create", "operation_game", 0, map[string]string{"game_id": id, "name": name})
+	if err := gameStore.CreateGameWithAudit(game, event); err != nil {
+		return OperationGame{}, err
+	}
+	return game, nil
+}
+
+func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return nil, err
+	}
+	gameStore, okStore := s.store.(operationGameStore)
+	if !ok || !isAdmin(actor) || !okStore {
+		return nil, ErrForbidden
+	}
+	return gameStore.ListGames()
+}
+
+func (s *Service) UpdateGame(actorID UserID, id, name string, status GameStatus, remark string) (OperationGame, error) {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return OperationGame{}, err
+	}
+	gameStore, okStore := s.store.(operationGameStore)
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	remark = strings.TrimSpace(remark)
+	if !ok || !isAdmin(actor) || !okStore || id == "" || name == "" || len(name) > 128 || len(remark) > 255 || !validGameStatus(status) {
+		return OperationGame{}, ErrInvalidInput
+	}
+	game, found, err := gameStore.FindGame(id)
+	if err != nil {
+		return OperationGame{}, err
+	}
+	if !found {
+		return OperationGame{}, ErrInvalidInput
+	}
+	if game.Status != GameStatusDisabled && status == GameStatusDisabled {
+		referenced, err := gameStore.GameHasReferences(id)
+		if err != nil {
+			return OperationGame{}, err
+		}
+		if referenced {
+			return OperationGame{}, ErrGameInUse
+		}
+	}
+	game.Name = name
+	game.Status = status
+	game.Remark = remark
+	game.UpdatedAt = s.now()
+	event := s.newAuditEvent(actor.ID, "operation_game.update", "operation_game", 0, map[string]string{"game_id": id, "status": string(status)})
+	if err := gameStore.UpdateGameWithAudit(game, event); err != nil {
+		return OperationGame{}, err
+	}
+	return game, nil
+}
+
+func (s *Service) DeleteGame(actorID UserID, id string) error {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return err
+	}
+	gameStore, okStore := s.store.(operationGameStore)
+	id = strings.TrimSpace(id)
+	if !ok || !isAdmin(actor) || !okStore || id == "" {
+		return ErrForbidden
+	}
+	if _, found, err := gameStore.FindGame(id); err != nil {
+		return err
+	} else if !found {
+		return ErrInvalidInput
+	}
+	referenced, err := gameStore.GameHasReferences(id)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return ErrGameInUse
+	}
+	event := s.newAuditEvent(actor.ID, "operation_game.delete", "operation_game", 0, map[string]string{"game_id": id})
+	return gameStore.DeleteGameWithAudit(id, event)
+}
+
 func (s *Service) DeleteUser(actorID, userID UserID) error {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
@@ -627,6 +804,9 @@ func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, 
 			return PublicUser{}, ErrInvalidInput
 		} else {
 			teamName = team.Name
+		}
+		if err := s.ensureGamesAssignable(normalizedGameIDs); err != nil {
+			return PublicUser{}, err
 		}
 	}
 	user.Role = role
@@ -712,6 +892,23 @@ func formatTeamID(value *TeamID) string {
 
 func validStatus(status UserStatus) bool {
 	return status == UserStatusEnabled || status == UserStatusDisabled
+}
+
+func validGameStatus(status GameStatus) bool {
+	return status == GameStatusEnabled || status == GameStatusDisabled
+}
+
+func validGameID(id string) bool {
+	if id == "" || len(id) > 32 {
+		return false
+	}
+	for _, ch := range id {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func normalizeGameIDs(values []string) []string {
@@ -1061,6 +1258,17 @@ func (s *memoryStore) FindSessionByTokenHash(tokenHash string) (Session, bool, e
 	defer s.mu.RUnlock()
 	session, ok := s.sessions[tokenHash]
 	return session, ok, nil
+}
+
+func (s *memoryStore) HasActiveSession(userID UserID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, session := range s.sessions {
+		if session.UserID == userID && session.InvalidAt == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *memoryStore) InvalidateUserSessions(userID UserID, at time.Time) error {

@@ -11,8 +11,14 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
 });
 
 const DEFAULT_STATUS = Object.freeze({
+  node_id: "",
   agent_id: "local-agent-dev",
   status: "stopped",
+  bitbrowser_status: "unknown",
+  main_user_id: "",
+  operating_system: "",
+  cpu_architecture: "",
+  agent_version: "",
   current_task_id: null,
   current_task_progress: null,
   current_task_status: null,
@@ -26,8 +32,14 @@ function clone(value) {
 export function normalizeLocalAgentStatus(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
+    node_id: String(source.node_id ?? DEFAULT_STATUS.node_id),
     agent_id: String(source.agent_id ?? DEFAULT_STATUS.agent_id),
     status: String(source.status ?? DEFAULT_STATUS.status),
+    bitbrowser_status: String(source.bitbrowser_status ?? DEFAULT_STATUS.bitbrowser_status),
+    main_user_id: String(source.main_user_id ?? DEFAULT_STATUS.main_user_id),
+    operating_system: String(source.operating_system ?? DEFAULT_STATUS.operating_system),
+    cpu_architecture: String(source.cpu_architecture ?? DEFAULT_STATUS.cpu_architecture),
+    agent_version: String(source.agent_version ?? DEFAULT_STATUS.agent_version),
     current_task_id: source.current_task_id ?? null,
     current_task_progress: source.current_task_progress ?? null,
     current_task_status: source.current_task_status ?? null,

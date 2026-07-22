@@ -81,6 +81,28 @@ func TestMySQLStoreAppliesConfirmedScanTransactionally(t *testing.T) {
 	}
 }
 
+func TestMySQLStoreConfirmsMainIdentityWithoutApplyingProfiles(t *testing.T) {
+	store, mock, closeDB := newMockStore(t)
+	defer closeDB()
+	scan := mysqlTestScan()
+	at := scan.CreatedAt.Add(time.Minute)
+	binding := BitAccountBinding{UserID: scan.UserID, MainUserID: scan.MainUserID, Status: BitAccountBound, BoundAt: &scan.CreatedAt, LastVerifiedAt: &at}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`)).
+		WithArgs(binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`)).
+		WithArgs(ScanConfirmed, at, scan.ID, scan.UserID, ScanReady).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO audit_logs`)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := store.ConfirmMainIdentity(scan, binding, at, auditMainAccountBind); err != nil {
+		t.Fatalf("ConfirmMainIdentity() error = %v", err)
+	}
+}
+
 func newMockStore(t *testing.T) (*MySQLStore, sqlmock.Sqlmock, func()) {
 	t.Helper()
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))

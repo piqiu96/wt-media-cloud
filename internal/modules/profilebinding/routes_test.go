@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
 func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
@@ -37,6 +40,32 @@ func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
 	}
 }
 
+func TestProfileRoutesConfirmMainIdentityDoesNotApplyProfiles(t *testing.T) {
+	engine, cookie, store := newProfileRouteTest(t)
+	created := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-1","profile_user_id":"bit-user-1","name":"窗口一"}]}`, cookie)
+	if created.Result().StatusCode() != consts.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.Result().StatusCode(), created.Result().Body())
+	}
+	var envelope struct {
+		Data ProfileScan `json:"data"`
+	}
+	if err := json.Unmarshal(created.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	confirmed := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans/"+envelope.Data.ID+"/confirm-main-identity", `{}`, cookie)
+	if confirmed.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("confirm-main-identity status=%d body=%s", confirmed.Result().StatusCode(), confirmed.Result().Body())
+	}
+	if len(store.profiles) != 0 {
+		t.Fatalf("identity-only route applied profiles: %v", store.profiles)
+	}
+	binding := store.bindings[identity.UserID(2)]
+	if binding.MainUserID != "main-user-1" {
+		t.Fatalf("binding=%#v", binding)
+	}
+}
+
 func TestProfileRoutesRejectMixedIdentity(t *testing.T) {
 	engine, cookie, _ := newProfileRouteTest(t)
 	response := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-2","profile_user_id":"bit-user-2"}]}`, cookie)
@@ -45,7 +74,33 @@ func TestProfileRoutesRejectMixedIdentity(t *testing.T) {
 	}
 }
 
+func TestProfileRoutesBlockLocalSensitiveTaskWhenNodeIsUntrusted(t *testing.T) {
+	engine, cookie, store, tasks, trust := newProfileRouteTestWithRuntime(t)
+	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), TeamID: actorTeamID(t, engine, cookie), BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", LocalStatus: ProfileActive, LastSyncedAt: time.Now().UTC()}
+	trust.err = runtimebinding.ErrLocalTrustUnavailable
+
+	blocked := performProfileJSON(engine, "POST", "/api/v1/browser-profiles/profile-1/open", `{"node_id":"node-untrusted"}`, cookie)
+	if blocked.Result().StatusCode() != consts.StatusConflict || tasks.created != 0 {
+		t.Fatalf("blocked status=%d body=%s tasks=%d", blocked.Result().StatusCode(), blocked.Result().Body(), tasks.created)
+	}
+
+	trust.err = nil
+	allowed := performProfileJSON(engine, "POST", "/api/v1/browser-profiles/profile-1/open", `{"node_id":"node-trusted"}`, cookie)
+	if allowed.Result().StatusCode() != consts.StatusCreated || tasks.created != 1 {
+		t.Fatalf("allowed status=%d body=%s tasks=%d", allowed.Result().StatusCode(), allowed.Result().Body(), tasks.created)
+	}
+	if trust.lastNodeID != "node-trusted" {
+		t.Fatalf("trust node = %q", trust.lastNodeID)
+	}
+}
+
 func newProfileRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore) {
+	t.Helper()
+	engine, cookie, store, _, _ := newProfileRouteTestWithRuntime(t)
+	return engine, cookie, store
+}
+
+func newProfileRouteTestWithRuntime(t *testing.T) (*server.Hertz, string, *memoryStore, *fakeTaskCreator, *fakeTrustChecker) {
 	t.Helper()
 	identityStore := identity.NewMemoryStore()
 	identityService := identity.NewService(identityStore)
@@ -61,9 +116,11 @@ func newProfileRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore) {
 	engine := server.New()
 	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
 	store := newMemoryStore()
-	RegisterRoutes(engine, NewService(store), identityService)
+	tasks := &fakeTaskCreator{}
+	trust := &fakeTrustChecker{}
+	RegisterRoutes(engine, NewService(store), identityService, tasks, trust)
 	login := performProfileJSON(engine, "POST", "/api/v1/auth/login", `{"username":"operator","password":"a-long-operator-password"}`, "")
-	return engine, string(login.Result().Header.Peek("Set-Cookie")), store
+	return engine, string(login.Result().Header.Peek("Set-Cookie")), store, tasks, trust
 }
 
 func performProfileJSON(engine *server.Hertz, method, path, payload, cookie string) *ut.ResponseRecorder {
@@ -72,4 +129,51 @@ func performProfileJSON(engine *server.Hertz, method, path, payload, cookie stri
 		headers = append(headers, ut.Header{Key: "Cookie", Value: cookie})
 	}
 	return ut.PerformRequest(engine.Engine, method, path, &ut.Body{Body: bytes.NewBufferString(payload), Len: len(payload)}, headers...)
+}
+
+type fakeTaskCreator struct {
+	created int
+	last    cloudagent.CreateTaskRequest
+}
+
+func (t *fakeTaskCreator) Create(req cloudagent.CreateTaskRequest) cloudagent.Task {
+	t.created++
+	t.last = req
+	return cloudagent.Task{TaskID: "task-1", TaskType: req.TaskType, Status: cloudagent.TaskStatusPending.String(), Payload: req.Payload}
+}
+
+type fakeTrustChecker struct {
+	err        error
+	lastUserID identity.UserID
+	lastNodeID string
+}
+
+func (c *fakeTrustChecker) CheckLocalTrust(userID identity.UserID, nodeID string) error {
+	c.lastUserID = userID
+	c.lastNodeID = nodeID
+	if c.err != nil {
+		return c.err
+	}
+	if strings.TrimSpace(nodeID) == "" {
+		return runtimebinding.ErrInvalidInput
+	}
+	return nil
+}
+
+func actorTeamID(t *testing.T, engine *server.Hertz, cookie string) *identity.TeamID {
+	t.Helper()
+	me := performProfileJSON(engine, "GET", "/api/v1/auth/me", `{}`, cookie)
+	if me.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("me status=%d body=%s", me.Result().StatusCode(), me.Result().Body())
+	}
+	var envelope struct {
+		Data identity.PublicUser `json:"data"`
+	}
+	if err := json.Unmarshal(me.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.TeamID == nil {
+		t.Fatal("operator team id missing")
+	}
+	return envelope.Data.TeamID
 }

@@ -468,6 +468,110 @@ func (s *MySQLStore) TeamHasReferences(teamID TeamID) (bool, error) {
 	return count > 0, err
 }
 
+func (s *MySQLStore) CreateGameWithAudit(game OperationGame, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO operation_games (id, name, status, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, game.ID, game.Name, game.Status, game.Remark, game.CreatedAt, game.UpdatedAt); err != nil {
+		if duplicateKey(err) {
+			return ErrGameNameTaken
+		}
+		return err
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) FindGame(id string) (OperationGame, bool, error) {
+	var game OperationGame
+	err := s.db.QueryRow(`SELECT id, name, status, remark, created_at, updated_at FROM operation_games WHERE id = ?`, id).Scan(&game.ID, &game.Name, &game.Status, &game.Remark, &game.CreatedAt, &game.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OperationGame{}, false, nil
+	}
+	return game, err == nil, err
+}
+
+func (s *MySQLStore) ListGames() ([]OperationGame, error) {
+	rows, err := s.db.Query(`SELECT id, name, status, remark, created_at, updated_at FROM operation_games ORDER BY status, name, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var games []OperationGame
+	for rows.Next() {
+		var game OperationGame
+		if err := rows.Scan(&game.ID, &game.Name, &game.Status, &game.Remark, &game.CreatedAt, &game.UpdatedAt); err != nil {
+			return nil, err
+		}
+		games = append(games, game)
+	}
+	return games, rows.Err()
+}
+
+func (s *MySQLStore) UpdateGameWithAudit(game OperationGame, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE operation_games SET name = ?, status = ?, remark = ?, updated_at = ? WHERE id = ?`, game.Name, game.Status, game.Remark, game.UpdatedAt, game.ID)
+	if err != nil {
+		if duplicateKey(err) {
+			return ErrGameNameTaken
+		}
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrInvalidInput
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) DeleteGameWithAudit(id string, event AuditEvent) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`DELETE FROM operation_games WHERE id = ?`, id)
+	if err != nil {
+		if foreignKeyReferenced(err) {
+			return ErrGameInUse
+		}
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrInvalidInput
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) GameHasReferences(id string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT
+        (SELECT COUNT(*) FROM user_game_scopes WHERE game_id = ?) +
+        (SELECT COUNT(*) FROM media_accounts WHERE game_id = ?)`,
+		id, id,
+	).Scan(&count)
+	return count > 0, err
+}
+
 func (s *MySQLStore) CreateSession(session Session) error {
 	_, err := s.db.Exec(
 		`INSERT INTO user_sessions (id, user_id, token_hash, created_at, invalidated_at) VALUES (?, ?, ?, ?, ?)`,
@@ -494,6 +598,15 @@ func (s *MySQLStore) FindSessionByTokenHash(tokenHash string) (Session, bool, er
 		session.InvalidAt = &at
 	}
 	return session, true, nil
+}
+
+func (s *MySQLStore) HasActiveSession(userID UserID) (bool, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND invalidated_at IS NULL`,
+		userID,
+	).Scan(&count)
+	return count > 0, err
 }
 
 func (s *MySQLStore) InvalidateUserSessions(userID UserID, at time.Time) error {

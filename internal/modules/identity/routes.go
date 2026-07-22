@@ -19,8 +19,9 @@ type RouteConfig struct {
 }
 
 type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	ReplaceExisting bool   `json:"replace_existing"`
 }
 
 type createUserRequest struct {
@@ -47,6 +48,13 @@ type teamRequest struct {
 	Name string `json:"name"`
 }
 
+type gameRequest struct {
+	ID     string     `json:"id"`
+	Name   string     `json:"name"`
+	Status GameStatus `json:"status"`
+	Remark string     `json:"remark"`
+}
+
 type oneTimePasswordResult struct {
 	User            PublicUser `json:"user"`
 	OneTimePassword string     `json:"one_time_password"`
@@ -66,7 +74,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			common.Success(c, context.User)
 			return
 		}
-		result, err := service.Login(req.Username, req.Password)
+		result, err := service.LoginWithOptions(req.Username, req.Password, LoginOptions{ReplaceExisting: req.ReplaceExisting})
 		if err != nil {
 			writeIdentityError(c, err)
 			return
@@ -277,6 +285,66 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		}
 		common.NoContent(c)
 	})
+
+	h.GET("/api/v1/games", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		games, err := service.ListGames(actor.ID)
+		if err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.Success(c, filterGames(games, c))
+	})
+
+	h.POST("/api/v1/games", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		var req gameRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		game, err := service.CreateGame(actor.ID, req.ID, req.Name, req.Remark)
+		if err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.Created(c, game)
+	})
+
+	h.PATCH("/api/v1/games/:game_id", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		var req gameRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		game, err := service.UpdateGame(actor.ID, c.Param("game_id"), req.Name, req.Status, req.Remark)
+		if err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.Success(c, game)
+	})
+
+	h.DELETE("/api/v1/games/:game_id", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		if err := service.DeleteGame(actor.ID, c.Param("game_id")); err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.NoContent(c)
+	})
+
 	h.GET("/api/v1/audit-logs", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := AuthenticateRequest(c, service)
 		if !ok {
@@ -293,6 +361,22 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		}
 		common.Success(c, logs)
 	})
+}
+
+func filterGames(games []OperationGame, c *hertzapp.RequestContext) []OperationGame {
+	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
+	status := GameStatus(strings.TrimSpace(c.Query("status")))
+	result := make([]OperationGame, 0, len(games))
+	for _, game := range games {
+		if keyword != "" && !strings.Contains(strings.ToLower(game.ID+" "+game.Name), keyword) {
+			continue
+		}
+		if status != "" && game.Status != status {
+			continue
+		}
+		result = append(result, game)
+	}
+	return result
 }
 
 func parseUserID(value string) (UserID, bool) {
@@ -387,9 +471,23 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, ErrTeamNameTaken):
 		common.Conflict(c, 20002, "分组名称已被使用")
 	case errors.Is(err, ErrTeamInUse):
-		common.Conflict(c, 20003, "对象仍有业务引用，不能删除")
+		common.Conflict(c, 20003, "该分组下还有用户或业务引用，不能删除，请先转移用户")
+	case errors.Is(err, ErrGameIDTaken):
+		common.Conflict(c, 20006, "游戏ID已被使用")
+	case errors.Is(err, ErrInvalidGameID):
+		common.BadRequest(c, 10004, "游戏ID仅支持32位以内字母或数字")
+	case errors.Is(err, ErrGameNameTaken):
+		common.Conflict(c, 20004, "游戏名称已被使用")
+	case errors.Is(err, ErrGameInUse):
+		common.Conflict(c, 20005, "该游戏已分配给用户或已有业务引用，不能停用或删除，请先调整用户游戏范围")
+	case errors.Is(err, ErrGameUnavailable):
+		common.BadRequest(c, 10002, "请选择已启用的游戏")
+	case errors.Is(err, ErrPasswordTooShort):
+		common.BadRequest(c, 10003, "密码至少需要6位")
+	case errors.Is(err, ErrSessionReplaceNeeded):
+		common.Conflict(c, 20010, "当前账号已在其他位置登录，请确认是否替换旧会话")
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrBootstrapUnavailable):
-		common.BadRequest(c, 10001, "用户信息格式错误")
+		common.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、分组、游戏ID或状态")
 	default:
 		common.InternalError(c, "用户服务内部错误")
 	}
