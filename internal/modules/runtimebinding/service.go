@@ -227,12 +227,14 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 		if len(profileIDs) != len(report.BitProfileIDs) {
 			return ErrInvalidInput
 		}
-		valid, err := s.store.ValidateRuntimeProfiles(node.UserID, report.MainUserID, profileIDs)
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return ErrProfileOwnershipMismatch
+		if len(profileIDs) > 0 {
+			valid, err := s.store.ValidateRuntimeProfiles(node.UserID, report.MainUserID, profileIDs)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				return ErrProfileOwnershipMismatch
+			}
 		}
 		report.BitProfileIDs = profileIDs
 	}
@@ -275,7 +277,7 @@ func validReport(report RuntimeReport) bool {
 		return false
 	}
 	if report.BitBrowserStatus == "normal" {
-		return strings.TrimSpace(report.MainUserID) != "" && len(report.BitProfileIDs) > 0 && allNonEmpty(report.BitProfileIDs)
+		return strings.TrimSpace(report.MainUserID) != "" && allNonEmpty(report.BitProfileIDs)
 	}
 	return report.MainUserID == "" && len(report.BitProfileIDs) == 0
 }

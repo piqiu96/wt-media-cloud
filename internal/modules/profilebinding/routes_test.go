@@ -66,6 +66,67 @@ func TestProfileRoutesConfirmMainIdentityDoesNotApplyProfiles(t *testing.T) {
 	}
 }
 
+func TestProfileRoutesConfirmMainIdentityDirectDoesNotApplyProfiles(t *testing.T) {
+	engine, cookie, store := newProfileRouteTest(t)
+	confirmed := performProfileJSON(engine, "POST", "/api/v1/bit-browser/main-identity", `{"main_user_id":"main-user-1"}`, cookie)
+	if confirmed.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("main-identity status=%d body=%s", confirmed.Result().StatusCode(), confirmed.Result().Body())
+	}
+	if len(store.profiles) != 0 || len(store.scans) != 0 {
+		t.Fatalf("direct identity route applied profiles=%v scans=%v", store.profiles, store.scans)
+	}
+	binding := store.bindings[identity.UserID(2)]
+	if binding.MainUserID != "main-user-1" {
+		t.Fatalf("binding=%#v", binding)
+	}
+}
+
+func TestProfileRoutesRejectSilentMainIdentityRebind(t *testing.T) {
+	engine, cookie, store := newProfileRouteTest(t)
+	ok := performProfileJSON(engine, "POST", "/api/v1/bit-browser/main-identity", `{"main_user_id":"main-user-1"}`, cookie)
+	if ok.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("first main-identity status=%d body=%s", ok.Result().StatusCode(), ok.Result().Body())
+	}
+
+	rebind := performProfileJSON(engine, "POST", "/api/v1/bit-browser/main-identity", `{"main_user_id":"main-user-2"}`, cookie)
+	if rebind.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(rebind.Result().Body()), "当前比特浏览器登录账号与系统绑定账号不一致") {
+		t.Fatalf("rebind status=%d body=%s", rebind.Result().StatusCode(), rebind.Result().Body())
+	}
+	if got := store.bindings[identity.UserID(2)].MainUserID; got != "main-user-1" {
+		t.Fatalf("binding changed to %q", got)
+	}
+}
+
+func TestProfileRoutesAdminCanClearMainIdentity(t *testing.T) {
+	engine, operatorCookie, store := newProfileRouteTest(t)
+	confirmed := performProfileJSON(engine, "POST", "/api/v1/bit-browser/main-identity", `{"main_user_id":"main-user-1"}`, operatorCookie)
+	if confirmed.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("main-identity status=%d body=%s", confirmed.Result().StatusCode(), confirmed.Result().Body())
+	}
+	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), BitProfileID: "bit-profile-1", MainUserID: "main-user-1"}
+
+	adminLogin := performProfileJSON(engine, "POST", "/api/v1/auth/login", `{"username":"admin","password":"a-long-initial-password"}`, "")
+	adminCookie := string(adminLogin.Result().Header.Peek("Set-Cookie"))
+	cleared := performProfileJSON(engine, "DELETE", "/api/v1/users/2/bit-browser-main-identity", `{}`, adminCookie)
+	if cleared.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("clear status=%d body=%s", cleared.Result().StatusCode(), cleared.Result().Body())
+	}
+	if _, ok := store.bindings[identity.UserID(2)]; ok {
+		t.Fatal("binding was not cleared")
+	}
+	if _, ok := store.profiles["profile-1"]; !ok {
+		t.Fatal("clearing main identity deleted profile")
+	}
+}
+
+func TestProfileRoutesOperatorCannotClearMainIdentity(t *testing.T) {
+	engine, cookie, _ := newProfileRouteTest(t)
+	response := performProfileJSON(engine, "DELETE", "/api/v1/users/2/bit-browser-main-identity", `{}`, cookie)
+	if response.Result().StatusCode() != consts.StatusForbidden {
+		t.Fatalf("operator clear status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
 func TestProfileRoutesRejectMixedIdentity(t *testing.T) {
 	engine, cookie, _ := newProfileRouteTest(t)
 	response := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"node_id":"node-trusted","main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-2","profile_user_id":"bit-user-2"}]}`, cookie)

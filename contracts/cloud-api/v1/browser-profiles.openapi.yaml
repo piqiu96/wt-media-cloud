@@ -28,6 +28,17 @@ paths:
         '200': {description: User identity and formal Profile mirror applied transactionally.}
         '409': {description: Scan not ready or identity mismatch.}
         '410': {description: Scan expired.}
+  /api/v1/bit-browser/main-identity:
+    post:
+      operationId: confirmBitBrowserMainIdentity
+      summary: Confirm the current user's BitBrowser main account without applying Profile Diff.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MainIdentityInput'}}}
+      responses:
+        '200': {description: User main account identity confirmed; formal Profile mirror is unchanged.}
+        '409': {description: Empty or mismatched BitBrowser main identity.}
   /api/v1/browser-profiles:
     get:
       operationId: listBrowserProfiles
@@ -45,6 +56,12 @@ components:
       properties:
         main_user_id: {type: string, description: Normalized from BitBrowser mainUserId.}
         profiles: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ProfileInput'}}
+    MainIdentityInput:
+      type: object
+      required: [main_user_id]
+      additionalProperties: false
+      properties:
+        main_user_id: {type: string, description: Normalized from BitBrowser mainUserId read by Desktop through Local Agent.}
     ProfileInput:
       type: object
       required: [bit_profile_id, main_user_id, profile_user_id]

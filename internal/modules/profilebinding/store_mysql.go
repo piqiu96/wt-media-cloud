@@ -292,6 +292,70 @@ func (s *MySQLStore) ConfirmMainIdentity(scan ProfileScan, binding BitAccountBin
 	return tx.Commit()
 }
 
+func (s *MySQLStore) ConfirmMainIdentityDirect(binding BitAccountBinding, at time.Time, bindingAuditAction string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
+		`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`,
+		binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrIdentityMismatch
+	}
+	bindingSummary, _ := json.Marshal(map[string]any{"main_user_id": binding.MainUserID, "result": "identity_verified", "identity_only": true})
+	if _, err := tx.Exec(
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		common.NewID("audit"), binding.UserID, bindingAuditAction, "user", binding.UserID, bindingSummary, at,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) ClearMainIdentity(userID identity.UserID, actorID identity.UserID, at time.Time) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
+		`UPDATE users SET bit_main_user_id = NULL, bit_account_status = NULL, bit_account_bound_at = NULL, bit_account_last_verified_at = NULL, updated_at = ? WHERE id = ?`,
+		at, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrInvalidInput
+	}
+	if _, err := tx.Exec(
+		`UPDATE local_agent_nodes SET status = ?, updated_at = ?, last_heartbeat_at = ? WHERE user_id = ? AND mode = 'local'`,
+		"replaced", at, at, userID,
+	); err != nil {
+		return err
+	}
+	summary, _ := json.Marshal(map[string]any{"result": "cleared", "kept_profiles": true, "kept_accounts": true, "invalidated_local_nodes": true})
+	if _, err := tx.Exec(
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		common.NewID("audit"), actorID, "bitbrowser.main_account.clear", "user", userID, summary, at,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 type scanner interface{ Scan(...any) error }
 
 func scanProfile(row scanner) (BrowserProfile, error) {

@@ -12,17 +12,21 @@ describe('users api client', () => {
       .mockResolvedValueOnce(ok({ user: { id: 2 }, one_time_password: 'temporary-secret' }))
       .mockResolvedValueOnce(ok([{ id: 10, name: '火影组' }]))
       .mockResolvedValueOnce(ok([{ id: 'naruto', name: '火影忍者', status: 'enabled' }]))
+      .mockResolvedValueOnce(ok(null))
     const client = createUsersClient({ fetch })
 
     await client.listUsers({ uid: 2, username: 'operator', role: 'operator', teamId: 10, status: 'enabled', gameId: 'game-a' })
     await client.createUser({ username: 'operator', password: 'temporary-secret', role: 'operator', teamId: 10, gameIds: ['game-a'] })
     await client.listTeams()
     await client.listGames({ keyword: '火影', status: 'enabled' })
+    await client.clearBitBrowserBinding(2)
 
     expect(fetch.mock.calls[0][0]).toContain('/users?uid=2&username=operator&role=operator&team_id=10&status=enabled&game_id=game-a')
     expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ username: 'operator', password: 'temporary-secret', role: 'operator', team_id: 10, game_ids: ['game-a'] })
     expect(fetch.mock.calls[2][0]).toBe('/api/v1/operation-teams')
     expect(fetch.mock.calls[3][0]).toContain('/games?keyword=%E7%81%AB%E5%BD%B1&status=enabled')
+    expect(fetch.mock.calls[4][0]).toBe('/api/v1/users/2/bit-browser-main-identity')
+    expect(fetch.mock.calls[4][1].method).toBe('DELETE')
   })
 
   it('returns the service error message for referenced team deletion', async () => {

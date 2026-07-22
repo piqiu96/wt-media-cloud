@@ -43,6 +43,7 @@ const (
 
 var (
 	ErrForbidden            = errors.New("profile binding operation is forbidden")
+	ErrInvalidInput         = errors.New("profile binding input is invalid")
 	ErrIdentityUnverifiable = errors.New("BitBrowser identity is unverifiable")
 	ErrIdentityMismatch     = errors.New("BitBrowser identity does not match the bound user")
 	ErrScanNotFound         = errors.New("profile scan was not found")
@@ -110,6 +111,10 @@ type SnapshotInput struct {
 	NodeID     string         `json:"node_id,omitempty"`
 }
 
+type MainIdentityInput struct {
+	MainUserID string `json:"main_user_id"`
+}
+
 type ProfileDiff struct {
 	Kind         DiffKind `json:"kind"`
 	BitProfileID string   `json:"bit_profile_id"`
@@ -138,6 +143,8 @@ type Store interface {
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
 	ConfirmMainIdentity(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
+	ConfirmMainIdentityDirect(binding BitAccountBinding, at time.Time, bindingAuditAction string) error
+	ClearMainIdentity(userID identity.UserID, actorID identity.UserID, at time.Time) error
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
 }
@@ -290,6 +297,48 @@ func (s *Service) ConfirmScan(actor identity.PublicUser, scanID string) (Profile
 
 func (s *Service) ConfirmMainIdentity(actor identity.PublicUser, scanID string) (ProfileScan, error) {
 	return s.confirmScan(actor, scanID, false)
+}
+
+func (s *Service) ConfirmMainIdentityDirect(actor identity.PublicUser, input MainIdentityInput) (BitAccountBinding, error) {
+	if !validActor(actor) {
+		return BitAccountBinding{}, ErrForbidden
+	}
+	mainUserID := strings.TrimSpace(input.MainUserID)
+	if mainUserID == "" {
+		return BitAccountBinding{}, ErrIdentityUnverifiable
+	}
+	now := s.now()
+	binding, found, err := s.store.FindBinding(actor.ID)
+	if err != nil {
+		return BitAccountBinding{}, err
+	}
+	if found && binding.MainUserID != mainUserID {
+		return BitAccountBinding{}, ErrIdentityMismatch
+	}
+	if !found {
+		boundAt := now
+		binding = BitAccountBinding{UserID: actor.ID, MainUserID: mainUserID, Status: BitAccountBound, BoundAt: &boundAt}
+	}
+	verifiedAt := now
+	binding.LastVerifiedAt = &verifiedAt
+	bindingAuditAction := auditMainAccountBind
+	if found {
+		bindingAuditAction = auditMainAccountRebind
+	}
+	if err := s.store.ConfirmMainIdentityDirect(binding, now, bindingAuditAction); err != nil {
+		return BitAccountBinding{}, err
+	}
+	return binding, nil
+}
+
+func (s *Service) ClearMainIdentity(actor identity.PublicUser, userID identity.UserID) error {
+	if !validActor(actor) || actor.Role != identity.RoleAdmin {
+		return ErrForbidden
+	}
+	if userID <= 0 {
+		return ErrInvalidInput
+	}
+	return s.store.ClearMainIdentity(userID, actor.ID, s.now())
 }
 
 func (s *Service) confirmScan(actor identity.PublicUser, scanID string, applyProfiles bool) (ProfileScan, error) {

@@ -8,6 +8,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   stop: "local_agent_stop",
   taskStatus: "local_agent_task_status",
   bind: "local_agent_bind",
+  bindSession: "local_agent_bind_session",
   profileScan: "local_agent_profile_scan",
 });
 
@@ -87,6 +88,15 @@ export function createLocalAgentService({ invoke }) {
       const result = await invoke(LOCAL_AGENT_COMMANDS.bind);
       return normalizeBoundNode(result);
     },
+    async bindSession({ bindingTicket, cloudBaseUrl }) {
+      const result = await invoke(LOCAL_AGENT_COMMANDS.bindSession, {
+        args: {
+          binding_ticket: bindingTicket,
+          cloud_base_url: cloudBaseUrl,
+        },
+      });
+      return normalizeBoundNode(result);
+    },
     async profileScan() {
       return invoke(LOCAL_AGENT_COMMANDS.profileScan);
     },
@@ -121,6 +131,10 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
     },
     async bind() {
       return { id: "node-mock", agent_id: current.agent_id, user_id: "user-mock", status: "bound" };
+    },
+    async bindSession() {
+      current = normalizeLocalAgentStatus({ ...current, node_id: "node-mock" });
+      return { id: "node-mock", agent_id: current.agent_id, user_id: "user-mock", status: "online" };
     },
     async profileScan() {
       return { main_user_id: current.main_user_id || "main-user-mock", profiles: [] };

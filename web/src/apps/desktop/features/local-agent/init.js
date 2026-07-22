@@ -5,6 +5,8 @@ import { createLocalAgentService, createMockLocalAgentService } from "./service.
 import { createLocalAgentStore } from "./store.js"
 import { createLocalAgentStatusPage } from "./local-agent-status.js"
 import { createSessionClient } from "../../../../shared/api/session.js"
+import { createProfileBindingClient } from "../../../../shared/api/profileBindings.js"
+import { createRuntimeBindingClient } from "../../../../shared/api/runtimeBinding.js"
 
 function createHttpLocalAgentService() {
   const BASE = "http://127.0.0.1:8765"
@@ -48,6 +50,8 @@ function createHttpLocalAgentService() {
     async stop() { return "stop_requested" },
     async taskStatus(_taskId) { return { ...DEFAULT, current_task_id: _taskId } },
     async bind() { return { id: "node-http", agent_id: "local-agent-dev", user_id: "", status: "bound" } },
+    async bindSession() { throw new Error("请在Desktop应用内绑定当前电脑") },
+    async profileScan() { throw new Error("请在Desktop应用内读取BitBrowser身份") },
   }
 }
 
@@ -55,10 +59,20 @@ function isTauri() {
   return typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined
 }
 
-export async function createDesktopStatusPreview() {
+function cloudBaseUrl() {
+  if (typeof window === "undefined") return "http://127.0.0.1:8080"
+  const origin = window.location?.origin || "http://127.0.0.1:8080"
+  if (origin === "http://127.0.0.1:5174" || origin === "http://localhost:5174") {
+    return "http://127.0.0.1:8080"
+  }
+  return origin
+}
+
+async function createDesktopStatusContext() {
+  const tauri = isTauri()
   let service
 
-  if (isTauri()) {
+  if (tauri) {
     const { invoke } = await import("@tauri-apps/api/core")
     service = createLocalAgentService({ invoke })
   } else {
@@ -74,6 +88,40 @@ export async function createDesktopStatusPreview() {
   } catch {
     cloudUser = null
   }
+  return { service, store, snapshot, cloudUser, tauri }
+}
+
+export async function createDesktopStatusPreview() {
+  const { snapshot, cloudUser, tauri } = await createDesktopStatusContext()
   console.info(`wt-media-desktop local agent: ${snapshot.status}`)
-  return createLocalAgentStatusPage(snapshot, { cloudUser })
+  return createLocalAgentStatusPage(snapshot, { cloudUser, canBindTrustedNode: tauri })
+}
+
+export async function bindTrustedLocalAgent() {
+  const { service, cloudUser, tauri } = await createDesktopStatusContext()
+  if (!tauri) {
+    throw new Error("请在Desktop应用内刷新本机可信状态")
+  }
+  if (!cloudUser) {
+    throw new Error("请先登录运营平台")
+  }
+  const localSnapshot = await service.profileScan()
+  const mainUserId = localSnapshot?.main_user_id || ""
+  if (!mainUserId) {
+    throw new Error("未读取到比特浏览器账号，请确认比特浏览器已登录后重新检测本机环境。")
+  }
+  try {
+    await createProfileBindingClient().confirmMainIdentityDirect(mainUserId)
+  } catch (error) {
+    if (error?.errcode === 23002) {
+      throw new Error("当前比特浏览器登录账号与系统绑定账号不一致，已阻止本机浏览器相关操作。请切换回已绑定的比特浏览器账号后重新检测；如果系统绑定错误，请联系管理员解除绑定后重新绑定。")
+    }
+    throw error
+  }
+  const ticket = await createRuntimeBindingClient().createBindingTicket()
+  await service.bindSession({
+    bindingTicket: ticket.binding_token,
+    cloudBaseUrl: cloudBaseUrl(),
+  })
+  return createDesktopStatusPreview()
 }

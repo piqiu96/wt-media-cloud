@@ -5,9 +5,15 @@ const source = readFileSync(new URL('./UsersPage.vue', import.meta.url), 'utf8')
 
 describe('UsersPage product surface', () => {
   it('shows numeric UID, filters, pagination, edit operations and one-time password result', () => {
-    for (const required of ['用户管理', 'UID', '运营分组', '筛选', '编辑用户', '重置密码', '一次性密码', '停用', '删除', 't-pagination']) {
+    for (const required of ['用户管理', 'UID', '运营分组', '筛选', '编辑用户', '重置密码', '解除比特绑定', '一次性密码', '停用', '删除', 't-pagination']) {
       expect(source).toContain(required)
     }
+  })
+
+  it('declares BitBrowser unbind as non-destructive administrator repair', () => {
+    expect(source).toContain('解除后，该用户需要在 Desktop 重新绑定正确的比特浏览器账号')
+    expect(source).toContain('系统不会删除已有浏览器窗口、媒体账号和历史记录')
+    expect(source).toContain('clearBitBrowserBinding')
   })
 
   it('uses configured game options instead of free text game IDs', () => {

@@ -9,7 +9,25 @@ const sessionClient = createSessionClient()
 const username = ref('')
 const password = ref('')
 const loading = ref(true)
+const submitting = ref(false)
 const error = ref('')
+const replaceNeeded = ref(false)
+const loginAction = ref('')
+
+function resetReplacePrompt() {
+  replaceNeeded.value = false
+  if (!submitting.value) {
+    loginAction.value = ''
+  }
+}
+
+function submitLogin() {
+  return login({ replaceExisting: false })
+}
+
+function submitReplacementLogin() {
+  return login({ replaceExisting: true })
+}
 
 onMounted(async () => {
   if (isDesktop() && new URLSearchParams(window.location.search).has('desktop_role_forbidden')) {
@@ -32,10 +50,19 @@ onMounted(async () => {
   }
 })
 
-async function login() {
+async function login(options = {}) {
+  if (submitting.value) return
+  const replaceExisting = options?.replaceExisting === true
+  submitting.value = true
+  loginAction.value = replaceExisting ? '正在替换旧会话并登录…' : '正在登录…'
   error.value = ''
+  if (!replaceExisting) {
+    resetReplacePrompt()
+  }
   try {
-    const user = await sessionClient.login(username.value, password.value)
+    const user = await sessionClient.login(username.value, password.value, {
+      replaceExisting,
+    })
     if (isDesktop() && !canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
       error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
@@ -44,26 +71,14 @@ async function login() {
     router.push('/')
   } catch (e) {
     if (e.errcode === 20010) {
-      const confirmed = window.confirm('当前账号已在其他位置登录。确认替换旧会话后，旧 Web、Desktop 和 Agent 将不能继续发起新的敏感操作。是否继续？')
-      if (!confirmed) {
-        error.value = '已取消登录，旧会话保持有效。'
-        return
-      }
-      try {
-        const user = await sessionClient.login(username.value, password.value, { replaceExisting: true })
-        if (isDesktop() && !canUseDesktop(user)) {
-          await sessionClient.logout().catch(() => {})
-          error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
-          return
-        }
-        router.push('/')
-        return
-      } catch (replaceError) {
-        error.value = replaceError.message
-        return
-      }
+      replaceNeeded.value = true
+      error.value = '当前账号已在其他位置登录。请确认是否替换旧会话。'
+      return
     }
     error.value = e.message
+  } finally {
+    submitting.value = false
+    loginAction.value = ''
   }
 }
 </script>
@@ -78,18 +93,53 @@ async function login() {
         <template #subtitle>
           <span style="color:var(--td-text-color-secondary)">登录运营平台</span>
         </template>
-        <t-form @submit="login">
+        <t-form @submit.prevent="replaceNeeded ? submitReplacementLogin() : submitLogin()">
           <t-form-item label="用户名">
-            <t-input v-model="username" placeholder="请输入用户名" autocomplete="username" />
+            <t-input v-model="username" placeholder="请输入用户名" autocomplete="username" @change="resetReplacePrompt" />
           </t-form-item>
           <t-form-item label="密码">
-            <t-input v-model="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+            <t-input v-model="password" type="password" placeholder="请输入密码" autocomplete="current-password" @change="resetReplacePrompt" />
           </t-form-item>
           <t-form-item v-if="error">
             <t-alert :message="error" theme="error" />
           </t-form-item>
+          <t-form-item v-if="replaceNeeded">
+            <t-alert
+              message="确认后会替换旧 Web、Desktop 和 Agent 会话；旧会话不能继续发起新的浏览器窗口操作。"
+              theme="warning"
+            />
+          </t-form-item>
+          <t-form-item v-if="loginAction">
+            <t-alert :message="loginAction" theme="info" />
+          </t-form-item>
           <t-form-item>
-            <t-button type="submit" theme="primary" block>登录</t-button>
+            <button
+              v-if="!replaceNeeded"
+              type="button"
+              class="login-button primary"
+              :disabled="submitting"
+              @click="submitLogin"
+            >
+              {{ submitting ? '正在登录…' : '登录' }}
+            </button>
+            <t-space v-else direction="vertical" style="width:100%">
+              <button
+                type="button"
+                class="login-button primary"
+                :disabled="submitting"
+                @click="submitReplacementLogin"
+              >
+                {{ submitting ? '正在替换旧会话…' : '替换旧会话并登录' }}
+              </button>
+              <button
+                type="button"
+                class="login-button outline"
+                :disabled="submitting"
+                @click="resetReplacePrompt"
+              >
+                取消
+              </button>
+            </t-space>
           </t-form-item>
         </t-form>
       </t-card>
@@ -107,4 +157,34 @@ async function login() {
   background: var(--td-bg-color-page);
 }
 .login-card { width: 400px; }
+.login-button {
+  width: 100%;
+  height: 40px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+.login-button.primary {
+  color: #fff;
+  background: var(--td-brand-color);
+  border-color: var(--td-brand-color);
+}
+.login-button.primary:hover:not(:disabled) {
+  background: var(--td-brand-color-hover);
+  border-color: var(--td-brand-color-hover);
+}
+.login-button.outline {
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  border-color: var(--td-border-level-2-color);
+}
+.login-button.outline:hover:not(:disabled) {
+  background: var(--td-bg-color-container-hover);
+}
 </style>

@@ -29,6 +29,9 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     confirmMainIdentity(scanId) {
       return api.post(`/bit-browser/profile-scans/${scanId}/confirm-main-identity`, {})
     },
+    confirmMainIdentityDirect(mainUserId) {
+      return api.post('/bit-browser/main-identity', { main_user_id: mainUserId })
+    },
     listProfiles() {
       return api.get('/browser-profiles')
     },

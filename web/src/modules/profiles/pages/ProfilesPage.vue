@@ -49,7 +49,7 @@ async function currentLocalNodeId() {
 
 function localTrustMessage(e) {
   if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
-    return "当前Desktop、Local Agent或BitBrowser身份未通过可信检查，已阻止本地敏感操作。请在Desktop环境状态页重新检测并确认主账号后重试。"
+    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境状态」页刷新本机状态后重试。"
   }
   return e.message
 }
@@ -155,7 +155,7 @@ async function triggerScan() {
     const localAgent = await desktopLocalAgentService()
     const status = await localAgent.status()
     if (!status.node_id) {
-      throw new Error("当前Desktop尚未绑定可信本机节点，请先到环境状态页重新检测")
+      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
     }
     const snapshot = await localAgent.profileScan()
     const scan = await bindingClient.submit({

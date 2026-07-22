@@ -87,6 +87,38 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		common.Success(c, scan)
 	})
+	h.POST("/api/v1/bit-browser/main-identity", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var input MainIdentityInput
+		if !common.DecodeJSON(c, &input) {
+			return
+		}
+		binding, err := service.ConfirmMainIdentityDirect(actor, input)
+		if err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.Success(c, binding)
+	})
+	h.DELETE("/api/v1/users/:user_id/bit-browser-main-identity", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		userID, valid := parseProfileUserID(c.Param("user_id"))
+		if !valid {
+			writeProfileError(c, ErrInvalidInput)
+			return
+		}
+		if err := service.ClearMainIdentity(actor, userID); err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.NoContent(c)
+	})
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/reject", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -218,6 +250,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 	})
 }
 
+func parseProfileUserID(raw string) (identity.UserID, bool) {
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, false
+	}
+	return identity.UserID(parsed), true
+}
+
 func extractNodeID(input map[string]any) (string, bool) {
 	raw, ok := input["node_id"]
 	delete(input, "node_id")
@@ -272,18 +312,20 @@ func createProfileTask(c *hertzapp.RequestContext, tasks TaskCreator, taskType s
 
 func writeProfileError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, ErrInvalidInput):
+		common.BadRequest(c, 10001, "请求参数无效")
 	case errors.Is(err, runtimebinding.ErrInvalidInput):
-		common.BadRequest(c, 10001, "本地敏感操作请求缺少可信节点")
+		common.BadRequest(c, 10001, "当前电脑缺少本地环境确认信息")
 	case errors.Is(err, runtimebinding.ErrBoundSessionInvalid), errors.Is(err, runtimebinding.ErrNodeCredentialInvalid):
-		common.Unauthorized(c, 11001, "本机会话已失效，请重新登录并绑定Desktop")
+		common.Unauthorized(c, 11001, "当前电脑登录状态已失效，请重新登录 Desktop 并刷新本机状态")
 	case errors.Is(err, runtimebinding.ErrLocalTrustUnavailable), errors.Is(err, runtimebinding.ErrProfileOwnershipMismatch):
-		common.Conflict(c, 23003, "当前Desktop、Local Agent或BitBrowser身份不可信，已阻止本地敏感操作")
+		common.Conflict(c, 23003, "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口")
 	case errors.Is(err, ErrForbidden):
 		common.Forbidden(c, 11003, "没有权限执行此 Profile 操作")
 	case errors.Is(err, ErrIdentityUnverifiable):
 		common.Conflict(c, 23002, "BitBrowser Profile 身份无法验证")
 	case errors.Is(err, ErrIdentityMismatch):
-		common.Conflict(c, 23002, "BitBrowser 身份与绑定用户不匹配")
+		common.Conflict(c, 23002, "当前比特浏览器登录账号与系统绑定账号不一致")
 	case errors.Is(err, ErrScanNotFound), errors.Is(err, ErrProfileNotFound):
 		common.NotFound(c, 20004, "Profile 扫描或 Profile 不存在")
 	case errors.Is(err, ErrScanExpired):

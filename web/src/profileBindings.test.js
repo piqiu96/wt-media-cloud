@@ -26,10 +26,13 @@ describe('profile binding client', () => {
     const client = createProfileBindingClient({ fetch })
 
     await client.confirm('scan-1')
+    await client.confirmMainIdentityDirect('main-user-1')
     await client.listProfiles()
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/bit-browser/profile-scans/scan-1/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/bit-browser/main-identity', expect.objectContaining({ method: 'POST', credentials: 'include' }))
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ main_user_id: 'main-user-1' })
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 
   it('sends node id for local sensitive profile entries', async () => {
