@@ -26,6 +26,10 @@ type localSensitiveRequest struct {
 	NodeID string `json:"node_id"`
 }
 
+type assignProfileOwnerRequest struct {
+	UserID identity.UserID `json:"user_id"`
+}
+
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, tasks TaskCreator, trust LocalTrustChecker) {
 	h.POST("/api/v1/bit-browser/profile-scans", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -244,6 +248,32 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		input["profile_id"] = profile.BitProfileID
 		createProfileTask(c, tasks, cloudagent.TaskTypeProfileUpdate.String(), actor.ID, input)
 	})
+	h.POST("/api/v1/browser-profiles/:id/assign-owner", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req assignProfileOwnerRequest
+		if !common.DecodeJSON(c, &req) || req.UserID <= 0 {
+			writeProfileError(c, ErrInvalidInput)
+			return
+		}
+		target, found, err := identityService.ResolveUser(req.UserID)
+		if err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		if !found {
+			writeProfileError(c, ErrInvalidInput)
+			return
+		}
+		profile, err := service.AssignProfileOwner(actor, c.Param("id"), target)
+		if err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.Success(c, profile)
+	})
 	h.DELETE("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -340,6 +370,8 @@ func writeProfileError(c *hertzapp.RequestContext, err error) {
 		common.Failure(c, 410, 20004, "Profile 扫描已过期", nil)
 	case errors.Is(err, ErrScanNotReady):
 		common.Conflict(c, 20009, "Profile 扫描未就绪")
+	case errors.Is(err, ErrProfileReferenced):
+		common.Conflict(c, 20003, "浏览器窗口已被媒体账号引用，不能直接分配给其他用户")
 	default:
 		common.InternalError(c, "Profile 服务内部错误")
 	}

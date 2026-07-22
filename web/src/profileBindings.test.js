@@ -42,8 +42,11 @@ describe('profile binding client', () => {
 
     await client.createProfile({ name: '窗口一' }, { nodeId: 'node-1' })
     await client.openProfile('profile-1', { nodeId: 'node-1' })
+    await client.assignProfileOwner('profile-1', 3)
 
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: '窗口一', node_id: 'node-1' })
     expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ node_id: 'node-1' })
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles/profile-1/assign-owner', expect.objectContaining({ method: 'POST', credentials: 'include' }))
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ user_id: 3 })
   })
 })

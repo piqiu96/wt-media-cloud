@@ -47,6 +47,9 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     updateProfile(id, config, options = {}) {
       return api.patch(`/browser-profiles/${id}`, { ...config, node_id: options.nodeId })
     },
+    assignProfileOwner(id, userId) {
+      return api.post(`/browser-profiles/${id}/assign-owner`, { user_id: Number(userId) })
+    },
     deleteProfile(id) {
       return api.delete(`/browser-profiles/${id}`)
     },

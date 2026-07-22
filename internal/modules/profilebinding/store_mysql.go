@@ -388,4 +388,48 @@ func (s *MySQLStore) DeleteProfile(id string) error {
 	return err
 }
 
+func (s *MySQLStore) ProfileHasAccountReferences(profileID string) (bool, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM media_accounts WHERE browser_profile_id = ?`, profileID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *MySQLStore) AssignProfileOwner(profileID string, userID identity.UserID, teamID *identity.TeamID, actorID identity.UserID, at time.Time) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
+		`UPDATE browser_profiles SET user_id = ?, team_id = ?, updated_at = ? WHERE id = ?`,
+		userID, sqlTeamID(teamID), at, profileID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows == 0 {
+		if err != nil {
+			return err
+		}
+		return ErrProfileNotFound
+	}
+	summary, _ := json.Marshal(map[string]any{"user_id": userID, "team_id": teamID})
+	if _, err := tx.Exec(
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		common.NewID("audit"), actorID, "bitbrowser.profile.assign_owner", "browser_profile", profileID, summary, at,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func sqlTeamID(teamID *identity.TeamID) any {
+	if teamID == nil {
+		return nil
+	}
+	return *teamID
+}
+
 var _ Store = (*MySQLStore)(nil)

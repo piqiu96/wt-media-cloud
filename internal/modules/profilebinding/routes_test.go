@@ -141,6 +141,28 @@ func TestProfileRoutesAdminCanClearMainIdentity(t *testing.T) {
 	}
 }
 
+func TestProfileRoutesAdminCanAssignProfileOwnerAndRejectReferencedProfile(t *testing.T) {
+	engine, cookie, store := newProfileRouteTest(t)
+	teamID := actorTeamID(t, engine, cookie)
+	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(99), TeamID: teamID, BitProfileID: "bit-profile-1", MainUserID: "main-user-1"}
+
+	adminLogin := performProfileJSON(engine, "POST", "/api/v1/auth/login", `{"username":"admin","password":"a-long-initial-password"}`, "")
+	adminCookie := string(adminLogin.Result().Header.Peek("Set-Cookie"))
+	assigned := performProfileJSON(engine, "POST", "/api/v1/browser-profiles/profile-1/assign-owner", `{"user_id":2}`, adminCookie)
+	if assigned.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("assign status=%d body=%s", assigned.Result().StatusCode(), assigned.Result().Body())
+	}
+	if stored := store.profiles["profile-1"]; stored.UserID != identity.UserID(2) {
+		t.Fatalf("profile owner=%d", stored.UserID)
+	}
+
+	store.profileAccountRefs["profile-1"] = true
+	rejected := performProfileJSON(engine, "POST", "/api/v1/browser-profiles/profile-1/assign-owner", `{"user_id":2}`, adminCookie)
+	if rejected.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(rejected.Result().Body()), "已被媒体账号引用") {
+		t.Fatalf("referenced assign status=%d body=%s", rejected.Result().StatusCode(), rejected.Result().Body())
+	}
+}
+
 func TestProfileRoutesOperatorCannotClearMainIdentity(t *testing.T) {
 	engine, cookie, _ := newProfileRouteTest(t)
 	response := performProfileJSON(engine, "DELETE", "/api/v1/users/2/bit-browser-main-identity", `{}`, cookie)

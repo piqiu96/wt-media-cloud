@@ -51,6 +51,7 @@ var (
 	ErrScanExpired          = errors.New("profile scan has expired")
 	ErrProfileNotFound      = errors.New("browser profile was not found")
 	ErrProfileInactive      = errors.New("browser profile is not active")
+	ErrProfileReferenced    = errors.New("browser profile is still referenced")
 )
 
 const (
@@ -147,6 +148,8 @@ type Store interface {
 	ClearMainIdentity(userID identity.UserID, actorID identity.UserID, at time.Time) error
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
+	ProfileHasAccountReferences(profileID string) (bool, error)
+	AssignProfileOwner(profileID string, userID identity.UserID, teamID *identity.TeamID, actorID identity.UserID, at time.Time) error
 }
 
 type Service struct {
@@ -449,6 +452,37 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 	return s.store.DeleteProfile(profileID)
 }
 
+func (s *Service) AssignProfileOwner(actor identity.PublicUser, profileID string, target identity.PublicUser) (BrowserProfile, error) {
+	if !validActor(actor) || actor.Role != identity.RoleAdmin {
+		return BrowserProfile{}, ErrForbidden
+	}
+	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if !found {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
+	if target.ID <= 0 || target.Status != identity.UserStatusEnabled || target.Role != identity.RoleOperator || target.TeamID == nil {
+		return BrowserProfile{}, ErrInvalidInput
+	}
+	referenced, err := s.store.ProfileHasAccountReferences(profile.ID)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if referenced {
+		return BrowserProfile{}, ErrProfileReferenced
+	}
+	now := s.now()
+	if err := s.store.AssignProfileOwner(profile.ID, target.ID, target.TeamID, actor.ID, now); err != nil {
+		return BrowserProfile{}, err
+	}
+	profile.UserID = target.ID
+	profile.TeamID = cloneTeamID(target.TeamID)
+	profile.UpdatedAt = now
+	return profile, nil
+}
+
 func (s *Service) GetActiveProfile(actor identity.PublicUser, profileID string) (BrowserProfile, error) {
 	if !validActor(actor) {
 		return BrowserProfile{}, ErrForbidden
@@ -467,6 +501,14 @@ func (s *Service) GetActiveProfile(actor identity.PublicUser, profileID string) 
 		return BrowserProfile{}, ErrProfileInactive
 	}
 	return profile, nil
+}
+
+func cloneTeamID(teamID *identity.TeamID) *identity.TeamID {
+	if teamID == nil {
+		return nil
+	}
+	value := *teamID
+	return &value
 }
 
 func validActor(actor identity.PublicUser) bool {

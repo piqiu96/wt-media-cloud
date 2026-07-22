@@ -173,6 +173,51 @@ func TestProfileOwnerAndAdminCanDeleteCloudRecord(t *testing.T) {
 	}
 }
 
+func TestAdminCanAssignUnreferencedProfileToOperator(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identity.TeamID(10)
+	targetTeamID := identity.TeamID(20)
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BitProfileID: "bit-profile-1", LocalStatus: ProfileActive}
+	service := newTestService(store)
+	admin := identity.PublicUser{ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
+	target := identity.PublicUser{ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &targetTeamID}
+
+	profile, err := service.AssignProfileOwner(admin, "profile", target)
+	if err != nil {
+		t.Fatalf("AssignProfileOwner() error=%v", err)
+	}
+	if profile.UserID != target.ID || profile.TeamID == nil || *profile.TeamID != targetTeamID {
+		t.Fatalf("assigned profile=%#v", profile)
+	}
+	if stored := store.profiles["profile"]; stored.UserID != target.ID || stored.TeamID == nil || *stored.TeamID != targetTeamID {
+		t.Fatalf("stored profile=%#v", stored)
+	}
+	if len(store.audits) != 1 || store.audits[0].Action != "bitbrowser.profile.assign_owner" {
+		t.Fatalf("audits=%#v", store.audits)
+	}
+}
+
+func TestAssignProfileOwnerRejectsNonAdminInvalidTargetAndReferencedProfile(t *testing.T) {
+	teamID := identity.TeamID(10)
+	admin := identity.PublicUser{ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
+	operator := identity.PublicUser{ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &teamID}
+	senior := identity.PublicUser{ID: 4, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &teamID}
+
+	store := newMemoryStore()
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, LocalStatus: ProfileActive}
+	service := newTestService(store)
+	if _, err := service.AssignProfileOwner(operator, "profile", operator); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("AssignProfileOwner(non-admin) error=%v, want ErrForbidden", err)
+	}
+	if _, err := service.AssignProfileOwner(admin, "profile", senior); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("AssignProfileOwner(senior target) error=%v, want ErrInvalidInput", err)
+	}
+	store.profileAccountRefs["profile"] = true
+	if _, err := service.AssignProfileOwner(admin, "profile", operator); !errors.Is(err, ErrProfileReferenced) {
+		t.Fatalf("AssignProfileOwner(referenced) error=%v, want ErrProfileReferenced", err)
+	}
+}
+
 func TestSeniorCanReviewSameTeamScanButCannotConfirmIt(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identity.TeamID(10)
@@ -361,14 +406,15 @@ func newTestService(store Store) *Service {
 }
 
 type memoryStore struct {
-	bindings map[identity.UserID]BitAccountBinding
-	profiles map[string]BrowserProfile
-	scans    map[string]ProfileScan
-	audits   []identity.AuditEvent
+	bindings           map[identity.UserID]BitAccountBinding
+	profiles           map[string]BrowserProfile
+	scans              map[string]ProfileScan
+	profileAccountRefs map[string]bool
+	audits             []identity.AuditEvent
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{bindings: map[identity.UserID]BitAccountBinding{}, profiles: map[string]BrowserProfile{}, scans: map[string]ProfileScan{}}
+	return &memoryStore{bindings: map[identity.UserID]BitAccountBinding{}, profiles: map[string]BrowserProfile{}, scans: map[string]ProfileScan{}, profileAccountRefs: map[string]bool{}}
 }
 
 func (s *memoryStore) FindBinding(userID identity.UserID) (BitAccountBinding, bool, error) {
@@ -465,6 +511,25 @@ func (s *memoryStore) ClearMainIdentity(userID identity.UserID, actorID identity
 
 func (s *memoryStore) DeleteProfile(id string) error {
 	delete(s.profiles, id)
+	return nil
+}
+
+func (s *memoryStore) ProfileHasAccountReferences(profileID string) (bool, error) {
+	return s.profileAccountRefs[profileID], nil
+}
+
+func (s *memoryStore) AssignProfileOwner(profileID string, userID identity.UserID, teamID *identity.TeamID, actorID identity.UserID, at time.Time) error {
+	profile, ok := s.profiles[profileID]
+	if !ok {
+		return ErrProfileNotFound
+	}
+	profile.UserID = userID
+	profile.TeamID = cloneTeamID(teamID)
+	profile.UpdatedAt = at
+	s.profiles[profileID] = profile
+	s.audits = append(s.audits,
+		identity.AuditEvent{ActorUserID: actorID, Action: "bitbrowser.profile.assign_owner", TargetType: "browser_profile", TargetID: profileID, Summary: map[string]string{"user_id": strconv.FormatInt(int64(userID), 10)}, CreatedAt: at},
+	)
 	return nil
 }
 

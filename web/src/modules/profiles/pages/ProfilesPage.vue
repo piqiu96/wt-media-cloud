@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
+import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
@@ -8,6 +9,7 @@ import { isDesktop } from "../../../utils.js"
 
 const bindingClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
+const usersClient = createUsersClient()
 const profiles = ref([])
 const scans = ref([])
 const loading = ref(true)
@@ -22,6 +24,11 @@ const newProfile = ref({ name: "", group_name: "", seq: 1 })
 // Detail drawer
 const detailVisible = ref(false)
 const detailProfile = ref(null)
+const showAssign = ref(false)
+const assigning = ref(false)
+const assignProfile = ref(null)
+const assignUserId = ref("")
+const operatorUsers = ref([])
 
 // Scan
 const scanning = ref(false)
@@ -32,8 +39,13 @@ const currentScan = ref(null)
 const identityError = ref("")
 const selectedTab = ref("changed")
 
-let currentUser = null
+const currentUser = ref(null)
 const isDesktopClient = computed(() => isDesktop())
+const isAdmin = computed(() => currentUser.value?.role === "admin")
+const operatorOptions = computed(() => operatorUsers.value.map((user) => ({
+  label: `${user.username}（UID ${user.id}）`,
+  value: String(user.id),
+})))
 
 async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
@@ -58,10 +70,22 @@ function localTrustMessage(e) {
 
 onMounted(async () => {
   try {
-    currentUser = await sessionClient.me()
+    currentUser.value = await sessionClient.me()
+    if (currentUser.value?.role === "admin") {
+      await loadOperatorUsers()
+    }
   } catch {}
   await loadProfiles()
 })
+
+async function loadOperatorUsers() {
+  try {
+    const users = await usersClient.listUsers({ role: "operator", status: "enabled" })
+    operatorUsers.value = Array.isArray(users) ? users.filter((user) => user.role === "operator" && user.status === "enabled") : []
+  } catch (e) {
+    error.value = e.message
+  }
+}
 
 async function loadProfiles() {
   error.value = ""
@@ -161,7 +185,7 @@ async function triggerScan() {
     }
     const snapshot = await localAgent.profileScan()
     const scan = await bindingClient.submit({
-      main_user_id: snapshot.main_user_id || currentUser?.id,
+      main_user_id: snapshot.main_user_id || currentUser.value?.id,
       profiles: snapshot.profiles || [],
     }, { nodeId: status.node_id })
     currentScan.value = scan
@@ -266,7 +290,7 @@ async function restoreCloudConfig() {
     const result = await localAgent.profileRestore(targets)
     const readback = result.snapshot || {}
     currentScan.value = await bindingClient.submit({
-      main_user_id: readback.main_user_id || currentUser?.id,
+      main_user_id: readback.main_user_id || currentUser.value?.id,
       profiles: readback.profiles || [],
     }, { nodeId: status.node_id })
     taskNotice.value = `已恢复 ${result.restored_count || targets.length} 个窗口的Cloud配置，并已读回验证。`
@@ -277,6 +301,45 @@ async function restoreCloudConfig() {
   } finally {
     restoringCloud.value = false
   }
+}
+
+function openAssignProfile(profile) {
+  assignProfile.value = profile
+  assignUserId.value = profile.user_id ? String(profile.user_id) : ""
+  showAssign.value = true
+}
+
+async function assignOwner() {
+  if (!assignProfile.value || !assignUserId.value) {
+    error.value = "请选择要授权的普通运营用户。"
+    return
+  }
+  assigning.value = true
+  error.value = ""
+  try {
+    const updated = await bindingClient.assignProfileOwner(assignProfile.value.id, assignUserId.value)
+    taskNotice.value = "已更新Cloud窗口授权关系。本操作不会修改本机BitBrowser窗口或媒体账号绑定。"
+    showAssign.value = false
+    const index = profiles.value.findIndex((profile) => profile.id === updated.id)
+    if (index >= 0) profiles.value.splice(index, 1, updated)
+    else await loadProfiles()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    assigning.value = false
+  }
+}
+
+function operatorLabel(userID) {
+  const user = operatorUsers.value.find((item) => Number(item.id) === Number(userID))
+  return user ? `${user.username}（UID ${user.id}）` : `UID ${userID || "-"}`
+}
+
+function maskMainUserId(value) {
+  if (!value) return "-"
+  const text = String(value)
+  if (text.length <= 8) return text
+  return `${text.slice(0, 4)}…${text.slice(-4)}`
 }
 
 function getDiff(scan) {
@@ -307,6 +370,7 @@ const columns = [
   { colKey: "name", title: "名称", width: 160 },
   { colKey: "bit_profile_id", title: "Bit ID", width: 100 },
   { colKey: "group_name", title: "分组", width: 100 },
+  { colKey: "user_id", title: "授权用户", width: 120 },
   { colKey: "local_status", title: "状态", width: 90 },
   { colKey: "last_synced_at", title: "同步", width: 130 },
   { colKey: "op", title: "操作", width: 200 },
@@ -376,10 +440,14 @@ const diffColumns = [
         <template #local_status="{ row }">
           <BusinessStatus :status="row.local_status === 'active' ? 'normal' : 'stopped'" :label="row.local_status" />
         </template>
+        <template #user_id="{ row }">
+          {{ operatorLabel(row.user_id) }}
+        </template>
         <template #last_synced_at="{ row }">{{ formatTime(row.last_synced_at) }}</template>
         <template #op="{ row }">
           <t-space>
             <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
+            <t-button v-if="isAdmin" size="small" variant="text" @click="openAssignProfile(row)">分配</t-button>
             <template v-if="isDesktopClient">
               <t-button size="small" variant="text" @click="openProfile(row)">打开</t-button>
               <t-button size="small" variant="text" @click="closeProfile(row)">关闭</t-button>
@@ -409,7 +477,8 @@ const diffColumns = [
         <t-descriptions-item label="BitBrowser窗口ID">{{ detailProfile.bit_profile_id }}</t-descriptions-item>
         <t-descriptions-item label="名称">{{ detailProfile.name || '-' }}</t-descriptions-item>
         <t-descriptions-item label="分组">{{ detailProfile.group_name || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="主账号">{{ detailProfile.main_user_id }}</t-descriptions-item>
+        <t-descriptions-item label="已保存主账号">{{ maskMainUserId(detailProfile.main_user_id) }}</t-descriptions-item>
+        <t-descriptions-item label="授权用户">{{ operatorLabel(detailProfile.user_id) }}</t-descriptions-item>
         <t-descriptions-item label="状态">
           <BusinessStatus :status="detailProfile.local_status === 'active' ? 'normal' : 'stopped'" :label="detailProfile.local_status" />
         </t-descriptions-item>
@@ -418,6 +487,28 @@ const diffColumns = [
         <t-descriptions-item label="最后同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
       </t-descriptions>
     </t-drawer>
+
+    <!-- Cloud窗口授权 -->
+    <t-dialog
+      v-model:visible="showAssign"
+      header="分配浏览器窗口"
+      :confirm-btn="{ loading: assigning, theme: 'primary' }"
+      @confirm="assignOwner"
+    >
+      <t-alert
+        message="只更新Cloud窗口授权关系，不操作本机BitBrowser。已绑定媒体账号的窗口不能直接分配。"
+        theme="warning"
+        style="margin-bottom:12px"
+      />
+      <t-form>
+        <t-form-item label="窗口">
+          <span>{{ assignProfile?.name || assignProfile?.bit_profile_id || '-' }}</span>
+        </t-form-item>
+        <t-form-item label="授权给">
+          <t-select v-model="assignUserId" :options="operatorOptions" placeholder="选择普通运营" filterable />
+        </t-form-item>
+      </t-form>
+    </t-dialog>
 
     <!-- 扫描 Diff 抽屉 -->
     <t-drawer v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close>
