@@ -1,9 +1,10 @@
 <script setup>
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
+import { isDesktop } from "../../../utils.js"
 
 const bindingClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
@@ -30,6 +31,7 @@ const identityError = ref("")
 const selectedTab = ref("changed")
 
 let currentUser = null
+const isDesktopClient = computed(() => isDesktop())
 
 async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
@@ -72,6 +74,10 @@ async function loadProfiles() {
 }
 
 async function createProfile() {
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web只展示云端已保存的浏览器窗口信息；新建窗口请在Desktop客户端执行。"
+    return
+  }
   creating.value = true
   try {
     const nodeId = await currentLocalNodeId()
@@ -92,6 +98,10 @@ async function createProfile() {
 }
 
 async function openProfile(profile) {
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web不能打开本机BitBrowser窗口；请在Desktop客户端执行。"
+    return
+  }
   try {
     const nodeId = await currentLocalNodeId()
     const task = await bindingClient.openProfile(profile.id, { nodeId })
@@ -102,6 +112,10 @@ async function openProfile(profile) {
 }
 
 async function closeProfile(profile) {
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web不能关闭本机BitBrowser窗口；请在Desktop客户端执行。"
+    return
+  }
   try {
     const nodeId = await currentLocalNodeId()
     const task = await bindingClient.closeProfile(profile.id, { nodeId })
@@ -112,6 +126,10 @@ async function closeProfile(profile) {
 }
 
 async function deleteProfile(profile) {
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web不处理本机窗口变更；窗口失效或归档请在后续Desktop闭环中处理。"
+    return
+  }
   if (!confirm(`确定删除 Profile "${profile.name}"？`)) return
   try {
     await bindingClient.deleteProfile(profile.id)
@@ -127,6 +145,10 @@ function openDetail(profile) {
 }
 
 async function triggerScan() {
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web只展示Cloud已保存信息；扫描BitBrowser窗口请在Desktop客户端执行。"
+    return
+  }
   scanning.value = true
   error.value = ""
   try {
@@ -159,30 +181,6 @@ async function reviewScan(scan) {
   try {
     currentScan.value = await bindingClient.review(scan.id || scan.scan_id)
     scanDetailVisible.value = true
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
-async function confirmScan() {
-  if (!currentScan.value) return
-  try {
-    await bindingClient.confirm(currentScan.value.id)
-    currentScan.value = null
-    scanDetailVisible.value = false
-    await loadProfiles()
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
-async function confirmMainIdentity() {
-  if (!currentScan.value) return
-  try {
-    await bindingClient.confirmMainIdentity(currentScan.value.id)
-    taskNotice.value = "已确认当前BitBrowser主账号身份；Profile变更尚未同步。"
-    currentScan.value = null
-    scanDetailVisible.value = false
   } catch (e) {
     error.value = e.message
   }
@@ -260,16 +258,22 @@ const diffColumns = [
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
     <t-alert v-if="identityError" :message="identityError" theme="warning" style="margin-bottom:16px" closable @close="identityError=''" />
+    <t-alert
+      v-if="!isDesktopClient"
+      message="当前为Cloud Web：仅展示Cloud已保存的浏览器窗口信息。扫描、Diff处理、打开/关闭和创建窗口请在Desktop客户端执行。"
+      theme="info"
+      style="margin-bottom:16px"
+    />
 
     <div class="action-bar">
       <t-space>
-        <t-button theme="primary" @click="showCreate = true">新建窗口</t-button>
-        <t-button :loading="scanning" @click="triggerScan">触发扫描</t-button>
+        <t-button v-if="isDesktopClient" theme="primary" @click="showCreate = true">新建窗口</t-button>
+        <t-button v-if="isDesktopClient" :loading="scanning" @click="triggerScan">扫描本机窗口</t-button>
         <t-button variant="outline" @click="loadProfiles">刷新</t-button>
       </t-space>
     </div>
 
-    <t-card title="浏览器窗口 (Profile)" :bordered="true">
+    <t-card title="浏览器窗口" :bordered="true">
       <t-table
         :data="profiles"
         :columns="columns"
@@ -277,7 +281,7 @@ const diffColumns = [
         size="small"
         hover
         :pagination="{ pageSize: 50, total: profiles.length }"
-        empty="暂无 Profile"
+        empty="暂无浏览器窗口"
       >
         <template #name="{ row }">
           <div class="profile-name">{{ row.name || '-' }}</div>
@@ -289,9 +293,11 @@ const diffColumns = [
         <template #op="{ row }">
           <t-space>
             <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
-            <t-button size="small" variant="text" @click="openProfile(row)">打开</t-button>
-            <t-button size="small" variant="text" @click="closeProfile(row)">关闭</t-button>
-            <t-button size="small" variant="text" theme="danger" @click="deleteProfile(row)">删除</t-button>
+            <template v-if="isDesktopClient">
+              <t-button size="small" variant="text" @click="openProfile(row)">打开</t-button>
+              <t-button size="small" variant="text" @click="closeProfile(row)">关闭</t-button>
+              <t-button size="small" variant="text" theme="danger" @click="deleteProfile(row)">删除</t-button>
+            </template>
           </t-space>
         </template>
       </t-table>
@@ -310,10 +316,10 @@ const diffColumns = [
     </t-dialog>
 
     <!-- 详情抽屉 -->
-    <t-drawer v-model:visible="detailVisible" header="Profile 详情" :size="'480px'" destroy-on-close>
+    <t-drawer v-model:visible="detailVisible" header="浏览器窗口详情" :size="'480px'" destroy-on-close>
       <t-descriptions v-if="detailProfile" :column="1" bordered size="small">
         <t-descriptions-item label="ID">{{ detailProfile.id }}</t-descriptions-item>
-        <t-descriptions-item label="BitBrowser ID">{{ detailProfile.bit_profile_id }}</t-descriptions-item>
+        <t-descriptions-item label="BitBrowser窗口ID">{{ detailProfile.bit_profile_id }}</t-descriptions-item>
         <t-descriptions-item label="名称">{{ detailProfile.name || '-' }}</t-descriptions-item>
         <t-descriptions-item label="分组">{{ detailProfile.group_name || '-' }}</t-descriptions-item>
         <t-descriptions-item label="主账号">{{ detailProfile.main_user_id }}</t-descriptions-item>
@@ -327,9 +333,10 @@ const diffColumns = [
     </t-drawer>
 
     <!-- 扫描 Diff 抽屉 -->
-    <t-drawer v-model:visible="scanDetailVisible" header="扫描结果" :size="'700px'" destroy-on-close>
+    <t-drawer v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close>
       <div v-if="currentScan">
         <t-alert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
+        <t-alert message="本次扫描只展示Diff，不会同步或覆盖Cloud浏览器窗口。接受本地变化、恢复Cloud配置属于后续CHG。" theme="warning" style="margin-bottom:16px" />
         <t-tabs v-model="selectedTab" :default-value="'changed'">
           <t-tab-panel value="added" label="新增">
             <t-table v-if="getDiff(currentScan).added?.length" :data="getDiff(currentScan).added.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="diffColumns" size="small">
@@ -363,8 +370,8 @@ const diffColumns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="primary" @click="confirmMainIdentity">仅确认主账号</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="confirmScan">确认同步窗口</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="primary" disabled>接受本地变化（后续）</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="default" disabled>恢复Cloud配置（后续）</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>
       </template>
