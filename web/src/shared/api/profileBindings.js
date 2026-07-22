@@ -13,9 +13,10 @@ function safeProfile(profile) {
 export function createProfileBindingClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    submit(snapshot) {
+    submit(snapshot, options = {}) {
       return api.post('/bit-browser/profile-scans', {
         main_user_id: snapshot.main_user_id,
+        node_id: options.nodeId,
         profiles: (snapshot.profiles || []).map(safeProfile),
       })
     },

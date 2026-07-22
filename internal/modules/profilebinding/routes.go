@@ -36,6 +36,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &input) {
 			return
 		}
+		nodeID := strings.TrimSpace(input.NodeID)
+		if nodeID == "" {
+			writeProfileError(c, runtimebinding.ErrInvalidInput)
+			return
+		}
+		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
+			return
+		}
 		scan, err := service.SubmitScan(actor, input)
 		if err != nil {
 			writeProfileError(c, err)
