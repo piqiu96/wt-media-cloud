@@ -69,7 +69,7 @@ async function createAccount() {
   creating.value = true
   try {
     await accountClient.create({
-      userId: user.value?.role === "technician" ? targetUserId.value : "",
+      userId: user.value?.role === "admin" ? Number(targetUserId.value) || undefined : undefined,
       gameId: gameId.value,
       platform: createPlatform.value,
       originalCookie: originalCookie.value,
@@ -332,8 +332,8 @@ const columns = [
     <!-- 新建账号弹窗 -->
     <t-dialog v-model:visible="showCreate" header="新建账号" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
       <t-form @submit="createAccount">
-        <t-form-item v-if="user?.role === 'technician'" label="归属用户">
-          <t-input v-model="targetUserId" placeholder="留空则归当前用户" />
+        <t-form-item v-if="user?.role === 'admin'" label="归属用户 UID">
+          <t-input-number v-model="targetUserId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
         <t-form-item label="平台">
           <t-select v-model="createPlatform">
