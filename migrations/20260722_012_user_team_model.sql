@@ -32,7 +32,9 @@ ALTER TABLE media_account_tags ADD COLUMN user_uid BIGINT UNSIGNED NULL;
 ALTER TABLE browser_profiles
     ADD COLUMN user_uid BIGINT UNSIGNED NULL,
     ADD COLUMN team_id BIGINT UNSIGNED NULL;
-ALTER TABLE profile_sync_scans ADD COLUMN user_uid BIGINT UNSIGNED NULL;
+ALTER TABLE profile_sync_scans
+    ADD COLUMN user_uid BIGINT UNSIGNED NULL,
+    ADD COLUMN team_id BIGINT UNSIGNED NULL;
 ALTER TABLE local_agent_binding_tickets ADD COLUMN user_uid BIGINT UNSIGNED NULL;
 ALTER TABLE local_agent_nodes ADD COLUMN user_uid BIGINT UNSIGNED NULL;
 ALTER TABLE browser_profile_runtime_presence ADD COLUMN user_uid BIGINT UNSIGNED NULL;
@@ -45,7 +47,7 @@ UPDATE audit_logs child JOIN users parent ON child.actor_user_id = parent.id SET
 UPDATE media_accounts child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid, child.team_id = parent.team_id;
 UPDATE media_account_tags child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid;
 UPDATE browser_profiles child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid, child.team_id = parent.team_id;
-UPDATE profile_sync_scans child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid;
+UPDATE profile_sync_scans child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid, child.team_id = parent.team_id;
 UPDATE local_agent_binding_tickets child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid;
 UPDATE local_agent_nodes child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid;
 UPDATE browser_profile_runtime_presence child JOIN users parent ON child.user_id = parent.id SET child.user_uid = parent.uid;
@@ -189,6 +191,7 @@ ALTER TABLE browser_profiles
     ADD CONSTRAINT fk_browser_profiles_user FOREIGN KEY (user_id) REFERENCES users(id),
     ADD CONSTRAINT fk_browser_profiles_team FOREIGN KEY (team_id) REFERENCES operation_teams(id);
 ALTER TABLE profile_sync_scans ADD CONSTRAINT fk_profile_sync_scans_user FOREIGN KEY (user_id) REFERENCES users(id);
+ALTER TABLE profile_sync_scans ADD CONSTRAINT fk_profile_sync_scans_team FOREIGN KEY (team_id) REFERENCES operation_teams(id);
 ALTER TABLE local_agent_binding_tickets ADD CONSTRAINT fk_local_agent_binding_ticket_user FOREIGN KEY (user_id) REFERENCES users(id);
 ALTER TABLE local_agent_nodes ADD CONSTRAINT fk_local_agent_node_user FOREIGN KEY (user_id) REFERENCES users(id);
 ALTER TABLE browser_profile_runtime_presence ADD CONSTRAINT fk_browser_profile_runtime_presence_user FOREIGN KEY (user_id) REFERENCES users(id);

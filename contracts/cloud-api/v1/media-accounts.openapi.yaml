@@ -8,7 +8,7 @@ paths:
       operationId: listMediaAccounts
       security: [{sessionCookie: []}]
       parameters:
-        - {in: query, name: user_id, schema: {type: string}}
+        - {in: query, name: user_id, schema: {type: integer, format: int64}}
         - {in: query, name: game_id, schema: {type: string}}
         - {in: query, name: platform, schema: {$ref: '#/components/schemas/Platform'}}
         - {in: query, name: any_tags, schema: {type: string}, description: Comma-separated tags; at least one must match.}
@@ -162,7 +162,7 @@ components:
       type: object
       required: [game_id, platform]
       properties:
-        user_id: {type: string, description: Technician-only target; otherwise omitted or current user.}
+        user_id: {type: integer, format: int64, description: Admin-only target; otherwise omitted or current user.}
         game_id: {type: string, maxLength: 128}
         platform: {$ref: '#/components/schemas/Platform'}
         original_cookie: {type: string, format: password, writeOnly: true}
@@ -188,10 +188,11 @@ components:
         tags: {type: array, minItems: 1, items: {type: string, maxLength: 64}}
     MediaAccount:
       type: object
-      required: [id, user_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+      required: [id, user_id, team_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
       properties:
         id: {type: string}
-        user_id: {type: string}
+        user_id: {type: integer, format: int64}
+        team_id: {type: integer, format: int64, nullable: true}
         game_id: {type: string}
         platform: {$ref: '#/components/schemas/Platform'}
         platform_account_id: {type: string}

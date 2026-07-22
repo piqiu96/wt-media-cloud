@@ -46,7 +46,7 @@ func Load() Config {
 
 func (c Config) Validate() error {
 	if c.MySQLDSN == "" && (c.InitialTechnicianUsername != "" || c.InitialTechnicianPassword != "") {
-		return fmt.Errorf("initial technician requires WT_MEDIA_MYSQL_DSN")
+		return fmt.Errorf("initial admin requires WT_MEDIA_MYSQL_DSN")
 	}
 	return nil
 }

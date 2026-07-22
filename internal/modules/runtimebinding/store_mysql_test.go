@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
 func TestRuntimeMigrationStoresOnlyHashesAndSeparatesPresence(t *testing.T) {
@@ -45,7 +46,7 @@ func TestMySQLStoreConsumesBindingTicketTransactionally(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, user_id, session_id, token_hash, created_at, expires_at, used_at FROM local_agent_binding_tickets WHERE token_hash = ? FOR UPDATE`)).
 		WithArgs("hash-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "session_id", "token_hash", "created_at", "expires_at", "used_at"}).
-			AddRow("ticket-1", "user-1", "session-1", "hash-1", now.Add(-time.Minute), expires, nil))
+			AddRow("ticket-1", identity.UserID(1), "session-1", "hash-1", now.Add(-time.Minute), expires, nil))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE local_agent_binding_tickets SET used_at = ? WHERE id = ? AND used_at IS NULL`)).
 		WithArgs(now, "ticket-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -60,12 +61,12 @@ func TestMySQLStoreValidatesBoundOwnerAndEveryActiveProfile(t *testing.T) {
 	store, mock, closeDB := newRuntimeMockStore(t)
 	defer closeDB()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`)).
-		WithArgs("user-1").WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id"}).AddRow("main-user-1"))
+		WithArgs(identity.UserID(1)).WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id"}).AddRow("main-user-1"))
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM browser_profiles WHERE user_id = \? AND main_user_id = \? AND local_status = 'active' AND bit_profile_id IN \(\?, \?\)`).
-		WithArgs("user-1", "main-user-1", "profile-1", "profile-2").
+		WithArgs(identity.UserID(1), "main-user-1", "profile-1", "profile-2").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 
-	valid, err := store.ValidateRuntimeProfiles("user-1", "main-user-1", []string{"profile-1", "profile-2"})
+	valid, err := store.ValidateRuntimeProfiles(identity.UserID(1), "main-user-1", []string{"profile-1", "profile-2"})
 	if err != nil || !valid {
 		t.Fatalf("ValidateRuntimeProfiles() valid=%v error=%v", valid, err)
 	}
@@ -75,7 +76,7 @@ func TestMySQLStoreAppliesRuntimePresenceTransactionally(t *testing.T) {
 	store, mock, closeDB := newRuntimeMockStore(t)
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
-	node := AgentNode{ID: "node-1", UserID: "user-1", LastHeartbeatAt: now, Status: "online"}
+	node := AgentNode{ID: "node-1", UserID: identity.UserID(1), LastHeartbeatAt: now, Status: "online"}
 	report := validRuntimeReport()
 
 	mock.ExpectBegin()

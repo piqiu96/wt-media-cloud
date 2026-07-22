@@ -58,7 +58,7 @@ const (
 )
 
 type BitAccountBinding struct {
-	UserID         string           `json:"user_id"`
+	UserID         identity.UserID  `json:"user_id"`
 	MainUserID     string           `json:"main_user_id"`
 	Status         BitAccountStatus `json:"status"`
 	BoundAt        *time.Time       `json:"bound_at,omitempty"`
@@ -67,7 +67,8 @@ type BitAccountBinding struct {
 
 type BrowserProfile struct {
 	ID            string             `json:"id"`
-	UserID        string             `json:"user_id"`
+	UserID        identity.UserID    `json:"user_id"`
+	TeamID        *identity.TeamID   `json:"team_id"`
 	BitProfileID  string             `json:"bit_profile_id"`
 	MainUserID    string             `json:"main_user_id"`
 	ProfileUserID string             `json:"profile_user_id"`
@@ -113,7 +114,8 @@ type ProfileDiff struct {
 
 type ProfileScan struct {
 	ID          string           `json:"id"`
-	UserID      string           `json:"user_id"`
+	UserID      identity.UserID  `json:"user_id"`
+	TeamID      *identity.TeamID `json:"team_id"`
 	MainUserID  string           `json:"main_user_id"`
 	Status      ScanStatus       `json:"status"`
 	Profiles    []BrowserProfile `json:"profiles"`
@@ -124,8 +126,8 @@ type ProfileScan struct {
 }
 
 type Store interface {
-	FindBinding(userID string) (BitAccountBinding, bool, error)
-	ListProfiles(userID string) ([]BrowserProfile, error)
+	FindBinding(userID identity.UserID) (BitAccountBinding, bool, error)
+	ListProfiles(userID identity.UserID) ([]BrowserProfile, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
@@ -208,6 +210,7 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 		candidate := BrowserProfile{
 			ID:            s.newID("browser_profile"),
 			UserID:        actor.ID,
+			TeamID:        actor.TeamID,
 			BitProfileID:  bitProfileID,
 			MainUserID:    mainUserID,
 			ProfileUserID: profileUserID,
@@ -246,7 +249,7 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 		return diff[i].Kind < diff[j].Kind
 	})
 	scan := ProfileScan{
-		ID: s.newID("profile_scan"), UserID: actor.ID, MainUserID: mainUserID,
+		ID: s.newID("profile_scan"), UserID: actor.ID, TeamID: actor.TeamID, MainUserID: mainUserID,
 		Status: ScanReady, Profiles: candidates, Diff: diff, CreatedAt: now, ExpiresAt: now.Add(s.scanTTL),
 	}
 	if err := s.store.CreateScan(scan); err != nil {
@@ -324,30 +327,39 @@ func (s *Service) RejectScan(actor identity.PublicUser, scanID string) error {
 	return nil
 }
 
-func (s *Service) ListProfiles(actor identity.PublicUser, userID string) ([]BrowserProfile, error) {
+func (s *Service) ListProfiles(actor identity.PublicUser, userID identity.UserID) ([]BrowserProfile, error) {
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	if userID <= 0 {
 		userID = actor.ID
 	}
-	if actor.Role != identity.RoleTechnician && userID != actor.ID {
+	profiles, err := s.store.ListProfiles(userID)
+	if err != nil {
+		return nil, err
+	}
+	visible := profiles[:0]
+	for _, profile := range profiles {
+		if actor.Role == identity.RoleAdmin || actor.ID == profile.UserID || (actor.Role == identity.RoleSeniorOperator && actor.TeamID != nil && profile.TeamID != nil && *actor.TeamID == *profile.TeamID) {
+			visible = append(visible, profile)
+		}
+	}
+	if userID != actor.ID && actor.Role == identity.RoleOperator {
 		return nil, ErrForbidden
 	}
-	return s.store.ListProfiles(userID)
+	return visible, nil
 }
 
 func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) error {
 	if !validActor(actor) {
 		return ErrForbidden
 	}
-	// Only technician or the owning user can delete a profile.
+	// Only an admin or the owning user can delete a profile.
 	profiles, err := s.store.ListProfiles(actor.ID)
 	if err != nil {
 		return err
 	}
-	if actor.Role != identity.RoleTechnician {
+	if actor.Role != identity.RoleAdmin {
 		found := false
 		for _, p := range profiles {
 			if p.ID == profileID {
@@ -363,7 +375,7 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 }
 
 func (s *Service) GetActiveProfile(actor identity.PublicUser, profileID string) (BrowserProfile, error) {
-	profiles, err := s.ListProfiles(actor, "")
+	profiles, err := s.ListProfiles(actor, 0)
 	if err != nil {
 		return BrowserProfile{}, err
 	}
@@ -379,8 +391,8 @@ func (s *Service) GetActiveProfile(actor identity.PublicUser, profileID string) 
 }
 
 func validActor(actor identity.PublicUser) bool {
-	return actor.ID != "" && actor.Status == identity.UserStatusEnabled &&
-		(actor.Role == identity.RoleOperator || actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleTechnician)
+	return actor.ID > 0 && actor.Status == identity.UserStatusEnabled &&
+		(actor.Role == identity.RoleOperator || actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleAdmin)
 }
 
 func changedFields(current, candidate BrowserProfile) []string {

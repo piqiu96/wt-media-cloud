@@ -101,12 +101,16 @@ func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore
 	t.Helper()
 	identityStore := identity.NewMemoryStore()
 	identityService := identity.NewService(identityStore)
-	tech, err := identityService.BootstrapTechnician("tech", "a-long-initial-password")
+	admin, err := identityService.BootstrapAdmin("admin", "a-long-initial-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	operator, err := identityService.CreateUser(tech.ID, identity.CreateUserInput{
-		Username: "operator", Password: "a-long-operator-password", Role: identity.RoleOperator, GameIDs: []string{"game-a"},
+	team, err := identityService.CreateTeam(admin.ID, "运营一组")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, err := identityService.CreateUser(admin.ID, identity.CreateUserInput{
+		Username: "operator", Password: "a-long-operator-password", Role: identity.RoleOperator, TeamID: &team.ID, GameIDs: []string{"game-a"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,8 +118,8 @@ func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore
 	engine := server.New()
 	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
 	store := newMemoryStore()
-	resolver := &fakeProfileResolver{profiles: map[string]string{"profile-1": operator.ID}, inactive: map[string]bool{}}
-	RegisterRoutes(engine, NewService(store, WithProfileResolver(resolver)), identityService)
+	resolver := &fakeProfileResolver{profiles: map[string]identity.UserID{"profile-1": operator.ID}, inactive: map[string]bool{}}
+	RegisterRoutes(engine, NewService(store, WithProfileResolver(resolver), WithUserResolver(identityService)), identityService)
 	login := performMediaJSON(engine, "POST", "/api/v1/auth/login", `{"username":"operator","password":"a-long-operator-password"}`, "")
 	if login.Result().StatusCode() != consts.StatusOK {
 		t.Fatalf("login status = %d, body = %s", login.Result().StatusCode(), login.Result().Body())

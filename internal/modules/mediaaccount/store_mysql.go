@@ -12,7 +12,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const accountColumns = `id, user_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at`
+const accountColumns = `id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at`
 
 type MySQLStore struct {
 	db *sql.DB
@@ -24,8 +24,8 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 
 func (s *MySQLStore) Create(record AccountRecord) error {
 	_, err := s.db.Exec(
-		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.ID, record.UserID, record.GameID, record.Platform,
+		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, record.UserID, record.TeamID, record.GameID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
 		record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
@@ -41,7 +41,7 @@ func (s *MySQLStore) Find(id string) (AccountRecord, bool, error) {
 	return s.find(`SELECT `+accountColumns+` FROM media_accounts WHERE id = ?`, id)
 }
 
-func (s *MySQLStore) FindByIdentity(userID string, platform Platform, platformAccountID string) (AccountRecord, bool, error) {
+func (s *MySQLStore) FindByIdentity(userID identity.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error) {
 	return s.find(
 		`SELECT `+accountColumns+` FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`,
 		userID, platform, platformAccountID,
@@ -68,8 +68,8 @@ func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error
 
 func (s *MySQLStore) Update(record AccountRecord) error {
 	result, err := s.db.Exec(
-		`UPDATE media_accounts SET user_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`,
-		record.UserID, record.GameID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
+		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`,
+		record.UserID, record.TeamID, record.GameID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
 		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), record.IdentificationStatus,
 		nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
@@ -95,7 +95,7 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	statement := `SELECT ` + accountColumns + ` FROM media_accounts`
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 3)
-	if query.UserID != "" {
+	if query.UserID > 0 {
 		conditions = append(conditions, "user_id = ?")
 		args = append(args, query.UserID)
 	}
@@ -148,7 +148,7 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	return filtered, nil
 }
 
-func (s *MySQLStore) AddTags(userID string, accountIDs, tags []string, createdAt time.Time) error {
+func (s *MySQLStore) AddTags(userID identity.UserID, accountIDs, tags []string, createdAt time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -167,7 +167,7 @@ func (s *MySQLStore) AddTags(userID string, accountIDs, tags []string, createdAt
 	return tx.Commit()
 }
 
-func (s *MySQLStore) RemoveTags(userID string, accountIDs, tags []string) error {
+func (s *MySQLStore) RemoveTags(userID identity.UserID, accountIDs, tags []string) error {
 	if len(accountIDs) == 0 || len(tags) == 0 {
 		return nil
 	}
@@ -219,7 +219,7 @@ func (s *MySQLStore) AppendAudit(event identity.AuditEvent) error {
 		return err
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)`,
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), ?, ?)`,
 		event.ID, event.ActorUserID, event.Action, event.TargetType, event.TargetID, summary, event.CreatedAt,
 	)
 	return err
@@ -235,7 +235,7 @@ func scanAccount(row scanner) (AccountRecord, error) {
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
 	err := row.Scan(
-		&record.ID, &record.UserID, &record.GameID, &record.Platform,
+		&record.ID, &record.UserID, &record.TeamID, &record.GameID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
 		&record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,

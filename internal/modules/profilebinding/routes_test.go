@@ -40,7 +40,7 @@ func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
 func TestProfileRoutesRejectMixedIdentity(t *testing.T) {
 	engine, cookie, _ := newProfileRouteTest(t)
 	response := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-2","profile_user_id":"bit-user-2"}]}`, cookie)
-		if response.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(response.Result().Body()), `"errcode":23002`) {
+	if response.Result().StatusCode() != consts.StatusConflict || !strings.Contains(string(response.Result().Body()), `"errcode":23002`) {
 		t.Fatalf("status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
 	}
 }
@@ -49,8 +49,12 @@ func newProfileRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore) {
 	t.Helper()
 	identityStore := identity.NewMemoryStore()
 	identityService := identity.NewService(identityStore)
-	tech, _ := identityService.BootstrapTechnician("tech", "a-long-initial-password")
-	_, err := identityService.CreateUser(tech.ID, identity.CreateUserInput{Username: "operator", Password: "a-long-operator-password", Role: identity.RoleOperator, GameIDs: []string{"game-a"}})
+	admin, _ := identityService.BootstrapAdmin("admin", "a-long-initial-password")
+	team, err := identityService.CreateTeam(admin.ID, "运营一组")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identityService.CreateUser(admin.ID, identity.CreateUserInput{Username: "operator", Password: "a-long-operator-password", Role: identity.RoleOperator, TeamID: &team.ID, GameIDs: []string{"game-a"}})
 	if err != nil {
 		t.Fatal(err)
 	}

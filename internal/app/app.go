@@ -73,7 +73,7 @@ func NewServer() (*Server, error) {
 		profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(result.db), runtimeService))
 		profileStore := profilebinding.NewMySQLStore(result.db)
 		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore)
-		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore)), identityService, taskStore)
+		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore), mediaaccount.WithUserResolver(identityService)), identityService, taskStore)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv())
 	} else if cfg.InitialTechnicianUsername != "" || cfg.InitialTechnicianPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
@@ -105,14 +105,14 @@ func bootstrapIdentity(service *identity.Service, username, password string) err
 		return nil
 	}
 	if username == "" || password == "" {
-		return fmt.Errorf("both initial technician username and password are required")
+		return fmt.Errorf("both initial admin username and password are required")
 	}
-	_, err := service.BootstrapTechnician(username, password)
+	_, err := service.BootstrapAdmin(username, password)
 	if errors.Is(err, identity.ErrBootstrapUnavailable) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("bootstrap initial technician: %w", err)
+		return fmt.Errorf("bootstrap initial admin: %w", err)
 	}
 	return nil
 }

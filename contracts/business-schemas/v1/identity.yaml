@@ -1,15 +1,30 @@
 schema_version: 1
-revision: "2026.07.14.1"
+revision: "2026.07.22.1"
 schemas:
   PublicUser:
     type: object
-    required: [id, username, role, status, game_ids]
+    required: [id, username, role, status, team_id, team_name, game_ids]
     properties:
-      id: {type: string}
+      id: {type: integer, format: int64}
       username: {type: string}
-      role: {type: string, enum: [operator, senior_operator, technician]}
+      role: {type: string, enum: [admin, senior_operator, operator]}
       status: {type: string, enum: [enabled, disabled]}
+      team_id: {type: integer, format: int64, nullable: true}
+      team_name: {type: string}
       game_ids:
         type: array
         items: {type: string}
     forbidden_properties: [password, password_hash, session_token, token_hash]
+  OperationTeam:
+    type: object
+    required: [id, name, created_at, updated_at]
+    properties:
+      id: {type: integer, format: int64}
+      name: {type: string, maxLength: 64}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
+  OneTimePasswordResult:
+    type: object
+    required: [one_time_password]
+    properties:
+      one_time_password: {type: string, writeOnly: true}

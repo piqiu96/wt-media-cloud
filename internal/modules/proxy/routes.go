@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -198,7 +199,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		task := tasks.Create(cloudagent.CreateTaskRequest{
 			TaskType:       cloudagent.TaskTypeProxyCheck.String(),
-			IdempotencyKey: "proxy-check:" + actor.ID + ":" + proxy.ID + ":" + common.NewID("attempt"),
+			IdempotencyKey: "proxy-check:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + proxy.ID + ":" + common.NewID("attempt"),
 			Payload:        map[string]any{"proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password},
 		})
 		common.Created(c, task)
@@ -237,7 +238,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Conflict(c, 23004, "代理不可用")
 			return
 		}
-		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeProxyMutation.String(), IdempotencyKey: "proxy-assign:" + actor.ID + ":" + profile.ID + ":" + proxy.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID, "proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password}})
+		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeProxyMutation.String(), IdempotencyKey: "proxy-assign:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + profile.ID + ":" + proxy.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID, "proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password}})
 		common.Created(c, task)
 	})
 

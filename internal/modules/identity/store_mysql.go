@@ -23,50 +23,61 @@ func (s *MySQLStore) CountUsers() (int, error) {
 	return count, err
 }
 
-func (s *MySQLStore) CreateUser(user User) error {
+func (s *MySQLStore) CreateUser(user User) (UserID, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(
-		`INSERT INTO users (id, username, password_hash, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		user.ID, user.Username, user.PasswordHash, user.Role, user.Status, user.CreatedAt, user.UpdatedAt,
+	result, err := tx.Exec(
+		`INSERT INTO users (legacy_id, username, password_hash, role, status, team_id, created_at, updated_at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, user.CreatedAt, user.UpdatedAt,
 	)
 	if err != nil {
 		if duplicateKey(err) {
-			return ErrUsernameTaken
+			return 0, ErrUsernameTaken
 		}
-		return err
+		return 0, err
 	}
+	insertedID, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	user.ID = UserID(insertedID)
 	for _, gameID := range user.GameIDs {
 		if _, err := tx.Exec(
 			`INSERT INTO user_game_scopes (user_id, game_id, created_at) VALUES (?, ?, ?)`,
 			user.ID, gameID, user.CreatedAt,
 		); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return user.ID, nil
 }
 
-func (s *MySQLStore) FindUser(id string) (User, bool, error) {
-	return s.findUser(`SELECT id, username, password_hash, role, status, created_at, updated_at FROM users WHERE id = ?`, id)
+func (s *MySQLStore) FindUser(id UserID) (User, bool, error) {
+	return s.findUser(`SELECT u.id, u.username, u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id WHERE u.id = ?`, id)
 }
 
 func (s *MySQLStore) FindUserByUsername(username string) (User, bool, error) {
-	return s.findUser(`SELECT id, username, password_hash, role, status, created_at, updated_at FROM users WHERE username = ?`, username)
+	return s.findUser(`SELECT u.id, u.username, u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id WHERE u.username = ?`, username)
 }
 
-func (s *MySQLStore) findUser(query string, arg string) (User, bool, error) {
+func (s *MySQLStore) findUser(query string, arg any) (User, bool, error) {
 	var user User
+	var teamID sql.NullInt64
 	err := s.db.QueryRow(query, arg).Scan(
 		&user.ID,
 		&user.Username,
 		&user.PasswordHash,
 		&user.Role,
 		&user.Status,
+		&teamID,
+		&user.TeamName,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -76,6 +87,10 @@ func (s *MySQLStore) findUser(query string, arg string) (User, bool, error) {
 	if err != nil {
 		return User{}, false, err
 	}
+	if teamID.Valid {
+		value := TeamID(teamID.Int64)
+		user.TeamID = &value
+	}
 	gameIDs, err := s.findGameIDs(user.ID)
 	if err != nil {
 		return User{}, false, err
@@ -84,7 +99,7 @@ func (s *MySQLStore) findUser(query string, arg string) (User, bool, error) {
 	return user, true, nil
 }
 
-func (s *MySQLStore) findGameIDs(userID string) ([]string, error) {
+func (s *MySQLStore) findGameIDs(userID UserID) ([]string, error) {
 	rows, err := s.db.Query(`SELECT game_id FROM user_game_scopes WHERE user_id = ? ORDER BY game_id`, userID)
 	if err != nil {
 		return nil, err
@@ -110,8 +125,8 @@ func (s *MySQLStore) UpdateUser(user User) error {
 	defer tx.Rollback()
 
 	result, err := tx.Exec(
-		`UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, updated_at = ? WHERE id = ?`,
-		user.Username, user.PasswordHash, user.Role, user.Status, user.UpdatedAt, user.ID,
+		`UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, team_id = ?, updated_at = ? WHERE id = ?`,
+		user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, user.UpdatedAt, user.ID,
 	)
 	if err != nil {
 		if duplicateKey(err) {
@@ -138,6 +153,129 @@ func (s *MySQLStore) UpdateUser(user User) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *MySQLStore) DeleteUser(userID UserID) error {
+	var references int
+	err := s.db.QueryRow(`SELECT
+        (SELECT COUNT(*) FROM user_sessions WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = ?) +
+        (SELECT COUNT(*) FROM media_accounts WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM local_agent_binding_tickets WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM local_agent_nodes WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM browser_profile_runtime_presence WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
+        (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
+		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
+	).Scan(&references)
+	if err != nil {
+		return err
+	}
+	if references > 0 {
+		return ErrTeamInUse
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM user_game_scopes WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) CreateTeam(team OperationTeam) (TeamID, error) {
+	result, err := s.db.Exec(
+		`INSERT INTO operation_teams (name, created_at, updated_at) VALUES (?, ?, ?)`,
+		team.Name, team.CreatedAt, team.UpdatedAt,
+	)
+	if err != nil {
+		if duplicateKey(err) {
+			return 0, ErrTeamNameTaken
+		}
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	return TeamID(id), err
+}
+
+func (s *MySQLStore) FindTeam(teamID TeamID) (OperationTeam, bool, error) {
+	var team OperationTeam
+	err := s.db.QueryRow(
+		`SELECT id, name, created_at, updated_at FROM operation_teams WHERE id = ?`, teamID,
+	).Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OperationTeam{}, false, nil
+	}
+	return team, err == nil, err
+}
+
+func (s *MySQLStore) ListTeams() ([]OperationTeam, error) {
+	rows, err := s.db.Query(`SELECT id, name, created_at, updated_at FROM operation_teams ORDER BY name, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var teams []OperationTeam
+	for rows.Next() {
+		var team OperationTeam
+		if err := rows.Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt); err != nil {
+			return nil, err
+		}
+		teams = append(teams, team)
+	}
+	return teams, rows.Err()
+}
+
+func (s *MySQLStore) UpdateTeam(team OperationTeam) error {
+	result, err := s.db.Exec(`UPDATE operation_teams SET name = ?, updated_at = ? WHERE id = ?`, team.Name, team.UpdatedAt, team.ID)
+	if err != nil {
+		if duplicateKey(err) {
+			return ErrTeamNameTaken
+		}
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func (s *MySQLStore) DeleteTeam(teamID TeamID) error {
+	result, err := s.db.Exec(`DELETE FROM operation_teams WHERE id = ?`, teamID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func (s *MySQLStore) TeamHasReferences(teamID TeamID) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT
+        (SELECT COUNT(*) FROM users WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM media_accounts WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?)`,
+		teamID, teamID, teamID,
+	).Scan(&count)
+	return count > 0, err
 }
 
 func (s *MySQLStore) CreateSession(session Session) error {
@@ -168,7 +306,7 @@ func (s *MySQLStore) FindSessionByTokenHash(tokenHash string) (Session, bool, er
 	return session, true, nil
 }
 
-func (s *MySQLStore) InvalidateUserSessions(userID string, at time.Time) error {
+func (s *MySQLStore) InvalidateUserSessions(userID UserID, at time.Time) error {
 	_, err := s.db.Exec(
 		`UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND invalidated_at IS NULL`,
 		at, userID,
@@ -182,14 +320,14 @@ func (s *MySQLStore) AppendAudit(event AuditEvent) error {
 		return err
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)`,
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), ?, ?)`,
 		event.ID, event.ActorUserID, event.Action, event.TargetType, event.TargetID, summary, event.CreatedAt,
 	)
 	return err
 }
 
 func (s *MySQLStore) ListUsers() ([]User, error) {
-	rows, err := s.db.Query("SELECT id, username, password_hash, role, status, created_at, updated_at FROM users ORDER BY created_at DESC")
+	rows, err := s.db.Query("SELECT u.id, u.username, u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id ORDER BY u.created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -197,8 +335,13 @@ func (s *MySQLStore) ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		var teamID sql.NullInt64
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &teamID, &u.TeamName, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if teamID.Valid {
+			value := TeamID(teamID.Int64)
+			u.TeamID = &value
 		}
 		scopes, err := s.db.Query("SELECT game_id FROM user_game_scopes WHERE user_id = ?", u.ID)
 		if err == nil {
@@ -223,9 +366,13 @@ func (s *MySQLStore) ListAuditLogs(limit int) ([]AuditEvent, error) {
 	var events []AuditEvent
 	for rows.Next() {
 		var e AuditEvent
+		var actorID sql.NullInt64
 		var summaryJSON string
-		if err := rows.Scan(&e.ID, &e.ActorUserID, &e.Action, &e.TargetType, &e.TargetID, &summaryJSON, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &actorID, &e.Action, &e.TargetType, &e.TargetID, &summaryJSON, &e.CreatedAt); err != nil {
 			return nil, err
+		}
+		if actorID.Valid {
+			e.ActorUserID = UserID(actorID.Int64)
 		}
 		json.Unmarshal([]byte(summaryJSON), &e.Summary)
 		events = append(events, e)

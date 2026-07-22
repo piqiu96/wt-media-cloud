@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
@@ -68,7 +69,7 @@ var (
 
 type SensitiveTask struct {
 	ID           string             `json:"id"`
-	UserID       string             `json:"user_id"`
+	UserID       identity.UserID    `json:"user_id"`
 	ProfileID    string             `json:"profile_id"`
 	BitProfileID string             `json:"bit_profile_id"`
 	NodeID       string             `json:"node_id"`
@@ -81,7 +82,7 @@ type SensitiveTask struct {
 type Permit struct {
 	ID             string
 	TaskID         string
-	UserID         string
+	UserID         identity.UserID
 	ProfileID      string
 	NodeID         string
 	Operation      SensitiveOperation

@@ -1,12 +1,13 @@
 schema_version: 1
-revision: "2026.07.14.3"
+revision: "2026.07.22.1"
 schemas:
   MediaAccount:
     type: object
-    required: [id, user_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+    required: [id, user_id, team_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
     properties:
       id: {type: string}
-      user_id: {type: string}
+      user_id: {type: integer, format: int64}
+      team_id: {type: integer, format: int64, nullable: true}
       game_id: {type: string}
       platform: {type: string, enum: [douyin, bilibili, baijiahao]}
       platform_account_id: {type: string, nullable: true}

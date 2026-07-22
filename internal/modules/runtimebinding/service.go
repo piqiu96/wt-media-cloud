@@ -29,7 +29,7 @@ const AgentStatusReplaced = "replaced"
 
 type BindingTicket struct {
 	ID        string
-	UserID    string
+	UserID    identity.UserID
 	SessionID string
 	TokenHash string
 	CreatedAt time.Time
@@ -44,19 +44,19 @@ type BindingTicketGrant struct {
 }
 
 type AgentNode struct {
-	ID                   string    `json:"id"`
-	AgentID              string    `json:"agent_id"`
-	DeviceID             string    `json:"device_id"`
-	UserID               string    `json:"user_id"`
-	SessionID            string    `json:"-"`
-	Mode                 string    `json:"mode"`
-	AgentVersion         string    `json:"agent_version"`
-	ContractMajorVersion string    `json:"contract_major_version"`
-	ContractRevision     string    `json:"contract_revision"`
-	Status               string    `json:"status"`
-	CredentialHash       string    `json:"-"`
-	RegisteredAt         time.Time `json:"registered_at"`
-	LastHeartbeatAt      time.Time `json:"last_heartbeat_at"`
+	ID                   string          `json:"id"`
+	AgentID              string          `json:"agent_id"`
+	DeviceID             string          `json:"device_id"`
+	UserID               identity.UserID `json:"user_id"`
+	SessionID            string          `json:"-"`
+	Mode                 string          `json:"mode"`
+	AgentVersion         string          `json:"agent_version"`
+	ContractMajorVersion string          `json:"contract_major_version"`
+	ContractRevision     string          `json:"contract_revision"`
+	Status               string          `json:"status"`
+	CredentialHash       string          `json:"-"`
+	RegisteredAt         time.Time       `json:"registered_at"`
+	LastHeartbeatAt      time.Time       `json:"last_heartbeat_at"`
 }
 
 type RegisterLocalInput struct {
@@ -99,10 +99,10 @@ type RuntimeReport struct {
 type Store interface {
 	CreateTicket(BindingTicket) error
 	ConsumeTicket(tokenHash string, at time.Time) (BindingTicket, bool, error)
-	IsSessionActive(sessionID, userID string, at time.Time) (bool, error)
+	IsSessionActive(sessionID string, userID identity.UserID, at time.Time) (bool, error)
 	SaveNode(AgentNode) error
 	FindNodeByCredentialHash(hash string) (AgentNode, bool, error)
-	ValidateRuntimeProfiles(userID, mainUserID string, profileIDs []string) (bool, error)
+	ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error)
 	ApplyRuntimeReport(node AgentNode, report RuntimeReport, at time.Time) error
 }
 
@@ -138,7 +138,7 @@ func NewService(store Store, options ...Option) *Service {
 }
 
 func (s *Service) IssueTicket(actor identity.PublicUser, sessionID string) (BindingTicketGrant, error) {
-	if actor.ID == "" || actor.Status != identity.UserStatusEnabled || strings.TrimSpace(sessionID) == "" {
+	if actor.ID <= 0 || actor.Status != identity.UserStatusEnabled || strings.TrimSpace(sessionID) == "" {
 		return BindingTicketGrant{}, ErrForbidden
 	}
 	now := s.now()

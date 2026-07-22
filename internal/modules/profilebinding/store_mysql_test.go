@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
 func TestMySQLStoreCreatesStagedScanTransactionally(t *testing.T) {
@@ -16,7 +17,7 @@ func TestMySQLStoreCreatesStagedScanTransactionally(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO profile_sync_scans`)).
-		WithArgs(scan.ID, scan.UserID, scan.MainUserID, scan.Status, sqlmock.AnyArg(), scan.CreatedAt, scan.ExpiresAt, nil).
+		WithArgs(scan.ID, scan.UserID, scan.TeamID, scan.MainUserID, scan.Status, sqlmock.AnyArg(), scan.CreatedAt, scan.ExpiresAt, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO profile_sync_candidates`)).
 		WithArgs(scan.ID, scan.Profiles[0].ID, scan.Profiles[0].BitProfileID, scan.Profiles[0].MainUserID, scan.Profiles[0].ProfileUserID, scan.Profiles[0].Name, scan.Profiles[0].Seq, nil, nil, nil, nil, scan.Profiles[0].CreatedAt, scan.Profiles[0].UpdatedAt).
@@ -33,19 +34,19 @@ func TestMySQLStoreFindsBindingAndProfiles(t *testing.T) {
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, bit_main_user_id, bit_account_status, bit_account_bound_at, bit_account_last_verified_at FROM users WHERE id = ?`)).
-		WithArgs("user-1").
+		WithArgs(identity.UserID(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "bit_main_user_id", "bit_account_status", "bit_account_bound_at", "bit_account_last_verified_at"}).
-			AddRow("user-1", "main-user-1", "bound", now, now))
+			AddRow(identity.UserID(1), "main-user-1", "bound", now, now))
 
-	binding, found, err := store.FindBinding("user-1")
+	binding, found, err := store.FindBinding(identity.UserID(1))
 	if err != nil || !found || binding.MainUserID != "main-user-1" {
 		t.Fatalf("FindBinding() binding=%#v found=%v error=%v", binding, found, err)
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM browser_profiles WHERE user_id = ? ORDER BY bit_profile_id`)).
-		WithArgs("user-1").
+		WithArgs(identity.UserID(1)).
 		WillReturnRows(sqlmock.NewRows(profileColumns()).AddRow(profileValues(mysqlTestScan().Profiles[0])...))
-	profiles, err := store.ListProfiles("user-1")
+	profiles, err := store.ListProfiles(identity.UserID(1))
 	if err != nil || len(profiles) != 1 || profiles[0].BitProfileID != "bit-profile-1" {
 		t.Fatalf("ListProfiles() profiles=%#v error=%v", profiles, err)
 	}
@@ -96,14 +97,15 @@ func newMockStore(t *testing.T) (*MySQLStore, sqlmock.Sqlmock, func()) {
 
 func mysqlTestScan() ProfileScan {
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
-	profile := BrowserProfile{ID: "profile-1", UserID: "user-1", BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", Name: "窗口一", Seq: 1, LocalStatus: ProfileActive, LastSyncedAt: now, CreatedAt: now, UpdatedAt: now}
-	return ProfileScan{ID: "scan-1", UserID: "user-1", MainUserID: "main-user-1", Status: ScanReady, Profiles: []BrowserProfile{profile}, Diff: []ProfileDiff{{Kind: DiffAdded, BitProfileID: profile.BitProfileID, ProfileID: profile.ID, Fields: []string{}}}, CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
+	teamID := identity.TeamID(11)
+	profile := BrowserProfile{ID: "profile-1", UserID: identity.UserID(1), TeamID: &teamID, BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", Name: "窗口一", Seq: 1, LocalStatus: ProfileActive, LastSyncedAt: now, CreatedAt: now, UpdatedAt: now}
+	return ProfileScan{ID: "scan-1", UserID: identity.UserID(1), TeamID: &teamID, MainUserID: "main-user-1", Status: ScanReady, Profiles: []BrowserProfile{profile}, Diff: []ProfileDiff{{Kind: DiffAdded, BitProfileID: profile.BitProfileID, ProfileID: profile.ID, Fields: []string{}}}, CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
 }
 
 func profileColumns() []string {
-	return []string{"id", "user_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "local_status", "last_synced_at", "created_at", "updated_at"}
+	return []string{"id", "user_id", "team_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "local_status", "last_synced_at", "created_at", "updated_at"}
 }
 
 func profileValues(profile BrowserProfile) []driver.Value {
-	return []driver.Value{profile.ID, profile.UserID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
+	return []driver.Value{profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
 }

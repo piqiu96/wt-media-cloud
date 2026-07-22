@@ -22,7 +22,7 @@ func TestMySQLStoreCreatesAccountWithSecretFieldsInternal(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_accounts`)).
 		WithArgs(
-			record.ID, record.UserID, record.GameID, record.Platform, nil, nil, nil, nil,
+			record.ID, record.UserID, record.TeamID, record.GameID, record.Platform, nil, nil, nil, nil,
 			record.IdentificationStatus, nil, record.BusinessStatus, record.LoginStatus,
 			record.OriginalCookie, nil, nil, nil, nil, record.CreatedAt, record.UpdatedAt,
 		).
@@ -40,7 +40,7 @@ func TestMySQLStoreFindsAccountIdentity(t *testing.T) {
 	record.PlatformAccountID = "platform-42"
 	record.IdentificationStatus = IdentificationIdentified
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, user_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`)).
 		WithArgs(record.UserID, record.Platform, record.PlatformAccountID).
 		WillReturnRows(accountRows(record))
 
@@ -88,7 +88,7 @@ func TestMySQLStoreListsScopedAccountsAndAppliesTagFilters(t *testing.T) {
 	second.Platform = PlatformBilibili
 
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM media_accounts WHERE user_id = ? AND game_id = ? ORDER BY created_at, id`)).
-		WithArgs("user-1", "game-a").
+		WithArgs(identity.UserID(1), "game-a").
 		WillReturnRows(accountRows(first).AddRow(accountRowValues(second)...))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT media_account_id, tag_name FROM media_account_tags WHERE media_account_id IN (?, ?) ORDER BY media_account_id, tag_name`)).
 		WithArgs(first.ID, second.ID).
@@ -97,7 +97,7 @@ func TestMySQLStoreListsScopedAccountsAndAppliesTagFilters(t *testing.T) {
 			AddRow(first.ID, "vip").
 			AddRow(second.ID, "launch"))
 
-	got, err := store.List(AccountQuery{UserID: "user-1", GameID: "game-a", AllTags: []string{"launch", "vip"}})
+	got, err := store.List(AccountQuery{UserID: identity.UserID(1), GameID: "game-a", AllTags: []string{"launch", "vip"}})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -113,20 +113,20 @@ func TestMySQLStoreAddsAndRemovesTagsTransactionally(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT IGNORE INTO media_account_tags`)).
-		WithArgs(sqlmock.AnyArg(), "user-1", "account-1", "launch", now).
+		WithArgs(sqlmock.AnyArg(), identity.UserID(1), "account-1", "launch", now).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT IGNORE INTO media_account_tags`)).
-		WithArgs(sqlmock.AnyArg(), "user-1", "account-1", "vip", now).
+		WithArgs(sqlmock.AnyArg(), identity.UserID(1), "account-1", "vip", now).
 		WillReturnResult(sqlmock.NewResult(2, 1))
 	mock.ExpectCommit()
-	if err := store.AddTags("user-1", []string{"account-1"}, []string{"launch", "vip"}, now); err != nil {
+	if err := store.AddTags(identity.UserID(1), []string{"account-1"}, []string{"launch", "vip"}, now); err != nil {
 		t.Fatalf("AddTags() error = %v", err)
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM media_account_tags WHERE user_id = ? AND media_account_id IN (?) AND tag_name IN (?)`)).
-		WithArgs("user-1", "account-1", "vip").
+		WithArgs(identity.UserID(1), "account-1", "vip").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := store.RemoveTags("user-1", []string{"account-1"}, []string{"vip"}); err != nil {
+	if err := store.RemoveTags(identity.UserID(1), []string{"account-1"}, []string{"vip"}); err != nil {
 		t.Fatalf("RemoveTags() error = %v", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestMySQLStoreAppendsSecretFreeAudit(t *testing.T) {
 	store, mock, closeDB := newMockMySQLStore(t)
 	defer closeDB()
 	event := identity.AuditEvent{
-		ID: "audit-1", ActorUserID: "user-1", Action: "media_account.create", TargetType: "media_account",
+		ID: "audit-1", ActorUserID: identity.UserID(1), Action: "media_account.create", TargetType: "media_account",
 		TargetID: "account-1", Summary: map[string]string{"platform": "douyin"}, CreatedAt: time.Now().UTC(),
 	}
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO audit_logs`)).
@@ -185,7 +185,7 @@ func mysqlTestRecord() AccountRecord {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	return AccountRecord{
 		Account: Account{
-			ID: "media_account-1", UserID: "user-1", GameID: "game-a", Platform: PlatformDouyin,
+			ID: "media_account-1", UserID: identity.UserID(1), TeamID: teamIDPointer(10), GameID: "game-a", Platform: PlatformDouyin,
 			IdentificationStatus: IdentificationPending, BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
 			CreatedAt: now, UpdatedAt: now,
 		},
@@ -195,7 +195,7 @@ func mysqlTestRecord() AccountRecord {
 
 func accountRows(records ...AccountRecord) *sqlmock.Rows {
 	rows := sqlmock.NewRows([]string{
-		"id", "user_id", "game_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id",
+		"id", "user_id", "team_id", "game_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id",
 		"identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie",
 		"cookie_status", "active_cookie_updated_at", "last_checked_at", "created_at", "updated_at",
 	})
@@ -207,10 +207,14 @@ func accountRows(records ...AccountRecord) *sqlmock.Rows {
 
 func accountRowValues(record AccountRecord) []driver.Value {
 	return []driver.Value{
-		record.ID, record.UserID, record.GameID, record.Platform, nullableString(record.PlatformAccountID), nullableString(record.Name), nullableString(record.AvatarURL), nullableString(record.BrowserProfileID),
+		record.ID, record.UserID, record.TeamID, record.GameID, record.Platform, nullableString(record.PlatformAccountID), nullableString(record.Name), nullableString(record.AvatarURL), nullableString(record.BrowserProfileID),
 		record.IdentificationStatus, nullableString(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus, nullableString(record.OriginalCookie), nullableString(record.ActiveCookie),
 		nullableString(record.CookieStatus), record.ActiveCookieUpdatedAt, record.LastCheckedAt, record.CreatedAt, record.UpdatedAt,
 	}
+}
+
+func teamIDPointer(value identity.TeamID) *identity.TeamID {
+	return &value
 }
 
 func nullableString(value string) driver.Value {

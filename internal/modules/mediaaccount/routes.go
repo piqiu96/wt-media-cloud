@@ -3,6 +3,7 @@ package mediaaccount
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -13,10 +14,10 @@ import (
 )
 
 type createAccountRequest struct {
-	UserID         string   `json:"user_id"`
-	GameID         string   `json:"game_id"`
-	Platform       Platform `json:"platform"`
-	OriginalCookie string   `json:"original_cookie"`
+	UserID         identity.UserID `json:"user_id"`
+	GameID         string          `json:"game_id"`
+	Platform       Platform        `json:"platform"`
+	OriginalCookie string          `json:"original_cookie"`
 }
 
 type updateAccountRequest struct {
@@ -71,8 +72,17 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
+		var userID identity.UserID
+		if raw := c.Query("user_id"); raw != "" {
+			parsed, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || parsed <= 0 {
+				writeMediaAccountError(c, ErrInvalidInput)
+				return
+			}
+			userID = identity.UserID(parsed)
+		}
 		accounts, err := service.ListAccounts(actor, AccountFilter{
-			UserID:      c.Query("user_id"),
+			UserID:      userID,
 			GameID:      c.Query("game_id"),
 			Platform:    Platform(c.Query("platform")),
 			AnyTags:     commaValues(c.Query("any_tags")),
@@ -160,7 +170,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		task := tasks.Create(cloudagent.CreateTaskRequest{
 			TaskType:       cloudagent.TaskTypeAccountCheck.String(),
-			IdempotencyKey: "account-check:" + actor.ID + ":" + record.ID + ":" + common.NewID("attempt"),
+			IdempotencyKey: "account-check:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + common.NewID("attempt"),
 			Payload:        map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform, "platform_account_id": record.PlatformAccountID},
 		})
 		common.Created(c, task)
@@ -184,7 +194,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeMediaAccountError(c, ErrProfileUnavailable)
 			return
 		}
-		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + actor.ID + ":" + record.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}})
+		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}})
 		common.Created(c, task)
 	})
 

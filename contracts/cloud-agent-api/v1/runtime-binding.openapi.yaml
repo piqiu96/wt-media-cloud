@@ -92,7 +92,7 @@ components:
                 id: {type: string}
                 agent_id: {type: string}
                 device_id: {type: string}
-                user_id: {type: string}
+                user_id: {type: integer, format: int64}
                 mode: {type: string, const: local}
                 agent_version: {type: string}
                 contract_major_version: {type: string}

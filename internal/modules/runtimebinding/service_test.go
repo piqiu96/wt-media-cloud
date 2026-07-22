@@ -2,6 +2,7 @@ package runtimebinding
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -48,8 +49,8 @@ func (s *memoryStore) ConsumeTicket(tokenHash string, at time.Time) (BindingTick
 	return ticket, true, nil
 }
 
-func (s *memoryStore) IsSessionActive(sessionID, userID string, at time.Time) (bool, error) {
-	return s.activeSessions[sessionID+":"+userID], nil
+func (s *memoryStore) IsSessionActive(sessionID string, userID identity.UserID, at time.Time) (bool, error) {
+	return s.activeSessions[runtimeKey(sessionID, userID)], nil
 }
 
 func (s *memoryStore) SaveNode(node AgentNode) error {
@@ -63,12 +64,12 @@ func (s *memoryStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, er
 	return node, ok, nil
 }
 
-func (s *memoryStore) ValidateRuntimeProfiles(userID, mainUserID string, profileIDs []string) (bool, error) {
+func (s *memoryStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	if mainUserID != "main-user-1" {
 		return false, nil
 	}
 	for _, profileID := range profileIDs {
-		if !s.validProfiles[userID+":"+profileID] {
+		if !s.validProfiles[runtimeKey(profileID, userID)] {
 			return false, nil
 		}
 	}
@@ -97,7 +98,7 @@ func TestIssueTicketStoresOnlyHashAndExpires(t *testing.T) {
 	store := newMemoryStore()
 	service := testService(store, &now)
 
-	grant, err := service.IssueTicket(identity.PublicUser{ID: "user-1", Status: identity.UserStatusEnabled}, "session-1")
+	grant, err := service.IssueTicket(identity.PublicUser{ID: identity.UserID(1), Status: identity.UserStatusEnabled}, "session-1")
 	if err != nil {
 		t.Fatalf("IssueTicket() error = %v", err)
 	}
@@ -112,9 +113,9 @@ func TestIssueTicketStoresOnlyHashAndExpires(t *testing.T) {
 func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
-	store.activeSessions["session-1:user-1"] = true
+	store.activeSessions[runtimeKey("session-1", 1)] = true
 	service := testService(store, &now)
-	grant, _ := service.IssueTicket(identity.PublicUser{ID: "user-1", Status: identity.UserStatusEnabled}, "session-1")
+	grant, _ := service.IssueTicket(identity.PublicUser{ID: identity.UserID(1), Status: identity.UserStatusEnabled}, "session-1")
 
 	registration, err := service.RegisterLocal(RegisterLocalInput{
 		BindingToken:         grant.BindingToken,
@@ -127,7 +128,7 @@ func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterLocal() error = %v", err)
 	}
-	if registration.Node.UserID != "user-1" || registration.Node.SessionID != "session-1" {
+	if registration.Node.UserID != identity.UserID(1) || registration.Node.SessionID != "session-1" {
 		t.Fatalf("node = %+v", registration.Node)
 	}
 	if registration.NodeCredential != "node-secret" || store.storedCredential == registration.NodeCredential {
@@ -141,12 +142,12 @@ func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 func TestRuntimeReportRequiresActiveBoundSession(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
-	store.activeSessions["session-1:user-1"] = true
+	store.activeSessions[runtimeKey("session-1", 1)] = true
 	service := testService(store, &now)
-	grant, _ := service.IssueTicket(identity.PublicUser{ID: "user-1", Status: identity.UserStatusEnabled}, "session-1")
+	grant, _ := service.IssueTicket(identity.PublicUser{ID: identity.UserID(1), Status: identity.UserStatusEnabled}, "session-1")
 	registration, _ := service.RegisterLocal(RegisterLocalInput{BindingToken: grant.BindingToken, AgentID: "agent-1", DeviceID: "device-1", AgentVersion: "0.2.0", ContractMajorVersion: cloudagent.MajorVersion, ContractRevision: cloudagent.ContractRevision})
 
-	store.activeSessions["session-1:user-1"] = false
+	store.activeSessions[runtimeKey("session-1", 1)] = false
 	err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, validRuntimeReport())
 	if !errors.Is(err, ErrBoundSessionInvalid) {
 		t.Fatalf("ReportRuntime() error = %v", err)
@@ -156,7 +157,7 @@ func TestRuntimeReportRequiresActiveBoundSession(t *testing.T) {
 func TestRuntimeReportRejectsCredentialForReplacedNode(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
-	store.nodes[secretHash("old-node-secret")] = AgentNode{ID: "old-node", Mode: "local", Status: AgentStatusReplaced, UserID: "user-1", SessionID: "session-1"}
+	store.nodes[secretHash("old-node-secret")] = AgentNode{ID: "old-node", Mode: "local", Status: AgentStatusReplaced, UserID: identity.UserID(1), SessionID: "session-1"}
 	service := testService(store, &now)
 
 	err := service.ReportRuntime("old-node", "old-node-secret", validRuntimeReport())
@@ -168,18 +169,18 @@ func TestRuntimeReportRejectsCredentialForReplacedNode(t *testing.T) {
 func TestRuntimeReportValidatesOwnerAndEveryActiveProfile(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
-	store.activeSessions["session-1:user-1"] = true
-	store.validProfiles["user-1:profile-1"] = true
-	store.validProfiles["user-1:profile-2"] = true
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	store.validProfiles[runtimeKey("profile-1", 1)] = true
+	store.validProfiles[runtimeKey("profile-2", 1)] = true
 	service := testService(store, &now)
-	grant, _ := service.IssueTicket(identity.PublicUser{ID: "user-1", Status: identity.UserStatusEnabled}, "session-1")
+	grant, _ := service.IssueTicket(identity.PublicUser{ID: identity.UserID(1), Status: identity.UserStatusEnabled}, "session-1")
 	registration, _ := service.RegisterLocal(RegisterLocalInput{BindingToken: grant.BindingToken, AgentID: "agent-1", DeviceID: "device-1", AgentVersion: "0.2.0", ContractMajorVersion: cloudagent.MajorVersion, ContractRevision: cloudagent.ContractRevision})
 
 	report := validRuntimeReport()
 	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); err != nil {
 		t.Fatalf("ReportRuntime() error = %v", err)
 	}
-	if store.appliedNode.UserID != "user-1" || len(store.appliedReport.BitProfileIDs) != 2 {
+	if store.appliedNode.UserID != identity.UserID(1) || len(store.appliedReport.BitProfileIDs) != 2 {
 		t.Fatalf("applied node/report = %+v / %+v", store.appliedNode, store.appliedReport)
 	}
 
@@ -192,6 +193,10 @@ func TestRuntimeReportValidatesOwnerAndEveryActiveProfile(t *testing.T) {
 	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); !errors.Is(err, ErrProfileOwnershipMismatch) {
 		t.Fatalf("profile mismatch error = %v", err)
 	}
+}
+
+func runtimeKey(value string, userID identity.UserID) string {
+	return fmt.Sprintf("%s:%d", value, userID)
 }
 
 func validRuntimeReport() RuntimeReport {

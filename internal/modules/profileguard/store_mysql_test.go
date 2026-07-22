@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
@@ -17,7 +18,7 @@ func TestMySQLStoreGrantsPermitWhenProfileHasNoPriorLock(t *testing.T) {
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 	task := authorizedTask()
-	node := runtimebinding.AgentNode{ID: "node-1", UserID: "user-1", SessionID: "session-1", Status: "online"}
+	node := runtimebinding.AgentNode{ID: "node-1", UserID: identity.UserID(1), SessionID: "session-1", Status: "online"}
 	permit := Permit{ID: "permit-1", TaskID: task.ID, UserID: task.UserID, ProfileID: task.ProfileID, NodeID: node.ID, Operation: task.Operation, Status: PermitActive, CredentialHash: "hash", AcquiredAt: now, ExpiresAt: now.Add(2 * time.Minute)}
 
 	mock.ExpectBegin()
@@ -58,7 +59,7 @@ func TestMySQLStoreAcquiresPermitAfterAtomicRuntimeValidation(t *testing.T) {
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 	task := authorizedTask()
-	node := runtimebinding.AgentNode{ID: "node-1", UserID: "user-1", SessionID: "session-1", Status: "online"}
+	node := runtimebinding.AgentNode{ID: "node-1", UserID: identity.UserID(1), SessionID: "session-1", Status: "online"}
 	permit := Permit{ID: "permit-1", TaskID: task.ID, UserID: task.UserID, ProfileID: task.ProfileID, NodeID: node.ID, Operation: task.Operation, Status: PermitActive, CredentialHash: "hash", AcquiredAt: now, ExpiresAt: now.Add(2 * time.Minute)}
 
 	mock.ExpectBegin()
@@ -78,7 +79,7 @@ func TestMySQLStoreExpiredPermitRequiresReviewInsteadOfReuse(t *testing.T) {
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 	task := authorizedTask()
-	node := runtimebinding.AgentNode{ID: "node-1", UserID: "user-1", SessionID: "session-1", Status: "online"}
+	node := runtimebinding.AgentNode{ID: "node-1", UserID: identity.UserID(1), SessionID: "session-1", Status: "online"}
 	permit := Permit{ID: "permit-new", TaskID: task.ID, UserID: task.UserID, ProfileID: task.ProfileID, NodeID: node.ID, Operation: task.Operation, Status: PermitActive, CredentialHash: "hash", AcquiredAt: now, ExpiresAt: now.Add(2 * time.Minute)}
 
 	mock.ExpectBegin()

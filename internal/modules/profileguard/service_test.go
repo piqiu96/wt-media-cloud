@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
@@ -57,7 +58,7 @@ func (s *fakeStore) FinishPermit(permitID, nodeID, credentialHash string, outcom
 func testProfileGuard(store *fakeStore, now *time.Time) *Service {
 	return NewService(
 		store,
-		fakeNodeAuth{node: runtimebinding.AgentNode{ID: "node-1", UserID: "user-1", Mode: "local", Status: "online"}},
+		fakeNodeAuth{node: runtimebinding.AgentNode{ID: "node-1", UserID: identity.UserID(1), Mode: "local", Status: "online"}},
 		WithClock(func() time.Time { return *now }),
 		WithIDGenerator(func(prefix string) string { return "permit-1" }),
 		WithSecretGenerator(func() string { return "permit-secret" }),
@@ -65,7 +66,7 @@ func testProfileGuard(store *fakeStore, now *time.Time) *Service {
 }
 
 func authorizedTask() SensitiveTask {
-	return SensitiveTask{ID: "task-1", UserID: "user-1", ProfileID: "profile-1", BitProfileID: "bit-profile-1", NodeID: "node-1", Operation: OperationInteraction, Status: TaskAuthorized}
+	return SensitiveTask{ID: "task-1", UserID: identity.UserID(1), ProfileID: "profile-1", BitProfileID: "bit-profile-1", NodeID: "node-1", Operation: OperationInteraction, Status: TaskAuthorized}
 }
 
 func TestPreflightGrantsHashedPermitOnlyForAssignedTask(t *testing.T) {

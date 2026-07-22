@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 )
 
@@ -17,7 +18,7 @@ func TestProfileGuardRoutesPreflightAndFinish(t *testing.T) {
 	store := &fakeStore{task: authorizedTask(), taskFound: true}
 	service := NewService(
 		store,
-		fakeNodeAuth{node: runtimebinding.AgentNode{ID: "node-1", UserID: "user-1", Mode: "local", Status: "online"}},
+		fakeNodeAuth{node: runtimebinding.AgentNode{ID: "node-1", UserID: identity.UserID(1), Mode: "local", Status: "online"}},
 		WithClock(func() time.Time { return now }),
 		WithIDGenerator(func(prefix string) string { return "permit-1" }),
 		WithSecretGenerator(func() string { return "permit-secret" }),
@@ -47,7 +48,7 @@ func TestProfileGuardRoutesPreflightAndFinish(t *testing.T) {
 
 func TestProfileGuardRoutesRejectWrongNodeCredential(t *testing.T) {
 	engine := server.New()
-	RegisterRoutes(engine, NewService(&fakeStore{task: authorizedTask(), taskFound: true}, fakeNodeAuth{node: runtimebinding.AgentNode{ID: "node-1", UserID: "user-1"}}))
+	RegisterRoutes(engine, NewService(&fakeStore{task: authorizedTask(), taskFound: true}, fakeNodeAuth{node: runtimebinding.AgentNode{ID: "node-1", UserID: identity.UserID(1)}}))
 	response := guardJSON(engine, "/api/v1/local-agent/sensitive-tasks/task-1/preflight", `{"node_id":"node-1"}`, "wrong", "")
 	if response.Result().StatusCode() != consts.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", response.Result().StatusCode(), response.Result().Body())

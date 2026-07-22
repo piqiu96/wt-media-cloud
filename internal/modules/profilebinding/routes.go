@@ -3,6 +3,7 @@ package profilebinding
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -76,7 +77,16 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
-		profiles, err := service.ListProfiles(actor, c.Query("user_id"))
+		var userID identity.UserID
+		if raw := c.Query("user_id"); raw != "" {
+			parsed, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || parsed <= 0 {
+				writeProfileError(c, ErrForbidden)
+				return
+			}
+			userID = identity.UserID(parsed)
+		}
+		profiles, err := service.ListProfiles(actor, userID)
 		if err != nil {
 			writeProfileError(c, err)
 			return
@@ -150,12 +160,12 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 	})
 }
 
-func createProfileTask(c *hertzapp.RequestContext, tasks TaskCreator, taskType, actorID string, payload map[string]any) {
+func createProfileTask(c *hertzapp.RequestContext, tasks TaskCreator, taskType string, actorID identity.UserID, payload map[string]any) {
 	if tasks == nil {
 		common.Failure(c, 503, 30006, "任务服务不可用", nil)
 		return
 	}
-	idempotency := taskType + ":" + actorID + ":" + common.NewID("attempt")
+	idempotency := taskType + ":" + strconv.FormatInt(int64(actorID), 10) + ":" + common.NewID("attempt")
 	task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: taskType, IdempotencyKey: idempotency, Payload: payload})
 	common.Created(c, task)
 }

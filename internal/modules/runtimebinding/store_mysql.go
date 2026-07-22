@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
 type MySQLStore struct{ db *sql.DB }
@@ -59,7 +60,7 @@ func (s *MySQLStore) ConsumeTicket(tokenHash string, at time.Time) (BindingTicke
 	return ticket, true, nil
 }
 
-func (s *MySQLStore) IsSessionActive(sessionID, userID string, at time.Time) (bool, error) {
+func (s *MySQLStore) IsSessionActive(sessionID string, userID identity.UserID, at time.Time) (bool, error) {
 	var active bool
 	err := s.db.QueryRow(
 		`SELECT EXISTS(SELECT 1 FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.user_id = ? AND s.invalidated_at IS NULL AND u.status = 'enabled')`,
@@ -106,7 +107,7 @@ func (s *MySQLStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, err
 	return node, true, nil
 }
 
-func (s *MySQLStore) ValidateRuntimeProfiles(userID, mainUserID string, profileIDs []string) (bool, error) {
+func (s *MySQLStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	if len(profileIDs) == 0 {
 		return false, nil
 	}

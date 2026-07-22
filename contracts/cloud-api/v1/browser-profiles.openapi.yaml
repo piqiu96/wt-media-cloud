@@ -32,7 +32,7 @@ paths:
     get:
       operationId: listBrowserProfiles
       security: [{sessionCookie: []}]
-      parameters: [{in: query, name: user_id, schema: {type: string}, description: Technician-only global filter.}]
+      parameters: [{in: query, name: user_id, schema: {type: integer, format: int64}, description: Admin-only explicit owner filter.}]
       responses:
         '200': {description: Visible confirmed Profile mirrors.}
 components:

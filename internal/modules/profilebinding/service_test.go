@@ -3,6 +3,8 @@ package profilebinding
 import (
 	"errors"
 	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,7 +50,7 @@ func TestSubmitScanRejectsUnverifiableIdentity(t *testing.T) {
 
 func TestSubmitScanRejectsExistingBindingMismatch(t *testing.T) {
 	store := newMemoryStore()
-	store.bindings["user-1"] = BitAccountBinding{UserID: "user-1", MainUserID: "main-user-1", Status: BitAccountBound}
+	store.bindings[1] = BitAccountBinding{UserID: 1, MainUserID: "main-user-1", Status: BitAccountBound}
 	service := newTestService(store)
 
 	_, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
@@ -140,9 +142,9 @@ func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
 
 func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	store := newMemoryStore()
-	store.bindings["user-1"] = BitAccountBinding{UserID: "user-1", MainUserID: "main-user-1", Status: BitAccountBound}
-	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: "user-1", BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "旧名称", LocalStatus: ProfileActive}
-	store.profiles["profile-old-2"] = BrowserProfile{ID: "profile-old-2", UserID: "user-1", BitProfileID: "p2", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "即将缺失", LocalStatus: ProfileActive}
+	store.bindings[1] = BitAccountBinding{UserID: 1, MainUserID: "main-user-1", Status: BitAccountBound}
+	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: 1, BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "旧名称", LocalStatus: ProfileActive}
+	store.profiles["profile-old-2"] = BrowserProfile{ID: "profile-old-2", UserID: 1, BitProfileID: "p2", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "即将缺失", LocalStatus: ProfileActive}
 	service := newTestService(store)
 
 	scan, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
@@ -166,7 +168,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID); err != nil {
 		t.Fatal(err)
 	}
-	profiles := store.profileList("user-1")
+	profiles := store.profileList(1)
 	byBitID := map[string]BrowserProfile{}
 	for _, item := range profiles {
 		byBitID[item.BitProfileID] = item
@@ -177,7 +179,9 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 }
 
 func profileActor(userID string) identity.PublicUser {
-	return identity.PublicUser{ID: userID, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, GameIDs: []string{"game-a"}}
+	parsed, _ := strconv.ParseInt(strings.TrimPrefix(userID, "user-"), 10, 64)
+	teamID := identity.TeamID(parsed)
+	return identity.PublicUser{ID: identity.UserID(parsed), Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a"}}
 }
 
 func newTestService(store Store) *Service {
@@ -193,22 +197,22 @@ func newTestService(store Store) *Service {
 }
 
 type memoryStore struct {
-	bindings map[string]BitAccountBinding
+	bindings map[identity.UserID]BitAccountBinding
 	profiles map[string]BrowserProfile
 	scans    map[string]ProfileScan
 	audits   []identity.AuditEvent
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{bindings: map[string]BitAccountBinding{}, profiles: map[string]BrowserProfile{}, scans: map[string]ProfileScan{}}
+	return &memoryStore{bindings: map[identity.UserID]BitAccountBinding{}, profiles: map[string]BrowserProfile{}, scans: map[string]ProfileScan{}}
 }
 
-func (s *memoryStore) FindBinding(userID string) (BitAccountBinding, bool, error) {
+func (s *memoryStore) FindBinding(userID identity.UserID) (BitAccountBinding, bool, error) {
 	binding, ok := s.bindings[userID]
 	return binding, ok, nil
 }
 
-func (s *memoryStore) ListProfiles(userID string) ([]BrowserProfile, error) {
+func (s *memoryStore) ListProfiles(userID identity.UserID) ([]BrowserProfile, error) {
 	return s.profileList(userID), nil
 }
 
@@ -246,7 +250,7 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 	s.scans[scan.ID] = cloneScan(scan)
 	s.audits = append(s.audits,
 		identity.AuditEvent{Action: "bitbrowser.profile_scan.confirm", TargetType: "profile_sync_scan", TargetID: scan.ID, Summary: map[string]string{"main_user_id": scan.MainUserID}},
-		identity.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: scan.UserID, Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "verified"}},
+		identity.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(scan.UserID), 10), Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "verified"}},
 	)
 	return nil
 }
@@ -256,7 +260,7 @@ func (s *memoryStore) DeleteProfile(id string) error {
 	return nil
 }
 
-func (s *memoryStore) profileList(userID string) []BrowserProfile {
+func (s *memoryStore) profileList(userID identity.UserID) []BrowserProfile {
 	var result []BrowserProfile
 	for _, profile := range s.profiles {
 		if profile.UserID == userID {

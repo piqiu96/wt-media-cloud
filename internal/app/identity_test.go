@@ -16,7 +16,7 @@ func TestBootstrapIdentityRequiresCredentialPair(t *testing.T) {
 	}
 }
 
-func TestBootstrapIdentityDoesNotResetExistingTechnician(t *testing.T) {
+func TestBootstrapIdentityDoesNotResetExistingAdmin(t *testing.T) {
 	service := identity.NewService(identity.NewMemoryStore())
 	if err := bootstrapIdentity(service, "tech", "a-long-initial-password"); err != nil {
 		t.Fatalf("first bootstrap error = %v", err)
@@ -25,6 +25,6 @@ func TestBootstrapIdentityDoesNotResetExistingTechnician(t *testing.T) {
 		t.Fatalf("second bootstrap error = %v", err)
 	}
 	if _, err := service.Login("tech", "a-long-initial-password"); err != nil {
-		t.Fatalf("original technician login error = %v", err)
+		t.Fatalf("original admin login error = %v", err)
 	}
 }
