@@ -20,7 +20,7 @@ func TestMySQLStoreCreatesStagedScanTransactionally(t *testing.T) {
 		WithArgs(scan.ID, scan.UserID, scan.TeamID, scan.MainUserID, scan.Status, sqlmock.AnyArg(), scan.CreatedAt, scan.ExpiresAt, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO profile_sync_candidates`)).
-		WithArgs(scan.ID, scan.Profiles[0].ID, scan.Profiles[0].BitProfileID, scan.Profiles[0].MainUserID, scan.Profiles[0].ProfileUserID, scan.Profiles[0].Name, scan.Profiles[0].Seq, nil, nil, nil, nil, scan.Profiles[0].CreatedAt, scan.Profiles[0].UpdatedAt).
+		WithArgs(scan.ID, scan.Profiles[0].ID, scan.Profiles[0].BitProfileID, scan.Profiles[0].MainUserID, scan.Profiles[0].ProfileUserID, scan.Profiles[0].Name, scan.Profiles[0].Seq, nil, nil, nil, nil, "socks5", "127.0.0.1", 1080, "本地窗口备注", scan.Profiles[0].CreatedAt, scan.Profiles[0].UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -120,7 +120,7 @@ func newMockStore(t *testing.T) (*MySQLStore, sqlmock.Sqlmock, func()) {
 func mysqlTestScan() ProfileScan {
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	teamID := identity.TeamID(11)
-	profile := BrowserProfile{ID: "profile-1", UserID: identity.UserID(1), TeamID: &teamID, BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", Name: "窗口一", Seq: 1, LocalStatus: ProfileActive, LastSyncedAt: now, CreatedAt: now, UpdatedAt: now}
+	profile := BrowserProfile{ID: "profile-1", UserID: identity.UserID(1), TeamID: &teamID, BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", Name: "窗口一", Seq: 1, ProxyType: "socks5", ProxyHost: "127.0.0.1", ProxyPort: 1080, Remark: "本地窗口备注", LocalStatus: ProfileActive, LastSyncedAt: now, CreatedAt: now, UpdatedAt: now}
 	return ProfileScan{ID: "scan-1", UserID: identity.UserID(1), TeamID: &teamID, MainUserID: "main-user-1", Status: ScanReady, Profiles: []BrowserProfile{profile}, Diff: []ProfileDiff{{Kind: DiffAdded, BitProfileID: profile.BitProfileID, ProfileID: profile.ID, Fields: []string{}}}, CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
 }
 

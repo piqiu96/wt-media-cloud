@@ -39,5 +39,11 @@ WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATA
   AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'browser_profiles' AND column_name = 'proxy_port')
   AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'browser_profiles' AND column_name = 'remark');
 INSERT IGNORE INTO schema_migrations (version, name, applied_at)
+SELECT '20260723_014_profile_sync_candidate_runtime_fields', 'profile_sync_candidate_runtime_fields', UTC_TIMESTAMP(6)
+WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'profile_sync_candidates' AND column_name = 'proxy_type')
+  AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'profile_sync_candidates' AND column_name = 'proxy_host')
+  AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'profile_sync_candidates' AND column_name = 'proxy_port')
+  AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'profile_sync_candidates' AND column_name = 'remark');
+INSERT IGNORE INTO schema_migrations (version, name, applied_at)
 SELECT '20260721_011_task_result', 'task_result', UTC_TIMESTAMP(6)
 WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'tasks' AND column_name = 'result_json');

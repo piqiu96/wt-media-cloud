@@ -98,6 +98,10 @@ type ProfileInput struct {
 	GroupName     string `json:"group_name"`
 	BitStatus     string `json:"bit_status"`
 	BitUpdatedAt  string `json:"bit_updated_at"`
+	ProxyType     string `json:"proxy_type"`
+	ProxyHost     string `json:"proxy_host"`
+	ProxyPort     int    `json:"proxy_port"`
+	Remark        string `json:"remark"`
 }
 
 type SnapshotInput struct {
@@ -223,6 +227,10 @@ func (s *Service) SubmitScan(actor identity.PublicUser, input SnapshotInput) (Pr
 			GroupName:     strings.TrimSpace(item.GroupName),
 			BitStatus:     strings.TrimSpace(item.BitStatus),
 			BitUpdatedAt:  strings.TrimSpace(item.BitUpdatedAt),
+			ProxyType:     strings.TrimSpace(item.ProxyType),
+			ProxyHost:     strings.TrimSpace(item.ProxyHost),
+			ProxyPort:     item.ProxyPort,
+			Remark:        strings.TrimSpace(item.Remark),
 			LocalStatus:   ProfileActive,
 			LastSyncedAt:  now,
 			CreatedAt:     now,
@@ -441,6 +449,18 @@ func changedFields(current, candidate BrowserProfile) []string {
 	}
 	if current.BitUpdatedAt != candidate.BitUpdatedAt {
 		fields = append(fields, "bit_updated_at")
+	}
+	if current.ProxyType != candidate.ProxyType {
+		fields = append(fields, "proxy_type")
+	}
+	if current.ProxyHost != candidate.ProxyHost {
+		fields = append(fields, "proxy_host")
+	}
+	if current.ProxyPort != candidate.ProxyPort {
+		fields = append(fields, "proxy_port")
+	}
+	if current.Remark != candidate.Remark {
+		fields = append(fields, "remark")
 	}
 	return fields
 }

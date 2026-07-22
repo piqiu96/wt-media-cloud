@@ -8,14 +8,14 @@ describe('profile binding client', () => {
   it('submits only normalized secret-free snapshot fields', async () => {
     const fetch = vi.fn(async () => response({ id: 'scan-1', status: 'ready', diff: [] }))
     const client = createProfileBindingClient({ fetch })
-    const raw = { main_user_id: 'main-user-1', profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', cookie: 'secret', proxyPassword: 'secret' }] }
+    const raw = { main_user_id: 'main-user-1', profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', status: 1, proxy_type: 'socks5', proxy_host: '127.0.0.1', proxy_port: 1080, remark: '测试窗口', cookie: 'secret', proxyPassword: 'secret' }] }
 
     await client.submit(raw)
 
     const body = JSON.parse(fetch.mock.calls[0][1].body)
     expect(body).toEqual({
       main_user_id: 'main-user-1',
-      profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口' }],
+      profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', bit_status: '1', remark: '测试窗口', proxy_type: 'socks5', proxy_host: '127.0.0.1', proxy_port: 1080 }],
     })
     expect(fetch.mock.calls[0][1].credentials).toBe('include')
   })

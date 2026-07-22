@@ -114,10 +114,10 @@ func (s *MySQLStore) CreateScan(scan ProfileScan) error {
 	}
 	for _, profile := range scan.Profiles {
 		if _, err := tx.Exec(
-			`INSERT INTO profile_sync_candidates (scan_id, profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO profile_sync_candidates (scan_id, profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			scan.ID, profile.ID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
-			profile.CreatedAt, profile.UpdatedAt,
+			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nullIfEmpty(profile.Remark), profile.CreatedAt, profile.UpdatedAt,
 		); err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (s *MySQLStore) FindScan(scanID string) (ProfileScan, bool, error) {
 		scan.ConfirmedAt = &value
 	}
 	rows, err := s.db.Query(
-		`SELECT profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, created_at, updated_at FROM profile_sync_candidates WHERE scan_id = ? ORDER BY bit_profile_id`, scanID,
+		`SELECT profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, created_at, updated_at FROM profile_sync_candidates WHERE scan_id = ? ORDER BY bit_profile_id`, scanID,
 	)
 	if err != nil {
 		return ProfileScan{}, false, err
@@ -154,13 +154,18 @@ func (s *MySQLStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var profile BrowserProfile
-		var groupID, groupName, bitStatus, bitUpdatedAt sql.NullString
-		if err := rows.Scan(&profile.ID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+		var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, remark sql.NullString
+		var proxyPort sql.NullInt64
+		if err := rows.Scan(&profile.ID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
 			return ProfileScan{}, false, err
 		}
 		profile.UserID = scan.UserID
 		profile.TeamID = scan.TeamID
 		profile.GroupID, profile.GroupName, profile.BitStatus, profile.BitUpdatedAt = groupID.String, groupName.String, bitStatus.String, bitUpdatedAt.String
+		profile.ProxyType, profile.ProxyHost, profile.Remark = proxyType.String, proxyHost.String, remark.String
+		if proxyPort.Valid {
+			profile.ProxyPort = int(proxyPort.Int64)
+		}
 		profile.LocalStatus = ProfileActive
 		profile.LastSyncedAt = scan.CreatedAt
 		scan.Profiles = append(scan.Profiles, profile)

@@ -258,14 +258,14 @@ func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
 func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	store := newMemoryStore()
 	store.bindings[1] = BitAccountBinding{UserID: 1, MainUserID: "main-user-1", Status: BitAccountBound}
-	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: 1, BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "旧名称", LocalStatus: ProfileActive}
+	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: 1, BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "旧名称", BitStatus: "0", ProxyType: "http", ProxyHost: "1.1.1.1", ProxyPort: 8080, Remark: "旧备注", LocalStatus: ProfileActive}
 	store.profiles["profile-old-2"] = BrowserProfile{ID: "profile-old-2", UserID: 1, BitProfileID: "p2", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "即将缺失", LocalStatus: ProfileActive}
 	service := newTestService(store)
 
 	scan, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
 		MainUserID: "main-user-1",
 		Profiles: []ProfileInput{
-			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "新名称"},
+			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "新名称", BitStatus: "1", ProxyType: "socks5", ProxyHost: "2.2.2.2", ProxyPort: 1080, Remark: "新备注"},
 			{BitProfileID: "p3", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "新增"},
 		},
 	})
@@ -280,6 +280,16 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	if len(kinds) != 3 || kinds[0] != DiffAdded || kinds[1] != DiffChanged || kinds[2] != DiffMissing {
 		t.Fatalf("diff kinds = %v", kinds)
 	}
+	var changed ProfileDiff
+	for _, item := range scan.Diff {
+		if item.Kind == DiffChanged && item.BitProfileID == "p1" {
+			changed = item
+			break
+		}
+	}
+	if strings.Join(changed.Fields, ",") != "name,bit_status,proxy_type,proxy_host,proxy_port,remark" {
+		t.Fatalf("changed fields = %v", changed.Fields)
+	}
 	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +298,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	for _, item := range profiles {
 		byBitID[item.BitProfileID] = item
 	}
-	if byBitID["p1"].Name != "新名称" || byBitID["p2"].LocalStatus != ProfileLocalMissing || byBitID["p3"].LocalStatus != ProfileActive {
+	if byBitID["p1"].Name != "新名称" || byBitID["p1"].ProxyHost != "2.2.2.2" || byBitID["p1"].Remark != "新备注" || byBitID["p2"].LocalStatus != ProfileLocalMissing || byBitID["p3"].LocalStatus != ProfileActive {
 		t.Fatalf("profiles after apply = %#v", byBitID)
 	}
 }
