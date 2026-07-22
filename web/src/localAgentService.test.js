@@ -14,4 +14,20 @@ describe('local agent desktop service', () => {
     await expect(service.profileScan()).resolves.toEqual(snapshot)
     expect(invoke).toHaveBeenCalledWith('local_agent_profile_scan')
   })
+
+  it('proxies profile restore through Tauri invoke', async () => {
+    const profiles = [{ bit_profile_id: 'p1', name: '窗口一' }]
+    const result = { restored_count: 1, profiles: [{ bit_profile_id: 'p1', status: 'verified' }] }
+    const invoke = vi.fn(async (command, args) => {
+      if (command === LOCAL_AGENT_COMMANDS.profileRestore) {
+        expect(args).toEqual({ profiles })
+        return result
+      }
+      return {}
+    })
+    const service = createLocalAgentService({ invoke })
+
+    await expect(service.profileRestore(profiles)).resolves.toEqual(result)
+    expect(invoke).toHaveBeenCalledWith('local_agent_profile_restore', { profiles })
+  })
 })

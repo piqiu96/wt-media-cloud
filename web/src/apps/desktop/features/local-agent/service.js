@@ -10,6 +10,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   bind: "local_agent_bind",
   bindSession: "local_agent_bind_session",
   profileScan: "local_agent_profile_scan",
+  profileRestore: "local_agent_profile_restore",
 });
 
 const DEFAULT_STATUS = Object.freeze({
@@ -100,6 +101,9 @@ export function createLocalAgentService({ invoke }) {
     async profileScan() {
       return invoke(LOCAL_AGENT_COMMANDS.profileScan);
     },
+    async profileRestore(profiles) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileRestore, { profiles });
+    },
   };
 }
 
@@ -138,6 +142,19 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
     },
     async profileScan() {
       return { main_user_id: current.main_user_id || "main-user-mock", profiles: [] };
+    },
+    async profileRestore(profiles) {
+      return {
+        restored_count: profiles.length,
+        profiles: profiles.map((profile) => ({
+          bit_profile_id: profile.bit_profile_id,
+          status: "verified",
+        })),
+        snapshot: {
+          main_user_id: current.main_user_id || "main-user-mock",
+          profiles,
+        },
+      };
     },
   };
 }

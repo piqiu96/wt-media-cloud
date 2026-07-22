@@ -26,6 +26,7 @@ const detailProfile = ref(null)
 // Scan
 const scanning = ref(false)
 const acceptingScan = ref(false)
+const restoringCloud = ref(false)
 const scanDetailVisible = ref(false)
 const currentScan = ref(null)
 const identityError = ref("")
@@ -219,6 +220,65 @@ async function acceptLocalChanges() {
   }
 }
 
+function restoreTargetsFromCurrentScan() {
+  const diff = getDiff(currentScan.value)
+  const targetBitIds = new Set([
+    ...(diff.changed || []).map((item) => item.bit_profile_id).filter(Boolean),
+    ...(diff.missing || []).map((item) => item.bit_profile_id).filter(Boolean),
+  ])
+  const byBitId = new Map(profiles.value.map((profile) => [profile.bit_profile_id, profile]))
+  return [...targetBitIds]
+    .map((bitProfileId) => byBitId.get(bitProfileId))
+    .filter(Boolean)
+    .map((profile) => ({
+      bit_profile_id: profile.bit_profile_id,
+      name: profile.name || "",
+      seq: Number.isFinite(Number(profile.seq)) ? Number(profile.seq) : null,
+      group_id: profile.group_id || "",
+      group_name: profile.group_name || "",
+      proxy_type: profile.proxy_type || "",
+      proxy_host: profile.proxy_host || "",
+      proxy_port: Number.isFinite(Number(profile.proxy_port)) ? Number(profile.proxy_port) : null,
+      remark: profile.remark || "",
+    }))
+}
+
+async function restoreCloudConfig() {
+  if (!currentScan.value) return
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web不能恢复本机BitBrowser配置；请在Desktop客户端执行。"
+    return
+  }
+  const targets = restoreTargetsFromCurrentScan()
+  if (!targets.length) {
+    error.value = "当前扫描没有可恢复的Cloud窗口配置；本地新增窗口只能选择接受本地变化。"
+    return
+  }
+  if (!confirm(`确定将 ${targets.length} 个Cloud已保存窗口配置写回本机BitBrowser，并在写回后重新读回验证？本操作不会写入账号、Cookie、授权用户或业务状态。`)) return
+  restoringCloud.value = true
+  error.value = ""
+  try {
+    const localAgent = await desktopLocalAgentService()
+    const status = await localAgent.status()
+    if (!status.node_id) {
+      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
+    }
+    const result = await localAgent.profileRestore(targets)
+    const readback = result.snapshot || {}
+    currentScan.value = await bindingClient.submit({
+      main_user_id: readback.main_user_id || currentUser?.id,
+      profiles: readback.profiles || [],
+    }, { nodeId: status.node_id })
+    taskNotice.value = `已恢复 ${result.restored_count || targets.length} 个窗口的Cloud配置，并已读回验证。`
+    selectedTab.value = "changed"
+    await loadProfiles()
+  } catch (e) {
+    error.value = localTrustMessage(e)
+  } finally {
+    restoringCloud.value = false
+  }
+}
+
 function getDiff(scan) {
   const src = scan?.diff || scan?.diff_json
   if (!src) return { added: [], changed: [], missing: [] }
@@ -398,7 +458,7 @@ const diffColumns = [
         <t-space>
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="default" disabled>恢复Cloud配置（后续）</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="default" :loading="restoringCloud" @click="restoreCloudConfig">恢复Cloud配置并读回验证</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>
       </template>
