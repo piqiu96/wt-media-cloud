@@ -68,6 +68,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
+		nodeID, ok := decodeLocalSensitiveNode(c)
+		if !ok {
+			writeProfileError(c, runtimebinding.ErrInvalidInput)
+			return
+		}
+		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
+			return
+		}
 		scan, err := service.ConfirmScan(actor, c.Param("scan_id"))
 		if err != nil {
 			writeProfileError(c, err)

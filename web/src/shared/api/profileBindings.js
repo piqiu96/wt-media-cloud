@@ -23,8 +23,8 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     review(scanId) {
       return api.get(`/bit-browser/profile-scans/${scanId}`)
     },
-    confirm(scanId) {
-      return api.post(`/bit-browser/profile-scans/${scanId}/confirm`, {})
+    confirm(scanId, options = {}) {
+      return api.post(`/bit-browser/profile-scans/${scanId}/confirm`, { node_id: options.nodeId })
     },
     confirmMainIdentity(scanId) {
       return api.post(`/bit-browser/profile-scans/${scanId}/confirm-main-identity`, {})

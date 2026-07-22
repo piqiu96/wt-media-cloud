@@ -24,8 +24,11 @@ paths:
       operationId: confirmProfileScan
       security: [{sessionCookie: []}]
       parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ConfirmProfileScanInput'}}}
       responses:
-        '200': {description: User identity and formal Profile mirror applied transactionally.}
+        '200': {description: Trusted Desktop accepted local changes and formal Profile mirror was applied transactionally.}
         '409': {description: Scan not ready or identity mismatch.}
         '410': {description: Scan expired.}
   /api/v1/bit-browser/main-identity:
@@ -55,7 +58,14 @@ components:
       required: [main_user_id, profiles]
       properties:
         main_user_id: {type: string, description: Normalized from BitBrowser mainUserId.}
+        node_id: {type: string, description: Trusted Desktop node id.}
         profiles: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ProfileInput'}}
+    ConfirmProfileScanInput:
+      type: object
+      required: [node_id]
+      additionalProperties: false
+      properties:
+        node_id: {type: string, description: Trusted Desktop node id required before applying local scan changes.}
     MainIdentityInput:
       type: object
       required: [main_user_id]

@@ -25,6 +25,7 @@ const detailProfile = ref(null)
 
 // Scan
 const scanning = ref(false)
+const acceptingScan = ref(false)
 const scanDetailVisible = ref(false)
 const currentScan = ref(null)
 const identityError = ref("")
@@ -192,6 +193,32 @@ async function rejectScan() {
   scanDetailVisible.value = false
 }
 
+async function acceptLocalChanges() {
+  if (!currentScan.value) return
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web不处理本机扫描差异；请在Desktop客户端接受本地变化。"
+    return
+  }
+  const diff = getDiff(currentScan.value)
+  const total = (diff.added?.length || 0) + (diff.changed?.length || 0) + (diff.missing?.length || 0)
+  const message = total > 0
+    ? `确定接受本机扫描结果并更新Cloud窗口镜像？本次会处理 ${total} 项差异，但不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。`
+    : "本次扫描没有差异，确认后只会记录本次扫描已处理。"
+  if (!confirm(message)) return
+  acceptingScan.value = true
+  error.value = ""
+  try {
+    const nodeId = await currentLocalNodeId()
+    currentScan.value = await bindingClient.confirm(currentScan.value.id || currentScan.value.scan_id, { nodeId })
+    taskNotice.value = "已接受本地变化，Cloud浏览器窗口镜像已按允许字段更新。"
+    await loadProfiles()
+  } catch (e) {
+    error.value = localTrustMessage(e)
+  } finally {
+    acceptingScan.value = false
+  }
+}
+
 function getDiff(scan) {
   const src = scan?.diff || scan?.diff_json
   if (!src) return { added: [], changed: [], missing: [] }
@@ -336,7 +363,7 @@ const diffColumns = [
     <t-drawer v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close>
       <div v-if="currentScan">
         <t-alert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
-        <t-alert message="本次扫描只展示Diff，不会同步或覆盖Cloud浏览器窗口。接受本地变化、恢复Cloud配置属于后续CHG。" theme="warning" style="margin-bottom:16px" />
+        <t-alert message="接受本地变化后，会更新Cloud窗口镜像中的名称、分组、代理摘要、运行状态等允许字段；不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。" theme="warning" style="margin-bottom:16px" />
         <t-tabs v-model="selectedTab" :default-value="'changed'">
           <t-tab-panel value="added" label="新增">
             <t-table v-if="getDiff(currentScan).added?.length" :data="getDiff(currentScan).added.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="diffColumns" size="small">
@@ -370,7 +397,7 @@ const diffColumns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="primary" disabled>接受本地变化（后续）</t-button>
+          <t-button v-if="currentScan?.status === 'ready'" theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="default" disabled>恢复Cloud配置（后续）</t-button>
           <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>

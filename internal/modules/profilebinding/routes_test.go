@@ -34,9 +34,31 @@ func TestProfileRoutesStageReviewAndConfirm(t *testing.T) {
 	if review.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(review.Result().Body()), `"kind":"added"`) {
 		t.Fatalf("review status=%d body=%s", review.Result().StatusCode(), review.Result().Body())
 	}
-	confirmed := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans/"+envelope.Data.ID+"/confirm", `{}`, cookie)
+	confirmed := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans/"+envelope.Data.ID+"/confirm", `{"node_id":"node-trusted"}`, cookie)
 	if confirmed.Result().StatusCode() != consts.StatusOK || len(store.profiles) != 1 {
 		t.Fatalf("confirm status=%d body=%s profiles=%v", confirmed.Result().StatusCode(), confirmed.Result().Body(), store.profiles)
+	}
+}
+
+func TestProfileRoutesRequireTrustedNodeForConfirmScan(t *testing.T) {
+	engine, cookie, store, _, trust := newProfileRouteTestWithRuntime(t)
+	created := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans", `{"node_id":"node-trusted","main_user_id":"main-user-1","profiles":[{"bit_profile_id":"p1","main_user_id":"main-user-1","profile_user_id":"bit-user-1","name":"窗口一"}]}`, cookie)
+	var envelope struct {
+		Data ProfileScan `json:"data"`
+	}
+	if err := json.Unmarshal(created.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	missingNode := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans/"+envelope.Data.ID+"/confirm", `{}`, cookie)
+	if missingNode.Result().StatusCode() != consts.StatusBadRequest || len(store.profiles) != 0 {
+		t.Fatalf("missing node confirm status=%d body=%s profiles=%d", missingNode.Result().StatusCode(), missingNode.Result().Body(), len(store.profiles))
+	}
+
+	trust.err = runtimebinding.ErrLocalTrustUnavailable
+	untrusted := performProfileJSON(engine, "POST", "/api/v1/bit-browser/profile-scans/"+envelope.Data.ID+"/confirm", `{"node_id":"node-untrusted"}`, cookie)
+	if untrusted.Result().StatusCode() != consts.StatusConflict || len(store.profiles) != 0 {
+		t.Fatalf("untrusted confirm status=%d body=%s profiles=%d", untrusted.Result().StatusCode(), untrusted.Result().Body(), len(store.profiles))
 	}
 }
 

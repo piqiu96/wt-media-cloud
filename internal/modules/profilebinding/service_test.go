@@ -326,7 +326,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 			break
 		}
 	}
-	if strings.Join(changed.Fields, ",") != "name,bit_status,proxy_type,proxy_host,proxy_port,remark" {
+	if strings.Join(changed.Fields, ",") != "name,bit_status,proxy_type,proxy_host,proxy_port" {
 		t.Fatalf("changed fields = %v", changed.Fields)
 	}
 	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID); err != nil {
@@ -337,7 +337,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	for _, item := range profiles {
 		byBitID[item.BitProfileID] = item
 	}
-	if byBitID["p1"].Name != "新名称" || byBitID["p1"].ProxyHost != "2.2.2.2" || byBitID["p1"].Remark != "新备注" || byBitID["p2"].LocalStatus != ProfileLocalMissing || byBitID["p3"].LocalStatus != ProfileActive {
+	if byBitID["p1"].Name != "新名称" || byBitID["p1"].ProxyHost != "2.2.2.2" || byBitID["p1"].Remark != "旧备注" || byBitID["p2"].LocalStatus != ProfileLocalMissing || byBitID["p3"].LocalStatus != ProfileActive {
 		t.Fatalf("profiles after apply = %#v", byBitID)
 	}
 }
@@ -408,6 +408,10 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 	seen := map[string]struct{}{}
 	for _, candidate := range scan.Profiles {
 		seen[candidate.BitProfileID] = struct{}{}
+		if existing, ok := s.profiles[candidate.ID]; ok {
+			candidate.Remark = existing.Remark
+			candidate.CreatedAt = existing.CreatedAt
+		}
 		candidate.LocalStatus = ProfileActive
 		candidate.LastSyncedAt = at
 		s.profiles[candidate.ID] = candidate
@@ -416,7 +420,7 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 		if profile.UserID != scan.UserID {
 			continue
 		}
-		if _, ok := seen[profile.BitProfileID]; !ok {
+		if _, ok := seen[profile.BitProfileID]; !ok && profile.LocalStatus != ProfileArchived {
 			profile.LocalStatus = ProfileLocalMissing
 			profile.LastSyncedAt = at
 			s.profiles[id] = profile

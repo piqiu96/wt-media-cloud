@@ -509,8 +509,5 @@ func changedFields(current, candidate BrowserProfile) []string {
 	if current.ProxyPort != candidate.ProxyPort {
 		fields = append(fields, "proxy_port")
 	}
-	if current.Remark != candidate.Remark {
-		fields = append(fields, "remark")
-	}
 	return fields
 }
