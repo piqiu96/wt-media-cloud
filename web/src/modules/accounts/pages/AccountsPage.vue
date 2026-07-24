@@ -1,92 +1,172 @@
 <script setup>
 import { computed, onMounted, ref } from "vue"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
+import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
+import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 
 const accountClient = createMediaAccountClient()
+const profileClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
+const usersClient = createUsersClient()
 
-// --- State ---
+const isDesktop = window.__WT_MEDIA_APP__ === "desktop"
+
 const user = ref(null)
 const accounts = ref([])
+const profiles = ref([])
+const games = ref([])
 const loading = ref(true)
 const error = ref("")
 
-// Search / Filter
+const searchText = ref("")
 const searchPlatform = ref("")
 const searchBizStatus = ref("")
+const searchLoginStatus = ref("")
 const searchTags = ref("")
-const gameId = ref("")
+const searchGameId = ref("")
 
-// Create account form
 const showCreate = ref(false)
-const targetUserId = ref("")
-const createPlatform = ref("douyin")
-const originalCookie = ref("")
+const createForm = ref(defaultCreateForm())
 const creating = ref(false)
 
-// Batch tag
-const tagInput = ref("")
-const selectedAccountIds = ref([])
-
-// Detail drawer
 const detailVisible = ref(false)
 const detailAccount = ref(null)
-const identifyName = ref("")
-const identifyPlatformAccountId = ref("")
-const savingIdentify = ref(false)
+const detailRemark = ref("")
+const detailProfileId = ref("")
+const savingDetail = ref(false)
+
+const tagInput = ref("")
+const selectedAccountIds = ref([])
 
 onMounted(async () => {
   try {
     user.value = await sessionClient.me()
-    gameId.value = (user.value.game_ids || [])[0] || ""
-    await loadAccounts()
-  } catch {
-    user.value = null
+    await Promise.all([loadAuxiliaryData(), loadAccounts()])
+  } catch (e) {
+    error.value = e.message || "加载账号数据失败"
   } finally {
     loading.value = false
   }
 })
 
-// --- Data ---
-async function loadAccounts() {
-  error.value = ""
-  try {
-    const params = {}
-    if (searchPlatform.value) params.platform = searchPlatform.value
-    if (searchBizStatus.value) params.businessStatus = searchBizStatus.value
-    if (searchTags.value) params.anyTags = searchTags.value.split(",").map(t => t.trim()).filter(Boolean)
-    accounts.value = await accountClient.list(params)
-  } catch (e) {
-    error.value = e.message
+function defaultCreateForm() {
+  return {
+    userId: "",
+    gameId: "",
+    platform: "bilibili",
+    browserProfileId: "",
+    remark: "",
+    tagsText: "",
   }
 }
 
-// --- Create ---
+async function loadAuxiliaryData() {
+  const [profileList, gameList] = await Promise.all([
+    profileClient.listProfiles().catch(() => []),
+    usersClient.listGames({ status: "enabled" }).catch(() => []),
+  ])
+  profiles.value = Array.isArray(profileList) ? profileList : []
+  games.value = Array.isArray(gameList) ? gameList : []
+  if (!createForm.value.gameId) {
+    createForm.value.gameId = (user.value?.game_ids || [])[0] || games.value[0]?.id || ""
+  }
+}
+
+async function loadAccounts() {
+  error.value = ""
+  const params = {}
+  if (searchText.value) params.search = searchText.value
+  if (searchPlatform.value) params.platform = searchPlatform.value
+  if (searchBizStatus.value) params.businessStatus = searchBizStatus.value
+  if (searchLoginStatus.value) params.loginStatus = searchLoginStatus.value
+  if (searchGameId.value) params.game_id = searchGameId.value
+  if (searchTags.value) params.anyTags = searchTags.value.split(",").map(t => t.trim()).filter(Boolean)
+  try {
+    accounts.value = await accountClient.list(params)
+  } catch (e) {
+    error.value = e.message || "加载媒体账号失败"
+  }
+}
+
+function resetFilters() {
+  searchText.value = ""
+  searchPlatform.value = ""
+  searchBizStatus.value = ""
+  searchLoginStatus.value = ""
+  searchTags.value = ""
+  searchGameId.value = ""
+  loadAccounts()
+}
+
+function openCreate() {
+  createForm.value = defaultCreateForm()
+  createForm.value.gameId = (user.value?.game_ids || [])[0] || games.value[0]?.id || ""
+  showCreate.value = true
+}
+
 async function createAccount() {
   error.value = ""
   creating.value = true
   try {
     await accountClient.create({
-      userId: user.value?.role === "admin" ? Number(targetUserId.value) || undefined : undefined,
-      gameId: gameId.value,
-      platform: createPlatform.value,
-      originalCookie: originalCookie.value,
+      userId: user.value?.role === "admin" ? Number(createForm.value.userId) || undefined : undefined,
+      gameId: createForm.value.gameId,
+      platform: createForm.value.platform,
+      browserProfileId: isDesktop ? createForm.value.browserProfileId : "",
+      remark: createForm.value.remark,
+      tags: splitTags(createForm.value.tagsText),
     })
-    originalCookie.value = ""
     showCreate.value = false
     await loadAccounts()
   } catch (e) {
-    error.value = e.message
+    error.value = e.message || "创建媒体账号失败"
   } finally {
     creating.value = false
   }
 }
 
-// --- Batch Tags ---
+function openDetail(account) {
+  detailAccount.value = account
+  detailRemark.value = account.remark || ""
+  detailProfileId.value = account.browser_profile_id || ""
+  detailVisible.value = true
+}
+
+async function saveDetail() {
+  if (!detailAccount.value) return
+  savingDetail.value = true
+  error.value = ""
+  try {
+    let updated = await accountClient.update(detailAccount.value.id, { remark: detailRemark.value })
+    if (isDesktop && detailProfileId.value !== (detailAccount.value.browser_profile_id || "")) {
+      updated = detailProfileId.value
+        ? await accountClient.bindProfile(detailAccount.value.id, detailProfileId.value)
+        : await accountClient.unbindProfile(detailAccount.value.id)
+    }
+    detailAccount.value = { ...detailAccount.value, ...updated }
+    await loadAccounts()
+    detailVisible.value = false
+  } catch (e) {
+    error.value = e.message || "保存账号失败"
+  } finally {
+    savingDetail.value = false
+  }
+}
+
+async function updateStatus(account, bizStatus) {
+  error.value = ""
+  try {
+    await accountClient.update(account.id, { businessStatus: bizStatus })
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "更新状态失败"
+  }
+}
+
 async function changeTags(remove = false) {
-  const tags = tagInput.value.split(",").map(t => t.trim()).filter(Boolean)
+  const tags = splitTags(tagInput.value)
   if (!selectedAccountIds.value.length || !tags.length) return
   error.value = ""
   try {
@@ -95,126 +175,54 @@ async function changeTags(remove = false) {
     tagInput.value = ""
     await loadAccounts()
   } catch (e) {
-    error.value = e.message
+    error.value = e.message || "更新标签失败"
   }
 }
 
-// --- Status Operation ---
-async function updateStatus(account, bizStatus) {
-  error.value = ""
-  try {
-    await accountClient.update(account.id, { businessStatus: bizStatus })
-    await loadAccounts()
-  } catch (e) {
-    error.value = e.message
-  }
+function splitTags(value) {
+  return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
 }
 
-// --- Detail Drawer ---
-function openDetail(account) {
-  detailAccount.value = account
-  identifyName.value = account.name || ""
-  identifyPlatformAccountId.value = account.platform_account_id || ""
-  detailVisible.value = true
+function gameName(gameId) {
+  return games.value.find(game => game.id === gameId)?.name || gameId || "-"
 }
 
-async function saveIdentify() {
-  if (!detailAccount.value) return
-  savingIdentify.value = true
-  try {
-    await accountClient.identify(detailAccount.value.id, {
-      platformAccountId: identifyPlatformAccountId.value,
-      name: identifyName.value,
-    })
-    await loadAccounts()
-    if (detailAccount.value) {
-      detailAccount.value.name = identifyName.value
-      detailAccount.value.platform_account_id = identifyPlatformAccountId.value
-    }
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    savingIdentify.value = false
-  }
+function profileLabel(profileId) {
+  const profile = profiles.value.find(item => item.id === profileId)
+  if (!profile) return profileId || "-"
+  return `${profile.name || profile.bit_profile_id || profile.id}（${profile.local_status === "active" ? "可用" : "不可用"}）`
 }
 
-// --- Cookie Import / Export ---
-const importCookieText = ref("")
-const showCookieImport = ref(false)
-const importingCookie = ref(false)
-
-function openCookieImport(account) {
-  detailAccount.value = account
-  importCookieText.value = ""
-  showCookieImport.value = true
+function executableText(account) {
+  if (account.business_status !== "enabled") return "不可执行：账号未启用"
+  if (!account.browser_profile_id) return "不可执行：未绑定窗口"
+  if (account.login_status !== "normal") return "待检查：需要真实账号检查"
+  return "可进入后续预检"
 }
-
-async function importCookie() {
-  if (!detailAccount.value || !importCookieText.value) return
-  importingCookie.value = true
-  try {
-    await accountClient.update(detailAccount.value.id, { loginStatus: "unknown" })
-    importCookieText.value = ""
-    showCookieImport.value = false
-    await loadAccounts()
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    importingCookie.value = false
-  }
-}
-
-async function exportOriginalCookie(account) {
-  try {
-    const cookies = await accountClient.fetchCookies(account.id)
-    const c = cookies?.original_cookie
-    if (!c) { alert("无原始 Cookie"); return }
-    await navigator.clipboard.writeText(c)
-    alert("原始 Cookie 已复制到剪贴板")
-  } catch (e) {
-    alert("获取 Cookie 失败: " + e.message)
-  }
-}
-
-async function exportActiveCookie(account) {
-  try {
-    const cookies = await accountClient.fetchCookies(account.id)
-    const c = cookies?.active_cookie
-    if (!c) { alert("无活跃 Cookie"); return }
-    await navigator.clipboard.writeText(c)
-    alert("活跃 Cookie 已复制到剪贴板")
-  } catch (e) {
-    alert("获取 Cookie 失败: " + e.message)
-  }
-}
-
-// --- Stats ---
 
 function formatTime(t) {
   if (!t) return "-"
   return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
-// --- Stats ---
-const stats = computed(() => {
-  const all = accounts.value
-  return {
-    total: all.length,
-    active: all.filter(a => a.business_status === "active").length,
-    disabled: all.filter(a => a.business_status === "disabled").length,
-    identified: all.filter(a => a.identification_status === "identified").length,
-    pendingId: all.filter(a => a.identification_status === "pending_identification").length,
-  }
-})
+const activeProfiles = computed(() => profiles.value.filter(profile => profile.local_status === "active"))
 
-// --- Columns ---
+const stats = computed(() => ({
+  total: accounts.value.length,
+  enabled: accounts.value.filter(a => a.business_status === "enabled").length,
+  unbound: accounts.value.filter(a => !a.browser_profile_id).length,
+  normal: accounts.value.filter(a => a.login_status === "normal").length,
+  unknown: accounts.value.filter(a => a.login_status === "unknown").length,
+}))
+
 const columns = [
-  { colKey: "name", title: "账号", width: 200 },
+  { colKey: "name", title: "账号", width: 210 },
   { colKey: "platform", title: "平台", width: 90 },
-  { colKey: "game_id", title: "游戏", width: 100 },
+  { colKey: "game_id", title: "游戏", width: 120 },
+  { colKey: "browser_profile_id", title: "绑定窗口", width: 190 },
+  { colKey: "login_status", title: "登录状态", width: 120 },
   { colKey: "business_status", title: "业务状态", width: 100 },
-  { colKey: "identification_status", title: "识别状态", width: 100 },
-  { colKey: "login_status", title: "登录状态", width: 110 },
+  { colKey: "executable", title: "可执行结论", width: 180 },
   { colKey: "op", title: "操作", width: 160 },
 ]
 </script>
@@ -222,58 +230,68 @@ const columns = [
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <t-alert
+      v-if="!isDesktop"
+      message="Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息；绑定、换绑和后续账号检查请在 Desktop 端完成。"
+      theme="info"
+      style="margin-bottom:16px"
+    />
 
-    <!-- 统计卡片 -->
     <t-row :gutter="16" class="stats-row">
-      <t-col :span="4">
-        <t-card><template #title>总账号</template><div class="stat-num">{{ stats.total }}</div></t-card>
-      </t-col>
-      <t-col :span="4">
-        <t-card><template #title>已启用</template><div class="stat-num">{{ stats.active }}</div></t-card>
-      </t-col>
-      <t-col :span="4">
-        <t-card><template #title>已识别</template><div class="stat-num">{{ stats.identified }}</div></t-card>
-      </t-col>
-      <t-col :span="4">
-        <t-card><template #title>待识别</template><div class="stat-num">{{ stats.pendingId }}</div></t-card>
-      </t-col>
-      <t-col :span="4">
-        <t-card><template #title>已停用</template><div class="stat-num">{{ stats.disabled }}</div></t-card>
-      </t-col>
+      <t-col :span="4"><t-card><template #title>总账号</template><div class="stat-num">{{ stats.total }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>已启用</template><div class="stat-num">{{ stats.enabled }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>未绑定窗口</template><div class="stat-num">{{ stats.unbound }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>登录正常</template><div class="stat-num">{{ stats.normal }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>待检查</template><div class="stat-num">{{ stats.unknown }}</div></t-card></t-col>
     </t-row>
 
-    <!-- 搜索/过滤栏 -->
     <t-card class="search-bar" :bordered="true">
       <t-form layout="inline">
+        <t-form-item label="搜索">
+          <t-input v-model="searchText" placeholder="账号、UID、备注" clearable style="width:180px" />
+        </t-form-item>
+        <t-form-item label="游戏">
+          <t-select v-model="searchGameId" placeholder="全部" clearable style="width:140px">
+            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+          </t-select>
+        </t-form-item>
         <t-form-item label="平台">
           <t-select v-model="searchPlatform" placeholder="全部" clearable style="width:120px">
-            <t-option value="douyin" label="抖音" />
             <t-option value="bilibili" label="B站" />
             <t-option value="baijiahao" label="百家号" />
+            <t-option value="douyin" label="抖音" />
           </t-select>
         </t-form-item>
         <t-form-item label="业务状态">
           <t-select v-model="searchBizStatus" placeholder="全部" clearable style="width:120px">
-            <t-option value="active" label="启用" />
+            <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
             <t-option value="retired" label="退役" />
           </t-select>
         </t-form-item>
+        <t-form-item label="登录状态">
+          <t-select v-model="searchLoginStatus" placeholder="全部" clearable style="width:130px">
+            <t-option value="unknown" label="待检查" />
+            <t-option value="normal" label="登录正常" />
+            <t-option value="not_logged_in" label="未登录" />
+            <t-option value="expired" label="已失效" />
+            <t-option value="account_mismatch" label="账号不一致" />
+          </t-select>
+        </t-form-item>
         <t-form-item label="标签">
-          <t-input v-model="searchTags" placeholder="用逗号分隔" clearable style="width:160px" />
+          <t-input v-model="searchTags" placeholder="逗号分隔" clearable style="width:140px" />
         </t-form-item>
         <t-form-item>
           <t-button theme="primary" @click="loadAccounts">查询</t-button>
-          <t-button @click="() => { searchPlatform=''; searchBizStatus=''; searchTags=''; loadAccounts() }">重置</t-button>
+          <t-button @click="resetFilters">重置</t-button>
         </t-form-item>
       </t-form>
     </t-card>
 
-    <!-- 操作栏 -->
     <div class="action-bar">
       <t-space>
-        <t-button theme="primary" @click="showCreate = true">新建账号</t-button>
-        <t-button variant="outline" @click="loadAccounts">刷新</t-button>
+        <t-button theme="primary" @click="openCreate">新建账号台账</t-button>
+        <t-button variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </t-space>
       <t-space v-if="selectedAccountIds.length" class="batch-actions">
         <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" style="width:200px" />
@@ -283,7 +301,6 @@ const columns = [
       </t-space>
     </div>
 
-    <!-- 表格 -->
     <t-table
       :data="accounts"
       :columns="columns"
@@ -297,29 +314,28 @@ const columns = [
     >
       <template #name="{ row }">
         <div>
-          <div class="account-name">{{ row.name || row.platform_account_id || '待识别' }}</div>
+          <div class="account-name">{{ row.name || row.platform_account_id || '待检查账号' }}</div>
+          <div class="account-sub">{{ row.remark || row.id }}</div>
           <div class="account-tags">
             <t-tag v-for="tag in row.tags || []" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
           </div>
         </div>
       </template>
-      <template #platform="{ row }">
-        {{ { douyin: '抖音', bilibili: 'B站', baijiahao: '百家号' }[row.platform] || row.platform }}
+      <template #platform="{ row }">{{ { douyin: '抖音', bilibili: 'B站', baijiahao: '百家号' }[row.platform] || row.platform }}</template>
+      <template #game_id="{ row }">{{ gameName(row.game_id) }}</template>
+      <template #browser_profile_id="{ row }">{{ row.browser_profile_id ? profileLabel(row.browser_profile_id) : '未绑定' }}</template>
+      <template #login_status="{ row }">
+        <BusinessStatus :status="row.login_status === 'normal' ? 'normal' : row.login_status === 'unknown' ? 'pending_review' : 'warning'" :label="row.login_status" />
       </template>
       <template #business_status="{ row }">
-        <BusinessStatus :status="row.business_status === 'active' ? 'normal' : row.business_status === 'disabled' ? 'paused' : 'expired'" />
+        <BusinessStatus :status="row.business_status === 'enabled' ? 'normal' : row.business_status === 'disabled' ? 'paused' : 'expired'" :label="row.business_status" />
       </template>
-      <template #identification_status="{ row }">
-        <BusinessStatus :status="row.identification_status === 'identified' ? 'success' : 'pending_review'" :label="row.identification_status" />
-      </template>
-      <template #login_status="{ row }">
-        <BusinessStatus :status="row.login_status === 'normal' ? 'normal' : row.login_status === 'not_logged_in' ? 'warning' : 'error'" :label="row.login_status" />
-      </template>
+      <template #executable="{ row }">{{ executableText(row) }}</template>
       <template #op="{ row }">
         <t-space>
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
           <t-dropdown :options="[
-            { value: 'active', label: '启用', disabled: row.business_status === 'active' },
+            { value: 'enabled', label: '启用', disabled: row.business_status === 'enabled' },
             { value: 'disabled', label: '停用', disabled: row.business_status === 'disabled' },
             { value: 'retired', label: '退役', disabled: row.business_status === 'retired' },
           ]" @click="(v) => updateStatus(row, v)">
@@ -329,62 +345,69 @@ const columns = [
       </template>
     </t-table>
 
-    <!-- 新建账号弹窗 -->
-    <t-dialog v-model:visible="showCreate" header="新建账号" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
-      <t-form @submit="createAccount">
+    <t-dialog v-model:visible="showCreate" header="新建账号台账" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
+      <t-form @submit.prevent="createAccount">
         <t-form-item v-if="user?.role === 'admin'" label="归属用户 UID">
-          <t-input-number v-model="targetUserId" :min="1" placeholder="留空则归当前用户" />
+          <t-input-number v-model="createForm.userId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
-        <t-form-item label="平台">
-          <t-select v-model="createPlatform">
-            <t-option value="douyin" label="抖音" />
-            <t-option value="bilibili" label="B站" />
-            <t-option value="baijiahao" label="百家号" />
+        <t-form-item label="游戏">
+          <t-select v-model="createForm.gameId" placeholder="选择游戏">
+            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
-        <t-form-item label="原始 Cookie（可选）">
-          <t-textarea v-model="originalCookie" :rows="3" placeholder="Cookie 仅随本次请求提交，服务端不会持久保存" />
+        <t-form-item label="平台">
+          <t-select v-model="createForm.platform">
+            <t-option value="bilibili" label="B站" />
+            <t-option value="baijiahao" label="百家号" />
+            <t-option value="douyin" label="抖音" />
+          </t-select>
+        </t-form-item>
+        <t-form-item v-if="isDesktop" label="绑定窗口">
+          <t-select v-model="createForm.browserProfileId" clearable placeholder="可先不绑定">
+            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileLabel(profile.id)" />
+          </t-select>
+        </t-form-item>
+        <t-form-item label="标签">
+          <t-input v-model="createForm.tagsText" placeholder="多个标签用逗号分隔" />
+        </t-form-item>
+        <t-form-item label="备注">
+          <t-textarea v-model="createForm.remark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
       </t-form>
     </t-dialog>
 
-    <!-- 详情抽屉 -->
-    <t-drawer v-model:visible="detailVisible" header="账号详情" :size="'500px'" destroy-on-close>
+    <t-drawer v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
-        <t-descriptions-item label="账号 ID">{{ detailAccount.id }}</t-descriptions-item>
-        <t-descriptions-item label="用户名">{{ detailAccount.name || '-' }}</t-descriptions-item>
+        <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
         <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>
-        <t-descriptions-item label="游戏">{{ detailAccount.game_id || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="业务状态">
-          <BusinessStatus :status="detailAccount.business_status === 'active' ? 'normal' : 'expired'" :label="detailAccount.business_status" />
-        </t-descriptions-item>
-        <t-descriptions-item label="识别状态">
-          <BusinessStatus :status="detailAccount.identification_status === 'identified' ? 'success' : 'pending_review'" :label="detailAccount.identification_status" />
-        </t-descriptions-item>
-        <t-descriptions-item label="登录状态">
-          <BusinessStatus :status="detailAccount.login_status === 'normal' ? 'normal' : 'warning'" :label="detailAccount.login_status" />
-        </t-descriptions-item>
-        <t-descriptions-item label="Profile ID">{{ detailAccount.browser_profile_id || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="Cookie 状态">{{ detailAccount.cookie_status || '无' }}</t-descriptions-item>
-        <t-descriptions-item label="活跃 Cookie 更新">{{ detailAccount.active_cookie_updated_at ? formatTime(detailAccount.active_cookie_updated_at) : '从未' }}</t-descriptions-item>
+        <t-descriptions-item label="游戏">{{ gameName(detailAccount.game_id) }}</t-descriptions-item>
+        <t-descriptions-item label="绑定窗口">{{ detailAccount.browser_profile_id ? profileLabel(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
+        <t-descriptions-item label="可执行结论">{{ executableText(detailAccount) }}</t-descriptions-item>
+        <t-descriptions-item label="最近检查">{{ detailAccount.last_checked_at ? formatTime(detailAccount.last_checked_at) : '尚未检查' }}</t-descriptions-item>
       </t-descriptions>
+
+      <t-form v-if="detailAccount" class="detail-form" label-width="92px">
+        <t-form-item label="备注">
+          <t-textarea v-model="detailRemark" :rows="3" />
+        </t-form-item>
+        <t-form-item v-if="isDesktop" label="绑定窗口">
+          <t-select v-model="detailProfileId" clearable placeholder="选择本人授权窗口">
+            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileLabel(profile.id)" />
+          </t-select>
+          <div class="form-tip">绑定或换绑后，登录状态会回到“待检查”，需要后续账号检查重新确认。</div>
+        </t-form-item>
+        <t-form-item v-else label="操作边界">
+          <div class="form-tip">Cloud Web 只查看绑定关系；请在 Desktop 端绑定、解绑或换绑窗口。</div>
+        </t-form-item>
+      </t-form>
 
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="detailVisible = false">关闭</t-button>
-          <t-button variant="outline" @click="exportOriginalCookie(detailAccount)">导出原始 CK</t-button>
-          <t-button variant="outline" @click="exportActiveCookie(detailAccount)">导出活跃 CK</t-button>
-          <t-button @click="openCookieImport(detailAccount)">导入 CK</t-button>
-          <t-button v-if="detailAccount?.identification_status !== 'identified'" theme="primary" :loading="savingIdentify" @click="saveIdentify">保存识别</t-button>
+          <t-button theme="primary" :loading="savingDetail" @click="saveDetail">保存</t-button>
         </t-space>
       </template>
     </t-drawer>
-
-    <!-- Cookie 导入弹窗 -->
-    <t-dialog v-model:visible="showCookieImport" header="导入 Cookie" @confirm="importCookie" :confirm-btn="{ loading: importingCookie, theme: 'primary' }">
-      <p style="margin-bottom:8px; color:var(--td-text-color-secondary); font-size:13px">粘贴 Cookie 文本，将更新此账号的原始 Cookie</p>
-      <t-textarea v-model="importCookieText" :rows="5" placeholder="粘贴 Cookie..." />
-    </t-dialog>
   </t-loading>
 </template>
 
@@ -400,15 +423,14 @@ const columns = [
   gap: 8px;
   margin-bottom: 12px;
 }
-.batch-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.selected-count {
+.batch-actions { display: flex; align-items: center; gap: 8px; }
+.selected-count,
+.account-sub,
+.form-tip {
   color: var(--td-text-color-placeholder);
   font-size: 13px;
 }
 .account-name { font-weight: 500; }
 .account-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.detail-form { margin-top: 16px; }
 </style>

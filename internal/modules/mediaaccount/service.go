@@ -70,6 +70,7 @@ type Account struct {
 	Name                  string               `json:"name,omitempty"`
 	AvatarURL             string               `json:"avatar_url,omitempty"`
 	BrowserProfileID      string               `json:"browser_profile_id,omitempty"`
+	Remark                string               `json:"remark,omitempty"`
 	IdentificationStatus  IdentificationStatus `json:"identification_status"`
 	DuplicateOfAccountID  string               `json:"duplicate_of_account_id,omitempty"`
 	BusinessStatus        BusinessStatus       `json:"business_status"`
@@ -89,10 +90,13 @@ type AccountRecord struct {
 }
 
 type CreateAccountInput struct {
-	UserID         identity.UserID
-	GameID         string
-	Platform       Platform
-	OriginalCookie string
+	UserID           identity.UserID
+	GameID           string
+	Platform         Platform
+	OriginalCookie   string
+	BrowserProfileID string
+	Remark           string
+	Tags             []string
 }
 
 type IdentifyAccountInput struct {
@@ -105,15 +109,19 @@ type IdentifyAccountInput struct {
 type UpdateAccountInput struct {
 	BusinessStatus BusinessStatus
 	LoginStatus    LoginStatus
+	Remark         *string
 }
 
 type AccountFilter struct {
-	UserID      identity.UserID
-	GameID      string
-	Platform    Platform
-	AnyTags     []string
-	AllTags     []string
-	ExcludeTags []string
+	UserID         identity.UserID
+	GameID         string
+	Platform       Platform
+	BusinessStatus BusinessStatus
+	LoginStatus    LoginStatus
+	Search         string
+	AnyTags        []string
+	AllTags        []string
+	ExcludeTags    []string
 }
 
 type AccountQuery = AccountFilter
@@ -180,7 +188,8 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	}
 	gameID := strings.TrimSpace(input.GameID)
 	platform := Platform(strings.ToLower(strings.TrimSpace(string(input.Platform))))
-	if !validActor(actor) || gameID == "" || len(gameID) > 128 || !validPlatform(platform) {
+	remark := strings.TrimSpace(input.Remark)
+	if !validActor(actor) || gameID == "" || len(gameID) > 128 || !validPlatform(platform) || len(remark) > 500 {
 		return Account{}, ErrInvalidInput
 	}
 	teamID := actor.TeamID
@@ -211,6 +220,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 			TeamID:               teamID,
 			GameID:               gameID,
 			Platform:             platform,
+			Remark:               remark,
 			IdentificationStatus: IdentificationPending,
 			BusinessStatus:       BusinessEnabled,
 			LoginStatus:          LoginUnknown,
@@ -222,6 +232,18 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	}
 	if err := s.store.Create(record); err != nil {
 		return Account{}, err
+	}
+	if strings.TrimSpace(input.BrowserProfileID) != "" {
+		account, err := s.BindProfile(actor, record.ID, input.BrowserProfileID)
+		if err != nil {
+			return Account{}, err
+		}
+		record.Account = account
+	}
+	if len(input.Tags) > 0 {
+		if err := s.AddTags(actor, []string{record.ID}, input.Tags); err != nil {
+			return Account{}, err
+		}
 	}
 	if err := s.audit(actor.ID, "media_account.create", record.ID, map[string]string{
 		"user_id": strconv.FormatInt(int64(userID), 10), "game_id": gameID, "platform": string(platform),
@@ -289,6 +311,16 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 			return nil, ErrInvalidInput
 		}
 	}
+	if filter.BusinessStatus != "" && !validBusinessStatus(filter.BusinessStatus) {
+		return nil, ErrInvalidInput
+	}
+	if filter.LoginStatus != "" && !validLoginStatus(filter.LoginStatus) {
+		return nil, ErrInvalidInput
+	}
+	filter.Search = strings.TrimSpace(filter.Search)
+	if len(filter.Search) > 128 {
+		return nil, ErrInvalidInput
+	}
 	var err error
 	if filter.AnyTags, err = normalizeTags(filter.AnyTags); err != nil {
 		return nil, err
@@ -329,7 +361,14 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 		}
 		record.LoginStatus = input.LoginStatus
 	}
-	if input.BusinessStatus == "" && input.LoginStatus == "" {
+	if input.Remark != nil {
+		remark := strings.TrimSpace(*input.Remark)
+		if len(remark) > 500 {
+			return Account{}, ErrInvalidInput
+		}
+		record.Remark = remark
+	}
+	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()
@@ -402,9 +441,15 @@ func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID st
 	if err != nil {
 		return Account{}, err
 	}
+	if record.BusinessStatus != BusinessEnabled {
+		return Account{}, ErrInvalidInput
+	}
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" || s.profiles == nil {
 		return Account{}, ErrProfileUnavailable
+	}
+	if record.BrowserProfileID == profileID {
+		return record.Account, nil
 	}
 	userID, active, found, err := s.profiles.ResolveProfile(profileID)
 	if err != nil {
@@ -424,11 +469,37 @@ func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID st
 		return Account{}, ErrProfilePlatformTaken
 	}
 	record.BrowserProfileID = profileID
+	record.LoginStatus = LoginUnknown
+	record.LastCheckedAt = nil
 	record.UpdatedAt = s.now()
 	if err := s.store.Update(record); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.profile.bind", record.ID, map[string]string{"browser_profile_id": profileID}); err != nil {
+		return Account{}, err
+	}
+	return record.Account, nil
+}
+
+func (s *Service) UnbindProfile(actor identity.PublicUser, accountID string) (Account, error) {
+	record, err := s.authorizedRecord(actor, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	if record.BusinessStatus != BusinessEnabled {
+		return Account{}, ErrInvalidInput
+	}
+	if record.BrowserProfileID == "" {
+		return record.Account, nil
+	}
+	record.BrowserProfileID = ""
+	record.LoginStatus = LoginUnknown
+	record.LastCheckedAt = nil
+	record.UpdatedAt = s.now()
+	if err := s.store.Update(record); err != nil {
+		return Account{}, err
+	}
+	if err := s.audit(actor.ID, "media_account.profile.unbind", record.ID, map[string]string{}); err != nil {
 		return Account{}, err
 	}
 	return record.Account, nil

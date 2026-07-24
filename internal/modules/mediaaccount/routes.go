@@ -14,15 +14,19 @@ import (
 )
 
 type createAccountRequest struct {
-	UserID         identity.UserID `json:"user_id"`
-	GameID         string          `json:"game_id"`
-	Platform       Platform        `json:"platform"`
-	OriginalCookie string          `json:"original_cookie"`
+	UserID           identity.UserID `json:"user_id"`
+	GameID           string          `json:"game_id"`
+	Platform         Platform        `json:"platform"`
+	OriginalCookie   string          `json:"original_cookie"`
+	BrowserProfileID string          `json:"browser_profile_id"`
+	Remark           string          `json:"remark"`
+	Tags             []string        `json:"tags"`
 }
 
 type updateAccountRequest struct {
 	BusinessStatus BusinessStatus `json:"business_status"`
 	LoginStatus    LoginStatus    `json:"login_status"`
+	Remark         *string        `json:"remark"`
 }
 
 type identifyAccountRequest struct {
@@ -82,12 +86,15 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			userID = identity.UserID(parsed)
 		}
 		accounts, err := service.ListAccounts(actor, AccountFilter{
-			UserID:      userID,
-			GameID:      c.Query("game_id"),
-			Platform:    Platform(c.Query("platform")),
-			AnyTags:     commaValues(c.Query("any_tags")),
-			AllTags:     commaValues(c.Query("all_tags")),
-			ExcludeTags: commaValues(c.Query("exclude_tags")),
+			UserID:         userID,
+			GameID:         c.Query("game_id"),
+			Platform:       Platform(c.Query("platform")),
+			BusinessStatus: BusinessStatus(c.Query("business_status")),
+			LoginStatus:    LoginStatus(c.Query("login_status")),
+			Search:         c.Query("search"),
+			AnyTags:        commaValues(c.Query("any_tags")),
+			AllTags:        commaValues(c.Query("all_tags")),
+			ExcludeTags:    commaValues(c.Query("exclude_tags")),
 		})
 		if err != nil {
 			writeMediaAccountError(c, err)
@@ -225,6 +232,19 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			return
 		}
 		account, err := service.BindProfile(actor, c.Param("account_id"), req.BrowserProfileID)
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, account)
+	})
+
+	h.DELETE("/api/v1/media-accounts/:account_id/profile", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		account, err := service.UnbindProfile(actor, c.Param("account_id"))
 		if err != nil {
 			writeMediaAccountError(c, err)
 			return

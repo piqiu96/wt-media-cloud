@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,6 +244,10 @@ func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 	if err != nil || bound.BrowserProfileID != "profile-1" {
 		t.Fatalf("BindProfile() account=%#v error=%v", bound, err)
 	}
+	storedFirst, _, _ := store.Find(first.ID)
+	if storedFirst.LoginStatus != LoginUnknown || storedFirst.LastCheckedAt != nil {
+		t.Fatalf("binding must reset login check facts: %#v", storedFirst)
+	}
 	if _, err := service.BindProfile(actor, second.ID, "profile-1"); !errors.Is(err, ErrProfilePlatformTaken) {
 		t.Fatalf("same platform bind error = %v", err)
 	}
@@ -254,6 +259,48 @@ func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 	if _, err := service.BindProfile(actor, second.ID, "profile-3"); !errors.Is(err, ErrProfileUnavailable) {
 		t.Fatalf("inactive bind error = %v", err)
 	}
+}
+
+func TestServiceUnbindsProfileAndRejectsDisabledBinding(t *testing.T) {
+	store := newMemoryStore()
+	resolver := &fakeProfileResolver{profiles: map[string]identity.UserID{"profile-1": 1}, inactive: map[string]bool{}}
+	service := newTestServiceWithProfiles(store, resolver)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	bound, err := service.BindProfile(actor, account.ID, "profile-1")
+	if err != nil {
+		t.Fatalf("BindProfile() error=%v", err)
+	}
+	store.records[account.ID] = AccountRecord{Account: bound}
+	unbound, err := service.UnbindProfile(actor, account.ID)
+	if err != nil {
+		t.Fatalf("UnbindProfile() error=%v", err)
+	}
+	if unbound.BrowserProfileID != "" || unbound.LoginStatus != LoginUnknown {
+		t.Fatalf("unbound account = %#v", unbound)
+	}
+	store.records[account.ID] = AccountRecord{Account: Account{ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili, BusinessStatus: BusinessDisabled, LoginStatus: LoginUnknown}}
+	if _, err := service.BindProfile(actor, account.ID, "profile-1"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("disabled BindProfile() error=%v, want ErrInvalidInput", err)
+	}
+}
+
+func TestServiceFiltersByStatusAndSearch(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili, Remark: "重点账号"})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBaijiahao, Remark: "普通账号"})
+	firstRecord, _, _ := store.Find(first.ID)
+	firstRecord.BusinessStatus = BusinessDisabled
+	firstRecord.LoginStatus = LoginExpired
+	store.records[first.ID] = firstRecord
+	secondRecord, _, _ := store.Find(second.ID)
+	secondRecord.LoginStatus = LoginNormal
+	store.records[second.ID] = secondRecord
+
+	assertAccountIDs(t, service, actor, AccountFilter{BusinessStatus: BusinessDisabled, LoginStatus: LoginExpired, Search: "重点"}, first.ID)
+	assertAccountIDs(t, service, actor, AccountFilter{LoginStatus: LoginNormal, Search: "普通"}, second.ID)
 }
 
 func assertAccountIDs(t *testing.T, service *Service, actor identity.PublicUser, filter AccountFilter, want ...string) {
@@ -364,6 +411,15 @@ func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {
 		if query.Platform != "" && record.Platform != query.Platform {
 			continue
 		}
+		if query.BusinessStatus != "" && record.BusinessStatus != query.BusinessStatus {
+			continue
+		}
+		if query.LoginStatus != "" && record.LoginStatus != query.LoginStatus {
+			continue
+		}
+		if query.Search != "" && !recordMatchesSearch(record, query.Search) {
+			continue
+		}
 		if !matchesTags(s.tags[record.ID], query.AnyTags, query.AllTags, query.ExcludeTags) {
 			continue
 		}
@@ -371,6 +427,16 @@ func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 	return records, nil
+}
+
+func recordMatchesSearch(record AccountRecord, search string) bool {
+	search = strings.ToLower(search)
+	for _, value := range []string{record.ID, record.PlatformAccountID, record.Name, record.Remark} {
+		if strings.Contains(strings.ToLower(value), search) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *memoryStore) AddTags(userID identity.UserID, accountIDs, tags []string, createdAt time.Time) error {

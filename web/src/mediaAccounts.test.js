@@ -19,6 +19,24 @@ describe('media account client', () => {
     )
   })
 
+  it('maps ledger filters to backend query names', async () => {
+    const fetch = vi.fn(async () => response([]))
+    const client = createMediaAccountClient({ fetch })
+
+    await client.list({
+      search: '重点',
+      businessStatus: 'enabled',
+      loginStatus: 'unknown',
+      anyTags: ['launch'],
+      excludeTags: ['retired'],
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/media-accounts?search=%E9%87%8D%E7%82%B9&business_status=enabled&login_status=unknown&any_tags=launch&exclude_tags=retired',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
   it('creates an account without persisting or returning cookie fields', async () => {
     const fetch = vi.fn(async () => response({
       id: 'account-1',
@@ -53,14 +71,18 @@ describe('media account client', () => {
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/tags/remove', expect.objectContaining({ credentials: 'include' }))
   })
 
-  it('binds a confirmed browser profile', async () => {
-	const fetch = vi.fn(async () => response({ id: 'account-1', browser_profile_id: 'profile-1' }))
-	const client = createMediaAccountClient({ fetch })
+  it('binds and unbinds a confirmed browser profile', async () => {
+    const fetch = vi.fn(async () => response({ id: 'account-1', browser_profile_id: 'profile-1' }))
+    const client = createMediaAccountClient({ fetch })
 
-	await client.bindProfile('account-1', 'profile-1')
+    await client.bindProfile('account-1', 'profile-1')
+    await client.unbindProfile('account-1')
 
-	expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts/account-1/profile', expect.objectContaining({
-	  method: 'PATCH', credentials: 'include', body: JSON.stringify({ browser_profile_id: 'profile-1' }),
-	}))
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts/account-1/profile', expect.objectContaining({
+      method: 'PATCH', credentials: 'include', body: JSON.stringify({ browser_profile_id: 'profile-1' }),
+    }))
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/account-1/profile', expect.objectContaining({
+      method: 'DELETE', credentials: 'include',
+    }))
   })
 })

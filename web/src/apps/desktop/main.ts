@@ -9,6 +9,7 @@ import "tdesign-vue-next/es/style/index.css"
 const app = createApp(App)
 const pinia = createPinia()
 const router = createDesktopRouter()
+;(window as any).__WT_MEDIA_APP__ = "desktop"
 
 app.use(pinia)
 app.use(TDesign)

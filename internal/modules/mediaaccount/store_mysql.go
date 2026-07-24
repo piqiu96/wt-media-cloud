@@ -12,7 +12,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const accountColumns = `id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at`
+const accountColumns = `id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at`
 
 type MySQLStore struct {
 	db *sql.DB
@@ -24,10 +24,10 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 
 func (s *MySQLStore) Create(record AccountRecord) error {
 	_, err := s.db.Exec(
-		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.UserID, record.TeamID, record.GameID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
-		record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
+		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
 		record.ActiveCookieUpdatedAt, record.LastCheckedAt, record.CreatedAt, record.UpdatedAt,
 	)
@@ -68,9 +68,9 @@ func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error
 
 func (s *MySQLStore) Update(record AccountRecord) error {
 	result, err := s.db.Exec(
-		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`,
 		record.UserID, record.TeamID, record.GameID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
-		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), record.IdentificationStatus,
+		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
 		nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
 		record.ActiveCookieUpdatedAt, record.LastCheckedAt, record.UpdatedAt, record.ID,
@@ -106,6 +106,19 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	if query.Platform != "" {
 		conditions = append(conditions, "platform = ?")
 		args = append(args, query.Platform)
+	}
+	if query.BusinessStatus != "" {
+		conditions = append(conditions, "business_status = ?")
+		args = append(args, query.BusinessStatus)
+	}
+	if query.LoginStatus != "" {
+		conditions = append(conditions, "login_status = ?")
+		args = append(args, query.LoginStatus)
+	}
+	if query.Search != "" {
+		like := "%" + query.Search + "%"
+		conditions = append(conditions, "(id LIKE ? OR platform_account_id LIKE ? OR name LIKE ? OR remark LIKE ?)")
+		args = append(args, like, like, like, like)
 	}
 	if len(conditions) > 0 {
 		statement += " WHERE " + strings.Join(conditions, " AND ")
@@ -231,13 +244,13 @@ type scanner interface {
 
 func scanAccount(row scanner) (AccountRecord, error) {
 	var record AccountRecord
-	var platformAccountID, name, avatarURL, browserProfileID sql.NullString
+	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.GameID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
-		&record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
+		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
 		&record.CreatedAt, &record.UpdatedAt,
 	)
@@ -248,6 +261,7 @@ func scanAccount(row scanner) (AccountRecord, error) {
 	record.Name = name.String
 	record.AvatarURL = avatarURL.String
 	record.BrowserProfileID = browserProfileID.String
+	record.Remark = remark.String
 	record.DuplicateOfAccountID = duplicateOfAccountID.String
 	record.OriginalCookie = originalCookie.String
 	record.ActiveCookie = activeCookie.String

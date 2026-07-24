@@ -23,7 +23,7 @@ func TestMySQLStoreCreatesAccountWithSecretFieldsInternal(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_accounts`)).
 		WithArgs(
 			record.ID, record.UserID, record.TeamID, record.GameID, record.Platform, nil, nil, nil, nil,
-			record.IdentificationStatus, nil, record.BusinessStatus, record.LoginStatus,
+			nil, record.IdentificationStatus, nil, record.BusinessStatus, record.LoginStatus,
 			record.OriginalCookie, nil, nil, nil, nil, record.CreatedAt, record.UpdatedAt,
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -40,7 +40,7 @@ func TestMySQLStoreFindsAccountIdentity(t *testing.T) {
 	record.PlatformAccountID = "platform-42"
 	record.IdentificationStatus = IdentificationIdentified
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT `+accountColumns+` FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`)).
 		WithArgs(record.UserID, record.Platform, record.PlatformAccountID).
 		WillReturnRows(accountRows(record))
 
@@ -196,7 +196,7 @@ func mysqlTestRecord() AccountRecord {
 func accountRows(records ...AccountRecord) *sqlmock.Rows {
 	rows := sqlmock.NewRows([]string{
 		"id", "user_id", "team_id", "game_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id",
-		"identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie",
+		"remark", "identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie",
 		"cookie_status", "active_cookie_updated_at", "last_checked_at", "created_at", "updated_at",
 	})
 	for _, record := range records {
@@ -208,7 +208,7 @@ func accountRows(records ...AccountRecord) *sqlmock.Rows {
 func accountRowValues(record AccountRecord) []driver.Value {
 	return []driver.Value{
 		record.ID, record.UserID, record.TeamID, record.GameID, record.Platform, nullableString(record.PlatformAccountID), nullableString(record.Name), nullableString(record.AvatarURL), nullableString(record.BrowserProfileID),
-		record.IdentificationStatus, nullableString(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus, nullableString(record.OriginalCookie), nullableString(record.ActiveCookie),
+		nullableString(record.Remark), record.IdentificationStatus, nullableString(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus, nullableString(record.OriginalCookie), nullableString(record.ActiveCookie),
 		nullableString(record.CookieStatus), record.ActiveCookieUpdatedAt, record.LastCheckedAt, record.CreatedAt, record.UpdatedAt,
 	}
 }

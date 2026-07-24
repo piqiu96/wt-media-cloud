@@ -9,6 +9,7 @@ const app = createApp(App)
 const pinia = createPinia()
 const router = createCloudRouter()
 const adminOnlyPaths = new Set(["/users", "/operation-teams", "/games"])
+;(window as any).__WT_MEDIA_APP__ = "cloud"
 
 app.use(pinia)
 app.use(TDesign)
