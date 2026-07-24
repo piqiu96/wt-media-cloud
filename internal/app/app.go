@@ -70,10 +70,17 @@ func NewServer() (*Server, error) {
 		identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: cfg.SessionCookieSecure})
 		runtimeService := runtimebinding.NewService(runtimebinding.NewMySQLStore(result.db))
 		runtimebinding.RegisterRoutes(engine, runtimeService, identityService)
-		profileguard.RegisterRoutes(engine, profileguard.NewService(profileguard.NewMySQLStore(result.db), runtimeService))
+		profileGuardStore := profileguard.NewMySQLStore(result.db)
+		profileguard.RegisterRoutes(engine, profileguard.NewService(profileGuardStore, runtimeService))
 		profileStore := profilebinding.NewMySQLStore(result.db)
 		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore, runtimeService)
-		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(mediaaccount.NewMySQLStore(result.db), mediaaccount.WithProfileResolver(profileStore), mediaaccount.WithUserResolver(identityService)), identityService, taskStore)
+		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(
+			mediaaccount.NewMySQLStore(result.db),
+			mediaaccount.WithProfileResolver(profileStore),
+			mediaaccount.WithProfileFactResolver(profileStore),
+			mediaaccount.WithSensitiveTaskCreator(profileGuardStore),
+			mediaaccount.WithUserResolver(identityService),
+		), identityService, taskStore)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv())
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")

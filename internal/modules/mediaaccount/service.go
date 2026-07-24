@@ -10,6 +10,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/common"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 )
 
 type Platform string
@@ -106,6 +107,29 @@ type IdentifyAccountInput struct {
 	LoginStatus       LoginStatus
 }
 
+type AccountCheckStartInput struct {
+	NodeID string
+}
+
+type AccountCheckStart struct {
+	TaskID                    string      `json:"task_id"`
+	AccountID                 string      `json:"account_id"`
+	BrowserProfileID          string      `json:"browser_profile_id"`
+	BitProfileID              string      `json:"bit_profile_id"`
+	Platform                  Platform    `json:"platform"`
+	ExpectedPlatformAccountID string      `json:"expected_platform_account_id,omitempty"`
+	LoginStatus               LoginStatus `json:"login_status"`
+}
+
+type AccountCheckResultInput struct {
+	TaskID            string
+	PlatformAccountID string
+	Name              string
+	AvatarURL         string
+	LoginStatus       LoginStatus
+	Message           string
+}
+
 type UpdateAccountInput struct {
 	BusinessStatus BusinessStatus
 	LoginStatus    LoginStatus
@@ -140,15 +164,25 @@ type Store interface {
 }
 
 type Service struct {
-	store    Store
-	profiles ProfileResolver
-	users    UserResolver
-	now      func() time.Time
-	newID    func(string) string
+	store          Store
+	profiles       ProfileResolver
+	profileFacts   ProfileFactResolver
+	sensitiveTasks SensitiveTaskCreator
+	users          UserResolver
+	now            func() time.Time
+	newID          func(string) string
 }
 
 type ProfileResolver interface {
 	ResolveProfile(profileID string) (userID identity.UserID, active bool, found bool, err error)
+}
+
+type ProfileFactResolver interface {
+	ResolveProfileForAccountCheck(profileID string) (id string, userID identity.UserID, bitProfileID string, active bool, found bool, err error)
+}
+
+type SensitiveTaskCreator interface {
+	CreateAuthorizedTask(profileguard.SensitiveTask) error
 }
 
 type UserResolver interface {
@@ -167,6 +201,14 @@ func WithIDGenerator(newID func(string) string) Option {
 
 func WithProfileResolver(resolver ProfileResolver) Option {
 	return func(service *Service) { service.profiles = resolver }
+}
+
+func WithProfileFactResolver(resolver ProfileFactResolver) Option {
+	return func(service *Service) { service.profileFacts = resolver }
+}
+
+func WithSensitiveTaskCreator(creator SensitiveTaskCreator) Option {
+	return func(service *Service) { service.sensitiveTasks = creator }
 }
 
 func WithUserResolver(resolver UserResolver) Option {
@@ -422,6 +464,115 @@ func (s *Service) IdentifyAccount(actor identity.PublicUser, accountID string, i
 	}
 	if err := s.audit(actor.ID, "media_account.identify", record.ID, map[string]string{
 		"platform": string(record.Platform), "platform_account_id": record.PlatformAccountID,
+	}); err != nil {
+		return Account{}, err
+	}
+	return record.Account, nil
+}
+
+func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID string, input AccountCheckStartInput) (AccountCheckStart, error) {
+	if actor.Role != identity.RoleOperator {
+		return AccountCheckStart{}, ErrForbidden
+	}
+	if s.profileFacts == nil || s.sensitiveTasks == nil {
+		return AccountCheckStart{}, ErrProfileUnavailable
+	}
+	record, err := s.GetOwnedAccountRecord(actor, accountID)
+	if err != nil {
+		return AccountCheckStart{}, err
+	}
+	if record.BusinessStatus != BusinessEnabled {
+		return AccountCheckStart{}, ErrInvalidInput
+	}
+	if strings.TrimSpace(record.BrowserProfileID) == "" {
+		return AccountCheckStart{}, ErrProfileUnavailable
+	}
+	nodeID := strings.TrimSpace(input.NodeID)
+	if nodeID == "" {
+		return AccountCheckStart{}, ErrInvalidInput
+	}
+	profileID, profileUserID, bitProfileID, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
+	if err != nil {
+		return AccountCheckStart{}, err
+	}
+	if !found || !profileActive || profileUserID != actor.ID || bitProfileID == "" {
+		return AccountCheckStart{}, ErrProfileUnavailable
+	}
+	now := s.now()
+	taskID := s.newID("sensitive-account-check")
+	task := profileguard.SensitiveTask{
+		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
+		Operation: profileguard.OperationAuthenticatedAccountCheck, Status: profileguard.TaskAuthorized,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.sensitiveTasks.CreateAuthorizedTask(task); err != nil {
+		return AccountCheckStart{}, err
+	}
+	if err := s.audit(actor.ID, "media_account.check.start", record.ID, map[string]string{
+		"task_id": taskID, "browser_profile_id": record.BrowserProfileID, "bit_profile_id": bitProfileID,
+	}); err != nil {
+		return AccountCheckStart{}, err
+	}
+	return AccountCheckStart{
+		TaskID: taskID, AccountID: record.ID, BrowserProfileID: record.BrowserProfileID, BitProfileID: bitProfileID,
+		Platform: record.Platform, ExpectedPlatformAccountID: record.PlatformAccountID, LoginStatus: record.LoginStatus,
+	}, nil
+}
+
+func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accountID string, input AccountCheckResultInput) (Account, error) {
+	record, err := s.GetOwnedAccountRecord(actor, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	if strings.TrimSpace(input.TaskID) == "" || !validLoginStatus(input.LoginStatus) {
+		return Account{}, ErrInvalidInput
+	}
+	now := s.now()
+	platformAccountID := strings.TrimSpace(input.PlatformAccountID)
+	if input.LoginStatus == LoginNormal {
+		if platformAccountID == "" {
+			return Account{}, ErrInvalidInput
+		}
+		existing, found, err := s.store.FindByIdentity(record.UserID, record.Platform, platformAccountID)
+		if err != nil {
+			return Account{}, err
+		}
+		if found && existing.ID != record.ID {
+			record.IdentificationStatus = IdentificationDuplicate
+			record.DuplicateOfAccountID = existing.ID
+			record.LoginStatus = LoginAccountMismatch
+			record.UpdatedAt = now
+			record.LastCheckedAt = &now
+			if err := s.store.Update(record); err != nil {
+				return Account{}, err
+			}
+			if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
+				"task_id": strings.TrimSpace(input.TaskID), "login_status": string(record.LoginStatus), "message": "duplicate:" + existing.ID,
+			}); err != nil {
+				return Account{}, err
+			}
+			return record.Account, nil
+		}
+		record.PlatformAccountID = platformAccountID
+		record.Name = strings.TrimSpace(input.Name)
+		record.AvatarURL = strings.TrimSpace(input.AvatarURL)
+		record.IdentificationStatus = IdentificationIdentified
+		record.DuplicateOfAccountID = ""
+	} else if platformAccountID != "" && record.PlatformAccountID != "" && platformAccountID != record.PlatformAccountID {
+		record.LoginStatus = LoginAccountMismatch
+	} else {
+		record.LoginStatus = input.LoginStatus
+	}
+	if record.LoginStatus != LoginAccountMismatch {
+		record.LoginStatus = input.LoginStatus
+	}
+	record.UpdatedAt = now
+	record.LastCheckedAt = &now
+	if err := s.store.Update(record); err != nil {
+		return Account{}, err
+	}
+	if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
+		"task_id": strings.TrimSpace(input.TaskID), "login_status": string(record.LoginStatus), "message": strings.TrimSpace(input.Message),
 	}); err != nil {
 		return Account{}, err
 	}

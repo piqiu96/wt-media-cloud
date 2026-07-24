@@ -9,6 +9,8 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   taskStatus: "local_agent_task_status",
   bind: "local_agent_bind",
   bindSession: "local_agent_bind_session",
+  refreshRuntime: "local_agent_refresh_runtime",
+  accountCheck: "local_agent_account_check",
   profileScan: "local_agent_profile_scan",
   profileRestore: "local_agent_profile_restore",
 });
@@ -98,6 +100,24 @@ export function createLocalAgentService({ invoke }) {
       });
       return normalizeBoundNode(result);
     },
+    async refreshRuntime({ cloudBaseUrl }) {
+      return normalizeLocalAgentStatus(await invoke(LOCAL_AGENT_COMMANDS.refreshRuntime, {
+        args: {
+          cloud_base_url: cloudBaseUrl,
+        },
+      }));
+    },
+    async accountCheck({ cloudBaseUrl, taskId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
+      return invoke(LOCAL_AGENT_COMMANDS.accountCheck, {
+        args: {
+          cloud_base_url: cloudBaseUrl,
+          task_id: taskId,
+          bit_profile_id: bitProfileId,
+          platform,
+          expected_platform_account_id: expectedPlatformAccountId,
+        },
+      });
+    },
     async profileScan() {
       return invoke(LOCAL_AGENT_COMMANDS.profileScan);
     },
@@ -139,6 +159,18 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
     async bindSession() {
       current = normalizeLocalAgentStatus({ ...current, node_id: "node-mock" });
       return { id: "node-mock", agent_id: current.agent_id, user_id: "user-mock", status: "online" };
+    },
+    async refreshRuntime() {
+      return clone(current);
+    },
+    async accountCheck() {
+      return {
+        platform_account_id: "mock-uid",
+        name: "",
+        avatar_url: "",
+        login_status: "normal",
+        message: "mock account check",
+      };
     },
     async profileScan() {
       return { main_user_id: current.main_user_id || "main-user-mock", profiles: [] };

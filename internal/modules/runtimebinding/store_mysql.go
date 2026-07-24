@@ -132,9 +132,6 @@ func (s *MySQLStore) CheckLocalTrust(userID identity.UserID, nodeID string, at t
 }
 
 func (s *MySQLStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID string, profileIDs []string) (bool, error) {
-	if len(profileIDs) == 0 {
-		return false, nil
-	}
 	var boundMain sql.NullString
 	err := s.db.QueryRow(`SELECT bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`, userID).Scan(&boundMain)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -145,6 +142,9 @@ func (s *MySQLStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID 
 	}
 	if !boundMain.Valid || boundMain.String != mainUserID {
 		return false, nil
+	}
+	if len(profileIDs) == 0 {
+		return true, nil
 	}
 	args := make([]any, 0, 2+len(profileIDs))
 	args = append(args, userID, mainUserID)

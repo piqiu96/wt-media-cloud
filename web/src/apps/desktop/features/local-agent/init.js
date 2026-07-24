@@ -51,6 +51,7 @@ function createHttpLocalAgentService() {
     async taskStatus(_taskId) { return { ...DEFAULT, current_task_id: _taskId } },
     async bind() { return { id: "node-http", agent_id: "local-agent-dev", user_id: "", status: "bound" } },
     async bindSession() { throw new Error("请在Desktop应用内绑定当前电脑") },
+    async refreshRuntime() { throw new Error("请在Desktop应用内刷新本机可信状态") },
     async profileScan() { throw new Error("请在Desktop应用内读取BitBrowser身份") },
   }
 }
@@ -60,10 +61,10 @@ function isTauri() {
 }
 
 function cloudBaseUrl() {
-  if (typeof window === "undefined") return "http://127.0.0.1:8080"
-  const origin = window.location?.origin || "http://127.0.0.1:8080"
+  if (typeof window === "undefined") return "http://127.0.0.1:18080"
+  const origin = window.location?.origin || "http://127.0.0.1:18080"
   if (origin === "http://127.0.0.1:5174" || origin === "http://localhost:5174") {
-    return "http://127.0.0.1:8080"
+    return "http://127.0.0.1:18080"
   }
   return origin
 }
@@ -117,6 +118,15 @@ export async function bindTrustedLocalAgent() {
       throw new Error("当前比特浏览器登录账号与系统绑定账号不一致，已阻止本机浏览器相关操作。请切换回已绑定的比特浏览器账号后重新检测；如果系统绑定错误，请联系管理员解除绑定后重新绑定。")
     }
     throw error
+  }
+  const status = await service.status()
+  if (status.node_id) {
+    try {
+      await service.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
+      return createDesktopStatusPreview()
+    } catch (error) {
+      console.warn("刷新本机可信状态失败，将重新确认并绑定当前Desktop执行凭证", error)
+    }
   }
   const ticket = await createRuntimeBindingClient().createBindingTicket()
   await service.bindSession({

@@ -38,6 +38,13 @@ const scanDetailVisible = ref(false)
 const currentScan = ref(null)
 const identityError = ref("")
 const selectedTab = ref("changed")
+const acceptConfirmVisible = ref(false)
+const acceptConfirmMessage = ref("")
+const restoreConfirmVisible = ref(false)
+const restoreConfirmMessage = ref("")
+const restoreTargets = ref([])
+let lastRuntimeRefreshAt = 0
+let lastRuntimeStatus = null
 
 const currentUser = ref(null)
 const isDesktopClient = computed(() => isDesktop())
@@ -55,10 +62,50 @@ async function desktopLocalAgentService() {
   return createLocalAgentService({ invoke })
 }
 
+function cloudBaseUrl() {
+  if (typeof window === "undefined") return "http://127.0.0.1:18080"
+  const origin = window.location?.origin || "http://127.0.0.1:18080"
+  if (origin === "http://127.0.0.1:5174" || origin === "http://localhost:5174") {
+    return "http://127.0.0.1:18080"
+  }
+  return origin
+}
+
 async function currentLocalNodeId() {
   const service = await desktopLocalAgentService()
-  const status = await service.status()
+  const status = await refreshRuntimeWithCooldown(service)
   return status.node_id || ""
+}
+
+async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
+  const now = Date.now()
+  if (!force && lastRuntimeStatus?.node_id && now - lastRuntimeRefreshAt < 60_000) {
+    return lastRuntimeStatus
+  }
+  const localStatus = await service.status()
+  try {
+    const refreshed = await service.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
+    lastRuntimeStatus = refreshed
+    lastRuntimeRefreshAt = now
+    return refreshed
+  } catch (e) {
+    if (localStatus?.node_id) {
+      taskNotice.value = "本机状态已读取，Cloud可信状态刷新暂时失败；将继续由Cloud预检判断是否可执行。"
+      lastRuntimeStatus = localStatus
+      lastRuntimeRefreshAt = now
+      return localStatus
+    }
+    throw e
+  }
+}
+
+function diffCount(scan) {
+  const diff = getDiff(scan)
+  return (diff.added?.length || 0) + (diff.changed?.length || 0) + (diff.missing?.length || 0)
+}
+
+function hasDiff(scan) {
+  return diffCount(scan) > 0
 }
 
 function localTrustMessage(e) {
@@ -179,7 +226,7 @@ async function triggerScan() {
   error.value = ""
   try {
     const localAgent = await desktopLocalAgentService()
-    const status = await localAgent.status()
+    const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
     if (!status.node_id) {
       throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
     }
@@ -225,17 +272,27 @@ async function acceptLocalChanges() {
     return
   }
   const diff = getDiff(currentScan.value)
-  const total = (diff.added?.length || 0) + (diff.changed?.length || 0) + (diff.missing?.length || 0)
+  const total = diffCount(currentScan.value)
+  if (total === 0) {
+    taskNotice.value = "本机窗口与Cloud记录一致，无需处理。"
+    return
+  }
   const message = total > 0
     ? `确定接受本机扫描结果并更新Cloud窗口镜像？本次会处理 ${total} 项差异，但不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。`
     : "本次扫描没有差异，确认后只会记录本次扫描已处理。"
-  if (!confirm(message)) return
+  acceptConfirmMessage.value = message
+  acceptConfirmVisible.value = true
+}
+
+async function confirmAcceptLocalChanges() {
+  if (!currentScan.value) return
   acceptingScan.value = true
   error.value = ""
   try {
     const nodeId = await currentLocalNodeId()
     currentScan.value = await bindingClient.confirm(currentScan.value.id || currentScan.value.scan_id, { nodeId })
     taskNotice.value = "已接受本地变化，Cloud浏览器窗口镜像已按允许字段更新。"
+    acceptConfirmVisible.value = false
     await loadProfiles()
   } catch (e) {
     error.value = localTrustMessage(e)
@@ -278,22 +335,30 @@ async function restoreCloudConfig() {
     error.value = "当前扫描没有可恢复的Cloud窗口配置；本地新增窗口只能选择接受本地变化。"
     return
   }
-  if (!confirm(`确定将 ${targets.length} 个Cloud已保存窗口配置写回本机BitBrowser，并在写回后重新读回验证？本操作不会写入账号、Cookie、授权用户或业务状态。`)) return
+  restoreTargets.value = targets
+  restoreConfirmMessage.value = `确定将 ${targets.length} 个Cloud已保存窗口配置写回本机BitBrowser，并在写回后重新读回验证？本操作不会写入账号、Cookie、授权用户或业务状态。`
+  restoreConfirmVisible.value = true
+}
+
+async function confirmRestoreCloudConfig() {
+  if (!currentScan.value || !restoreTargets.value.length) return
   restoringCloud.value = true
   error.value = ""
   try {
     const localAgent = await desktopLocalAgentService()
-    const status = await localAgent.status()
+    const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
     if (!status.node_id) {
       throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
     }
-    const result = await localAgent.profileRestore(targets)
+    const result = await localAgent.profileRestore(restoreTargets.value)
     const readback = result.snapshot || {}
     currentScan.value = await bindingClient.submit({
       main_user_id: readback.main_user_id || currentUser.value?.id,
       profiles: readback.profiles || [],
     }, { nodeId: status.node_id })
-    taskNotice.value = `已恢复 ${result.restored_count || targets.length} 个窗口的Cloud配置，并已读回验证。`
+    taskNotice.value = `已恢复 ${result.restored_count || restoreTargets.value.length} 个窗口的Cloud配置，并已读回验证。`
+    restoreConfirmVisible.value = false
+    restoreTargets.value = []
     selectedTab.value = "changed"
     await loadProfiles()
   } catch (e) {
@@ -514,7 +579,18 @@ const diffColumns = [
     <t-drawer v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close>
       <div v-if="currentScan">
         <t-alert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
-        <t-alert message="接受本地变化后，会更新Cloud窗口镜像中的名称、分组、代理摘要、运行状态等允许字段；不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。" theme="warning" style="margin-bottom:16px" />
+        <t-alert
+          v-if="hasDiff(currentScan)"
+          message="接受本地变化后，会更新Cloud窗口镜像中的名称、分组、代理摘要、运行状态等允许字段；不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。"
+          theme="warning"
+          style="margin-bottom:16px"
+        />
+        <t-alert
+          v-else
+          message="本机窗口与Cloud记录一致，无需处理。"
+          theme="success"
+          style="margin-bottom:16px"
+        />
         <t-tabs v-model="selectedTab" :default-value="'changed'">
           <t-tab-panel value="added" label="新增">
             <t-table v-if="getDiff(currentScan).added?.length" :data="getDiff(currentScan).added.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="diffColumns" size="small">
@@ -548,12 +624,42 @@ const diffColumns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="default" :loading="restoringCloud" @click="restoreCloudConfig">恢复Cloud配置并读回验证</t-button>
-          <t-button v-if="currentScan?.status === 'ready'" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
+          <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
+          <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="default" :loading="restoringCloud" @click="restoreCloudConfig">恢复Cloud配置并读回验证</t-button>
+          <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>
       </template>
     </t-drawer>
+
+    <t-dialog
+      v-model:visible="acceptConfirmVisible"
+      header="接受本地变化"
+      :confirm-btn="{ loading: acceptingScan, theme: 'primary', content: '确认接受' }"
+      :cancel-btn="{ disabled: acceptingScan }"
+      @confirm="confirmAcceptLocalChanges"
+    >
+      <t-alert
+        theme="warning"
+        message="接受后只更新Cloud窗口镜像中的允许字段，不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie和业务状态。"
+        style="margin-bottom:12px"
+      />
+      <p>{{ acceptConfirmMessage }}</p>
+    </t-dialog>
+
+    <t-dialog
+      v-model:visible="restoreConfirmVisible"
+      header="恢复Cloud配置"
+      :confirm-btn="{ loading: restoringCloud, theme: 'primary', content: '确认恢复' }"
+      :cancel-btn="{ disabled: restoringCloud }"
+      @confirm="confirmRestoreCloudConfig"
+    >
+      <t-alert
+        theme="warning"
+        message="恢复会把Cloud已保存的窗口配置写回本机BitBrowser，并在写回后重新扫描验证；不会写入账号、Cookie、授权用户或业务状态。"
+        style="margin-bottom:12px"
+      />
+      <p>{{ restoreConfirmMessage }}</p>
+    </t-dialog>
   </t-loading>
 </template>
 

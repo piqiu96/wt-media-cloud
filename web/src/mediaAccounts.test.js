@@ -85,4 +85,45 @@ describe('media account client', () => {
       method: 'DELETE', credentials: 'include',
     }))
   })
+
+  it('starts local account check and submits safe result facts', async () => {
+    const fetch = vi.fn(async () => response({ task_id: 'task-1' }))
+    const client = createMediaAccountClient({ fetch })
+
+    await client.check('account-1', { nodeId: 'node-1' })
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts/account-1/check', expect.objectContaining({
+      method: 'POST',
+      credentials: 'include',
+      body: JSON.stringify({ node_id: 'node-1' }),
+    }))
+
+    fetch.mockResolvedValueOnce(response({
+      id: 'account-1',
+      platform_account_id: '123',
+      original_cookie: 'server-must-not-return-this',
+    }))
+    const updated = await client.submitCheckResult('account-1', {
+      taskId: 'task-1',
+      platformAccountId: '123',
+      name: '',
+      avatarUrl: '',
+      loginStatus: 'normal',
+      message: 'ok',
+    })
+
+    expect(fetch).toHaveBeenLastCalledWith('/api/v1/media-accounts/account-1/check/result', expect.objectContaining({
+      method: 'POST',
+      credentials: 'include',
+      body: JSON.stringify({
+        task_id: 'task-1',
+        platform_account_id: '123',
+        name: '',
+        avatar_url: '',
+        login_status: 'normal',
+        message: 'ok',
+      }),
+    }))
+    expect(updated.original_cookie).toBeUndefined()
+  })
 })

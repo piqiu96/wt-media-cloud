@@ -45,6 +45,19 @@ type bindProfileRequest struct {
 	BrowserProfileID string `json:"browser_profile_id"`
 }
 
+type startAccountCheckRequest struct {
+	NodeID string `json:"node_id"`
+}
+
+type accountCheckResultRequest struct {
+	TaskID            string      `json:"task_id"`
+	PlatformAccountID string      `json:"platform_account_id"`
+	Name              string      `json:"name"`
+	AvatarURL         string      `json:"avatar_url"`
+	LoginStatus       LoginStatus `json:"login_status"`
+	Message           string      `json:"message"`
+}
+
 type TaskCreator interface {
 	Create(cloudagent.CreateTaskRequest) cloudagent.Task
 }
@@ -162,25 +175,33 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
-		if tasks == nil {
-			common.Failure(c, 503, 30006, "任务服务不可用", nil)
+		var req startAccountCheckRequest
+		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		record, err := service.GetOwnedAccountRecord(actor, c.Param("account_id"))
+		start, err := service.StartLocalAccountCheck(actor, c.Param("account_id"), AccountCheckStartInput(req))
 		if err != nil {
 			writeMediaAccountError(c, err)
 			return
 		}
-		if record.BrowserProfileID == "" {
-			writeMediaAccountError(c, ErrProfileUnavailable)
+		common.Created(c, start)
+	})
+
+	h.POST("/api/v1/media-accounts/:account_id/check/result", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
 			return
 		}
-		task := tasks.Create(cloudagent.CreateTaskRequest{
-			TaskType:       cloudagent.TaskTypeAccountCheck.String(),
-			IdempotencyKey: "account-check:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + common.NewID("attempt"),
-			Payload:        map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform, "platform_account_id": record.PlatformAccountID},
-		})
-		common.Created(c, task)
+		var req accountCheckResultRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		account, err := service.ApplyLocalAccountCheckResult(actor, c.Param("account_id"), AccountCheckResultInput(req))
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, account)
 	})
 
 	h.POST("/api/v1/media-accounts/:account_id/cookies/read", func(ctx context.Context, c *hertzapp.RequestContext) {

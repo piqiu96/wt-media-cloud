@@ -4,6 +4,7 @@ import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
+import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 
 const accountClient = createMediaAccountClient()
@@ -36,9 +37,13 @@ const detailAccount = ref(null)
 const detailRemark = ref("")
 const detailProfileId = ref("")
 const savingDetail = ref(false)
+const checkingAccount = ref(false)
+const checkNotice = ref("")
 
 const tagInput = ref("")
 const selectedAccountIds = ref([])
+let lastRuntimeRefreshAt = 0
+let lastRuntimeStatus = null
 
 onMounted(async () => {
   try {
@@ -131,6 +136,7 @@ function openDetail(account) {
   detailAccount.value = account
   detailRemark.value = account.remark || ""
   detailProfileId.value = account.browser_profile_id || ""
+  checkNotice.value = ""
   detailVisible.value = true
 }
 
@@ -198,6 +204,100 @@ function executableText(account) {
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   if (account.login_status !== "normal") return "待检查：需要真实账号检查"
   return "可进入后续预检"
+}
+
+function loginStatusText(status) {
+  return {
+    unknown: "待检查",
+    normal: "登录正常",
+    not_logged_in: "未登录",
+    verification_needed: "需要验证码",
+    expired: "已失效",
+    restricted: "受限",
+    account_mismatch: "账号不一致",
+    environment_error: "环境异常",
+  }[status] || status || "-"
+}
+
+function canCheckAccount(account) {
+  return isDesktop && account && account.business_status === "enabled" && !!account.browser_profile_id
+}
+
+function cloudBaseUrl() {
+  if (typeof window === "undefined") return "http://127.0.0.1:18080"
+  const origin = window.location?.origin || "http://127.0.0.1:18080"
+  if (origin === "http://127.0.0.1:5174" || origin === "http://localhost:5174") {
+    return "http://127.0.0.1:18080"
+  }
+  return origin
+}
+
+async function desktopLocalAgentService() {
+  if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
+    throw new Error("账号检查只能在 Desktop 客户端执行")
+  }
+  const { invoke } = await import("@tauri-apps/api/core")
+  return createLocalAgentService({ invoke })
+}
+
+async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
+  const now = Date.now()
+  if (!force && lastRuntimeStatus?.node_id && now - lastRuntimeRefreshAt < 60_000) {
+    return lastRuntimeStatus
+  }
+  const localStatus = await service.status()
+  try {
+    const refreshed = await service.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
+    lastRuntimeStatus = refreshed
+    lastRuntimeRefreshAt = now
+    return refreshed
+  } catch (e) {
+    if (localStatus?.node_id) {
+      checkNotice.value = "本机状态已读取，Cloud可信状态刷新暂时失败；将继续由Cloud预检判断是否可执行。"
+      lastRuntimeStatus = localStatus
+      lastRuntimeRefreshAt = now
+      return localStatus
+    }
+    throw e
+  }
+}
+
+async function checkDetailAccount() {
+  if (!detailAccount.value || !canCheckAccount(detailAccount.value)) return
+  checkingAccount.value = true
+  checkNotice.value = ""
+  error.value = ""
+  try {
+    const service = await desktopLocalAgentService()
+    const status = await refreshRuntimeWithCooldown(service)
+    const nodeId = status.node_id || ""
+    if (!nodeId) {
+      throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
+    }
+    const start = await accountClient.check(detailAccount.value.id, { nodeId })
+    const localResult = await service.accountCheck({
+      cloudBaseUrl: cloudBaseUrl(),
+      taskId: start.task_id,
+      bitProfileId: start.bit_profile_id,
+      platform: start.platform,
+      expectedPlatformAccountId: start.expected_platform_account_id || "",
+    })
+    const updated = await accountClient.submitCheckResult(detailAccount.value.id, {
+      taskId: start.task_id,
+      platformAccountId: localResult.platform_account_id,
+      name: localResult.name,
+      avatarUrl: localResult.avatar_url,
+      loginStatus: localResult.login_status,
+      message: localResult.message,
+    })
+    detailAccount.value = { ...detailAccount.value, ...updated }
+    checkNotice.value = localResult.message || `检查完成：${loginStatusText(updated.login_status)}`
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "账号检查失败"
+  } finally {
+    checkingAccount.value = false
+  }
 }
 
 function formatTime(t) {
@@ -325,7 +425,7 @@ const columns = [
       <template #game_id="{ row }">{{ gameName(row.game_id) }}</template>
       <template #browser_profile_id="{ row }">{{ row.browser_profile_id ? profileLabel(row.browser_profile_id) : '未绑定' }}</template>
       <template #login_status="{ row }">
-        <BusinessStatus :status="row.login_status === 'normal' ? 'normal' : row.login_status === 'unknown' ? 'pending_review' : 'warning'" :label="row.login_status" />
+        <BusinessStatus :status="row.login_status === 'normal' ? 'normal' : row.login_status === 'unknown' ? 'pending_review' : 'warning'" :label="loginStatusText(row.login_status)" />
       </template>
       <template #business_status="{ row }">
         <BusinessStatus :status="row.business_status === 'enabled' ? 'normal' : row.business_status === 'disabled' ? 'paused' : 'expired'" :label="row.business_status" />
@@ -382,9 +482,13 @@ const columns = [
         <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>
         <t-descriptions-item label="游戏">{{ gameName(detailAccount.game_id) }}</t-descriptions-item>
         <t-descriptions-item label="绑定窗口">{{ detailAccount.browser_profile_id ? profileLabel(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
+        <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
+        <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>
+        <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.login_status) }}</t-descriptions-item>
         <t-descriptions-item label="可执行结论">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_checked_at ? formatTime(detailAccount.last_checked_at) : '尚未检查' }}</t-descriptions-item>
       </t-descriptions>
+      <t-alert v-if="checkNotice" :message="checkNotice" theme="success" style="margin-top:12px" />
 
       <t-form v-if="detailAccount" class="detail-form" label-width="92px">
         <t-form-item label="备注">
@@ -404,6 +508,7 @@ const columns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="detailVisible = false">关闭</t-button>
+          <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查账号</t-button>
           <t-button theme="primary" :loading="savingDetail" @click="saveDetail">保存</t-button>
         </t-space>
       </template>

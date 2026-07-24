@@ -62,8 +62,18 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     unbindProfile(accountId) {
       return api.delete(`/media-accounts/${accountId}/profile`).then(sanitize)
     },
-    check(accountId) {
-      return api.post(`/media-accounts/${accountId}/check`, {})
+    check(accountId, { nodeId } = {}) {
+      return api.post(`/media-accounts/${accountId}/check`, { node_id: nodeId })
+    },
+    submitCheckResult(accountId, { taskId, platformAccountId, name, avatarUrl, loginStatus, message }) {
+      return api.post(`/media-accounts/${accountId}/check/result`, {
+        task_id: taskId,
+        platform_account_id: platformAccountId,
+        name,
+        avatar_url: avatarUrl,
+        login_status: loginStatus,
+        message,
+      }).then(sanitize)
     },
     addTags(accountIds, tags) {
       return api.post('/media-accounts/tags/add', { account_ids: accountIds, tags })

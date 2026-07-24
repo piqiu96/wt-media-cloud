@@ -84,6 +84,22 @@ func (s *MySQLStore) ResolveProfile(profileID string) (identity.UserID, bool, bo
 	return userID, status == ProfileActive, true, nil
 }
 
+func (s *MySQLStore) ResolveProfileForAccountCheck(profileID string) (string, identity.UserID, string, bool, bool, error) {
+	var id string
+	var userID identity.UserID
+	var bitProfileID string
+	var status ProfileLocalStatus
+	err := s.db.QueryRow(`SELECT id, user_id, bit_profile_id, local_status FROM browser_profiles WHERE id = ?`, profileID).
+		Scan(&id, &userID, &bitProfileID, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, "", false, false, nil
+	}
+	if err != nil {
+		return "", 0, "", false, false, err
+	}
+	return id, userID, bitProfileID, status == ProfileActive, true, nil
+}
+
 func (s *MySQLStore) GetProfile(profileID string) (BrowserProfile, bool, error) {
 	row := s.db.QueryRow(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE id = ?`, profileID)
 	profile, err := scanProfile(row)

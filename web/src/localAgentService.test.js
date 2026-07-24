@@ -30,4 +30,54 @@ describe('local agent desktop service', () => {
     await expect(service.profileRestore(profiles)).resolves.toEqual(result)
     expect(invoke).toHaveBeenCalledWith('local_agent_profile_restore', { profiles })
   })
+
+  it('proxies account check through Tauri invoke without exposing agent credentials', async () => {
+    const result = { platform_account_id: '123', login_status: 'normal' }
+    const invoke = vi.fn(async (command, args) => {
+      if (command === LOCAL_AGENT_COMMANDS.accountCheck) {
+        expect(args).toEqual({
+          args: {
+            cloud_base_url: 'http://127.0.0.1:5176',
+            task_id: 'task-1',
+            bit_profile_id: 'bit-profile-1',
+            platform: 'bilibili',
+            expected_platform_account_id: '123',
+          },
+        })
+        return result
+      }
+      return {}
+    })
+    const service = createLocalAgentService({ invoke })
+
+    await expect(service.accountCheck({
+      cloudBaseUrl: 'http://127.0.0.1:5176',
+      taskId: 'task-1',
+      bitProfileId: 'bit-profile-1',
+      platform: 'bilibili',
+      expectedPlatformAccountId: '123',
+    })).resolves.toEqual(result)
+    expect(invoke).toHaveBeenCalledWith('local_agent_account_check', expect.any(Object))
+  })
+
+  it('proxies runtime refresh through Tauri invoke without exposing node credentials', async () => {
+    const status = { node_id: 'node-1', agent_id: 'local-agent-dev', status: 'idle' }
+    const invoke = vi.fn(async (command, args) => {
+      if (command === LOCAL_AGENT_COMMANDS.refreshRuntime) {
+        expect(args).toEqual({
+          args: {
+            cloud_base_url: 'http://127.0.0.1:18080',
+          },
+        })
+        return status
+      }
+      return {}
+    })
+    const service = createLocalAgentService({ invoke })
+
+    await expect(service.refreshRuntime({
+      cloudBaseUrl: 'http://127.0.0.1:18080',
+    })).resolves.toEqual(expect.objectContaining({ node_id: 'node-1' }))
+    expect(invoke).toHaveBeenCalledWith('local_agent_refresh_runtime', expect.any(Object))
+  })
 })

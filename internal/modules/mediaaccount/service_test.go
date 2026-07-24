@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 )
 
 func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
@@ -285,6 +286,62 @@ func TestServiceUnbindsProfileAndRejectsDisabledBinding(t *testing.T) {
 	}
 }
 
+func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testing.T) {
+	store := newMemoryStore()
+	facts := &fakeProfileFacts{profiles: map[string]fakeProfileFact{
+		"profile-1": {id: "profile-1", userID: 1, bitProfileID: "bit-profile-1", active: true},
+	}}
+	tasks := &fakeSensitiveTasks{}
+	service := newTestServiceForAccountCheck(store, facts, tasks)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	store.records[account.ID] = AccountRecord{Account: Account{
+		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+	}}
+
+	start, err := service.StartLocalAccountCheck(actor, account.ID, AccountCheckStartInput{NodeID: "node-1"})
+	if err != nil {
+		t.Fatalf("StartLocalAccountCheck() error=%v", err)
+	}
+	if start.BitProfileID != "bit-profile-1" || start.Platform != PlatformBilibili {
+		t.Fatalf("start=%#v", start)
+	}
+	if len(tasks.tasks) != 1 {
+		t.Fatalf("created sensitive tasks=%d, want 1", len(tasks.tasks))
+	}
+	task := tasks.tasks[0]
+	if task.Operation != profileguard.OperationAuthenticatedAccountCheck || task.NodeID != "node-1" || task.BitProfileID != "bit-profile-1" {
+		t.Fatalf("task=%#v", task)
+	}
+}
+
+func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	store.records[first.ID] = AccountRecord{Account: Account{
+		ID: first.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		PlatformAccountID: "uid-1", IdentificationStatus: IdentificationIdentified, BusinessStatus: BusinessEnabled, LoginStatus: LoginNormal,
+	}}
+	store.records[second.ID] = AccountRecord{Account: Account{
+		ID: second.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		BrowserProfileID: "profile-2", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+	}}
+
+	updated, err := service.ApplyLocalAccountCheckResult(actor, second.ID, AccountCheckResultInput{
+		TaskID: "task-1", PlatformAccountID: "uid-1", LoginStatus: LoginNormal,
+	})
+	if err != nil {
+		t.Fatalf("ApplyLocalAccountCheckResult() error=%v", err)
+	}
+	if updated.LoginStatus != LoginAccountMismatch || updated.IdentificationStatus != IdentificationDuplicate || updated.DuplicateOfAccountID != first.ID {
+		t.Fatalf("updated=%#v", updated)
+	}
+}
+
 func TestServiceFiltersByStatusAndSearch(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
@@ -341,6 +398,21 @@ func newTestServiceWithProfiles(store Store, resolver ProfileResolver) *Service 
 		next++
 		return prefix + "-profile-test-" + string(rune('0'+next))
 	}))
+}
+
+func newTestServiceForAccountCheck(store Store, facts ProfileFactResolver, tasks SensitiveTaskCreator) *Service {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	next := 0
+	return NewService(store,
+		WithUserResolver(testUserResolver()),
+		WithProfileFactResolver(facts),
+		WithSensitiveTaskCreator(tasks),
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(func(prefix string) string {
+			next++
+			return prefix + "-check-test-" + string(rune('0'+next))
+		}),
+	)
 }
 
 func containsSecretField(value string) bool {
@@ -509,6 +581,31 @@ type fakeProfileResolver struct {
 func (r *fakeProfileResolver) ResolveProfile(profileID string) (userID identity.UserID, active bool, found bool, err error) {
 	userID, found = r.profiles[profileID]
 	return userID, !r.inactive[profileID], found, nil
+}
+
+type fakeProfileFact struct {
+	id           string
+	userID       identity.UserID
+	bitProfileID string
+	active       bool
+}
+
+type fakeProfileFacts struct {
+	profiles map[string]fakeProfileFact
+}
+
+func (r *fakeProfileFacts) ResolveProfileForAccountCheck(profileID string) (string, identity.UserID, string, bool, bool, error) {
+	profile, found := r.profiles[profileID]
+	return profile.id, profile.userID, profile.bitProfileID, profile.active, found, nil
+}
+
+type fakeSensitiveTasks struct {
+	tasks []profileguard.SensitiveTask
+}
+
+func (s *fakeSensitiveTasks) CreateAuthorizedTask(task profileguard.SensitiveTask) error {
+	s.tasks = append(s.tasks, task)
+	return nil
 }
 
 type fakeUserResolver struct {

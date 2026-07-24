@@ -21,7 +21,7 @@ describe('local agent status page', () => {
     expect(page.trustText).toBe('可执行本机浏览器操作')
     expect(page.trustReason).toContain('扫描窗口、配置代理和检查账号')
     expect(page.canBindTrustedNode).toBe(true)
-    expect(page.bindActionText).toBe('刷新本机可信状态')
+    expect(page.bindActionText).toBe('确认并刷新本机可信环境')
   })
 
   it('uses first-bind wording before a local node exists', () => {

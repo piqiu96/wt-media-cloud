@@ -56,7 +56,7 @@ export function createLocalAgentStatusPage(snapshot, context = {}) {
     trustReason: reason,
     canRefresh: true,
     canBindTrustedNode: !!context.canBindTrustedNode && componentsReady,
-    bindActionText: bound ? "刷新本机可信状态" : "绑定当前比特浏览器账号",
+    bindActionText: bound ? "确认并刷新本机可信环境" : "绑定当前比特浏览器账号",
     actions: [
       {
         id: "start",

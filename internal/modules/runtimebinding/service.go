@@ -227,14 +227,12 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 		if len(profileIDs) != len(report.BitProfileIDs) {
 			return ErrInvalidInput
 		}
-		if len(profileIDs) > 0 {
-			valid, err := s.store.ValidateRuntimeProfiles(node.UserID, report.MainUserID, profileIDs)
-			if err != nil {
-				return err
-			}
-			if !valid {
-				return ErrProfileOwnershipMismatch
-			}
+		valid, err := s.store.ValidateRuntimeProfiles(node.UserID, report.MainUserID, nil)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return ErrProfileOwnershipMismatch
 		}
 		report.BitProfileIDs = profileIDs
 	}

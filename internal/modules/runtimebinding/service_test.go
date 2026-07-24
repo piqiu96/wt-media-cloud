@@ -78,6 +78,9 @@ func (s *memoryStore) ValidateRuntimeProfiles(userID identity.UserID, mainUserID
 	if mainUserID != "main-user-1" {
 		return false, nil
 	}
+	if len(profileIDs) == 0 {
+		return true, nil
+	}
 	for _, profileID := range profileIDs {
 		if !s.validProfiles[runtimeKey(profileID, userID)] {
 			return false, nil
@@ -197,7 +200,7 @@ func TestCheckLocalTrustRequiresFreshOnlineNodeAndActiveSession(t *testing.T) {
 	}
 }
 
-func TestRuntimeReportValidatesOwnerAndEveryActiveProfile(t *testing.T) {
+func TestRuntimeReportValidatesMainIdentityAndLeavesUnknownProfilesToDiff(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
@@ -221,8 +224,11 @@ func TestRuntimeReportValidatesOwnerAndEveryActiveProfile(t *testing.T) {
 	}
 	report.MainUserID = "main-user-1"
 	report.BitProfileIDs = append(report.BitProfileIDs, "unknown-profile")
-	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); !errors.Is(err, ErrProfileOwnershipMismatch) {
-		t.Fatalf("profile mismatch error = %v", err)
+	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); err != nil {
+		t.Fatalf("unknown local profile should be accepted for later diff handling, got %v", err)
+	}
+	if len(store.appliedReport.BitProfileIDs) != 3 {
+		t.Fatalf("applied profile ids = %+v, want 3 ids preserved for runtime projection", store.appliedReport.BitProfileIDs)
 	}
 }
 
