@@ -51,6 +51,20 @@ func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
 	}
 }
 
+func TestServiceAllowsLedgerAccountWithoutGame(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+
+	account, err := service.CreateAccount(actor, CreateAccountInput{Platform: PlatformBilibili, Remark: "先建台账后绑定游戏"})
+	if err != nil {
+		t.Fatalf("CreateAccount(no game) error = %v", err)
+	}
+	if account.GameID != "" || account.BusinessStatus != BusinessEnabled || account.LoginStatus != LoginUnknown {
+		t.Fatalf("account defaults = %#v", account)
+	}
+}
+
 func TestServiceRejectsCrossUserAndOutOfGameScope(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := mediaActor(1, 10, identity.RoleSeniorOperator)

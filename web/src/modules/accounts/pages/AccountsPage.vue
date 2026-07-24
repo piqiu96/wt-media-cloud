@@ -27,6 +27,7 @@ const searchBizStatus = ref("")
 const searchLoginStatus = ref("")
 const searchTags = ref("")
 const searchGameId = ref("")
+const pagination = ref({ current: 1, pageSize: 20 })
 
 const showCreate = ref(false)
 const createForm = ref(defaultCreateForm())
@@ -196,12 +197,21 @@ function gameName(gameId) {
 function profileLabel(profileId) {
   const profile = profiles.value.find(item => item.id === profileId)
   if (!profile) return profileId || "-"
-  return `${profile.name || profile.bit_profile_id || profile.id}（${profile.local_status === "active" ? "可用" : "不可用"}）`
+  const name = profile.name || "未命名窗口"
+  const bitId = profile.bit_profile_id || "-"
+  return `系统ID ${profile.id} / ${name} / BitBrowser ${bitId}`
+}
+
+function profileForAccount(account) {
+  return profiles.value.find(item => item.id === account?.browser_profile_id)
 }
 
 function executableText(account) {
   if (account.business_status !== "enabled") return "不可执行：账号未启用"
+  if (!account.game_id) return "不可执行：未绑定游戏"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
+  const profile = profileForAccount(account)
+  if (profile && profile.local_status !== "active") return "不可执行：绑定窗口已停用"
   if (account.login_status !== "normal") return "待检查：需要真实账号检查"
   return "可进入后续预检"
 }
@@ -221,6 +231,11 @@ function loginStatusText(status) {
 
 function canCheckAccount(account) {
   return isDesktop && account && account.business_status === "enabled" && !!account.browser_profile_id
+}
+
+function canOperateBoundWindow(account) {
+  const profile = profileForAccount(account)
+  return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active"
 }
 
 function cloudBaseUrl() {
@@ -300,6 +315,36 @@ async function checkDetailAccount() {
   }
 }
 
+async function openAccountProfile(account) {
+  const profile = profileForAccount(account)
+  if (!canOperateBoundWindow(account)) return
+  error.value = ""
+  checkNotice.value = ""
+  try {
+    const service = await desktopLocalAgentService()
+    await refreshRuntimeWithCooldown(service)
+    await service.profileOpen(profile.bit_profile_id)
+    checkNotice.value = `已打开绑定窗口：${profile.name || profile.bit_profile_id}`
+  } catch (e) {
+    error.value = e.message || "打开绑定窗口失败"
+  }
+}
+
+async function closeAccountProfile(account) {
+  const profile = profileForAccount(account)
+  if (!canOperateBoundWindow(account)) return
+  error.value = ""
+  checkNotice.value = ""
+  try {
+    const service = await desktopLocalAgentService()
+    await refreshRuntimeWithCooldown(service)
+    await service.profileClose(profile.bit_profile_id)
+    checkNotice.value = `已关闭绑定窗口：${profile.name || profile.bit_profile_id}`
+  } catch (e) {
+    error.value = e.message || "关闭绑定窗口失败"
+  }
+}
+
 function formatTime(t) {
   if (!t) return "-"
   return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
@@ -316,14 +361,17 @@ const stats = computed(() => ({
 }))
 
 const columns = [
+  { colKey: "id", title: "系统ID", width: 130 },
   { colKey: "name", title: "账号", width: 210 },
   { colKey: "platform", title: "平台", width: 90 },
+  { colKey: "platform_account_id", title: "平台UID", width: 130 },
   { colKey: "game_id", title: "游戏", width: 120 },
-  { colKey: "browser_profile_id", title: "绑定窗口", width: 190 },
+  { colKey: "browser_profile_id", title: "绑定窗口", width: 260 },
   { colKey: "login_status", title: "登录状态", width: 120 },
   { colKey: "business_status", title: "业务状态", width: 100 },
+  { colKey: "last_checked_at", title: "最近检查", width: 130 },
   { colKey: "executable", title: "可执行结论", width: 180 },
-  { colKey: "op", title: "操作", width: 160 },
+  { colKey: "op", title: "操作", width: 260 },
 ]
 </script>
 
@@ -332,7 +380,7 @@ const columns = [
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-alert
       v-if="!isDesktop"
-      message="Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息；绑定、换绑和后续账号检查请在 Desktop 端完成。"
+        message="Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息；打开/关闭窗口、绑定/换绑和检查/同步账号信息请在 Desktop 端完成。"
       theme="info"
       style="margin-bottom:16px"
     />
@@ -390,7 +438,7 @@ const columns = [
 
     <div class="action-bar">
       <t-space>
-        <t-button theme="primary" @click="openCreate">新建账号台账</t-button>
+        <t-button theme="primary" @click="openCreate">新增账号</t-button>
         <t-button variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </t-space>
       <t-space v-if="selectedAccountIds.length" class="batch-actions">
@@ -409,11 +457,14 @@ const columns = [
       @select-change="(keys) => { selectedAccountIds = keys }"
       size="small"
       hover
-      :pagination="{ pageSize: 50, total: accounts.length }"
+      v-model:pagination="pagination"
+      :pagination="{ ...pagination, total: accounts.length, showJumper: true }"
       empty="暂无媒体账号"
     >
+      <template #id="{ row }">{{ row.id }}</template>
       <template #name="{ row }">
         <div>
+          <t-avatar v-if="row.avatar_url" :image="row.avatar_url" size="small" style="margin-right:6px" />
           <div class="account-name">{{ row.name || row.platform_account_id || '待检查账号' }}</div>
           <div class="account-sub">{{ row.remark || row.id }}</div>
           <div class="account-tags">
@@ -422,6 +473,7 @@ const columns = [
         </div>
       </template>
       <template #platform="{ row }">{{ { douyin: '抖音', bilibili: 'B站', baijiahao: '百家号' }[row.platform] || row.platform }}</template>
+      <template #platform_account_id="{ row }">{{ row.platform_account_id || '未回填' }}</template>
       <template #game_id="{ row }">{{ gameName(row.game_id) }}</template>
       <template #browser_profile_id="{ row }">{{ row.browser_profile_id ? profileLabel(row.browser_profile_id) : '未绑定' }}</template>
       <template #login_status="{ row }">
@@ -430,10 +482,15 @@ const columns = [
       <template #business_status="{ row }">
         <BusinessStatus :status="row.business_status === 'enabled' ? 'normal' : row.business_status === 'disabled' ? 'paused' : 'expired'" :label="row.business_status" />
       </template>
+      <template #last_checked_at="{ row }">{{ row.last_checked_at ? formatTime(row.last_checked_at) : '尚未检查' }}</template>
       <template #executable="{ row }">{{ executableText(row) }}</template>
       <template #op="{ row }">
         <t-space>
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
+          <template v-if="isDesktop">
+            <t-button size="small" variant="text" :disabled="!canOperateBoundWindow(row)" @click="openAccountProfile(row)">打开窗口</t-button>
+            <t-button size="small" variant="text" :disabled="!canOperateBoundWindow(row)" @click="closeAccountProfile(row)">关闭窗口</t-button>
+          </template>
           <t-dropdown :options="[
             { value: 'enabled', label: '启用', disabled: row.business_status === 'enabled' },
             { value: 'disabled', label: '停用', disabled: row.business_status === 'disabled' },
@@ -445,13 +502,13 @@ const columns = [
       </template>
     </t-table>
 
-    <t-dialog v-model:visible="showCreate" header="新建账号台账" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
+    <t-dialog v-model:visible="showCreate" header="新增账号" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
       <t-form @submit.prevent="createAccount">
         <t-form-item v-if="user?.role === 'admin'" label="归属用户 UID">
           <t-input-number v-model="createForm.userId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
         <t-form-item label="游戏">
-          <t-select v-model="createForm.gameId" placeholder="选择游戏">
+          <t-select v-model="createForm.gameId" clearable placeholder="可先不绑定；启用执行前必须绑定游戏">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
@@ -503,12 +560,17 @@ const columns = [
         <t-form-item v-else label="操作边界">
           <div class="form-tip">Cloud Web 只查看绑定关系；请在 Desktop 端绑定、解绑或换绑窗口。</div>
         </t-form-item>
+        <t-form-item v-if="isDesktop" label="账号同步">
+          <div class="form-tip">如已在 BitBrowser 窗口中人工登录，请返回这里点击“检查/同步账号信息”，系统会读取真实平台身份并回填 Cloud。</div>
+        </t-form-item>
       </t-form>
 
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="detailVisible = false">关闭</t-button>
-          <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查账号</t-button>
+          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" @click="openAccountProfile(detailAccount)">打开窗口</t-button>
+          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" @click="closeAccountProfile(detailAccount)">关闭窗口</t-button>
+          <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查/同步账号信息</t-button>
           <t-button theme="primary" :loading="savingDetail" @click="saveDetail">保存</t-button>
         </t-space>
       </template>

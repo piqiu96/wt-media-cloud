@@ -231,7 +231,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	gameID := strings.TrimSpace(input.GameID)
 	platform := Platform(strings.ToLower(strings.TrimSpace(string(input.Platform))))
 	remark := strings.TrimSpace(input.Remark)
-	if !validActor(actor) || gameID == "" || len(gameID) > 128 || !validPlatform(platform) || len(remark) > 500 {
+	if !validActor(actor) || len(gameID) > 128 || !validPlatform(platform) || len(remark) > 500 {
 		return Account{}, ErrInvalidInput
 	}
 	teamID := actor.TeamID
@@ -251,7 +251,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 		}
 		teamID = target.TeamID
 	}
-	if !actor.CanAccess(userID, teamID, gameID) {
+	if gameID != "" && !actor.CanAccess(userID, teamID, gameID) {
 		return Account{}, ErrForbidden
 	}
 	now := s.now()

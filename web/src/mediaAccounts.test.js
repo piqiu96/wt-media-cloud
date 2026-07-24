@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 
 import { createMediaAccountClient } from './shared/api/mediaAccounts.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 function response(data) {
   return { ok: true, json: async () => ({ errcode: 0, data }) }
@@ -125,5 +130,18 @@ describe('media account client', () => {
       }),
     }))
     expect(updated.original_cookie).toBeUndefined()
+  })
+
+  it('keeps B6 account page desktop boundaries explicit', () => {
+    const source = readFileSync(resolve(__dirname, 'modules/accounts/pages/AccountsPage.vue'), 'utf8')
+
+    expect(source).toContain('新增账号')
+    expect(source).toContain('检查/同步账号信息')
+    expect(source).toContain('打开窗口')
+    expect(source).toContain('关闭窗口')
+    expect(source).toContain('系统ID ${profile.id} / ${name} / BitBrowser ${bitId}')
+    expect(source).toContain('不可执行：未绑定游戏')
+    expect(source).toContain('Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息')
+    expect(source).not.toContain('批量检查')
   })
 })

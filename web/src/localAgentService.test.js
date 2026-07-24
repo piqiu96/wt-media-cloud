@@ -60,6 +60,21 @@ describe('local agent desktop service', () => {
     expect(invoke).toHaveBeenCalledWith('local_agent_account_check', expect.any(Object))
   })
 
+  it('proxies account row window operations through Tauri invoke', async () => {
+    const invoke = vi.fn(async (command, args) => ({ command, args }))
+    const service = createLocalAgentService({ invoke })
+
+    await service.profileOpen('bit-profile-1')
+    await service.profileClose('bit-profile-1')
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'local_agent_profile_open', {
+      args: { bit_profile_id: 'bit-profile-1' },
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'local_agent_profile_close', {
+      args: { bit_profile_id: 'bit-profile-1' },
+    })
+  })
+
   it('proxies runtime refresh through Tauri invoke without exposing node credentials', async () => {
     const status = { node_id: 'node-1', agent_id: 'local-agent-dev', status: 'idle' }
     const invoke = vi.fn(async (command, args) => {
