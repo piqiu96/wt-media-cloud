@@ -15,11 +15,16 @@ const scans = ref([])
 const loading = ref(true)
 const error = ref("")
 const taskNotice = ref("")
+const keyword = ref("")
+const statusFilter = ref("")
+const pagination = ref({ current: 1, pageSize: 20 })
 
 // Create dialog
 const showCreate = ref(false)
 const creating = ref(false)
-const newProfile = ref({ name: "", group_name: "", seq: 1 })
+const newProfile = ref({ name: "", group_id: "", group_name: "", seq: null, remark: "" })
+const profileGroups = ref([])
+const loadingGroups = ref(false)
 
 // Detail drawer
 const detailVisible = ref(false)
@@ -53,6 +58,27 @@ const operatorOptions = computed(() => operatorUsers.value.map((user) => ({
   label: `${user.username}（UID ${user.id}）`,
   value: String(user.id),
 })))
+const groupOptions = computed(() => profileGroups.value.map((group) => ({
+  label: `${group.name || group.id}（${group.id}）`,
+  value: group.id,
+})))
+const filteredProfiles = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  return profiles.value.filter((profile) => {
+    if (statusFilter.value && profile.local_status !== statusFilter.value) return false
+    if (!kw) return true
+    return [
+      profile.id,
+      profile.bit_profile_id,
+      profile.name,
+      profile.group_id,
+      profile.group_name,
+      profile.remark,
+      profile.bit_status,
+      proxySummary(profile),
+    ].some((value) => String(value || "").toLowerCase().includes(kw))
+  })
+})
 
 async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
@@ -152,12 +178,23 @@ async function createProfile() {
     return
   }
   creating.value = true
+  error.value = ""
   try {
-    const nodeId = await currentLocalNodeId()
-    const task = await bindingClient.createProfile(newProfile.value, { nodeId })
-    taskNotice.value = `已创建 Profile 任务（${task.task_id || "待执行"}），需要 Local Agent 执行后才会出现在列表。`
+    const localAgent = await desktopLocalAgentService()
+    const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
+    if (!status.node_id) {
+      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
+    }
+    const created = await localAgent.profileCreate(newProfile.value)
+    const readback = created.snapshot || {}
+    const scan = await bindingClient.submit({
+      main_user_id: readback.main_user_id || currentUser.value?.bit_main_user_id || currentUser.value?.id,
+      profiles: readback.profiles || [],
+    }, { nodeId: status.node_id })
+    await bindingClient.confirm(scan.id || scan.scan_id, { nodeId: status.node_id })
+    taskNotice.value = `已在BitBrowser创建窗口并读回同步到Cloud：${created.bit_profile_id}`
     showCreate.value = false
-    newProfile.value = { name: "", group_name: "", seq: 1 }
+    newProfile.value = { name: "", group_id: "", group_name: "", seq: null, remark: "" }
     identityError.value = ""
     await loadProfiles()
   } catch (e) {
@@ -176,9 +213,10 @@ async function openProfile(profile) {
     return
   }
   try {
-    const nodeId = await currentLocalNodeId()
-    const task = await bindingClient.openProfile(profile.id, { nodeId })
-    taskNotice.value = `已创建打开任务（${task.task_id || "待执行"}）。`
+    const localAgent = await desktopLocalAgentService()
+    await refreshRuntimeWithCooldown(localAgent, { force: true })
+    const result = await localAgent.profileOpen(profile.bit_profile_id)
+    taskNotice.value = `已打开BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     error.value = localTrustMessage(e)
   }
@@ -190,22 +228,20 @@ async function closeProfile(profile) {
     return
   }
   try {
-    const nodeId = await currentLocalNodeId()
-    const task = await bindingClient.closeProfile(profile.id, { nodeId })
-    taskNotice.value = `已创建关闭任务（${task.task_id || "待执行"}）。`
+    const localAgent = await desktopLocalAgentService()
+    await refreshRuntimeWithCooldown(localAgent, { force: true })
+    const result = await localAgent.profileClose(profile.bit_profile_id)
+    taskNotice.value = `已关闭BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     error.value = localTrustMessage(e)
   }
 }
 
 async function deleteProfile(profile) {
-  if (!isDesktopClient.value) {
-    error.value = "Cloud Web不处理本机窗口变更；窗口失效或归档请在后续Desktop闭环中处理。"
-    return
-  }
-  if (!confirm(`确定删除 Profile "${profile.name}"？`)) return
+  if (!confirm(`确定停用Cloud窗口镜像 "${profile.name || profile.bit_profile_id}"？本操作不会删除BitBrowser本地窗口，也不会删除账号历史。`)) return
   try {
     await bindingClient.deleteProfile(profile.id)
+    taskNotice.value = "已停用Cloud窗口镜像；BitBrowser本地窗口和账号历史未删除。"
     await loadProfiles()
   } catch (e) {
     error.value = e.message
@@ -215,6 +251,21 @@ async function deleteProfile(profile) {
 function openDetail(profile) {
   detailProfile.value = profile
   detailVisible.value = true
+}
+
+async function openCreateDialog() {
+  showCreate.value = true
+  if (!isDesktopClient.value) return
+  loadingGroups.value = true
+  try {
+    const localAgent = await desktopLocalAgentService()
+    const result = await localAgent.profileGroups()
+    profileGroups.value = result?.data?.groups || result?.groups || []
+  } catch (e) {
+    error.value = localTrustMessage(e)
+  } finally {
+    loadingGroups.value = false
+  }
 }
 
 async function triggerScan() {
@@ -431,14 +482,31 @@ function formatTime(t) {
   return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
+function proxySummary(profile) {
+  if (!profile?.proxy_host) return "-"
+  return `${profile.proxy_type || "http"}://${profile.proxy_host}:${profile.proxy_port || 0}`
+}
+
+function statusLabel(status) {
+  return {
+    active: "可用",
+    local_missing: "本机缺失",
+    archived: "已停用",
+  }[status] || status || "-"
+}
+
 const columns = [
+  { colKey: "id", title: "系统ID", width: 120 },
+  { colKey: "bit_profile_id", title: "BitBrowser ID", width: 170 },
+  { colKey: "seq", title: "比特序号", width: 90 },
   { colKey: "name", title: "名称", width: 160 },
-  { colKey: "bit_profile_id", title: "Bit ID", width: 100 },
-  { colKey: "group_name", title: "分组", width: 100 },
+  { colKey: "group_name", title: "分组", width: 120 },
+  { colKey: "proxy", title: "代理", width: 170 },
+  { colKey: "remark", title: "备注", width: 140 },
   { colKey: "user_id", title: "授权用户", width: 120 },
   { colKey: "local_status", title: "状态", width: 90 },
   { colKey: "last_synced_at", title: "同步", width: 130 },
-  { colKey: "op", title: "操作", width: 200 },
+  { colKey: "op", title: "操作", width: 230 },
 ]
 
 // Profile lookup from scan profiles list
@@ -483,27 +551,43 @@ const diffColumns = [
 
     <div class="action-bar">
       <t-space>
-        <t-button v-if="isDesktopClient" theme="primary" @click="showCreate = true">新建窗口</t-button>
+        <t-button v-if="isDesktopClient" theme="primary" @click="openCreateDialog">新建窗口</t-button>
         <t-button v-if="isDesktopClient" :loading="scanning" @click="triggerScan">扫描本机窗口</t-button>
         <t-button variant="outline" @click="loadProfiles">刷新</t-button>
       </t-space>
     </div>
 
     <t-card title="浏览器窗口" :bordered="true">
+      <div class="filter-bar">
+        <t-space>
+          <t-input v-model="keyword" clearable placeholder="搜索系统ID / Bit ID / 名称 / 分组 / 备注 / 代理" style="width:360px" />
+          <t-select v-model="statusFilter" clearable placeholder="状态筛选" style="width:160px">
+            <t-option value="active" label="可用" />
+            <t-option value="local_missing" label="本机缺失" />
+            <t-option value="archived" label="已停用" />
+          </t-select>
+        </t-space>
+      </div>
       <t-table
-        :data="profiles"
+        :data="filteredProfiles"
         :columns="columns"
         row-key="id"
         size="small"
         hover
-        :pagination="{ pageSize: 50, total: profiles.length }"
+        v-model:pagination="pagination"
+        :pagination="{ ...pagination, total: filteredProfiles.length, showJumper: true }"
         empty="暂无浏览器窗口"
       >
+        <template #id="{ row }">
+          <span>{{ row.id }}</span>
+        </template>
         <template #name="{ row }">
           <div class="profile-name">{{ row.name || '-' }}</div>
         </template>
+        <template #proxy="{ row }">{{ proxySummary(row) }}</template>
+        <template #remark="{ row }">{{ row.remark || '-' }}</template>
         <template #local_status="{ row }">
-          <BusinessStatus :status="row.local_status === 'active' ? 'normal' : 'stopped'" :label="row.local_status" />
+          <BusinessStatus :status="row.local_status === 'active' ? 'normal' : 'stopped'" :label="statusLabel(row.local_status)" />
         </template>
         <template #user_id="{ row }">
           {{ operatorLabel(row.user_id) }}
@@ -514,9 +598,9 @@ const diffColumns = [
             <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
             <t-button v-if="isAdmin" size="small" variant="text" @click="openAssignProfile(row)">分配</t-button>
             <template v-if="isDesktopClient">
-              <t-button size="small" variant="text" @click="openProfile(row)">打开</t-button>
-              <t-button size="small" variant="text" @click="closeProfile(row)">关闭</t-button>
-              <t-button size="small" variant="text" theme="danger" @click="deleteProfile(row)">删除</t-button>
+              <t-button size="small" variant="text" :disabled="row.local_status === 'archived'" @click="openProfile(row)">打开</t-button>
+              <t-button size="small" variant="text" :disabled="row.local_status === 'archived'" @click="closeProfile(row)">关闭</t-button>
+              <t-button size="small" variant="text" theme="danger" :disabled="row.local_status === 'archived'" @click="deleteProfile(row)">停用</t-button>
             </template>
           </t-space>
         </template>
@@ -524,13 +608,31 @@ const diffColumns = [
     </t-card>
 
     <!-- 新建窗口 -->
-    <t-dialog v-model:visible="showCreate" header="新建窗口" @confirm="createProfile" :confirm-btn="{ loading: creating, theme: 'primary' }">
+    <t-dialog v-model:visible="showCreate" header="新建BitBrowser窗口" @confirm="createProfile" :confirm-btn="{ loading: creating, theme: 'primary', content: '创建并同步' }">
+      <t-alert
+        message="新建窗口会先调用本机BitBrowser创建，创建成功后立即读回并同步Cloud镜像；不会只创建Cloud假记录。"
+        theme="info"
+        style="margin-bottom:12px"
+      />
       <t-form>
         <t-form-item label="名称">
           <t-input v-model="newProfile.name" placeholder="窗口名称" />
         </t-form-item>
-        <t-form-item label="分组">
-          <t-input v-model="newProfile.group_name" placeholder="如: 运营组/抖音组" />
+        <t-form-item label="BitBrowser分组">
+          <t-select
+            v-model="newProfile.group_id"
+            :loading="loadingGroups"
+            :options="groupOptions"
+            placeholder="请选择真实BitBrowser分组"
+            filterable
+            @change="value => { const group = profileGroups.find(item => item.id === value); newProfile.group_name = group?.name || '' }"
+          />
+        </t-form-item>
+        <t-form-item label="比特序号">
+          <t-input-number v-model="newProfile.seq" placeholder="可选" />
+        </t-form-item>
+        <t-form-item label="备注">
+          <t-input v-model="newProfile.remark" placeholder="可选，写入BitBrowser备注" />
         </t-form-item>
       </t-form>
     </t-dialog>
@@ -545,9 +647,9 @@ const diffColumns = [
         <t-descriptions-item label="已保存主账号">{{ maskMainUserId(detailProfile.main_user_id) }}</t-descriptions-item>
         <t-descriptions-item label="授权用户">{{ operatorLabel(detailProfile.user_id) }}</t-descriptions-item>
         <t-descriptions-item label="状态">
-          <BusinessStatus :status="detailProfile.local_status === 'active' ? 'normal' : 'stopped'" :label="detailProfile.local_status" />
+          <BusinessStatus :status="detailProfile.local_status === 'active' ? 'normal' : 'stopped'" :label="statusLabel(detailProfile.local_status)" />
         </t-descriptions-item>
-        <t-descriptions-item label="代理">{{ detailProfile.proxy_host ? detailProfile.proxy_type + '://' + detailProfile.proxy_host + ':' + detailProfile.proxy_port : '-' }}</t-descriptions-item>
+        <t-descriptions-item label="代理">{{ proxySummary(detailProfile) }}</t-descriptions-item>
         <t-descriptions-item label="备注">{{ detailProfile.remark || '-' }}</t-descriptions-item>
         <t-descriptions-item label="最后同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
       </t-descriptions>

@@ -400,7 +400,7 @@ func nullIfEmpty(value string) any {
 func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?, ", count), ", ") }
 
 func (s *MySQLStore) DeleteProfile(id string) error {
-	_, err := s.db.Exec(`DELETE FROM browser_profiles WHERE id = ?`, id)
+	_, err := s.db.Exec(`UPDATE browser_profiles SET local_status = ?, updated_at = NOW() WHERE id = ?`, ProfileArchived, id)
 	return err
 }
 

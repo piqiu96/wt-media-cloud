@@ -193,23 +193,30 @@ func TestProfileRoutesRequireTrustedNodeForScanSnapshot(t *testing.T) {
 	}
 }
 
-func TestProfileRoutesBlockLocalSensitiveTaskWhenNodeIsUntrusted(t *testing.T) {
+func TestProfileRoutesRejectDesktopOnlyOperations(t *testing.T) {
 	engine, cookie, store, tasks, trust := newProfileRouteTestWithRuntime(t)
 	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), TeamID: actorTeamID(t, engine, cookie), BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", LocalStatus: ProfileActive, LastSyncedAt: time.Now().UTC()}
-	trust.err = runtimebinding.ErrLocalTrustUnavailable
 
-	blocked := performProfileJSON(engine, "POST", "/api/v1/browser-profiles/profile-1/open", `{"node_id":"node-untrusted"}`, cookie)
-	if blocked.Result().StatusCode() != consts.StatusConflict || tasks.created != 0 {
-		t.Fatalf("blocked status=%d body=%s tasks=%d", blocked.Result().StatusCode(), blocked.Result().Body(), tasks.created)
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{"POST", "/api/v1/browser-profiles", `{"node_id":"node-trusted","name":"窗口"}`},
+		{"POST", "/api/v1/browser-profiles/profile-1/open", `{"node_id":"node-trusted"}`},
+		{"POST", "/api/v1/browser-profiles/profile-1/close", `{"node_id":"node-trusted"}`},
+		{"PATCH", "/api/v1/browser-profiles/profile-1", `{"node_id":"node-trusted","name":"窗口"}`},
+	} {
+		resp := performProfileJSON(engine, tc.method, tc.path, tc.body, cookie)
+		if resp.Result().StatusCode() != consts.StatusConflict {
+			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.path, resp.Result().StatusCode(), resp.Result().Body())
+		}
 	}
-
-	trust.err = nil
-	allowed := performProfileJSON(engine, "POST", "/api/v1/browser-profiles/profile-1/open", `{"node_id":"node-trusted"}`, cookie)
-	if allowed.Result().StatusCode() != consts.StatusCreated || tasks.created != 1 {
-		t.Fatalf("allowed status=%d body=%s tasks=%d", allowed.Result().StatusCode(), allowed.Result().Body(), tasks.created)
+	if tasks.created != 0 {
+		t.Fatalf("desktop-only profile operations created Cloud tasks: %d", tasks.created)
 	}
-	if trust.lastNodeID != "node-trusted" {
-		t.Fatalf("trust node = %q", trust.lastNodeID)
+	if trust.lastNodeID != "" {
+		t.Fatalf("desktop-only profile operations checked local trust through Cloud: %q", trust.lastNodeID)
 	}
 }
 

@@ -157,7 +157,7 @@ func TestDefaultProfileListAppliesRoleVisibility(t *testing.T) {
 	}
 }
 
-func TestProfileOwnerAndAdminCanDeleteCloudRecord(t *testing.T) {
+func TestProfileOwnerAndAdminCanArchiveCloudMirror(t *testing.T) {
 	for name, actor := range map[string]identity.PublicUser{
 		"owner": profileActor("user-2"),
 		"admin": {ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled},
@@ -168,6 +168,13 @@ func TestProfileOwnerAndAdminCanDeleteCloudRecord(t *testing.T) {
 			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, LocalStatus: ProfileActive}
 			if err := newTestService(store).DeleteProfile(actor, "profile"); err != nil {
 				t.Fatalf("DeleteProfile() error=%v", err)
+			}
+			stored, ok := store.profiles["profile"]
+			if !ok {
+				t.Fatal("DeleteProfile archived Cloud mirror by deleting the record")
+			}
+			if stored.LocalStatus != ProfileArchived {
+				t.Fatalf("LocalStatus=%s, want %s", stored.LocalStatus, ProfileArchived)
 			}
 		})
 	}
@@ -510,7 +517,12 @@ func (s *memoryStore) ClearMainIdentity(userID identity.UserID, actorID identity
 }
 
 func (s *memoryStore) DeleteProfile(id string) error {
-	delete(s.profiles, id)
+	profile, ok := s.profiles[id]
+	if !ok {
+		return ErrProfileNotFound
+	}
+	profile.LocalStatus = ProfileArchived
+	s.profiles[id] = profile
 	return nil
 }
 

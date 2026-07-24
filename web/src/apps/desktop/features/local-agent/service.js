@@ -12,6 +12,10 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   refreshRuntime: "local_agent_refresh_runtime",
   accountCheck: "local_agent_account_check",
   profileScan: "local_agent_profile_scan",
+  profileGroups: "local_agent_profile_groups",
+  profileOpen: "local_agent_profile_open",
+  profileClose: "local_agent_profile_close",
+  profileCreate: "local_agent_profile_create",
   profileRestore: "local_agent_profile_restore",
 });
 
@@ -121,6 +125,26 @@ export function createLocalAgentService({ invoke }) {
     async profileScan() {
       return invoke(LOCAL_AGENT_COMMANDS.profileScan);
     },
+    async profileGroups() {
+      return invoke(LOCAL_AGENT_COMMANDS.profileGroups);
+    },
+    async profileOpen(bitProfileId) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileOpen, { args: { bit_profile_id: bitProfileId } });
+    },
+    async profileClose(bitProfileId) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileClose, { args: { bit_profile_id: bitProfileId } });
+    },
+    async profileCreate(profile) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileCreate, {
+        args: {
+          name: profile.name,
+          group_id: profile.group_id,
+          group_name: profile.group_name || "",
+          seq: profile.seq ?? null,
+          remark: profile.remark || "",
+        },
+      });
+    },
     async profileRestore(profiles) {
       return invoke(LOCAL_AGENT_COMMANDS.profileRestore, { profiles });
     },
@@ -174,6 +198,31 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
     },
     async profileScan() {
       return { main_user_id: current.main_user_id || "main-user-mock", profiles: [] };
+    },
+    async profileGroups() {
+      return { data: { groups: [{ id: "group-mock", name: "模拟分组" }] } };
+    },
+    async profileOpen(bitProfileId) {
+      return { bit_profile_id: bitProfileId, status: "opened", snapshot: { main_user_id: current.main_user_id || "main-user-mock", profiles: [] } };
+    },
+    async profileClose(bitProfileId) {
+      return { bit_profile_id: bitProfileId, status: "closed", snapshot: { main_user_id: current.main_user_id || "main-user-mock", profiles: [] } };
+    },
+    async profileCreate(profile) {
+      return {
+        bit_profile_id: "profile-created-mock",
+        snapshot: {
+          main_user_id: current.main_user_id || "main-user-mock",
+          profiles: [{
+            bit_profile_id: "profile-created-mock",
+            main_user_id: current.main_user_id || "main-user-mock",
+            profile_user_id: "bit-user-mock",
+            name: profile.name,
+            group_id: profile.group_id,
+            group_name: profile.group_name || "模拟分组",
+          }],
+        },
+      };
     },
     async profileRestore(profiles) {
       return {

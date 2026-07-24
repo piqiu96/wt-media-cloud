@@ -31,6 +31,7 @@ type assignProfileOwnerRequest struct {
 }
 
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, tasks TaskCreator, trust LocalTrustChecker) {
+	_ = tasks
 	h.POST("/api/v1/bit-browser/profile-scans", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -164,89 +165,28 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		common.Success(c, profiles)
 	})
 	h.POST("/api/v1/browser-profiles", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := identity.AuthenticateRequest(c, identityService)
-		if !ok {
+		if _, ok := identity.AuthenticateRequest(c, identityService); !ok {
 			return
 		}
-		var input map[string]any
-		if !common.DecodeJSON(c, &input) {
-			return
-		}
-		nodeID, ok := extractNodeID(input)
-		if !ok {
-			writeProfileError(c, runtimebinding.ErrInvalidInput)
-			return
-		}
-		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
-			return
-		}
-		createProfileTask(c, tasks, cloudagent.TaskTypeProfileCreate.String(), actor.ID, input)
+		writeDesktopOnlyProfileOperation(c)
 	})
 	h.POST("/api/v1/browser-profiles/:id/open", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := identity.AuthenticateRequest(c, identityService)
-		if !ok {
+		if _, ok := identity.AuthenticateRequest(c, identityService); !ok {
 			return
 		}
-		profile, err := service.GetActiveProfile(actor, c.Param("id"))
-		if err != nil {
-			writeProfileError(c, err)
-			return
-		}
-		nodeID, ok := decodeLocalSensitiveNode(c)
-		if !ok {
-			writeProfileError(c, runtimebinding.ErrInvalidInput)
-			return
-		}
-		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
-			return
-		}
-		createProfileTask(c, tasks, cloudagent.TaskTypeProfileOpen.String(), actor.ID, map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID})
+		writeDesktopOnlyProfileOperation(c)
 	})
 	h.POST("/api/v1/browser-profiles/:id/close", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := identity.AuthenticateRequest(c, identityService)
-		if !ok {
+		if _, ok := identity.AuthenticateRequest(c, identityService); !ok {
 			return
 		}
-		profile, err := service.GetActiveProfile(actor, c.Param("id"))
-		if err != nil {
-			writeProfileError(c, err)
-			return
-		}
-		nodeID, ok := decodeLocalSensitiveNode(c)
-		if !ok {
-			writeProfileError(c, runtimebinding.ErrInvalidInput)
-			return
-		}
-		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
-			return
-		}
-		createProfileTask(c, tasks, cloudagent.TaskTypeProfileClose.String(), actor.ID, map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID})
+		writeDesktopOnlyProfileOperation(c)
 	})
 	h.PATCH("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := identity.AuthenticateRequest(c, identityService)
-		if !ok {
+		if _, ok := identity.AuthenticateRequest(c, identityService); !ok {
 			return
 		}
-		profile, err := service.GetActiveProfile(actor, c.Param("id"))
-		if err != nil {
-			writeProfileError(c, err)
-			return
-		}
-		var input map[string]any
-		if !common.DecodeJSON(c, &input) {
-			return
-		}
-		nodeID, ok := extractNodeID(input)
-		if !ok {
-			writeProfileError(c, runtimebinding.ErrInvalidInput)
-			return
-		}
-		if !checkLocalTrust(c, trust, actor.ID, nodeID) {
-			return
-		}
-		input["cloud_profile_id"] = profile.ID
-		input["profile_id"] = profile.BitProfileID
-		createProfileTask(c, tasks, cloudagent.TaskTypeProfileUpdate.String(), actor.ID, input)
+		writeDesktopOnlyProfileOperation(c)
 	})
 	h.POST("/api/v1/browser-profiles/:id/assign-owner", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -313,6 +253,10 @@ func decodeLocalSensitiveNode(c *hertzapp.RequestContext) (string, bool) {
 	}
 	nodeID := strings.TrimSpace(req.NodeID)
 	return nodeID, nodeID != ""
+}
+
+func writeDesktopOnlyProfileOperation(c *hertzapp.RequestContext) {
+	common.Conflict(c, 23004, "浏览器窗口本机操作只能在Desktop执行；Cloud Web只展示已保存的窗口信息")
 }
 
 func checkLocalTrust(c *hertzapp.RequestContext, trust LocalTrustChecker, userID identity.UserID, nodeID string) bool {
