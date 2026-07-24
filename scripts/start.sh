@@ -4,8 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+source "$ROOT_DIR/scripts/local-env.sh"
+
 PID_FILE="${WT_MEDIA_CLOUD_PID_FILE:-$ROOT_DIR/.cache/wt-media-cloud.pid}"
 LOG_FILE="${WT_MEDIA_CLOUD_LOG_FILE:-$ROOT_DIR/.cache/wt-media-cloud.log}"
+BINARY_FILE="${WT_MEDIA_CLOUD_BINARY_FILE:-$ROOT_DIR/.cache/wt-media-cloud-server}"
 mkdir -p "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")"
 
 if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
@@ -15,7 +18,8 @@ fi
 
 export GOCACHE="${GOCACHE:-$ROOT_DIR/.cache/go-build}"
 export GOPATH="${WT_MEDIA_CLOUD_GOPATH:-${GOPATH:-$ROOT_DIR/.cache/go-path}}"
-nohup go run ./cmd/server >"$LOG_FILE" 2>&1 &
+go build -o "$BINARY_FILE" ./cmd/server
+nohup "$BINARY_FILE" >"$LOG_FILE" 2>&1 &
 echo "$!" >"$PID_FILE"
 
 ADDR="${WT_MEDIA_CLOUD_HTTP_ADDR:-127.0.0.1:18080}"

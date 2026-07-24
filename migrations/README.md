@@ -7,8 +7,10 @@ M0 intentionally does not define business tables. Future CHGs add migrations wit
 Use `WT_MEDIA_MYSQL_DSN` for the Cloud process database connection and migration command:
 
 ```text
-WT_MEDIA_MYSQL_DSN='user:password@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&loc=UTC' scripts/migrate.sh
+scripts/migrate.sh
 ```
+
+Local scripts default to the stable local database `wt_media_cloud`. Do not create one database per CHG/Task during local acceptance; apply schema changes to the stable local database through repeat-safe migrations.
 
 The command creates the DSN database when missing, applies files in lexical order, records applied versions in `schema_migrations`, and skips already applied migrations on repeat runs.
 

@@ -25,8 +25,16 @@ Runtime configuration:
 Apply migrations with:
 
 ```text
-WT_MEDIA_MYSQL_DSN='user:password@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&loc=UTC' scripts/migrate.sh
+scripts/migrate.sh
 ```
+
+Local scripts default to the stable local database `wt_media_cloud` through `scripts/local-env.sh`:
+
+```text
+root:root123@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&multiStatements=true
+```
+
+For local M/CHG acceptance, use this stable database and modify its tables through migrations or explicit acceptance data updates. Do not create a new database for every Task. Override `WT_MEDIA_MYSQL_DSN` only when intentionally running isolated CI or destructive experiments.
 
 The migration command creates the DSN database when missing, records applied versions in `schema_migrations`, and skips already applied migrations on repeat runs.
 
