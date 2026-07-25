@@ -15,6 +15,7 @@ const scans = ref([])
 const loading = ref(true)
 const error = ref("")
 const taskNotice = ref("")
+const operatingProfileId = ref("")
 const keyword = ref("")
 const statusFilter = ref("")
 const pagination = ref({ current: 1, pageSize: 20 })
@@ -223,13 +224,23 @@ async function openProfile(profile) {
     error.value = "Cloud Web不能打开本机BitBrowser窗口；请在Desktop客户端执行。"
     return
   }
+  const bitProfileId = String(profile.bit_profile_id || "").trim()
+  if (!bitProfileId) {
+    error.value = "打开窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
+    return
+  }
+  operatingProfileId.value = `open:${bitProfileId}`
+  error.value = ""
+  taskNotice.value = `正在打开BitBrowser窗口：${profile.name || bitProfileId}`
   try {
     const localAgent = await desktopLocalAgentService()
     await refreshRuntimeWithCooldown(localAgent, { force: true })
-    const result = await localAgent.profileOpen(profile.bit_profile_id)
+    const result = await localAgent.profileOpen(bitProfileId)
     taskNotice.value = `已打开BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     error.value = localTrustMessage(e)
+  } finally {
+    operatingProfileId.value = ""
   }
 }
 
@@ -238,13 +249,23 @@ async function closeProfile(profile) {
     error.value = "Cloud Web不能关闭本机BitBrowser窗口；请在Desktop客户端执行。"
     return
   }
+  const bitProfileId = String(profile.bit_profile_id || "").trim()
+  if (!bitProfileId) {
+    error.value = "关闭窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
+    return
+  }
+  operatingProfileId.value = `close:${bitProfileId}`
+  error.value = ""
+  taskNotice.value = `正在关闭BitBrowser窗口：${profile.name || bitProfileId}`
   try {
     const localAgent = await desktopLocalAgentService()
     await refreshRuntimeWithCooldown(localAgent, { force: true })
-    const result = await localAgent.profileClose(profile.bit_profile_id)
+    const result = await localAgent.profileClose(bitProfileId)
     taskNotice.value = `已关闭BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     error.value = localTrustMessage(e)
+  } finally {
+    operatingProfileId.value = ""
   }
 }
 
@@ -614,8 +635,8 @@ const diffColumns = [
             <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
             <t-button v-if="isAdmin" size="small" variant="text" @click="openAssignProfile(row)">分配</t-button>
             <template v-if="isDesktopClient">
-              <t-button size="small" variant="text" :disabled="row.local_status === 'archived'" @click="openProfile(row)">打开</t-button>
-              <t-button size="small" variant="text" :disabled="row.local_status === 'archived'" @click="closeProfile(row)">关闭</t-button>
+              <t-button size="small" variant="text" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.local_status === 'archived' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
+              <t-button size="small" variant="text" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.local_status === 'archived' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
               <t-button size="small" variant="text" theme="danger" :disabled="row.local_status === 'archived'" @click="deleteProfile(row)">停用</t-button>
             </template>
           </t-space>
