@@ -22,9 +22,10 @@ const pagination = ref({ current: 1, pageSize: 20 })
 // Create dialog
 const showCreate = ref(false)
 const creating = ref(false)
-const newProfile = ref({ name: "", group_id: "", group_name: "", seq: null, remark: "" })
+const newProfile = ref({ name: "", group_id: "", group_name: "", remark: "" })
 const profileGroups = ref([])
 const loadingGroups = ref(false)
+const createError = ref("")
 
 // Detail drawer
 const detailVisible = ref(false)
@@ -177,6 +178,15 @@ async function createProfile() {
     error.value = "Cloud Web只展示云端已保存的浏览器窗口信息；新建窗口请在Desktop客户端执行。"
     return
   }
+  createError.value = ""
+  if (!newProfile.value.name.trim()) {
+    createError.value = "请填写窗口名称。"
+    return
+  }
+  if (!newProfile.value.group_id) {
+    createError.value = "请先选择真实BitBrowser分组。"
+    return
+  }
   creating.value = true
   error.value = ""
   try {
@@ -194,14 +204,15 @@ async function createProfile() {
     await bindingClient.confirm(scan.id || scan.scan_id, { nodeId: status.node_id })
     taskNotice.value = `已在BitBrowser创建窗口并读回同步到Cloud：${created.bit_profile_id}`
     showCreate.value = false
-    newProfile.value = { name: "", group_id: "", group_name: "", seq: null, remark: "" }
+    newProfile.value = { name: "", group_id: "", group_name: "", remark: "" }
     identityError.value = ""
     await loadProfiles()
   } catch (e) {
     if (e.errcode === 23002 || e.errcode === 23003) {
       identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
     }
-    error.value = localTrustMessage(e)
+    createError.value = localTrustMessage(e)
+    error.value = createError.value
   } finally {
     creating.value = false
   }
@@ -255,14 +266,19 @@ function openDetail(profile) {
 
 async function openCreateDialog() {
   showCreate.value = true
+  createError.value = ""
   if (!isDesktopClient.value) return
   loadingGroups.value = true
   try {
     const localAgent = await desktopLocalAgentService()
     const result = await localAgent.profileGroups()
     profileGroups.value = result?.data?.groups || result?.groups || []
+    if (!profileGroups.value.length) {
+      createError.value = "未读取到BitBrowser分组，请确认BitBrowser已登录并至少存在一个分组。"
+    }
   } catch (e) {
-    error.value = localTrustMessage(e)
+    createError.value = localTrustMessage(e)
+    error.value = createError.value
   } finally {
     loadingGroups.value = false
   }
@@ -628,13 +644,11 @@ const diffColumns = [
             @change="value => { const group = profileGroups.find(item => item.id === value); newProfile.group_name = group?.name || '' }"
           />
         </t-form-item>
-        <t-form-item label="比特序号">
-          <t-input-number v-model="newProfile.seq" placeholder="可选" />
-        </t-form-item>
         <t-form-item label="备注">
           <t-input v-model="newProfile.remark" placeholder="可选，写入BitBrowser备注" />
         </t-form-item>
       </t-form>
+      <t-alert v-if="createError" :message="createError" theme="error" style="margin-top:12px" />
     </t-dialog>
 
     <!-- 详情抽屉 -->

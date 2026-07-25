@@ -75,6 +75,22 @@ describe('local agent desktop service', () => {
     })
   })
 
+  it('creates profiles without sending optional bit sequence', async () => {
+    const invoke = vi.fn(async () => ({ bit_profile_id: 'profile-1' }))
+    const service = createLocalAgentService({ invoke })
+
+    await service.profileCreate({ name: '窗口', group_id: 'group-1', group_name: '测试组', remark: '备注' })
+
+    expect(invoke).toHaveBeenCalledWith('local_agent_profile_create', {
+      args: {
+        name: '窗口',
+        group_id: 'group-1',
+        group_name: '测试组',
+        remark: '备注',
+      },
+    })
+  })
+
   it('proxies runtime refresh through Tauri invoke without exposing node credentials', async () => {
     const status = { node_id: 'node-1', agent_id: 'local-agent-dev', status: 'idle' }
     const invoke = vi.fn(async (command, args) => {

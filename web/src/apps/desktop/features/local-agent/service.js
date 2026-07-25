@@ -140,7 +140,6 @@ export function createLocalAgentService({ invoke }) {
           name: profile.name,
           group_id: profile.group_id,
           group_name: profile.group_name || "",
-          seq: profile.seq ?? null,
           remark: profile.remark || "",
         },
       });
