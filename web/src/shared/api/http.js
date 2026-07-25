@@ -67,6 +67,9 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
     if (method === 'GET' || method === 'DELETE') delete options.headers['Content-Type']
 
     const response = await fetchImpl(url, options)
+    if (response.status === 204) {
+      return null
+    }
     const result = await parseResponse(response)
 
     // HTTP error without structured body

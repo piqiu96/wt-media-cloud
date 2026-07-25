@@ -16,6 +16,7 @@ const loading = ref(true)
 const error = ref("")
 const taskNotice = ref("")
 const operatingProfileId = ref("")
+const archivingProfileId = ref("")
 const keyword = ref("")
 const statusFilter = ref("")
 const pagination = ref({ current: 1, pageSize: 20 })
@@ -275,12 +276,18 @@ async function closeProfile(profile) {
 
 async function deleteProfile(profile) {
   if (!confirm(`确定停用Cloud窗口镜像 "${profile.name || profile.bit_profile_id}"？本操作不会删除BitBrowser本地窗口，也不会删除账号历史。`)) return
+  archivingProfileId.value = String(profile.id || "")
+  error.value = ""
+  taskNotice.value = `正在停用Cloud窗口镜像：${profile.name || profile.bit_profile_id}`
   try {
     await bindingClient.deleteProfile(profile.id)
     taskNotice.value = "已停用Cloud窗口镜像；BitBrowser本地窗口和账号历史未删除。"
     await loadProfiles()
   } catch (e) {
     error.value = e.message
+    taskNotice.value = ""
+  } finally {
+    archivingProfileId.value = ""
   }
 }
 
@@ -641,7 +648,7 @@ const diffColumns = [
             <template v-if="isDesktopClient">
               <t-button size="small" variant="text" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.local_status === 'archived' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
               <t-button size="small" variant="text" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.local_status === 'archived' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
-              <t-button size="small" variant="text" theme="danger" :disabled="row.local_status === 'archived'" @click="deleteProfile(row)">停用</t-button>
+              <t-button size="small" variant="text" theme="danger" :loading="archivingProfileId === String(row.id || '')" :disabled="row.local_status === 'archived' || Boolean(archivingProfileId)" @click="deleteProfile(row)">停用</t-button>
             </template>
           </t-space>
         </template>
