@@ -137,10 +137,14 @@ function hasDiff(scan) {
 }
 
 function localTrustMessage(e) {
+  const message = String(e?.message || e || "")
   if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
     return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境状态」页刷新本机状态后重试。"
   }
-  return e.message
+  if (message.includes("timed out") || message.includes("timeout")) {
+    return "BitBrowser窗口操作超时：Local Agent 已请求 BitBrowser，但 BitBrowser 未在限定时间内返回。请查看 Agent 日志确认是否已延迟打开，或稍后重试。"
+  }
+  return message || "本机操作失败，请查看 Agent 日志。"
 }
 
 onMounted(async () => {
@@ -234,10 +238,10 @@ async function openProfile(profile) {
   taskNotice.value = `正在打开BitBrowser窗口：${profile.name || bitProfileId}`
   try {
     const localAgent = await desktopLocalAgentService()
-    await refreshRuntimeWithCooldown(localAgent, { force: true })
     const result = await localAgent.profileOpen(bitProfileId)
     taskNotice.value = `已打开BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
+    taskNotice.value = ""
     error.value = localTrustMessage(e)
   } finally {
     operatingProfileId.value = ""
@@ -259,10 +263,10 @@ async function closeProfile(profile) {
   taskNotice.value = `正在关闭BitBrowser窗口：${profile.name || bitProfileId}`
   try {
     const localAgent = await desktopLocalAgentService()
-    await refreshRuntimeWithCooldown(localAgent, { force: true })
     const result = await localAgent.profileClose(bitProfileId)
     taskNotice.value = `已关闭BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
+    taskNotice.value = ""
     error.value = localTrustMessage(e)
   } finally {
     operatingProfileId.value = ""
