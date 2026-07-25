@@ -42,6 +42,7 @@ const checkingAccount = ref(false)
 const checkNotice = ref("")
 const batchChecking = ref(false)
 const batchResults = ref([])
+const operatingProfileId = ref("")
 
 const tagInput = ref("")
 const selectedAccountIds = ref([])
@@ -240,6 +241,17 @@ function canOperateBoundWindow(account) {
   return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active"
 }
 
+function localTrustMessage(e) {
+  const message = String(e?.message || e || "")
+  if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
+    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境状态」页刷新本机状态后重试。"
+  }
+  if (message.includes("timed out") || message.includes("timeout")) {
+    return "BitBrowser窗口操作超时：Local Agent 已请求 BitBrowser，但 BitBrowser 未在限定时间内返回。请查看 Agent 日志确认是否已延迟打开，或稍后重试。"
+  }
+  return message || "本机操作失败，请查看 Agent 日志。"
+}
+
 function cloudBaseUrl() {
   if (typeof window === "undefined") return "http://127.0.0.1:18080"
   const origin = window.location?.origin || "http://127.0.0.1:18080"
@@ -388,30 +400,46 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
 async function openAccountProfile(account) {
   const profile = profileForAccount(account)
   if (!canOperateBoundWindow(account)) return
+  const bitProfileId = String(profile.bit_profile_id || "").trim()
+  if (!bitProfileId) {
+    error.value = "打开绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
+    return
+  }
+  operatingProfileId.value = `open:${bitProfileId}`
   error.value = ""
-  checkNotice.value = ""
+  checkNotice.value = `正在打开绑定窗口：${profile.name || bitProfileId}`
   try {
     const service = await desktopLocalAgentService()
-    await refreshRuntimeWithCooldown(service)
-    await service.profileOpen(profile.bit_profile_id)
-    checkNotice.value = `已打开绑定窗口：${profile.name || profile.bit_profile_id}`
+    const result = await service.profileOpen(bitProfileId)
+    checkNotice.value = `已打开绑定窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
-    error.value = e.message || "打开绑定窗口失败"
+    checkNotice.value = ""
+    error.value = localTrustMessage(e)
+  } finally {
+    operatingProfileId.value = ""
   }
 }
 
 async function closeAccountProfile(account) {
   const profile = profileForAccount(account)
   if (!canOperateBoundWindow(account)) return
+  const bitProfileId = String(profile.bit_profile_id || "").trim()
+  if (!bitProfileId) {
+    error.value = "关闭绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
+    return
+  }
+  operatingProfileId.value = `close:${bitProfileId}`
   error.value = ""
-  checkNotice.value = ""
+  checkNotice.value = `正在关闭绑定窗口：${profile.name || bitProfileId}`
   try {
     const service = await desktopLocalAgentService()
-    await refreshRuntimeWithCooldown(service)
-    await service.profileClose(profile.bit_profile_id)
-    checkNotice.value = `已关闭绑定窗口：${profile.name || profile.bit_profile_id}`
+    const result = await service.profileClose(bitProfileId)
+    checkNotice.value = `已关闭绑定窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
-    error.value = e.message || "关闭绑定窗口失败"
+    checkNotice.value = ""
+    error.value = localTrustMessage(e)
+  } finally {
+    operatingProfileId.value = ""
   }
 }
 
@@ -579,8 +607,8 @@ const columns = [
         <t-space>
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
           <template v-if="isDesktop">
-            <t-button size="small" variant="text" :disabled="!canOperateBoundWindow(row)" @click="openAccountProfile(row)">打开窗口</t-button>
-            <t-button size="small" variant="text" :disabled="!canOperateBoundWindow(row)" @click="closeAccountProfile(row)">关闭窗口</t-button>
+            <t-button size="small" variant="text" :loading="operatingProfileId === `open:${profileForAccount(row)?.bit_profile_id || ''}`" :disabled="!canOperateBoundWindow(row) || Boolean(operatingProfileId)" @click="openAccountProfile(row)">打开窗口</t-button>
+            <t-button size="small" variant="text" :loading="operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" :disabled="!canOperateBoundWindow(row) || Boolean(operatingProfileId)" @click="closeAccountProfile(row)">关闭窗口</t-button>
           </template>
           <t-dropdown :options="[
             { value: 'enabled', label: '启用', disabled: row.business_status === 'enabled' },
@@ -659,8 +687,8 @@ const columns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="detailVisible = false">关闭</t-button>
-          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" @click="openAccountProfile(detailAccount)">打开窗口</t-button>
-          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" @click="closeAccountProfile(detailAccount)">关闭窗口</t-button>
+          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" :loading="operatingProfileId === `open:${profileForAccount(detailAccount)?.bit_profile_id || ''}`" :disabled="Boolean(operatingProfileId)" @click="openAccountProfile(detailAccount)">打开窗口</t-button>
+          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" :loading="operatingProfileId === `close:${profileForAccount(detailAccount)?.bit_profile_id || ''}`" :disabled="Boolean(operatingProfileId)" @click="closeAccountProfile(detailAccount)">关闭窗口</t-button>
           <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查/同步账号信息</t-button>
           <t-button theme="primary" :loading="savingDetail" @click="saveDetail">保存</t-button>
         </t-space>
