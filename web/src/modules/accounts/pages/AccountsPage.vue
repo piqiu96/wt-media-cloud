@@ -40,6 +40,8 @@ const detailProfileId = ref("")
 const savingDetail = ref(false)
 const checkingAccount = ref(false)
 const checkNotice = ref("")
+const batchChecking = ref(false)
+const batchResults = ref([])
 
 const tagInput = ref("")
 const selectedAccountIds = ref([])
@@ -230,7 +232,7 @@ function loginStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  return isDesktop && account && account.business_status === "enabled" && !!account.browser_profile_id
+  return isDesktop && account && account.business_status === "enabled" && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
@@ -284,34 +286,102 @@ async function checkDetailAccount() {
   error.value = ""
   try {
     const service = await desktopLocalAgentService()
-    const status = await refreshRuntimeWithCooldown(service)
-    const nodeId = status.node_id || ""
-    if (!nodeId) {
-      throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
-    }
-    const start = await accountClient.check(detailAccount.value.id, { nodeId })
-    const localResult = await service.accountCheck({
-      cloudBaseUrl: cloudBaseUrl(),
-      taskId: start.task_id,
-      bitProfileId: start.bit_profile_id,
-      platform: start.platform,
-      expectedPlatformAccountId: start.expected_platform_account_id || "",
-    })
-    const updated = await accountClient.submitCheckResult(detailAccount.value.id, {
-      taskId: start.task_id,
-      platformAccountId: localResult.platform_account_id,
-      name: localResult.name,
-      avatarUrl: localResult.avatar_url,
-      loginStatus: localResult.login_status,
-      message: localResult.message,
-    })
+    const updated = await runSingleAccountCheck(detailAccount.value, service)
     detailAccount.value = { ...detailAccount.value, ...updated }
-    checkNotice.value = localResult.message || `检查完成：${loginStatusText(updated.login_status)}`
+    checkNotice.value = `检查完成：${loginStatusText(updated.login_status)}`
     await loadAccounts()
   } catch (e) {
     error.value = e.message || "账号检查失败"
   } finally {
     checkingAccount.value = false
+  }
+}
+
+async function runSingleAccountCheck(account, service) {
+  const status = await refreshRuntimeWithCooldown(service)
+  const nodeId = status.node_id || ""
+  if (!nodeId) {
+    throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
+  }
+  const start = await accountClient.check(account.id, { nodeId })
+  const localResult = await service.accountCheck({
+    cloudBaseUrl: cloudBaseUrl(),
+    taskId: start.task_id,
+    bitProfileId: start.bit_profile_id,
+    platform: start.platform,
+    expectedPlatformAccountId: start.expected_platform_account_id || "",
+  })
+  return accountClient.submitCheckResult(account.id, {
+    taskId: start.task_id,
+    platformAccountId: localResult.platform_account_id,
+    name: localResult.name,
+    avatarUrl: localResult.avatar_url,
+    loginStatus: localResult.login_status,
+    message: localResult.message,
+  })
+}
+
+function accountLabel(account) {
+  return account?.name || account?.platform_account_id || account?.id || "未知账号"
+}
+
+function selectedAccounts() {
+  const selected = new Set(selectedAccountIds.value)
+  return accounts.value.filter(account => selected.has(account.id))
+}
+
+function batchStats() {
+  return {
+    total: batchResults.value.length,
+    success: batchResults.value.filter(item => item.status === "success").length,
+    failed: batchResults.value.filter(item => item.status === "failed").length,
+    skipped: batchResults.value.filter(item => item.status === "skipped").length,
+    pending: batchResults.value.filter(item => item.status === "pending").length,
+  }
+}
+
+async function runBatchCheck({ retryFailedOnly = false } = {}) {
+  if (!isDesktop || batchChecking.value) return
+  const candidates = retryFailedOnly
+    ? batchResults.value.filter(item => item.status === "failed").map(item => item.account)
+    : selectedAccounts()
+  if (!candidates.length) return
+  batchChecking.value = true
+  error.value = ""
+  checkNotice.value = ""
+  const initialResults = candidates.map(account => {
+    if (!canCheckAccount(account)) {
+      return { account, status: "skipped", message: executableText(account) }
+    }
+    return { account, status: "pending", message: "等待检查" }
+  })
+  batchResults.value = retryFailedOnly
+    ? batchResults.value.map(existing => {
+        const retry = initialResults.find(item => item.account.id === existing.account.id)
+        return retry || existing
+      })
+    : initialResults
+  try {
+    const service = await desktopLocalAgentService()
+    for (const item of batchResults.value) {
+      if (!candidates.some(account => account.id === item.account.id) || item.status !== "pending") continue
+      try {
+        const updated = await runSingleAccountCheck(item.account, service)
+        item.status = "success"
+        item.message = `检查完成：${loginStatusText(updated.login_status)}`
+        item.account = { ...item.account, ...updated }
+      } catch (e) {
+        item.status = "failed"
+        item.message = e.message || "检查失败"
+      }
+    }
+    const stats = batchStats()
+    checkNotice.value = `批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}`
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "批量检查失败"
+  } finally {
+    batchChecking.value = false
   }
 }
 
@@ -359,6 +429,9 @@ const stats = computed(() => ({
   normal: accounts.value.filter(a => a.login_status === "normal").length,
   unknown: accounts.value.filter(a => a.login_status === "unknown").length,
 }))
+
+const currentBatchStats = computed(batchStats)
+const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
 
 const columns = [
   { colKey: "id", title: "系统ID", width: 130 },
@@ -445,9 +518,27 @@ const columns = [
         <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" style="width:200px" />
         <t-button size="small" @click="changeTags(false)">添加标签</t-button>
         <t-button size="small" @click="changeTags(true)">移除标签</t-button>
+        <t-button v-if="isDesktop" size="small" theme="primary" :loading="batchChecking" @click="runBatchCheck()">批量检查/同步</t-button>
         <span class="selected-count">已选 {{ selectedAccountIds.length }} 项</span>
       </t-space>
     </div>
+
+    <t-card v-if="batchResults.length" title="批量检查结果" :bordered="true" class="batch-result-card">
+      <div class="batch-summary">
+        共 {{ currentBatchStats.total }} 项，成功 {{ currentBatchStats.success }}，失败 {{ currentBatchStats.failed }}，跳过 {{ currentBatchStats.skipped }}，等待 {{ currentBatchStats.pending }}
+        <t-button v-if="hasBatchFailures" size="small" variant="outline" :loading="batchChecking" @click="runBatchCheck({ retryFailedOnly: true })">重试失败项</t-button>
+      </div>
+      <div class="batch-result-list">
+        <div v-for="item in batchResults" :key="item.account.id" class="batch-result-item">
+          <span class="batch-account">{{ accountLabel(item.account) }}</span>
+          <BusinessStatus
+            :status="item.status === 'success' ? 'normal' : item.status === 'pending' ? 'pending_review' : item.status === 'skipped' ? 'paused' : 'warning'"
+            :label="{ success: '成功', failed: '失败', skipped: '跳过', pending: '等待' }[item.status]"
+          />
+          <span class="batch-message">{{ item.message }}</span>
+        </div>
+      </div>
+    </t-card>
 
     <t-table
       :data="accounts"
@@ -582,6 +673,22 @@ const columns = [
 .stats-row { margin-bottom: 16px; }
 .stat-num { font-size: 24px; font-weight: 700; line-height: 1.2; }
 .search-bar { margin-bottom: 12px; }
+.batch-result-card { margin-bottom: 12px; }
+.batch-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.batch-result-list { display: grid; gap: 6px; }
+.batch-result-item {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 80px minmax(200px, 2fr);
+  align-items: center;
+  gap: 8px;
+}
+.batch-account { font-weight: 500; }
+.batch-message { color: var(--td-text-color-secondary); }
 .action-bar {
   display: flex;
   align-items: center;
