@@ -220,6 +220,20 @@ func TestProfileRoutesRejectDesktopOnlyOperations(t *testing.T) {
 	}
 }
 
+func TestProfileRoutesArchiveProfileReturnsEmptySuccess(t *testing.T) {
+	engine, cookie, store := newProfileRouteTest(t)
+	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), TeamID: actorTeamID(t, engine, cookie), BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", LocalStatus: ProfileActive, LastSyncedAt: time.Now().UTC()}
+
+	response := performProfileJSON(engine, "DELETE", "/api/v1/browser-profiles/profile-1", `{}`, cookie)
+
+	if response.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(response.Result().Body()), `"data":null`) {
+		t.Fatalf("archive status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	if stored := store.profiles["profile-1"]; stored.LocalStatus != ProfileArchived {
+		t.Fatalf("LocalStatus=%s, want %s", stored.LocalStatus, ProfileArchived)
+	}
+}
+
 func newProfileRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore) {
 	t.Helper()
 	engine, cookie, store, _, _ := newProfileRouteTestWithRuntime(t)
