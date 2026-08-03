@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -37,6 +38,7 @@ func NewServer() (*Server, error) {
 	engine := server.Default(server.WithHostPorts(cfg.HTTPAddr))
 
 	// Request logging and trace ID middleware.
+	engine.Use(localDesktopCORSMiddleware())
 	engine.Use(traceAndLogMiddleware())
 
 	registerHealthRoutes(engine)
@@ -146,6 +148,38 @@ func traceAndLogMiddleware() hertzapp.HandlerFunc {
 		status := c.Response.StatusCode()
 		elapsed := time.Since(start)
 		hlog.CtxInfof(ctx, "[%s] %s %s %d %v", traceID, string(c.Method()), string(c.Path()), status, elapsed)
+	}
+}
+
+func localDesktopCORSMiddleware() hertzapp.HandlerFunc {
+	return func(ctx context.Context, c *hertzapp.RequestContext) {
+		origin := string(c.Request.Header.Peek("Origin"))
+		if isAllowedLocalDesktopOrigin(origin) {
+			c.Response.Header.Set("Access-Control-Allow-Origin", origin)
+			c.Response.Header.Set("Access-Control-Allow-Credentials", "true")
+			c.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Response.Header.Set("Vary", "Origin")
+		}
+		if string(c.Method()) == consts.MethodOptions {
+			c.SetStatusCode(consts.StatusNoContent)
+			c.Abort()
+			return
+		}
+		c.Next(ctx)
+	}
+}
+
+func isAllowedLocalDesktopOrigin(origin string) bool {
+	switch strings.TrimSpace(origin) {
+	case "http://tauri.localhost",
+		"https://tauri.localhost",
+		"tauri://localhost",
+		"http://127.0.0.1:5174",
+		"http://localhost:5174":
+		return true
+	default:
+		return false
 	}
 }
 

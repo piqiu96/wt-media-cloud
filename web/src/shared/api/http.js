@@ -46,9 +46,19 @@ async function parseResponse(response) {
   })
 }
 
+function defaultApiBase(base) {
+  if (base !== '/api/v1') return base
+  const win = typeof window !== 'undefined' ? window : null
+  if (win?.__WT_MEDIA_APP__ !== 'desktop') return base
+  if (win.location?.port === '5174') return base
+  return 'http://127.0.0.1:18080/api/v1'
+}
+
 export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch } = {}) {
+  const apiBase = defaultApiBase(base)
+
   async function request(path, { method = 'GET', body, params } = {}) {
-    let url = `${base}${path}`
+    let url = `${apiBase}${path}`
     if (params) {
       const q = new URLSearchParams()
       for (const [k, v] of Object.entries(params)) {
