@@ -238,16 +238,21 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 		// Accepting a scan cleans up Cloud records for windows that are gone from
 		// BitBrowser and not referenced by any media account. Referenced windows
 		// are kept as local_missing so account bindings are not orphaned.
-		deleteArgs := append(append([]any{}, args...), ProfileArchived)
+		//
+		// Delete runtime presence first for ALL missing (non-archived) profiles so
+		// the FK from browser_profile_runtime_presence never blocks the profile
+		// delete. A correlated subquery inside a multi-table DELETE is unreliable,
+		// so the media-account guard lives only on the single-table profile delete.
+		cleanupArgs := append(append([]any{}, args...), ProfileArchived)
 		if _, err := tx.Exec(
-			`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`,
-			deleteArgs...,
+			`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND bp.local_status <> ?`,
+			cleanupArgs...,
 		); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(
 			`DELETE bp FROM browser_profiles bp WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`,
-			deleteArgs...,
+			cleanupArgs...,
 		); err != nil {
 			return err
 		}

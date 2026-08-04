@@ -175,14 +175,12 @@ async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
     lastRuntimeStatus = refreshed
     lastRuntimeRefreshAt = now
     return refreshed
-  } catch (e) {
-    if (localStatus?.node_id) {
-      taskNotice.value = "本机状态已读取，Cloud可信状态刷新暂时失败；将继续由Cloud预检判断是否可执行。"
-      lastRuntimeStatus = localStatus
-      lastRuntimeRefreshAt = now
-      return localStatus
-    }
-    throw e
+  } catch {
+    // 返回本地状态，由调用方根据 node_id 判断可信与友好提示，而不是抛原始错误。
+    taskNotice.value = "Cloud可信状态刷新暂时失败；将由本地状态与本机预检判断是否可执行。"
+    lastRuntimeStatus = localStatus
+    lastRuntimeRefreshAt = now
+    return localStatus
   }
 }
 
