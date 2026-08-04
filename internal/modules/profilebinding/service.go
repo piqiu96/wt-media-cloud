@@ -595,12 +595,9 @@ func changedFields(current, candidate BrowserProfile) []string {
 	if current.GroupName != candidate.GroupName {
 		fields = append(fields, "group_name")
 	}
-	if current.BitStatus != candidate.BitStatus {
-		fields = append(fields, "bit_status")
-	}
-	if current.BitUpdatedAt != candidate.BitUpdatedAt {
-		fields = append(fields, "bit_updated_at")
-	}
+	// bit_status (open/close running state) and bit_updated_at (BitBrowser
+	// timestamp) are operational state that changes on open/close; they are NOT
+	// window configuration and must not trigger a "changed" diff.
 	if current.ProxyType != candidate.ProxyType {
 		fields = append(fields, "proxy_type")
 	}

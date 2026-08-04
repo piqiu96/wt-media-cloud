@@ -754,8 +754,7 @@ function profileRemark(scan, bitProfileId) {
 
 const CHANGED_FIELD_LABELS = {
   name: '名称', group_name: '分组', proxy_host: '代理', remark: '备注', seq: '比特序号',
-  bit_status: '运行状态', main_user_id: '主账号', profile_user_id: '子账号', group_id: '分组ID',
-  bit_updated_at: '比特更新时间', local_status: '状态',
+  main_user_id: '主账号', profile_user_id: '子账号', group_id: '分组ID', proxy_type: '代理类型', proxy_port: '代理端口',
 }
 // 变更字段明细：字段: 旧值 → 新值（Cloud 旧值 vs 扫描新值）
 function changedFieldDetails(scan, bitProfileId) {
