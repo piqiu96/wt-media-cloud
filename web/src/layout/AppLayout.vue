@@ -155,8 +155,8 @@ async function logout() {
 </template>
 
 <style scoped>
-.app-root-layout { height: 100vh; overflow: hidden; }
-.app-aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.app-root-layout { height: 100vh; }
+.app-aside { height: 100vh; overflow-y: auto; }
 .sidebar-header {
   height: 48px;
   display: flex;
