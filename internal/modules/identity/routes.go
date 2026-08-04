@@ -18,6 +18,17 @@ type RouteConfig struct {
 	CookieSecure bool
 }
 
+// isLocalDesktopOrigin reports whether the request originates from the packaged
+// Desktop WebView. It mirrors the CORS allowlist in internal/app so token/cookie
+// handling agrees with which origins are treated as the Desktop.
+func isLocalDesktopOrigin(origin string) bool {
+	switch strings.TrimSpace(origin) {
+	case "http://tauri.localhost", "https://tauri.localhost", "tauri://localhost":
+		return true
+	}
+	return false
+}
+
 // sessionCookieMode returns the SameSite/Secure attributes for the session
 // cookie. The packaged Desktop page runs on http://tauri.localhost, which is
 // cross-site to the local Cloud API (127.0.0.1); SameSite=Lax cookies are not
@@ -25,7 +36,7 @@ type RouteConfig struct {
 // SameSite=None + Secure for the Desktop origin and keep Lax for same-site
 // Cloud Web clients.
 func sessionCookieMode(origin string, defaultSecure bool) (protocol.CookieSameSite, bool) {
-	if strings.Contains(origin, "tauri.localhost") {
+	if isLocalDesktopOrigin(origin) {
 		return protocol.CookieSameSiteNoneMode, true
 	}
 	return protocol.CookieSameSiteLaxMode, defaultSecure
@@ -94,7 +105,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		}
 		sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), cfg.CookieSecure)
 		c.SetCookie(SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
-		if strings.Contains(string(c.GetHeader("Origin")), "tauri.localhost") {
+		if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
 			// Packaged Desktop cannot round-trip the cross-site cookie, so it
 			// receives the session token in the body and sends it back as the
 			// X-Session-Token header. Cloud Web keeps the HttpOnly cookie path.
