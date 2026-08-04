@@ -133,8 +133,14 @@ const filteredProfiles = computed(() => {
   }).sort((a, b) => (Number(b.seq) || 0) - (Number(a.seq) || 0))
 })
 
+const pagedProfiles = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return filteredProfiles.value.slice(start, start + pagination.value.pageSize)
+})
+
 watch(filteredProfiles, (list) => {
-  pagination.value = { ...pagination.value, total: list.length }
+  const maxPage = Math.max(1, Math.ceil(list.length / (pagination.value.pageSize || 20)))
+  if (pagination.value.current > maxPage) pagination.value.current = maxPage
 }, { immediate: true })
 
 async function desktopLocalAgentService() {
@@ -798,14 +804,13 @@ const diffColumns = [
       </div>
       <div class="table-scroll-wrap">
       <t-table
-        :data="filteredProfiles"
+        :data="pagedProfiles"
         :columns="columns"
         row-key="id"
         size="small"
         hover
         :scroll="{ x: 'max-content' }"
         v-model:selected-row-keys="selectedRowKeys"
-        v-model:pagination="pagination"
         empty="暂无浏览器窗口"
       >
         <template #id="{ row }">
@@ -834,14 +839,23 @@ const diffColumns = [
             <t-button size="small" variant="outline" @click="openDetail(row)">详情</t-button>
             <t-button v-if="isAdmin" size="small" variant="outline" @click="openAssignProfile(row)">分配</t-button>
             <template v-if="isDesktopClient">
-              <t-button size="small" variant="outline" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
-              <t-button size="small" variant="text" theme="warning" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
               <t-button v-if="!isWindowOpen(row)" size="small" theme="success" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
               <t-button v-else size="small" theme="danger" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
+              <t-button size="small" variant="outline" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
+              <t-button size="small" variant="text" theme="warning" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
             </template>
           </t-space>
         </template>
       </t-table>
+      </div>
+      <div class="pagination-bar">
+        <t-pagination
+          v-model:current="pagination.current"
+          v-model:pageSize="pagination.pageSize"
+          :total="filteredProfiles.length"
+          :page-size-options="[10, 20, 50, 100]"
+          show-jumper
+        />
       </div>
     </t-card>
 
@@ -1033,4 +1047,5 @@ const diffColumns = [
 .remark-cloud { color: #0052d9; }
 .detail-remark { white-space: pre-line; }
 .table-scroll-wrap { overflow-x: auto; width: 100%; }
+.pagination-bar { margin-top: 12px; display: flex; justify-content: flex-end; }
 </style>
