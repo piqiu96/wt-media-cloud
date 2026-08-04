@@ -7,6 +7,9 @@ import { createLocalAgentStatusPage } from "./local-agent-status.js"
 import { createSessionClient } from "../../../../shared/api/session.js"
 import { createProfileBindingClient } from "../../../../shared/api/profileBindings.js"
 import { createRuntimeBindingClient } from "../../../../shared/api/runtimeBinding.js"
+// Static import: a dynamic import() of a node_modules chunk does not resolve in
+// the packaged Tauri WebView ("Module name ... does not resolve to a valid file").
+import { invoke } from "@tauri-apps/api/core"
 
 function createHttpLocalAgentService() {
   const BASE = "http://127.0.0.1:8765"
@@ -74,7 +77,6 @@ async function createDesktopStatusContext() {
   let service
 
   if (tauri) {
-    const { invoke } = await import("@tauri-apps/api/core")
     service = createLocalAgentService({ invoke })
   } else {
     service = createHttpLocalAgentService()

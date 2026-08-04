@@ -6,6 +6,11 @@ import { createProfileBindingClient } from "../../../shared/api/profileBindings.
 import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import { isDesktop } from "../../../utils.js"
+// Static import: a dynamic import() of a node_modules bare specifier does not
+// resolve in the packaged Tauri WebView ("Module name ... does not resolve to a
+// valid file"). invoke is only called inside __TAURI_INTERNALS__-guarded code,
+// so importing it is inert in Cloud Web.
+import { invoke } from "@tauri-apps/api/core"
 
 const bindingClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
@@ -87,7 +92,6 @@ async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
     throw new Error("BitBrowser 扫描只能在 Desktop 客户端执行")
   }
-  const { invoke } = await import("@tauri-apps/api/core")
   return createLocalAgentService({ invoke })
 }
 
