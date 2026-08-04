@@ -46,6 +46,41 @@ async function parseResponse(response) {
   })
 }
 
+// Session token for the packaged Desktop WebView. The Desktop page runs on
+// http://tauri.localhost, cross-site to the local Cloud API, so the WebView does
+// not round-trip the HttpOnly session cookie; the token is carried in the
+// X-Session-Token header instead. Cloud Web keeps the cookie path (token empty).
+//
+// The Desktop app uses history-mode routing, so any full page load resets module
+// state; persist the token in localStorage on Desktop and restore it on load so
+// navigations/reloads do not silently log the operator out.
+const SESSION_TOKEN_KEY = 'wt_media_desktop_session_token'
+function isDesktopApp() {
+  return typeof window !== 'undefined' && window.__WT_MEDIA_APP__ === 'desktop'
+}
+let sessionToken = ''
+export function setSessionToken(token) {
+  sessionToken = token
+  if (isDesktopApp()) {
+    try {
+      if (token) localStorage.setItem(SESSION_TOKEN_KEY, token)
+      else localStorage.removeItem(SESSION_TOKEN_KEY)
+    } catch {
+      // localStorage unavailable; token stays in-memory for this load.
+    }
+  }
+}
+export function getSessionToken() {
+  return sessionToken
+}
+if (isDesktopApp()) {
+  try {
+    sessionToken = localStorage.getItem(SESSION_TOKEN_KEY) || ''
+  } catch {
+    sessionToken = ''
+  }
+}
+
 function defaultApiBase(base) {
   if (base !== '/api/v1') return base
   const win = typeof window !== 'undefined' ? window : null
@@ -73,6 +108,7 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
     }
+    if (sessionToken) options.headers['X-Session-Token'] = sessionToken
     if (body !== undefined) options.body = JSON.stringify(body)
     if (method === 'GET' || method === 'DELETE') delete options.headers['Content-Type']
 
@@ -87,8 +123,10 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
       throw new ApiError({ errcode: 50000, message: `HTTP ${response.status}` })
     }
 
-    // 401 → redirect to login (skip for login endpoint itself)
+    // 401 → redirect to login (skip for login endpoint itself). Clear any
+    // stale Desktop token so it does not persist and loop on reload.
     if (response.status === 401 && !path.startsWith('/auth/login')) {
+      setSessionToken('')
       const returnUrl = encodeURIComponent(window.location.pathname + window.location.search)
       window.location.href = `/login?redirect=${returnUrl}`
     }
