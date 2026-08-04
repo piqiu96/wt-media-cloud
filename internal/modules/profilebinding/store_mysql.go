@@ -231,34 +231,35 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 	}
 	notIn := placeholders(len(bitIDs))
 	if len(bitIDs) > 0 {
-		// Auto-cleanup: disabled windows that are gone from BitBrowser are
-		// removed (their Cloud mirror and stale runtime presence rows).
-		cleanupArgs := []any{scan.UserID}
-		for _, bitID := range bitIDs {
-			cleanupArgs = append(cleanupArgs, bitID)
-		}
-		cleanupArgs = append(cleanupArgs, ProfileBusinessDisabled)
-		if _, err := tx.Exec(
-			`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND bp.business_status = ?`,
-			cleanupArgs...,
-		); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(
-			`DELETE FROM browser_profiles WHERE user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND business_status = ?`,
-			cleanupArgs...,
-		); err != nil {
-			return err
-		}
-		// Remaining missing windows (enabled) are marked local_missing.
-		args := []any{ProfileLocalMissing, at, at, scan.UserID}
+		args := []any{scan.UserID}
 		for _, bitID := range bitIDs {
 			args = append(args, bitID)
 		}
-		args = append(args, ProfileBusinessDisabled, ProfileArchived)
+		// Accepting a scan cleans up Cloud records for windows that are gone from
+		// BitBrowser and not referenced by any media account. Referenced windows
+		// are kept as local_missing so account bindings are not orphaned.
+		deleteArgs := append(append([]any{}, args...), ProfileArchived)
 		if _, err := tx.Exec(
-			`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND business_status <> ? AND local_status <> ?`,
-			args...,
+			`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`,
+			deleteArgs...,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			`DELETE bp FROM browser_profiles bp WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`,
+			deleteArgs...,
+		); err != nil {
+			return err
+		}
+		// Remaining missing windows (with account references) are marked local_missing.
+		markArgs := []any{ProfileLocalMissing, at, at, scan.UserID}
+		for _, bitID := range bitIDs {
+			markArgs = append(markArgs, bitID)
+		}
+		markArgs = append(markArgs, ProfileArchived)
+		if _, err := tx.Exec(
+			`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND local_status <> ?`,
+			markArgs...,
 		); err != nil {
 			return err
 		}

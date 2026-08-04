@@ -595,6 +595,9 @@ func changedFields(current, candidate BrowserProfile) []string {
 	if current.GroupName != candidate.GroupName {
 		fields = append(fields, "group_name")
 	}
+	if current.Remark != candidate.Remark {
+		fields = append(fields, "remark")
+	}
 	// bit_status (open/close running state) and bit_updated_at (BitBrowser
 	// timestamp) are operational state that changes on open/close; they are NOT
 	// window configuration and must not trigger a "changed" diff.

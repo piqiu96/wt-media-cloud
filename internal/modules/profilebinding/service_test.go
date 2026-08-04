@@ -407,7 +407,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 			break
 		}
 	}
-	if strings.Join(changed.Fields, ",") != "name,proxy_type,proxy_host,proxy_port" {
+	if strings.Join(changed.Fields, ",") != "name,remark,proxy_type,proxy_host,proxy_port" {
 		t.Fatalf("changed fields = %v", changed.Fields)
 	}
 	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID); err != nil {

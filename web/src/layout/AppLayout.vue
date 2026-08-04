@@ -178,4 +178,5 @@ async function logout() {
   flex: 1; overflow: auto; min-width: 0; min-height: 0;
   padding: 24px; background: var(--td-bg-color-page);
 }
+.content-area > * { min-width: 0; max-width: 100%; }
 </style>

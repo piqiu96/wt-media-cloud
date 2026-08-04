@@ -66,14 +66,14 @@ func TestMySQLStoreAppliesConfirmedScanTransactionally(t *testing.T) {
 		WithArgs(binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO browser_profiles`)).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (?) AND bp.business_status = ?`)).
-		WithArgs(scan.UserID, scan.Profiles[0].BitProfileID, ProfileBusinessDisabled).
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (?) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`)).
+		WithArgs(scan.UserID, scan.Profiles[0].BitProfileID, ProfileArchived).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM browser_profiles WHERE user_id = ? AND bit_profile_id NOT IN (?) AND business_status = ?`)).
-		WithArgs(scan.UserID, scan.Profiles[0].BitProfileID, ProfileBusinessDisabled).
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE bp FROM browser_profiles bp WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (?) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`)).
+		WithArgs(scan.UserID, scan.Profiles[0].BitProfileID, ProfileArchived).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (?) AND business_status <> ? AND local_status <> ?`)).
-		WithArgs(ProfileLocalMissing, at, at, scan.UserID, scan.Profiles[0].BitProfileID, ProfileBusinessDisabled, ProfileArchived).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (?) AND local_status <> ?`)).
+		WithArgs(ProfileLocalMissing, at, at, scan.UserID, scan.Profiles[0].BitProfileID, ProfileArchived).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`)).
 		WithArgs(ScanConfirmed, at, scan.ID, scan.UserID, ScanReady).
