@@ -727,22 +727,48 @@ const columns = [
 ]
 
 // Profile lookup from scan profiles list
+// 从本次扫描候选或 Cloud 窗口列表取值（缺失项在 BitBrowser 已删，仅在 Cloud 有值）。
+function profileFieldValue(bitProfileId, field) {
+  const scanP = currentScan.value?.profiles?.find((p) => p.bit_profile_id === bitProfileId)
+  if (scanP && scanP[field] !== undefined && scanP[field] !== null && scanP[field] !== '') return scanP[field]
+  const cloudP = profiles.value.find((p) => p.bit_profile_id === bitProfileId)
+  if (cloudP && cloudP[field] !== undefined && cloudP[field] !== null && cloudP[field] !== '') return cloudP[field]
+  return undefined
+}
 function profileName(scan, bitProfileId) {
-  const p = scan?.profiles?.find(p => p.bit_profile_id === bitProfileId)
-  return p?.name || p?.profile_name || bitProfileId.slice(0, 12)
+  return profileFieldValue(bitProfileId, 'name') || bitProfileId.slice(0, 12)
 }
 function profileGroup(scan, bitProfileId) {
-  const p = scan?.profiles?.find(p => p.bit_profile_id === bitProfileId)
-  return p?.group_name || p?.groupName || '-'
+  return profileFieldValue(bitProfileId, 'group_name') || '-'
 }
 function profileProxy(scan, bitProfileId) {
-  const p = scan?.profiles?.find(p => p.bit_profile_id === bitProfileId)
-  if (!p?.proxy_host) return '-'
-  return (p.proxy_type || 'http') + '://' + p.proxy_host + ':' + (p.proxy_port || 0)
+  const host = profileFieldValue(bitProfileId, 'proxy_host')
+  if (!host) return '-'
+  const type = profileFieldValue(bitProfileId, 'proxy_type') || 'http'
+  const port = profileFieldValue(bitProfileId, 'proxy_port')
+  return `${type}://${host}:${port || 0}`
 }
 function profileRemark(scan, bitProfileId) {
-  const p = scan?.profiles?.find(p => p.bit_profile_id === bitProfileId)
-  return p?.remark || '-'
+  return profileFieldValue(bitProfileId, 'remark') || '-'
+}
+
+const CHANGED_FIELD_LABELS = {
+  name: '名称', group_name: '分组', proxy_host: '代理', remark: '备注', seq: '比特序号',
+  bit_status: '运行状态', main_user_id: '主账号', profile_user_id: '子账号', group_id: '分组ID',
+  bit_updated_at: '比特更新时间', local_status: '状态',
+}
+// 变更字段明细：字段: 旧值 → 新值（Cloud 旧值 vs 扫描新值）
+function changedFieldDetails(scan, bitProfileId) {
+  const item = (getDiff(scan).changed || []).find((d) => d.bit_profile_id === bitProfileId)
+  const fields = item?.fields || []
+  if (!fields.length) return ''
+  const cloud = profiles.value.find((p) => p.bit_profile_id === bitProfileId) || {}
+  const scanP = scan?.profiles?.find((p) => p.bit_profile_id === bitProfileId) || {}
+  return fields.map((f) => {
+    const label = CHANGED_FIELD_LABELS[f] || f
+    const format = (src) => (f === 'proxy_host' ? `${src.proxy_type || 'http'}://${src.proxy_host}:${src.proxy_port || 0}` : src[f]) || '-'
+    return `${label}: ${format(cloud)} → ${format(scanP)}`
+  }).join('\n')
 }
 
 const diffColumns = [
@@ -752,6 +778,8 @@ const diffColumns = [
   { colKey: "proxy", title: "代理", width: 140 },
   { colKey: "remark", title: "备注", width: 120 },
 ]
+
+const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段", width: 240 }]
 
 </script>
 
@@ -977,11 +1005,14 @@ const diffColumns = [
             <t-empty v-else description="无新增" />
           </t-tab-panel>
           <t-tab-panel value="changed" label="变更">
-            <t-table v-if="getDiff(currentScan).changed?.length" :data="getDiff(currentScan).changed.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="diffColumns" size="small">
+            <t-table v-if="getDiff(currentScan).changed?.length" :data="getDiff(currentScan).changed.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="changedColumns" size="small">
               <template #name="{ row }">{{ row.name || row.bit_profile_id }}</template>
               <template #group_name="{ row }">{{ row.group_name }}</template>
               <template #proxy="{ row }">{{ row.proxy }}</template>
               <template #remark="{ row }">{{ row.remark }}</template>
+              <template #fields="{ row }">
+                <div class="diff-fields">{{ changedFieldDetails(currentScan, row.bit_profile_id) || '-' }}</div>
+              </template>
             </t-table>
             <t-empty v-else description="无变更" />
           </t-tab-panel>
@@ -1046,6 +1077,7 @@ const diffColumns = [
 .remark-bit { color: #999; }
 .remark-cloud { color: #0052d9; }
 .detail-remark { white-space: pre-line; }
+.diff-fields { white-space: pre-line; color: #e34d59; line-height: 1.6; }
 .table-scroll-wrap { overflow-x: auto; width: 100%; }
 .pagination-bar { margin-top: 12px; display: flex; justify-content: flex-end; }
 </style>
