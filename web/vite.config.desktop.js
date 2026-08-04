@@ -44,7 +44,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: fileURLToPath(new URL("index.desktop.html", import.meta.url)),
-      external: ["@tauri-apps/api/core"],
+      // Do NOT externalize @tauri-apps/api/core: the packaged WebView cannot
+      // resolve a bare module specifier at runtime ("Module name ... does not
+      // resolve to a valid URL"). Vite must bundle it like the Cloud build.
     },
   },
 });

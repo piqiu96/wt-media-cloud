@@ -260,10 +260,9 @@ function localTrustMessage(e) {
 function cloudBaseUrl() {
   if (typeof window === "undefined") return "http://127.0.0.1:18080"
   const origin = window.location?.origin || "http://127.0.0.1:18080"
-  if (origin === "http://127.0.0.1:5174" || origin === "http://localhost:5174") {
-    return "http://127.0.0.1:18080"
-  }
-  return origin
+  // Packaged Desktop runs on http://tauri.localhost, which is NOT the Cloud
+  // API host; the local Cloud server is always the API base.
+  return origin.startsWith("http://127.0.0.1:18080") ? origin : "http://127.0.0.1:18080"
 }
 
 async function desktopLocalAgentService() {
