@@ -107,6 +107,52 @@ func TestDesktopOriginLoginUsesSameSiteNoneSecureCookie(t *testing.T) {
 	}
 }
 
+func TestDesktopSessionTokenHeaderRoundTrip(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	if _, err := service.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatalf("BootstrapAdmin() error = %v", err)
+	}
+	engine := server.New()
+	RegisterRoutes(engine, service, RouteConfig{CookieSecure: false})
+
+	login := ut.PerformRequest(
+		engine.Engine,
+		"POST",
+		"/api/v1/auth/login",
+		&ut.Body{
+			Body: bytes.NewBufferString(`{"username":"admin","password":"a-long-initial-password"}`),
+			Len:  len(`{"username":"admin","password":"a-long-initial-password"}`),
+		},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "Origin", Value: "http://tauri.localhost"},
+	)
+	if login.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("desktop login status = %d, body = %s", login.Result().StatusCode(), login.Result().Body())
+	}
+	var payload struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(login.Result().Body(), &payload); err != nil {
+		t.Fatalf("login body unmarshal: %v, body = %s", err, login.Result().Body())
+	}
+	if payload.Data.Token == "" {
+		t.Fatalf("desktop login returned no token: %s", login.Result().Body())
+	}
+
+	me := ut.PerformRequest(
+		engine.Engine,
+		"GET",
+		"/api/v1/auth/me",
+		nil,
+		ut.Header{Key: "X-Session-Token", Value: payload.Data.Token},
+	)
+	if me.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("me via header token status = %d, body = %s", me.Result().StatusCode(), me.Result().Body())
+	}
+}
+
 func TestAdminManagesTeamsAndUsersWithOneTimePassword(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	if _, err := service.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {

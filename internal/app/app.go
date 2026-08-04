@@ -157,7 +157,7 @@ func localDesktopCORSMiddleware() hertzapp.HandlerFunc {
 		if isAllowedLocalDesktopOrigin(origin) {
 			c.Response.Header.Set("Access-Control-Allow-Origin", origin)
 			c.Response.Header.Set("Access-Control-Allow-Credentials", "true")
-			c.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Token")
 			c.Response.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			c.Response.Header.Set("Vary", "Origin")
 		}

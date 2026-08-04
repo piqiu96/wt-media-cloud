@@ -83,7 +83,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		if context, err := service.AuthenticateContext(string(c.Cookie(SessionCookieName))); err == nil && context.User.Username == strings.TrimSpace(req.Username) {
+		if context, err := service.AuthenticateContext(sessionToken(c)); err == nil && context.User.Username == strings.TrimSpace(req.Username) {
 			common.Success(c, context.User)
 			return
 		}
@@ -94,6 +94,13 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		}
 		sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), cfg.CookieSecure)
 		c.SetCookie(SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
+		if strings.Contains(string(c.GetHeader("Origin")), "tauri.localhost") {
+			// Packaged Desktop cannot round-trip the cross-site cookie, so it
+			// receives the session token in the body and sends it back as the
+			// X-Session-Token header. Cloud Web keeps the HttpOnly cookie path.
+			common.Success(c, map[string]any{"user": result.User, "token": result.Token})
+			return
+		}
 		common.Success(c, result.User)
 	})
 
@@ -464,11 +471,22 @@ func AuthenticateRequest(c *hertzapp.RequestContext, service *Service) (PublicUs
 	return context.User, ok
 }
 
+// sessionToken returns the current session token from the cookie first, then
+// falls back to the X-Session-Token header. The packaged Desktop WebView is
+// cross-site to the local Cloud API and does not round-trip cookies, so it
+// carries the token as a header instead.
+func sessionToken(c *hertzapp.RequestContext) string {
+	if token := string(c.Cookie(SessionCookieName)); token != "" {
+		return token
+	}
+	return string(c.GetHeader("X-Session-Token"))
+}
+
 // AuthenticateRequestContext is for trusted Cloud modules that must bind a
 // resource to the current server-side session ID. It never returns the raw
 // Cookie token to an API response.
 func AuthenticateRequestContext(c *hertzapp.RequestContext, service *Service) (AuthContext, bool) {
-	context, err := service.AuthenticateContext(string(c.Cookie(SessionCookieName)))
+	context, err := service.AuthenticateContext(sessionToken(c))
 	if err != nil {
 		writeIdentityError(c, err)
 		return AuthContext{}, false
