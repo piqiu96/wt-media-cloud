@@ -11,7 +11,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, business_status, local_status, last_synced_at, created_at, updated_at`
+const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, cloud_remark, business_status, local_status, last_synced_at, created_at, updated_at`
 
 type MySQLStore struct{ db *sql.DB }
 
@@ -212,29 +212,56 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 		return ErrIdentityMismatch
 	}
 	for _, profile := range scan.Profiles {
+		// id is omitted (NULL) so MySQL auto-increments; upsert matches on the
+		// existing UNIQUE(user_id, bit_profile_id) key. business_status and
+		// cloud_remark are Cloud-side and are preserved on duplicate.
 		if _, err := tx.Exec(
-			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE main_user_id = VALUES(main_user_id), profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
-			profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
+			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE main_user_id = VALUES(main_user_id), profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
+			profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
 			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nullIfEmpty(profile.Remark),
-			ProfileBusinessEnabled, ProfileActive, at, profile.CreatedAt, at,
+			"", ProfileBusinessEnabled, ProfileActive, at, profile.CreatedAt, at,
 		); err != nil {
 			return err
 		}
 	}
 	bitIDs := make([]string, 0, len(scan.Profiles))
-	args := make([]any, 0, 5+len(scan.Profiles))
-	args = append(args, ProfileLocalMissing, at, at, scan.UserID)
 	for _, profile := range scan.Profiles {
 		bitIDs = append(bitIDs, profile.BitProfileID)
-		args = append(args, profile.BitProfileID)
 	}
-	args = append(args, ProfileArchived)
-	if _, err := tx.Exec(
-		`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (`+placeholders(len(bitIDs))+`) AND local_status <> ?`,
-		args...,
-	); err != nil {
-		return err
+	notIn := placeholders(len(bitIDs))
+	if len(bitIDs) > 0 {
+		// Auto-cleanup: disabled windows that are gone from BitBrowser are
+		// removed (their Cloud mirror and stale runtime presence rows).
+		cleanupArgs := []any{scan.UserID}
+		for _, bitID := range bitIDs {
+			cleanupArgs = append(cleanupArgs, bitID)
+		}
+		cleanupArgs = append(cleanupArgs, ProfileBusinessDisabled)
+		if _, err := tx.Exec(
+			`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND bp.business_status = ?`,
+			cleanupArgs...,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			`DELETE FROM browser_profiles WHERE user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND business_status = ?`,
+			cleanupArgs...,
+		); err != nil {
+			return err
+		}
+		// Remaining missing windows (enabled) are marked local_missing.
+		args := []any{ProfileLocalMissing, at, at, scan.UserID}
+		for _, bitID := range bitIDs {
+			args = append(args, bitID)
+		}
+		args = append(args, ProfileBusinessDisabled, ProfileArchived)
+		if _, err := tx.Exec(
+			`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND business_status <> ? AND local_status <> ?`,
+			args...,
+		); err != nil {
+			return err
+		}
 	}
 	result, err = tx.Exec(
 		`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`,
@@ -376,14 +403,15 @@ type scanner interface{ Scan(...any) error }
 
 func scanProfile(row scanner) (BrowserProfile, error) {
 	var profile BrowserProfile
-	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, remark sql.NullString
+	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, remark, cloudRemark sql.NullString
 	var proxyPort sql.NullInt64
-	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &profile.BusinessStatus, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
+	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &cloudRemark, &profile.BusinessStatus, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
 	if err != nil {
 		return BrowserProfile{}, err
 	}
 	profile.GroupID, profile.GroupName, profile.BitStatus, profile.BitUpdatedAt = groupID.String, groupName.String, bitStatus.String, bitUpdatedAt.String
 	profile.ProxyType, profile.ProxyHost, profile.Remark = proxyType.String, proxyHost.String, remark.String
+	profile.CloudRemark = cloudRemark.String
 	if proxyPort.Valid {
 		profile.ProxyPort = int(proxyPort.Int64)
 	}
@@ -432,12 +460,12 @@ func (s *MySQLStore) ProfileHasDependencies(profileID string) (bool, error) {
 	return count > 0, nil
 }
 
-func (s *MySQLStore) UpdateProfile(profileID string, remark *string, businessStatus *ProfileBusinessStatus, at time.Time) error {
+func (s *MySQLStore) UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error {
 	var sets []string
 	var args []any
-	if remark != nil {
-		sets = append(sets, "remark = ?")
-		args = append(args, nullIfEmpty(*remark))
+	if cloudRemark != nil {
+		sets = append(sets, "cloud_remark = ?")
+		args = append(args, nullIfEmpty(*cloudRemark))
 	}
 	if businessStatus != nil {
 		sets = append(sets, "business_status = ?")

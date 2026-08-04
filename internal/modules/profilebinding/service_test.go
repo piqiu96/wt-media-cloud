@@ -189,19 +189,19 @@ func TestProfileSyncDeleteRejectsEnabledProfile(t *testing.T) {
 	}
 }
 
-func TestServiceUpdateProfileRemarkAndBusinessStatus(t *testing.T) {
+func TestServiceUpdateProfileCloudRemarkAndBusinessStatus(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identity.TeamID(2)
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessEnabled, Remark: "旧备注"}
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessEnabled, Remark: "比特备注", CloudRemark: "旧备注"}
 	service := newTestService(store)
 
-	remark := "新备注"
+	cloudRemark := "新备注"
 	disabled := ProfileBusinessDisabled
-	updated, err := service.UpdateProfile(profileActor("user-2"), "profile", &remark, &disabled)
+	updated, err := service.UpdateProfile(profileActor("user-2"), "profile", &cloudRemark, &disabled)
 	if err != nil {
 		t.Fatalf("UpdateProfile() error=%v", err)
 	}
-	if updated.Remark != "新备注" || updated.BusinessStatus != ProfileBusinessDisabled {
+	if updated.CloudRemark != "新备注" || updated.Remark != "比特备注" || updated.BusinessStatus != ProfileBusinessDisabled {
 		t.Fatalf("updated=%+v", updated)
 	}
 	if _, ok := store.profiles["profile"]; !ok {
@@ -553,13 +553,13 @@ func (s *memoryStore) DeleteProfile(id string) error {
 	return nil
 }
 
-func (s *memoryStore) UpdateProfile(profileID string, remark *string, businessStatus *ProfileBusinessStatus, at time.Time) error {
+func (s *memoryStore) UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error {
 	profile, ok := s.profiles[profileID]
 	if !ok {
 		return ErrProfileNotFound
 	}
-	if remark != nil {
-		profile.Remark = *remark
+	if cloudRemark != nil {
+		profile.CloudRemark = *cloudRemark
 	}
 	if businessStatus != nil {
 		profile.BusinessStatus = *businessStatus

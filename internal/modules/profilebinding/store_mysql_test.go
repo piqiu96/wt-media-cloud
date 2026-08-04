@@ -66,8 +66,14 @@ func TestMySQLStoreAppliesConfirmedScanTransactionally(t *testing.T) {
 		WithArgs(binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO browser_profiles`)).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (?) AND local_status <> ?`)).
-		WithArgs(ProfileLocalMissing, at, at, scan.UserID, scan.Profiles[0].BitProfileID, ProfileArchived).
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (?) AND bp.business_status = ?`)).
+		WithArgs(scan.UserID, scan.Profiles[0].BitProfileID, ProfileBusinessDisabled).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM browser_profiles WHERE user_id = ? AND bit_profile_id NOT IN (?) AND business_status = ?`)).
+		WithArgs(scan.UserID, scan.Profiles[0].BitProfileID, ProfileBusinessDisabled).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (?) AND business_status <> ? AND local_status <> ?`)).
+		WithArgs(ProfileLocalMissing, at, at, scan.UserID, scan.Profiles[0].BitProfileID, ProfileBusinessDisabled, ProfileArchived).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`)).
 		WithArgs(ScanConfirmed, at, scan.ID, scan.UserID, ScanReady).
@@ -125,9 +131,9 @@ func mysqlTestScan() ProfileScan {
 }
 
 func profileColumns() []string {
-	return []string{"id", "user_id", "team_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "business_status", "local_status", "last_synced_at", "created_at", "updated_at"}
+	return []string{"id", "user_id", "team_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "cloud_remark", "business_status", "local_status", "last_synced_at", "created_at", "updated_at"}
 }
 
 func profileValues(profile BrowserProfile) []driver.Value {
-	return []driver.Value{profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.BusinessStatus, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
+	return []driver.Value{profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.CloudRemark, profile.BusinessStatus, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
 }

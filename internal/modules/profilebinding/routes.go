@@ -23,7 +23,7 @@ type LocalTrustChecker interface {
 }
 
 type updateProfileRequest struct {
-	Remark         *string                `json:"remark"`
+	CloudRemark    *string                `json:"cloud_remark"`
 	BusinessStatus *ProfileBusinessStatus `json:"business_status"`
 }
 
@@ -196,7 +196,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		profile, err := service.UpdateProfile(actor, c.Param("id"), req.Remark, req.BusinessStatus)
+		profile, err := service.UpdateProfile(actor, c.Param("id"), req.CloudRemark, req.BusinessStatus)
 		if err != nil {
 			writeProfileError(c, err)
 			return

@@ -96,6 +96,7 @@ type BrowserProfile struct {
 	ProxyHost     string             `json:"proxy_host,omitempty"`
 	ProxyPort     int                `json:"proxy_port,omitempty"`
 	Remark         string                `json:"remark,omitempty"`
+	CloudRemark    string                `json:"cloud_remark,omitempty"`
 	BusinessStatus ProfileBusinessStatus `json:"business_status"`
 	LocalStatus    ProfileLocalStatus    `json:"local_status"`
 	LastSyncedAt   time.Time             `json:"last_synced_at"`
@@ -161,7 +162,7 @@ type Store interface {
 	ClearMainIdentity(userID identity.UserID, actorID identity.UserID, at time.Time) error
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
-	UpdateProfile(profileID string, remark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
+	UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
 	ProfileHasDependencies(profileID string) (bool, error)
 	AssignProfileOwner(profileID string, userID identity.UserID, teamID *identity.TeamID, actorID identity.UserID, at time.Time) error
@@ -480,7 +481,7 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 	return s.store.DeleteProfile(profileID)
 }
 
-func (s *Service) UpdateProfile(actor identity.PublicUser, profileID string, remark *string, businessStatus *ProfileBusinessStatus) (BrowserProfile, error) {
+func (s *Service) UpdateProfile(actor identity.PublicUser, profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus) (BrowserProfile, error) {
 	if !validActor(actor) {
 		return BrowserProfile{}, ErrForbidden
 	}
@@ -497,7 +498,7 @@ func (s *Service) UpdateProfile(actor identity.PublicUser, profileID string, rem
 	if businessStatus != nil && *businessStatus != ProfileBusinessEnabled && *businessStatus != ProfileBusinessDisabled {
 		return BrowserProfile{}, ErrInvalidInput
 	}
-	if err := s.store.UpdateProfile(profileID, remark, businessStatus, s.now()); err != nil {
+	if err := s.store.UpdateProfile(profileID, cloudRemark, businessStatus, s.now()); err != nil {
 		return BrowserProfile{}, err
 	}
 	updated, found, err := s.store.GetProfile(profileID)
