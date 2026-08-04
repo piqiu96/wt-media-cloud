@@ -796,13 +796,13 @@ const diffColumns = [
           </t-select>
         </t-space>
       </div>
+      <div class="table-scroll-wrap">
       <t-table
         :data="filteredProfiles"
         :columns="columns"
         row-key="id"
         size="small"
         hover
-        class="table-scroll"
         :scroll="{ x: 'max-content' }"
         v-model:selected-row-keys="selectedRowKeys"
         v-model:pagination="pagination"
@@ -842,6 +842,7 @@ const diffColumns = [
           </t-space>
         </template>
       </t-table>
+      </div>
     </t-card>
 
     <!-- 新建窗口 -->
@@ -1031,5 +1032,5 @@ const diffColumns = [
 .remark-bit { color: #999; }
 .remark-cloud { color: #0052d9; }
 .detail-remark { white-space: pre-line; }
-.table-scroll { overflow-x: auto; }
+.table-scroll-wrap { overflow-x: auto; width: 100%; }
 </style>
