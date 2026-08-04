@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
@@ -21,7 +21,6 @@ const loading = ref(true)
 const error = ref("")
 const taskNotice = ref("")
 const operatingProfileId = ref("")
-const archivingProfileId = ref("")
 const filterId = ref("")
 const filterName = ref("")
 const filterGroup = ref("")
@@ -29,7 +28,11 @@ const filterBitId = ref("")
 const filterRemark = ref("")
 const statusFilter = ref("")
 const businessFilter = ref("")
-const pagination = ref({ current: 1, pageSize: 20 })
+const pagination = ref({ current: 1, pageSize: 20, total: 0 })
+// 运行状态本地跟踪：key=profile.id → true(打开)/false(关闭)；未知则为 undefined
+const openStates = ref({})
+const selectedRowKeys = ref([])
+const batchOperating = ref("")
 
 // Create dialog
 const showCreate = ref(false)
@@ -107,8 +110,12 @@ const filteredProfiles = computed(() => {
     if (bitId && !String(profile.bit_profile_id || "").toLowerCase().includes(bitId)) return false
     if (remark && !String(profile.remark || "").toLowerCase().includes(remark)) return false
     return true
-  })
+  }).sort((a, b) => (Number(b.seq) || 0) - (Number(a.seq) || 0))
 })
+
+watch(filteredProfiles, (list) => {
+  pagination.value = { ...pagination.value, total: list.length }
+}, { immediate: true })
 
 async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
@@ -249,6 +256,16 @@ async function createProfile() {
   }
 }
 
+function isWindowOpen(profile) {
+  return openStates.value[profile.id] === true
+}
+
+function openStateLabel(profile) {
+  if (isWindowOpen(profile)) return "打开"
+  if (openStates.value[profile.id] === false) return "关闭"
+  return "未知"
+}
+
 async function openProfile(profile) {
   if (!isDesktopClient.value) {
     error.value = "Cloud Web不能打开本机BitBrowser窗口；请在Desktop客户端执行。"
@@ -259,12 +276,17 @@ async function openProfile(profile) {
     error.value = "打开窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
     return
   }
+  if (isWindowOpen(profile)) {
+    taskNotice.value = "该窗口已处于打开状态。"
+    return
+  }
   operatingProfileId.value = `open:${bitProfileId}`
   error.value = ""
   taskNotice.value = `正在打开BitBrowser窗口：${profile.name || bitProfileId}`
   try {
     const localAgent = await desktopLocalAgentService()
     const result = await localAgent.profileOpen(bitProfileId)
+    openStates.value[profile.id] = true
     taskNotice.value = `已打开BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     taskNotice.value = ""
@@ -284,18 +306,73 @@ async function closeProfile(profile) {
     error.value = "关闭窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
     return
   }
+  if (openStates.value[profile.id] === false) {
+    taskNotice.value = "该窗口已处于关闭状态。"
+    return
+  }
   operatingProfileId.value = `close:${bitProfileId}`
   error.value = ""
   taskNotice.value = `正在关闭BitBrowser窗口：${profile.name || bitProfileId}`
   try {
     const localAgent = await desktopLocalAgentService()
     const result = await localAgent.profileClose(bitProfileId)
+    openStates.value[profile.id] = false
     taskNotice.value = `已关闭BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     taskNotice.value = ""
     error.value = localTrustMessage(e)
   } finally {
     operatingProfileId.value = ""
+  }
+}
+
+async function batchOpenWindows() {
+  const targets = profiles.value.filter((p) => selectedRowKeys.value.includes(p.id) && !isWindowOpen(p))
+  await runBatchWindow(targets, "open")
+}
+
+async function batchCloseWindows() {
+  const targets = profiles.value.filter((p) => selectedRowKeys.value.includes(p.id) && openStates.value[p.id] !== false)
+  await runBatchWindow(targets, "close")
+}
+
+async function runBatchWindow(targets, action) {
+  if (!isDesktopClient.value) {
+    error.value = "批量操作请在Desktop客户端执行。"
+    return
+  }
+  if (!targets.length) {
+    taskNotice.value = "没有需要操作的已选窗口。"
+    return
+  }
+  batchOperating.value = action
+  error.value = ""
+  let ok = 0
+  let failed = 0
+  try {
+    const localAgent = await desktopLocalAgentService()
+    for (const profile of targets) {
+      const bitProfileId = String(profile.bit_profile_id || "").trim()
+      if (!bitProfileId) { failed += 1; continue }
+      try {
+        if (action === "open") {
+          await localAgent.profileOpen(bitProfileId)
+          openStates.value[profile.id] = true
+        } else {
+          await localAgent.profileClose(bitProfileId)
+          openStates.value[profile.id] = false
+        }
+        ok += 1
+      } catch {
+        failed += 1
+      }
+    }
+    taskNotice.value = `批量${action === "open" ? "打开" : "关闭"}完成：成功 ${ok} 个，失败 ${failed} 个。`
+  } catch (e) {
+    error.value = localTrustMessage(e)
+  } finally {
+    batchOperating.value = ""
+    selectedRowKeys.value = []
   }
 }
 
@@ -319,9 +396,16 @@ async function toggleBusinessStatus(profile) {
   }
 }
 
+function remarkDisplay(profile) {
+  const parts = []
+  if (profile.remark) parts.push(`[B] ${profile.remark}`)
+  if (profile.cloud_remark) parts.push(`[C] ${profile.cloud_remark}`)
+  return parts.join("  ")
+}
+
 function openEdit(profile) {
   editProfile.value = profile
-  editRemark.value = profile.remark || ""
+  editRemark.value = profile.cloud_remark || ""
   editError.value = ""
   showEdit.value = true
 }
@@ -331,8 +415,8 @@ async function saveEdit() {
   editing.value = true
   editError.value = ""
   try {
-    await bindingClient.updateProfile(editProfile.value.id, { remark: editRemark.value })
-    taskNotice.value = "已更新Cloud窗口备注。"
+    await bindingClient.updateProfile(editProfile.value.id, { cloud_remark: editRemark.value })
+    taskNotice.value = "已更新Cloud窗口备注（BitBrowser备注保持不变）。"
     showEdit.value = false
     await loadProfiles()
   } catch (e) {
@@ -342,29 +426,6 @@ async function saveEdit() {
   }
 }
 
-function disabledMissingProfile(scan, bitProfileId) {
-  const profile = profiles.value.find((p) => p.bit_profile_id === bitProfileId)
-  return profile && profile.business_status === "disabled" ? profile : null
-}
-
-async function syncDeleteProfile(profile) {
-  if (!isDesktopClient.value) {
-    error.value = "Cloud Web仅展示浏览器窗口信息；同步删除请在Desktop客户端执行。"
-    return
-  }
-  if (!confirm(`确认同步删除已停用窗口 "${profile.name || profile.bit_profile_id}" 的Cloud记录？该窗口已从BitBrowser删除且已停用。`)) return
-  archivingProfileId.value = String(profile.id || "")
-  error.value = ""
-  try {
-    await bindingClient.deleteProfile(profile.id)
-    taskNotice.value = `已同步删除窗口 "${profile.name || profile.bit_profile_id}" 的Cloud记录。`
-    await loadProfiles()
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    archivingProfileId.value = ""
-  }
-}
 
 function openDetail(profile) {
   detailProfile.value = profile
@@ -570,8 +631,10 @@ async function assignOwner() {
 }
 
 function operatorLabel(userID) {
-  const user = operatorUsers.value.find((item) => Number(item.id) === Number(userID))
-  return user ? `${user.username}（UID ${user.id}）` : `UID ${userID || "-"}`
+  const nid = Number(userID)
+  if (currentUser.value && nid === Number(currentUser.value.id)) return "我"
+  const user = operatorUsers.value.find((item) => Number(item.id) === nid)
+  return user ? user.username : (userID ? `UID ${userID}` : "-")
 }
 
 function maskMainUserId(value) {
@@ -624,19 +687,20 @@ function bitStatusLabel(status) {
 }
 
 const columns = [
-  { colKey: "id", title: "系统ID", width: 100, sortable: true },
-  { colKey: "bit_profile_id", title: "Bit ID", width: 160, sortable: true },
-  { colKey: "seq", title: "比特序号", width: 90 },
+  { colKey: "row-select", type: "multiple", width: 40 },
+  { colKey: "id", title: "自增ID", width: 80, sortable: true },
+  { colKey: "seq", title: "比特序号", width: 90, sortable: true },
   { colKey: "name", title: "名称", width: 160 },
   { colKey: "group_name", title: "分组", width: 110 },
-  { colKey: "proxy", title: "代理", width: 160 },
-  { colKey: "remark", title: "备注", width: 130 },
-  { colKey: "user_id", title: "授权用户", width: 110 },
-  { colKey: "business_status", title: "业务", width: 80 },
-  { colKey: "bit_status", title: "BitBrowser", width: 90 },
-  { colKey: "local_status", title: "Cloud状态", width: 100 },
-  { colKey: "last_synced_at", title: "同步", width: 120 },
-  { colKey: "op", title: "操作", width: 250 },
+  { colKey: "bit_profile_id", title: "Bit ID", width: 150, sortable: true },
+  { colKey: "proxy", title: "代理", width: 150 },
+  { colKey: "remark", title: "备注", width: 160 },
+  { colKey: "user_id", title: "授权用户", width: 100 },
+  { colKey: "business_status", title: "业务", width: 70 },
+  { colKey: "running", title: "运行", width: 60 },
+  { colKey: "local_status", title: "Cloud状态", width: 90 },
+  { colKey: "last_synced_at", title: "同步", width: 110 },
+  { colKey: "op", title: "操作", width: 200 },
 ]
 
 // Profile lookup from scan profiles list
@@ -666,7 +730,6 @@ const diffColumns = [
   { colKey: "remark", title: "备注", width: 120 },
 ]
 
-const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 100 }]
 </script>
 
 <template>
@@ -682,9 +745,13 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
     />
 
     <div class="action-bar">
-      <t-space>
+      <t-space wrap>
         <t-button v-if="isDesktopClient" theme="primary" @click="openCreateDialog">新建窗口</t-button>
         <t-button v-if="isDesktopClient" :loading="scanning" @click="triggerScan">扫描本机窗口</t-button>
+        <template v-if="isDesktopClient">
+          <t-button theme="success" :disabled="!selectedRowKeys.length || Boolean(batchOperating)" @click="batchOpenWindows">批量打开</t-button>
+          <t-button theme="warning" :disabled="!selectedRowKeys.length || Boolean(batchOperating)" @click="batchCloseWindows">批量关闭</t-button>
+        </template>
         <t-button variant="outline" @click="loadProfiles">刷新</t-button>
       </t-space>
     </div>
@@ -713,8 +780,8 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
         row-key="id"
         size="small"
         hover
+        v-model:selected-row-keys="selectedRowKeys"
         v-model:pagination="pagination"
-        :pagination="{ ...pagination, total: filteredProfiles.length, showJumper: true }"
         empty="暂无浏览器窗口"
       >
         <template #id="{ row }">
@@ -724,12 +791,12 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
           <div class="profile-name">{{ row.name || '-' }}</div>
         </template>
         <template #proxy="{ row }">{{ proxySummary(row) }}</template>
-        <template #remark="{ row }">{{ row.remark || '-' }}</template>
+        <template #remark="{ row }">{{ remarkDisplay(row) || '-' }}</template>
         <template #business_status="{ row }">
           <t-tag :theme="row.business_status === 'disabled' ? 'danger' : 'success'" variant="light">{{ businessStatusLabel(row.business_status) }}</t-tag>
         </template>
-        <template #bit_status="{ row }">
-          {{ bitStatusLabel(row.bit_status) }}
+        <template #running="{ row }">
+          <t-tag :theme="isWindowOpen(row) ? 'success' : (openStates[row.id] === false ? 'default' : 'warning')" variant="light">{{ openStateLabel(row) }}</t-tag>
         </template>
         <template #local_status="{ row }">
           <BusinessStatus :status="row.local_status === 'active' ? 'normal' : 'stopped'" :label="statusLabel(row.local_status)" />
@@ -740,16 +807,13 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
         <template #last_synced_at="{ row }">{{ formatTime(row.last_synced_at) }}</template>
         <template #op="{ row }">
           <t-space>
-            <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
-            <t-button v-if="isAdmin" size="small" variant="text" @click="openAssignProfile(row)">分配</t-button>
+            <t-button size="small" variant="outline" @click="openDetail(row)">详情</t-button>
+            <t-button v-if="isAdmin" size="small" variant="outline" @click="openAssignProfile(row)">分配</t-button>
             <template v-if="isDesktopClient">
-              <t-button size="small" variant="text" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
-              <t-button size="small" variant="text" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
-              <t-button size="small" variant="text" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
-              <t-button size="small" variant="text" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
-            </template>
-            <template v-if="isDesktopClient && row.business_status === 'disabled' && row.local_status === 'local_missing'">
-              <t-button size="small" variant="text" theme="danger" :loading="archivingProfileId === String(row.id || '')" @click="syncDeleteProfile(row)">同步删除</t-button>
+              <t-button size="small" variant="outline" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
+              <t-button size="small" variant="text" theme="warning" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
+              <t-button v-if="!isWindowOpen(row)" size="small" theme="success" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
+              <t-button v-else size="small" theme="danger" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
             </template>
           </t-space>
         </template>
@@ -803,7 +867,7 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
     </t-dialog>
 
     <!-- 详情抽屉 -->
-    <t-drawer v-model:visible="detailVisible" header="浏览器窗口详情" :size="'480px'" destroy-on-close>
+    <t-drawer v-model:visible="detailVisible" header="浏览器窗口详情" :size="'560px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailProfile" :column="1" bordered size="small">
         <t-descriptions-item label="ID">{{ detailProfile.id }}</t-descriptions-item>
         <t-descriptions-item label="BitBrowser窗口ID">{{ detailProfile.bit_profile_id }}</t-descriptions-item>
@@ -818,7 +882,7 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
         <t-descriptions-item label="已保存主账号">{{ maskMainUserId(detailProfile.main_user_id) }}</t-descriptions-item>
         <t-descriptions-item label="授权用户">{{ operatorLabel(detailProfile.user_id) }}</t-descriptions-item>
         <t-descriptions-item label="代理">{{ proxySummary(detailProfile) }}</t-descriptions-item>
-        <t-descriptions-item label="备注">{{ detailProfile.remark || '-' }}</t-descriptions-item>
+        <t-descriptions-item label="备注">{{ remarkDisplay(detailProfile) || '-' }}</t-descriptions-item>
         <t-descriptions-item label="最后同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
         <t-descriptions-item label="创建时间">{{ formatTime(detailProfile.created_at) }}</t-descriptions-item>
         <t-descriptions-item label="更新时间">{{ formatTime(detailProfile.updated_at) }}</t-descriptions-item>
@@ -883,14 +947,11 @@ const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 
             <t-empty v-else description="无变更" />
           </t-tab-panel>
           <t-tab-panel value="missing" label="缺失">
-            <t-table v-if="getDiff(currentScan).missing?.length" :data="getDiff(currentScan).missing.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="missingColumns" size="small">
+            <t-table v-if="getDiff(currentScan).missing?.length" :data="getDiff(currentScan).missing.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="diffColumns" size="small">
               <template #name="{ row }">{{ row.name || row.bit_profile_id }}</template>
               <template #group_name="{ row }">{{ row.group_name }}</template>
               <template #proxy="{ row }">{{ row.proxy }}</template>
               <template #remark="{ row }">{{ row.remark }}</template>
-              <template #op="{ row }">
-                <t-button v-if="disabledMissingProfile(currentScan, row.bit_profile_id)" size="small" variant="text" theme="danger" @click="syncDeleteProfile(disabledMissingProfile(currentScan, row.bit_profile_id))">同步删除</t-button>
-              </template>
             </t-table>
             <t-empty v-else description="无缺失" />
           </t-tab-panel>
