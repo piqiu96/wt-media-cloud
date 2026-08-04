@@ -537,7 +537,7 @@ async function acceptLocalChanges() {
     return
   }
   const message = total > 0
-    ? `确定接受本机扫描结果并更新Cloud窗口镜像？本次会处理 ${total} 项差异，但不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。`
+    ? `确定接受本机扫描结果并更新Cloud窗口镜像？本次会处理 ${total} 项差异（含BitBrowser备注），但不会覆盖授权用户、媒体账号绑定、游戏、标签、Cloud备注、Cookie 和业务状态。`
     : "本次扫描没有差异，确认后只会记录本次扫描已处理。"
   acceptConfirmMessage.value = message
   acceptConfirmVisible.value = true
@@ -981,7 +981,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
         <t-alert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
         <t-alert
           v-if="hasDiff(currentScan)"
-          message="接受本地变化后，会更新Cloud窗口镜像中的名称、分组、代理摘要、运行状态等允许字段；不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie 和业务状态。"
+          message="接受本地变化后，会更新Cloud窗口镜像中的名称、分组、代理摘要、BitBrowser备注等允许字段；不会覆盖授权用户、媒体账号绑定、游戏、标签、Cloud备注、Cookie 和业务状态。"
           theme="warning"
           style="margin-bottom:16px"
         />
@@ -1043,7 +1043,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
     >
       <t-alert
         theme="warning"
-        message="接受后只更新Cloud窗口镜像中的允许字段，不会覆盖授权用户、媒体账号绑定、游戏、标签、备注、Cookie和业务状态。"
+        message="接受后只更新Cloud窗口镜像中的允许字段（含BitBrowser备注），不会覆盖授权用户、媒体账号绑定、游戏、标签、Cloud备注、Cookie和业务状态。"
         style="margin-bottom:12px"
       />
       <p>{{ acceptConfirmMessage }}</p>
