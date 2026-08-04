@@ -5,6 +5,7 @@ import { createDesktopRouter } from "./router"
 import App from "./App.vue"
 import { canUseDesktop } from "../../utils.js"
 import "tdesign-vue-next/es/style/index.css"
+import "../../shared/styles/layout.css"
 
 const app = createApp(App)
 const pinia = createPinia()

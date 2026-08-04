@@ -1,0 +1,11 @@
+/* 全局布局基础：应用填满窗口，body 不滚动；滚动发生在 AppLayout 内容区。 */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}

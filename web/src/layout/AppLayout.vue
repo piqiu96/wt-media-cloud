@@ -108,8 +108,8 @@ async function logout() {
 </script>
 
 <template>
-  <t-layout>
-    <t-aside :width="collapsed ? '64px' : '232px'">
+  <t-layout class="app-shell">
+    <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
       <div class="sidebar-header" @click="router.push('/')">
         <span v-if="!collapsed" class="sidebar-title">WT Media</span>
         <span v-else class="sidebar-title-mini">W</span>
@@ -132,7 +132,7 @@ async function logout() {
       </t-menu>
     </t-aside>
 
-    <t-layout>
+    <t-layout class="app-main">
       <t-header class="topbar">
         <div style="display:flex; align-items:center; gap:12px">
           <t-button variant="text" @click="collapsed = !collapsed">
@@ -155,6 +155,9 @@ async function logout() {
 </template>
 
 <style scoped>
+.app-shell { height: 100%; }
+.app-aside { height: 100%; overflow-y: auto; flex-shrink: 0; }
+.app-main { height: 100%; min-width: 0; overflow: hidden; }
 .sidebar-header {
   height: 48px;
   display: flex;
@@ -169,9 +172,10 @@ async function logout() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px; background: var(--td-bg-color-container);
   border-bottom: 1px solid var(--td-component-stroke); height: 48px;
+  flex-shrink: 0;
 }
 .content-area {
+  flex: 1; overflow: auto; min-width: 0; min-height: 0;
   padding: 24px; background: var(--td-bg-color-page);
-  min-height: calc(100vh - 48px);
 }
 </style>

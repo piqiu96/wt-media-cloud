@@ -4,6 +4,7 @@ import TDesign from "tdesign-vue-next"
 import { createCloudRouter } from "./router"
 import App from "../../App.vue"
 import "tdesign-vue-next/es/style/index.css"
+import "../../shared/styles/layout.css"
 
 const app = createApp(App)
 const pinia = createPinia()
