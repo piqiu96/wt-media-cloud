@@ -157,7 +157,7 @@ func TestDefaultProfileListAppliesRoleVisibility(t *testing.T) {
 	}
 }
 
-func TestProfileOwnerAndAdminCanArchiveCloudMirror(t *testing.T) {
+func TestProfileOwnerAndAdminCanSyncDeleteDisabledProfile(t *testing.T) {
 	for name, actor := range map[string]identity.PublicUser{
 		"owner": profileActor("user-2"),
 		"admin": {ID: 99, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled},
@@ -165,18 +165,47 @@ func TestProfileOwnerAndAdminCanArchiveCloudMirror(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := newMemoryStore()
 			teamID := identity.TeamID(2)
-			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, LocalStatus: ProfileActive}
+			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessDisabled, LocalStatus: ProfileLocalMissing}
 			if err := newTestService(store).DeleteProfile(actor, "profile"); err != nil {
 				t.Fatalf("DeleteProfile() error=%v", err)
 			}
-			stored, ok := store.profiles["profile"]
-			if !ok {
-				t.Fatal("DeleteProfile archived Cloud mirror by deleting the record")
-			}
-			if stored.LocalStatus != ProfileArchived {
-				t.Fatalf("LocalStatus=%s, want %s", stored.LocalStatus, ProfileArchived)
+			if _, ok := store.profiles["profile"]; ok {
+				t.Fatal("disabled profile not removed by sync-delete")
 			}
 		})
+	}
+}
+
+func TestProfileSyncDeleteRejectsEnabledProfile(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identity.TeamID(2)
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessEnabled, LocalStatus: ProfileActive}
+	err := newTestService(store).DeleteProfile(profileActor("user-2"), "profile")
+	if err == nil {
+		t.Fatal("DeleteProfile() on enabled profile succeeded, want ErrProfileNotDisabled")
+	}
+	if _, ok := store.profiles["profile"]; !ok {
+		t.Fatal("enabled profile was removed despite rejection")
+	}
+}
+
+func TestServiceUpdateProfileRemarkAndBusinessStatus(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identity.TeamID(2)
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessEnabled, Remark: "旧备注"}
+	service := newTestService(store)
+
+	remark := "新备注"
+	disabled := ProfileBusinessDisabled
+	updated, err := service.UpdateProfile(profileActor("user-2"), "profile", &remark, &disabled)
+	if err != nil {
+		t.Fatalf("UpdateProfile() error=%v", err)
+	}
+	if updated.Remark != "新备注" || updated.BusinessStatus != ProfileBusinessDisabled {
+		t.Fatalf("updated=%+v", updated)
+	}
+	if _, ok := store.profiles["profile"]; !ok {
+		t.Fatal("profile removed by update")
 	}
 }
 
@@ -517,16 +546,34 @@ func (s *memoryStore) ClearMainIdentity(userID identity.UserID, actorID identity
 }
 
 func (s *memoryStore) DeleteProfile(id string) error {
-	profile, ok := s.profiles[id]
+	if _, ok := s.profiles[id]; !ok {
+		return ErrProfileNotFound
+	}
+	delete(s.profiles, id)
+	return nil
+}
+
+func (s *memoryStore) UpdateProfile(profileID string, remark *string, businessStatus *ProfileBusinessStatus, at time.Time) error {
+	profile, ok := s.profiles[profileID]
 	if !ok {
 		return ErrProfileNotFound
 	}
-	profile.LocalStatus = ProfileArchived
-	s.profiles[id] = profile
+	if remark != nil {
+		profile.Remark = *remark
+	}
+	if businessStatus != nil {
+		profile.BusinessStatus = *businessStatus
+	}
+	profile.UpdatedAt = at
+	s.profiles[profileID] = profile
 	return nil
 }
 
 func (s *memoryStore) ProfileHasAccountReferences(profileID string) (bool, error) {
+	return s.profileAccountRefs[profileID], nil
+}
+
+func (s *memoryStore) ProfileHasDependencies(profileID string) (bool, error) {
 	return s.profileAccountRefs[profileID], nil
 }
 

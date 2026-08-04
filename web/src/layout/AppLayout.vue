@@ -34,7 +34,7 @@ const menuItems = [
   { title: '社媒账号', path: '/accounts', icon: 'user' },
   { title: '账号开户', path: '/account-opening', icon: 'add' },
   { title: '代理管理', path: '/proxies', icon: 'link' },
-  { title: '浏览器用户', path: '/browser-users', icon: 'desktop' },
+  { title: '浏览器窗口', path: '/browser-windows', icon: 'desktop' },
   { title: '合成策略', path: '/compose-strategy', icon: 'setting' },
   { title: '评论模板', path: '/comment-templates', icon: 'comment' },
 

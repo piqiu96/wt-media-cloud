@@ -20,7 +20,7 @@ export function createCloudRouter() {
         { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue") },
         { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue") },
-        { path: "browser-users", name: "BrowserUsers", component: () => import("../../modules/profiles/pages/ProfilesPage.vue") },
+        { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue") },
         { path: "compose-strategy", name: "ComposeStrategy", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue") },

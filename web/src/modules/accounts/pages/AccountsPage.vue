@@ -219,7 +219,7 @@ function executableText(account) {
   if (!account.game_id) return "不可执行：未绑定游戏"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   const profile = profileForAccount(account)
-  if (profile && profile.local_status !== "active") return "不可执行：绑定窗口已停用"
+  if (profile && (profile.local_status !== "active" || profile.business_status === "disabled")) return "不可执行：绑定窗口已停用"
   if (account.login_status !== "normal") return "待检查：需要真实账号检查"
   return "可进入后续预检"
 }
@@ -243,7 +243,7 @@ function canCheckAccount(account) {
 
 function canOperateBoundWindow(account) {
   const profile = profileForAccount(account)
-  return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active"
+  return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active" && profile.business_status !== "disabled"
 }
 
 function localTrustMessage(e) {
@@ -451,7 +451,7 @@ function formatTime(t) {
   return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
-const activeProfiles = computed(() => profiles.value.filter(profile => profile.local_status === "active"))
+const activeProfiles = computed(() => profiles.value.filter(profile => profile.local_status === "active" && profile.business_status !== "disabled"))
 
 const stats = computed(() => ({
   total: accounts.value.length,

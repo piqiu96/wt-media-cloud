@@ -26,6 +26,17 @@ const (
 	ProfileArchived     ProfileLocalStatus = "archived"
 )
 
+// ProfileBusinessStatus is the Cloud-side matching-eligibility flag on a
+// browser window. It is independent of scan reality (local_status): a disabled
+// window still exists and is scanned, but is excluded from social-media-account
+// matching/binding and from open/close execution. Scans never overwrite it.
+type ProfileBusinessStatus string
+
+const (
+	ProfileBusinessEnabled  ProfileBusinessStatus = "enabled"
+	ProfileBusinessDisabled ProfileBusinessStatus = "disabled"
+)
+
 type ScanStatus string
 
 const (
@@ -52,6 +63,7 @@ var (
 	ErrProfileNotFound      = errors.New("browser profile was not found")
 	ErrProfileInactive      = errors.New("browser profile is not active")
 	ErrProfileReferenced    = errors.New("browser profile is still referenced")
+	ErrProfileNotDisabled   = errors.New("browser profile is not disabled")
 )
 
 const (
@@ -83,9 +95,10 @@ type BrowserProfile struct {
 	ProxyType     string             `json:"proxy_type,omitempty"`
 	ProxyHost     string             `json:"proxy_host,omitempty"`
 	ProxyPort     int                `json:"proxy_port,omitempty"`
-	Remark        string             `json:"remark,omitempty"`
-	LocalStatus   ProfileLocalStatus `json:"local_status"`
-	LastSyncedAt  time.Time          `json:"last_synced_at"`
+	Remark         string                `json:"remark,omitempty"`
+	BusinessStatus ProfileBusinessStatus `json:"business_status"`
+	LocalStatus    ProfileLocalStatus    `json:"local_status"`
+	LastSyncedAt   time.Time             `json:"last_synced_at"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 }
@@ -148,7 +161,9 @@ type Store interface {
 	ClearMainIdentity(userID identity.UserID, actorID identity.UserID, at time.Time) error
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
+	UpdateProfile(profileID string, remark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
+	ProfileHasDependencies(profileID string) (bool, error)
 	AssignProfileOwner(profileID string, userID identity.UserID, teamID *identity.TeamID, actorID identity.UserID, at time.Time) error
 }
 
@@ -449,7 +464,50 @@ func (s *Service) DeleteProfile(actor identity.PublicUser, profileID string) err
 	if actor.Role != identity.RoleAdmin && profile.UserID != actor.ID {
 		return ErrForbidden
 	}
+	// Sync-delete is only allowed for disabled windows: the window is already
+	// gone from BitBrowser (scan reports it missing) and is disabled, so the
+	// Cloud mirror has no value left. Active windows must not be deleted.
+	if profile.BusinessStatus != ProfileBusinessDisabled {
+		return ErrProfileNotDisabled
+	}
+	referenced, err := s.store.ProfileHasDependencies(profile.ID)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return ErrProfileReferenced
+	}
 	return s.store.DeleteProfile(profileID)
+}
+
+func (s *Service) UpdateProfile(actor identity.PublicUser, profileID string, remark *string, businessStatus *ProfileBusinessStatus) (BrowserProfile, error) {
+	if !validActor(actor) {
+		return BrowserProfile{}, ErrForbidden
+	}
+	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if !found {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
+	if actor.Role != identity.RoleAdmin && profile.UserID != actor.ID {
+		return BrowserProfile{}, ErrForbidden
+	}
+	if businessStatus != nil && *businessStatus != ProfileBusinessEnabled && *businessStatus != ProfileBusinessDisabled {
+		return BrowserProfile{}, ErrInvalidInput
+	}
+	if err := s.store.UpdateProfile(profileID, remark, businessStatus, s.now()); err != nil {
+		return BrowserProfile{}, err
+	}
+	updated, found, err := s.store.GetProfile(profileID)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if !found {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
+	return updated, nil
 }
 
 func (s *Service) AssignProfileOwner(actor identity.PublicUser, profileID string, target identity.PublicUser) (BrowserProfile, error) {

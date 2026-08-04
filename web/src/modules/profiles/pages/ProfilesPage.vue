@@ -22,8 +22,13 @@ const error = ref("")
 const taskNotice = ref("")
 const operatingProfileId = ref("")
 const archivingProfileId = ref("")
-const keyword = ref("")
+const filterId = ref("")
+const filterName = ref("")
+const filterGroup = ref("")
+const filterBitId = ref("")
+const filterRemark = ref("")
 const statusFilter = ref("")
+const businessFilter = ref("")
 const pagination = ref({ current: 1, pageSize: 20 })
 
 // Create dialog
@@ -33,6 +38,13 @@ const newProfile = ref({ name: "", group_id: "", group_name: "", remark: "" })
 const profileGroups = ref([])
 const loadingGroups = ref(false)
 const createError = ref("")
+
+// Edit dialog (Cloud remark)
+const showEdit = ref(false)
+const editing = ref(false)
+const editProfile = ref(null)
+const editRemark = ref("")
+const editError = ref("")
 
 // Detail drawer
 const detailVisible = ref(false)
@@ -70,21 +82,31 @@ const groupOptions = computed(() => profileGroups.value.map((group) => ({
   label: `${group.name || group.id}（${group.id}）`,
   value: group.id,
 })))
+const groupFilterOptions = computed(() => {
+  const seen = new Set()
+  return profiles.value
+    .filter((p) => {
+      if (!p.group_name || seen.has(p.group_name)) return false
+      seen.add(p.group_name)
+      return true
+    })
+    .map((p) => ({ label: p.group_name, value: p.group_name }))
+})
 const filteredProfiles = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
+  const id = filterId.value.trim().toLowerCase()
+  const name = filterName.value.trim().toLowerCase()
+  const group = filterGroup.value.trim().toLowerCase()
+  const bitId = filterBitId.value.trim().toLowerCase()
+  const remark = filterRemark.value.trim().toLowerCase()
   return profiles.value.filter((profile) => {
     if (statusFilter.value && profile.local_status !== statusFilter.value) return false
-    if (!kw) return true
-    return [
-      profile.id,
-      profile.bit_profile_id,
-      profile.name,
-      profile.group_id,
-      profile.group_name,
-      profile.remark,
-      profile.bit_status,
-      proxySummary(profile),
-    ].some((value) => String(value || "").toLowerCase().includes(kw))
+    if (businessFilter.value && profile.business_status !== businessFilter.value) return false
+    if (id && !String(profile.id || "").toLowerCase().includes(id)) return false
+    if (name && !String(profile.name || "").toLowerCase().includes(name)) return false
+    if (group && ![profile.group_id, profile.group_name].some((value) => String(value || "").toLowerCase().includes(group))) return false
+    if (bitId && !String(profile.bit_profile_id || "").toLowerCase().includes(bitId)) return false
+    if (remark && !String(profile.remark || "").toLowerCase().includes(remark)) return false
+    return true
   })
 })
 
@@ -277,18 +299,68 @@ async function closeProfile(profile) {
   }
 }
 
-async function deleteProfile(profile) {
-  if (!confirm(`确定停用Cloud窗口镜像 "${profile.name || profile.bit_profile_id}"？本操作不会删除BitBrowser本地窗口，也不会删除账号历史。`)) return
-  archivingProfileId.value = String(profile.id || "")
+function businessStatusLabel(status) {
+  return status === "disabled" ? "已停用" : "启用"
+}
+
+async function toggleBusinessStatus(profile) {
+  const next = profile.business_status === "disabled" ? "enabled" : "disabled"
+  operatingProfileId.value = `biz:${profile.id}`
   error.value = ""
-  taskNotice.value = `正在停用Cloud窗口镜像：${profile.name || profile.bit_profile_id}`
+  const label = next === "disabled" ? "停用" : "启用"
   try {
-    await bindingClient.deleteProfile(profile.id)
-    taskNotice.value = "已停用Cloud窗口镜像；BitBrowser本地窗口和账号历史未删除。"
+    await bindingClient.updateProfile(profile.id, { business_status: next })
+    taskNotice.value = `已${label}窗口 "${profile.name || profile.bit_profile_id}"：${label === "停用" ? "将不再参与社媒账号匹配、不可打开/关闭，但窗口仍会被扫描显示。" : "已恢复参与账号匹配与执行。"}`
     await loadProfiles()
   } catch (e) {
     error.value = e.message
-    taskNotice.value = ""
+  } finally {
+    operatingProfileId.value = ""
+  }
+}
+
+function openEdit(profile) {
+  editProfile.value = profile
+  editRemark.value = profile.remark || ""
+  editError.value = ""
+  showEdit.value = true
+}
+
+async function saveEdit() {
+  if (!editProfile.value) return
+  editing.value = true
+  editError.value = ""
+  try {
+    await bindingClient.updateProfile(editProfile.value.id, { remark: editRemark.value })
+    taskNotice.value = "已更新Cloud窗口备注。"
+    showEdit.value = false
+    await loadProfiles()
+  } catch (e) {
+    editError.value = e.message
+  } finally {
+    editing.value = false
+  }
+}
+
+function disabledMissingProfile(scan, bitProfileId) {
+  const profile = profiles.value.find((p) => p.bit_profile_id === bitProfileId)
+  return profile && profile.business_status === "disabled" ? profile : null
+}
+
+async function syncDeleteProfile(profile) {
+  if (!isDesktopClient.value) {
+    error.value = "Cloud Web仅展示浏览器窗口信息；同步删除请在Desktop客户端执行。"
+    return
+  }
+  if (!confirm(`确认同步删除已停用窗口 "${profile.name || profile.bit_profile_id}" 的Cloud记录？该窗口已从BitBrowser删除且已停用。`)) return
+  archivingProfileId.value = String(profile.id || "")
+  error.value = ""
+  try {
+    await bindingClient.deleteProfile(profile.id)
+    taskNotice.value = `已同步删除窗口 "${profile.name || profile.bit_profile_id}" 的Cloud记录。`
+    await loadProfiles()
+  } catch (e) {
+    error.value = e.message
   } finally {
     archivingProfileId.value = ""
   }
@@ -542,22 +614,29 @@ function statusLabel(status) {
   return {
     active: "可用",
     local_missing: "本机缺失",
-    archived: "已停用",
+    archived: "已归档",
   }[status] || status || "-"
 }
 
+function bitStatusLabel(status) {
+  if (!status) return "-"
+  return String(status) === "0" ? "未运行" : "运行中"
+}
+
 const columns = [
-  { colKey: "id", title: "系统ID", width: 120 },
-  { colKey: "bit_profile_id", title: "BitBrowser ID", width: 170 },
+  { colKey: "id", title: "系统ID", width: 100, sortable: true },
+  { colKey: "bit_profile_id", title: "Bit ID", width: 160, sortable: true },
   { colKey: "seq", title: "比特序号", width: 90 },
   { colKey: "name", title: "名称", width: 160 },
-  { colKey: "group_name", title: "分组", width: 120 },
-  { colKey: "proxy", title: "代理", width: 170 },
-  { colKey: "remark", title: "备注", width: 140 },
-  { colKey: "user_id", title: "授权用户", width: 120 },
-  { colKey: "local_status", title: "状态", width: 90 },
-  { colKey: "last_synced_at", title: "同步", width: 130 },
-  { colKey: "op", title: "操作", width: 230 },
+  { colKey: "group_name", title: "分组", width: 110 },
+  { colKey: "proxy", title: "代理", width: 160 },
+  { colKey: "remark", title: "备注", width: 130 },
+  { colKey: "user_id", title: "授权用户", width: 110 },
+  { colKey: "business_status", title: "业务", width: 80 },
+  { colKey: "bit_status", title: "BitBrowser", width: 90 },
+  { colKey: "local_status", title: "Cloud状态", width: 100 },
+  { colKey: "last_synced_at", title: "同步", width: 120 },
+  { colKey: "op", title: "操作", width: 250 },
 ]
 
 // Profile lookup from scan profiles list
@@ -586,6 +665,8 @@ const diffColumns = [
   { colKey: "proxy", title: "代理", width: 140 },
   { colKey: "remark", title: "备注", width: 120 },
 ]
+
+const missingColumns = [...diffColumns, { colKey: "op", title: "操作", width: 100 }]
 </script>
 
 <template>
@@ -610,12 +691,19 @@ const diffColumns = [
 
     <t-card title="浏览器窗口" :bordered="true">
       <div class="filter-bar">
-        <t-space>
-          <t-input v-model="keyword" clearable placeholder="搜索系统ID / Bit ID / 名称 / 分组 / 备注 / 代理" style="width:360px" />
-          <t-select v-model="statusFilter" clearable placeholder="状态筛选" style="width:160px">
+        <t-space wrap>
+          <t-input v-model="filterId" clearable placeholder="系统ID" style="width:110px" />
+          <t-input v-model="filterName" clearable placeholder="名称" style="width:120px" />
+          <t-select v-model="filterGroup" clearable placeholder="分组" style="width:140px" :options="groupFilterOptions" filterable />
+          <t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:180px" />
+          <t-input v-model="filterRemark" clearable placeholder="备注" style="width:110px" />
+          <t-select v-model="businessFilter" clearable placeholder="业务" style="width:100px">
+            <t-option value="enabled" label="启用" />
+            <t-option value="disabled" label="停用" />
+          </t-select>
+          <t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:130px">
             <t-option value="active" label="可用" />
             <t-option value="local_missing" label="本机缺失" />
-            <t-option value="archived" label="已停用" />
           </t-select>
         </t-space>
       </div>
@@ -637,6 +725,12 @@ const diffColumns = [
         </template>
         <template #proxy="{ row }">{{ proxySummary(row) }}</template>
         <template #remark="{ row }">{{ row.remark || '-' }}</template>
+        <template #business_status="{ row }">
+          <t-tag :theme="row.business_status === 'disabled' ? 'danger' : 'success'" variant="light">{{ businessStatusLabel(row.business_status) }}</t-tag>
+        </template>
+        <template #bit_status="{ row }">
+          {{ bitStatusLabel(row.bit_status) }}
+        </template>
         <template #local_status="{ row }">
           <BusinessStatus :status="row.local_status === 'active' ? 'normal' : 'stopped'" :label="statusLabel(row.local_status)" />
         </template>
@@ -649,9 +743,13 @@ const diffColumns = [
             <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
             <t-button v-if="isAdmin" size="small" variant="text" @click="openAssignProfile(row)">分配</t-button>
             <template v-if="isDesktopClient">
-              <t-button size="small" variant="text" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.local_status === 'archived' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
-              <t-button size="small" variant="text" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.local_status === 'archived' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
-              <t-button size="small" variant="text" theme="danger" :loading="archivingProfileId === String(row.id || '')" :disabled="row.local_status === 'archived' || Boolean(archivingProfileId)" @click="deleteProfile(row)">停用</t-button>
+              <t-button size="small" variant="text" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
+              <t-button size="small" variant="text" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
+              <t-button size="small" variant="text" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
+              <t-button size="small" variant="text" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
+            </template>
+            <template v-if="isDesktopClient && row.business_status === 'disabled' && row.local_status === 'local_missing'">
+              <t-button size="small" variant="text" theme="danger" :loading="archivingProfileId === String(row.id || '')" @click="syncDeleteProfile(row)">同步删除</t-button>
             </template>
           </t-space>
         </template>
@@ -686,6 +784,24 @@ const diffColumns = [
       <t-alert v-if="createError" :message="createError" theme="error" style="margin-top:12px" />
     </t-dialog>
 
+    <!-- 编辑窗口 -->
+    <t-dialog v-model:visible="showEdit" header="编辑浏览器窗口" @confirm="saveEdit" :confirm-btn="{ loading: editing, theme: 'primary', content: '保存' }">
+      <t-alert
+        message="仅更新Cloud窗口备注（扫描不会覆盖备注）；BitBrowser侧窗口配置（名称/分组/代理）的编辑为后续能力。"
+        theme="info"
+        style="margin-bottom:12px"
+      />
+      <t-form>
+        <t-form-item label="窗口">
+          <span>{{ editProfile?.name || editProfile?.bit_profile_id || '-' }}</span>
+        </t-form-item>
+        <t-form-item label="Cloud备注">
+          <t-input v-model="editRemark" placeholder="窗口Cloud备注" />
+        </t-form-item>
+      </t-form>
+      <t-alert v-if="editError" :message="editError" theme="error" style="margin-top:12px" />
+    </t-dialog>
+
     <!-- 详情抽屉 -->
     <t-drawer v-model:visible="detailVisible" header="浏览器窗口详情" :size="'480px'" destroy-on-close>
       <t-descriptions v-if="detailProfile" :column="1" bordered size="small">
@@ -693,14 +809,19 @@ const diffColumns = [
         <t-descriptions-item label="BitBrowser窗口ID">{{ detailProfile.bit_profile_id }}</t-descriptions-item>
         <t-descriptions-item label="名称">{{ detailProfile.name || '-' }}</t-descriptions-item>
         <t-descriptions-item label="分组">{{ detailProfile.group_name || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="已保存主账号">{{ maskMainUserId(detailProfile.main_user_id) }}</t-descriptions-item>
-        <t-descriptions-item label="授权用户">{{ operatorLabel(detailProfile.user_id) }}</t-descriptions-item>
-        <t-descriptions-item label="状态">
+        <t-descriptions-item label="比特序号">{{ detailProfile.seq || '-' }}</t-descriptions-item>
+        <t-descriptions-item label="业务状态">{{ businessStatusLabel(detailProfile.business_status) }}</t-descriptions-item>
+        <t-descriptions-item label="Cloud状态">
           <BusinessStatus :status="detailProfile.local_status === 'active' ? 'normal' : 'stopped'" :label="statusLabel(detailProfile.local_status)" />
         </t-descriptions-item>
+        <t-descriptions-item label="BitBrowser状态">{{ bitStatusLabel(detailProfile.bit_status) }}</t-descriptions-item>
+        <t-descriptions-item label="已保存主账号">{{ maskMainUserId(detailProfile.main_user_id) }}</t-descriptions-item>
+        <t-descriptions-item label="授权用户">{{ operatorLabel(detailProfile.user_id) }}</t-descriptions-item>
         <t-descriptions-item label="代理">{{ proxySummary(detailProfile) }}</t-descriptions-item>
         <t-descriptions-item label="备注">{{ detailProfile.remark || '-' }}</t-descriptions-item>
         <t-descriptions-item label="最后同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
+        <t-descriptions-item label="创建时间">{{ formatTime(detailProfile.created_at) }}</t-descriptions-item>
+        <t-descriptions-item label="更新时间">{{ formatTime(detailProfile.updated_at) }}</t-descriptions-item>
       </t-descriptions>
     </t-drawer>
 
@@ -762,11 +883,14 @@ const diffColumns = [
             <t-empty v-else description="无变更" />
           </t-tab-panel>
           <t-tab-panel value="missing" label="缺失">
-            <t-table v-if="getDiff(currentScan).missing?.length" :data="getDiff(currentScan).missing.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="diffColumns" size="small">
+            <t-table v-if="getDiff(currentScan).missing?.length" :data="getDiff(currentScan).missing.map(d => ({...d, name: profileName(currentScan, d.bit_profile_id), group_name: profileGroup(currentScan, d.bit_profile_id), proxy: profileProxy(currentScan, d.bit_profile_id), remark: profileRemark(currentScan, d.bit_profile_id)}))" :columns="missingColumns" size="small">
               <template #name="{ row }">{{ row.name || row.bit_profile_id }}</template>
               <template #group_name="{ row }">{{ row.group_name }}</template>
               <template #proxy="{ row }">{{ row.proxy }}</template>
               <template #remark="{ row }">{{ row.remark }}</template>
+              <template #op="{ row }">
+                <t-button v-if="disabledMissingProfile(currentScan, row.bit_profile_id)" size="small" variant="text" theme="danger" @click="syncDeleteProfile(disabledMissingProfile(currentScan, row.bit_profile_id))">同步删除</t-button>
+              </template>
             </t-table>
             <t-empty v-else description="无缺失" />
           </t-tab-panel>
@@ -816,5 +940,6 @@ const diffColumns = [
 
 <style scoped>
 .action-bar { margin-bottom: 12px; }
+.filter-bar { margin-bottom: 12px; }
 .profile-name { font-weight: 500; }
 </style>

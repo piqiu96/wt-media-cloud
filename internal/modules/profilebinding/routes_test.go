@@ -205,7 +205,6 @@ func TestProfileRoutesRejectDesktopOnlyOperations(t *testing.T) {
 		{"POST", "/api/v1/browser-profiles", `{"node_id":"node-trusted","name":"窗口"}`},
 		{"POST", "/api/v1/browser-profiles/profile-1/open", `{"node_id":"node-trusted"}`},
 		{"POST", "/api/v1/browser-profiles/profile-1/close", `{"node_id":"node-trusted"}`},
-		{"PATCH", "/api/v1/browser-profiles/profile-1", `{"node_id":"node-trusted","name":"窗口"}`},
 	} {
 		resp := performProfileJSON(engine, tc.method, tc.path, tc.body, cookie)
 		if resp.Result().StatusCode() != consts.StatusConflict {
@@ -220,17 +219,31 @@ func TestProfileRoutesRejectDesktopOnlyOperations(t *testing.T) {
 	}
 }
 
-func TestProfileRoutesArchiveProfileReturnsEmptySuccess(t *testing.T) {
+func TestProfileRoutesSyncDeleteDisabledProfile(t *testing.T) {
 	engine, cookie, store := newProfileRouteTest(t)
-	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), TeamID: actorTeamID(t, engine, cookie), BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", LocalStatus: ProfileActive, LastSyncedAt: time.Now().UTC()}
+	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), TeamID: actorTeamID(t, engine, cookie), BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", BusinessStatus: ProfileBusinessDisabled, LocalStatus: ProfileLocalMissing, LastSyncedAt: time.Now().UTC()}
 
 	response := performProfileJSON(engine, "DELETE", "/api/v1/browser-profiles/profile-1", `{}`, cookie)
 
 	if response.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(response.Result().Body()), `"data":null`) {
-		t.Fatalf("archive status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+		t.Fatalf("sync-delete status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
 	}
-	if stored := store.profiles["profile-1"]; stored.LocalStatus != ProfileArchived {
-		t.Fatalf("LocalStatus=%s, want %s", stored.LocalStatus, ProfileArchived)
+	if _, ok := store.profiles["profile-1"]; ok {
+		t.Fatalf("profile-1 still present after sync-delete")
+	}
+}
+
+func TestProfileRoutesSyncDeleteRejectsActiveProfile(t *testing.T) {
+	engine, cookie, store := newProfileRouteTest(t)
+	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: identity.UserID(2), TeamID: actorTeamID(t, engine, cookie), BitProfileID: "bit-profile-1", MainUserID: "main-user-1", ProfileUserID: "bit-user-1", BusinessStatus: ProfileBusinessEnabled, LocalStatus: ProfileActive, LastSyncedAt: time.Now().UTC()}
+
+	response := performProfileJSON(engine, "DELETE", "/api/v1/browser-profiles/profile-1", `{}`, cookie)
+
+	if response.Result().StatusCode() != consts.StatusConflict {
+		t.Fatalf("active profile delete status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	if _, ok := store.profiles["profile-1"]; !ok {
+		t.Fatalf("profile-1 was deleted despite being enabled")
 	}
 }
 

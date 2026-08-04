@@ -11,7 +11,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, local_status, last_synced_at, created_at, updated_at`
+const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, business_status, local_status, last_synced_at, created_at, updated_at`
 
 type MySQLStore struct{ db *sql.DB }
 
@@ -47,11 +47,11 @@ func (s *MySQLStore) FindBinding(userID identity.UserID) (BitAccountBinding, boo
 }
 
 func (s *MySQLStore) ListProfiles(userID identity.UserID) ([]BrowserProfile, error) {
-	return s.listProfiles(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE user_id = ? ORDER BY bit_profile_id`, userID)
+	return s.listProfiles(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE user_id = ? ORDER BY id DESC`, userID)
 }
 
 func (s *MySQLStore) ListAllProfiles() ([]BrowserProfile, error) {
-	return s.listProfiles(`SELECT ` + profileColumnsSQL + ` FROM browser_profiles ORDER BY bit_profile_id`)
+	return s.listProfiles(`SELECT ` + profileColumnsSQL + ` FROM browser_profiles ORDER BY id DESC`)
 }
 
 func (s *MySQLStore) listProfiles(query string, args ...any) ([]BrowserProfile, error) {
@@ -217,7 +217,7 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 			profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
 			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nullIfEmpty(profile.Remark),
-			ProfileActive, at, profile.CreatedAt, at,
+			ProfileBusinessEnabled, ProfileActive, at, profile.CreatedAt, at,
 		); err != nil {
 			return err
 		}
@@ -378,7 +378,7 @@ func scanProfile(row scanner) (BrowserProfile, error) {
 	var profile BrowserProfile
 	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, remark sql.NullString
 	var proxyPort sql.NullInt64
-	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
+	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &profile.BusinessStatus, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
 	if err != nil {
 		return BrowserProfile{}, err
 	}
@@ -400,7 +400,56 @@ func nullIfEmpty(value string) any {
 func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?, ", count), ", ") }
 
 func (s *MySQLStore) DeleteProfile(id string) error {
-	_, err := s.db.Exec(`UPDATE browser_profiles SET local_status = ?, updated_at = NOW() WHERE id = ?`, ProfileArchived, id)
+	// Sync-delete: only called for disabled windows whose BitBrowser profile is
+	// gone. Removes stale runtime presence rows (the window no longer exists in
+	// BitBrowser) then the Cloud mirror record. Account/task/permit references
+	// are guarded in the service layer.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM browser_profile_runtime_presence WHERE profile_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM browser_profiles WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *MySQLStore) ProfileHasDependencies(profileID string) (bool, error) {
+	var count int
+	if err := s.db.QueryRow(
+		`SELECT (
+			(SELECT COUNT(*) FROM media_accounts WHERE browser_profile_id = ?) +
+			(SELECT COUNT(*) FROM sensitive_browser_tasks WHERE profile_id = ?) +
+			(SELECT COUNT(*) FROM sensitive_profile_permits WHERE profile_id = ?)
+		)`, profileID, profileID, profileID,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *MySQLStore) UpdateProfile(profileID string, remark *string, businessStatus *ProfileBusinessStatus, at time.Time) error {
+	var sets []string
+	var args []any
+	if remark != nil {
+		sets = append(sets, "remark = ?")
+		args = append(args, nullIfEmpty(*remark))
+	}
+	if businessStatus != nil {
+		sets = append(sets, "business_status = ?")
+		args = append(args, string(*businessStatus))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	sets = append(sets, "updated_at = ?")
+	args = append(args, at)
+	args = append(args, profileID)
+	_, err := s.db.Exec(`UPDATE browser_profiles SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
 	return err
 }
 

@@ -22,6 +22,11 @@ type LocalTrustChecker interface {
 	CheckLocalTrust(userID identity.UserID, nodeID string) error
 }
 
+type updateProfileRequest struct {
+	Remark         *string                `json:"remark"`
+	BusinessStatus *ProfileBusinessStatus `json:"business_status"`
+}
+
 type localSensitiveRequest struct {
 	NodeID string `json:"node_id"`
 }
@@ -183,10 +188,20 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		writeDesktopOnlyProfileOperation(c)
 	})
 	h.PATCH("/api/v1/browser-profiles/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
-		if _, ok := identity.AuthenticateRequest(c, identityService); !ok {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
 			return
 		}
-		writeDesktopOnlyProfileOperation(c)
+		var req updateProfileRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		profile, err := service.UpdateProfile(actor, c.Param("id"), req.Remark, req.BusinessStatus)
+		if err != nil {
+			writeProfileError(c, err)
+			return
+		}
+		common.Success(c, profile)
 	})
 	h.POST("/api/v1/browser-profiles/:id/assign-owner", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
@@ -316,6 +331,8 @@ func writeProfileError(c *hertzapp.RequestContext, err error) {
 		common.Conflict(c, 20009, "Profile 扫描未就绪")
 	case errors.Is(err, ErrProfileReferenced):
 		common.Conflict(c, 20003, "浏览器窗口已被媒体账号引用，不能直接分配给其他用户")
+	case errors.Is(err, ErrProfileNotDisabled):
+		common.Conflict(c, 20011, "仅已停用的浏览器窗口可同步删除；请先停用该窗口")
 	default:
 		common.InternalError(c, "Profile 服务内部错误")
 	}

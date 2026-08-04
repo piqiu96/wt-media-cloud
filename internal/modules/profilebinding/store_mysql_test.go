@@ -43,7 +43,7 @@ func TestMySQLStoreFindsBindingAndProfiles(t *testing.T) {
 		t.Fatalf("FindBinding() binding=%#v found=%v error=%v", binding, found, err)
 	}
 
-	mock.ExpectQuery(regexp.QuoteMeta(`FROM browser_profiles WHERE user_id = ? ORDER BY bit_profile_id`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM browser_profiles WHERE user_id = ? ORDER BY id DESC`)).
 		WithArgs(identity.UserID(1)).
 		WillReturnRows(sqlmock.NewRows(profileColumns()).AddRow(profileValues(mysqlTestScan().Profiles[0])...))
 	profiles, err := store.ListProfiles(identity.UserID(1))
@@ -125,9 +125,9 @@ func mysqlTestScan() ProfileScan {
 }
 
 func profileColumns() []string {
-	return []string{"id", "user_id", "team_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "local_status", "last_synced_at", "created_at", "updated_at"}
+	return []string{"id", "user_id", "team_id", "bit_profile_id", "main_user_id", "profile_user_id", "name", "seq", "group_id", "group_name", "bit_status", "bit_updated_at", "proxy_type", "proxy_host", "proxy_port", "remark", "business_status", "local_status", "last_synced_at", "created_at", "updated_at"}
 }
 
 func profileValues(profile BrowserProfile) []driver.Value {
-	return []driver.Value{profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
+	return []driver.Value{profile.ID, profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq, nil, nil, nil, nil, profile.ProxyType, profile.ProxyHost, profile.ProxyPort, profile.Remark, profile.BusinessStatus, profile.LocalStatus, profile.LastSyncedAt, profile.CreatedAt, profile.UpdatedAt}
 }
