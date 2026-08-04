@@ -76,6 +76,37 @@ func TestLoginUsesHttpOnlyCookieAndRequiresReplacementConfirmation(t *testing.T)
 	}
 }
 
+func TestDesktopOriginLoginUsesSameSiteNoneSecureCookie(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	if _, err := service.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatalf("BootstrapAdmin() error = %v", err)
+	}
+	engine := server.New()
+	RegisterRoutes(engine, service, RouteConfig{CookieSecure: false})
+
+	// Packaged Desktop runs on http://tauri.localhost, cross-site to the local
+	// Cloud API (127.0.0.1); the session cookie must be SameSite=None + Secure
+	// so the WebView round-trips it on cross-site fetches.
+	login := ut.PerformRequest(
+		engine.Engine,
+		"POST",
+		"/api/v1/auth/login",
+		&ut.Body{
+			Body: bytes.NewBufferString(`{"username":"admin","password":"a-long-initial-password","replace_existing":true}`),
+			Len:  len(`{"username":"admin","password":"a-long-initial-password","replace_existing":true}`),
+		},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "Origin", Value: "http://tauri.localhost"},
+	)
+	if login.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("desktop login status = %d, body = %s", login.Result().StatusCode(), login.Result().Body())
+	}
+	cookie := string(login.Result().Header.Peek("Set-Cookie"))
+	if !strings.Contains(cookie, SessionCookieName+"=") || !strings.Contains(cookie, "SameSite=None") || !strings.Contains(cookie, "secure") {
+		t.Fatalf("desktop Set-Cookie = %q", cookie)
+	}
+}
+
 func TestAdminManagesTeamsAndUsersWithOneTimePassword(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	if _, err := service.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {

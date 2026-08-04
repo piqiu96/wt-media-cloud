@@ -18,6 +18,19 @@ type RouteConfig struct {
 	CookieSecure bool
 }
 
+// sessionCookieMode returns the SameSite/Secure attributes for the session
+// cookie. The packaged Desktop page runs on http://tauri.localhost, which is
+// cross-site to the local Cloud API (127.0.0.1); SameSite=Lax cookies are not
+// sent on cross-site fetches, so the session would never round-trip. Use
+// SameSite=None + Secure for the Desktop origin and keep Lax for same-site
+// Cloud Web clients.
+func sessionCookieMode(origin string, defaultSecure bool) (protocol.CookieSameSite, bool) {
+	if strings.Contains(origin, "tauri.localhost") {
+		return protocol.CookieSameSiteNoneMode, true
+	}
+	return protocol.CookieSameSiteLaxMode, defaultSecure
+}
+
 type loginRequest struct {
 	Username        string `json:"username"`
 	Password        string `json:"password"`
@@ -79,7 +92,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		c.SetCookie(SessionCookieName, result.Token, 0, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
+		sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), cfg.CookieSecure)
+		c.SetCookie(SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
 		common.Success(c, result.User)
 	})
 
@@ -97,7 +111,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		c.SetCookie(SessionCookieName, "", -1, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
+		sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), cfg.CookieSecure)
+		c.SetCookie(SessionCookieName, "", -1, "/", "", sameSite, secure, true)
 		common.NoContent(c)
 	})
 
@@ -174,7 +189,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 			writeIdentityError(c, err)
 			return
 		}
-		c.SetCookie(SessionCookieName, "", -1, "/", "", protocol.CookieSameSiteLaxMode, cfg.CookieSecure, true)
+		sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), cfg.CookieSecure)
+		c.SetCookie(SessionCookieName, "", -1, "/", "", sameSite, secure, true)
 		common.NoContent(c)
 	})
 
