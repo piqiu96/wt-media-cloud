@@ -518,12 +518,6 @@ async function reviewScan(scan) {
   }
 }
 
-async function rejectScan() {
-  if (!currentScan.value) return
-  currentScan.value = null
-  scanDetailVisible.value = false
-}
-
 async function acceptLocalChanges() {
   if (!currentScan.value) return
   if (!isDesktopClient.value) {
@@ -1029,7 +1023,6 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
           <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
           <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="default" :loading="restoringCloud" @click="restoreCloudConfig">恢复Cloud配置并读回验证</t-button>
-          <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="default" @click="rejectScan" style="margin-left:8px">取消变更</t-button>
         </t-space>
       </template>
     </t-drawer>
