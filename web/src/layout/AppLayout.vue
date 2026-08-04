@@ -108,8 +108,8 @@ async function logout() {
 </script>
 
 <template>
-  <t-layout>
-    <t-aside :width="collapsed ? '64px' : '232px'">
+  <t-layout class="app-root-layout">
+    <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
       <div class="sidebar-header" @click="router.push('/')">
         <span v-if="!collapsed" class="sidebar-title">WT Media</span>
         <span v-else class="sidebar-title-mini">W</span>
@@ -155,6 +155,8 @@ async function logout() {
 </template>
 
 <style scoped>
+.app-root-layout { height: 100vh; overflow: hidden; }
+.app-aside { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .sidebar-header {
   height: 48px;
   display: flex;
@@ -172,6 +174,7 @@ async function logout() {
 }
 .content-area {
   padding: 24px; background: var(--td-bg-color-page);
-  min-height: calc(100vh - 48px);
+  height: calc(100vh - 48px);
+  overflow: auto;
 }
 </style>

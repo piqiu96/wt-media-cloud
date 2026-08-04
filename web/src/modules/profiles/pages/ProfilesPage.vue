@@ -28,6 +28,8 @@ const filterBitId = ref("")
 const filterRemark = ref("")
 const statusFilter = ref("")
 const businessFilter = ref("")
+const runningFilter = ref("")
+const userFilter = ref("")
 const pagination = ref({ current: 1, pageSize: 20, total: 0 })
 // 运行状态本地跟踪：key=profile.id → true(打开)/false(关闭)；未知则为 undefined
 const openStates = ref({})
@@ -95,6 +97,21 @@ const groupFilterOptions = computed(() => {
     })
     .map((p) => ({ label: p.group_name, value: p.group_name }))
 })
+const userFilterOptions = computed(() => {
+  const seen = new Set()
+  const list = []
+  if (currentUser.value) {
+    list.push({ label: currentUser.value.username || `UID ${currentUser.value.id}`, value: String(currentUser.value.id) })
+    seen.add(String(currentUser.value.id))
+  }
+  for (const u of operatorUsers.value) {
+    const key = String(u.id)
+    if (seen.has(key)) continue
+    seen.add(key)
+    list.push({ label: u.username || `UID ${u.id}`, value: key })
+  }
+  return list
+})
 const filteredProfiles = computed(() => {
   const id = filterId.value.trim().toLowerCase()
   const name = filterName.value.trim().toLowerCase()
@@ -104,6 +121,9 @@ const filteredProfiles = computed(() => {
   return profiles.value.filter((profile) => {
     if (statusFilter.value && profile.local_status !== statusFilter.value) return false
     if (businessFilter.value && profile.business_status !== businessFilter.value) return false
+    if (runningFilter.value === "open" && openStates.value[profile.id] !== true) return false
+    if (runningFilter.value === "closed" && openStates.value[profile.id] !== false) return false
+    if (userFilter.value && String(profile.user_id || "") !== userFilter.value) return false
     if (id && !String(profile.id || "").toLowerCase().includes(id)) return false
     if (name && !String(profile.name || "").toLowerCase().includes(name)) return false
     if (group && ![profile.group_id, profile.group_name].some((value) => String(value || "").toLowerCase().includes(group))) return false
@@ -398,9 +418,9 @@ async function toggleBusinessStatus(profile) {
 
 function remarkDisplay(profile) {
   const parts = []
-  if (profile.remark) parts.push(`[B] ${profile.remark}`)
-  if (profile.cloud_remark) parts.push(`[C] ${profile.cloud_remark}`)
-  return parts.join("  ")
+  if (profile.remark) parts.push(profile.remark)
+  if (profile.cloud_remark) parts.push(profile.cloud_remark)
+  return parts.join("\n")
 }
 
 function openEdit(profile) {
@@ -665,7 +685,7 @@ function getDiff(scan) {
 
 function formatTime(t) {
   if (!t) return "-"
-  return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+  return new Date(t).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
 function proxySummary(profile) {
@@ -688,18 +708,15 @@ function bitStatusLabel(status) {
 
 const columns = [
   { colKey: "row-select", type: "multiple", width: 40 },
-  { colKey: "id", title: "自增ID", width: 80, sortable: true },
-  { colKey: "seq", title: "比特序号", width: 90, sortable: true },
+  { colKey: "id", title: "ID", width: 70, sortable: true },
+  { colKey: "seq", title: "比特序号", width: 80, sortable: true },
   { colKey: "name", title: "名称", width: 160 },
-  { colKey: "group_name", title: "分组", width: 110 },
-  { colKey: "bit_profile_id", title: "Bit ID", width: 150, sortable: true },
-  { colKey: "proxy", title: "代理", width: 150 },
-  { colKey: "remark", title: "备注", width: 160 },
-  { colKey: "user_id", title: "授权用户", width: 100 },
-  { colKey: "business_status", title: "业务", width: 70 },
+  { colKey: "group_name", title: "分组", width: 100 },
+  { colKey: "proxy", title: "代理", width: 100 },
+  { colKey: "remark", title: "备注", width: 180 },
+  { colKey: "business_status", title: "状态", width: 70 },
   { colKey: "running", title: "运行", width: 60 },
-  { colKey: "local_status", title: "Cloud状态", width: 90 },
-  { colKey: "last_synced_at", title: "同步", width: 110 },
+  { colKey: "last_synced_at", title: "同步时间", width: 130 },
   { colKey: "op", title: "操作", width: 200 },
 ]
 
@@ -759,16 +776,21 @@ const diffColumns = [
     <t-card title="浏览器窗口" :bordered="true">
       <div class="filter-bar">
         <t-space wrap>
-          <t-input v-model="filterId" clearable placeholder="系统ID" style="width:110px" />
+          <t-input v-model="filterId" clearable placeholder="ID" style="width:90px" />
           <t-input v-model="filterName" clearable placeholder="名称" style="width:120px" />
           <t-select v-model="filterGroup" clearable placeholder="分组" style="width:140px" :options="groupFilterOptions" filterable />
-          <t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:180px" />
+          <t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:170px" />
           <t-input v-model="filterRemark" clearable placeholder="备注" style="width:110px" />
-          <t-select v-model="businessFilter" clearable placeholder="业务" style="width:100px">
+          <t-select v-model="businessFilter" clearable placeholder="状态" style="width:90px">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
           </t-select>
-          <t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:130px">
+          <t-select v-model="runningFilter" clearable placeholder="运行" style="width:90px">
+            <t-option value="open" label="打开" />
+            <t-option value="closed" label="关闭" />
+          </t-select>
+          <t-select v-model="userFilter" clearable placeholder="授权用户" style="width:120px" :options="userFilterOptions" filterable />
+          <t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:110px">
             <t-option value="active" label="可用" />
             <t-option value="local_missing" label="本机缺失" />
           </t-select>
@@ -780,6 +802,8 @@ const diffColumns = [
         row-key="id"
         size="small"
         hover
+        class="table-scroll"
+        :scroll="{ x: 'max-content' }"
         v-model:selected-row-keys="selectedRowKeys"
         v-model:pagination="pagination"
         empty="暂无浏览器窗口"
@@ -791,18 +815,18 @@ const diffColumns = [
           <div class="profile-name">{{ row.name || '-' }}</div>
         </template>
         <template #proxy="{ row }">{{ proxySummary(row) }}</template>
-        <template #remark="{ row }">{{ remarkDisplay(row) || '-' }}</template>
+        <template #remark="{ row }">
+          <div class="remark-cell">
+            <div v-if="row.remark" class="remark-bit">{{ row.remark }}</div>
+            <div v-if="row.cloud_remark" class="remark-cloud">{{ row.cloud_remark }}</div>
+            <span v-if="!row.remark && !row.cloud_remark">-</span>
+          </div>
+        </template>
         <template #business_status="{ row }">
           <t-tag :theme="row.business_status === 'disabled' ? 'danger' : 'success'" variant="light">{{ businessStatusLabel(row.business_status) }}</t-tag>
         </template>
         <template #running="{ row }">
           <t-tag :theme="isWindowOpen(row) ? 'success' : (openStates[row.id] === false ? 'default' : 'warning')" variant="light">{{ openStateLabel(row) }}</t-tag>
-        </template>
-        <template #local_status="{ row }">
-          <BusinessStatus :status="row.local_status === 'active' ? 'normal' : 'stopped'" :label="statusLabel(row.local_status)" />
-        </template>
-        <template #user_id="{ row }">
-          {{ operatorLabel(row.user_id) }}
         </template>
         <template #last_synced_at="{ row }">{{ formatTime(row.last_synced_at) }}</template>
         <template #op="{ row }">
@@ -882,7 +906,7 @@ const diffColumns = [
         <t-descriptions-item label="已保存主账号">{{ maskMainUserId(detailProfile.main_user_id) }}</t-descriptions-item>
         <t-descriptions-item label="授权用户">{{ operatorLabel(detailProfile.user_id) }}</t-descriptions-item>
         <t-descriptions-item label="代理">{{ proxySummary(detailProfile) }}</t-descriptions-item>
-        <t-descriptions-item label="备注">{{ remarkDisplay(detailProfile) || '-' }}</t-descriptions-item>
+        <t-descriptions-item label="备注"><span class="detail-remark">{{ remarkDisplay(detailProfile) || '-' }}</span></t-descriptions-item>
         <t-descriptions-item label="最后同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
         <t-descriptions-item label="创建时间">{{ formatTime(detailProfile.created_at) }}</t-descriptions-item>
         <t-descriptions-item label="更新时间">{{ formatTime(detailProfile.updated_at) }}</t-descriptions-item>
@@ -1003,4 +1027,9 @@ const diffColumns = [
 .action-bar { margin-bottom: 12px; }
 .filter-bar { margin-bottom: 12px; }
 .profile-name { font-weight: 500; }
+.remark-cell { line-height: 1.5; }
+.remark-bit { color: #999; }
+.remark-cloud { color: #0052d9; }
+.detail-remark { white-space: pre-line; }
+.table-scroll { overflow-x: auto; }
 </style>
