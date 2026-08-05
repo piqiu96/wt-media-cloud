@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -324,6 +325,83 @@ func recordMatchesTags(tags, anyTags, allTags, excludeTags []string) bool {
 		}
 	}
 	return true
+}
+
+const accountGroupColumns = `id, user_id, team_id, name, filters, sort_order, created_at, updated_at`
+
+func (s *MySQLStore) CreateGroup(group AccountGroup) (string, error) {
+	filtersJSON, err := json.Marshal(group.Filters)
+	if err != nil {
+		return "", err
+	}
+	result, err := s.db.Exec(
+		`INSERT INTO account_groups (user_id, team_id, name, filters, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		group.UserID, group.TeamID, group.Name, string(filtersJSON), group.SortOrder, group.CreatedAt, group.UpdatedAt,
+	)
+	if err != nil {
+		return "", err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(id, 10), nil
+}
+
+func (s *MySQLStore) FindGroup(id string) (AccountGroup, bool, error) {
+	group, err := scanAccountGroup(s.db.QueryRow(`SELECT `+accountGroupColumns+` FROM account_groups WHERE id = ?`, id))
+	if err != nil {
+		return AccountGroup{}, false, err
+	}
+	return group, group.ID != "", nil
+}
+
+func (s *MySQLStore) ListGroups(userID identity.UserID) ([]AccountGroup, error) {
+	rows, err := s.db.Query(`SELECT `+accountGroupColumns+` FROM account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	groups := []AccountGroup{}
+	for rows.Next() {
+		group, err := scanAccountGroup(rows)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	return groups, rows.Err()
+}
+
+func (s *MySQLStore) UpdateGroup(group AccountGroup) error {
+	filtersJSON, err := json.Marshal(group.Filters)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`UPDATE account_groups SET name = ?, filters = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
+		group.Name, string(filtersJSON), group.SortOrder, group.UpdatedAt, group.ID,
+	)
+	return err
+}
+
+func (s *MySQLStore) DeleteGroup(id string) error {
+	_, err := s.db.Exec(`DELETE FROM account_groups WHERE id = ?`, id)
+	return err
+}
+
+func scanAccountGroup(row interface{ Scan(...any) error }) (AccountGroup, error) {
+	var group AccountGroup
+	var filtersJSON []byte
+	if err := row.Scan(&group.ID, &group.UserID, &group.TeamID, &group.Name, &filtersJSON, &group.SortOrder, &group.CreatedAt, &group.UpdatedAt); err != nil {
+		return AccountGroup{}, err
+	}
+	if len(filtersJSON) > 0 {
+		if err := json.Unmarshal(filtersJSON, &group.Filters); err != nil {
+			return AccountGroup{}, err
+		}
+	}
+	return group, nil
 }
 
 var _ Store = (*MySQLStore)(nil)

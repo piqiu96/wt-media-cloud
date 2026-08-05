@@ -93,5 +93,20 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
         cookies,
       }).then(sanitize)
     },
+    createAccountGroup({ name, filters }) {
+      return api.post('/account-groups', { name, filters }).then(sanitize)
+    },
+    listAccountGroups() {
+      return api.get('/account-groups')
+    },
+    listAccountsByGroup(groupId) {
+      return api.get(`/account-groups/${groupId}/accounts`)
+    },
+    updateAccountGroup(groupId, { name, filters }) {
+      return api.patch(`/account-groups/${groupId}`, { name, filters }).then(sanitize)
+    },
+    deleteAccountGroup(groupId) {
+      return api.delete(`/account-groups/${groupId}`)
+    },
   }
 }

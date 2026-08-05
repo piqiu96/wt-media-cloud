@@ -67,6 +67,16 @@ type cookieReadResultRequest struct {
 	Cookies []map[string]any `json:"cookies"`
 }
 
+type createAccountGroupRequest struct {
+	Name    string               `json:"name"`
+	Filters AccountGroupFilters  `json:"filters"`
+}
+
+type updateAccountGroupRequest struct {
+	Name    *string              `json:"name"`
+	Filters *AccountGroupFilters `json:"filters"`
+}
+
 type TaskCreator interface {
 	Create(cloudagent.CreateTaskRequest) cloudagent.Task
 }
@@ -315,6 +325,79 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			return
 		}
 		common.Success(c, account)
+	})
+
+	// 账号组（可保存筛选，PRD 3.3.6）
+	h.POST("/api/v1/account-groups", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req createAccountGroupRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{Name: req.Name, Filters: req.Filters})
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Created(c, group)
+	})
+
+	h.GET("/api/v1/account-groups", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		groups, err := service.ListAccountGroups(actor)
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, groups)
+	})
+
+	h.GET("/api/v1/account-groups/:group_id/accounts", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		accounts, err := service.ListAccountsByGroup(actor, c.Param("group_id"))
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, accounts)
+	})
+
+	h.PATCH("/api/v1/account-groups/:group_id", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req updateAccountGroupRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		group, err := service.UpdateAccountGroup(actor, c.Param("group_id"), UpdateAccountGroupInput{Name: req.Name, Filters: req.Filters})
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, group)
+	})
+
+	h.DELETE("/api/v1/account-groups/:group_id", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if err := service.DeleteAccountGroup(actor, c.Param("group_id")); err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, nil)
 	})
 }
 

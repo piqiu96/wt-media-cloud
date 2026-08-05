@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -396,6 +397,72 @@ func assertAccountIDs(t *testing.T, service *Service, actor identity.PublicUser,
 	}
 }
 
+func TestServiceAccountGroupCRUD(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+
+	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{
+		Name: "重点账号", Filters: AccountGroupFilters{Platform: PlatformBilibili, BusinessStatus: BusinessEnabled},
+	})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if group.ID == "" || group.Name != "重点账号" {
+		t.Fatalf("group = %#v", group)
+	}
+	groups, err := service.ListAccountGroups(actor)
+	if err != nil || len(groups) != 1 {
+		t.Fatalf("list groups = %#v err=%v", groups, err)
+	}
+
+	other := mediaActor(2, 10, identity.RoleOperator)
+	if _, err := service.UpdateAccountGroup(other, group.ID, UpdateAccountGroupInput{Name: strPtr("抢改")}); err == nil {
+		t.Fatal("other user should not update group")
+	}
+	updated, err := service.UpdateAccountGroup(actor, group.ID, UpdateAccountGroupInput{Name: strPtr("改名")})
+	if err != nil || updated.Name != "改名" {
+		t.Fatalf("update = %#v err=%v", updated, err)
+	}
+	if err := service.DeleteAccountGroup(other, group.ID); err == nil {
+		t.Fatal("other user should not delete group")
+	}
+	if err := service.DeleteAccountGroup(actor, group.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+}
+
+func TestServiceAccountGroupApplyFilters(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili}); err != nil {
+		t.Fatalf("create bilibili: %v", err)
+	}
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBaijiahao}); err != nil {
+		t.Fatalf("create baijiahao: %v", err)
+	}
+	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{Name: "仅B站", Filters: AccountGroupFilters{Platform: PlatformBilibili}})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	accounts, err := service.ListAccountsByGroup(actor, group.ID)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].Platform != PlatformBilibili {
+		t.Fatalf("apply accounts = %#v", accounts)
+	}
+	if _, err := service.ListAccountsByGroup(mediaActor(2, 10, identity.RoleOperator), group.ID); err == nil {
+		t.Fatal("other user should not apply group")
+	}
+}
+
+func strPtr(value string) *string {
+	return &value
+}
+
 func newTestService(store Store) *Service {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	next := 0
@@ -443,13 +510,15 @@ func containsSecretField(value string) bool {
 }
 
 type memoryStore struct {
-	records map[string]AccountRecord
-	tags    map[string]map[string]struct{}
-	audits  []identity.AuditEvent
+	records  map[string]AccountRecord
+	tags     map[string]map[string]struct{}
+	audits   []identity.AuditEvent
+	groups   map[string]AccountGroup
+	groupSeq int64
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{records: map[string]AccountRecord{}, tags: map[string]map[string]struct{}{}}
+	return &memoryStore{records: map[string]AccountRecord{}, tags: map[string]map[string]struct{}{}, groups: map[string]AccountGroup{}}
 }
 
 func (s *memoryStore) Create(record AccountRecord) error {
@@ -559,6 +628,38 @@ func (s *memoryStore) ListTags(accountIDs []string) (map[string][]string, error)
 
 func (s *memoryStore) AppendAudit(event identity.AuditEvent) error {
 	s.audits = append(s.audits, event)
+	return nil
+}
+
+func (s *memoryStore) CreateGroup(group AccountGroup) (string, error) {
+	s.groupSeq++
+	group.ID = strconv.FormatInt(s.groupSeq, 10)
+	s.groups[group.ID] = group
+	return group.ID, nil
+}
+
+func (s *memoryStore) FindGroup(id string) (AccountGroup, bool, error) {
+	group, found := s.groups[id]
+	return group, found, nil
+}
+
+func (s *memoryStore) ListGroups(userID identity.UserID) ([]AccountGroup, error) {
+	groups := []AccountGroup{}
+	for _, group := range s.groups {
+		if group.UserID == userID {
+			groups = append(groups, group)
+		}
+	}
+	return groups, nil
+}
+
+func (s *memoryStore) UpdateGroup(group AccountGroup) error {
+	s.groups[group.ID] = group
+	return nil
+}
+
+func (s *memoryStore) DeleteGroup(id string) error {
+	delete(s.groups, id)
 	return nil
 }
 

@@ -55,13 +55,18 @@ const operatingProfileId = ref("")
 
 const tagInput = ref("")
 const selectedAccountIds = ref([])
+
+const accountGroups = ref([])
+const selectedGroupId = ref("")
+const showSaveGroup = ref(false)
+const newGroupName = ref("")
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
 
 onMounted(async () => {
   try {
     user.value = await sessionClient.me()
-    await Promise.all([loadAuxiliaryData(), loadAccounts()])
+    await Promise.all([loadAuxiliaryData(), loadAccounts(), loadAccountGroups()])
   } catch (e) {
     error.value = e.message || "加载账号数据失败"
   } finally {
@@ -116,6 +121,68 @@ function resetFilters() {
   searchTags.value = ""
   searchGameId.value = ""
   loadAccounts()
+}
+
+async function loadAccountGroups() {
+  try {
+    accountGroups.value = await accountClient.listAccountGroups()
+  } catch (e) {
+    // 静默：账号组加载失败不影响主列表
+  }
+}
+
+function currentFiltersPayload() {
+  return {
+    search: searchText.value || "",
+    platform: searchPlatform.value || "",
+    business_status: searchBizStatus.value || "",
+    login_status: searchLoginStatus.value || "",
+    game_id: searchGameId.value || "",
+    any_tags: searchTags.value ? searchTags.value.split(",").map(t => t.trim()).filter(Boolean) : [],
+  }
+}
+
+async function saveCurrentFiltersAsGroup() {
+  const name = newGroupName.value.trim()
+  if (!name) return
+  try {
+    await accountClient.createAccountGroup({ name, filters: currentFiltersPayload() })
+    newGroupName.value = ""
+    showSaveGroup.value = false
+    await loadAccountGroups()
+  } catch (e) {
+    error.value = e.message || "保存账号组失败"
+  }
+}
+
+async function applyAccountGroup() {
+  const groupId = selectedGroupId.value
+  if (!groupId) {
+    resetFilters()
+    return
+  }
+  const group = accountGroups.value.find(g => g.id === groupId)
+  if (!group) return
+  const f = group.filters || {}
+  searchText.value = f.search || ""
+  searchPlatform.value = f.platform || ""
+  searchBizStatus.value = f.business_status || ""
+  searchLoginStatus.value = f.login_status || ""
+  searchGameId.value = f.game_id || ""
+  searchTags.value = (f.any_tags || []).join(",")
+  await loadAccounts()
+}
+
+async function deleteSelectedGroup() {
+  const groupId = selectedGroupId.value
+  if (!groupId) return
+  try {
+    await accountClient.deleteAccountGroup(groupId)
+    selectedGroupId.value = ""
+    await loadAccountGroups()
+  } catch (e) {
+    error.value = e.message || "删除账号组失败"
+  }
 }
 
 function openCreate() {
@@ -619,8 +686,24 @@ const columns = [
           <t-button theme="primary" @click="loadAccounts">查询</t-button>
           <t-button @click="resetFilters">重置</t-button>
         </t-form-item>
+        <t-form-item label="账号组">
+          <t-select v-model="selectedGroupId" placeholder="选择账号组" clearable style="width:180px" @change="applyAccountGroup">
+            <t-option v-for="g in accountGroups" :key="g.id" :value="g.id" :label="g.name" />
+          </t-select>
+          <t-button variant="outline" style="margin-left:8px" @click="showSaveGroup = true">保存当前筛选</t-button>
+          <t-button v-if="selectedGroupId" variant="text" theme="danger" style="margin-left:4px" @click="deleteSelectedGroup">删除该组</t-button>
+        </t-form-item>
       </t-form>
     </t-card>
+
+    <t-dialog v-model:visible="showSaveGroup" header="保存为账号组" :confirm-btn="{ content: '保存', loading: false }" @confirm="saveCurrentFiltersAsGroup">
+      <t-form label-width="90px">
+        <t-form-item label="组名称">
+          <t-input v-model="newGroupName" placeholder="如：B站主投账号" />
+        </t-form-item>
+        <div class="form-tip">将保存当前筛选条件（游戏/平台/业务状态/登录状态/标签/搜索）为一组，供后续发布/互动筛选目标账号。</div>
+      </t-form>
+    </t-dialog>
 
     <div class="action-bar">
       <t-space>

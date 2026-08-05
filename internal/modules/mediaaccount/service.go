@@ -170,6 +170,39 @@ type AccountFilter struct {
 
 type AccountQuery = AccountFilter
 
+// AccountGroupFilters 是账号组保存的筛选条件（AccountFilter 子集，均可为空=不筛选）。
+type AccountGroupFilters struct {
+	GameID         string         `json:"game_id,omitempty"`
+	Platform       Platform       `json:"platform,omitempty"`
+	BusinessStatus BusinessStatus `json:"business_status,omitempty"`
+	LoginStatus    LoginStatus    `json:"login_status,omitempty"`
+	Search         string         `json:"search,omitempty"`
+	AnyTags        []string       `json:"any_tags,omitempty"`
+	AllTags        []string       `json:"all_tags,omitempty"`
+	ExcludeTags    []string       `json:"exclude_tags,omitempty"`
+}
+
+type AccountGroup struct {
+	ID        string              `json:"id"`
+	UserID    identity.UserID     `json:"user_id"`
+	TeamID    *identity.TeamID    `json:"team_id,omitempty"`
+	Name      string              `json:"name"`
+	Filters   AccountGroupFilters `json:"filters"`
+	SortOrder int                 `json:"sort_order"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+type CreateAccountGroupInput struct {
+	Name    string              `json:"name"`
+	Filters AccountGroupFilters `json:"filters"`
+}
+
+type UpdateAccountGroupInput struct {
+	Name    *string             `json:"name"`
+	Filters *AccountGroupFilters `json:"filters"`
+}
+
 type Store interface {
 	Create(AccountRecord) error
 	Find(id string) (AccountRecord, bool, error)
@@ -181,6 +214,11 @@ type Store interface {
 	RemoveTags(userID identity.UserID, accountIDs, tags []string) error
 	ListTags(accountIDs []string) (map[string][]string, error)
 	AppendAudit(identity.AuditEvent) error
+	CreateGroup(group AccountGroup) (string, error)
+	FindGroup(id string) (AccountGroup, bool, error)
+	ListGroups(userID identity.UserID) ([]AccountGroup, error)
+	UpdateGroup(AccountGroup) error
+	DeleteGroup(id string) error
 }
 
 type Service struct {
@@ -798,6 +836,137 @@ func (s *Service) changeTags(actor identity.PublicUser, accountIDs, tags []strin
 		}
 	}
 	return nil
+}
+
+func (s *Service) CreateAccountGroup(actor identity.PublicUser, input CreateAccountGroupInput) (AccountGroup, error) {
+	if !validActor(actor) {
+		return AccountGroup{}, ErrForbidden
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" || len(name) > 128 {
+		return AccountGroup{}, ErrInvalidInput
+	}
+	if !validGroupFilters(input.Filters) {
+		return AccountGroup{}, ErrInvalidInput
+	}
+	// 主键一律自增，由 DB 分配；CreateGroup 返回新 id
+	userID := actor.ID
+	now := s.now()
+	group := AccountGroup{
+		UserID: userID, TeamID: actor.TeamID,
+		Name: name, Filters: input.Filters, CreatedAt: now, UpdatedAt: now,
+	}
+	newID, err := s.store.CreateGroup(group)
+	if err != nil {
+		return AccountGroup{}, err
+	}
+	group.ID = newID
+	return group, nil
+}
+
+func (s *Service) ListAccountGroups(actor identity.PublicUser) ([]AccountGroup, error) {
+	if !validActor(actor) {
+		return nil, ErrForbidden
+	}
+	return s.store.ListGroups(actor.ID)
+}
+
+func (s *Service) UpdateAccountGroup(actor identity.PublicUser, groupID string, input UpdateAccountGroupInput) (AccountGroup, error) {
+	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
+		return AccountGroup{}, ErrForbidden
+	}
+	group, found, err := s.store.FindGroup(groupID)
+	if err != nil {
+		return AccountGroup{}, err
+	}
+	if !found {
+		return AccountGroup{}, ErrNotFound
+	}
+	if group.UserID != actor.ID && actor.Role != identity.RoleAdmin {
+		return AccountGroup{}, ErrForbidden
+	}
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" || len(name) > 128 {
+			return AccountGroup{}, ErrInvalidInput
+		}
+		group.Name = name
+	}
+	if input.Filters != nil {
+		if !validGroupFilters(*input.Filters) {
+			return AccountGroup{}, ErrInvalidInput
+		}
+		group.Filters = *input.Filters
+	}
+	group.UpdatedAt = s.now()
+	if err := s.store.UpdateGroup(group); err != nil {
+		return AccountGroup{}, err
+	}
+	return group, nil
+}
+
+func (s *Service) DeleteAccountGroup(actor identity.PublicUser, groupID string) error {
+	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
+		return ErrForbidden
+	}
+	group, found, err := s.store.FindGroup(groupID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrNotFound
+	}
+	if group.UserID != actor.ID && actor.Role != identity.RoleAdmin {
+		return ErrForbidden
+	}
+	return s.store.DeleteGroup(groupID)
+}
+
+func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string) ([]Account, error) {
+	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
+		return nil, ErrForbidden
+	}
+	group, found, err := s.store.FindGroup(groupID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrNotFound
+	}
+	if group.UserID != actor.ID && actor.Role != identity.RoleAdmin {
+		return nil, ErrForbidden
+	}
+	filter := AccountFilter{UserID: actor.ID}
+	if group.Filters.GameID != "" {
+		filter.GameID = group.Filters.GameID
+	}
+	if group.Filters.Platform != "" {
+		filter.Platform = group.Filters.Platform
+	}
+	if group.Filters.BusinessStatus != "" {
+		filter.BusinessStatus = group.Filters.BusinessStatus
+	}
+	if group.Filters.LoginStatus != "" {
+		filter.LoginStatus = group.Filters.LoginStatus
+	}
+	filter.Search = group.Filters.Search
+	filter.AnyTags = group.Filters.AnyTags
+	filter.AllTags = group.Filters.AllTags
+	filter.ExcludeTags = group.Filters.ExcludeTags
+	return s.ListAccounts(actor, filter)
+}
+
+func validGroupFilters(filters AccountGroupFilters) bool {
+	if filters.Platform != "" && !validPlatform(filters.Platform) {
+		return false
+	}
+	if filters.BusinessStatus != "" && !validBusinessStatus(filters.BusinessStatus) {
+		return false
+	}
+	if filters.LoginStatus != "" && !validLoginStatus(filters.LoginStatus) {
+		return false
+	}
+	return true
 }
 
 func (s *Service) authorizedRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
