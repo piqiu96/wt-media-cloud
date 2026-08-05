@@ -2,6 +2,7 @@
 package mediaaccount
 
 import (
+	"encoding/json"
 	"errors"
 	"sort"
 	"strconv"
@@ -130,6 +131,23 @@ type AccountCheckResultInput struct {
 	AvatarURL         string
 	LoginStatus       LoginStatus
 	Message           string
+}
+
+type CookieReadStartInput struct {
+	NodeID string
+}
+
+type CookieReadStart struct {
+	TaskID           string   `json:"task_id"`
+	AccountID        string   `json:"account_id"`
+	BrowserProfileID string   `json:"browser_profile_id"`
+	BitProfileID     string   `json:"bit_profile_id"`
+	Platform         Platform `json:"platform"`
+}
+
+type CookieReadResultInput struct {
+	TaskID  string
+	Cookies []map[string]any
 }
 
 type UpdateAccountInput struct {
@@ -519,6 +537,82 @@ func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID st
 		TaskID: taskID, AccountID: record.ID, BrowserProfileID: record.BrowserProfileID, BitProfileID: bitProfileID,
 		Platform: record.Platform, ExpectedPlatformAccountID: record.PlatformAccountID, LoginStatus: record.LoginStatus,
 	}, nil
+}
+
+func (s *Service) StartCookieRead(actor identity.PublicUser, accountID string, input CookieReadStartInput) (CookieReadStart, error) {
+	if actor.Role != identity.RoleOperator {
+		return CookieReadStart{}, ErrForbidden
+	}
+	if s.profileFacts == nil || s.sensitiveTasks == nil {
+		return CookieReadStart{}, ErrProfileUnavailable
+	}
+	record, err := s.GetOwnedAccountRecord(actor, accountID)
+	if err != nil {
+		return CookieReadStart{}, err
+	}
+	if record.BusinessStatus != BusinessEnabled && record.BusinessStatus != BusinessDraft {
+		return CookieReadStart{}, ErrInvalidInput
+	}
+	if strings.TrimSpace(record.BrowserProfileID) == "" {
+		return CookieReadStart{}, ErrProfileUnavailable
+	}
+	nodeID := strings.TrimSpace(input.NodeID)
+	if nodeID == "" {
+		return CookieReadStart{}, ErrInvalidInput
+	}
+	profileID, profileUserID, bitProfileID, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
+	if err != nil {
+		return CookieReadStart{}, err
+	}
+	if !found || !profileActive || profileUserID != actor.ID || bitProfileID == "" {
+		return CookieReadStart{}, ErrProfileUnavailable
+	}
+	now := s.now()
+	taskID := s.newID("sensitive-cookie-read")
+	task := profileguard.SensitiveTask{
+		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
+		Operation: profileguard.OperationCookieRead, Status: profileguard.TaskAuthorized,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.sensitiveTasks.CreateAuthorizedTask(task); err != nil {
+		return CookieReadStart{}, err
+	}
+	if err := s.audit(actor.ID, "media_account.cookie_read.start", record.ID, map[string]string{
+		"task_id": taskID, "browser_profile_id": record.BrowserProfileID, "bit_profile_id": bitProfileID,
+	}); err != nil {
+		return CookieReadStart{}, err
+	}
+	return CookieReadStart{
+		TaskID: taskID, AccountID: record.ID, BrowserProfileID: record.BrowserProfileID, BitProfileID: bitProfileID, Platform: record.Platform,
+	}, nil
+}
+
+func (s *Service) ApplyCookieReadResult(actor identity.PublicUser, accountID string, input CookieReadResultInput) (Account, error) {
+	record, err := s.GetOwnedAccountRecord(actor, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	if strings.TrimSpace(input.TaskID) == "" {
+		return Account{}, ErrInvalidInput
+	}
+	now := s.now()
+	serialized, err := json.Marshal(input.Cookies)
+	if err != nil {
+		return Account{}, ErrInvalidInput
+	}
+	record.ActiveCookie = string(serialized)
+	record.CookieStatus = "active"
+	record.ActiveCookieUpdatedAt = &now
+	record.UpdatedAt = now
+	if err := s.store.Update(record); err != nil {
+		return Account{}, err
+	}
+	if err := s.audit(actor.ID, "media_account.cookie_read.result", record.ID, map[string]string{
+		"task_id": strings.TrimSpace(input.TaskID), "cookie_count": strconv.Itoa(len(input.Cookies)),
+	}); err != nil {
+		return Account{}, err
+	}
+	return record.Account, nil
 }
 
 func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accountID string, input AccountCheckResultInput) (Account, error) {

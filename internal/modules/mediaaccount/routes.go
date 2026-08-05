@@ -58,6 +58,15 @@ type accountCheckResultRequest struct {
 	Message           string      `json:"message"`
 }
 
+type startCookieReadRequest struct {
+	NodeID string `json:"node_id"`
+}
+
+type cookieReadResultRequest struct {
+	TaskID  string           `json:"task_id"`
+	Cookies []map[string]any `json:"cookies"`
+}
+
 type TaskCreator interface {
 	Create(cloudagent.CreateTaskRequest) cloudagent.Task
 }
@@ -224,6 +233,41 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}})
 		common.Created(c, task)
+	})
+
+	// 同步 Cookie 读回：创建敏感任务（互斥），Desktop 经 Tauri preflight→Agent 读回→result 应用
+	h.POST("/api/v1/media-accounts/:account_id/cookies/read-sync", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req startCookieReadRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		start, err := service.StartCookieRead(actor, c.Param("account_id"), CookieReadStartInput{NodeID: req.NodeID})
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Created(c, start)
+	})
+
+	h.POST("/api/v1/media-accounts/:account_id/cookies/read-sync/result", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req cookieReadResultRequest
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		account, err := service.ApplyCookieReadResult(actor, c.Param("account_id"), CookieReadResultInput{TaskID: req.TaskID, Cookies: req.Cookies})
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
+		common.Success(c, account)
 	})
 
 	// Cookie export: returns original and active cookie for the account.

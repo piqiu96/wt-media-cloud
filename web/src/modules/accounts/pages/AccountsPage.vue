@@ -45,6 +45,10 @@ const detailProfileId = ref("")
 const savingDetail = ref(false)
 const checkingAccount = ref(false)
 const checkNotice = ref("")
+const readingCookie = ref(false)
+const cookieNotice = ref("")
+const showCookieDialog = ref(false)
+const cookieDialog = ref({ original_cookie: "", active_cookie: "" })
 const batchChecking = ref(false)
 const batchResults = ref([])
 const operatingProfileId = ref("")
@@ -351,6 +355,62 @@ async function runSingleAccountCheck(account, service) {
     loginStatus: localResult.login_status,
     message: localResult.message,
   })
+}
+
+async function readProfileCookie() {
+  if (!detailAccount.value || !detailAccount.value.browser_profile_id) return
+  readingCookie.value = true
+  cookieNotice.value = ""
+  error.value = ""
+  try {
+    const service = await desktopLocalAgentService()
+    const status = await refreshRuntimeWithCooldown(service)
+    const nodeId = status.node_id || ""
+    if (!nodeId) throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
+    const start = await accountClient.startCookieReadSync(detailAccount.value.id, { nodeId })
+    const localResult = await service.cookieRead({
+      cloudBaseUrl: cloudBaseUrl(),
+      taskId: start.task_id,
+      bitProfileId: start.bit_profile_id,
+    })
+    const cookies = localResult.cookies || []
+    const updated = await accountClient.submitCookieReadResult(detailAccount.value.id, {
+      taskId: start.task_id,
+      cookies,
+    })
+    detailAccount.value = { ...detailAccount.value, ...updated }
+    cookieNotice.value = `已从 Profile 读回 ${cookies.length} 条真实 Cookie 并更新 active_cookie`
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "读取 Cookie 失败"
+  } finally {
+    readingCookie.value = false
+  }
+}
+
+async function viewExportCookie() {
+  if (!detailAccount.value) return
+  try {
+    const data = await accountClient.fetchCookies(detailAccount.value.id)
+    cookieDialog.value = data || { original_cookie: "", active_cookie: "" }
+    showCookieDialog.value = true
+  } catch (e) {
+    error.value = e.message || "获取 Cookie 失败"
+  }
+}
+
+async function copyCookie(field) {
+  const value = cookieDialog.value?.[field]
+  if (!value) {
+    error.value = "当前 Cookie 为空，无可复制内容"
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(value)
+    cookieNotice.value = `已复制 ${field === "active_cookie" ? "Active" : "原始"} Cookie 到剪贴板`
+  } catch (e) {
+    error.value = "复制失败，请手动选择复制"
+  }
 }
 
 function accountLabel(account) {
@@ -695,6 +755,7 @@ const columns = [
         <t-descriptions-item label="最近检查">{{ detailAccount.last_checked_at ? formatTime(detailAccount.last_checked_at) : '尚未检查' }}</t-descriptions-item>
       </t-descriptions>
       <t-alert v-if="checkNotice" :message="checkNotice" theme="success" style="margin-top:12px" />
+      <t-alert v-if="cookieNotice" :message="cookieNotice" theme="success" style="margin-top:12px" />
 
       <t-form v-if="detailAccount" class="detail-form" label-width="92px">
         <t-form-item label="备注">
@@ -720,10 +781,24 @@ const columns = [
           <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" :loading="operatingProfileId === `open:${profileForAccount(detailAccount)?.bit_profile_id || ''}`" :disabled="Boolean(operatingProfileId)" @click="openAccountProfile(detailAccount)">打开窗口</t-button>
           <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" :loading="operatingProfileId === `close:${profileForAccount(detailAccount)?.bit_profile_id || ''}`" :disabled="Boolean(operatingProfileId)" @click="closeAccountProfile(detailAccount)">关闭窗口</t-button>
           <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查/同步账号信息</t-button>
+          <t-button variant="outline" @click="viewExportCookie">查看/导出 Cookie</t-button>
+          <t-button v-if="isDesktop && canOperateBoundWindow(detailAccount)" variant="outline" :loading="readingCookie" @click="readProfileCookie">从 Profile 读真实 Cookie</t-button>
           <t-button theme="primary" :loading="savingDetail" @click="saveDetail">保存</t-button>
         </t-space>
       </template>
     </t-drawer>
+
+    <t-dialog v-model:visible="showCookieDialog" header="账号 Cookie（敏感数据）" :cancel-btn="{ content: '关闭' }">
+      <p><strong>原始 Cookie：</strong></p>
+      <pre class="cookie-box">{{ cookieDialog.original_cookie || '（空）' }}</pre>
+      <p><strong>当前真实 Cookie（active）：</strong></p>
+      <pre class="cookie-box">{{ cookieDialog.active_cookie || '（空）' }}</pre>
+      <div class="form-tip">Cookie 为敏感数据，请勿泄露。复制后建议及时清理剪贴板；导出仅用于授权用途。</div>
+      <t-space style="margin-top:8px">
+        <t-button size="small" @click="copyCookie('active_cookie')">复制 Active Cookie</t-button>
+        <t-button size="small" variant="outline" @click="copyCookie('original_cookie')">复制原始 Cookie</t-button>
+      </t-space>
+    </t-dialog>
   </t-loading>
 </template>
 
@@ -732,6 +807,16 @@ const columns = [
 .stat-num { font-size: 24px; font-weight: 700; line-height: 1.2; }
 .search-bar { margin-bottom: 12px; }
 .batch-result-card { margin-bottom: 12px; }
+.cookie-box {
+  max-height: 160px;
+  overflow: auto;
+  background: var(--td-bg-color-container-hover, #f5f5f5);
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
 .batch-summary {
   display: flex;
   align-items: center;

@@ -11,6 +11,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   bindSession: "local_agent_bind_session",
   refreshRuntime: "local_agent_refresh_runtime",
   accountCheck: "local_agent_account_check",
+  cookieRead: "local_agent_cookie_read",
   profileScan: "local_agent_profile_scan",
   profileGroups: "local_agent_profile_groups",
   profileOpen: "local_agent_profile_open",
@@ -119,6 +120,15 @@ export function createLocalAgentService({ invoke }) {
           bit_profile_id: bitProfileId,
           platform,
           expected_platform_account_id: expectedPlatformAccountId,
+        },
+      });
+    },
+    async cookieRead({ cloudBaseUrl, taskId, bitProfileId }) {
+      return invoke(LOCAL_AGENT_COMMANDS.cookieRead, {
+        args: {
+          cloud_base_url: cloudBaseUrl,
+          task_id: taskId,
+          bit_profile_id: bitProfileId,
         },
       });
     },

@@ -84,5 +84,14 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     fetchCookies(accountId) {
       return api.get(`/media-accounts/${accountId}/cookies`)
     },
+    startCookieReadSync(accountId, { nodeId } = {}) {
+      return api.post(`/media-accounts/${accountId}/cookies/read-sync`, { node_id: nodeId })
+    },
+    submitCookieReadResult(accountId, { taskId, cookies }) {
+      return api.post(`/media-accounts/${accountId}/cookies/read-sync/result`, {
+        task_id: taskId,
+        cookies,
+      }).then(sanitize)
+    },
   }
 }
