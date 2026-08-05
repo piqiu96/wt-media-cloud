@@ -215,6 +215,12 @@ function profileForAccount(account) {
 }
 
 function executableText(account) {
+  if (account.business_status === "draft") {
+    if (!account.game_id) return "待识别：未绑定游戏"
+    if (!account.browser_profile_id) return "待识别：未绑定窗口"
+    return "待识别：需要真实账号检查"
+  }
+  if (account.business_status === "abnormal") return "异常：需要人工处理"
   if (account.business_status !== "enabled") return "不可执行：账号未启用"
   if (!account.game_id) return "不可执行：未绑定游戏"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
@@ -237,8 +243,19 @@ function loginStatusText(status) {
   }[status] || status || "-"
 }
 
+function bizStatusText(status) {
+  return {
+    draft: "待识别",
+    enabled: "启用",
+    disabled: "停用",
+    abnormal: "异常",
+    retired: "退役",
+  }[status] || status || "-"
+}
+
 function canCheckAccount(account) {
-  return isDesktop && account && account.business_status === "enabled" && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
+  // draft（待识别）与 enabled 均可发起检查：draft 需要检查完成真实识别后升级
+  return isDesktop && account && (account.business_status === "enabled" || account.business_status === "draft") && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
@@ -456,6 +473,8 @@ const activeProfiles = computed(() => profiles.value.filter(profile => profile.l
 const stats = computed(() => ({
   total: accounts.value.length,
   enabled: accounts.value.filter(a => a.business_status === "enabled").length,
+  draft: accounts.value.filter(a => a.business_status === "draft").length,
+  abnormal: accounts.value.filter(a => a.business_status === "abnormal").length,
   unbound: accounts.value.filter(a => !a.browser_profile_id).length,
   normal: accounts.value.filter(a => a.login_status === "normal").length,
   unknown: accounts.value.filter(a => a.login_status === "unknown").length,
@@ -492,7 +511,8 @@ const columns = [
     <t-row :gutter="16" class="stats-row">
       <t-col :span="4"><t-card><template #title>总账号</template><div class="stat-num">{{ stats.total }}</div></t-card></t-col>
       <t-col :span="4"><t-card><template #title>已启用</template><div class="stat-num">{{ stats.enabled }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>未绑定窗口</template><div class="stat-num">{{ stats.unbound }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>待识别</template><div class="stat-num">{{ stats.draft }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>异常</template><div class="stat-num">{{ stats.abnormal }}</div></t-card></t-col>
       <t-col :span="4"><t-card><template #title>登录正常</template><div class="stat-num">{{ stats.normal }}</div></t-card></t-col>
       <t-col :span="4"><t-card><template #title>待检查</template><div class="stat-num">{{ stats.unknown }}</div></t-card></t-col>
     </t-row>
@@ -516,8 +536,10 @@ const columns = [
         </t-form-item>
         <t-form-item label="业务状态">
           <t-select v-model="searchBizStatus" placeholder="全部" clearable style="width:120px">
+            <t-option value="draft" label="待识别" />
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
+            <t-option value="abnormal" label="异常" />
             <t-option value="retired" label="退役" />
           </t-select>
         </t-form-item>
@@ -602,7 +624,10 @@ const columns = [
         <BusinessStatus :status="row.login_status === 'normal' ? 'normal' : row.login_status === 'unknown' ? 'pending_review' : 'warning'" :label="loginStatusText(row.login_status)" />
       </template>
       <template #business_status="{ row }">
-        <BusinessStatus :status="row.business_status === 'enabled' ? 'normal' : row.business_status === 'disabled' ? 'paused' : 'expired'" :label="row.business_status" />
+        <BusinessStatus
+          :status="row.business_status === 'enabled' ? 'normal' : row.business_status === 'draft' ? 'pending' : row.business_status === 'disabled' ? 'paused' : row.business_status === 'abnormal' ? 'error' : 'expired'"
+          :label="bizStatusText(row.business_status)"
+        />
       </template>
       <template #last_checked_at="{ row }">{{ row.last_checked_at ? formatTime(row.last_checked_at) : '尚未检查' }}</template>
       <template #executable="{ row }">{{ executableText(row) }}</template>
@@ -614,8 +639,10 @@ const columns = [
             <t-button size="small" variant="text" :loading="operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" :disabled="!canOperateBoundWindow(row) || Boolean(operatingProfileId)" @click="closeAccountProfile(row)">关闭窗口</t-button>
           </template>
           <t-dropdown :options="[
+            { value: 'draft', label: '待识别', disabled: row.business_status === 'draft' },
             { value: 'enabled', label: '启用', disabled: row.business_status === 'enabled' },
             { value: 'disabled', label: '停用', disabled: row.business_status === 'disabled' },
+            { value: 'abnormal', label: '异常', disabled: row.business_status === 'abnormal' },
             { value: 'retired', label: '退役', disabled: row.business_status === 'retired' },
           ]" @click="(v) => updateStatus(row, v)">
             <t-button size="small" variant="text">状态</t-button>

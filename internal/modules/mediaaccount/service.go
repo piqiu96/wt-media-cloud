@@ -32,8 +32,10 @@ const (
 type BusinessStatus string
 
 const (
+	BusinessDraft    BusinessStatus = "draft"    // 待识别：创建后未完成真实识别
 	BusinessEnabled  BusinessStatus = "enabled"
 	BusinessDisabled BusinessStatus = "disabled"
+	BusinessAbnormal BusinessStatus = "abnormal" // 异常：检查发现问题需处理
 	BusinessRetired  BusinessStatus = "retired"
 )
 
@@ -264,7 +266,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 			Platform:             platform,
 			Remark:               remark,
 			IdentificationStatus: IdentificationPending,
-			BusinessStatus:       BusinessEnabled,
+			BusinessStatus:       BusinessDraft, // 待识别：创建后未完成真实识别
 			LoginStatus:          LoginUnknown,
 			Tags:                 []string{},
 			CreatedAt:            now,
@@ -481,7 +483,7 @@ func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID st
 	if err != nil {
 		return AccountCheckStart{}, err
 	}
-	if record.BusinessStatus != BusinessEnabled {
+	if record.BusinessStatus != BusinessEnabled && record.BusinessStatus != BusinessDraft {
 		return AccountCheckStart{}, ErrInvalidInput
 	}
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
@@ -566,6 +568,18 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 	if record.LoginStatus != LoginAccountMismatch {
 		record.LoginStatus = input.LoginStatus
 	}
+	// 检查后推进业务状态：识别成功且登录正常→启用；识别成功但登录异常→abnormal；
+	// 未识别（not_logged_in/unknown）保持当前状态（如 draft 待识别）。
+	if record.IdentificationStatus == IdentificationIdentified {
+		switch record.LoginStatus {
+		case LoginNormal:
+			record.BusinessStatus = BusinessEnabled
+		case LoginNotLoggedIn, LoginUnknown:
+			// 已识别账号未登录/未知不降级，保持当前业务状态
+		default:
+			record.BusinessStatus = BusinessAbnormal
+		}
+	}
 	record.UpdatedAt = now
 	record.LastCheckedAt = &now
 	if err := s.store.Update(record); err != nil {
@@ -592,7 +606,7 @@ func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID st
 	if err != nil {
 		return Account{}, err
 	}
-	if record.BusinessStatus != BusinessEnabled {
+	if record.BusinessStatus != BusinessEnabled && record.BusinessStatus != BusinessDraft {
 		return Account{}, ErrInvalidInput
 	}
 	profileID = strings.TrimSpace(profileID)
@@ -637,7 +651,7 @@ func (s *Service) UnbindProfile(actor identity.PublicUser, accountID string) (Ac
 	if err != nil {
 		return Account{}, err
 	}
-	if record.BusinessStatus != BusinessEnabled {
+	if record.BusinessStatus != BusinessEnabled && record.BusinessStatus != BusinessDraft {
 		return Account{}, ErrInvalidInput
 	}
 	if record.BrowserProfileID == "" {
@@ -749,7 +763,12 @@ func validPlatform(platform Platform) bool {
 }
 
 func validBusinessStatus(status BusinessStatus) bool {
-	return status == BusinessEnabled || status == BusinessDisabled || status == BusinessRetired
+	switch status {
+	case BusinessDraft, BusinessEnabled, BusinessDisabled, BusinessAbnormal, BusinessRetired:
+		return true
+	default:
+		return false
+	}
 }
 
 func validLoginStatus(status LoginStatus) bool {
