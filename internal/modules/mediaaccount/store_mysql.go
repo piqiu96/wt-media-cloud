@@ -13,7 +13,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const accountColumns = `id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, created_at, updated_at`
+const accountColumns = `id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, check_items, created_at, updated_at`
 
 type MySQLStore struct {
 	db *sql.DB
@@ -25,12 +25,12 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 
 func (s *MySQLStore) Create(record AccountRecord) error {
 	_, err := s.db.Exec(
-		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.UserID, record.TeamID, record.GameID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
 		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
-		record.ActiveCookieUpdatedAt, record.LastCheckedAt, record.CreatedAt, record.UpdatedAt,
+		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.CreatedAt, record.UpdatedAt,
 	)
 	if duplicateKey(err) {
 		return ErrDuplicateAccount
@@ -69,12 +69,12 @@ func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error
 
 func (s *MySQLStore) Update(record AccountRecord) error {
 	result, err := s.db.Exec(
-		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, check_items = ?, updated_at = ? WHERE id = ?`,
 		record.UserID, record.TeamID, record.GameID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
 		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
 		nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
-		record.ActiveCookieUpdatedAt, record.LastCheckedAt, record.UpdatedAt, record.ID,
+		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.UpdatedAt, record.ID,
 	)
 	if duplicateKey(err) {
 		return ErrDuplicateAccount
@@ -248,12 +248,13 @@ func scanAccount(row scanner) (AccountRecord, error) {
 	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
+	var checkItemsJSON sql.NullString
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.GameID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
 		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
-		&record.CreatedAt, &record.UpdatedAt,
+		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt,
 	)
 	if err != nil {
 		return AccountRecord{}, err
@@ -267,6 +268,9 @@ func scanAccount(row scanner) (AccountRecord, error) {
 	record.OriginalCookie = originalCookie.String
 	record.ActiveCookie = activeCookie.String
 	record.CookieStatus = cookieStatus.String
+	if checkItemsJSON.Valid && checkItemsJSON.String != "" {
+		_ = json.Unmarshal([]byte(checkItemsJSON.String), &record.CheckItems)
+	}
 	if activeCookieUpdatedAt.Valid {
 		value := activeCookieUpdatedAt.Time
 		record.ActiveCookieUpdatedAt = &value
@@ -402,6 +406,17 @@ func scanAccountGroup(row interface{ Scan(...any) error }) (AccountGroup, error)
 		}
 	}
 	return group, nil
+}
+
+func marshalCheckItems(items []AccountCheckItem) any {
+	if len(items) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return nil
+	}
+	return string(raw)
 }
 
 var _ Store = (*MySQLStore)(nil)

@@ -82,6 +82,7 @@ type Account struct {
 	CookieStatus          string               `json:"cookie_status,omitempty"`
 	ActiveCookieUpdatedAt *time.Time           `json:"active_cookie_updated_at,omitempty"`
 	LastCheckedAt         *time.Time           `json:"last_checked_at,omitempty"`
+	CheckItems            []AccountCheckItem   `json:"check_items,omitempty"`
 	Tags                  []string             `json:"tags"`
 	CreatedAt             time.Time            `json:"created_at"`
 	UpdatedAt             time.Time            `json:"updated_at"`
@@ -131,6 +132,7 @@ type AccountCheckResultInput struct {
 	AvatarURL         string
 	LoginStatus       LoginStatus
 	Message           string
+	CheckItems        []AccountCheckItem // Agent 返回的第 5-8 项；1-4 项由 Cloud 合成
 }
 
 type CookieReadStartInput struct {
@@ -180,6 +182,15 @@ type AccountGroupFilters struct {
 	AnyTags        []string       `json:"any_tags,omitempty"`
 	AllTags        []string       `json:"all_tags,omitempty"`
 	ExcludeTags    []string       `json:"exclude_tags,omitempty"`
+}
+
+// AccountCheckItem 是账号检查 8 项中的一项结果（PRD 3.3.10）。
+// Status: pass=通过 | fail=不通过 | skip=跳过 | na=不适用（未接入/延后）。
+type AccountCheckItem struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 
 type AccountGroup struct {
@@ -712,6 +723,9 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 			record.BusinessStatus = BusinessAbnormal
 		}
 	}
+	// 合成 8 项检查明细：1/2 来自本检查前置（能执行到此处说明前置通过）；
+	// 3/4 代理项延后 M2-C（na）；5-8 来自 Agent 返回。
+	record.CheckItems = mergeCheckItems(input.CheckItems)
 	record.UpdatedAt = now
 	record.LastCheckedAt = &now
 	if err := s.store.Update(record); err != nil {
@@ -954,6 +968,35 @@ func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string)
 	filter.AllTags = group.Filters.AllTags
 	filter.ExcludeTags = group.Filters.ExcludeTags
 	return s.ListAccounts(actor, filter)
+}
+
+// mergeCheckItems 合成账号检查 8 项明细：固定 1-4 项 + Agent 返回的 5-8 项（缺失补 na）。
+func mergeCheckItems(agentItems []AccountCheckItem) []AccountCheckItem {
+	fixed := []AccountCheckItem{
+		{Key: "identity_match", Label: "比特浏览器账号匹配", Status: "pass"},
+		{Key: "profile_exists", Label: "绑定窗口存在", Status: "pass"},
+		{Key: "proxy_ok", Label: "窗口代理正常", Status: "na", Message: "代理管理未接入（M2-C）"},
+		{Key: "proxy_expired", Label: "代理到期/停用", Status: "na", Message: "代理管理未接入（M2-C）"},
+	}
+	merged := make([]AccountCheckItem, 0, 8)
+	merged = append(merged, fixed...)
+	merged = append(merged, agentItems...)
+	keys := make(map[string]bool, len(merged))
+	for _, item := range merged {
+		keys[item.Key] = true
+	}
+	defaults := []AccountCheckItem{
+		{Key: "platform_login", Label: "平台登录状态", Status: "na", Message: "本次未获取到平台身份"},
+		{Key: "account_match", Label: "登录账号与台账一致", Status: "na", Message: "未校验"},
+		{Key: "verification_needed", Label: "需验证码/安全验证", Status: "na", Message: "需真实受限账号样本对齐"},
+		{Key: "account_restricted", Label: "账号限制/封号", Status: "na", Message: "需真实受限账号样本对齐"},
+	}
+	for _, item := range defaults {
+		if !keys[item.Key] {
+			merged = append(merged, item)
+		}
+	}
+	return merged
 }
 
 func validGroupFilters(filters AccountGroupFilters) bool {

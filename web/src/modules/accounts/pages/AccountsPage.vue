@@ -324,6 +324,15 @@ function bizStatusText(status) {
   }[status] || status || "-"
 }
 
+function checkItemStatusText(status) {
+  return {
+    pass: "通过",
+    fail: "未通过",
+    skip: "跳过",
+    na: "不适用",
+  }[status] || status || "-"
+}
+
 function canCheckAccount(account) {
   // draft（待识别）与 enabled 均可发起检查：draft 需要检查完成真实识别后升级
   return isDesktop && account && (account.business_status === "enabled" || account.business_status === "draft") && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
@@ -421,6 +430,7 @@ async function runSingleAccountCheck(account, service) {
     avatarUrl: localResult.avatar_url,
     loginStatus: localResult.login_status,
     message: localResult.message,
+    checkItems: localResult.check_items || [],
   })
 }
 
@@ -837,6 +847,14 @@ const columns = [
         <t-descriptions-item label="可执行结论">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_checked_at ? formatTime(detailAccount.last_checked_at) : '尚未检查' }}</t-descriptions-item>
       </t-descriptions>
+      <div v-if="detailAccount?.check_items?.length" class="check-items-box" style="margin-top:12px">
+        <div class="check-items-title">检查明细（8 项）</div>
+        <div v-for="item in detailAccount.check_items" :key="item.key" class="check-item">
+          <span class="check-item-status" :class="'status-' + (item.status || 'na')">{{ checkItemStatusText(item.status) }}</span>
+          <span class="check-item-label">{{ item.label }}</span>
+          <span v-if="item.message" class="check-item-msg">{{ item.message }}</span>
+        </div>
+      </div>
       <t-alert v-if="checkNotice" :message="checkNotice" theme="success" style="margin-top:12px" />
       <t-alert v-if="cookieNotice" :message="cookieNotice" theme="success" style="margin-top:12px" />
 
@@ -900,6 +918,19 @@ const columns = [
   word-break: break-all;
   white-space: pre-wrap;
 }
+.check-items-box {
+  border: 1px solid var(--td-component-border, #ddd);
+  border-radius: 4px;
+  padding: 8px;
+}
+.check-items-title { font-weight: 600; margin-bottom: 6px; font-size: 13px; }
+.check-item { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 13px; }
+.check-item-status { width: 48px; text-align: center; border-radius: 3px; padding: 1px 4px; font-size: 12px; flex-shrink: 0; }
+.check-item-status.status-pass { background: #e8f7ef; color: #2ba471; }
+.check-item-status.status-fail { background: #fdecee; color: #d54941; }
+.check-item-status.status-na, .check-item-status.status-skip { background: #f0f0f0; color: #666; }
+.check-item-label { flex-shrink: 0; }
+.check-item-msg { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .batch-summary {
   display: flex;
   align-items: center;

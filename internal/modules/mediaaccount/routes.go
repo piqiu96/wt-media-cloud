@@ -50,12 +50,13 @@ type startAccountCheckRequest struct {
 }
 
 type accountCheckResultRequest struct {
-	TaskID            string      `json:"task_id"`
-	PlatformAccountID string      `json:"platform_account_id"`
-	Name              string      `json:"name"`
-	AvatarURL         string      `json:"avatar_url"`
-	LoginStatus       LoginStatus `json:"login_status"`
-	Message           string      `json:"message"`
+	TaskID            string             `json:"task_id"`
+	PlatformAccountID string             `json:"platform_account_id"`
+	Name              string             `json:"name"`
+	AvatarURL         string             `json:"avatar_url"`
+	LoginStatus       LoginStatus        `json:"login_status"`
+	Message           string             `json:"message"`
+	CheckItems        []AccountCheckItem `json:"check_items"`
 }
 
 type startCookieReadRequest struct {

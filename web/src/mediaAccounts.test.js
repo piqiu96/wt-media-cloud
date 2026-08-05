@@ -127,6 +127,7 @@ describe('media account client', () => {
         avatar_url: '',
         login_status: 'normal',
         message: 'ok',
+        check_items: [],
       }),
     }))
     expect(updated.original_cookie).toBeUndefined()
