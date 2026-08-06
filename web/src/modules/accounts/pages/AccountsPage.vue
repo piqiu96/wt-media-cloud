@@ -52,6 +52,11 @@ const cookieDialog = ref({ original_cookie: "", active_cookie: "" })
 const batchChecking = ref(false)
 const batchResults = ref([])
 const operatingProfileId = ref("")
+const currentCheckingId = ref("")
+const profileOpenMap = ref({})
+const accountInfoPopup = ref(null)
+const windowPopup = ref(null)
+const allTagsPopup = ref(null)
 
 const tagInput = ref("")
 const selectedAccountIds = ref([])
@@ -220,6 +225,102 @@ function openDetail(account) {
   detailVisible.value = true
 }
 
+function accountDisplayName(account) {
+  if (!account) return "-"
+  if (account.name) return account.name
+  if (account.platform_account_id) return account.platform_account_id
+  return account.identification_status !== "identified" ? "待识别账号" : "未识别"
+}
+
+async function copyAccountId(account) {
+  if (!account?.id) return
+  try {
+    await navigator.clipboard.writeText(account.id)
+    cookieNotice.value = "已复制系统账号 ID"
+  } catch (e) {
+    error.value = "复制失败，请手动选择"
+  }
+}
+
+function openAccountInfoPopup(account) {
+  accountInfoPopup.value = account
+}
+
+function showAllTags(account) {
+  allTagsPopup.value = account
+}
+
+function openWindowPopup(account) {
+  windowPopup.value = account
+}
+
+function profileIsOpen(account) {
+  const profile = profileForAccount(account)
+  if (!profile?.bit_profile_id) return false
+  return Boolean(profileOpenMap.value[profile.bit_profile_id])
+}
+
+async function toggleWindow(account) {
+  const profile = profileForAccount(account)
+  if (!profile?.bit_profile_id) return
+  const isOpen = profileIsOpen(account)
+  try {
+    if (isOpen) {
+      await closeAccountProfile(account)
+      profileOpenMap.value[profile.bit_profile_id] = false
+    } else {
+      await openAccountProfile(account)
+      profileOpenMap.value[profile.bit_profile_id] = true
+    }
+  } catch (e) {
+    error.value = e.message || "窗口操作失败"
+  }
+}
+
+async function checkFromRow(account) {
+  if (!canCheckAccount(account)) {
+    error.value = executableText(account)
+    return
+  }
+  currentCheckingId.value = account.id
+  error.value = ""
+  try {
+    const service = await desktopLocalAgentService()
+    const updated = await runSingleAccountCheck(account, service)
+    const idx = accounts.value.findIndex(a => a.id === account.id)
+    if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
+    checkNotice.value = `检查完成：${loginStatusText(updated.login_status)}`
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "账号检查失败"
+  } finally {
+    currentCheckingId.value = ""
+  }
+}
+
+async function batchSetBizStatus(status) {
+  const ids = selectedAccountIds.value
+  if (!ids.length) return
+  try {
+    await Promise.all(ids.map(id => accountClient.update(id, { businessStatus: status })))
+    selectedAccountIds.value = []
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "批量状态更新失败"
+  }
+}
+
+async function toggleBizStatus(account) {
+  const target = account.business_status === "enabled" ? "disabled" : "enabled"
+  try {
+    const updated = await accountClient.update(account.id, { businessStatus: target })
+    const idx = accounts.value.findIndex(a => a.id === account.id)
+    if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
+  } catch (e) {
+    error.value = e.message || "状态切换失败"
+  }
+}
+
 async function saveDetail() {
   if (!detailAccount.value) return
   savingDetail.value = true
@@ -286,13 +387,7 @@ function profileForAccount(account) {
 }
 
 function executableText(account) {
-  if (account.business_status === "draft") {
-    if (!account.game_id) return "待识别：未绑定游戏"
-    if (!account.browser_profile_id) return "待识别：未绑定窗口"
-    return "待识别：需要真实账号检查"
-  }
-  if (account.business_status === "abnormal") return "异常：需要人工处理"
-  if (account.business_status !== "enabled") return "不可执行：账号未启用"
+  if (account.business_status !== "enabled") return "不可执行：账号已停用"
   if (!account.game_id) return "不可执行：未绑定游戏"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   const profile = profileForAccount(account)
@@ -316,12 +411,63 @@ function loginStatusText(status) {
 
 function bizStatusText(status) {
   return {
-    draft: "待识别",
     enabled: "启用",
     disabled: "停用",
-    abnormal: "异常",
-    retired: "退役",
   }[status] || status || "-"
+}
+
+// 账号状态：真实平台状态，由 login_status + identification_status 派生（与业务状态独立）
+const ACCOUNT_STATUS_MAP = {
+  pending: { label: "待上号", color: "gray" },
+  normal: { label: "正常", color: "green" },
+  not_logged_in: { label: "未登录", color: "orange" },
+  expired: { label: "登录失效", color: "orange" },
+  account_mismatch: { label: "账号不匹配", color: "red" },
+  restricted: { label: "账号受限", color: "red" },
+  check_failed: { label: "检查失败", color: "red" },
+}
+
+function accountStatusKey(account) {
+  if (!account) return "pending"
+  const idStatus = account.identification_status || ""
+  const login = account.login_status || ""
+  if (login === "normal") return "normal"
+  switch (login) {
+    case "not_logged_in": return "not_logged_in"
+    case "expired": return "expired"
+    case "account_mismatch": return "account_mismatch"
+    case "restricted": case "verification_needed": return "restricted"
+    case "environment_error": case "unknown": return "check_failed"
+    default:
+      // 未检查/待识别 → 待上号
+      return idStatus !== "identified" ? "pending" : "check_failed"
+  }
+}
+
+function accountStatusText(account) {
+  return ACCOUNT_STATUS_MAP[accountStatusKey(account)]?.label || "待上号"
+}
+
+function accountStatusColor(account) {
+  return ACCOUNT_STATUS_MAP[accountStatusKey(account)]?.color || "gray"
+}
+
+function relativeTime(ts) {
+  if (!ts) return "从未检查"
+  const diff = Date.now() - new Date(ts).getTime()
+  if (diff < 0) return "刚刚"
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return "刚刚"
+  if (min < 60) return `${min}分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}小时前`
+  const day = Math.floor(hr / 24)
+  if (day === 1) return "昨天"
+  return `${day}天前 · 建议检查`
+}
+
+function platformLabel(platform) {
+  return { bilibili: "哔哩哔哩", baijiahao: "百家号", douyin: "抖音" }[platform] || platform || "-"
 }
 
 function checkItemStatusText(status) {
@@ -610,28 +756,25 @@ const activeProfiles = computed(() => profiles.value.filter(profile => profile.l
 const stats = computed(() => ({
   total: accounts.value.length,
   enabled: accounts.value.filter(a => a.business_status === "enabled").length,
-  draft: accounts.value.filter(a => a.business_status === "draft").length,
-  abnormal: accounts.value.filter(a => a.business_status === "abnormal").length,
-  unbound: accounts.value.filter(a => !a.browser_profile_id).length,
-  normal: accounts.value.filter(a => a.login_status === "normal").length,
-  unknown: accounts.value.filter(a => a.login_status === "unknown").length,
+  disabled: accounts.value.filter(a => a.business_status === "disabled").length,
+  normal: accounts.value.filter(a => accountStatusKey(a) === "normal").length,
+  abnormal: accounts.value.filter(a => ["restricted", "account_mismatch", "check_failed"].includes(accountStatusKey(a))).length,
+  pending: accounts.value.filter(a => ["pending", "not_logged_in", "expired"].includes(accountStatusKey(a))).length,
 }))
 
 const currentBatchStats = computed(batchStats)
 const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
 
 const columns = [
-  { colKey: "id", title: "系统ID", width: 130 },
-  { colKey: "name", title: "账号", width: 210 },
+  { colKey: "id", title: "ID", width: 70 },
   { colKey: "platform", title: "平台", width: 90 },
-  { colKey: "platform_account_id", title: "平台UID", width: 130 },
-  { colKey: "game_id", title: "游戏", width: 120 },
-  { colKey: "browser_profile_id", title: "绑定窗口", width: 260 },
-  { colKey: "login_status", title: "登录状态", width: 120 },
-  { colKey: "business_status", title: "业务状态", width: 100 },
+  { colKey: "account_info", title: "平台 / 账号信息", width: 220 },
+  { colKey: "tags", title: "标签", width: 150 },
+  { colKey: "window_info", title: "浏览器窗口", width: 200 },
+  { colKey: "business_status", title: "业务状态", width: 90 },
+  { colKey: "account_status", title: "账号状态", width: 100 },
   { colKey: "last_checked_at", title: "最近检查", width: 130 },
-  { colKey: "executable", title: "可执行结论", width: 180 },
-  { colKey: "op", title: "操作", width: 260 },
+  { colKey: "op", title: "操作", width: 420, fixed: "right" },
 ]
 </script>
 
@@ -647,11 +790,11 @@ const columns = [
 
     <t-row :gutter="16" class="stats-row">
       <t-col :span="4"><t-card><template #title>总账号</template><div class="stat-num">{{ stats.total }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>已启用</template><div class="stat-num">{{ stats.enabled }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>待识别</template><div class="stat-num">{{ stats.draft }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>异常</template><div class="stat-num">{{ stats.abnormal }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>登录正常</template><div class="stat-num">{{ stats.normal }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>待检查</template><div class="stat-num">{{ stats.unknown }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>启用账号</template><div class="stat-num">{{ stats.enabled }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>停用账号</template><div class="stat-num">{{ stats.disabled }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>正常账号</template><div class="stat-num">{{ stats.normal }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>异常账号</template><div class="stat-num">{{ stats.abnormal }}</div></t-card></t-col>
+      <t-col :span="4"><t-card><template #title>待检查</template><div class="stat-num">{{ stats.pending }}</div></t-card></t-col>
     </t-row>
 
     <t-card class="search-bar" :bordered="true">
@@ -673,20 +816,18 @@ const columns = [
         </t-form-item>
         <t-form-item label="业务状态">
           <t-select v-model="searchBizStatus" placeholder="全部" clearable style="width:120px">
-            <t-option value="draft" label="待识别" />
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
-            <t-option value="abnormal" label="异常" />
-            <t-option value="retired" label="退役" />
           </t-select>
         </t-form-item>
-        <t-form-item label="登录状态">
+        <t-form-item label="账号状态">
           <t-select v-model="searchLoginStatus" placeholder="全部" clearable style="width:130px">
-            <t-option value="unknown" label="待检查" />
-            <t-option value="normal" label="登录正常" />
+            <t-option value="normal" label="正常" />
             <t-option value="not_logged_in" label="未登录" />
-            <t-option value="expired" label="已失效" />
-            <t-option value="account_mismatch" label="账号不一致" />
+            <t-option value="expired" label="登录失效" />
+            <t-option value="account_mismatch" label="账号不匹配" />
+            <t-option value="restricted" label="账号受限" />
+            <t-option value="environment_error" label="检查失败" />
           </t-select>
         </t-form-item>
         <t-form-item label="标签">
@@ -724,6 +865,8 @@ const columns = [
         <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" style="width:200px" />
         <t-button size="small" @click="changeTags(false)">添加标签</t-button>
         <t-button size="small" @click="changeTags(true)">移除标签</t-button>
+        <t-button size="small" variant="outline" @click="batchSetBizStatus('enabled')">批量启用</t-button>
+        <t-button size="small" variant="outline" @click="batchSetBizStatus('disabled')">批量停用</t-button>
         <t-button v-if="isDesktop" size="small" theme="primary" :loading="batchChecking" @click="runBatchCheck()">批量检查/同步</t-button>
         <span class="selected-count">已选 {{ selectedAccountIds.length }} 项</span>
       </t-space>
@@ -758,51 +901,109 @@ const columns = [
       :pagination="{ ...pagination, total: accounts.length, showJumper: true }"
       empty="暂无媒体账号"
     >
-      <template #id="{ row }">{{ row.id }}</template>
-      <template #name="{ row }">
+      <template #id="{ row }"><span class="account-id" @click="copyAccountId(row)">{{ row.id }}</span></template>
+      <template #platform="{ row }"><span>{{ platformLabel(row.platform) }}</span></template>
+      <template #account_info="{ row }">
         <div>
-          <t-avatar v-if="row.avatar_url" :image="row.avatar_url" size="small" style="margin-right:6px" />
-          <div class="account-name">{{ row.name || row.platform_account_id || '待检查账号' }}</div>
-          <div class="account-sub">{{ row.remark || row.id }}</div>
-          <div class="account-tags">
-            <t-tag v-for="tag in row.tags || []" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
-          </div>
+          <a class="account-name-link" @click="openAccountInfoPopup(row)">{{ accountDisplayName(row) }}</a>
+          <div class="account-sub">UID：{{ row.platform_account_id || '--' }}</div>
         </div>
       </template>
-      <template #platform="{ row }">{{ { douyin: '抖音', bilibili: 'B站', baijiahao: '百家号' }[row.platform] || row.platform }}</template>
-      <template #platform_account_id="{ row }">{{ row.platform_account_id || '未回填' }}</template>
-      <template #game_id="{ row }">{{ gameName(row.game_id) }}</template>
-      <template #browser_profile_id="{ row }">{{ row.browser_profile_id ? profileLabel(row.browser_profile_id) : '未绑定' }}</template>
-      <template #login_status="{ row }">
-        <BusinessStatus :status="row.login_status === 'normal' ? 'normal' : row.login_status === 'unknown' ? 'pending_review' : 'warning'" :label="loginStatusText(row.login_status)" />
+      <template #tags="{ row }">
+        <div class="account-tags">
+          <t-tag v-for="tag in (row.tags || []).slice(0, 2)" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
+          <t-tag v-if="(row.tags || []).length > 2" size="small" variant="light" class="tags-more" @click="showAllTags(row)">+{{ (row.tags || []).length - 2 }}</t-tag>
+        </div>
+      </template>
+      <template #window_info="{ row }">
+        <div v-if="row.browser_profile_id" class="window-cell" @click="openWindowPopup(row)">
+          <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 代理正常</div>
+          <div class="window-name">{{ profileLabel(row.browser_profile_id) }}</div>
+        </div>
+        <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
       <template #business_status="{ row }">
-        <BusinessStatus
-          :status="row.business_status === 'enabled' ? 'normal' : row.business_status === 'draft' ? 'pending' : row.business_status === 'disabled' ? 'paused' : row.business_status === 'abnormal' ? 'error' : 'expired'"
-          :label="bizStatusText(row.business_status)"
-        />
+        <span class="biz-status" :class="row.business_status === 'enabled' ? 'biz-enabled' : 'biz-disabled'">{{ bizStatusText(row.business_status) }}</span>
       </template>
-      <template #last_checked_at="{ row }">{{ row.last_checked_at ? formatTime(row.last_checked_at) : '尚未检查' }}</template>
-      <template #executable="{ row }">{{ executableText(row) }}</template>
+      <template #account_status="{ row }">
+        <span class="account-status" :class="'status-' + accountStatusColor(row)">{{ accountStatusText(row) }}</span>
+      </template>
+      <template #last_checked_at="{ row }">
+        <span :title="row.last_checked_at ? formatTime(row.last_checked_at) : ''">{{ relativeTime(row.last_checked_at) }}</span>
+      </template>
       <template #op="{ row }">
-        <t-space>
-          <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
-          <template v-if="isDesktop">
-            <t-button size="small" variant="text" :loading="operatingProfileId === `open:${profileForAccount(row)?.bit_profile_id || ''}`" :disabled="!canOperateBoundWindow(row) || Boolean(operatingProfileId)" @click="openAccountProfile(row)">打开窗口</t-button>
-            <t-button size="small" variant="text" :loading="operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" :disabled="!canOperateBoundWindow(row) || Boolean(operatingProfileId)" @click="closeAccountProfile(row)">关闭窗口</t-button>
+        <t-space size="small" class="op-cell">
+          <template v-if="isDesktop && canOperateBoundWindow(row)">
+            <t-button size="small" variant="text" :loading="operatingProfileId === `open:${profileForAccount(row)?.bit_profile_id || ''}` || operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
           </template>
-          <t-dropdown :options="[
-            { value: 'draft', label: '待识别', disabled: row.business_status === 'draft' },
-            { value: 'enabled', label: '启用', disabled: row.business_status === 'enabled' },
-            { value: 'disabled', label: '停用', disabled: row.business_status === 'disabled' },
-            { value: 'abnormal', label: '异常', disabled: row.business_status === 'abnormal' },
-            { value: 'retired', label: '退役', disabled: row.business_status === 'retired' },
-          ]" @click="(v) => updateStatus(row, v)">
-            <t-button size="small" variant="text">状态</t-button>
-          </t-dropdown>
+          <t-button size="small" theme="primary" variant="text" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
+          <t-button size="small" variant="text" @click="openDetail(row)">查看</t-button>
+          <t-button size="small" variant="text" @click="openDetail(row)">编辑</t-button>
+          <t-button size="small" variant="text" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
         </t-space>
       </template>
     </t-table>
+
+    <!-- 账号信息弹窗（点击昵称） -->
+    <t-dialog :visible="accountInfoPopup !== null" @close="accountInfoPopup = null" header="账号信息" :footer="false" width="480px">
+      <div v-if="accountInfoPopup" class="info-popup">
+        <div class="info-head">
+          <t-avatar v-if="accountInfoPopup.avatar_url" :image="accountInfoPopup.avatar_url" size="medium" />
+          <div>
+            <div class="info-name">{{ accountInfoPopup.name || '待识别账号' }}</div>
+            <div class="info-sub">{{ platformLabel(accountInfoPopup.platform) }}</div>
+          </div>
+        </div>
+        <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
+          <t-descriptions-item label="系统账号ID">{{ accountInfoPopup.id }}</t-descriptions-item>
+          <t-descriptions-item label="平台UID">{{ accountInfoPopup.platform_account_id || '--' }}</t-descriptions-item>
+          <t-descriptions-item label="平台昵称">{{ accountInfoPopup.name || '--' }}</t-descriptions-item>
+          <t-descriptions-item label="所属游戏">{{ gameName(accountInfoPopup.game_id) }}</t-descriptions-item>
+          <t-descriptions-item label="标签">{{ (accountInfoPopup.tags || []).join('、') || '--' }}</t-descriptions-item>
+          <t-descriptions-item label="业务状态">{{ bizStatusText(accountInfoPopup.business_status) }}</t-descriptions-item>
+          <t-descriptions-item label="账号状态">{{ accountStatusText(accountInfoPopup) }}</t-descriptions-item>
+          <t-descriptions-item label="最近检查">{{ accountInfoPopup.last_checked_at ? formatTime(accountInfoPopup.last_checked_at) : '从未检查' }}</t-descriptions-item>
+          <t-descriptions-item label="最近同步资料">{{ accountInfoPopup.last_checked_at ? formatTime(accountInfoPopup.last_checked_at) : '--' }}</t-descriptions-item>
+          <t-descriptions-item label="备注">{{ accountInfoPopup.remark || '--' }}</t-descriptions-item>
+        </t-descriptions>
+        <div style="margin-top:12px; text-align:right">
+          <t-button variant="outline" @click="openDetail(accountInfoPopup); accountInfoPopup = null">查看完整详情</t-button>
+          <t-button style="margin-left:8px" @click="accountInfoPopup = null">关闭</t-button>
+        </div>
+      </div>
+    </t-dialog>
+
+    <!-- 浏览器窗口弹窗（点击窗口名） -->
+    <t-dialog :visible="windowPopup !== null" @close="windowPopup = null" header="浏览器窗口信息" :footer="false" width="480px">
+      <div v-if="windowPopup" class="info-popup">
+        <div class="info-name">{{ profileLabel(windowPopup.browser_profile_id) }}</div>
+        <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
+          <t-descriptions-item label="窗口名称">{{ profileLabel(windowPopup.browser_profile_id) }}</t-descriptions-item>
+          <t-descriptions-item label="浏览器窗口状态"><span class="status-green">● 正常</span> <span class="info-tip">窗口存在，可以正常连接</span></t-descriptions-item>
+          <t-descriptions-item label="代理状态"><span class="info-tip">代理管理未接入（M2-C）</span></t-descriptions-item>
+          <t-descriptions-item label="当前运行状态">{{ profileIsOpen(windowPopup) ? '已打开' : '已关闭' }}</t-descriptions-item>
+          <t-descriptions-item label="最近同步">{{ windowPopup.last_checked_at ? formatTime(windowPopup.last_checked_at) : '--' }}</t-descriptions-item>
+        </t-descriptions>
+        <div style="margin-top:12px; text-align:right">
+          <t-button v-if="canOperateBoundWindow(windowPopup)" variant="outline" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
+          <t-button variant="outline" style="margin-left:8px" @click="openDetail(windowPopup); windowPopup = null">查看窗口详情</t-button>
+          <t-button style="margin-left:8px" @click="windowPopup = null">关闭</t-button>
+        </div>
+      </div>
+    </t-dialog>
+
+    <!-- 全部标签弹窗 -->
+    <t-dialog :visible="allTagsPopup !== null" @close="allTagsPopup = null" header="全部标签" :footer="false" width="360px">
+      <div v-if="allTagsPopup">
+        <t-space wrap>
+          <t-tag v-for="tag in (allTagsPopup.tags || [])" :key="tag" size="medium" variant="light">{{ tag }}</t-tag>
+          <span v-if="!(allTagsPopup.tags || []).length" class="info-tip">暂无标签</span>
+        </t-space>
+        <div style="margin-top:12px; text-align:right">
+          <t-button @click="allTagsPopup = null">关闭</t-button>
+        </div>
+      </div>
+    </t-dialog>
 
     <t-dialog v-model:visible="showCreate" header="新增账号" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
       <t-form @submit.prevent="createAccount">
@@ -918,6 +1119,32 @@ const columns = [
   word-break: break-all;
   white-space: pre-wrap;
 }
+.account-id { cursor: pointer; color: var(--td-brand-color, #0052d9); }
+.account-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); font-weight: 500; }
+.account-sub { color: var(--td-text-color-secondary, #666); font-size: 12px; }
+.account-remark { color: var(--td-text-color-secondary, #666); font-size: 12px; }
+.account-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tags-more { cursor: pointer; }
+.window-cell { cursor: pointer; }
+.window-proxy { font-size: 12px; }
+.proxy-dot { margin-right: 2px; }
+.proxy-dot.proxy-ok { color: var(--td-success-color, #2ba471); }
+.window-name { font-size: 13px; }
+.window-unbound { color: var(--td-text-color-secondary, #666); }
+.biz-status { font-size: 13px; }
+.biz-enabled { color: var(--td-success-color, #2ba471); }
+.biz-disabled { color: var(--td-text-color-secondary, #666); }
+.account-status { font-size: 13px; padding: 1px 8px; border-radius: 3px; }
+.account-status.status-gray { background: #f0f0f0; color: #666; }
+.account-status.status-green { background: #e8f7ef; color: #2ba471; }
+.account-status.status-orange { background: #fef3e8; color: #e37318; }
+.account-status.status-red { background: #fdecee; color: #d54941; }
+.op-cell { white-space: nowrap; }
+.info-popup .info-head { display: flex; gap: 10px; align-items: center; }
+.info-popup .info-name { font-size: 16px; font-weight: 600; }
+.info-popup .info-sub { color: var(--td-text-color-secondary, #666); font-size: 13px; }
+.info-tip { color: var(--td-text-color-secondary, #666); font-size: 12px; }
+.status-green { color: var(--td-success-color, #2ba471); }
 .check-items-box {
   border: 1px solid var(--td-component-border, #ddd);
   border-radius: 4px;
