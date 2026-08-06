@@ -665,11 +665,28 @@ func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
 	if err != nil {
 		return nil, err
 	}
-	gameStore, okStore := s.store.(operationGameStore)
-	if !ok || !isAdmin(actor) || !okStore {
+	if !ok {
 		return nil, ErrForbidden
 	}
-	return gameStore.ListGames()
+	gameStore, okStore := s.store.(operationGameStore)
+	if !okStore {
+		return nil, ErrForbidden
+	}
+	games, err := gameStore.ListGames()
+	if err != nil {
+		return nil, err
+	}
+	// 运营/高级运营只返回 enabled 游戏（供筛选/分配）；管理员返回全量（供管理）
+	if !isAdmin(actor) && actor.Role != RoleSeniorOperator {
+		enabled := make([]OperationGame, 0, len(games))
+		for _, game := range games {
+			if game.Status == GameStatusEnabled {
+				enabled = append(enabled, game)
+			}
+		}
+		return enabled, nil
+	}
+	return games, nil
 }
 
 func (s *Service) UpdateGame(actorID UserID, id, name string, status GameStatus, remark string) (OperationGame, error) {

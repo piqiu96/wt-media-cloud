@@ -66,6 +66,8 @@ const allTagsPopup = ref(null)
 
 const tagInput = ref("")
 const selectedAccountIds = ref([])
+const tagManageVisible = ref(false)
+const tagManageList = ref([])
 
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
@@ -239,6 +241,25 @@ async function checkFromRow(account) {
   }
 }
 
+function openTagManage() {
+  const count = {}
+  accounts.value.forEach(a => (a.tags || []).forEach(t => { count[t] = (count[t] || 0) + 1 }))
+  tagManageList.value = Object.entries(count).map(([name, num]) => ({ name, num })).sort((a, b) => b.num - a.num)
+  tagManageVisible.value = true
+}
+
+async function deleteTagFromAll(tag) {
+  try {
+    const affected = accounts.value.filter(a => (a.tags || []).includes(tag))
+    if (!affected.length) return
+    await accountClient.removeTags(affected.map(a => a.id), [tag])
+    await loadAccounts()
+    await openTagManage()
+  } catch (e) {
+    error.value = e.message || "删除标签失败"
+  }
+}
+
 async function batchSetBizStatus(status) {
   const ids = selectedAccountIds.value
   if (!ids.length) return
@@ -356,6 +377,12 @@ function profileLabel(profileId) {
   const name = profile.name || "未命名窗口"
   const bitId = profile.bit_profile_id || "-"
   return `系统ID ${profile.id} / ${name} / BitBrowser ${bitId}`
+}
+
+function profileName(profileId) {
+  const profile = profiles.value.find(item => item.id === profileId)
+  if (!profile) return "未命名窗口"
+  return profile.name || "未命名窗口"
 }
 
 function profileForAccount(account) {
@@ -837,15 +864,16 @@ const columns = [
     <div class="action-bar">
       <t-space>
         <t-button theme="primary" @click="openCreate">新增账号</t-button>
+        <t-button variant="outline" @click="openTagManage">标签管理</t-button>
         <t-button variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </t-space>
-      <t-space v-if="selectedAccountIds.length" class="batch-actions">
-        <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" style="width:200px" />
-        <t-button size="small" @click="changeTags(false)">添加标签</t-button>
-        <t-button size="small" @click="changeTags(true)">移除标签</t-button>
-        <t-button size="small" variant="outline" @click="batchSetBizStatus('enabled')">批量启用</t-button>
-        <t-button size="small" variant="outline" @click="batchSetBizStatus('disabled')">批量停用</t-button>
-        <t-button v-if="isDesktop" size="small" theme="primary" :loading="batchChecking" @click="runBatchCheck()">批量检查/同步</t-button>
+      <t-space class="batch-actions">
+        <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" style="width:180px" :disabled="!selectedAccountIds.length" />
+        <t-button size="small" :disabled="!selectedAccountIds.length" @click="changeTags(false)">添加标签</t-button>
+        <t-button size="small" :disabled="!selectedAccountIds.length" @click="changeTags(true)">移除标签</t-button>
+        <t-button size="small" variant="outline" :disabled="!selectedAccountIds.length" @click="batchSetBizStatus('enabled')">批量启用</t-button>
+        <t-button size="small" variant="outline" :disabled="!selectedAccountIds.length" @click="batchSetBizStatus('disabled')">批量停用</t-button>
+        <t-button v-if="isDesktop" size="small" theme="primary" :loading="batchChecking" :disabled="!selectedAccountIds.length" @click="runBatchCheck()">批量检查/同步</t-button>
         <span class="selected-count">已选 {{ selectedAccountIds.length }} 项</span>
       </t-space>
     </div>
@@ -898,7 +926,7 @@ const columns = [
         <div v-if="row.browser_profile_id" class="window-cell" @click="openWindowPopup(row)">
           <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 代理正常</div>
           <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 窗口正常</div>
-          <div class="window-name window-name-link">{{ profileLabel(row.browser_profile_id) }}</div>
+          <div class="window-name window-name-link">{{ profileName(row.browser_profile_id) }}</div>
         </div>
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
@@ -956,9 +984,9 @@ const columns = [
     <!-- 浏览器窗口弹窗（点击窗口名） -->
     <t-dialog :visible="windowPopup !== null" @close="windowPopup = null" header="浏览器窗口信息" :footer="false" width="480px">
       <div v-if="windowPopup" class="info-popup">
-        <div class="info-name">{{ profileLabel(windowPopup.browser_profile_id) }}</div>
+        <div class="info-name">{{ profileName(windowPopup.browser_profile_id) }}</div>
         <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
-          <t-descriptions-item label="窗口名称">{{ profileLabel(windowPopup.browser_profile_id) }}</t-descriptions-item>
+          <t-descriptions-item label="窗口名称">{{ profileName(windowPopup.browser_profile_id) }}</t-descriptions-item>
           <t-descriptions-item label="浏览器窗口状态"><span class="status-green">● 正常</span> <span class="info-tip">窗口存在，可以正常连接</span></t-descriptions-item>
           <t-descriptions-item label="代理状态"><span class="info-tip">代理管理未接入（M2-C）</span></t-descriptions-item>
           <t-descriptions-item label="当前运行状态">{{ profileIsOpen(windowPopup) ? '已打开' : '已关闭' }}</t-descriptions-item>
@@ -970,6 +998,18 @@ const columns = [
           <t-button style="margin-left:8px" @click="windowPopup = null">关闭</t-button>
         </div>
       </div>
+    </t-dialog>
+
+    <!-- 标签管理弹窗 -->
+    <t-dialog :visible="tagManageVisible" header="标签管理" :footer="false" width="420px" @close="tagManageVisible = false">
+      <div class="info-tip" style="margin-bottom:8px">本运营的标签库（无全局库）；删除标签会从所有账号移除。</div>
+      <div v-if="!tagManageList.length" class="info-tip" style="padding:12px 0">暂无标签</div>
+      <div v-for="item in tagManageList" :key="item.name" class="tag-manage-row">
+        <t-tag size="medium" variant="light">{{ item.name }}</t-tag>
+        <span class="tag-count">{{ item.num }} 个账号</span>
+        <t-button size="small" variant="text" theme="danger" @click="deleteTagFromAll(item.name)">删除</t-button>
+      </div>
+      <div class="info-tip" style="margin-top:8px">新增标签：先在列表勾选账号，点批量「添加标签」；或在编辑弹窗给账号加标签。</div>
     </t-dialog>
 
     <!-- 全部标签弹窗 -->
@@ -1157,6 +1197,8 @@ const columns = [
 .check-item-status.status-na, .check-item-status.status-skip { background: #f0f0f0; color: #666; }
 .check-item-label { flex-shrink: 0; }
 .check-item-msg { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-manage-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.tag-count { color: var(--td-text-color-secondary, #666); font-size: 12px; flex: 1; }
 .batch-summary {
   display: flex;
   align-items: center;
