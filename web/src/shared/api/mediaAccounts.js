@@ -41,11 +41,12 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
       if (tags?.length) body.tags = tags
       return api.post('/media-accounts', body).then(sanitize)
     },
-    update(accountId, { businessStatus, loginStatus, remark }) {
+    update(accountId, { businessStatus, loginStatus, remark, gameId }) {
       return api.patch(`/media-accounts/${accountId}`, {
         business_status: businessStatus,
         login_status: loginStatus,
         remark,
+        game_id: gameId,
       }).then(sanitize)
     },
     identify(accountId, { platformAccountId, name, avatarUrl, loginStatus }) {

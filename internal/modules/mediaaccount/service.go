@@ -153,6 +153,7 @@ type UpdateAccountInput struct {
 	BusinessStatus BusinessStatus
 	LoginStatus    LoginStatus
 	Remark         *string
+	GameID         *string
 }
 
 type AccountFilter struct {
@@ -478,7 +479,17 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 		}
 		record.Remark = remark
 	}
-	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil {
+	if input.GameID != nil {
+		gameID := strings.TrimSpace(*input.GameID)
+		if len(gameID) > 128 {
+			return Account{}, ErrInvalidInput
+		}
+		if gameID != "" && !actor.CanAccess(record.UserID, record.TeamID, gameID) {
+			return Account{}, ErrForbidden
+		}
+		record.GameID = gameID
+	}
+	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameID == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()

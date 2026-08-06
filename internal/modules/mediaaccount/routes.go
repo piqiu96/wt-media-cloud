@@ -27,6 +27,7 @@ type updateAccountRequest struct {
 	BusinessStatus BusinessStatus `json:"business_status"`
 	LoginStatus    LoginStatus    `json:"login_status"`
 	Remark         *string        `json:"remark"`
+	GameID         *string        `json:"game_id"`
 }
 
 type identifyAccountRequest struct {

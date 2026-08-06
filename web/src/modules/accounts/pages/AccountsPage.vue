@@ -49,6 +49,12 @@ const readingCookie = ref(false)
 const cookieNotice = ref("")
 const showCookieDialog = ref(false)
 const cookieDialog = ref({ original_cookie: "", active_cookie: "" })
+const editVisible = ref(false)
+const editAccount = ref(null)
+const editRemark = ref("")
+const editGameId = ref("")
+const editTagsText = ref("")
+const savingEdit = ref(false)
 const batchChecking = ref(false)
 const batchResults = ref([])
 const operatingProfileId = ref("")
@@ -61,17 +67,13 @@ const allTagsPopup = ref(null)
 const tagInput = ref("")
 const selectedAccountIds = ref([])
 
-const accountGroups = ref([])
-const selectedGroupId = ref("")
-const showSaveGroup = ref(false)
-const newGroupName = ref("")
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
 
 onMounted(async () => {
   try {
     user.value = await sessionClient.me()
-    await Promise.all([loadAuxiliaryData(), loadAccounts(), loadAccountGroups()])
+    await Promise.all([loadAuxiliaryData(), loadAccounts()])
   } catch (e) {
     error.value = e.message || "加载账号数据失败"
   } finally {
@@ -110,7 +112,7 @@ async function loadAccounts() {
   if (searchBizStatus.value) params.businessStatus = searchBizStatus.value
   if (searchLoginStatus.value) params.loginStatus = searchLoginStatus.value
   if (searchGameId.value) params.game_id = searchGameId.value
-  if (searchTags.value) params.anyTags = searchTags.value.split(",").map(t => t.trim()).filter(Boolean)
+  if (searchTags.value) params.anyTags = [searchTags.value]
   try {
     accounts.value = await accountClient.list(params)
   } catch (e) {
@@ -128,67 +130,6 @@ function resetFilters() {
   loadAccounts()
 }
 
-async function loadAccountGroups() {
-  try {
-    accountGroups.value = await accountClient.listAccountGroups()
-  } catch (e) {
-    // 静默：账号组加载失败不影响主列表
-  }
-}
-
-function currentFiltersPayload() {
-  return {
-    search: searchText.value || "",
-    platform: searchPlatform.value || "",
-    business_status: searchBizStatus.value || "",
-    login_status: searchLoginStatus.value || "",
-    game_id: searchGameId.value || "",
-    any_tags: searchTags.value ? searchTags.value.split(",").map(t => t.trim()).filter(Boolean) : [],
-  }
-}
-
-async function saveCurrentFiltersAsGroup() {
-  const name = newGroupName.value.trim()
-  if (!name) return
-  try {
-    await accountClient.createAccountGroup({ name, filters: currentFiltersPayload() })
-    newGroupName.value = ""
-    showSaveGroup.value = false
-    await loadAccountGroups()
-  } catch (e) {
-    error.value = e.message || "保存账号组失败"
-  }
-}
-
-async function applyAccountGroup() {
-  const groupId = selectedGroupId.value
-  if (!groupId) {
-    resetFilters()
-    return
-  }
-  const group = accountGroups.value.find(g => g.id === groupId)
-  if (!group) return
-  const f = group.filters || {}
-  searchText.value = f.search || ""
-  searchPlatform.value = f.platform || ""
-  searchBizStatus.value = f.business_status || ""
-  searchLoginStatus.value = f.login_status || ""
-  searchGameId.value = f.game_id || ""
-  searchTags.value = (f.any_tags || []).join(",")
-  await loadAccounts()
-}
-
-async function deleteSelectedGroup() {
-  const groupId = selectedGroupId.value
-  if (!groupId) return
-  try {
-    await accountClient.deleteAccountGroup(groupId)
-    selectedGroupId.value = ""
-    await loadAccountGroups()
-  } catch (e) {
-    error.value = e.message || "删除账号组失败"
-  }
-}
 
 function openCreate() {
   createForm.value = defaultCreateForm()
@@ -307,6 +248,41 @@ async function batchSetBizStatus(status) {
     await loadAccounts()
   } catch (e) {
     error.value = e.message || "批量状态更新失败"
+  }
+}
+
+function openEdit(account) {
+  editAccount.value = account
+  editRemark.value = account.remark || ""
+  editGameId.value = account.game_id || ""
+  editTagsText.value = (account.tags || []).join(",")
+  editVisible.value = true
+}
+
+async function saveEdit() {
+  if (!editAccount.value) return
+  savingEdit.value = true
+  error.value = ""
+  try {
+    const updated = await accountClient.update(editAccount.value.id, {
+      remark: editRemark.value,
+      gameId: editGameId.value || "",
+    })
+    // 标签差异：先加后删
+    const oldTags = new Set(editAccount.value.tags || [])
+    const newTags = splitTags(editTagsText.value)
+    const toAdd = newTags.filter(t => !oldTags.has(t))
+    const toRemove = [...oldTags].filter(t => !newTags.includes(t))
+    if (toAdd.length) await accountClient.addTags([editAccount.value.id], toAdd)
+    if (toRemove.length) await accountClient.removeTags([editAccount.value.id], toRemove)
+    const idx = accounts.value.findIndex(a => a.id === editAccount.value.id)
+    if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated, tags: newTags }
+    editVisible.value = false
+    await loadAccounts()
+  } catch (e) {
+    error.value = e.message || "保存失败"
+  } finally {
+    savingEdit.value = false
   }
 }
 
@@ -467,7 +443,17 @@ function relativeTime(ts) {
 }
 
 function platformLabel(platform) {
-  return { bilibili: "哔哩哔哩", baijiahao: "百家号", douyin: "抖音" }[platform] || platform || "-"
+  return { bilibili: "哔哩", baijiahao: "百度" }[platform] || platform || "-"
+}
+
+function profileOptionLabel(profile) {
+  if (!profile) return ""
+  const name = profile.name || profileLabel(profile.id)
+  const parts = []
+  if (profile.seq) parts.push(String(profile.seq))
+  parts.push(name)
+  if (profile.id) parts.push(String(profile.id))
+  return parts.join(" - ")
 }
 
 function checkItemStatusText(status) {
@@ -753,6 +739,12 @@ function formatTime(t) {
 
 const activeProfiles = computed(() => profiles.value.filter(profile => profile.local_status === "active" && profile.business_status !== "disabled"))
 
+const availableTags = computed(() => {
+  const set = new Set()
+  accounts.value.forEach(a => (a.tags || []).forEach(t => set.add(t)))
+  return [...set].sort()
+})
+
 const stats = computed(() => ({
   total: accounts.value.length,
   enabled: accounts.value.filter(a => a.business_status === "enabled").length,
@@ -767,13 +759,14 @@ const hasBatchFailures = computed(() => batchResults.value.some(item => item.sta
 
 const columns = [
   { colKey: "id", title: "ID", width: 70 },
-  { colKey: "platform", title: "平台", width: 90 },
-  { colKey: "account_info", title: "平台 / 账号信息", width: 220 },
+  { colKey: "platform", title: "平台", width: 80 },
+  { colKey: "account_info", title: "账号信息", width: 200 },
+  { colKey: "game_id", title: "游戏", width: 90 },
   { colKey: "tags", title: "标签", width: 150 },
-  { colKey: "window_info", title: "浏览器窗口", width: 200 },
-  { colKey: "business_status", title: "业务状态", width: 90 },
-  { colKey: "account_status", title: "账号状态", width: 100 },
-  { colKey: "last_checked_at", title: "最近检查", width: 130 },
+  { colKey: "window_info", title: "浏览器窗口", width: 190 },
+  { colKey: "business_status", title: "业务状态", width: 80 },
+  { colKey: "account_status", title: "账号状态", width: 90 },
+  { colKey: "last_checked_at", title: "最近检查", width: 120 },
   { colKey: "op", title: "操作", width: 420, fixed: "right" },
 ]
 </script>
@@ -809,9 +802,8 @@ const columns = [
         </t-form-item>
         <t-form-item label="平台">
           <t-select v-model="searchPlatform" placeholder="全部" clearable style="width:120px">
-            <t-option value="bilibili" label="B站" />
-            <t-option value="baijiahao" label="百家号" />
-            <t-option value="douyin" label="抖音" />
+            <t-option value="bilibili" label="哔哩" />
+            <t-option value="baijiahao" label="百度" />
           </t-select>
         </t-form-item>
         <t-form-item label="业务状态">
@@ -831,30 +823,16 @@ const columns = [
           </t-select>
         </t-form-item>
         <t-form-item label="标签">
-          <t-input v-model="searchTags" placeholder="逗号分隔" clearable style="width:140px" />
+          <t-select v-model="searchTags" placeholder="全部" clearable style="width:140px">
+            <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
+          </t-select>
         </t-form-item>
         <t-form-item>
           <t-button theme="primary" @click="loadAccounts">查询</t-button>
           <t-button @click="resetFilters">重置</t-button>
         </t-form-item>
-        <t-form-item label="账号组">
-          <t-select v-model="selectedGroupId" placeholder="选择账号组" clearable style="width:180px" @change="applyAccountGroup">
-            <t-option v-for="g in accountGroups" :key="g.id" :value="g.id" :label="g.name" />
-          </t-select>
-          <t-button variant="outline" style="margin-left:8px" @click="showSaveGroup = true">保存当前筛选</t-button>
-          <t-button v-if="selectedGroupId" variant="text" theme="danger" style="margin-left:4px" @click="deleteSelectedGroup">删除该组</t-button>
-        </t-form-item>
       </t-form>
     </t-card>
-
-    <t-dialog v-model:visible="showSaveGroup" header="保存为账号组" :confirm-btn="{ content: '保存', loading: false }" @confirm="saveCurrentFiltersAsGroup">
-      <t-form label-width="90px">
-        <t-form-item label="组名称">
-          <t-input v-model="newGroupName" placeholder="如：B站主投账号" />
-        </t-form-item>
-        <div class="form-tip">将保存当前筛选条件（游戏/平台/业务状态/登录状态/标签/搜索）为一组，供后续发布/互动筛选目标账号。</div>
-      </t-form>
-    </t-dialog>
 
     <div class="action-bar">
       <t-space>
@@ -909,6 +887,7 @@ const columns = [
           <div class="account-sub">UID：{{ row.platform_account_id || '--' }}</div>
         </div>
       </template>
+      <template #game_id="{ row }">{{ gameName(row.game_id) }}</template>
       <template #tags="{ row }">
         <div class="account-tags">
           <t-tag v-for="tag in (row.tags || []).slice(0, 2)" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
@@ -918,7 +897,8 @@ const columns = [
       <template #window_info="{ row }">
         <div v-if="row.browser_profile_id" class="window-cell" @click="openWindowPopup(row)">
           <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 代理正常</div>
-          <div class="window-name">{{ profileLabel(row.browser_profile_id) }}</div>
+          <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 窗口正常</div>
+          <div class="window-name window-name-link">{{ profileLabel(row.browser_profile_id) }}</div>
         </div>
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
@@ -938,7 +918,7 @@ const columns = [
           </template>
           <t-button size="small" theme="primary" variant="text" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
           <t-button size="small" variant="text" @click="openDetail(row)">查看</t-button>
-          <t-button size="small" variant="text" @click="openDetail(row)">编辑</t-button>
+          <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
           <t-button size="small" variant="text" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
         </t-space>
       </template>
@@ -1017,14 +997,13 @@ const columns = [
         </t-form-item>
         <t-form-item label="平台">
           <t-select v-model="createForm.platform">
-            <t-option value="bilibili" label="B站" />
-            <t-option value="baijiahao" label="百家号" />
-            <t-option value="douyin" label="抖音" />
+            <t-option value="bilibili" label="哔哩" />
+            <t-option value="baijiahao" label="百度" />
           </t-select>
         </t-form-item>
         <t-form-item v-if="isDesktop" label="绑定窗口">
           <t-select v-model="createForm.browserProfileId" clearable placeholder="可先不绑定">
-            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileLabel(profile.id)" />
+            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
           </t-select>
         </t-form-item>
         <t-form-item label="标签">
@@ -1033,6 +1012,25 @@ const columns = [
         <t-form-item label="备注">
           <t-textarea v-model="createForm.remark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
+      </t-form>
+    </t-dialog>
+
+    <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
+    <t-dialog v-model:visible="editVisible" header="编辑账号" :confirm-btn="{ content: '保存', loading: savingEdit, theme: 'primary' }" @confirm="saveEdit">
+      <t-form v-if="editAccount" label-width="90px">
+        <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount.platform) }}）</t-form-item>
+        <t-form-item label="所属游戏">
+          <t-select v-model="editGameId" clearable placeholder="选择游戏">
+            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+          </t-select>
+        </t-form-item>
+        <t-form-item label="标签">
+          <t-input v-model="editTagsText" placeholder="多个标签用逗号分隔" />
+        </t-form-item>
+        <t-form-item label="备注">
+          <t-textarea v-model="editRemark" :rows="3" placeholder="账号备注" />
+        </t-form-item>
+        <div class="form-tip">平台 UID/昵称/头像/账号状态由检查同步，不在此编辑。</div>
       </t-form>
     </t-dialog>
 
@@ -1065,7 +1063,7 @@ const columns = [
         </t-form-item>
         <t-form-item v-if="isDesktop" label="绑定窗口">
           <t-select v-model="detailProfileId" clearable placeholder="选择本人授权窗口">
-            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileLabel(profile.id)" />
+            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
           </t-select>
           <div class="form-tip">绑定或换绑后，登录状态会回到“待检查”，需要后续账号检查重新确认。</div>
         </t-form-item>
@@ -1080,8 +1078,6 @@ const columns = [
       <template #footer>
         <t-space>
           <t-button variant="outline" @click="detailVisible = false">关闭</t-button>
-          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" :loading="operatingProfileId === `open:${profileForAccount(detailAccount)?.bit_profile_id || ''}`" :disabled="Boolean(operatingProfileId)" @click="openAccountProfile(detailAccount)">打开窗口</t-button>
-          <t-button v-if="canOperateBoundWindow(detailAccount)" variant="outline" :loading="operatingProfileId === `close:${profileForAccount(detailAccount)?.bit_profile_id || ''}`" :disabled="Boolean(operatingProfileId)" @click="closeAccountProfile(detailAccount)">关闭窗口</t-button>
           <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查/同步账号信息</t-button>
           <t-button variant="outline" @click="viewExportCookie">查看/导出 Cookie</t-button>
           <t-button v-if="isDesktop && canOperateBoundWindow(detailAccount)" variant="outline" :loading="readingCookie" @click="readProfileCookie">从 Profile 读真实 Cookie</t-button>
@@ -1105,8 +1101,10 @@ const columns = [
 </template>
 
 <style scoped>
-.stats-row { margin-bottom: 16px; }
-.stat-num { font-size: 24px; font-weight: 700; line-height: 1.2; }
+.stats-row { margin-bottom: 12px; }
+.stat-num { font-size: 18px; font-weight: 600; line-height: 1.2; }
+.stats-row :deep(.t-card__body) { padding: 10px 12px; }
+.stats-row :deep(.t-card__title) { font-size: 13px; }
 .search-bar { margin-bottom: 12px; }
 .batch-result-card { margin-bottom: 12px; }
 .cookie-box {
@@ -1121,6 +1119,7 @@ const columns = [
 }
 .account-id { cursor: pointer; color: var(--td-brand-color, #0052d9); }
 .account-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); font-weight: 500; }
+.window-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); }
 .account-sub { color: var(--td-text-color-secondary, #666); font-size: 12px; }
 .account-remark { color: var(--td-text-color-secondary, #666); font-size: 12px; }
 .account-tags { display: flex; flex-wrap: wrap; gap: 4px; }
