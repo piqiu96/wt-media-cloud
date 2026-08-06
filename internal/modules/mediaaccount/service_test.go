@@ -29,7 +29,7 @@ func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
 	if account.UserID != actor.ID || account.GameID != "game-a" {
 		t.Fatalf("account scope = %#v", account)
 	}
-	if account.IdentificationStatus != IdentificationPending || account.BusinessStatus != BusinessDraft || account.LoginStatus != LoginUnknown {
+	if account.IdentificationStatus != IdentificationPending || account.BusinessStatus != BusinessEnabled || account.LoginStatus != LoginUnknown {
 		t.Fatalf("account defaults = %#v", account)
 	}
 	stored, _, _ := store.Find(account.ID)
@@ -61,7 +61,7 @@ func TestServiceAllowsLedgerAccountWithoutGame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccount(no game) error = %v", err)
 	}
-	if account.GameID != "" || account.BusinessStatus != BusinessDraft || account.LoginStatus != LoginUnknown {
+	if account.GameID != "" || account.BusinessStatus != BusinessEnabled || account.LoginStatus != LoginUnknown {
 		t.Fatalf("account defaults = %#v", account)
 	}
 }
