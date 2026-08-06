@@ -212,7 +212,7 @@ type UpdateAccountGroupInput struct {
 }
 
 type Store interface {
-	Create(AccountRecord) error
+	Create(record AccountRecord) (string, error)
 	Find(id string) (AccountRecord, bool, error)
 	FindByIdentity(userID identity.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
@@ -323,7 +323,6 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	now := s.now()
 	record := AccountRecord{
 		Account: Account{
-			ID:                   s.newID("media_account"),
 			UserID:               userID,
 			TeamID:               teamID,
 			GameID:               gameID,
@@ -338,9 +337,12 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 		},
 		OriginalCookie: input.OriginalCookie,
 	}
-	if err := s.store.Create(record); err != nil {
+	// 主键一律自增，由 DB 分配；Create 返回新 id
+	newID, err := s.store.Create(record)
+	if err != nil {
 		return Account{}, err
 	}
+	record.ID = newID
 	if strings.TrimSpace(input.BrowserProfileID) != "" {
 		account, err := s.BindProfile(actor, record.ID, input.BrowserProfileID)
 		if err != nil {

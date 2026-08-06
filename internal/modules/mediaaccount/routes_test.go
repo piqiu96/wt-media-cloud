@@ -74,8 +74,26 @@ func TestRoutesIdentifyDuplicateAndManageTags(t *testing.T) {
 		t.Fatalf("tag status = %d, body = %s", tagged.Result().StatusCode(), tagged.Result().Body())
 	}
 	filtered := ut.PerformRequest(engine.Engine, "GET", "/api/v1/media-accounts?all_tags=launch,vip", nil, ut.Header{Key: "Cookie", Value: cookie})
-	if filtered.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(filtered.Result().Body()), firstID) || strings.Contains(string(filtered.Result().Body()), secondID) {
+	if filtered.Result().StatusCode() != consts.StatusOK {
 		t.Fatalf("filtered status = %d, body = %s", filtered.Result().StatusCode(), filtered.Result().Body())
+	}
+	var list struct {
+		Data []Account `json:"data"`
+	}
+	if err := json.Unmarshal(filtered.Result().Body(), &list); err != nil {
+		t.Fatalf("parse filtered = %v, body = %s", err, filtered.Result().Body())
+	}
+	foundFirst, foundSecond := false, false
+	for _, account := range list.Data {
+		if account.ID == firstID {
+			foundFirst = true
+		}
+		if account.ID == secondID {
+			foundSecond = true
+		}
+	}
+	if !foundFirst || foundSecond {
+		t.Fatalf("filtered ids = %#v, want contain %s and not %s", list.Data, firstID, secondID)
 	}
 }
 

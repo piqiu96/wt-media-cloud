@@ -510,20 +510,23 @@ func containsSecretField(value string) bool {
 }
 
 type memoryStore struct {
-	records  map[string]AccountRecord
-	tags     map[string]map[string]struct{}
-	audits   []identity.AuditEvent
-	groups   map[string]AccountGroup
-	groupSeq int64
+	records    map[string]AccountRecord
+	tags       map[string]map[string]struct{}
+	audits     []identity.AuditEvent
+	groups     map[string]AccountGroup
+	groupSeq   int64
+	accountSeq int64
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{records: map[string]AccountRecord{}, tags: map[string]map[string]struct{}{}, groups: map[string]AccountGroup{}}
 }
 
-func (s *memoryStore) Create(record AccountRecord) error {
+func (s *memoryStore) Create(record AccountRecord) (string, error) {
+	s.accountSeq++
+	record.ID = strconv.FormatInt(s.accountSeq, 10)
 	s.records[record.ID] = record
-	return nil
+	return record.ID, nil
 }
 
 func (s *memoryStore) Find(id string) (AccountRecord, bool, error) {

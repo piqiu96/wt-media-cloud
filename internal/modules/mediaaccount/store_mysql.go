@@ -23,19 +23,26 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 	return &MySQLStore{db: db}
 }
 
-func (s *MySQLStore) Create(record AccountRecord) error {
-	_, err := s.db.Exec(
-		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.ID, record.UserID, record.TeamID, record.GameID, record.Platform,
+func (s *MySQLStore) Create(record AccountRecord) (string, error) {
+	result, err := s.db.Exec(
+		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.UserID, record.TeamID, record.GameID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
 		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
 		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.CreatedAt, record.UpdatedAt,
 	)
 	if duplicateKey(err) {
-		return ErrDuplicateAccount
+		return "", ErrDuplicateAccount
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(id, 10), nil
 }
 
 func (s *MySQLStore) Find(id string) (AccountRecord, bool, error) {

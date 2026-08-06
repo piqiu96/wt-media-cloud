@@ -23,14 +23,18 @@ func TestMySQLStoreCreatesAccountWithSecretFieldsInternal(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_accounts`)).
 		WithArgs(
-			record.ID, record.UserID, record.TeamID, record.GameID, record.Platform, nil, nil, nil, nil,
+			record.UserID, record.TeamID, record.GameID, record.Platform, nil, nil, nil, nil,
 			nil, record.IdentificationStatus, nil, record.BusinessStatus, record.LoginStatus,
 			record.OriginalCookie, nil, nil, nil, nil, nil, record.CreatedAt, record.UpdatedAt,
 		).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WillReturnResult(sqlmock.NewResult(42, 1))
 
-	if err := store.Create(record); err != nil {
+	id, err := store.Create(record)
+	if err != nil {
 		t.Fatalf("Create() error = %v", err)
+	}
+	if id != "42" {
+		t.Fatalf("Create() id = %q, want 42", id)
 	}
 }
 
