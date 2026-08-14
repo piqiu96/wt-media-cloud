@@ -30,23 +30,29 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
         query.exclude_tags = query.excludeTags
         delete query.excludeTags
       }
+      if (query?.profile !== undefined) {
+        query.profile_search = query.profile
+        delete query.profile
+      }
       return api.get('/media-accounts', query).then((accounts) => Array.isArray(accounts) ? accounts.map(sanitize) : accounts)
     },
-    create({ userId, gameId, platform, originalCookie, browserProfileId, remark, tags }) {
+    create({ userId, gameId, name, platform, originalCookie, browserProfileId, remark, tags }) {
       const body = { game_id: gameId, platform }
       if (userId) body.user_id = userId
+      if (name) body.name = name
       if (originalCookie) body.original_cookie = originalCookie
       if (browserProfileId) body.browser_profile_id = browserProfileId
       if (remark) body.remark = remark
       if (tags?.length) body.tags = tags
       return api.post('/media-accounts', body).then(sanitize)
     },
-    update(accountId, { businessStatus, loginStatus, remark, gameId }) {
+    update(accountId, { businessStatus, loginStatus, remark, gameId, name }) {
       return api.patch(`/media-accounts/${accountId}`, {
         business_status: businessStatus,
         login_status: loginStatus,
         remark,
         game_id: gameId,
+        name,
       }).then(sanitize)
     },
     identify(accountId, { platformAccountId, name, avatarUrl, loginStatus }) {

@@ -357,6 +357,83 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	}
 }
 
+func TestServiceCreateAccountStoresName(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+
+	account, err := service.CreateAccount(actor, CreateAccountInput{
+		GameID: "game-a", Platform: PlatformBilibili, Name: "  测试昵称  ",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+	if account.Name != "测试昵称" {
+		t.Fatalf("account.Name = %q, want %q", account.Name, "测试昵称")
+	}
+	stored, _, _ := store.Find(account.ID)
+	if stored.Name != "测试昵称" {
+		t.Fatalf("stored.Name = %q, want %q", stored.Name, "测试昵称")
+	}
+}
+
+func TestServiceUpdateAccountName(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili, Name: "原名"})
+
+	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Name: strPtr("  新名  ")})
+	if err != nil {
+		t.Fatalf("UpdateAccount() error = %v", err)
+	}
+	if updated.Name != "新名" {
+		t.Fatalf("updated.Name = %q, want %q", updated.Name, "新名")
+	}
+
+	cleared, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Name: strPtr("")})
+	if err != nil {
+		t.Fatalf("UpdateAccount(clear) error = %v", err)
+	}
+	if cleared.Name != "" {
+		t.Fatalf("cleared.Name = %q, want empty", cleared.Name)
+	}
+}
+
+func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+
+	// name 为空时回填
+	updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
+		TaskID: "task-1", PlatformAccountID: "uid-1", Name: "回填昵称", LoginStatus: LoginNormal,
+	})
+	if err != nil {
+		t.Fatalf("ApplyLocalAccountCheckResult() error = %v", err)
+	}
+	if updated.Name != "回填昵称" {
+		t.Fatalf("backfilled name = %q, want %q", updated.Name, "回填昵称")
+	}
+
+	// 已有 name 不被覆盖
+	store.records[account.ID] = AccountRecord{Account: Account{
+		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		PlatformAccountID: "uid-1", Name: "已有名", IdentificationStatus: IdentificationIdentified,
+		BusinessStatus: BusinessEnabled, LoginStatus: LoginNormal,
+	}}
+	kept, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
+		TaskID: "task-2", PlatformAccountID: "uid-1", Name: "新名", LoginStatus: LoginNormal,
+	})
+	if err != nil {
+		t.Fatalf("ApplyLocalAccountCheckResult(keep) error = %v", err)
+	}
+	if kept.Name != "已有名" {
+		t.Fatalf("existing name overwritten = %q", kept.Name)
+	}
+}
+
 func TestServiceFiltersByStatusAndSearch(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)

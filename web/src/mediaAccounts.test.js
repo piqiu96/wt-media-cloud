@@ -136,9 +136,15 @@ describe('media account client', () => {
   it('keeps B6 account page desktop boundaries explicit', () => {
     const source = readFileSync(resolve(__dirname, 'modules/accounts/pages/AccountsPage.vue'), 'utf8')
 
+    expect(source).toContain('社媒账号')
     expect(source).toContain('新增账号')
-    expect(source).toContain('检查/同步账号信息')
-    expect(source).toContain('批量检查/同步')
+    expect(source).toContain('>检查</t-button>')
+    expect(source).toContain('从 Profile 读真实 Cookie')
+    expect(source).toContain('>批量检查</t-button>')
+    expect(source).toContain('v-if="isDesktop" variant="outline"')
+    expect(source).toContain('请先勾选要检查的账号')
+    expect(source).toContain('前往环境监测')
+    expect(source).toContain('<t-form-item label="窗口">')
     expect(source).toContain('重试失败项')
     expect(source).toContain('retryFailedOnly')
     expect(source).toContain('打开窗口')
@@ -146,6 +152,36 @@ describe('media account client', () => {
     expect(source).toContain('系统ID ${profile.id} / ${name} / BitBrowser ${bitId}')
     expect(source).toContain('不可执行：未绑定游戏')
     expect(source).toContain('Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息')
-    expect(source).toContain('v-if="isDesktop" size="small" theme="primary"')
+  })
+
+  it('passes window binding fuzzy search to backend', async () => {
+    const fetch = vi.fn(async () => response([]))
+    const client = createMediaAccountClient({ fetch })
+
+    await client.list({ profile: '运营' })
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/v1/media-accounts?profile_search=%E8%BF%90%E8%90%A5',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('sends account name on create and update', async () => {
+    const fetch = vi.fn(async () => response({ id: 'account-1' }))
+    const client = createMediaAccountClient({ fetch })
+
+    await client.create({ gameId: 'game-a', platform: 'bilibili', name: '测试昵称' })
+
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ game_id: 'game-a', platform: 'bilibili', name: '测试昵称' }),
+    }))
+
+    await client.update('account-1', { name: '新名' })
+
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/account-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ name: '新名' }),
+    }))
   })
 })

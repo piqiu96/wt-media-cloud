@@ -16,6 +16,7 @@ import (
 type createAccountRequest struct {
 	UserID           identity.UserID `json:"user_id"`
 	GameID           string          `json:"game_id"`
+	Name             string          `json:"name"`
 	Platform         Platform        `json:"platform"`
 	OriginalCookie   string          `json:"original_cookie"`
 	BrowserProfileID string          `json:"browser_profile_id"`
@@ -28,6 +29,7 @@ type updateAccountRequest struct {
 	LoginStatus    LoginStatus    `json:"login_status"`
 	Remark         *string        `json:"remark"`
 	GameID         *string        `json:"game_id"`
+	Name           *string        `json:"name"`
 }
 
 type identifyAccountRequest struct {
@@ -126,6 +128,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			BusinessStatus: BusinessStatus(c.Query("business_status")),
 			LoginStatus:    LoginStatus(c.Query("login_status")),
 			Search:         c.Query("search"),
+			ProfileSearch:  c.Query("profile_search"),
 			AnyTags:        commaValues(c.Query("any_tags")),
 			AllTags:        commaValues(c.Query("all_tags")),
 			ExcludeTags:    commaValues(c.Query("exclude_tags")),

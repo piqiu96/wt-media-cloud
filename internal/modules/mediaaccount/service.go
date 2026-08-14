@@ -94,6 +94,7 @@ type AccountRecord struct {
 type CreateAccountInput struct {
 	UserID           identity.UserID
 	GameID           string
+	Name             string
 	Platform         Platform
 	OriginalCookie   string
 	BrowserProfileID string
@@ -154,6 +155,7 @@ type UpdateAccountInput struct {
 	LoginStatus    LoginStatus
 	Remark         *string
 	GameID         *string
+	Name           *string
 }
 
 type AccountFilter struct {
@@ -163,6 +165,7 @@ type AccountFilter struct {
 	BusinessStatus BusinessStatus
 	LoginStatus    LoginStatus
 	Search         string
+	ProfileSearch  string
 	AnyTags        []string
 	AllTags        []string
 	ExcludeTags    []string
@@ -298,7 +301,8 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	gameID := strings.TrimSpace(input.GameID)
 	platform := Platform(strings.ToLower(strings.TrimSpace(string(input.Platform))))
 	remark := strings.TrimSpace(input.Remark)
-	if !validActor(actor) || len(gameID) > 128 || !validPlatform(platform) || len(remark) > 500 {
+	name := strings.TrimSpace(input.Name)
+	if !validActor(actor) || len(gameID) > 128 || !validPlatform(platform) || len(remark) > 500 || len(name) > 128 {
 		return Account{}, ErrInvalidInput
 	}
 	teamID := actor.TeamID
@@ -328,6 +332,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 			TeamID:               teamID,
 			GameID:               gameID,
 			Platform:             platform,
+			Name:                 name,
 			Remark:               remark,
 			IdentificationStatus: IdentificationPending,
 			BusinessStatus:       BusinessEnabled,
@@ -432,6 +437,10 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 	if len(filter.Search) > 128 {
 		return nil, ErrInvalidInput
 	}
+	filter.ProfileSearch = strings.TrimSpace(filter.ProfileSearch)
+	if len(filter.ProfileSearch) > 128 {
+		return nil, ErrInvalidInput
+	}
 	var err error
 	if filter.AnyTags, err = normalizeTags(filter.AnyTags); err != nil {
 		return nil, err
@@ -489,7 +498,14 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 		}
 		record.GameID = gameID
 	}
-	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameID == nil {
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if len(name) > 128 {
+			return Account{}, ErrInvalidInput
+		}
+		record.Name = name
+	}
+	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameID == nil && input.Name == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()
@@ -709,7 +725,9 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 			return record.Account, nil
 		}
 		record.PlatformAccountID = platformAccountID
-		record.Name = strings.TrimSpace(input.Name)
+		if record.Name == "" {
+			record.Name = strings.TrimSpace(input.Name)
+		}
 		record.AvatarURL = strings.TrimSpace(input.AvatarURL)
 		record.IdentificationStatus = IdentificationIdentified
 		record.DuplicateOfAccountID = ""

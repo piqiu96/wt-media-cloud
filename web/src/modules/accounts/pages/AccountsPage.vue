@@ -11,12 +11,15 @@ import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 // valid file"). invoke is only called inside __TAURI_INTERNALS__-guarded code,
 // so importing it is inert in Cloud Web.
 import { invoke } from "@tauri-apps/api/core"
+import { MessagePlugin } from "tdesign-vue-next"
+import { useRouter } from "vue-router"
 
 const accountClient = createMediaAccountClient()
 const profileClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
 const usersClient = createUsersClient()
 
+const router = useRouter()
 const isDesktop = window.__WT_MEDIA_APP__ === "desktop"
 
 const user = ref(null)
@@ -32,29 +35,31 @@ const searchBizStatus = ref("")
 const searchLoginStatus = ref("")
 const searchTags = ref("")
 const searchGameId = ref("")
-const pagination = ref({ current: 1, pageSize: 20 })
+const pagination = ref({ current: 1, pageSize: 20, total: 0, showJumper: true })
 
 const showCreate = ref(false)
 const createForm = ref(defaultCreateForm())
 const creating = ref(false)
+const createError = ref("")
 
 const detailVisible = ref(false)
 const detailAccount = ref(null)
-const detailRemark = ref("")
-const detailProfileId = ref("")
-const savingDetail = ref(false)
-const checkingAccount = ref(false)
 const checkNotice = ref("")
+const checkFailure = ref("")
+const checkFailureEnv = ref(false)
 const readingCookie = ref(false)
 const cookieNotice = ref("")
 const showCookieDialog = ref(false)
-const cookieDialog = ref({ original_cookie: "", active_cookie: "" })
+const cookieDialog = ref(null)
 const editVisible = ref(false)
 const editAccount = ref(null)
+const editName = ref("")
 const editRemark = ref("")
 const editGameId = ref("")
-const editTagsText = ref("")
+const editProfileId = ref("")
+const editTags = ref([])
 const savingEdit = ref(false)
+const editError = ref("")
 const batchChecking = ref(false)
 const batchResults = ref([])
 const operatingProfileId = ref("")
@@ -64,10 +69,8 @@ const accountInfoPopup = ref(null)
 const windowPopup = ref(null)
 const allTagsPopup = ref(null)
 
-const tagInput = ref("")
 const selectedAccountIds = ref([])
-const tagManageVisible = ref(false)
-const tagManageList = ref([])
+const searchProfile = ref("")
 
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
@@ -87,10 +90,11 @@ function defaultCreateForm() {
   return {
     userId: "",
     gameId: "",
+    name: "",
     platform: "bilibili",
     browserProfileId: "",
     remark: "",
-    tagsText: "",
+    tags: [],
   }
 }
 
@@ -115,11 +119,19 @@ async function loadAccounts() {
   if (searchLoginStatus.value) params.loginStatus = searchLoginStatus.value
   if (searchGameId.value) params.game_id = searchGameId.value
   if (searchTags.value) params.anyTags = [searchTags.value]
+  if (searchProfile.value) params.profile = searchProfile.value
   try {
     accounts.value = await accountClient.list(params)
+    pagination.value.total = accounts.value.length
+    pagination.value.current = 1
   } catch (e) {
     error.value = e.message || "加载媒体账号失败"
   }
+}
+
+function onPageChange(pageInfo) {
+  pagination.value.current = pageInfo.current
+  pagination.value.pageSize = pageInfo.pageSize
 }
 
 function resetFilters() {
@@ -129,6 +141,23 @@ function resetFilters() {
   searchLoginStatus.value = ""
   searchTags.value = ""
   searchGameId.value = ""
+  searchProfile.value = ""
+  loadAccounts()
+}
+
+function applyStatFilter(key) {
+  searchText.value = ""
+  searchPlatform.value = ""
+  searchBizStatus.value = ""
+  searchLoginStatus.value = ""
+  searchTags.value = ""
+  searchGameId.value = ""
+  searchProfile.value = ""
+  if (key === "enabled") searchBizStatus.value = "enabled"
+  else if (key === "disabled") searchBizStatus.value = "disabled"
+  else if (key === "normal") searchLoginStatus.value = "normal"
+  else if (key === "abnormal") searchLoginStatus.value = "restricted"
+  else if (key === "pending") searchLoginStatus.value = "unknown"
   loadAccounts()
 }
 
@@ -136,6 +165,7 @@ function resetFilters() {
 function openCreate() {
   createForm.value = defaultCreateForm()
   createForm.value.gameId = (user.value?.game_ids || [])[0] || games.value[0]?.id || ""
+  createError.value = ""
   showCreate.value = true
 }
 
@@ -146,15 +176,16 @@ async function createAccount() {
     await accountClient.create({
       userId: user.value?.role === "admin" ? Number(createForm.value.userId) || undefined : undefined,
       gameId: createForm.value.gameId,
+      name: createForm.value.name || undefined,
       platform: createForm.value.platform,
       browserProfileId: isDesktop ? createForm.value.browserProfileId : "",
       remark: createForm.value.remark,
-      tags: splitTags(createForm.value.tagsText),
+      tags: createForm.value.tags || [],
     })
     showCreate.value = false
     await loadAccounts()
   } catch (e) {
-    error.value = e.message || "创建媒体账号失败"
+    createError.value = e.message || "创建媒体账号失败"
   } finally {
     creating.value = false
   }
@@ -162,9 +193,9 @@ async function createAccount() {
 
 function openDetail(account) {
   detailAccount.value = account
-  detailRemark.value = account.remark || ""
-  detailProfileId.value = account.browser_profile_id || ""
   checkNotice.value = ""
+  checkFailure.value = ""
+  checkFailureEnv.value = false
   detailVisible.value = true
 }
 
@@ -179,9 +210,9 @@ async function copyAccountId(account) {
   if (!account?.id) return
   try {
     await navigator.clipboard.writeText(account.id)
-    cookieNotice.value = "已复制系统账号 ID"
+    MessagePlugin.success("已复制系统账号 ID")
   } catch (e) {
-    error.value = "复制失败，请手动选择"
+    MessagePlugin.error("复制失败，请手动选择")
   }
 }
 
@@ -216,67 +247,44 @@ async function toggleWindow(account) {
       profileOpenMap.value[profile.bit_profile_id] = true
     }
   } catch (e) {
-    error.value = e.message || "窗口操作失败"
+    MessagePlugin.error(e.message || "窗口操作失败")
   }
 }
 
 async function checkFromRow(account) {
   if (!canCheckAccount(account)) {
-    error.value = executableText(account)
+    MessagePlugin.warning(executableText(account))
     return
   }
   currentCheckingId.value = account.id
-  error.value = ""
   try {
     const service = await desktopLocalAgentService()
     const updated = await runSingleAccountCheck(account, service)
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
-    checkNotice.value = `检查完成：${loginStatusText(updated.login_status)}`
+    MessagePlugin.success(`检查完成：${loginStatusText(updated.login_status)}`)
     await loadAccounts()
   } catch (e) {
-    error.value = e.message || "账号检查失败"
+    // 单账号检查失败：行状态置「检查失败」+ 打开详情展示失败原因（不使用页面级横幅）
+    const idx = accounts.value.findIndex(a => a.id === account.id)
+    const failed = idx >= 0 ? { ...accounts.value[idx], login_status: "environment_error" } : account
+    if (idx >= 0) accounts.value[idx] = failed
+    openDetail(failed)
+    checkFailure.value = `检查失败：${e.message || "环境不可用"}`
+    checkFailureEnv.value = isEnvironmentError(e?.message)
   } finally {
     currentCheckingId.value = ""
   }
 }
 
-function openTagManage() {
-  const count = {}
-  accounts.value.forEach(a => (a.tags || []).forEach(t => { count[t] = (count[t] || 0) + 1 }))
-  tagManageList.value = Object.entries(count).map(([name, num]) => ({ name, num })).sort((a, b) => b.num - a.num)
-  tagManageVisible.value = true
-}
-
-async function deleteTagFromAll(tag) {
-  try {
-    const affected = accounts.value.filter(a => (a.tags || []).includes(tag))
-    if (!affected.length) return
-    await accountClient.removeTags(affected.map(a => a.id), [tag])
-    await loadAccounts()
-    await openTagManage()
-  } catch (e) {
-    error.value = e.message || "删除标签失败"
-  }
-}
-
-async function batchSetBizStatus(status) {
-  const ids = selectedAccountIds.value
-  if (!ids.length) return
-  try {
-    await Promise.all(ids.map(id => accountClient.update(id, { businessStatus: status })))
-    selectedAccountIds.value = []
-    await loadAccounts()
-  } catch (e) {
-    error.value = e.message || "批量状态更新失败"
-  }
-}
-
 function openEdit(account) {
   editAccount.value = account
+  editName.value = account.name || ""
   editRemark.value = account.remark || ""
   editGameId.value = account.game_id || ""
-  editTagsText.value = (account.tags || []).join(",")
+  editProfileId.value = account.browser_profile_id || ""
+  editTags.value = [...(account.tags || [])]
+  editError.value = ""
   editVisible.value = true
 }
 
@@ -285,13 +293,20 @@ async function saveEdit() {
   savingEdit.value = true
   error.value = ""
   try {
-    const updated = await accountClient.update(editAccount.value.id, {
+    let updated = await accountClient.update(editAccount.value.id, {
+      name: editName.value || undefined,
       remark: editRemark.value,
       gameId: editGameId.value || "",
     })
+    // 绑定窗口差异
+    if (isDesktop && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
+      updated = editProfileId.value
+        ? await accountClient.bindProfile(editAccount.value.id, editProfileId.value)
+        : await accountClient.unbindProfile(editAccount.value.id)
+    }
     // 标签差异：先加后删
     const oldTags = new Set(editAccount.value.tags || [])
-    const newTags = splitTags(editTagsText.value)
+    const newTags = editTags.value.map(t => String(t).trim()).filter(Boolean)
     const toAdd = newTags.filter(t => !oldTags.has(t))
     const toRemove = [...oldTags].filter(t => !newTags.includes(t))
     if (toAdd.length) await accountClient.addTags([editAccount.value.id], toAdd)
@@ -301,7 +316,7 @@ async function saveEdit() {
     editVisible.value = false
     await loadAccounts()
   } catch (e) {
-    error.value = e.message || "保存失败"
+    editError.value = e.message || "保存失败"
   } finally {
     savingEdit.value = false
   }
@@ -314,57 +329,17 @@ async function toggleBizStatus(account) {
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
   } catch (e) {
-    error.value = e.message || "状态切换失败"
-  }
-}
-
-async function saveDetail() {
-  if (!detailAccount.value) return
-  savingDetail.value = true
-  error.value = ""
-  try {
-    let updated = await accountClient.update(detailAccount.value.id, { remark: detailRemark.value })
-    if (isDesktop && detailProfileId.value !== (detailAccount.value.browser_profile_id || "")) {
-      updated = detailProfileId.value
-        ? await accountClient.bindProfile(detailAccount.value.id, detailProfileId.value)
-        : await accountClient.unbindProfile(detailAccount.value.id)
-    }
-    detailAccount.value = { ...detailAccount.value, ...updated }
-    await loadAccounts()
-    detailVisible.value = false
-  } catch (e) {
-    error.value = e.message || "保存账号失败"
-  } finally {
-    savingDetail.value = false
-  }
-}
-
-async function updateStatus(account, bizStatus) {
-  error.value = ""
-  try {
-    await accountClient.update(account.id, { businessStatus: bizStatus })
-    await loadAccounts()
-  } catch (e) {
-    error.value = e.message || "更新状态失败"
-  }
-}
-
-async function changeTags(remove = false) {
-  const tags = splitTags(tagInput.value)
-  if (!selectedAccountIds.value.length || !tags.length) return
-  error.value = ""
-  try {
-    if (remove) await accountClient.removeTags(selectedAccountIds.value, tags)
-    else await accountClient.addTags(selectedAccountIds.value, tags)
-    tagInput.value = ""
-    await loadAccounts()
-  } catch (e) {
-    error.value = e.message || "更新标签失败"
+    MessagePlugin.error(e.message || "状态切换失败")
   }
 }
 
 function splitTags(value) {
   return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
+}
+
+function appendTag(list, value) {
+  const v = String(value || "").trim()
+  if (v && !list.includes(v)) list.push(v)
 }
 
 function gameName(gameId) {
@@ -420,11 +395,12 @@ function bizStatusText(status) {
 }
 
 // 账号状态：真实平台状态，由 login_status + identification_status 派生（与业务状态独立）
+// 颜色语义遵循视觉规范 6.2（正常=绿、未检查=灰、待处理=橙、错误/冲突/失效/受限=红）
 const ACCOUNT_STATUS_MAP = {
   pending: { label: "待上号", color: "gray" },
   normal: { label: "正常", color: "green" },
   not_logged_in: { label: "未登录", color: "orange" },
-  expired: { label: "登录失效", color: "orange" },
+  expired: { label: "登录失效", color: "red" },
   account_mismatch: { label: "账号不匹配", color: "red" },
   restricted: { label: "账号受限", color: "red" },
   check_failed: { label: "检查失败", color: "red" },
@@ -453,6 +429,15 @@ function accountStatusText(account) {
 
 function accountStatusColor(account) {
   return ACCOUNT_STATUS_MAP[accountStatusKey(account)]?.color || "gray"
+}
+
+// 账号状态 → t-tag theme 映射（视觉规范 6.2 颜色语义）
+function accountStatusTheme(account) {
+  return { gray: "default", green: "success", orange: "warning", red: "danger" }[accountStatusColor(account)] || "default"
+}
+
+function isEnvironmentError(message) {
+  return /可信绑定|环境确认|timeout|timed out|BitBrowser/.test(message || "")
 }
 
 function relativeTime(ts) {
@@ -550,24 +535,6 @@ async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
   }
 }
 
-async function checkDetailAccount() {
-  if (!detailAccount.value || !canCheckAccount(detailAccount.value)) return
-  checkingAccount.value = true
-  checkNotice.value = ""
-  error.value = ""
-  try {
-    const service = await desktopLocalAgentService()
-    const updated = await runSingleAccountCheck(detailAccount.value, service)
-    detailAccount.value = { ...detailAccount.value, ...updated }
-    checkNotice.value = `检查完成：${loginStatusText(updated.login_status)}`
-    await loadAccounts()
-  } catch (e) {
-    error.value = e.message || "账号检查失败"
-  } finally {
-    checkingAccount.value = false
-  }
-}
-
 async function runSingleAccountCheck(account, service) {
   const status = await refreshRuntimeWithCooldown(service)
   const nodeId = status.node_id || ""
@@ -593,8 +560,9 @@ async function runSingleAccountCheck(account, service) {
   })
 }
 
-async function readProfileCookie() {
-  if (!detailAccount.value || !detailAccount.value.browser_profile_id) return
+async function readProfileCookieFor(account) {
+  const target = account || cookieDialog.value?.account
+  if (!target?.id || !target.browser_profile_id) return
   readingCookie.value = true
   cookieNotice.value = ""
   error.value = ""
@@ -603,49 +571,56 @@ async function readProfileCookie() {
     const status = await refreshRuntimeWithCooldown(service)
     const nodeId = status.node_id || ""
     if (!nodeId) throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
-    const start = await accountClient.startCookieReadSync(detailAccount.value.id, { nodeId })
+    const start = await accountClient.startCookieReadSync(target.id, { nodeId })
     const localResult = await service.cookieRead({
       cloudBaseUrl: cloudBaseUrl(),
       taskId: start.task_id,
       bitProfileId: start.bit_profile_id,
     })
     const cookies = localResult.cookies || []
-    const updated = await accountClient.submitCookieReadResult(detailAccount.value.id, {
+    const updated = await accountClient.submitCookieReadResult(target.id, {
       taskId: start.task_id,
       cookies,
     })
-    detailAccount.value = { ...detailAccount.value, ...updated }
+    const idx = accounts.value.findIndex(a => a.id === target.id)
+    if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
+    if (cookieDialog.value?.account?.id === target.id) {
+      cookieDialog.value = { ...cookieDialog.value, ...updated, account: { ...cookieDialog.value.account, ...updated } }
+    }
     cookieNotice.value = `已从 Profile 读回 ${cookies.length} 条真实 Cookie 并更新 active_cookie`
-    await loadAccounts()
   } catch (e) {
-    error.value = e.message || "读取 Cookie 失败"
+    MessagePlugin.error(e.message || "读取 Cookie 失败")
   } finally {
     readingCookie.value = false
   }
 }
 
-async function viewExportCookie() {
-  if (!detailAccount.value) return
+async function openCookieDialog(account) {
+  if (!account?.id) return
   try {
-    const data = await accountClient.fetchCookies(detailAccount.value.id)
-    cookieDialog.value = data || { original_cookie: "", active_cookie: "" }
+    const data = await accountClient.fetchCookies(account.id)
+    cookieDialog.value = {
+      account,
+      original_cookie: (data && data.original_cookie) || "",
+      active_cookie: (data && data.active_cookie) || "",
+    }
     showCookieDialog.value = true
   } catch (e) {
-    error.value = e.message || "获取 Cookie 失败"
+    MessagePlugin.error(e.message || "获取 Cookie 失败")
   }
 }
 
 async function copyCookie(field) {
   const value = cookieDialog.value?.[field]
   if (!value) {
-    error.value = "当前 Cookie 为空，无可复制内容"
+    MessagePlugin.warning("当前 Cookie 为空，无可复制内容")
     return
   }
   try {
     await navigator.clipboard.writeText(value)
-    cookieNotice.value = `已复制 ${field === "active_cookie" ? "Active" : "原始"} Cookie 到剪贴板`
+    MessagePlugin.success(`已复制 ${field === "active_cookie" ? "Active" : "原始"} Cookie 到剪贴板`)
   } catch (e) {
-    error.value = "复制失败，请手动选择复制"
+    MessagePlugin.error("复制失败，请手动选择复制")
   }
 }
 
@@ -673,9 +648,11 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
   const candidates = retryFailedOnly
     ? batchResults.value.filter(item => item.status === "failed").map(item => item.account)
     : selectedAccounts()
-  if (!candidates.length) return
+  if (!candidates.length) {
+    MessagePlugin.warning("请先勾选要检查的账号")
+    return
+  }
   batchChecking.value = true
-  error.value = ""
   checkNotice.value = ""
   const initialResults = candidates.map(account => {
     if (!canCheckAccount(account)) {
@@ -704,10 +681,14 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
       }
     }
     const stats = batchStats()
-    checkNotice.value = `批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}`
+    if (stats.failed > 0) {
+      MessagePlugin.warning(`批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}`)
+    } else {
+      MessagePlugin.success(`批量检查完成：成功 ${stats.success}，跳过 ${stats.skipped}`)
+    }
     await loadAccounts()
   } catch (e) {
-    error.value = e.message || "批量检查失败"
+    MessagePlugin.error(e.message || "批量检查失败")
   } finally {
     batchChecking.value = false
   }
@@ -718,19 +699,16 @@ async function openAccountProfile(account) {
   if (!canOperateBoundWindow(account)) return
   const bitProfileId = String(profile.bit_profile_id || "").trim()
   if (!bitProfileId) {
-    error.value = "打开绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
+    MessagePlugin.error("打开绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。")
     return
   }
   operatingProfileId.value = `open:${bitProfileId}`
-  error.value = ""
-  checkNotice.value = `正在打开绑定窗口：${profile.name || bitProfileId}`
   try {
     const service = await desktopLocalAgentService()
     const result = await service.profileOpen(bitProfileId)
-    checkNotice.value = `已打开绑定窗口：${profile.name || result.bit_profile_id}`
+    MessagePlugin.success(`已打开绑定窗口：${profile.name || result.bit_profile_id}`)
   } catch (e) {
-    checkNotice.value = ""
-    error.value = localTrustMessage(e)
+    MessagePlugin.error(localTrustMessage(e))
   } finally {
     operatingProfileId.value = ""
   }
@@ -741,19 +719,16 @@ async function closeAccountProfile(account) {
   if (!canOperateBoundWindow(account)) return
   const bitProfileId = String(profile.bit_profile_id || "").trim()
   if (!bitProfileId) {
-    error.value = "关闭绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。"
+    MessagePlugin.error("关闭绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。")
     return
   }
   operatingProfileId.value = `close:${bitProfileId}`
-  error.value = ""
-  checkNotice.value = `正在关闭绑定窗口：${profile.name || bitProfileId}`
   try {
     const service = await desktopLocalAgentService()
     const result = await service.profileClose(bitProfileId)
-    checkNotice.value = `已关闭绑定窗口：${profile.name || result.bit_profile_id}`
+    MessagePlugin.success(`已关闭绑定窗口：${profile.name || result.bit_profile_id}`)
   } catch (e) {
-    checkNotice.value = ""
-    error.value = localTrustMessage(e)
+    MessagePlugin.error(localTrustMessage(e))
   } finally {
     operatingProfileId.value = ""
   }
@@ -772,6 +747,8 @@ const availableTags = computed(() => {
   return [...set].sort()
 })
 
+const tagOptions = computed(() => availableTags.value.map(t => ({ label: t, value: t })))
+
 const stats = computed(() => ({
   total: accounts.value.length,
   enabled: accounts.value.filter(a => a.business_status === "enabled").length,
@@ -781,25 +758,35 @@ const stats = computed(() => ({
   pending: accounts.value.filter(a => ["pending", "not_logged_in", "expired"].includes(accountStatusKey(a))).length,
 }))
 
+// 统计卡片：分两组展示（业务状态 / 账号健康），点击应用对应筛选
+const bizStatItems = { total: { label: "总账号" }, enabled: { label: "启用" }, disabled: { label: "停用" } }
+const healthStatItems = { normal: { label: "正常" }, abnormal: { label: "异常" }, pending: { label: "待检查" } }
+
 const currentBatchStats = computed(batchStats)
 const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
 
 const columns = [
-  { colKey: "id", title: "ID", width: 70 },
-  { colKey: "platform", title: "平台", width: 80 },
-  { colKey: "account_info", title: "账号信息", width: 200 },
-  { colKey: "game_id", title: "游戏", width: 90 },
-  { colKey: "tags", title: "标签", width: 150 },
-  { colKey: "window_info", title: "浏览器窗口", width: 190 },
-  { colKey: "business_status", title: "业务状态", width: 80 },
-  { colKey: "account_status", title: "账号状态", width: 90 },
-  { colKey: "last_checked_at", title: "最近检查", width: 120 },
-  { colKey: "op", title: "操作", width: 420, fixed: "right" },
+  { colKey: "row-select", type: "multiple", width: 40 },
+  { colKey: "id", title: "ID", width: 60 },
+  { colKey: "platform", title: "平台", width: 70 },
+  { colKey: "account_info", title: "账号信息", width: 190 },
+  { colKey: "game_id", title: "游戏", width: 80 },
+  { colKey: "tags", title: "标签", width: 140 },
+  { colKey: "window_info", title: "浏览器窗口", width: 180 },
+  { colKey: "business_status", title: "业务状态", width: 80, minWidth: 80 },
+  { colKey: "account_status", title: "账号状态", width: 90, minWidth: 90 },
+  { colKey: "last_checked_at", title: "最近检查", width: 110, minWidth: 110 },
+  { colKey: "cookie", title: "Cookie", width: 80 },
+  { colKey: "op", title: "操作", width: 400, fixed: "right" },
 ]
 </script>
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
+    <div class="page-header">
+      <h1 class="page-title">社媒账号</h1>
+      <p class="page-subtitle">管理社媒账号资料、浏览器窗口关联和账号检查状态</p>
+    </div>
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-alert
       v-if="!isDesktop"
@@ -808,20 +795,26 @@ const columns = [
       style="margin-bottom:16px"
     />
 
-    <t-row :gutter="16" class="stats-row">
-      <t-col :span="4"><t-card><template #title>总账号</template><div class="stat-num">{{ stats.total }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>启用账号</template><div class="stat-num">{{ stats.enabled }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>停用账号</template><div class="stat-num">{{ stats.disabled }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>正常账号</template><div class="stat-num">{{ stats.normal }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>异常账号</template><div class="stat-num">{{ stats.abnormal }}</div></t-card></t-col>
-      <t-col :span="4"><t-card><template #title>待检查</template><div class="stat-num">{{ stats.pending }}</div></t-card></t-col>
-    </t-row>
+    <div class="stats-row">
+      <span class="stats-group">业务状态</span>
+      <t-card v-for="(item, key) in bizStatItems" :key="key" class="stat-card" @click="applyStatFilter(key)">
+        <div class="stat-label">{{ item.label }}</div>
+        <div class="stat-num">{{ stats[key] }}</div>
+      </t-card>
+      <span class="stats-group">账号健康</span>
+      <t-card v-for="(item, key) in healthStatItems" :key="key" class="stat-card" @click="applyStatFilter(key)">
+        <div class="stat-label">{{ item.label }}</div>
+        <div class="stat-num">{{ stats[key] }}</div>
+      </t-card>
+    </div>
 
     <t-card class="search-bar" :bordered="true">
       <t-form layout="inline">
-        <t-form-item label="搜索">
-          <t-input v-model="searchText" placeholder="账号、UID、备注" clearable style="width:180px" />
+        <t-form-item label="综合搜索">
+          <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable style="width:360px" />
         </t-form-item>
+      </t-form>
+      <t-form layout="inline" class="filter-fields">
         <t-form-item label="游戏">
           <t-select v-model="searchGameId" placeholder="全部" clearable style="width:140px">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
@@ -854,9 +847,12 @@ const columns = [
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
           </t-select>
         </t-form-item>
-        <t-form-item>
+        <t-form-item label="窗口">
+          <t-input v-model="searchProfile" placeholder="窗口名/序号/BitID/ID" clearable style="width:180px" />
+        </t-form-item>
+        <t-form-item class="filter-actions">
           <t-button theme="primary" @click="loadAccounts">查询</t-button>
-          <t-button @click="resetFilters">重置</t-button>
+          <t-button style="margin-left:8px" @click="resetFilters">重置</t-button>
         </t-form-item>
       </t-form>
     </t-card>
@@ -864,17 +860,8 @@ const columns = [
     <div class="action-bar">
       <t-space>
         <t-button theme="primary" @click="openCreate">新增账号</t-button>
-        <t-button variant="outline" @click="openTagManage">标签管理</t-button>
+        <t-button v-if="isDesktop" variant="outline" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
         <t-button variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
-      </t-space>
-      <t-space class="batch-actions">
-        <t-input v-model="tagInput" placeholder="标签，多个用逗号分隔" style="width:180px" :disabled="!selectedAccountIds.length" />
-        <t-button size="small" :disabled="!selectedAccountIds.length" @click="changeTags(false)">添加标签</t-button>
-        <t-button size="small" :disabled="!selectedAccountIds.length" @click="changeTags(true)">移除标签</t-button>
-        <t-button size="small" variant="outline" :disabled="!selectedAccountIds.length" @click="batchSetBizStatus('enabled')">批量启用</t-button>
-        <t-button size="small" variant="outline" :disabled="!selectedAccountIds.length" @click="batchSetBizStatus('disabled')">批量停用</t-button>
-        <t-button v-if="isDesktop" size="small" theme="primary" :loading="batchChecking" :disabled="!selectedAccountIds.length" @click="runBatchCheck()">批量检查/同步</t-button>
-        <span class="selected-count">已选 {{ selectedAccountIds.length }} 项</span>
       </t-space>
     </div>
 
@@ -898,16 +885,15 @@ const columns = [
     <t-table
       :data="accounts"
       :columns="columns"
-      :selected-row-keys="selectedAccountIds"
+      v-model:selected-row-keys="selectedAccountIds"
       :row-key="(r) => r.id"
-      @select-change="(keys) => { selectedAccountIds = keys }"
       size="small"
       hover
-      v-model:pagination="pagination"
-      :pagination="{ ...pagination, total: accounts.length, showJumper: true }"
+      :pagination="pagination"
+      @page-change="onPageChange"
       empty="暂无媒体账号"
     >
-      <template #id="{ row }"><span class="account-id" @click="copyAccountId(row)">{{ row.id }}</span></template>
+      <template #id="{ row }"><span class="account-id" :title="`系统账号ID：${row.id}（点击复制）`" @click="copyAccountId(row)">{{ row.id }}</span></template>
       <template #platform="{ row }"><span>{{ platformLabel(row.platform) }}</span></template>
       <template #account_info="{ row }">
         <div>
@@ -931,23 +917,26 @@ const columns = [
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
       <template #business_status="{ row }">
-        <span class="biz-status" :class="row.business_status === 'enabled' ? 'biz-enabled' : 'biz-disabled'">{{ bizStatusText(row.business_status) }}</span>
+        <t-tag :theme="row.business_status === 'enabled' ? 'success' : 'default'" variant="light">{{ bizStatusText(row.business_status) }}</t-tag>
       </template>
       <template #account_status="{ row }">
-        <span class="account-status" :class="'status-' + accountStatusColor(row)">{{ accountStatusText(row) }}</span>
+        <t-tag :theme="accountStatusTheme(row)" variant="light">{{ accountStatusText(row) }}</t-tag>
       </template>
       <template #last_checked_at="{ row }">
         <span :title="row.last_checked_at ? formatTime(row.last_checked_at) : ''">{{ relativeTime(row.last_checked_at) }}</span>
       </template>
+      <template #cookie="{ row }">
+        <t-button size="small" variant="outline" @click="openCookieDialog(row)">查看</t-button>
+      </template>
       <template #op="{ row }">
         <t-space size="small" class="op-cell">
           <template v-if="isDesktop && canOperateBoundWindow(row)">
-            <t-button size="small" variant="text" :loading="operatingProfileId === `open:${profileForAccount(row)?.bit_profile_id || ''}` || operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
+            <t-button size="small" variant="outline" :loading="operatingProfileId === `open:${profileForAccount(row)?.bit_profile_id || ''}` || operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
           </template>
-          <t-button size="small" theme="primary" variant="text" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
-          <t-button size="small" variant="text" @click="openDetail(row)">查看</t-button>
-          <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
-          <t-button size="small" variant="text" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
+          <t-button size="small" theme="primary" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
+          <t-button size="small" variant="outline" @click="openDetail(row)">查看</t-button>
+          <t-button size="small" variant="outline" @click="openEdit(row)">编辑</t-button>
+          <t-button size="small" variant="outline" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
         </t-space>
       </template>
     </t-table>
@@ -974,10 +963,6 @@ const columns = [
           <t-descriptions-item label="最近同步资料">{{ accountInfoPopup.last_checked_at ? formatTime(accountInfoPopup.last_checked_at) : '--' }}</t-descriptions-item>
           <t-descriptions-item label="备注">{{ accountInfoPopup.remark || '--' }}</t-descriptions-item>
         </t-descriptions>
-        <div style="margin-top:12px; text-align:right">
-          <t-button variant="outline" @click="openDetail(accountInfoPopup); accountInfoPopup = null">查看完整详情</t-button>
-          <t-button style="margin-left:8px" @click="accountInfoPopup = null">关闭</t-button>
-        </div>
       </div>
     </t-dialog>
 
@@ -994,22 +979,8 @@ const columns = [
         </t-descriptions>
         <div style="margin-top:12px; text-align:right">
           <t-button v-if="canOperateBoundWindow(windowPopup)" variant="outline" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
-          <t-button variant="outline" style="margin-left:8px" @click="openDetail(windowPopup); windowPopup = null">查看窗口详情</t-button>
-          <t-button style="margin-left:8px" @click="windowPopup = null">关闭</t-button>
         </div>
       </div>
-    </t-dialog>
-
-    <!-- 标签管理弹窗 -->
-    <t-dialog :visible="tagManageVisible" header="标签管理" :footer="false" width="420px" @close="tagManageVisible = false">
-      <div class="info-tip" style="margin-bottom:8px">本运营的标签库（无全局库）；删除标签会从所有账号移除。</div>
-      <div v-if="!tagManageList.length" class="info-tip" style="padding:12px 0">暂无标签</div>
-      <div v-for="item in tagManageList" :key="item.name" class="tag-manage-row">
-        <t-tag size="medium" variant="light">{{ item.name }}</t-tag>
-        <span class="tag-count">{{ item.num }} 个账号</span>
-        <t-button size="small" variant="text" theme="danger" @click="deleteTagFromAll(item.name)">删除</t-button>
-      </div>
-      <div class="info-tip" style="margin-top:8px">新增标签：先在列表勾选账号，点批量「添加标签」；或在编辑弹窗给账号加标签。</div>
     </t-dialog>
 
     <!-- 全部标签弹窗 -->
@@ -1019,14 +990,13 @@ const columns = [
           <t-tag v-for="tag in (allTagsPopup.tags || [])" :key="tag" size="medium" variant="light">{{ tag }}</t-tag>
           <span v-if="!(allTagsPopup.tags || []).length" class="info-tip">暂无标签</span>
         </t-space>
-        <div style="margin-top:12px; text-align:right">
-          <t-button @click="allTagsPopup = null">关闭</t-button>
-        </div>
       </div>
     </t-dialog>
 
     <t-dialog v-model:visible="showCreate" header="新增账号" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
+      <t-alert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
       <t-form @submit.prevent="createAccount">
+        <div class="form-section">基本信息</div>
         <t-form-item v-if="user?.role === 'admin'" label="归属用户 UID">
           <t-input-number v-model="createForm.userId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
@@ -1041,14 +1011,20 @@ const columns = [
             <t-option value="baijiahao" label="百度" />
           </t-select>
         </t-form-item>
+        <t-form-item label="账号名称">
+          <t-input v-model="createForm.name" maxlength="128" placeholder="平台昵称，可留空" />
+        </t-form-item>
+        <div class="form-section">业务分类</div>
+        <t-form-item label="标签">
+          <t-select v-model="createForm.tags" multiple filterable creatable :options="tagOptions" placeholder="标签（回车可新建）" @create="(value) => appendTag(createForm.tags, value)" />
+        </t-form-item>
+        <div class="form-section">关联资源</div>
         <t-form-item v-if="isDesktop" label="绑定窗口">
           <t-select v-model="createForm.browserProfileId" clearable placeholder="可先不绑定">
             <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
           </t-select>
         </t-form-item>
-        <t-form-item label="标签">
-          <t-input v-model="createForm.tagsText" placeholder="多个标签用逗号分隔" />
-        </t-form-item>
+        <div class="form-section">备注</div>
         <t-form-item label="备注">
           <t-textarea v-model="createForm.remark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
@@ -1057,31 +1033,53 @@ const columns = [
 
     <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
     <t-dialog v-model:visible="editVisible" header="编辑账号" :confirm-btn="{ content: '保存', loading: savingEdit, theme: 'primary' }" @confirm="saveEdit">
+      <t-alert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
       <t-form v-if="editAccount" label-width="90px">
+        <div class="form-section">基本信息</div>
         <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount.platform) }}）</t-form-item>
+        <t-form-item label="账号名称">
+          <t-input v-model="editName" maxlength="128" placeholder="账号名称，留空由检查回填" />
+        </t-form-item>
         <t-form-item label="所属游戏">
           <t-select v-model="editGameId" clearable placeholder="选择游戏">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
+        <div class="form-section">业务分类</div>
         <t-form-item label="标签">
-          <t-input v-model="editTagsText" placeholder="多个标签用逗号分隔" />
+          <t-select v-model="editTags" multiple filterable creatable :options="tagOptions" placeholder="标签（回车可新建）" @create="(value) => appendTag(editTags, value)" />
         </t-form-item>
+        <div class="form-section">关联资源</div>
+        <t-form-item v-if="isDesktop" label="绑定窗口">
+          <t-select v-model="editProfileId" clearable placeholder="选择本人授权窗口">
+            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
+          </t-select>
+        </t-form-item>
+        <t-form-item v-else label="操作边界">
+          <div class="form-tip">Cloud Web 只查看绑定关系；请在 Desktop 端绑定、解绑或换绑窗口。</div>
+        </t-form-item>
+        <div class="form-section">备注</div>
         <t-form-item label="备注">
           <t-textarea v-model="editRemark" :rows="3" placeholder="账号备注" />
         </t-form-item>
-        <div class="form-tip">平台 UID/昵称/头像/账号状态由检查同步，不在此编辑。</div>
+        <div class="form-tip">平台 UID/头像/账号状态由检查回填，不在此编辑。</div>
       </t-form>
     </t-dialog>
 
-    <t-drawer v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close>
+    <t-drawer v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
         <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>
         <t-descriptions-item label="游戏">{{ gameName(detailAccount.game_id) }}</t-descriptions-item>
-        <t-descriptions-item label="绑定窗口">{{ detailAccount.browser_profile_id ? profileLabel(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
         <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
         <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>
+      </t-descriptions>
+      <div class="form-section">关联资源</div>
+      <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
+        <t-descriptions-item label="绑定窗口">{{ detailAccount.browser_profile_id ? profileLabel(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
+      </t-descriptions>
+      <div class="form-section">状态与检查</div>
+      <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.login_status) }}</t-descriptions-item>
         <t-descriptions-item label="可执行结论">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_checked_at ? formatTime(detailAccount.last_checked_at) : '尚未检查' }}</t-descriptions-item>
@@ -1095,44 +1093,24 @@ const columns = [
         </div>
       </div>
       <t-alert v-if="checkNotice" :message="checkNotice" theme="success" style="margin-top:12px" />
-      <t-alert v-if="cookieNotice" :message="cookieNotice" theme="success" style="margin-top:12px" />
-
-      <t-form v-if="detailAccount" class="detail-form" label-width="92px">
-        <t-form-item label="备注">
-          <t-textarea v-model="detailRemark" :rows="3" />
-        </t-form-item>
-        <t-form-item v-if="isDesktop" label="绑定窗口">
-          <t-select v-model="detailProfileId" clearable placeholder="选择本人授权窗口">
-            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
-          </t-select>
-          <div class="form-tip">绑定或换绑后，登录状态会回到“待检查”，需要后续账号检查重新确认。</div>
-        </t-form-item>
-        <t-form-item v-else label="操作边界">
-          <div class="form-tip">Cloud Web 只查看绑定关系；请在 Desktop 端绑定、解绑或换绑窗口。</div>
-        </t-form-item>
-        <t-form-item v-if="isDesktop" label="账号同步">
-          <div class="form-tip">如已在 BitBrowser 窗口中人工登录，请返回这里点击“检查/同步账号信息”，系统会读取真实平台身份并回填 Cloud。</div>
-        </t-form-item>
-      </t-form>
-
-      <template #footer>
-        <t-space>
-          <t-button variant="outline" @click="detailVisible = false">关闭</t-button>
-          <t-button v-if="canCheckAccount(detailAccount)" variant="outline" :loading="checkingAccount" @click="checkDetailAccount">检查/同步账号信息</t-button>
-          <t-button variant="outline" @click="viewExportCookie">查看/导出 Cookie</t-button>
-          <t-button v-if="isDesktop && canOperateBoundWindow(detailAccount)" variant="outline" :loading="readingCookie" @click="readProfileCookie">从 Profile 读真实 Cookie</t-button>
-          <t-button theme="primary" :loading="savingDetail" @click="saveDetail">保存</t-button>
-        </t-space>
-      </template>
+      <t-alert v-if="checkFailure" theme="error" style="margin-top:12px">
+        <template #message>{{ checkFailure }}</template>
+        <template #operation>
+          <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/agent')">前往环境监测</t-button>
+        </template>
+      </t-alert>
     </t-drawer>
 
-    <t-dialog v-model:visible="showCookieDialog" header="账号 Cookie（敏感数据）" :cancel-btn="{ content: '关闭' }">
+    <t-dialog v-model:visible="showCookieDialog" header="账号 Cookie（敏感数据）" :footer="false">
+      <p v-if="cookieDialog?.account"><strong>账号：</strong>{{ accountDisplayName(cookieDialog.account) }}</p>
       <p><strong>原始 Cookie：</strong></p>
-      <pre class="cookie-box">{{ cookieDialog.original_cookie || '（空）' }}</pre>
+      <pre class="cookie-box">{{ cookieDialog?.original_cookie || '（空）' }}</pre>
       <p><strong>当前真实 Cookie（active）：</strong></p>
-      <pre class="cookie-box">{{ cookieDialog.active_cookie || '（空）' }}</pre>
+      <pre class="cookie-box">{{ cookieDialog?.active_cookie || '（空）' }}</pre>
       <div class="form-tip">Cookie 为敏感数据，请勿泄露。复制后建议及时清理剪贴板；导出仅用于授权用途。</div>
+      <t-alert v-if="cookieNotice" :message="cookieNotice" theme="success" style="margin-top:8px" />
       <t-space style="margin-top:8px">
+        <t-button v-if="isDesktop && canOperateBoundWindow(cookieDialog?.account)" size="small" :loading="readingCookie" @click="readProfileCookieFor(cookieDialog.account)">从 Profile 读真实 Cookie</t-button>
         <t-button size="small" @click="copyCookie('active_cookie')">复制 Active Cookie</t-button>
         <t-button size="small" variant="outline" @click="copyCookie('original_cookie')">复制原始 Cookie</t-button>
       </t-space>
@@ -1141,11 +1119,20 @@ const columns = [
 </template>
 
 <style scoped>
-.stats-row { margin-bottom: 12px; }
-.stat-num { font-size: 18px; font-weight: 600; line-height: 1.2; }
-.stats-row :deep(.t-card__body) { padding: 10px 12px; }
-.stats-row :deep(.t-card__title) { font-size: 13px; }
+.page-header { margin-bottom: 16px; }
+.page-title { font-size: 20px; font-weight: 600; margin: 0; color: var(--td-text-color-primary); }
+.page-subtitle { font-size: 14px; color: var(--td-text-color-secondary); margin: 4px 0 0; }
+.form-section { font-weight: 600; font-size: 13px; color: var(--td-text-color-secondary); margin: 12px 0 6px; }
+.form-section:first-child { margin-top: 0; }
+.stats-row { display: flex; align-items: stretch; gap: 8px; margin-bottom: 12px; }
+.stats-group { display: flex; align-items: center; color: var(--td-text-color-secondary, #666); font-size: 12px; padding: 0 4px; white-space: nowrap; }
+.stat-card { flex: 1; cursor: pointer; min-height: 72px; max-height: 80px; }
+.stat-card :deep(.t-card__body) { padding: 10px 12px; }
+.stat-label { font-size: 12px; color: var(--td-text-color-secondary, #666); }
+.stat-num { font-size: 20px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
 .search-bar { margin-bottom: 12px; }
+.filter-fields { margin-top: 10px; }
+.filter-actions { margin-left: 16px; }
 .batch-result-card { margin-bottom: 12px; }
 .cookie-box {
   max-height: 160px;
@@ -1157,7 +1144,7 @@ const columns = [
   word-break: break-all;
   white-space: pre-wrap;
 }
-.account-id { cursor: pointer; color: var(--td-brand-color, #0052d9); }
+.account-id { cursor: pointer; color: var(--td-brand-color, #0052d9); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 .account-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); font-weight: 500; }
 .window-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); }
 .account-sub { color: var(--td-text-color-secondary, #666); font-size: 12px; }
@@ -1170,14 +1157,6 @@ const columns = [
 .proxy-dot.proxy-ok { color: var(--td-success-color, #2ba471); }
 .window-name { font-size: 13px; }
 .window-unbound { color: var(--td-text-color-secondary, #666); }
-.biz-status { font-size: 13px; }
-.biz-enabled { color: var(--td-success-color, #2ba471); }
-.biz-disabled { color: var(--td-text-color-secondary, #666); }
-.account-status { font-size: 13px; padding: 1px 8px; border-radius: 3px; }
-.account-status.status-gray { background: #f0f0f0; color: #666; }
-.account-status.status-green { background: #e8f7ef; color: #2ba471; }
-.account-status.status-orange { background: #fef3e8; color: #e37318; }
-.account-status.status-red { background: #fdecee; color: #d54941; }
 .op-cell { white-space: nowrap; }
 .info-popup .info-head { display: flex; gap: 10px; align-items: center; }
 .info-popup .info-name { font-size: 16px; font-weight: 600; }
@@ -1222,8 +1201,6 @@ const columns = [
   gap: 8px;
   margin-bottom: 12px;
 }
-.batch-actions { display: flex; align-items: center; gap: 8px; }
-.selected-count,
 .account-sub,
 .form-tip {
   color: var(--td-text-color-placeholder);

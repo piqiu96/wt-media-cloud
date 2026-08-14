@@ -152,6 +152,25 @@ func TestMySQLStoreAppendsSecretFreeAudit(t *testing.T) {
 	}
 }
 
+func TestMySQLStoreListsAccountsFilteredByProfileSearch(t *testing.T) {
+	store, mock, closeDB := newMockMySQLStore(t)
+	defer closeDB()
+	first := mysqlTestRecord()
+	first.BrowserProfileID = "profile-9"
+
+	mock.ExpectQuery(regexp.QuoteMeta(`FROM media_accounts WHERE user_id = ? AND game_id = ? AND EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = media_accounts.browser_profile_id AND (bp.name LIKE ? OR bp.seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?)) ORDER BY created_at, id`)).
+		WithArgs(identity.UserID(1), "game-a", "%运营%", "%运营%", "%运营%", "%运营%").
+		WillReturnRows(accountRows(first))
+
+	got, err := store.List(AccountQuery{UserID: identity.UserID(1), GameID: "game-a", ProfileSearch: "运营"})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 1 || got[0].ID != first.ID {
+		t.Fatalf("List() = %#v", got)
+	}
+}
+
 func TestMediaAccountMigrationDefinesOwnershipAndUniqueness(t *testing.T) {
 	content, err := os.ReadFile("../../../migrations/20260714_002_media_accounts.sql")
 	if err != nil {

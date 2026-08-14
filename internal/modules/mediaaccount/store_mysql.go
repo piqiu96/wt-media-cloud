@@ -128,6 +128,11 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 		conditions = append(conditions, "(id LIKE ? OR platform_account_id LIKE ? OR name LIKE ? OR remark LIKE ?)")
 		args = append(args, like, like, like, like)
 	}
+	if query.ProfileSearch != "" {
+		like := "%" + query.ProfileSearch + "%"
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = media_accounts.browser_profile_id AND (bp.name LIKE ? OR bp.seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
+		args = append(args, like, like, like, like)
+	}
 	if len(conditions) > 0 {
 		statement += " WHERE " + strings.Join(conditions, " AND ")
 	}

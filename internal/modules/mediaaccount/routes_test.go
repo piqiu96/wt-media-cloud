@@ -115,6 +115,24 @@ func TestRoutesBindValidatedProfile(t *testing.T) {
 	}
 }
 
+func TestRoutesCreateAndUpdateAccountName(t *testing.T) {
+	engine, cookie, _ := newMediaAccountRouteTest(t)
+	created := performMediaJSON(engine, "POST", "/api/v1/media-accounts", `{"game_id":"game-a","platform":"bilibili","name":"  测试昵称  "}`, cookie)
+	if created.Result().StatusCode() != consts.StatusCreated || !strings.Contains(string(created.Result().Body()), `"name":"测试昵称"`) {
+		t.Fatalf("create status = %d, body = %s", created.Result().StatusCode(), created.Result().Body())
+	}
+	var envelope struct {
+		Data Account `json:"data"`
+	}
+	if err := json.Unmarshal(created.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	updated := performMediaJSON(engine, "PATCH", "/api/v1/media-accounts/"+envelope.Data.ID, `{"name":"新名"}`, cookie)
+	if updated.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(updated.Result().Body()), `"name":"新名"`) {
+		t.Fatalf("update status = %d, body = %s", updated.Result().StatusCode(), updated.Result().Body())
+	}
+}
+
 func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore) {
 	t.Helper()
 	identityStore := identity.NewMemoryStore()
