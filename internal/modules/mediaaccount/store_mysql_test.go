@@ -78,7 +78,7 @@ func TestMySQLStoreMapsIdentityDuplicateOnUpdate(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE media_accounts SET`)).
 		WillReturnError(&mysqlDriver.MySQLError{Number: 1062, Message: "duplicate"})
 
-	err := store.Update(record)
+	err := store.Update(record, nil)
 	if !errors.Is(err, ErrDuplicateAccount) {
 		t.Fatalf("Update() error = %v, want ErrDuplicateAccount", err)
 	}

@@ -82,6 +82,7 @@ func NewServer() (*Server, error) {
 			mediaaccount.WithProfileFactResolver(profileStore),
 			mediaaccount.WithSensitiveTaskCreator(profileGuardStore),
 			mediaaccount.WithUserResolver(identityService),
+			mediaaccount.WithGameResolver(identityService),
 		), identityService, taskStore)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv())
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {

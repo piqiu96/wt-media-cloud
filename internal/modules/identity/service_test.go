@@ -356,6 +356,21 @@ func TestReferencedGameCannotBeDisabledOrDeleted(t *testing.T) {
 	}
 }
 
+func TestServiceResolveGameReturnsStoredGameWithoutActorScope(t *testing.T) {
+	store := newGameMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	game, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	if err != nil {
+		t.Fatalf("CreateGame() error = %v", err)
+	}
+
+	resolved, found, err := service.ResolveGame(game.ID)
+	if err != nil || !found || resolved.ID != game.ID || resolved.Status != GameStatusEnabled {
+		t.Fatalf("ResolveGame() = %#v, found=%v, err=%v", resolved, found, err)
+	}
+}
+
 func TestUpdateUserAccessTransfersCurrentTeamAndInvalidatesSession(t *testing.T) {
 	service := NewService(NewMemoryStore(), WithTokenGenerator(func() string { return "operator-session" }))
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")

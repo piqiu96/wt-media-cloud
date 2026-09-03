@@ -3,6 +3,7 @@ package mediaaccount
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,7 +67,7 @@ func TestServiceAllowsLedgerAccountWithoutGame(t *testing.T) {
 	}
 }
 
-func TestServiceRejectsCrossUserAndOutOfGameScope(t *testing.T) {
+func TestServiceRejectsCrossUserScope(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := mediaActor(1, 10, identity.RoleSeniorOperator)
 
@@ -74,9 +75,70 @@ func TestServiceRejectsCrossUserAndOutOfGameScope(t *testing.T) {
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("cross-user error = %v, want ErrForbidden", err)
 	}
-	_, err = service.CreateAccount(actor, CreateAccountInput{GameID: "game-b", Platform: PlatformDouyin})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("out-of-game error = %v, want ErrForbidden", err)
+}
+
+func TestServiceAllowsEnabledPublicGamesAndNormalizesTheirSet(t *testing.T) {
+	service := newTestServiceWithGames(newMemoryStore(), fakeGameResolver{games: map[string]identity.OperationGame{
+		"game-a": {ID: "game-a", Status: identity.GameStatusEnabled},
+		"game-b": {ID: "game-b", Status: identity.GameStatusEnabled},
+	}})
+	actor := mediaActor(1, 10, identity.RoleOperator)
+
+	account, err := service.CreateAccount(actor, CreateAccountInput{
+		GameIDs:  []string{"game-b", "game-a", "game-b"},
+		Platform: PlatformDouyin,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+	if want := []string{"game-a", "game-b"}; !reflect.DeepEqual(account.GameIDs, want) {
+		t.Fatalf("GameIDs = %#v, want %#v", account.GameIDs, want)
+	}
+	if account.GameID != "game-a" {
+		t.Fatalf("compatibility GameID = %q, want game-a", account.GameID)
+	}
+}
+
+func TestServiceReplacesAndClearsEntireGameSet(t *testing.T) {
+	service := newTestServiceWithGames(newMemoryStore(), fakeGameResolver{games: map[string]identity.OperationGame{
+		"game-a": {ID: "game-a", Status: identity.GameStatusEnabled},
+		"game-b": {ID: "game-b", Status: identity.GameStatusEnabled},
+		"game-z": {ID: "game-z", Status: identity.GameStatusEnabled},
+	}})
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	account, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a", "game-b"}, Platform: PlatformDouyin})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+
+	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{GameIDs: gameIDsPtr([]string{"game-z", "game-b"})})
+	if err != nil {
+		t.Fatalf("UpdateAccount(replace) error = %v", err)
+	}
+	if want := []string{"game-b", "game-z"}; !reflect.DeepEqual(updated.GameIDs, want) {
+		t.Fatalf("replaced GameIDs = %#v, want %#v", updated.GameIDs, want)
+	}
+
+	updated, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{GameIDs: gameIDsPtr([]string{})})
+	if err != nil {
+		t.Fatalf("UpdateAccount(clear) error = %v", err)
+	}
+	if len(updated.GameIDs) != 0 || updated.GameID != "" {
+		t.Fatalf("cleared games = %#v", updated)
+	}
+}
+
+func TestServiceRejectsDisabledPublicGame(t *testing.T) {
+	service := newTestServiceWithGames(newMemoryStore(), fakeGameResolver{games: map[string]identity.OperationGame{
+		"game-disabled": {ID: "game-disabled", Status: identity.GameStatusDisabled},
+	}})
+
+	_, err := service.CreateAccount(mediaActor(1, 10, identity.RoleOperator), CreateAccountInput{
+		GameIDs:  []string{"game-disabled"},
+		Platform: PlatformBilibili,
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("CreateAccount(disabled game) error = %v, want ErrInvalidInput", err)
 	}
 }
 
@@ -540,19 +602,32 @@ func strPtr(value string) *string {
 	return &value
 }
 
+func gameIDsPtr(value []string) *[]string {
+	return &value
+}
+
 func newTestService(store Store) *Service {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	next := 0
-	return NewService(store, WithUserResolver(testUserResolver()), WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
+	return NewService(store, WithUserResolver(testUserResolver()), WithGameResolver(defaultTestGameResolver()), WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
 		next++
 		return prefix + "-" + string(rune('0'+next))
+	}))
+}
+
+func newTestServiceWithGames(store Store, games GameResolver) *Service {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	next := 0
+	return NewService(store, WithUserResolver(testUserResolver()), WithGameResolver(games), WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
+		next++
+		return prefix + "-games-test-" + string(rune('0'+next))
 	}))
 }
 
 func newTestServiceWithProfiles(store Store, resolver ProfileResolver) *Service {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	next := 0
-	return NewService(store, WithProfileResolver(resolver), WithUserResolver(testUserResolver()), WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
+	return NewService(store, WithProfileResolver(resolver), WithUserResolver(testUserResolver()), WithGameResolver(defaultTestGameResolver()), WithClock(func() time.Time { return now }), WithIDGenerator(func(prefix string) string {
 		next++
 		return prefix + "-profile-test-" + string(rune('0'+next))
 	}))
@@ -563,6 +638,7 @@ func newTestServiceForAccountCheck(store Store, facts ProfileFactResolver, tasks
 	next := 0
 	return NewService(store,
 		WithUserResolver(testUserResolver()),
+		WithGameResolver(defaultTestGameResolver()),
 		WithProfileFactResolver(facts),
 		WithSensitiveTaskCreator(tasks),
 		WithClock(func() time.Time { return now }),
@@ -588,6 +664,7 @@ func containsSecretField(value string) bool {
 
 type memoryStore struct {
 	records    map[string]AccountRecord
+	gameIDs    map[string][]string
 	tags       map[string]map[string]struct{}
 	audits     []identity.AuditEvent
 	groups     map[string]AccountGroup
@@ -596,19 +673,22 @@ type memoryStore struct {
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{records: map[string]AccountRecord{}, tags: map[string]map[string]struct{}{}, groups: map[string]AccountGroup{}}
+	return &memoryStore{records: map[string]AccountRecord{}, gameIDs: map[string][]string{}, tags: map[string]map[string]struct{}{}, groups: map[string]AccountGroup{}}
 }
 
 func (s *memoryStore) Create(record AccountRecord) (string, error) {
 	s.accountSeq++
 	record.ID = strconv.FormatInt(s.accountSeq, 10)
+	s.gameIDs[record.ID] = append([]string(nil), record.GameIDs...)
+	record.GameIDs = nil
+	record.GameID = ""
 	s.records[record.ID] = record
 	return record.ID, nil
 }
 
 func (s *memoryStore) Find(id string) (AccountRecord, bool, error) {
 	record, ok := s.records[id]
-	return record, ok, nil
+	return s.withGameIDs(record), ok, nil
 }
 
 func (s *memoryStore) FindByIdentity(userID identity.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error) {
@@ -629,7 +709,12 @@ func (s *memoryStore) FindByProfilePlatform(profileID string, platform Platform)
 	return AccountRecord{}, false, nil
 }
 
-func (s *memoryStore) Update(record AccountRecord) error {
+func (s *memoryStore) Update(record AccountRecord, replaceGameIDs *[]string) error {
+	if replaceGameIDs != nil {
+		s.gameIDs[record.ID] = append([]string(nil), (*replaceGameIDs)...)
+	}
+	record.GameIDs = nil
+	record.GameID = ""
 	s.records[record.ID] = record
 	return nil
 }
@@ -640,7 +725,8 @@ func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {
 		if query.UserID > 0 && record.UserID != query.UserID {
 			continue
 		}
-		if query.GameID != "" && record.GameID != query.GameID {
+		record = s.withGameIDs(record)
+		if len(query.GameIDs) > 0 && !intersects(record.GameIDs, query.GameIDs) {
 			continue
 		}
 		if query.Platform != "" && record.Platform != query.Platform {
@@ -662,6 +748,21 @@ func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 	return records, nil
+}
+
+func (s *memoryStore) withGameIDs(record AccountRecord) AccountRecord {
+	record.GameIDs = append([]string(nil), s.gameIDs[record.ID]...)
+	record.GameID = compatibilityGameID(record.GameIDs)
+	return record
+}
+
+func intersects(values, wanted []string) bool {
+	for _, value := range values {
+		if contains(wanted, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func recordMatchesSearch(record AccountRecord, search string) bool {
@@ -805,6 +906,23 @@ func (s *fakeSensitiveTasks) CreateAuthorizedTask(task profileguard.SensitiveTas
 
 type fakeUserResolver struct {
 	users map[identity.UserID]identity.PublicUser
+}
+
+type fakeGameResolver struct {
+	games map[string]identity.OperationGame
+}
+
+func defaultTestGameResolver() fakeGameResolver {
+	return fakeGameResolver{games: map[string]identity.OperationGame{
+		"game-a": {ID: "game-a", Status: identity.GameStatusEnabled},
+		"game-b": {ID: "game-b", Status: identity.GameStatusEnabled},
+		"game-z": {ID: "game-z", Status: identity.GameStatusEnabled},
+	}}
+}
+
+func (r fakeGameResolver) ResolveGame(gameID string) (identity.OperationGame, bool, error) {
+	game, found := r.games[gameID]
+	return game, found, nil
 }
 
 func (r fakeUserResolver) ResolveUser(userID identity.UserID) (identity.PublicUser, bool, error) {

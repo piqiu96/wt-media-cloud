@@ -65,6 +65,7 @@ type Account struct {
 	ID                    string               `json:"id"`
 	UserID                identity.UserID      `json:"user_id"`
 	TeamID                *identity.TeamID     `json:"team_id"`
+	GameIDs               []string             `json:"game_ids"`
 	GameID                string               `json:"game_id"`
 	Platform              Platform             `json:"platform"`
 	PlatformAccountID     string               `json:"platform_account_id,omitempty"`
@@ -93,6 +94,7 @@ type AccountRecord struct {
 
 type CreateAccountInput struct {
 	UserID           identity.UserID
+	GameIDs          []string
 	GameID           string
 	Name             string
 	Platform         Platform
@@ -154,12 +156,14 @@ type UpdateAccountInput struct {
 	BusinessStatus BusinessStatus
 	LoginStatus    LoginStatus
 	Remark         *string
+	GameIDs        *[]string
 	GameID         *string
 	Name           *string
 }
 
 type AccountFilter struct {
 	UserID         identity.UserID
+	GameIDs        []string
 	GameID         string
 	Platform       Platform
 	BusinessStatus BusinessStatus
@@ -175,6 +179,7 @@ type AccountQuery = AccountFilter
 
 // AccountGroupFilters 是账号组保存的筛选条件（AccountFilter 子集，均可为空=不筛选）。
 type AccountGroupFilters struct {
+	GameIDs        []string       `json:"game_ids,omitempty"`
 	GameID         string         `json:"game_id,omitempty"`
 	Platform       Platform       `json:"platform,omitempty"`
 	BusinessStatus BusinessStatus `json:"business_status,omitempty"`
@@ -211,7 +216,7 @@ type CreateAccountGroupInput struct {
 }
 
 type UpdateAccountGroupInput struct {
-	Name    *string             `json:"name"`
+	Name    *string              `json:"name"`
 	Filters *AccountGroupFilters `json:"filters"`
 }
 
@@ -220,7 +225,7 @@ type Store interface {
 	Find(id string) (AccountRecord, bool, error)
 	FindByIdentity(userID identity.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
-	Update(AccountRecord) error
+	Update(AccountRecord, *[]string) error
 	List(AccountQuery) ([]AccountRecord, error)
 	AddTags(userID identity.UserID, accountIDs, tags []string, createdAt time.Time) error
 	RemoveTags(userID identity.UserID, accountIDs, tags []string) error
@@ -239,6 +244,7 @@ type Service struct {
 	profileFacts   ProfileFactResolver
 	sensitiveTasks SensitiveTaskCreator
 	users          UserResolver
+	games          GameResolver
 	now            func() time.Time
 	newID          func(string) string
 }
@@ -257,6 +263,12 @@ type SensitiveTaskCreator interface {
 
 type UserResolver interface {
 	ResolveUser(userID identity.UserID) (identity.PublicUser, bool, error)
+}
+
+// GameResolver exposes enabled-game facts to the media-account module without
+// copying the identity store or applying user game-scope permissions.
+type GameResolver interface {
+	ResolveGame(gameID string) (identity.OperationGame, bool, error)
 }
 
 type Option func(*Service)
@@ -285,6 +297,10 @@ func WithUserResolver(resolver UserResolver) Option {
 	return func(service *Service) { service.users = resolver }
 }
 
+func WithGameResolver(resolver GameResolver) Option {
+	return func(service *Service) { service.games = resolver }
+}
+
 func NewService(store Store, options ...Option) *Service {
 	service := &Service{store: store, now: func() time.Time { return time.Now().UTC() }, newID: common.NewID}
 	for _, option := range options {
@@ -298,11 +314,14 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	if userID <= 0 {
 		userID = actor.ID
 	}
-	gameID := strings.TrimSpace(input.GameID)
+	gameIDs, err := s.resolveCreateGameIDs(input.GameIDs, input.GameID)
+	if err != nil {
+		return Account{}, err
+	}
 	platform := Platform(strings.ToLower(strings.TrimSpace(string(input.Platform))))
 	remark := strings.TrimSpace(input.Remark)
 	name := strings.TrimSpace(input.Name)
-	if !validActor(actor) || len(gameID) > 128 || !validPlatform(platform) || len(remark) > 500 || len(name) > 128 {
+	if !validActor(actor) || !validPlatform(platform) || len(remark) > 500 || len(name) > 128 {
 		return Account{}, ErrInvalidInput
 	}
 	teamID := actor.TeamID
@@ -322,15 +341,13 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 		}
 		teamID = target.TeamID
 	}
-	if gameID != "" && !actor.CanAccess(userID, teamID, gameID) {
-		return Account{}, ErrForbidden
-	}
 	now := s.now()
 	record := AccountRecord{
 		Account: Account{
 			UserID:               userID,
 			TeamID:               teamID,
-			GameID:               gameID,
+			GameIDs:              gameIDs,
+			GameID:               compatibilityGameID(gameIDs),
 			Platform:             platform,
 			Name:                 name,
 			Remark:               remark,
@@ -362,7 +379,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 		}
 	}
 	if err := s.audit(actor.ID, "media_account.create", record.ID, map[string]string{
-		"user_id": strconv.FormatInt(int64(userID), 10), "game_id": gameID, "platform": string(platform),
+		"user_id": strconv.FormatInt(int64(userID), 10), "game_ids": strings.Join(gameIDs, ","), "platform": string(platform),
 	}); err != nil {
 		return Account{}, err
 	}
@@ -411,15 +428,23 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
-	filter.GameID = strings.TrimSpace(filter.GameID)
+	filter.GameIDs = normalizeGameIDs(filter.GameIDs)
+	if filter.GameID = strings.TrimSpace(filter.GameID); filter.GameID != "" {
+		if len(filter.GameIDs) > 0 && (len(filter.GameIDs) != 1 || filter.GameIDs[0] != filter.GameID) {
+			return nil, ErrInvalidInput
+		}
+		if len(filter.GameIDs) == 0 {
+			filter.GameIDs = []string{filter.GameID}
+		}
+	}
+	if err := s.validateGameIDs(filter.GameIDs); err != nil {
+		return nil, err
+	}
 	if actor.Role == identity.RoleOperator {
 		if filter.UserID > 0 && filter.UserID != actor.ID {
 			return nil, ErrForbidden
 		}
 		filter.UserID = actor.ID
-		if filter.GameID != "" && !contains(actor.GameIDs, filter.GameID) {
-			return nil, ErrForbidden
-		}
 	}
 	if filter.Platform != "" {
 		filter.Platform = Platform(strings.ToLower(strings.TrimSpace(string(filter.Platform))))
@@ -457,7 +482,7 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 	}
 	visible := records[:0]
 	for _, record := range records {
-		if actor.CanAccess(record.UserID, record.TeamID, record.GameID) {
+		if actor.CanAccessOwnedResource(record.UserID, record.TeamID) {
 			visible = append(visible, record)
 		}
 	}
@@ -488,15 +513,13 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 		}
 		record.Remark = remark
 	}
-	if input.GameID != nil {
-		gameID := strings.TrimSpace(*input.GameID)
-		if len(gameID) > 128 {
-			return Account{}, ErrInvalidInput
-		}
-		if gameID != "" && !actor.CanAccess(record.UserID, record.TeamID, gameID) {
-			return Account{}, ErrForbidden
-		}
-		record.GameID = gameID
+	replaceGameIDs, err := s.resolveUpdateGameIDs(input.GameIDs, input.GameID)
+	if err != nil {
+		return Account{}, err
+	}
+	if replaceGameIDs != nil {
+		record.GameIDs = *replaceGameIDs
+		record.GameID = compatibilityGameID(record.GameIDs)
 	}
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
@@ -505,11 +528,11 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 		}
 		record.Name = name
 	}
-	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameID == nil && input.Name == nil {
+	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameIDs == nil && input.GameID == nil && input.Name == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record); err != nil {
+	if err := s.store.Update(record, replaceGameIDs); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.status.update", record.ID, map[string]string{
@@ -537,7 +560,7 @@ func (s *Service) IdentifyAccount(actor identity.PublicUser, accountID string, i
 		record.IdentificationStatus = IdentificationDuplicate
 		record.DuplicateOfAccountID = existing.ID
 		record.UpdatedAt = s.now()
-		if err := s.store.Update(record); err != nil {
+		if err := s.store.Update(record, nil); err != nil {
 			return Account{}, err
 		}
 		if err := s.audit(actor.ID, "media_account.identify.duplicate", record.ID, map[string]string{"duplicate_of": existing.ID}); err != nil {
@@ -554,7 +577,7 @@ func (s *Service) IdentifyAccount(actor identity.PublicUser, accountID string, i
 	record.UpdatedAt = s.now()
 	checkedAt := record.UpdatedAt
 	record.LastCheckedAt = &checkedAt
-	if err := s.store.Update(record); err != nil {
+	if err := s.store.Update(record, nil); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.identify", record.ID, map[string]string{
@@ -679,7 +702,7 @@ func (s *Service) ApplyCookieReadResult(actor identity.PublicUser, accountID str
 	record.CookieStatus = "active"
 	record.ActiveCookieUpdatedAt = &now
 	record.UpdatedAt = now
-	if err := s.store.Update(record); err != nil {
+	if err := s.store.Update(record, nil); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.cookie_read.result", record.ID, map[string]string{
@@ -714,7 +737,7 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 			record.LoginStatus = LoginAccountMismatch
 			record.UpdatedAt = now
 			record.LastCheckedAt = &now
-			if err := s.store.Update(record); err != nil {
+			if err := s.store.Update(record, nil); err != nil {
 				return Account{}, err
 			}
 			if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
@@ -744,7 +767,7 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 	record.CheckItems = mergeCheckItems(input.CheckItems)
 	record.UpdatedAt = now
 	record.LastCheckedAt = &now
-	if err := s.store.Update(record); err != nil {
+	if err := s.store.Update(record, nil); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
@@ -799,7 +822,7 @@ func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID st
 	record.LoginStatus = LoginUnknown
 	record.LastCheckedAt = nil
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record); err != nil {
+	if err := s.store.Update(record, nil); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.profile.bind", record.ID, map[string]string{"browser_profile_id": profileID}); err != nil {
@@ -823,7 +846,7 @@ func (s *Service) UnbindProfile(actor identity.PublicUser, accountID string) (Ac
 	record.LoginStatus = LoginUnknown
 	record.LastCheckedAt = nil
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record); err != nil {
+	if err := s.store.Update(record, nil); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.profile.unbind", record.ID, map[string]string{}); err != nil {
@@ -876,7 +899,8 @@ func (s *Service) CreateAccountGroup(actor identity.PublicUser, input CreateAcco
 	if name == "" || len(name) > 128 {
 		return AccountGroup{}, ErrInvalidInput
 	}
-	if !validGroupFilters(input.Filters) {
+	filters, err := s.normalizeGroupFilters(input.Filters)
+	if err != nil {
 		return AccountGroup{}, ErrInvalidInput
 	}
 	// 主键一律自增，由 DB 分配；CreateGroup 返回新 id
@@ -884,7 +908,7 @@ func (s *Service) CreateAccountGroup(actor identity.PublicUser, input CreateAcco
 	now := s.now()
 	group := AccountGroup{
 		UserID: userID, TeamID: actor.TeamID,
-		Name: name, Filters: input.Filters, CreatedAt: now, UpdatedAt: now,
+		Name: name, Filters: filters, CreatedAt: now, UpdatedAt: now,
 	}
 	newID, err := s.store.CreateGroup(group)
 	if err != nil {
@@ -923,10 +947,11 @@ func (s *Service) UpdateAccountGroup(actor identity.PublicUser, groupID string, 
 		group.Name = name
 	}
 	if input.Filters != nil {
-		if !validGroupFilters(*input.Filters) {
+		filters, err := s.normalizeGroupFilters(*input.Filters)
+		if err != nil {
 			return AccountGroup{}, ErrInvalidInput
 		}
-		group.Filters = *input.Filters
+		group.Filters = filters
 	}
 	group.UpdatedAt = s.now()
 	if err := s.store.UpdateGroup(group); err != nil {
@@ -967,9 +992,8 @@ func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string)
 		return nil, ErrForbidden
 	}
 	filter := AccountFilter{UserID: actor.ID}
-	if group.Filters.GameID != "" {
-		filter.GameID = group.Filters.GameID
-	}
+	filter.GameIDs = append([]string(nil), group.Filters.GameIDs...)
+	filter.GameID = group.Filters.GameID
 	if group.Filters.Platform != "" {
 		filter.Platform = group.Filters.Platform
 	}
@@ -1028,6 +1052,93 @@ func validGroupFilters(filters AccountGroupFilters) bool {
 	return true
 }
 
+func (s *Service) normalizeGroupFilters(filters AccountGroupFilters) (AccountGroupFilters, error) {
+	if !validGroupFilters(filters) {
+		return AccountGroupFilters{}, ErrInvalidInput
+	}
+	filters.GameIDs = normalizeGameIDs(filters.GameIDs)
+	if filters.GameID = strings.TrimSpace(filters.GameID); filters.GameID != "" {
+		if len(filters.GameIDs) > 0 && (len(filters.GameIDs) != 1 || filters.GameIDs[0] != filters.GameID) {
+			return AccountGroupFilters{}, ErrInvalidInput
+		}
+		if len(filters.GameIDs) == 0 {
+			filters.GameIDs = []string{filters.GameID}
+		}
+	}
+	if err := s.validateGameIDs(filters.GameIDs); err != nil {
+		return AccountGroupFilters{}, err
+	}
+	return filters, nil
+}
+
+func (s *Service) resolveCreateGameIDs(gameIDs []string, gameID string) ([]string, error) {
+	gameIDs = normalizeGameIDs(gameIDs)
+	gameID = strings.TrimSpace(gameID)
+	if gameID != "" {
+		if len(gameIDs) > 0 && (len(gameIDs) != 1 || gameIDs[0] != gameID) {
+			return nil, ErrInvalidInput
+		}
+		if len(gameIDs) == 0 {
+			gameIDs = []string{gameID}
+		}
+	}
+	if err := s.validateGameIDs(gameIDs); err != nil {
+		return nil, err
+	}
+	return gameIDs, nil
+}
+
+func (s *Service) resolveUpdateGameIDs(gameIDs *[]string, gameID *string) (*[]string, error) {
+	if gameIDs == nil && gameID == nil {
+		return nil, nil
+	}
+	if gameIDs != nil {
+		resolved, err := s.resolveCreateGameIDs(*gameIDs, "")
+		if err != nil {
+			return nil, err
+		}
+		if gameID != nil && strings.TrimSpace(*gameID) != "" && (len(resolved) != 1 || resolved[0] != strings.TrimSpace(*gameID)) {
+			return nil, ErrInvalidInput
+		}
+		return &resolved, nil
+	}
+	resolved, err := s.resolveCreateGameIDs(nil, *gameID)
+	if err != nil {
+		return nil, err
+	}
+	return &resolved, nil
+}
+
+func (s *Service) validateGameIDs(gameIDs []string) error {
+	if s.games == nil && len(gameIDs) > 0 {
+		return ErrInvalidInput
+	}
+	for _, gameID := range gameIDs {
+		if len(gameID) > 32 {
+			return ErrInvalidInput
+		}
+		game, found, err := s.games.ResolveGame(gameID)
+		if err != nil {
+			return err
+		}
+		if !found || game.Status != identity.GameStatusEnabled {
+			return ErrInvalidInput
+		}
+	}
+	return nil
+}
+
+func normalizeGameIDs(gameIDs []string) []string {
+	return normalizeStrings(gameIDs)
+}
+
+func compatibilityGameID(gameIDs []string) string {
+	if len(gameIDs) == 0 {
+		return ""
+	}
+	return gameIDs[0]
+}
+
 func (s *Service) authorizedRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
 	if !validActor(actor) || strings.TrimSpace(accountID) == "" {
 		return AccountRecord{}, ErrForbidden
@@ -1039,7 +1150,7 @@ func (s *Service) authorizedRecord(actor identity.PublicUser, accountID string) 
 	if !found {
 		return AccountRecord{}, ErrNotFound
 	}
-	if !actor.CanAccess(record.UserID, record.TeamID, record.GameID) {
+	if !actor.CanAccessOwnedResource(record.UserID, record.TeamID) {
 		return AccountRecord{}, ErrForbidden
 	}
 	return record, nil

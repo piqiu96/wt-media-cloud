@@ -72,8 +72,8 @@ type cookieReadResultRequest struct {
 }
 
 type createAccountGroupRequest struct {
-	Name    string               `json:"name"`
-	Filters AccountGroupFilters  `json:"filters"`
+	Name    string              `json:"name"`
+	Filters AccountGroupFilters `json:"filters"`
 }
 
 type updateAccountGroupRequest struct {
@@ -99,7 +99,10 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		account, err := service.CreateAccount(actor, CreateAccountInput(req))
+		account, err := service.CreateAccount(actor, CreateAccountInput{
+			UserID: req.UserID, GameID: req.GameID, Name: req.Name, Platform: req.Platform,
+			OriginalCookie: req.OriginalCookie, BrowserProfileID: req.BrowserProfileID, Remark: req.Remark, Tags: req.Tags,
+		})
 		if err != nil {
 			writeMediaAccountError(c, err)
 			return
@@ -169,7 +172,9 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		account, err := service.UpdateAccount(actor, c.Param("account_id"), UpdateAccountInput(req))
+		account, err := service.UpdateAccount(actor, c.Param("account_id"), UpdateAccountInput{
+			BusinessStatus: req.BusinessStatus, LoginStatus: req.LoginStatus, Remark: req.Remark, GameID: req.GameID, Name: req.Name,
+		})
 		if err != nil {
 			writeMediaAccountError(c, err)
 			return

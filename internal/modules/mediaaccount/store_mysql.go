@@ -74,7 +74,7 @@ func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error
 	return record, true, nil
 }
 
-func (s *MySQLStore) Update(record AccountRecord) error {
+func (s *MySQLStore) Update(record AccountRecord, _ *[]string) error {
 	result, err := s.db.Exec(
 		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, check_items = ?, updated_at = ? WHERE id = ?`,
 		record.UserID, record.TeamID, record.GameID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),

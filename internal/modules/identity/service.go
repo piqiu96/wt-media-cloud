@@ -538,6 +538,16 @@ func (s *Service) ResolveUser(userID UserID) (PublicUser, bool, error) {
 	return publicUser(user), true, nil
 }
 
+// ResolveGame exposes an operation-game fact to trusted in-process modules.
+// It intentionally does not apply the caller's user game-scope permissions.
+func (s *Service) ResolveGame(gameID string) (OperationGame, bool, error) {
+	gameStore, ok := s.store.(operationGameStore)
+	if !ok {
+		return OperationGame{}, false, nil
+	}
+	return gameStore.FindGame(strings.TrimSpace(gameID))
+}
+
 func (s *Service) ListAuditLogs(limit int) ([]AuditEvent, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
