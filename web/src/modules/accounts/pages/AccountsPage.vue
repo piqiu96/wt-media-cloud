@@ -337,21 +337,8 @@ function splitTags(value) {
   return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
 }
 
-function appendTag(list, value) {
-  const v = String(value || "").trim()
-  if (v && !list.includes(v)) list.push(v)
-}
-
 function gameName(gameId) {
   return games.value.find(game => game.id === gameId)?.name || gameId || "-"
-}
-
-function profileLabel(profileId) {
-  const profile = profiles.value.find(item => item.id === profileId)
-  if (!profile) return profileId || "-"
-  const name = profile.name || "未命名窗口"
-  const bitId = profile.bit_profile_id || "-"
-  return `系统ID ${profile.id} / ${name} / BitBrowser ${bitId}`
 }
 
 function profileName(profileId) {
@@ -460,7 +447,7 @@ function platformLabel(platform) {
 
 function profileOptionLabel(profile) {
   if (!profile) return ""
-  const name = profile.name || profileLabel(profile.id)
+  const name = profile.name || "未命名窗口"
   const parts = []
   if (profile.seq) parts.push(String(profile.seq))
   parts.push(name)
@@ -478,8 +465,7 @@ function checkItemStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  // draft（待识别）与 enabled 均可发起检查：draft 需要检查完成真实识别后升级
-  return isDesktop && account && (account.business_status === "enabled" || account.business_status === "draft") && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
+  return isDesktop && account?.business_status === "enabled" && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
@@ -748,6 +734,25 @@ const availableTags = computed(() => {
 })
 
 const tagOptions = computed(() => availableTags.value.map(t => ({ label: t, value: t })))
+const tagSearch = ref("")
+const tagCreateCandidate = computed(() => {
+  const v = tagSearch.value.trim()
+  if (!v) return ""
+  return availableTags.value.includes(v) ? "" : v
+})
+function onTagSearch(ctx) {
+  tagSearch.value = typeof ctx === "string" ? ctx : (ctx?.value ?? "")
+}
+function commitNewTag(list, value) {
+  const v = String(value ?? "").trim()
+  if (!v || list.includes(v)) return
+  list.push(v)
+  tagSearch.value = ""
+}
+function onTagEnter(list, ctx) {
+  const v = String(ctx?.inputValue ?? ctx?.value ?? "").trim()
+  if (v && !availableTags.value.includes(v)) commitNewTag(list, v)
+}
 
 const stats = computed(() => ({
   total: accounts.value.length,
@@ -811,29 +816,29 @@ const columns = [
     <t-card class="search-bar" :bordered="true">
       <t-form layout="inline">
         <t-form-item label="综合搜索">
-          <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable style="width:360px" />
+          <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable class="search-input" />
         </t-form-item>
       </t-form>
       <t-form layout="inline" class="filter-fields">
         <t-form-item label="游戏">
-          <t-select v-model="searchGameId" placeholder="全部" clearable style="width:140px">
+          <t-select v-model="searchGameId" placeholder="全部" clearable class="filter-control" style="min-width:140px">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
         <t-form-item label="平台">
-          <t-select v-model="searchPlatform" placeholder="全部" clearable style="width:120px">
+          <t-select v-model="searchPlatform" placeholder="全部" clearable class="filter-control" style="min-width:120px">
             <t-option value="bilibili" label="哔哩" />
             <t-option value="baijiahao" label="百度" />
           </t-select>
         </t-form-item>
         <t-form-item label="业务状态">
-          <t-select v-model="searchBizStatus" placeholder="全部" clearable style="width:120px">
+          <t-select v-model="searchBizStatus" placeholder="全部" clearable class="filter-control" style="min-width:120px">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
           </t-select>
         </t-form-item>
         <t-form-item label="账号状态">
-          <t-select v-model="searchLoginStatus" placeholder="全部" clearable style="width:130px">
+          <t-select v-model="searchLoginStatus" placeholder="全部" clearable class="filter-control" style="min-width:130px">
             <t-option value="normal" label="正常" />
             <t-option value="not_logged_in" label="未登录" />
             <t-option value="expired" label="登录失效" />
@@ -843,12 +848,12 @@ const columns = [
           </t-select>
         </t-form-item>
         <t-form-item label="标签">
-          <t-select v-model="searchTags" placeholder="全部" clearable style="width:140px">
+          <t-select v-model="searchTags" placeholder="全部" clearable class="filter-control" style="min-width:140px">
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
           </t-select>
         </t-form-item>
         <t-form-item label="窗口">
-          <t-input v-model="searchProfile" placeholder="窗口名/序号/BitID/ID" clearable style="width:180px" />
+          <t-input v-model="searchProfile" placeholder="窗口名/序号/BitID/ID" clearable class="filter-control" style="min-width:180px" />
         </t-form-item>
         <t-form-item class="filter-actions">
           <t-button theme="primary" @click="loadAccounts">查询</t-button>
@@ -972,6 +977,10 @@ const columns = [
         <div class="info-name">{{ profileName(windowPopup.browser_profile_id) }}</div>
         <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
           <t-descriptions-item label="窗口名称">{{ profileName(windowPopup.browser_profile_id) }}</t-descriptions-item>
+          <t-descriptions-item label="系统窗口ID">{{ profileForAccount(windowPopup)?.id || '--' }}</t-descriptions-item>
+          <t-descriptions-item label="BitBrowser ID">
+            <span class="window-bit-id" :title="profileForAccount(windowPopup)?.bit_profile_id || ''">{{ profileForAccount(windowPopup)?.bit_profile_id || '--' }}</span>
+          </t-descriptions-item>
           <t-descriptions-item label="浏览器窗口状态"><span class="status-green">● 正常</span> <span class="info-tip">窗口存在，可以正常连接</span></t-descriptions-item>
           <t-descriptions-item label="代理状态"><span class="info-tip">代理管理未接入（M2-C）</span></t-descriptions-item>
           <t-descriptions-item label="当前运行状态">{{ profileIsOpen(windowPopup) ? '已打开' : '已关闭' }}</t-descriptions-item>
@@ -1016,7 +1025,24 @@ const columns = [
         </t-form-item>
         <div class="form-section">业务分类</div>
         <t-form-item label="标签">
-          <t-select v-model="createForm.tags" multiple filterable creatable :options="tagOptions" placeholder="标签（回车可新建）" @create="(value) => appendTag(createForm.tags, value)" />
+          <div class="tag-editor">
+            <t-select
+              v-model="createForm.tags"
+              multiple
+              filterable
+              :options="tagOptions"
+              placeholder="输入搜索已有标签，或输入新标签后回车创建"
+              @search="onTagSearch"
+              @enter="onTagEnter(createForm.tags)"
+              clearable
+            >
+              <template #panelBottomContent>
+                <div v-if="tagCreateCandidate" class="tag-create-option" @mousedown.prevent="commitNewTag(createForm.tags, tagCreateCandidate)">
+                  <t-icon name="add" /> 创建标签「{{ tagCreateCandidate }}」
+                </div>
+              </template>
+            </t-select>
+          </div>
         </t-form-item>
         <div class="form-section">关联资源</div>
         <t-form-item v-if="isDesktop" label="绑定窗口">
@@ -1047,7 +1073,24 @@ const columns = [
         </t-form-item>
         <div class="form-section">业务分类</div>
         <t-form-item label="标签">
-          <t-select v-model="editTags" multiple filterable creatable :options="tagOptions" placeholder="标签（回车可新建）" @create="(value) => appendTag(editTags, value)" />
+          <div class="tag-editor">
+            <t-select
+              v-model="editTags"
+              multiple
+              filterable
+              :options="tagOptions"
+              placeholder="输入搜索已有标签，或输入新标签后回车创建"
+              @search="onTagSearch"
+              @enter="onTagEnter(editTags)"
+              clearable
+            >
+              <template #panelBottomContent>
+                <div v-if="tagCreateCandidate" class="tag-create-option" @mousedown.prevent="commitNewTag(editTags, tagCreateCandidate)">
+                  <t-icon name="add" /> 创建标签「{{ tagCreateCandidate }}」
+                </div>
+              </template>
+            </t-select>
+          </div>
         </t-form-item>
         <div class="form-section">关联资源</div>
         <t-form-item v-if="isDesktop" label="绑定窗口">
@@ -1076,7 +1119,16 @@ const columns = [
       </t-descriptions>
       <div class="form-section">关联资源</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
-        <t-descriptions-item label="绑定窗口">{{ detailAccount.browser_profile_id ? profileLabel(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
+        <t-descriptions-item label="绑定窗口">
+          <div v-if="profileForAccount(detailAccount)" class="window-binding">
+            <div class="window-binding-name">{{ profileName(detailAccount.browser_profile_id) }}</div>
+            <div class="window-binding-meta">
+              <span>系统ID {{ profileForAccount(detailAccount).id }}</span>
+              <span class="window-bit-id" :title="profileForAccount(detailAccount).bit_profile_id || ''">BitBrowser {{ profileForAccount(detailAccount).bit_profile_id || '--' }}</span>
+            </div>
+          </div>
+          <span v-else>未绑定</span>
+        </t-descriptions-item>
       </t-descriptions>
       <div class="form-section">状态与检查</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
@@ -1124,16 +1176,19 @@ const columns = [
 .page-subtitle { font-size: 14px; color: var(--td-text-color-secondary); margin: 4px 0 0; }
 .form-section { font-weight: 600; font-size: 13px; color: var(--td-text-color-secondary); margin: 12px 0 6px; }
 .form-section:first-child { margin-top: 0; }
-.stats-row { display: flex; align-items: stretch; gap: 8px; margin-bottom: 12px; }
+.stats-row { display: flex; align-items: stretch; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .stats-group { display: flex; align-items: center; color: var(--td-text-color-secondary, #666); font-size: 12px; padding: 0 4px; white-space: nowrap; }
-.stat-card { flex: 1; cursor: pointer; min-height: 72px; max-height: 80px; }
-.stat-card :deep(.t-card__body) { padding: 10px 12px; }
+.stat-card { flex: 1 1 118px; cursor: pointer; min-width: 118px; min-height: 72px; max-height: 80px; }
+.stat-card :deep(.t-card__body) { padding: 12px 16px; }
 .stat-label { font-size: 12px; color: var(--td-text-color-secondary, #666); }
 .stat-num { font-size: 20px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
-.search-bar { margin-bottom: 12px; }
-.filter-fields { margin-top: 10px; }
-.filter-actions { margin-left: 16px; }
-.batch-result-card { margin-bottom: 12px; }
+.search-bar { margin-bottom: 16px; }
+.search-input { width: 100%; max-width: 440px; }
+.filter-control { max-width: 100%; }
+.filter-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 12px; }
+.filter-fields :deep(.t-form__item) { margin: 0; }
+.filter-actions { margin-left: auto; }
+.batch-result-card { margin-bottom: 16px; }
 .cookie-box {
   max-height: 160px;
   overflow: auto;
@@ -1151,12 +1206,19 @@ const columns = [
 .account-remark { color: var(--td-text-color-secondary, #666); font-size: 12px; }
 .account-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .tags-more { cursor: pointer; }
+.tag-editor { width: 100%; }
+.tag-editor :deep(.t-select) { width: 100%; }
+.tag-create-option { display: flex; align-items: center; gap: 4px; padding: 8px 12px; cursor: pointer; color: var(--td-brand-color, #0052d9); font-size: 14px; }
+.tag-create-option:hover { background: var(--td-bg-color-container-hover, #f3f3f3); }
 .window-cell { cursor: pointer; }
 .window-proxy { font-size: 12px; }
 .proxy-dot { margin-right: 2px; }
 .proxy-dot.proxy-ok { color: var(--td-success-color, #2ba471); }
 .window-name { font-size: 13px; }
 .window-unbound { color: var(--td-text-color-secondary, #666); }
+.window-binding-name { font-size: 13px; font-weight: 500; }
+.window-binding-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary, #666); margin-top: 4px; }
+.window-bit-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; display: inline-block; vertical-align: bottom; }
 .op-cell { white-space: nowrap; }
 .info-popup .info-head { display: flex; gap: 10px; align-items: center; }
 .info-popup .info-name { font-size: 16px; font-weight: 600; }
@@ -1199,7 +1261,7 @@ const columns = [
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 .account-sub,
 .form-tip {

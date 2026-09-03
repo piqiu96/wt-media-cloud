@@ -22,6 +22,13 @@ The command creates the DSN database when missing, applies files in lexical orde
 - `20260714_004_agent_runtime.sql`: M2-C4 session-bound local Agent nodes, secret-safe environment facts, and Profile runtime presence.
 - `20260714_005_sensitive_profile_locks.sql`: M2-C5 pre-authorized sensitive browser tasks and non-reusable Profile permits.
 - `20260722_012_user_team_model.sql`: M2-A1 numeric user identifiers, fixed roles, operation teams, historical team snapshots, and all existing user foreign-key migration.
+- `20260814_024_media_account_tags_unique_account_scope.sql`: restores the media-account tag uniqueness key to `(user_id, media_account_id, tag_name)` after migration 022 removed and re-added `media_account_id`.
+
+## Migration 024 Safety
+
+Migration 024 changes only the unique index on `media_account_tags`; it does not rewrite tag rows. The migration runner makes it repeat-safe by recording the version in `schema_migrations`. It restores the intended rule that the same label may be reused by different accounts owned by one user.
+
+Before applying it to a non-empty environment, check for duplicate `(user_id, media_account_id, tag_name)` rows. After applying it, verify the index column order with `SHOW INDEX FROM media_account_tags`. A rollback may restore the former `(user_id, tag_name)` key only after duplicate tag names across accounts have been resolved; otherwise the rollback would discard a supported relationship or fail to create the key.
 
 ## M2-A1 Migration Safety
 
