@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
+import { createProxyClient } from "../../../shared/api/proxy.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import { isDesktop } from "../../../utils.js"
@@ -13,6 +14,7 @@ import { isDesktop } from "../../../utils.js"
 import { invoke } from "@tauri-apps/api/core"
 
 const bindingClient = createProfileBindingClient()
+const proxyClient = createProxyClient()
 const sessionClient = createSessionClient()
 const usersClient = createUsersClient()
 const profiles = ref([])
@@ -73,6 +75,12 @@ const acceptConfirmMessage = ref("")
 const restoreConfirmVisible = ref(false)
 const restoreConfirmMessage = ref("")
 const restoreTargets = ref([])
+const proxyDialogVisible = ref(false)
+const proxyBinding = ref(false)
+const proxyProfile = ref(null)
+const proxyId = ref("")
+const availableProxies = ref([])
+const localProxyScan = ref(null)
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
 
@@ -450,6 +458,41 @@ async function saveEdit() {
   }
 }
 
+async function openProxyBinding(profile) {
+  if (!isDesktopClient.value) return
+  proxyProfile.value = profile
+  proxyId.value = profile.proxy_id || ""
+  try {
+    const result = await proxyClient.list({ business_status: "active" })
+    const all = Array.isArray(result) ? result : (result?.list || [])
+    availableProxies.value = all.filter((item) => item.last_check_result === "ok" && (item.remaining_profile_count > 0 || item.id === profile.proxy_id))
+    proxyDialogVisible.value = true
+  } catch (e) {
+    error.value = e.message || "无法读取可绑定代理"
+  }
+}
+
+async function confirmProxyBinding() {
+  if (!proxyProfile.value) return
+  proxyBinding.value = true
+  error.value = ""
+  try {
+    if (proxyId.value) {
+      const profile = await proxyClient.assign(proxyId.value, proxyProfile.value.id)
+      taskNotice.value = `代理已写入 BitBrowser 并读回验证：${profile.name || profile.bit_profile_id}`
+    } else if (proxyProfile.value.proxy_id) {
+      await proxyClient.unbind(proxyProfile.value.proxy_id, proxyProfile.value.id)
+      taskNotice.value = "已解绑代理，并完成 BitBrowser 无代理读回验证。"
+    }
+    proxyDialogVisible.value = false
+    await loadProfiles()
+  } catch (e) {
+    error.value = e.message || "代理写入或读回失败"
+  } finally {
+    proxyBinding.value = false
+  }
+}
+
 
 function openDetail(profile) {
   detailProfile.value = profile
@@ -495,6 +538,7 @@ async function triggerScan() {
       profiles: snapshot.profiles || [],
     }, { nodeId: status.node_id })
     currentScan.value = scan
+    localProxyScan.value = await proxyClient.previewLocalScan(scan.id || scan.scan_id)
     scanDetailVisible.value = true
     selectedTab.value = "changed"
     identityError.value = ""
@@ -544,6 +588,9 @@ async function confirmAcceptLocalChanges() {
   try {
     const nodeId = await currentLocalNodeId()
     currentScan.value = await bindingClient.confirm(currentScan.value.id || currentScan.value.scan_id, { nodeId })
+    if (localProxyScan.value?.scan_id) {
+      await proxyClient.confirmLocalScan(localProxyScan.value.scan_id, nodeId)
+    }
     taskNotice.value = "已接受本地变化，Cloud浏览器窗口镜像已按允许字段更新。"
     acceptConfirmVisible.value = false
     await loadProfiles()
@@ -860,6 +907,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
             <template v-if="isDesktopClient">
               <t-button v-if="!isWindowOpen(row)" size="small" theme="success" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
               <t-button v-else size="small" theme="danger" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
+              <t-button size="small" variant="outline" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProxyBinding(row)">绑定代理</t-button>
               <t-button size="small" variant="outline" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
               <t-button size="small" variant="text" theme="warning" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
             </template>
@@ -904,6 +952,18 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
         </t-form-item>
       </t-form>
       <t-alert v-if="createError" :message="createError" theme="error" style="margin-top:12px" />
+    </t-dialog>
+
+    <t-dialog v-model:visible="proxyDialogVisible" header="绑定代理并同步 BitBrowser" @confirm="confirmProxyBinding" :confirm-btn="{ loading: proxyBinding, theme: 'primary', content: '写入并读回验证' }">
+      <t-alert theme="info" style="margin-bottom:12px">选择代理后会写入当前窗口的 BitBrowser 配置；只有协议、地址和端口读回一致，Cloud 才更新正式关联与配额。</t-alert>
+      <t-form label-width="84px">
+        <t-form-item label="窗口"><span>{{ proxyProfile?.name || proxyProfile?.bit_profile_id }}</span></t-form-item>
+        <t-form-item label="代理">
+          <t-select v-model="proxyId" clearable placeholder="留空则解绑当前代理">
+            <t-option v-for="item in availableProxies" :key="item.id" :value="item.id" :label="`${item.proxy_protocol}://${item.host}:${item.port}（剩余 ${item.remaining_profile_count ?? 0}）`" />
+          </t-select>
+        </t-form-item>
+      </t-form>
     </t-dialog>
 
     <!-- 编辑窗口 -->
@@ -1017,6 +1077,14 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
             <t-empty v-else description="无缺失" />
           </t-tab-panel>
         </t-tabs>
+        <t-divider>代理关系差异</t-divider>
+        <t-table :data="localProxyScan?.changes || []" row-key="profile_id" size="small" :columns="[
+          { colKey: 'kind', title: '差异', width: 120 }, { colKey: 'bit_profile_id', title: '窗口' }, { colKey: 'host', title: '本机代理' }, { colKey: 'current_proxy_id', title: '当前关联' },
+        ]" empty="本机代理与Cloud记录一致">
+          <template #kind="{ row }"><t-tag :theme="row.kind === 'conflict' ? 'danger' : row.kind === 'unknown' ? 'warning' : 'primary'">{{ { changed: '已更换', unbound: '已解绑', unknown: '未登记代理', conflict: '匹配冲突' }[row.kind] || row.kind }}</t-tag></template>
+          <template #host="{ row }">{{ row.host ? `${row.proxy_protocol}://${row.host}:${row.port}` : '-' }}</template>
+          <template #current_proxy_id="{ row }">{{ row.current_proxy_id || '-' }}</template>
+        </t-table>
       </div>
       <template #footer>
         <t-space>

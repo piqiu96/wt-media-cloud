@@ -1,14 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from "vue"
-import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
+import { onMounted, ref } from "vue"
 import { createProxyClient } from "../../../shared/api/proxy.js"
-import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
-import { isDesktop } from "../../../utils.js"
-import { invoke } from "@tauri-apps/api/core"
 
 const proxyClient = createProxyClient()
-const profileClient = createProfileBindingClient()
 const proxies = ref([])
 const loading = ref(true)
 const error = ref("")
@@ -30,10 +25,6 @@ const importing = ref(false)
 const showCreate = ref(false)
 const creating = ref(false)
 const createForm = ref(emptyProxyForm())
-const createSyncToProfile = ref(false)
-const createProfileId = ref("")
-const createProfiles = ref([])
-const loadingCreateProfiles = ref(false)
 
 // Detail drawer
 const detailVisible = ref(false)
@@ -45,19 +36,6 @@ const quotaProxyId = ref("")
 const quotaMax = ref(1)
 const savingQuota = ref(false)
 
-// Assignment dialog
-const assignVisible = ref(false)
-const assignProxy = ref(null)
-const assignProfileId = ref("")
-const assigning = ref(false)
-const activeProfiles = ref([])
-const isDesktopClient = computed(() => isDesktop())
-const localScanVisible = ref(false)
-const localScanLoading = ref(false)
-const localScanConfirming = ref(false)
-const localScanRestoring = ref(false)
-const localProxyScan = ref(null)
-const localScanNodeId = ref("")
 
 onMounted(() => { loadProxies() })
 
@@ -143,22 +121,7 @@ function emptyProxyForm() {
 
 function openCreate() {
   createForm.value = emptyProxyForm()
-  createSyncToProfile.value = false
-  createProfileId.value = ""
   showCreate.value = true
-}
-
-async function loadCreateProfiles() {
-  if (!isDesktopClient.value) return
-  loadingCreateProfiles.value = true
-  try {
-    const profiles = await profileClient.listProfiles()
-    createProfiles.value = Array.isArray(profiles) ? profiles.filter(profile => profile.local_status === "active" && !profile.proxy_id) : []
-  } catch (e) {
-    error.value = e.message || "无法读取可同步窗口"
-  } finally {
-    loadingCreateProfiles.value = false
-  }
 }
 
 async function createProxy() {
@@ -168,17 +131,8 @@ async function createProxy() {
   }
   creating.value = true
   try {
-    if (createSyncToProfile.value && !createProfileId.value) {
-      error.value = "请选择要同步的浏览器窗口"
-      return
-    }
-    const created = await proxyClient.create({ ...createForm.value, host: createForm.value.host.trim(), port: Number(createForm.value.port) })
-    if (createSyncToProfile.value) {
-      const profile = await proxyClient.assign(created.id, createProfileId.value)
-      taskNotice.value = `代理已创建并同步写入 BitBrowser，读回验证窗口：${profile.name || profile.bit_profile_id}`
-    } else {
-      taskNotice.value = "代理台账已创建；可在列表中选择“同步至窗口”写入 BitBrowser。"
-    }
+    await proxyClient.create({ ...createForm.value, host: createForm.value.host.trim(), port: Number(createForm.value.port) })
+    taskNotice.value = "代理台账已创建；请到浏览器窗口页绑定并同步到 BitBrowser。"
     showCreate.value = false
     await loadProxies()
   } catch (e) {
@@ -235,117 +189,6 @@ async function saveQuota() {
   }
 }
 
-async function openAssign(proxy) {
-  assignProxy.value = proxy
-  assignProfileId.value = ""
-  try {
-    const profiles = await profileClient.listProfiles()
-    activeProfiles.value = Array.isArray(profiles) ? profiles.filter(profile => profile.local_status === "active" && !profile.proxy_id) : []
-    assignVisible.value = true
-  } catch (e) {
-    error.value = e.message || "无法读取可分配窗口"
-  }
-}
-
-async function assignProxyToProfile() {
-  if (!assignProxy.value || !assignProfileId.value) {
-    error.value = "请选择窗口"
-    return
-  }
-  assigning.value = true
-  try {
-    const profile = await proxyClient.assign(assignProxy.value.id, assignProfileId.value)
-    taskNotice.value = `代理已写入并读回验证：${profile.name || profile.bit_profile_id}`
-    assignVisible.value = false
-    await loadProxies()
-  } catch (e) {
-    error.value = e.message || "代理写入或读回失败"
-  } finally {
-    assigning.value = false
-  }
-}
-
-function cloudBaseUrl() {
-  if (typeof window === "undefined") return "http://127.0.0.1:18080"
-  return window.location?.origin === "http://127.0.0.1:18080" ? window.location.origin : "http://127.0.0.1:18080"
-}
-
-async function desktopLocalAgentService() {
-  if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
-    throw new Error("扫描本机代理只能在 Desktop 客户端执行")
-  }
-  return createLocalAgentService({ invoke })
-}
-
-async function scanLocalProxies() {
-  if (!isDesktopClient.value) {
-    error.value = "Cloud Web只展示代理台账；扫描本机代理请在Desktop客户端执行。"
-    return
-  }
-  localScanLoading.value = true
-  error.value = ""
-  try {
-    const localAgent = await desktopLocalAgentService()
-    const status = await localAgent.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
-    if (!status.node_id) throw new Error("当前电脑尚未完成本地环境确认，请先刷新 Desktop 环境状态。")
-    const snapshot = await localAgent.profileScan()
-    const scan = await profileClient.submit({ main_user_id: snapshot.main_user_id, profiles: snapshot.profiles || [] }, { nodeId: status.node_id })
-    localScanNodeId.value = status.node_id
-    localProxyScan.value = await proxyClient.previewLocalScan(scan.id || scan.scan_id)
-    localScanVisible.value = true
-  } catch (e) {
-    error.value = e.message || "扫描本机代理失败"
-  } finally {
-    localScanLoading.value = false
-  }
-}
-
-async function confirmLocalProxyScan() {
-  if (!localProxyScan.value?.scan_id) return
-  localScanConfirming.value = true
-  try {
-    const result = await proxyClient.confirmLocalScan(localProxyScan.value.scan_id, localScanNodeId.value)
-    localProxyScan.value = result
-    localScanVisible.value = false
-    const changes = result.changes || []
-    taskNotice.value = changes.length ? `已确认 ${changes.length} 项本机代理变化；未知代理已创建为待补充记录。` : "本机代理与Cloud记录一致，无需更新。"
-    await loadProxies()
-  } catch (e) {
-    error.value = e.message || "确认本机代理变化失败"
-  } finally {
-    localScanConfirming.value = false
-  }
-}
-
-async function restoreCloudProxyConfiguration() {
-  const changes = localProxyScan.value?.changes || []
-  const targets = changes.filter(change => change.current_proxy_id && change.profile_id)
-  if (!targets.length) {
-    error.value = "当前差异没有可恢复的 Cloud 代理关联"
-    return
-  }
-  localScanRestoring.value = true
-  let succeeded = 0
-  const failures = []
-  try {
-    for (const target of targets) {
-      try {
-        await proxyClient.assign(target.current_proxy_id, target.profile_id)
-        succeeded += 1
-      } catch (e) {
-        failures.push(`${target.bit_profile_id || target.profile_id}：${e.message || '写入失败'}`)
-      }
-    }
-    if (failures.length) {
-      error.value = `恢复完成：成功 ${succeeded} 项，失败 ${failures.length} 项。${failures.join('；')}`
-    } else {
-      taskNotice.value = `已恢复 ${succeeded} 个窗口的 Cloud 代理配置，并逐项完成 BitBrowser 读回验证。`
-      await scanLocalProxies()
-    }
-  } finally {
-    localScanRestoring.value = false
-  }
-}
 
 const columns = [
   { colKey: "host", title: "地址", width: 200 },
@@ -406,7 +249,6 @@ function formatTime(t) {
       <t-space>
 		<t-button theme="primary" @click="openCreate">新增代理</t-button>
         <t-button theme="primary" @click="showImport = true">批量导入</t-button>
-        <t-button v-if="isDesktopClient" variant="outline" :loading="localScanLoading" @click="scanLocalProxies">扫描本机代理</t-button>
         <t-button variant="outline" @click="loadProxies">刷新</t-button>
       </t-space>
     </div>
@@ -453,13 +295,12 @@ function formatTime(t) {
           </t-dropdown>
           <t-button size="small" variant="text" @click="triggerCheck(row)">检测</t-button>
           <t-button size="small" variant="text" @click="openQuota(row)">配额</t-button>
-				<t-button size="small" variant="text" :disabled="row.business_status !== 'active' || (row.remaining_profile_count ?? (row.max_profile_count || 3)) <= 0" @click="openAssign(row)">同步至窗口</t-button>
           <t-button size="small" variant="text" theme="danger" @click="deleteProxy(row)">删除</t-button>
         </t-space>
       </template>
     </t-table>
 
-    <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: createSyncToProfile ? '创建并同步' : '创建' }" @confirm="createProxy">
+    <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: '创建' }" @confirm="createProxy">
       <t-form label-width="84px">
         <t-form-item label="协议"><t-select v-model="createForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
         <t-form-item label="地址"><t-input v-model="createForm.host" placeholder="例如 127.0.0.1" /></t-form-item>
@@ -469,14 +310,6 @@ function formatTime(t) {
         <t-form-item label="地区"><t-input v-model="createForm.region" /></t-form-item>
         <t-form-item label="供应商"><t-input v-model="createForm.supplier" /></t-form-item>
         <t-form-item label="备注"><t-textarea v-model="createForm.remark" /></t-form-item>
-        <template v-if="isDesktopClient">
-          <t-form-item label="同步 BitBrowser"><t-switch v-model="createSyncToProfile" @change="loadCreateProfiles" /></t-form-item>
-          <t-form-item v-if="createSyncToProfile" label="目标窗口">
-            <t-select v-model="createProfileId" :loading="loadingCreateProfiles" placeholder="选择未绑定代理的可用窗口">
-              <t-option v-for="profile in createProfiles" :key="profile.id" :value="profile.id" :label="`${profile.name || '未命名窗口'} (${profile.bit_profile_id})`" />
-            </t-select>
-          </t-form-item>
-        </template>
       </t-form>
     </t-dialog>
 
@@ -537,32 +370,6 @@ function formatTime(t) {
       </t-form>
     </t-dialog>
 
-    <t-dialog v-model:visible="assignVisible" header="分配代理到窗口" @confirm="assignProxyToProfile" :confirm-btn="{ loading: assigning, theme: 'primary', content: '写入并读回验证' }">
-      <t-alert theme="info" style="margin-bottom:12px">确认后会同步写入 BitBrowser；只有读回地址、端口和协议一致，Cloud 才会更新正式关联。</t-alert>
-      <t-form label-width="84px">
-        <t-form-item label="代理"><span>{{ assignProxy?.host }}:{{ assignProxy?.port }}</span></t-form-item>
-        <t-form-item label="窗口">
-          <t-select v-model="assignProfileId" placeholder="选择未绑定代理的可用窗口">
-            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="`${profile.name || '未命名窗口'} (${profile.bit_profile_id})`" />
-          </t-select>
-        </t-form-item>
-      </t-form>
-    </t-dialog>
-
-    <t-dialog v-model:visible="localScanVisible" header="本机代理扫描差异" width="760px" @confirm="confirmLocalProxyScan" :confirm-btn="{ loading: localScanConfirming, theme: 'primary', content: '接受本机代理变化' }">
-      <t-alert theme="info" style="margin-bottom:12px">扫描结果来自当前 BitBrowser 窗口；预览不会修改台账。确认后只回写无歧义的正式代理关系，未知代理会创建为“待补充、未检测”。</t-alert>
-      <t-table :data="localProxyScan?.changes || []" row-key="profile_id" size="small" :columns="[
-        { colKey: 'kind', title: '差异', width: 120 },
-        { colKey: 'bit_profile_id', title: '窗口' },
-        { colKey: 'host', title: '本机代理' },
-        { colKey: 'current_proxy_id', title: '当前关联' },
-      ]" empty="本机代理与Cloud记录一致">
-        <template #kind="{ row }"><t-tag :theme="row.kind === 'conflict' ? 'danger' : row.kind === 'unknown' ? 'warning' : 'primary'">{{ { changed: '已更换', unbound: '已解绑', unknown: '未登记代理', conflict: '匹配冲突' }[row.kind] || row.kind }}</t-tag></template>
-        <template #host="{ row }">{{ row.host ? `${row.proxy_protocol}://${row.host}:${row.port}` : '-' }}</template>
-        <template #current_proxy_id="{ row }">{{ row.current_proxy_id || '-' }}</template>
-      </t-table>
-      <t-button style="margin-top:12px" variant="outline" :loading="localScanRestoring" :disabled="!(localProxyScan?.changes || []).some(change => change.current_proxy_id)" @click="restoreCloudProxyConfiguration">恢复 Cloud 代理配置（逐项写入并读回）</t-button>
-    </t-dialog>
   </t-loading>
 </template>
 
