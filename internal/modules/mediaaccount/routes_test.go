@@ -3,6 +3,7 @@ package mediaaccount
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -130,6 +131,68 @@ func TestRoutesCreateAndUpdateAccountName(t *testing.T) {
 	updated := performMediaJSON(engine, "PATCH", "/api/v1/media-accounts/"+envelope.Data.ID, `{"name":"新名"}`, cookie)
 	if updated.Result().StatusCode() != consts.StatusOK || !strings.Contains(string(updated.Result().Body()), `"name":"新名"`) {
 		t.Fatalf("update status = %d, body = %s", updated.Result().StatusCode(), updated.Result().Body())
+	}
+}
+
+func TestRoutesCreateAndUpdateMultiGameAccount(t *testing.T) {
+	engine, cookie, _ := newMediaAccountRouteTest(t)
+	created := performMediaJSON(engine, "POST", "/api/v1/media-accounts", `{"game_ids":["game-b","game-a"],"platform":"bilibili"}`, cookie)
+	if created.Result().StatusCode() != consts.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", created.Result().StatusCode(), created.Result().Body())
+	}
+	var envelope struct {
+		Data Account `json:"data"`
+	}
+	if err := json.Unmarshal(created.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"game-a", "game-b"}; !reflect.DeepEqual(envelope.Data.GameIDs, want) || envelope.Data.GameID != "game-a" {
+		t.Fatalf("created games = %#v, want %#v with compatibility game-a", envelope.Data, want)
+	}
+
+	updated := performMediaJSON(engine, "PATCH", "/api/v1/media-accounts/"+envelope.Data.ID, `{"game_ids":[]}`, cookie)
+	if updated.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("update status = %d, body = %s", updated.Result().StatusCode(), updated.Result().Body())
+	}
+	if err := json.Unmarshal(updated.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.GameIDs) != 0 || envelope.Data.GameID != "" {
+		t.Fatalf("updated games = %#v", envelope.Data)
+	}
+}
+
+func TestRoutesRejectConflictingGameIDCompatibilityFields(t *testing.T) {
+	engine, cookie, _ := newMediaAccountRouteTest(t)
+	response := performMediaJSON(engine, "POST", "/api/v1/media-accounts", `{"game_id":"game-a","game_ids":["game-b"],"platform":"bilibili"}`, cookie)
+	if response.Result().StatusCode() != consts.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
+func TestRoutesFilterAccountsByAnyGameID(t *testing.T) {
+	engine, cookie, _ := newMediaAccountRouteTest(t)
+	first := performMediaJSON(engine, "POST", "/api/v1/media-accounts", `{"game_ids":["game-a","game-b"],"platform":"bilibili"}`, cookie)
+	if first.Result().StatusCode() != consts.StatusCreated {
+		t.Fatalf("first create status = %d, body = %s", first.Result().StatusCode(), first.Result().Body())
+	}
+	second := performMediaJSON(engine, "POST", "/api/v1/media-accounts", `{"game_ids":["game-b"],"platform":"baijiahao"}`, cookie)
+	if second.Result().StatusCode() != consts.StatusCreated {
+		t.Fatalf("second create status = %d, body = %s", second.Result().StatusCode(), second.Result().Body())
+	}
+
+	response := ut.PerformRequest(engine.Engine, "GET", "/api/v1/media-accounts?game_ids=game-a,game-b", nil, ut.Header{Key: "Cookie", Value: cookie})
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("list status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
+	}
+	var envelope struct {
+		Data []Account `json:"data"`
+	}
+	if err := json.Unmarshal(response.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data) != 2 {
+		t.Fatalf("list = %#v, want both matching accounts once", envelope.Data)
 	}
 }
 

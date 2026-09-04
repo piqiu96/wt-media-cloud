@@ -15,6 +15,7 @@ import (
 
 type createAccountRequest struct {
 	UserID           identity.UserID `json:"user_id"`
+	GameIDs          []string        `json:"game_ids"`
 	GameID           string          `json:"game_id"`
 	Name             string          `json:"name"`
 	Platform         Platform        `json:"platform"`
@@ -28,6 +29,7 @@ type updateAccountRequest struct {
 	BusinessStatus BusinessStatus `json:"business_status"`
 	LoginStatus    LoginStatus    `json:"login_status"`
 	Remark         *string        `json:"remark"`
+	GameIDs        *[]string      `json:"game_ids"`
 	GameID         *string        `json:"game_id"`
 	Name           *string        `json:"name"`
 }
@@ -99,8 +101,13 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
+		gameIDs, err := resolveCreateRequestGameIDs(req.GameIDs, req.GameID)
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
 		account, err := service.CreateAccount(actor, CreateAccountInput{
-			UserID: req.UserID, GameID: req.GameID, Name: req.Name, Platform: req.Platform,
+			UserID: req.UserID, GameIDs: gameIDs, Name: req.Name, Platform: req.Platform,
 			OriginalCookie: req.OriginalCookie, BrowserProfileID: req.BrowserProfileID, Remark: req.Remark, Tags: req.Tags,
 		})
 		if err != nil {
@@ -124,9 +131,14 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			}
 			userID = identity.UserID(parsed)
 		}
+		gameIDs, err := resolveQueryGameIDs(commaValues(c.Query("game_ids")), c.Query("game_id"))
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
 		accounts, err := service.ListAccounts(actor, AccountFilter{
 			UserID:         userID,
-			GameID:         c.Query("game_id"),
+			GameIDs:        gameIDs,
 			Platform:       Platform(c.Query("platform")),
 			BusinessStatus: BusinessStatus(c.Query("business_status")),
 			LoginStatus:    LoginStatus(c.Query("login_status")),
@@ -172,8 +184,13 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
+		gameIDs, err := resolveUpdateRequestGameIDs(req.GameIDs, req.GameID)
+		if err != nil {
+			writeMediaAccountError(c, err)
+			return
+		}
 		account, err := service.UpdateAccount(actor, c.Param("account_id"), UpdateAccountInput{
-			BusinessStatus: req.BusinessStatus, LoginStatus: req.LoginStatus, Remark: req.Remark, GameID: req.GameID, Name: req.Name,
+			BusinessStatus: req.BusinessStatus, LoginStatus: req.LoginStatus, Remark: req.Remark, GameIDs: gameIDs, Name: req.Name,
 		})
 		if err != nil {
 			writeMediaAccountError(c, err)
@@ -438,6 +455,71 @@ func commaValues(value string) []string {
 		return nil
 	}
 	return strings.Split(value, ",")
+}
+
+func resolveCreateRequestGameIDs(canonical []string, compatibility string) ([]string, error) {
+	if canonical == nil {
+		if strings.TrimSpace(compatibility) == "" {
+			return nil, nil
+		}
+		return []string{compatibility}, nil
+	}
+	if strings.TrimSpace(compatibility) == "" {
+		return canonical, nil
+	}
+	normalized := normalizeGameIDs(canonical)
+	if len(normalized) != 1 || normalized[0] != strings.TrimSpace(compatibility) {
+		return nil, ErrInvalidInput
+	}
+	return canonical, nil
+}
+
+func resolveUpdateRequestGameIDs(canonical *[]string, compatibility *string) (*[]string, error) {
+	if canonical == nil {
+		if compatibility == nil {
+			return nil, nil
+		}
+		result := []string{*compatibility}
+		if strings.TrimSpace(*compatibility) == "" {
+			result = []string{}
+		}
+		return &result, nil
+	}
+	if compatibility == nil {
+		return canonical, nil
+	}
+	if !sameGameIDs(normalizeGameIDs(*canonical), normalizeGameIDs([]string{*compatibility})) {
+		return nil, ErrInvalidInput
+	}
+	return canonical, nil
+}
+
+func resolveQueryGameIDs(canonical []string, compatibility string) ([]string, error) {
+	if len(canonical) == 0 {
+		if strings.TrimSpace(compatibility) == "" {
+			return nil, nil
+		}
+		return []string{compatibility}, nil
+	}
+	if strings.TrimSpace(compatibility) == "" {
+		return canonical, nil
+	}
+	if !sameGameIDs(normalizeGameIDs(canonical), normalizeGameIDs([]string{compatibility})) {
+		return nil, ErrInvalidInput
+	}
+	return canonical, nil
+}
+
+func sameGameIDs(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
