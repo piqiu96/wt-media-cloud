@@ -7,9 +7,6 @@ export function createProxyClient() {
     list(params) {
       return api.get('/proxies', params)
     },
-    create(input) {
-      return api.post('/proxies', input)
-    },
     get(id) {
       return api.get(`/proxies/${id}`)
     },
@@ -39,6 +36,9 @@ export function createProxyClient() {
     },
     setMaxProfileCount(proxyId, maxProfiles) {
       return api.post(`/proxies/${proxyId}/quota`, { max_profiles: maxProfiles })
+    },
+    assign(proxyId, profileId) {
+      return api.post(`/proxies/${proxyId}/assign`, { profile_id: profileId })
     },
   }
 }

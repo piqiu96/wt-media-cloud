@@ -22,8 +22,29 @@ type ProxyCheckResult struct {
 	Connectivity string `json:"connectivity"`
 }
 
+type ProxyMutationInput struct {
+	ProfileID     string        `json:"profile_id"`
+	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
+	Host          string        `json:"host"`
+	Port          int           `json:"port"`
+	Username      string        `json:"username,omitempty"`
+	Password      string        `json:"password,omitempty"`
+}
+
+type ProxyMutationResult struct {
+	ProfileID     string        `json:"profile_id"`
+	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
+	Host          string        `json:"host"`
+	Port          int           `json:"port"`
+	Readback      bool          `json:"readback"`
+}
+
 type SyncProxyChecker interface {
 	Check(context.Context, ProxyCheckInput) (ProxyCheckResult, error)
+}
+
+type SyncProxyMutator interface {
+	Mutate(context.Context, ProxyMutationInput) (ProxyMutationResult, error)
 }
 
 // HTTPAgentChecker calls the short-lived Agent API directly. It intentionally
@@ -42,7 +63,7 @@ func NewHTTPAgentChecker(baseURL, token string) *HTTPAgentChecker {
 }
 
 func NewHTTPAgentCheckerFromEnv() *HTTPAgentChecker {
-	return NewHTTPAgentChecker(envOr("WT_MEDIA_AGENT_SYNC_URL", "http://127.0.0.1:18765"), os.Getenv("WT_MEDIA_AGENT_AUTH_TOKEN"))
+	return NewHTTPAgentChecker(envOr("WT_MEDIA_AGENT_SYNC_URL", "http://127.0.0.1:8765"), os.Getenv("WT_MEDIA_AGENT_AUTH_TOKEN"))
 }
 
 func (c *HTTPAgentChecker) Check(ctx context.Context, input ProxyCheckInput) (ProxyCheckResult, error) {
@@ -75,6 +96,40 @@ func (c *HTTPAgentChecker) Check(ctx context.Context, input ProxyCheckInput) (Pr
 	}
 	if envelope.Data.Connectivity == "" {
 		return ProxyCheckResult{}, fmt.Errorf("agent sync response missing connectivity")
+	}
+	return envelope.Data, nil
+}
+
+func (c *HTTPAgentChecker) Mutate(ctx context.Context, input ProxyMutationInput) (ProxyMutationResult, error) {
+	body, err := json.Marshal(input)
+	if err != nil {
+		return ProxyMutationResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/proxy-mutation", strings.NewReader(string(body)))
+	if err != nil {
+		return ProxyMutationResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return ProxyMutationResult{}, fmt.Errorf("agent proxy mutation request: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ProxyMutationResult{}, fmt.Errorf("agent proxy mutation response status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var envelope struct {
+		Data ProxyMutationResult `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return ProxyMutationResult{}, fmt.Errorf("decode agent proxy mutation response: %w", err)
+	}
+	if !envelope.Data.Readback || envelope.Data.ProfileID == "" || envelope.Data.Host == "" || envelope.Data.Port <= 0 {
+		return ProxyMutationResult{}, fmt.Errorf("agent proxy mutation response missing verified readback")
 	}
 	return envelope.Data, nil
 }

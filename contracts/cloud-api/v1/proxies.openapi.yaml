@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: WT Media Cloud Proxy API
+  version: 2026.09.04.1
+paths:
+  /api/v1/proxies/{proxy_id}/assign:
+    post:
+      operationId: assignProxyToProfile
+      summary: Synchronously write one proxy to a verified Profile and persist the formal relation only after read-back matches.
+      security: [{sessionCookie: []}]
+      parameters:
+        - in: path
+          name: proxy_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyAssignmentRequest'}
+      responses:
+        '200':
+          description: Agent write and read-back succeeded; Cloud formal Profile proxy relation is updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyAssignmentResult'}
+        '403': {description: Profile does not belong to the current user or is inactive.}
+        '409': {description: Proxy unavailable, Profile has another proxy, or unified proxy capacity is exhausted.}
+        '503': {description: Agent write/read-back did not succeed; no formal relation was updated.}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  schemas:
+    ProxyAssignmentRequest:
+      type: object
+      required: [profile_id]
+      additionalProperties: false
+      properties:
+        profile_id: {type: string, description: Cloud Browser Profile id.}
+    ProxyAssignmentResult:
+      type: object
+      required: [id, bit_profile_id, proxy_id, proxy_type, proxy_host, proxy_port]
+      properties:
+        id: {type: string}
+        bit_profile_id: {type: string}
+        proxy_id: {type: string}
+        proxy_type: {type: string, enum: [http, https, socks5]}
+        proxy_host: {type: string}
+        proxy_port: {type: integer}

@@ -80,28 +80,29 @@ type BitAccountBinding struct {
 }
 
 type BrowserProfile struct {
-	ID            string             `json:"id"`
-	UserID        identity.UserID    `json:"user_id"`
-	TeamID        *identity.TeamID   `json:"team_id"`
-	BitProfileID  string             `json:"bit_profile_id"`
-	MainUserID    string             `json:"main_user_id"`
-	ProfileUserID string             `json:"profile_user_id"`
-	Name          string             `json:"name"`
-	Seq           int                `json:"seq,omitempty"`
-	GroupID       string             `json:"group_id,omitempty"`
-	GroupName     string             `json:"group_name,omitempty"`
-	BitStatus     string             `json:"bit_status,omitempty"`
-	BitUpdatedAt  string             `json:"bit_updated_at,omitempty"`
-	ProxyType     string             `json:"proxy_type,omitempty"`
-	ProxyHost     string             `json:"proxy_host,omitempty"`
-	ProxyPort     int                `json:"proxy_port,omitempty"`
+	ID             string                `json:"id"`
+	UserID         identity.UserID       `json:"user_id"`
+	TeamID         *identity.TeamID      `json:"team_id"`
+	BitProfileID   string                `json:"bit_profile_id"`
+	MainUserID     string                `json:"main_user_id"`
+	ProfileUserID  string                `json:"profile_user_id"`
+	Name           string                `json:"name"`
+	Seq            int                   `json:"seq,omitempty"`
+	GroupID        string                `json:"group_id,omitempty"`
+	GroupName      string                `json:"group_name,omitempty"`
+	BitStatus      string                `json:"bit_status,omitempty"`
+	BitUpdatedAt   string                `json:"bit_updated_at,omitempty"`
+	ProxyType      string                `json:"proxy_type,omitempty"`
+	ProxyHost      string                `json:"proxy_host,omitempty"`
+	ProxyPort      int                   `json:"proxy_port,omitempty"`
+	ProxyID        string                `json:"proxy_id,omitempty"`
 	Remark         string                `json:"remark,omitempty"`
 	CloudRemark    string                `json:"cloud_remark,omitempty"`
 	BusinessStatus ProfileBusinessStatus `json:"business_status"`
 	LocalStatus    ProfileLocalStatus    `json:"local_status"`
 	LastSyncedAt   time.Time             `json:"last_synced_at"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
 }
 
 type ProfileInput struct {

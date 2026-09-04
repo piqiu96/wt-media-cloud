@@ -32,23 +32,25 @@ var (
 )
 
 type ProxyConfig struct {
-	ID              string         `json:"id"`
-	ProxyProtocol   ProxyProtocol  `json:"proxy_protocol"`
-	Host            string         `json:"host"`
-	Port            int            `json:"port"`
-	Username        string         `json:"username,omitempty"`
-	Password        string         `json:"password,omitempty"`
-	Region          string         `json:"region,omitempty"`
-	Supplier        string         `json:"supplier,omitempty"`
-	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
-	BusinessStatus  BusinessStatus `json:"business_status"`
-	MaxProfileCount int            `json:"max_profile_count"`
-	LastCheckAt     *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckResult string         `json:"last_check_result,omitempty"`
-	ObservedExitIP  string         `json:"observed_exit_ip,omitempty"`
-	Remark          string         `json:"remark,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID                    string         `json:"id"`
+	ProxyProtocol         ProxyProtocol  `json:"proxy_protocol"`
+	Host                  string         `json:"host"`
+	Port                  int            `json:"port"`
+	Username              string         `json:"username,omitempty"`
+	Password              string         `json:"password,omitempty"`
+	Region                string         `json:"region,omitempty"`
+	Supplier              string         `json:"supplier,omitempty"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+	BusinessStatus        BusinessStatus `json:"business_status"`
+	MaxProfileCount       int            `json:"max_profile_count"`
+	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
+	LastCheckResult       string         `json:"last_check_result,omitempty"`
+	ObservedExitIP        string         `json:"observed_exit_ip,omitempty"`
+	AssignedProfileCount  int            `json:"assigned_profile_count,omitempty"`
+	RemainingProfileCount int            `json:"remaining_profile_count,omitempty"`
+	Remark                string         `json:"remark,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
 type CreateProxyInput struct {
@@ -121,19 +123,20 @@ func (s *Service) BulkImport(rows []BulkImportRow) ([]ProxyConfig, error) {
 		}
 		now := s.now()
 		p := ProxyConfig{
-			ID:             s.newID("proxy"),
-			ProxyProtocol:  row.Parsed.ProxyProtocol,
-			Host:           row.Parsed.Host,
-			Port:           row.Parsed.Port,
-			Username:       row.Parsed.Username,
-			Password:       row.Parsed.Password,
-			Region:         row.Parsed.Region,
-			Supplier:       row.Parsed.Supplier,
-			ExpiresAt:      row.Parsed.ExpiresAt,
-			BusinessStatus: BizActive,
-			Remark:         row.Parsed.Remark,
-			CreatedAt:      now,
-			UpdatedAt:      now,
+			ID:              s.newID("proxy"),
+			ProxyProtocol:   row.Parsed.ProxyProtocol,
+			Host:            row.Parsed.Host,
+			Port:            row.Parsed.Port,
+			Username:        row.Parsed.Username,
+			Password:        row.Parsed.Password,
+			Region:          row.Parsed.Region,
+			Supplier:        row.Parsed.Supplier,
+			ExpiresAt:       row.Parsed.ExpiresAt,
+			BusinessStatus:  BizActive,
+			MaxProfileCount: normalizedMaxProfileCount(row.Parsed.MaxProfileCount),
+			Remark:          row.Parsed.Remark,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 		if err := s.store.Create(p); err != nil {
 			return results, err

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 )
 
 func TestImportPreviewDoesNotPersistUntilConfirmed(t *testing.T) {
@@ -48,6 +50,11 @@ func TestImportPreviewDoesNotPersistUntilConfirmed(t *testing.T) {
 	if len(store.items) != 1 {
 		t.Fatalf("confirm persisted %d proxies, want 1", len(store.items))
 	}
+	for _, proxy := range store.items {
+		if proxy.MaxProfileCount != DefaultMaxProfiles {
+			t.Fatalf("import max_profile_count=%d, want default %d", proxy.MaxProfileCount, DefaultMaxProfiles)
+		}
+	}
 }
 
 func TestUnifiedQuotaAppliesAcrossPlatforms(t *testing.T) {
@@ -66,6 +73,35 @@ func TestUnifiedQuotaAppliesAcrossPlatforms(t *testing.T) {
 	updated, err := service.SetMaxProfileCount("proxy-1", 4)
 	if err != nil || updated.MaxProfileCount != 4 {
 		t.Fatalf("SetMaxProfileCount() = %#v, %v", updated, err)
+	}
+}
+
+func TestAssignWritesThroughAgentThenBindsReadbackProfile(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, MaxProfileCount: 2}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := &routeProfileStore{profile: profilebinding.BrowserProfile{ID: "profile-1", UserID: 1, BitProfileID: "bit-profile-1", LocalStatus: profilebinding.ProfileActive}}
+	mutator := &routeMutator{result: ProxyMutationResult{ProfileID: "bit-profile-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, Readback: true}}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService, profiles, mutator)
+
+	response := proxyJSON(engine, "POST", "/api/v1/proxies/proxy-1/assign", `{"profile_id":"profile-1"}`, login.Token)
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("assign status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	if mutator.input.ProfileID != "bit-profile-1" || profiles.boundProxyID != "proxy-1" {
+		t.Fatalf("mutation=%#v bound_proxy=%q", mutator.input, profiles.boundProxyID)
+	}
+	if !bytes.Contains(response.Result().Body(), []byte(`"proxy_id":"proxy-1"`)) {
+		t.Fatalf("assign response=%s", response.Result().Body())
 	}
 }
 
@@ -91,3 +127,28 @@ func (s *routeMemoryStore) FindByID(id string) (ProxyConfig, bool, error) {
 func (s *routeMemoryStore) List(ProxyFilter) ([]ProxyConfig, error) { return nil, nil }
 func (s *routeMemoryStore) Update(proxy ProxyConfig) error          { s.items[proxy.ID] = proxy; return nil }
 func (s *routeMemoryStore) Delete(id string) error                  { delete(s.items, id); return nil }
+
+type routeProfileStore struct {
+	profile      profilebinding.BrowserProfile
+	boundProxyID string
+}
+
+func (s *routeProfileStore) GetProfile(id string) (profilebinding.BrowserProfile, bool, error) {
+	return s.profile, s.profile.ID == id, nil
+}
+func (s *routeProfileStore) CountProfilesByProxyID(proxyID string) (int, error) { return 0, nil }
+func (s *routeProfileStore) BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (profilebinding.BrowserProfile, error) {
+	s.boundProxyID = proxyID
+	s.profile.ProxyID, s.profile.ProxyType, s.profile.ProxyHost, s.profile.ProxyPort = proxyID, proxyType, proxyHost, proxyPort
+	return s.profile, nil
+}
+
+type routeMutator struct {
+	input  ProxyMutationInput
+	result ProxyMutationResult
+}
+
+func (m *routeMutator) Mutate(_ context.Context, input ProxyMutationInput) (ProxyMutationResult, error) {
+	m.input = input
+	return m.result, nil
+}

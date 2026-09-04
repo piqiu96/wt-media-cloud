@@ -19,11 +19,17 @@ type TaskCreator interface {
 type ProfileLookup interface {
 	GetProfile(string) (profilebinding.BrowserProfile, bool, error)
 }
+type ProfileProxyBinder interface {
+	CountProfilesByProxyID(string) (int, error)
+	BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (profilebinding.BrowserProfile, error)
+}
 
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, deps ...any) {
 	var tasks TaskCreator
 	var profiles ProfileLookup
 	var checker SyncProxyChecker
+	var mutator SyncProxyMutator
+	var bindings ProfileProxyBinder
 	for _, dep := range deps {
 		if value, ok := dep.(TaskCreator); ok {
 			tasks = value
@@ -33,6 +39,12 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		if value, ok := dep.(SyncProxyChecker); ok {
 			checker = value
+		}
+		if value, ok := dep.(SyncProxyMutator); ok {
+			mutator = value
+		}
+		if value, ok := dep.(ProfileProxyBinder); ok {
+			bindings = value
 		}
 	}
 	h.GET("/api/v1/proxies", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -50,6 +62,17 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if err != nil {
 			writeProxyError(c, err)
 			return
+		}
+		if bindings != nil {
+			for index := range proxies {
+				assigned, countErr := bindings.CountProfilesByProxyID(proxies[index].ID)
+				if countErr != nil {
+					common.InternalError(c, "代理关联窗口查询失败")
+					return
+				}
+				proxies[index].AssignedProfileCount = assigned
+				proxies[index].RemainingProfileCount = max(0, normalizedMaxProfileCount(proxies[index].MaxProfileCount)-assigned)
+			}
 		}
 		common.Success(c, proxies)
 	})
@@ -224,8 +247,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
-		if tasks == nil || profiles == nil {
-			common.Failure(c, 503, 30006, "任务服务不可用", nil)
+		if profiles == nil || bindings == nil || mutator == nil {
+			common.Failure(c, 503, 30006, "Agent 同步写入服务不可用", nil)
 			return
 		}
 		var req struct {
@@ -243,6 +266,10 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Forbidden(c, 11003, "没有权限分配此 Profile")
 			return
 		}
+		if profile.ProxyID != "" && profile.ProxyID != c.Param("id") {
+			common.Conflict(c, 23004, "Profile 已绑定其他代理，请使用更换操作")
+			return
+		}
 		proxy, err := service.Get(c.Param("id"))
 		if err != nil {
 			writeProxyError(c, err)
@@ -252,8 +279,33 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Conflict(c, 23004, "代理不可用")
 			return
 		}
-		task := tasks.Create(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeProxyMutation.String(), IdempotencyKey: "proxy-assign:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + profile.ID + ":" + proxy.ID + ":" + common.NewID("attempt"), Payload: map[string]any{"cloud_profile_id": profile.ID, "profile_id": profile.BitProfileID, "proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password}})
-		common.Created(c, task)
+		if profile.ProxyID == "" {
+			assigned, countErr := bindings.CountProfilesByProxyID(proxy.ID)
+			if countErr != nil {
+				common.InternalError(c, "代理关联窗口查询失败")
+				return
+			}
+			available, quotaErr := service.CheckQuota(proxy.ID, assigned)
+			if quotaErr != nil {
+				writeProxyError(c, quotaErr)
+				return
+			}
+			if !available {
+				common.Conflict(c, 23005, "代理窗口配额已满")
+				return
+			}
+		}
+		result, mutateErr := mutator.Mutate(ctx, ProxyMutationInput{ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password})
+		if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID || result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
+			common.Failure(c, 503, 30008, "Agent 写入或读回代理失败", nil)
+			return
+		}
+		updated, bindErr := bindings.BindProxy(profile.ID, proxy.ID, string(result.ProxyProtocol), result.Host, result.Port)
+		if bindErr != nil {
+			common.InternalError(c, "代理正式关系更新失败")
+			return
+		}
+		common.Success(c, updated)
 	})
 
 	h.POST("/api/v1/proxies/:id/quota", func(ctx context.Context, c *hertzapp.RequestContext) {

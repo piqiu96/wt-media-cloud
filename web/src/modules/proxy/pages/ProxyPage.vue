@@ -1,9 +1,11 @@
 <script setup>
 import { onMounted, ref } from "vue"
 import { createProxyClient } from "../../../shared/api/proxy.js"
+import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 
 const proxyClient = createProxyClient()
+const profileClient = createProfileBindingClient()
 const proxies = ref([])
 const loading = ref(true)
 const error = ref("")
@@ -35,6 +37,13 @@ const quotaVisible = ref(false)
 const quotaProxyId = ref("")
 const quotaMax = ref(1)
 const savingQuota = ref(false)
+
+// Assignment dialog
+const assignVisible = ref(false)
+const assignProxy = ref(null)
+const assignProfileId = ref("")
+const assigning = ref(false)
+const activeProfiles = ref([])
 
 onMounted(() => { loadProxies() })
 
@@ -187,16 +196,46 @@ async function saveQuota() {
   }
 }
 
+async function openAssign(proxy) {
+  assignProxy.value = proxy
+  assignProfileId.value = ""
+  try {
+    const profiles = await profileClient.listProfiles()
+    activeProfiles.value = Array.isArray(profiles) ? profiles.filter(profile => profile.local_status === "active" && !profile.proxy_id) : []
+    assignVisible.value = true
+  } catch (e) {
+    error.value = e.message || "无法读取可分配窗口"
+  }
+}
+
+async function assignProxyToProfile() {
+  if (!assignProxy.value || !assignProfileId.value) {
+    error.value = "请选择窗口"
+    return
+  }
+  assigning.value = true
+  try {
+    const profile = await proxyClient.assign(assignProxy.value.id, assignProfileId.value)
+    taskNotice.value = `代理已写入并读回验证：${profile.name || profile.bit_profile_id}`
+    assignVisible.value = false
+    await loadProxies()
+  } catch (e) {
+    error.value = e.message || "代理写入或读回失败"
+  } finally {
+    assigning.value = false
+  }
+}
+
 const columns = [
   { colKey: "host", title: "地址", width: 200 },
   { colKey: "proxy_protocol", title: "协议", width: 80 },
   { colKey: "region", title: "地区", width: 100 },
   { colKey: "supplier", title: "供应商", width: 100 },
   { colKey: "business_status", title: "状态", width: 90 },
-	{ colKey: "max_profile_count", title: "最大窗口数", width: 110 },
+	{ colKey: "max_profile_count", title: "窗口容量", width: 170 },
 	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
-  { colKey: "op", title: "操作", width: 180 },
+	{ colKey: "op", title: "操作", width: 220 },
 ]
 
 function formatTime(t) {
@@ -274,7 +313,7 @@ function formatTime(t) {
         <BusinessStatus v-else-if="row.last_check_result" status="error" :label="row.last_check_result" />
         <span v-else style="color:var(--td-text-color-placeholder)">未检测</span>
       </template>
-		<template #max_profile_count="{ row }">{{ row.max_profile_count || 3 }}</template>
+		<template #max_profile_count="{ row }">{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }} 已用，{{ row.remaining_profile_count ?? (row.max_profile_count || 3) }} 剩余</template>
       <template #expires_at="{ row }">
         <span :style="row.expires_at && new Date(row.expires_at) < new Date() ? 'color:var(--td-error-color)' : ''">
           {{ formatTime(row.expires_at) }}
@@ -292,6 +331,7 @@ function formatTime(t) {
           </t-dropdown>
           <t-button size="small" variant="text" @click="triggerCheck(row)">检测</t-button>
           <t-button size="small" variant="text" @click="openQuota(row)">配额</t-button>
+				<t-button size="small" variant="text" :disabled="row.business_status !== 'active' || (row.remaining_profile_count ?? (row.max_profile_count || 3)) <= 0" @click="openAssign(row)">分配</t-button>
           <t-button size="small" variant="text" theme="danger" @click="deleteProxy(row)">删除</t-button>
         </t-space>
       </template>
@@ -359,10 +399,22 @@ function formatTime(t) {
     </t-drawer>
 
     <!-- 配额弹窗 -->
-		<t-dialog v-model:visible="quotaVisible" header="设置最大窗口数" @confirm="saveQuota" :confirm-btn="{ loading: savingQuota, theme: 'primary' }">
+    <t-dialog v-model:visible="quotaVisible" header="设置最大窗口数" @confirm="saveQuota" :confirm-btn="{ loading: savingQuota, theme: 'primary' }">
       <t-form>
         <t-form-item label="最大 Profile 数">
           <t-input-number v-model="quotaMax" :min="1" :max="100" />
+        </t-form-item>
+      </t-form>
+    </t-dialog>
+
+    <t-dialog v-model:visible="assignVisible" header="分配代理到窗口" @confirm="assignProxyToProfile" :confirm-btn="{ loading: assigning, theme: 'primary', content: '写入并读回验证' }">
+      <t-alert theme="info" style="margin-bottom:12px">确认后会同步写入 BitBrowser；只有读回地址、端口和协议一致，Cloud 才会更新正式关联。</t-alert>
+      <t-form label-width="84px">
+        <t-form-item label="代理"><span>{{ assignProxy?.host }}:{{ assignProxy?.port }}</span></t-form-item>
+        <t-form-item label="窗口">
+          <t-select v-model="assignProfileId" placeholder="选择未绑定代理的可用窗口">
+            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="`${profile.name || '未命名窗口'} (${profile.bit_profile_id})`" />
+          </t-select>
         </t-form-item>
       </t-form>
     </t-dialog>

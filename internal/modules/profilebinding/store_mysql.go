@@ -11,7 +11,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, cloud_remark, business_status, local_status, last_synced_at, created_at, updated_at`
+const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, proxy_id, remark, cloud_remark, business_status, local_status, last_synced_at, created_at, updated_at`
 
 type MySQLStore struct{ db *sql.DB }
 
@@ -216,10 +216,10 @@ func (s *MySQLStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at t
 		// existing UNIQUE(user_id, bit_profile_id) key. business_status and
 		// cloud_remark are Cloud-side and are preserved on duplicate.
 		if _, err := tx.Exec(
-			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE main_user_id = VALUES(main_user_id), profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), remark = VALUES(remark), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
+			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE main_user_id = VALUES(main_user_id), profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), remark = VALUES(remark), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
 			profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
-			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nullIfEmpty(profile.Remark),
+			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nil, nullIfEmpty(profile.Remark),
 			"", ProfileBusinessEnabled, ProfileActive, at, profile.CreatedAt, at,
 		); err != nil {
 			return err
@@ -409,14 +409,14 @@ type scanner interface{ Scan(...any) error }
 
 func scanProfile(row scanner) (BrowserProfile, error) {
 	var profile BrowserProfile
-	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, remark, cloudRemark sql.NullString
+	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, proxyID, remark, cloudRemark sql.NullString
 	var proxyPort sql.NullInt64
-	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &cloudRemark, &profile.BusinessStatus, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
+	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &proxyID, &remark, &cloudRemark, &profile.BusinessStatus, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
 	if err != nil {
 		return BrowserProfile{}, err
 	}
 	profile.GroupID, profile.GroupName, profile.BitStatus, profile.BitUpdatedAt = groupID.String, groupName.String, bitStatus.String, bitUpdatedAt.String
-	profile.ProxyType, profile.ProxyHost, profile.Remark = proxyType.String, proxyHost.String, remark.String
+	profile.ProxyType, profile.ProxyHost, profile.ProxyID, profile.Remark = proxyType.String, proxyHost.String, proxyID.String, remark.String
 	profile.CloudRemark = cloudRemark.String
 	if proxyPort.Valid {
 		profile.ProxyPort = int(proxyPort.Int64)
@@ -485,6 +485,39 @@ func (s *MySQLStore) UpdateProfile(profileID string, cloudRemark *string, busine
 	args = append(args, profileID)
 	_, err := s.db.Exec(`UPDATE browser_profiles SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
 	return err
+}
+
+func (s *MySQLStore) CountProfilesByProxyID(proxyID string) (int, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM browser_profiles WHERE proxy_id = ? AND local_status = ?`, proxyID, ProfileActive).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *MySQLStore) BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (BrowserProfile, error) {
+	result, err := s.db.Exec(
+		`UPDATE browser_profiles SET proxy_id = ?, proxy_type = ?, proxy_host = ?, proxy_port = ?, updated_at = ? WHERE id = ?`,
+		proxyID, nullIfEmpty(proxyType), nullIfEmpty(proxyHost), proxyPort, time.Now(), profileID,
+	)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if updated == 0 {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
+	profile, found, err := s.GetProfile(profileID)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if !found {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
+	return profile, nil
 }
 
 func (s *MySQLStore) ProfileHasAccountReferences(profileID string) (bool, error) {

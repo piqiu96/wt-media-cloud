@@ -1,5 +1,5 @@
 openapi: 3.0.3
-info: {title: WT Media Cloud Browser Profile API, version: 2026.07.14.4}
+info: {title: WT Media Cloud Browser Profile API, version: 2026.09.04.1}
 paths:
   /api/v1/bit-browser/profile-scans:
     post:
@@ -48,7 +48,17 @@ paths:
       security: [{sessionCookie: []}]
       parameters: [{in: query, name: user_id, schema: {type: integer, format: int64}, description: Admin-only explicit owner filter.}]
       responses:
-        '200': {description: Visible confirmed Profile mirrors.}
+        '200':
+          description: Visible confirmed Profile mirrors, including a formal proxy_id only after successful Agent read-back.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/BrowserProfile'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
@@ -86,3 +96,15 @@ components:
         group_name: {type: string}
         bit_status: {type: string}
         bit_updated_at: {type: string}
+    BrowserProfile:
+      type: object
+      required: [id, bit_profile_id, local_status]
+      properties:
+        id: {type: string}
+        bit_profile_id: {type: string}
+        name: {type: string}
+        local_status: {type: string, enum: [active, local_missing, archived]}
+        proxy_id: {type: string, nullable: true, description: Cloud formal relation, updated only after Agent write/read-back verification.}
+        proxy_type: {type: string, nullable: true}
+        proxy_host: {type: string, nullable: true}
+        proxy_port: {type: integer, nullable: true}
