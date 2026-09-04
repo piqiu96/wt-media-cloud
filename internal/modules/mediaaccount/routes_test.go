@@ -39,18 +39,18 @@ func TestRoutesCreateListAndNeverReturnCookie(t *testing.T) {
 	}
 }
 
-func TestRoutesEnforceGameScope(t *testing.T) {
+func TestRoutesAllowEnabledPublicGamesOutsideHistoricalUserScope(t *testing.T) {
 	engine, cookie, _ := newMediaAccountRouteTest(t)
 	response := performMediaJSON(engine, "POST", "/api/v1/media-accounts", `{"game_id":"game-b","platform":"douyin"}`, cookie)
-	if response.Result().StatusCode() != consts.StatusForbidden {
+	if response.Result().StatusCode() != consts.StatusCreated {
 		t.Fatalf("status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
 	}
 }
 
-func TestRoutesRejectOutOfScopeGameList(t *testing.T) {
+func TestRoutesAllowEnabledPublicGameListFilter(t *testing.T) {
 	engine, cookie, _ := newMediaAccountRouteTest(t)
 	response := ut.PerformRequest(engine.Engine, "GET", "/api/v1/media-accounts?game_id=game-b", nil, ut.Header{Key: "Cookie", Value: cookie})
-	if response.Result().StatusCode() != consts.StatusForbidden {
+	if response.Result().StatusCode() != consts.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
 	}
 }
@@ -155,7 +155,7 @@ func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore
 	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
 	store := newMemoryStore()
 	resolver := &fakeProfileResolver{profiles: map[string]identity.UserID{"profile-1": operator.ID}, inactive: map[string]bool{}}
-	RegisterRoutes(engine, NewService(store, WithProfileResolver(resolver), WithUserResolver(identityService)), identityService)
+	RegisterRoutes(engine, NewService(store, WithProfileResolver(resolver), WithUserResolver(identityService), WithGameResolver(defaultTestGameResolver())), identityService)
 	login := performMediaJSON(engine, "POST", "/api/v1/auth/login", `{"username":"operator","password":"a-long-operator-password"}`, "")
 	if login.Result().StatusCode() != consts.StatusOK {
 		t.Fatalf("login status = %d, body = %s", login.Result().StatusCode(), login.Result().Body())

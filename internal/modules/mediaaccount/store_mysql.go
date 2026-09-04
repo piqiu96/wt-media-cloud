@@ -13,7 +13,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
-const accountColumns = `id, user_id, team_id, game_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, check_items, created_at, updated_at`
+const accountColumns = `id, user_id, team_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, check_items, created_at, updated_at`
 
 type MySQLStore struct {
 	db *sql.DB
@@ -24,9 +24,14 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 }
 
 func (s *MySQLStore) Create(record AccountRecord) (string, error) {
-	result, err := s.db.Exec(
-		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		record.UserID, record.TeamID, record.GameID, record.Platform,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
+		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.UserID, record.TeamID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
 		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
@@ -42,7 +47,14 @@ func (s *MySQLStore) Create(record AccountRecord) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strconv.FormatInt(id, 10), nil
+	accountID := strconv.FormatInt(id, 10)
+	if err := replaceAccountGameIDs(tx, accountID, record.GameIDs); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return accountID, nil
 }
 
 func (s *MySQLStore) Find(id string) (AccountRecord, bool, error) {
@@ -71,13 +83,22 @@ func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error
 	if err != nil {
 		return AccountRecord{}, false, err
 	}
-	return record, true, nil
+	records := []AccountRecord{record}
+	if err := s.loadGameIDs(records); err != nil {
+		return AccountRecord{}, false, err
+	}
+	return records[0], true, nil
 }
 
-func (s *MySQLStore) Update(record AccountRecord, _ *[]string) error {
-	result, err := s.db.Exec(
-		`UPDATE media_accounts SET user_id = ?, team_id = ?, game_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, check_items = ?, updated_at = ? WHERE id = ?`,
-		record.UserID, record.TeamID, record.GameID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
+func (s *MySQLStore) Update(record AccountRecord, replaceGameIDs *[]string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
+		`UPDATE media_accounts SET user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, check_items = ?, updated_at = ? WHERE id = ?`,
+		record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
 		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
 		nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
@@ -96,7 +117,12 @@ func (s *MySQLStore) Update(record AccountRecord, _ *[]string) error {
 	if rows == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if replaceGameIDs != nil {
+		if err := replaceAccountGameIDs(tx, record.ID, *replaceGameIDs); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
@@ -107,9 +133,11 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 		conditions = append(conditions, "user_id = ?")
 		args = append(args, query.UserID)
 	}
-	if query.GameID != "" {
-		conditions = append(conditions, "game_id = ?")
-		args = append(args, query.GameID)
+	if len(query.GameIDs) > 0 {
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_games mag WHERE mag.media_account_id = media_accounts.id AND mag.game_id IN (`+placeholders(len(query.GameIDs))+`))`)
+		for _, gameID := range query.GameIDs {
+			args = append(args, gameID)
+		}
 	}
 	if query.Platform != "" {
 		conditions = append(conditions, "platform = ?")
@@ -154,6 +182,9 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := s.loadGameIDs(records); err != nil {
+		return nil, err
+	}
 	if len(query.AnyTags) == 0 && len(query.AllTags) == 0 && len(query.ExcludeTags) == 0 {
 		return records, nil
 	}
@@ -172,6 +203,62 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 		}
 	}
 	return filtered, nil
+}
+
+type accountGameExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func replaceAccountGameIDs(executor accountGameExecutor, accountID string, gameIDs []string) error {
+	if _, err := executor.Exec(`DELETE FROM media_account_games WHERE media_account_id = ?`, accountID); err != nil {
+		return err
+	}
+	for _, gameID := range gameIDs {
+		if _, err := executor.Exec(`INSERT INTO media_account_games (media_account_id, game_id) VALUES (?, ?)`, accountID, gameID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *MySQLStore) loadGameIDs(records []AccountRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(records))
+	byID := make(map[string]*AccountRecord, len(records))
+	for index := range records {
+		ids = append(ids, records[index].ID)
+		byID[records[index].ID] = &records[index]
+	}
+	args := make([]any, len(ids))
+	for index, id := range ids {
+		args[index] = id
+	}
+	rows, err := s.db.Query(
+		`SELECT media_account_id, game_id FROM media_account_games WHERE media_account_id IN (`+placeholders(len(ids))+`) ORDER BY media_account_id, game_id`,
+		args...,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var accountID, gameID string
+		if err := rows.Scan(&accountID, &gameID); err != nil {
+			return err
+		}
+		if record := byID[accountID]; record != nil {
+			record.GameIDs = append(record.GameIDs, gameID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for index := range records {
+		records[index].GameID = compatibilityGameID(records[index].GameIDs)
+	}
+	return nil
 }
 
 func (s *MySQLStore) AddTags(userID identity.UserID, accountIDs, tags []string, createdAt time.Time) error {
@@ -262,7 +349,7 @@ func scanAccount(row scanner) (AccountRecord, error) {
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
 	var checkItemsJSON sql.NullString
 	err := row.Scan(
-		&record.ID, &record.UserID, &record.TeamID, &record.GameID, &record.Platform,
+		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
 		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,

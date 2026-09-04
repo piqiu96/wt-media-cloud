@@ -161,7 +161,7 @@ func TestServiceSeniorCanManageButCannotCreateSameTeamGameAccountForAnotherUser(
 	users := fakeUserResolver{users: map[identity.UserID]identity.PublicUser{
 		2: {ID: 2, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a"}},
 	}}
-	service := NewService(store, WithUserResolver(users))
+	service := NewService(store, WithUserResolver(users), WithGameResolver(defaultTestGameResolver()))
 	actor := mediaActor(1, teamID, identity.RoleSeniorOperator)
 
 	if _, err := service.CreateAccount(actor, CreateAccountInput{UserID: 2, GameID: "game-a", Platform: PlatformDouyin}); !errors.Is(err, ErrForbidden) {

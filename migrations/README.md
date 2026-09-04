@@ -23,6 +23,28 @@ The command creates the DSN database when missing, applies files in lexical orde
 - `20260714_005_sensitive_profile_locks.sql`: M2-C5 pre-authorized sensitive browser tasks and non-reusable Profile permits.
 - `20260722_012_user_team_model.sql`: M2-A1 numeric user identifiers, fixed roles, operation teams, historical team snapshots, and all existing user foreign-key migration.
 - `20260814_024_media_account_tags_unique_account_scope.sql`: restores the media-account tag uniqueness key to `(user_id, media_account_id, tag_name)` after migration 022 removed and re-added `media_account_id`.
+- `20260903_025_media_account_games.sql`: moves the media-account game association into the canonical `media_account_games` relation table and removes `media_accounts.game_id`.
+
+## Migration 025 Safety
+
+Migration 025 changes only the media-account-to-game association. It creates
+`media_account_games`, clears only that newly created relation table, copies
+every non-empty legacy `media_accounts.game_id`, then removes the legacy index
+and column. Media accounts, tags, Cookie fields, check items and Profile
+bindings are not deleted or rewritten.
+
+Before applying to a non-empty environment, record the counts of media
+accounts, tags, non-null Cookie/check-item fields and Profile bindings; also
+verify that every non-empty legacy game ID exists in `operation_games` and is
+enabled. After applying, verify `schema_migrations` contains version
+`20260903_025_media_account_games`, relation-row count equals the pre-migration
+non-empty legacy count, `SHOW COLUMNS FROM media_accounts` has no `game_id`, and
+the composite primary key rejects duplicate `(media_account_id, game_id)` rows.
+
+Rollback is not lossless after one account has more than one relation row. A
+recovery can add a nullable legacy column and project a chosen relation value,
+but it must first archive every relation row and never silently discard the
+additional associations.
 
 ## Migration 024 Safety
 
