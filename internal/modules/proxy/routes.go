@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -24,6 +25,29 @@ type ProfileProxyBinder interface {
 	BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (profilebinding.BrowserProfile, error)
 	UnbindProxy(profileID, expectedProxyID string) (profilebinding.BrowserProfile, error)
 }
+type ProfileScanController interface {
+	GetScan(identity.PublicUser, string) (profilebinding.ProfileScan, error)
+	ConfirmScan(identity.PublicUser, string) (profilebinding.ProfileScan, error)
+}
+type LocalTrustChecker interface {
+	CheckLocalTrust(identity.UserID, string) error
+}
+
+type LocalProxyChange struct {
+	Kind           string `json:"kind"`
+	ProfileID      string `json:"profile_id"`
+	BitProfileID   string `json:"bit_profile_id"`
+	CurrentProxyID string `json:"current_proxy_id,omitempty"`
+	TargetProxyID  string `json:"target_proxy_id,omitempty"`
+	ProxyProtocol  string `json:"proxy_protocol,omitempty"`
+	Host           string `json:"host,omitempty"`
+	Port           int    `json:"port,omitempty"`
+}
+
+type LocalProxyScanPreview struct {
+	ScanID  string             `json:"scan_id"`
+	Changes []LocalProxyChange `json:"changes"`
+}
 
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, deps ...any) {
 	var tasks TaskCreator
@@ -31,6 +55,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 	var checker SyncProxyChecker
 	var mutator SyncProxyMutator
 	var bindings ProfileProxyBinder
+	var scans ProfileScanController
+	var trust LocalTrustChecker
 	for _, dep := range deps {
 		if value, ok := dep.(TaskCreator); ok {
 			tasks = value
@@ -46,6 +72,12 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		if value, ok := dep.(ProfileProxyBinder); ok {
 			bindings = value
+		}
+		if value, ok := dep.(ProfileScanController); ok {
+			scans = value
+		}
+		if value, ok := dep.(LocalTrustChecker); ok {
+			trust = value
 		}
 	}
 	h.GET("/api/v1/proxies", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -194,6 +226,107 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		})
 	})
 
+	h.POST("/api/v1/proxies/local-scan/preview", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if scans == nil || profiles == nil {
+			common.Failure(c, 503, 30006, "本机代理扫描服务不可用", nil)
+			return
+		}
+		var req struct {
+			ScanID string `json:"scan_id"`
+		}
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		scan, err := scans.GetScan(actor, req.ScanID)
+		if err != nil {
+			common.Failure(c, 404, 23001, "扫描记录不存在", nil)
+			return
+		}
+		preview, err := buildLocalProxyScanPreview(service, profiles, scan)
+		if err != nil {
+			common.InternalError(c, "本机代理差异计算失败")
+			return
+		}
+		common.Success(c, preview)
+	})
+
+	h.POST("/api/v1/proxies/local-scan/confirm", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		var req struct {
+			ScanID string `json:"scan_id"`
+			NodeID string `json:"node_id"`
+		}
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		if strings.TrimSpace(req.NodeID) == "" {
+			common.Failure(c, 400, 10001, "本机节点不能为空", nil)
+			return
+		}
+		if scans == nil || profiles == nil || bindings == nil || trust == nil {
+			common.Failure(c, 503, 30006, "本机代理扫描服务不可用", nil)
+			return
+		}
+		if err := trust.CheckLocalTrust(actor.ID, req.NodeID); err != nil {
+			common.Forbidden(c, 11003, "当前本机环境未获可信授权")
+			return
+		}
+		scan, err := scans.ConfirmScan(actor, req.ScanID)
+		if err != nil {
+			confirmed, getErr := scans.GetScan(actor, req.ScanID)
+			if getErr != nil || confirmed.Status != profilebinding.ScanConfirmed {
+				common.Failure(c, 409, 23004, "扫描记录无法确认", nil)
+				return
+			}
+			scan = confirmed
+		}
+		preview, err := buildLocalProxyScanPreview(service, profiles, scan)
+		if err != nil {
+			common.InternalError(c, "本机代理差异计算失败")
+			return
+		}
+		unknownCounts := make(map[string]int)
+		for _, change := range preview.Changes {
+			if change.Kind == "unknown" {
+				unknownCounts[proxyAddressKey(change.ProxyProtocol, change.Host, change.Port)]++
+			}
+		}
+		for index := range preview.Changes {
+			change := &preview.Changes[index]
+			switch change.Kind {
+			case "changed":
+				if _, err := bindings.BindProxy(change.ProfileID, change.TargetProxyID, change.ProxyProtocol, change.Host, change.Port); err != nil {
+					common.InternalError(c, "代理正式关系更新失败")
+					return
+				}
+			case "unbound":
+				if _, err := bindings.UnbindProxy(change.ProfileID, change.CurrentProxyID); err != nil {
+					common.InternalError(c, "代理正式关系清除失败")
+					return
+				}
+			case "unknown":
+				created, err := service.CreateDiscovered(CreateProxyInput{ProxyProtocol: ProxyProtocol(change.ProxyProtocol), Host: change.Host, Port: change.Port}, unknownCounts[proxyAddressKey(change.ProxyProtocol, change.Host, change.Port)])
+				if err != nil {
+					common.InternalError(c, "扫描发现代理记录失败")
+					return
+				}
+				change.TargetProxyID = created.ID
+				if _, err := bindings.BindProxy(change.ProfileID, created.ID, change.ProxyProtocol, change.Host, change.Port); err != nil {
+					common.InternalError(c, "扫描发现代理关联失败")
+					return
+				}
+			}
+		}
+		common.Success(c, preview)
+	})
+
 	h.POST("/api/v1/proxies/:id/check", func(ctx context.Context, c *hertzapp.RequestContext) {
 		_, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
@@ -307,15 +440,24 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 
 	h.POST("/api/v1/proxies/:id/unbind", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
-		if !ok { return }
+		if !ok {
+			return
+		}
 		if profiles == nil || bindings == nil || mutator == nil {
 			common.Failure(c, 503, 30006, "Agent 同步写入服务不可用", nil)
 			return
 		}
-		var req struct { ProfileID string `json:"profile_id"` }
-		if !common.DecodeJSON(c, &req) { return }
+		var req struct {
+			ProfileID string `json:"profile_id"`
+		}
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
 		profile, found, err := profiles.GetProfile(req.ProfileID)
-		if err != nil { common.InternalError(c, "Profile 查询失败"); return }
+		if err != nil {
+			common.InternalError(c, "Profile 查询失败")
+			return
+		}
 		if !found || profile.UserID != actor.ID || profile.LocalStatus != profilebinding.ProfileActive {
 			common.Forbidden(c, 11003, "没有权限解绑此 Profile")
 			return
@@ -330,7 +472,10 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			return
 		}
 		updated, unbindErr := bindings.UnbindProxy(profile.ID, profile.ProxyID)
-		if unbindErr != nil { common.InternalError(c, "代理正式关系清除失败"); return }
+		if unbindErr != nil {
+			common.InternalError(c, "代理正式关系清除失败")
+			return
+		}
 		common.Success(c, updated)
 	})
 
@@ -352,6 +497,53 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		common.Success(c, proxy)
 	})
+}
+
+func buildLocalProxyScanPreview(service *Service, profiles ProfileLookup, scan profilebinding.ProfileScan) (LocalProxyScanPreview, error) {
+	known, err := service.List(ProxyFilter{Limit: 200})
+	if err != nil {
+		return LocalProxyScanPreview{}, err
+	}
+	byAddress := make(map[string][]ProxyConfig, len(known))
+	for _, proxy := range known {
+		byAddress[proxyAddressKey(string(proxy.ProxyProtocol), proxy.Host, proxy.Port)] = append(byAddress[proxyAddressKey(string(proxy.ProxyProtocol), proxy.Host, proxy.Port)], proxy)
+	}
+	changes := make([]LocalProxyChange, 0)
+	for _, observed := range scan.Profiles {
+		current, found, err := profiles.GetProfile(observed.ID)
+		if err != nil {
+			return LocalProxyScanPreview{}, err
+		}
+		if !found {
+			continue
+		}
+		protocol, host, port := strings.ToLower(strings.TrimSpace(observed.ProxyType)), strings.TrimSpace(observed.ProxyHost), observed.ProxyPort
+		if protocol == "" || protocol == "noproxy" || host == "" || port <= 0 {
+			if current.ProxyID != "" {
+				changes = append(changes, LocalProxyChange{Kind: "unbound", ProfileID: current.ID, BitProfileID: current.BitProfileID, CurrentProxyID: current.ProxyID})
+			}
+			continue
+		}
+		matches := byAddress[proxyAddressKey(protocol, host, port)]
+		base := LocalProxyChange{ProfileID: current.ID, BitProfileID: current.BitProfileID, CurrentProxyID: current.ProxyID, ProxyProtocol: protocol, Host: host, Port: port}
+		switch len(matches) {
+		case 0:
+			base.Kind = "unknown"
+		case 1:
+			if current.ProxyID == matches[0].ID {
+				continue
+			}
+			base.Kind, base.TargetProxyID = "changed", matches[0].ID
+		default:
+			base.Kind = "conflict"
+		}
+		changes = append(changes, base)
+	}
+	return LocalProxyScanPreview{ScanID: scan.ID, Changes: changes}, nil
+}
+
+func proxyAddressKey(protocol, host string, port int) string {
+	return strings.ToLower(strings.TrimSpace(protocol)) + "://" + strings.ToLower(strings.TrimSpace(host)) + ":" + strconv.Itoa(port)
 }
 
 func writeProxyError(c *hertzapp.RequestContext, err error) {

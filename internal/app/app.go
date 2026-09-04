@@ -75,7 +75,8 @@ func NewServer() (*Server, error) {
 		profileGuardStore := profileguard.NewMySQLStore(result.db)
 		profileguard.RegisterRoutes(engine, profileguard.NewService(profileGuardStore, runtimeService))
 		profileStore := profilebinding.NewMySQLStore(result.db)
-		profilebinding.RegisterRoutes(engine, profilebinding.NewService(profileStore), identityService, taskStore, runtimeService)
+		profileService := profilebinding.NewService(profileStore)
+		profilebinding.RegisterRoutes(engine, profileService, identityService, taskStore, runtimeService)
 		mediaaccount.RegisterRoutes(engine, mediaaccount.NewService(
 			mediaaccount.NewMySQLStore(result.db),
 			mediaaccount.WithProfileResolver(profileStore),
@@ -84,7 +85,7 @@ func NewServer() (*Server, error) {
 			mediaaccount.WithUserResolver(identityService),
 			mediaaccount.WithGameResolver(identityService),
 		), identityService, taskStore)
-		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv())
+		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv(), profileService, runtimeService)
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}

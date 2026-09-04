@@ -529,11 +529,19 @@ func (s *MySQLStore) UnbindProxy(profileID, expectedProxyID string) (BrowserProf
 		return BrowserProfile{}, err
 	}
 	updated, err := result.RowsAffected()
-	if err != nil { return BrowserProfile{}, err }
-	if updated == 0 { return BrowserProfile{}, ErrProfileNotFound }
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if updated == 0 {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
 	profile, found, err := s.GetProfile(profileID)
-	if err != nil { return BrowserProfile{}, err }
-	if !found { return BrowserProfile{}, ErrProfileNotFound }
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if !found {
+		return BrowserProfile{}, ErrProfileNotFound
+	}
 	return profile, nil
 }
 

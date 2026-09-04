@@ -1,8 +1,7 @@
 import { createApiClient } from './http.js'
 
-const api = createApiClient()
-
-export function createProxyClient() {
+export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
+  const api = createApiClient({ base, fetchImpl: fetch })
   return {
     list(params) {
       return api.get('/proxies', params)
@@ -39,6 +38,15 @@ export function createProxyClient() {
     },
     assign(proxyId, profileId) {
       return api.post(`/proxies/${proxyId}/assign`, { profile_id: profileId })
+    },
+    unbind(proxyId, profileId) {
+      return api.post(`/proxies/${proxyId}/unbind`, { profile_id: profileId })
+    },
+    previewLocalScan(scanId) {
+      return api.post('/proxies/local-scan/preview', { scan_id: scanId })
+    },
+    confirmLocalScan(scanId, nodeId) {
+      return api.post('/proxies/local-scan/confirm', { scan_id: scanId, node_id: nodeId })
     },
   }
 }

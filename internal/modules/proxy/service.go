@@ -188,6 +188,28 @@ func (s *Service) Create(input CreateProxyInput) (ProxyConfig, error) {
 	return p, nil
 }
 
+// CreateDiscovered records a proxy observed in a trusted local Profile scan.
+// It is paused until an operator supplements and checks it, so it cannot be
+// selected by normal allocation flows merely because it was observed locally.
+func (s *Service) CreateDiscovered(input CreateProxyInput, observedProfileCount int) (ProxyConfig, error) {
+	now := s.now()
+	p := ProxyConfig{
+		ID:              s.newID("proxy"),
+		ProxyProtocol:   input.ProxyProtocol,
+		Host:            input.Host,
+		Port:            input.Port,
+		BusinessStatus:  BizPaused,
+		MaxProfileCount: max(DefaultMaxProfiles, observedProfileCount),
+		Remark:          "本机扫描发现，待补充并检测",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.store.Create(p); err != nil {
+		return ProxyConfig{}, err
+	}
+	return p, nil
+}
+
 func (s *Service) Update(id string, input CreateProxyInput) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {

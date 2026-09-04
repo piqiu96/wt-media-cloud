@@ -59,6 +59,48 @@ paths:
         '403': {description: Profile does not belong to the current user or is inactive.}
         '409': {description: Profile is not formally bound to the requested proxy.}
         '503': {description: Agent write/read-back did not succeed; no formal relation was cleared.}
+  /api/v1/proxies/local-scan/preview:
+    post:
+      operationId: previewLocalProxyScan
+      summary: Compare a trusted BitBrowser Profile scan with formal proxy relations without writing Cloud data.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LocalProxyScanRequest'}
+      responses:
+        '200':
+          description: A zero-side-effect local proxy diff.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/LocalProxyScanResult'}
+        '404': {description: The caller cannot access the source Profile scan.}
+  /api/v1/proxies/local-scan/confirm:
+    post:
+      operationId: confirmLocalProxyScan
+      summary: Accept a trusted local Profile scan and reconcile only unambiguous formal proxy relations.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LocalProxyScanConfirmRequest'}
+      responses:
+        '200':
+          description: Known changes are reconciled; unknown proxies are created as paused records pending supplement and check.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/LocalProxyScanResult'}
+        '409': {description: The source Profile scan is no longer confirmable.}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
@@ -89,3 +131,36 @@ components:
         proxy_type: {type: string, nullable: true}
         proxy_host: {type: string, nullable: true}
         proxy_port: {type: integer}
+    LocalProxyScanRequest:
+      type: object
+      required: [scan_id]
+      additionalProperties: false
+      properties:
+        scan_id: {type: string, description: Trusted Profile scan id created from the local Desktop snapshot.}
+    LocalProxyScanConfirmRequest:
+      type: object
+      required: [scan_id, node_id]
+      additionalProperties: false
+      properties:
+        scan_id: {type: string, description: Trusted Profile scan id created from the local Desktop snapshot.}
+        node_id: {type: string, description: Current trusted Desktop node id.}
+    LocalProxyScanResult:
+      type: object
+      required: [scan_id, changes]
+      properties:
+        scan_id: {type: string}
+        changes:
+          type: array
+          items: {$ref: '#/components/schemas/LocalProxyChange'}
+    LocalProxyChange:
+      type: object
+      required: [kind, profile_id, bit_profile_id]
+      properties:
+        kind: {type: string, enum: [changed, unbound, unknown, conflict]}
+        profile_id: {type: string}
+        bit_profile_id: {type: string}
+        current_proxy_id: {type: string}
+        target_proxy_id: {type: string}
+        proxy_protocol: {type: string, enum: [http, https, socks5]}
+        host: {type: string}
+        port: {type: integer}
