@@ -22,6 +22,7 @@ type ProfileLookup interface {
 type ProfileProxyBinder interface {
 	CountProfilesByProxyID(string) (int, error)
 	BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (profilebinding.BrowserProfile, error)
+	UnbindProxy(profileID, expectedProxyID string) (profilebinding.BrowserProfile, error)
 }
 
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, deps ...any) {
@@ -266,10 +267,6 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Forbidden(c, 11003, "没有权限分配此 Profile")
 			return
 		}
-		if profile.ProxyID != "" && profile.ProxyID != c.Param("id") {
-			common.Conflict(c, 23004, "Profile 已绑定其他代理，请使用更换操作")
-			return
-		}
 		proxy, err := service.Get(c.Param("id"))
 		if err != nil {
 			writeProxyError(c, err)
@@ -279,7 +276,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.Conflict(c, 23004, "代理不可用")
 			return
 		}
-		if profile.ProxyID == "" {
+		if profile.ProxyID != proxy.ID {
 			assigned, countErr := bindings.CountProfilesByProxyID(proxy.ID)
 			if countErr != nil {
 				common.InternalError(c, "代理关联窗口查询失败")
@@ -295,7 +292,7 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 				return
 			}
 		}
-		result, mutateErr := mutator.Mutate(ctx, ProxyMutationInput{ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password})
+		result, mutateErr := mutator.Mutate(ctx, ProxyMutationInput{Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password})
 		if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID || result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
 			common.Failure(c, 503, 30008, "Agent 写入或读回代理失败", nil)
 			return
@@ -305,6 +302,35 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			common.InternalError(c, "代理正式关系更新失败")
 			return
 		}
+		common.Success(c, updated)
+	})
+
+	h.POST("/api/v1/proxies/:id/unbind", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok { return }
+		if profiles == nil || bindings == nil || mutator == nil {
+			common.Failure(c, 503, 30006, "Agent 同步写入服务不可用", nil)
+			return
+		}
+		var req struct { ProfileID string `json:"profile_id"` }
+		if !common.DecodeJSON(c, &req) { return }
+		profile, found, err := profiles.GetProfile(req.ProfileID)
+		if err != nil { common.InternalError(c, "Profile 查询失败"); return }
+		if !found || profile.UserID != actor.ID || profile.LocalStatus != profilebinding.ProfileActive {
+			common.Forbidden(c, 11003, "没有权限解绑此 Profile")
+			return
+		}
+		if profile.ProxyID != c.Param("id") {
+			common.Conflict(c, 23004, "Profile 未绑定此代理")
+			return
+		}
+		result, mutateErr := mutator.Mutate(ctx, ProxyMutationInput{Operation: "unbind", ProfileID: profile.BitProfileID})
+		if mutateErr != nil || !result.Readback || result.Operation != "unbind" || result.ProfileID != profile.BitProfileID {
+			common.Failure(c, 503, 30008, "Agent 写入或读回解绑失败", nil)
+			return
+		}
+		updated, unbindErr := bindings.UnbindProxy(profile.ID, profile.ProxyID)
+		if unbindErr != nil { common.InternalError(c, "代理正式关系清除失败"); return }
 		common.Success(c, updated)
 	})
 

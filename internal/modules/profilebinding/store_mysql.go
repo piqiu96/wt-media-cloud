@@ -520,6 +520,23 @@ func (s *MySQLStore) BindProxy(profileID, proxyID, proxyType, proxyHost string, 
 	return profile, nil
 }
 
+func (s *MySQLStore) UnbindProxy(profileID, expectedProxyID string) (BrowserProfile, error) {
+	result, err := s.db.Exec(
+		`UPDATE browser_profiles SET proxy_id = NULL, proxy_type = NULL, proxy_host = NULL, proxy_port = 0, updated_at = ? WHERE id = ? AND proxy_id = ?`,
+		time.Now(), profileID, expectedProxyID,
+	)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil { return BrowserProfile{}, err }
+	if updated == 0 { return BrowserProfile{}, ErrProfileNotFound }
+	profile, found, err := s.GetProfile(profileID)
+	if err != nil { return BrowserProfile{}, err }
+	if !found { return BrowserProfile{}, ErrProfileNotFound }
+	return profile, nil
+}
+
 func (s *MySQLStore) ProfileHasAccountReferences(profileID string) (bool, error) {
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM media_accounts WHERE browser_profile_id = ?`, profileID).Scan(&count); err != nil {

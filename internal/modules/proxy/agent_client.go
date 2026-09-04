@@ -23,6 +23,7 @@ type ProxyCheckResult struct {
 }
 
 type ProxyMutationInput struct {
+	Operation     string        `json:"operation,omitempty"`
 	ProfileID     string        `json:"profile_id"`
 	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
 	Host          string        `json:"host"`
@@ -32,6 +33,7 @@ type ProxyMutationInput struct {
 }
 
 type ProxyMutationResult struct {
+	Operation     string        `json:"operation,omitempty"`
 	ProfileID     string        `json:"profile_id"`
 	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
 	Host          string        `json:"host"`
@@ -128,7 +130,16 @@ func (c *HTTPAgentChecker) Mutate(ctx context.Context, input ProxyMutationInput)
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return ProxyMutationResult{}, fmt.Errorf("decode agent proxy mutation response: %w", err)
 	}
-	if !envelope.Data.Readback || envelope.Data.ProfileID == "" || envelope.Data.Host == "" || envelope.Data.Port <= 0 {
+	if !envelope.Data.Readback || envelope.Data.ProfileID == "" {
+		return ProxyMutationResult{}, fmt.Errorf("agent proxy mutation response missing verified readback")
+	}
+	if input.Operation == "unbind" {
+		if envelope.Data.Operation != "unbind" {
+			return ProxyMutationResult{}, fmt.Errorf("agent proxy mutation response missing verified unbind")
+		}
+		return envelope.Data, nil
+	}
+	if envelope.Data.Host == "" || envelope.Data.Port <= 0 {
 		return ProxyMutationResult{}, fmt.Errorf("agent proxy mutation response missing verified readback")
 	}
 	return envelope.Data, nil
