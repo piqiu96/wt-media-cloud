@@ -33,7 +33,6 @@ const detailProxy = ref(null)
 // Quota dialog
 const quotaVisible = ref(false)
 const quotaProxyId = ref("")
-const quotaPlatform = ref("douyin")
 const quotaMax = ref(1)
 const savingQuota = ref(false)
 
@@ -171,16 +170,15 @@ async function queueBackgroundCheck() {
 }
 
 function openQuota(proxy) {
-  quotaProxyId.value = proxy.id
-  quotaPlatform.value = "douyin"
-  quotaMax.value = 1
+	quotaProxyId.value = proxy.id
+	quotaMax.value = proxy.max_profile_count || 3
   quotaVisible.value = true
 }
 
 async function saveQuota() {
   savingQuota.value = true
   try {
-    await proxyClient.setQuota(quotaProxyId.value, quotaPlatform.value, quotaMax.value)
+		await proxyClient.setMaxProfileCount(quotaProxyId.value, quotaMax.value)
     quotaVisible.value = false
   } catch (e) {
     error.value = e.message
@@ -195,7 +193,8 @@ const columns = [
   { colKey: "region", title: "地区", width: 100 },
   { colKey: "supplier", title: "供应商", width: 100 },
   { colKey: "business_status", title: "状态", width: 90 },
-  { colKey: "last_check_result", title: "检测结果", width: 100 },
+	{ colKey: "max_profile_count", title: "最大窗口数", width: 110 },
+	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
   { colKey: "op", title: "操作", width: 180 },
 ]
@@ -275,6 +274,7 @@ function formatTime(t) {
         <BusinessStatus v-else-if="row.last_check_result" status="error" :label="row.last_check_result" />
         <span v-else style="color:var(--td-text-color-placeholder)">未检测</span>
       </template>
+		<template #max_profile_count="{ row }">{{ row.max_profile_count || 3 }}</template>
       <template #expires_at="{ row }">
         <span :style="row.expires_at && new Date(row.expires_at) < new Date() ? 'color:var(--td-error-color)' : ''">
           {{ formatTime(row.expires_at) }}
@@ -359,15 +359,8 @@ function formatTime(t) {
     </t-drawer>
 
     <!-- 配额弹窗 -->
-    <t-dialog v-model:visible="quotaVisible" header="设置平台配额" @confirm="saveQuota" :confirm-btn="{ loading: savingQuota, theme: 'primary' }">
+		<t-dialog v-model:visible="quotaVisible" header="设置最大窗口数" @confirm="saveQuota" :confirm-btn="{ loading: savingQuota, theme: 'primary' }">
       <t-form>
-        <t-form-item label="平台">
-          <t-select v-model="quotaPlatform">
-            <t-option value="douyin" label="抖音" />
-            <t-option value="bilibili" label="B站" />
-            <t-option value="baijiahao" label="百家号" />
-          </t-select>
-        </t-form-item>
         <t-form-item label="最大 Profile 数">
           <t-input-number v-model="quotaMax" :min="1" :max="100" />
         </t-form-item>

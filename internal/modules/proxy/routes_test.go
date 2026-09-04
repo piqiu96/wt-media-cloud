@@ -50,6 +50,25 @@ func TestImportPreviewDoesNotPersistUntilConfirmed(t *testing.T) {
 	}
 }
 
+func TestUnifiedQuotaAppliesAcrossPlatforms(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", BusinessStatus: BizActive, MaxProfileCount: 2}
+	service := NewService(store)
+
+	available, err := service.CheckQuota("proxy-1", 1)
+	if err != nil || !available {
+		t.Fatalf("CheckQuota(1) = %v, %v; want true, nil", available, err)
+	}
+	available, err = service.CheckQuota("proxy-1", 2)
+	if err != nil || available {
+		t.Fatalf("CheckQuota(2) = %v, %v; want false, nil", available, err)
+	}
+	updated, err := service.SetMaxProfileCount("proxy-1", 4)
+	if err != nil || updated.MaxProfileCount != 4 {
+		t.Fatalf("SetMaxProfileCount() = %#v, %v", updated, err)
+	}
+}
+
 func proxyJSON(engine *server.Hertz, method, path, body, token string) *ut.ResponseRecorder {
 	return ut.PerformRequest(engine.Engine, method, path,
 		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
@@ -69,9 +88,6 @@ func (s *routeMemoryStore) FindByID(id string) (ProxyConfig, bool, error) {
 	proxy, ok := s.items[id]
 	return proxy, ok, nil
 }
-func (s *routeMemoryStore) List(ProxyFilter) ([]ProxyConfig, error)    { return nil, nil }
-func (s *routeMemoryStore) Update(proxy ProxyConfig) error             { s.items[proxy.ID] = proxy; return nil }
-func (s *routeMemoryStore) Delete(id string) error                     { delete(s.items, id); return nil }
-func (s *routeMemoryStore) UpsertQuota(PlatformQuota) error            { return nil }
-func (s *routeMemoryStore) ListQuotas(string) ([]PlatformQuota, error) { return nil, nil }
-func (s *routeMemoryStore) DeleteQuota(string, string) error           { return nil }
+func (s *routeMemoryStore) List(ProxyFilter) ([]ProxyConfig, error) { return nil, nil }
+func (s *routeMemoryStore) Update(proxy ProxyConfig) error          { s.items[proxy.ID] = proxy; return nil }
+func (s *routeMemoryStore) Delete(id string) error                  { delete(s.items, id); return nil }

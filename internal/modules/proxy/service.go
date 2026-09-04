@@ -13,8 +13,8 @@ import (
 type ProxyProtocol string
 
 const (
-	ProtocolHTTP  ProxyProtocol = "http"
-	ProtocolHTTPS ProxyProtocol = "https"
+	ProtocolHTTP   ProxyProtocol = "http"
+	ProtocolHTTPS  ProxyProtocol = "https"
 	ProtocolSOCKS5 ProxyProtocol = "socks5"
 )
 
@@ -42,37 +42,32 @@ type ProxyConfig struct {
 	Supplier        string         `json:"supplier,omitempty"`
 	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
 	BusinessStatus  BusinessStatus `json:"business_status"`
+	MaxProfileCount int            `json:"max_profile_count"`
 	LastCheckAt     *time.Time     `json:"last_check_at,omitempty"`
 	LastCheckResult string         `json:"last_check_result,omitempty"`
 	ObservedExitIP  string         `json:"observed_exit_ip,omitempty"`
 	Remark          string         `json:"remark,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-	PlatformQuotas  []PlatformQuota `json:"platform_quotas,omitempty"`
-}
-
-type PlatformQuota struct {
-	ProxyID     string `json:"proxy_id"`
-	Platform    string `json:"platform"`
-	MaxProfiles int    `json:"max_profiles"`
 }
 
 type CreateProxyInput struct {
-	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
-	Host          string        `json:"host"`
-	Port          int           `json:"port"`
-	Username      string        `json:"username"`
-	Password      string        `json:"password"`
-	Region        string        `json:"region"`
-	Supplier      string        `json:"supplier"`
-	ExpiresAt     *time.Time    `json:"expires_at"`
-	Remark        string        `json:"remark"`
+	ProxyProtocol   ProxyProtocol `json:"proxy_protocol"`
+	Host            string        `json:"host"`
+	Port            int           `json:"port"`
+	Username        string        `json:"username"`
+	Password        string        `json:"password"`
+	Region          string        `json:"region"`
+	Supplier        string        `json:"supplier"`
+	ExpiresAt       *time.Time    `json:"expires_at"`
+	Remark          string        `json:"remark"`
+	MaxProfileCount int           `json:"max_profile_count"`
 }
 
 type BulkImportRow struct {
-	Raw     string            `json:"raw"`
-	Parsed  *CreateProxyInput `json:"parsed,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	Raw    string            `json:"raw"`
+	Parsed *CreateProxyInput `json:"parsed,omitempty"`
+	Error  string            `json:"error,omitempty"`
 }
 
 type Store interface {
@@ -81,9 +76,6 @@ type Store interface {
 	List(filter ProxyFilter) ([]ProxyConfig, error)
 	Update(ProxyConfig) error
 	Delete(id string) error
-	UpsertQuota(PlatformQuota) error
-	ListQuotas(proxyID string) ([]PlatformQuota, error)
-	DeleteQuota(proxyID, platform string) error
 }
 
 type Service struct {
@@ -166,27 +158,26 @@ func (s *Service) Get(id string) (ProxyConfig, error) {
 	if !ok {
 		return ProxyConfig{}, ErrNotFound
 	}
-	quotas, _ := s.store.ListQuotas(id)
-	p.PlatformQuotas = quotas
 	return p, nil
 }
 
 func (s *Service) Create(input CreateProxyInput) (ProxyConfig, error) {
 	now := s.now()
 	p := ProxyConfig{
-		ID:             s.newID("proxy"),
-		ProxyProtocol:  input.ProxyProtocol,
-		Host:           input.Host,
-		Port:           input.Port,
-		Username:       input.Username,
-		Password:       input.Password,
-		Region:         input.Region,
-		Supplier:       input.Supplier,
-		ExpiresAt:      input.ExpiresAt,
-		BusinessStatus: BizActive,
-		Remark:         input.Remark,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:              s.newID("proxy"),
+		ProxyProtocol:   input.ProxyProtocol,
+		Host:            input.Host,
+		Port:            input.Port,
+		Username:        input.Username,
+		Password:        input.Password,
+		Region:          input.Region,
+		Supplier:        input.Supplier,
+		ExpiresAt:       input.ExpiresAt,
+		BusinessStatus:  BizActive,
+		MaxProfileCount: normalizedMaxProfileCount(input.MaxProfileCount),
+		Remark:          input.Remark,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := s.store.Create(p); err != nil {
 		return ProxyConfig{}, err
@@ -276,13 +267,10 @@ func checkTCPConnect(host string, port int) string {
 	return "reachable"
 }
 
-// SetQuota creates or updates a per-platform quota for a proxy.
-// DefaultMaxProfiles is the default limit when no per-proxy quota is configured.
 const DefaultMaxProfiles = 3
 
-// CheckQuota verifies a proxy has capacity for the given platform.
-// currentAssigned is the number of profiles already using this proxy for the platform.
-func (s *Service) CheckQuota(proxyID, platform string, currentAssigned int) (bool, error) {
+// CheckQuota verifies a proxy has cross-platform capacity.
+func (s *Service) CheckQuota(proxyID string, currentAssigned int) (bool, error) {
 	proxy, ok, err := s.store.FindByID(proxyID)
 	if err != nil {
 		return false, err
@@ -290,37 +278,33 @@ func (s *Service) CheckQuota(proxyID, platform string, currentAssigned int) (boo
 	if !ok || proxy.BusinessStatus != BizActive {
 		return false, nil
 	}
-	quotas, err := s.store.ListQuotas(proxyID)
-	if err != nil {
-		return false, err
-	}
-	maxProfiles := DefaultMaxProfiles
-	for _, q := range quotas {
-		if q.Platform == platform {
-			maxProfiles = q.MaxProfiles
-			break
-		}
-	}
-	return currentAssigned < maxProfiles, nil
+	return currentAssigned < normalizedMaxProfileCount(proxy.MaxProfileCount), nil
 }
 
-func (s *Service) SetQuota(proxyID, platform string, maxProfiles int) (PlatformQuota, error) {
-	_, ok, err := s.store.FindByID(proxyID)
+func (s *Service) SetMaxProfileCount(proxyID string, maxProfiles int) (ProxyConfig, error) {
+	proxy, ok, err := s.store.FindByID(proxyID)
 	if err != nil {
-		return PlatformQuota{}, err
+		return ProxyConfig{}, err
 	}
 	if !ok {
-		return PlatformQuota{}, ErrNotFound
+		return ProxyConfig{}, ErrNotFound
 	}
-	q := PlatformQuota{
-		ProxyID:     proxyID,
-		Platform:    platform,
-		MaxProfiles: maxProfiles,
+	if maxProfiles <= 0 || maxProfiles > 1000 {
+		return ProxyConfig{}, ErrInvalidInput
 	}
-	if err := s.store.UpsertQuota(q); err != nil {
-		return PlatformQuota{}, err
+	proxy.MaxProfileCount = maxProfiles
+	proxy.UpdatedAt = s.now()
+	if err := s.store.Update(proxy); err != nil {
+		return ProxyConfig{}, err
 	}
-	return q, nil
+	return proxy, nil
+}
+
+func normalizedMaxProfileCount(value int) int {
+	if value <= 0 {
+		return DefaultMaxProfiles
+	}
+	return value
 }
 
 // --- Helpers ---

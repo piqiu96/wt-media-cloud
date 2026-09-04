@@ -256,24 +256,23 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		common.Created(c, task)
 	})
 
-	h.POST("/api/v1/proxies/:id/quotas", func(ctx context.Context, c *hertzapp.RequestContext) {
+	h.POST("/api/v1/proxies/:id/quota", func(ctx context.Context, c *hertzapp.RequestContext) {
 		_, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
 		var req struct {
-			Platform    string `json:"platform"`
-			MaxProfiles int    `json:"max_profiles"`
+			MaxProfiles int `json:"max_profiles"`
 		}
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		quota, err := service.SetQuota(c.Param("id"), req.Platform, req.MaxProfiles)
+		proxy, err := service.SetMaxProfileCount(c.Param("id"), req.MaxProfiles)
 		if err != nil {
 			writeProxyError(c, err)
 			return
 		}
-		common.Success(c, quota)
+		common.Success(c, proxy)
 	})
 }
 

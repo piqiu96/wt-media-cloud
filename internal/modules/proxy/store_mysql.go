@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const proxyColumns = `id, proxy_protocol, host, port, username, password, region, supplier, expires_at, business_status, last_check_at, last_check_result, observed_exit_ip, remark, created_at, updated_at`
+const proxyColumns = `id, proxy_protocol, host, port, username, password, region, supplier, expires_at, business_status, max_profile_count, last_check_at, last_check_result, observed_exit_ip, remark, created_at, updated_at`
 
 type MySQLStore struct {
 	db *sql.DB
@@ -18,11 +18,11 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 
 func (s *MySQLStore) Create(p ProxyConfig) error {
 	_, err := s.db.Exec(
-		`INSERT INTO proxy_configs (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO proxy_configs (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.ProxyProtocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
 		nullIfEmpty(p.Region), nullIfEmpty(p.Supplier),
-		p.ExpiresAt, p.BusinessStatus,
+		p.ExpiresAt, p.BusinessStatus, p.MaxProfileCount,
 		p.LastCheckAt, nullIfEmpty(p.LastCheckResult),
 		nullIfEmpty(p.ObservedExitIP), nullIfEmpty(p.Remark),
 		p.CreatedAt, p.UpdatedAt,
@@ -92,11 +92,11 @@ func (s *MySQLStore) List(filter ProxyFilter) ([]ProxyConfig, error) {
 
 func (s *MySQLStore) Update(p ProxyConfig) error {
 	_, err := s.db.Exec(
-		`UPDATE proxy_configs SET proxy_protocol=?, host=?, port=?, username=?, password=?, region=?, supplier=?, expires_at=?, business_status=?, last_check_at=?, last_check_result=?, observed_exit_ip=?, remark=?, updated_at=? WHERE id=?`,
+		`UPDATE proxy_configs SET proxy_protocol=?, host=?, port=?, username=?, password=?, region=?, supplier=?, expires_at=?, business_status=?, max_profile_count=?, last_check_at=?, last_check_result=?, observed_exit_ip=?, remark=?, updated_at=? WHERE id=?`,
 		p.ProxyProtocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
 		nullIfEmpty(p.Region), nullIfEmpty(p.Supplier),
-		p.ExpiresAt, p.BusinessStatus,
+		p.ExpiresAt, p.BusinessStatus, p.MaxProfileCount,
 		p.LastCheckAt, nullIfEmpty(p.LastCheckResult),
 		nullIfEmpty(p.ObservedExitIP), nullIfEmpty(p.Remark),
 		p.UpdatedAt, p.ID,
@@ -106,38 +106,6 @@ func (s *MySQLStore) Update(p ProxyConfig) error {
 
 func (s *MySQLStore) Delete(id string) error {
 	_, err := s.db.Exec(`DELETE FROM proxy_configs WHERE id = ?`, id)
-	return err
-}
-
-func (s *MySQLStore) UpsertQuota(q PlatformQuota) error {
-	_, err := s.db.Exec(
-		`INSERT INTO proxy_platform_quotas (proxy_id, platform, max_profiles, created_at, updated_at)
-		 VALUES (?, ?, ?, NOW(), NOW())
-		 ON DUPLICATE KEY UPDATE max_profiles=?, updated_at=NOW()`,
-		q.ProxyID, q.Platform, q.MaxProfiles, q.MaxProfiles,
-	)
-	return err
-}
-
-func (s *MySQLStore) ListQuotas(proxyID string) ([]PlatformQuota, error) {
-	rows, err := s.db.Query(`SELECT proxy_id, platform, max_profiles FROM proxy_platform_quotas WHERE proxy_id = ?`, proxyID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var results []PlatformQuota
-	for rows.Next() {
-		var q PlatformQuota
-		if err := rows.Scan(&q.ProxyID, &q.Platform, &q.MaxProfiles); err != nil {
-			return nil, err
-		}
-		results = append(results, q)
-	}
-	return results, rows.Err()
-}
-
-func (s *MySQLStore) DeleteQuota(proxyID, platform string) error {
-	_, err := s.db.Exec(`DELETE FROM proxy_platform_quotas WHERE proxy_id = ? AND platform = ?`, proxyID, platform)
 	return err
 }
 
@@ -155,7 +123,7 @@ func scanProxy(row scannable) (ProxyConfig, error) {
 	err := row.Scan(
 		&p.ID, &p.ProxyProtocol, &p.Host, &p.Port,
 		&username, &password, &region, &supplier,
-		&expiresAt, &p.BusinessStatus,
+		&expiresAt, &p.BusinessStatus, &p.MaxProfileCount,
 		&lastCheckAt, &lastCheckResult, &observedExitIP, &remark,
 		&p.CreatedAt, &p.UpdatedAt,
 	)

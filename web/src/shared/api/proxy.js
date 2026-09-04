@@ -37,8 +37,8 @@ export function createProxyClient() {
     backgroundCheck(id) {
       return api.post(`/proxies/${id}/check/background`)
     },
-    setQuota(proxyId, platform, maxProfiles) {
-      return api.post(`/proxies/${proxyId}/quotas`, { platform, max_profiles: maxProfiles })
+    setMaxProfileCount(proxyId, maxProfiles) {
+      return api.post(`/proxies/${proxyId}/quota`, { max_profiles: maxProfiles })
     },
   }
 }
