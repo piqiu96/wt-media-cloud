@@ -132,12 +132,26 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		common.NoContent(c)
 	})
 
-	h.POST("/api/v1/proxies/import", func(ctx context.Context, c *hertzapp.RequestContext) {
-		actor, ok := identity.AuthenticateRequest(c, identityService)
+	h.POST("/api/v1/proxies/import/preview", func(ctx context.Context, c *hertzapp.RequestContext) {
+		_, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
 			return
 		}
-		_ = actor
+		var req struct {
+			Lines []string `json:"lines"`
+		}
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		parsed := service.BulkParse(req.Lines)
+		common.Success(c, map[string]interface{}{"parsed": parsed})
+	})
+
+	h.POST("/api/v1/proxies/import", func(ctx context.Context, c *hertzapp.RequestContext) {
+		_, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
 		var req struct {
 			Lines []string `json:"lines"`
 		}

@@ -7,6 +7,9 @@ export function createProxyClient() {
     list(params) {
       return api.get('/proxies', params)
     },
+    create(input) {
+      return api.post('/proxies', input)
+    },
     get(id) {
       return api.get(`/proxies/${id}`)
     },
@@ -24,6 +27,9 @@ export function createProxyClient() {
     },
     bulkImport(lines) {
       return api.post('/proxies/import', { lines })
+    },
+    previewImport(lines) {
+      return api.post('/proxies/import/preview', { lines })
     },
     check(id) {
       return api.post(`/proxies/${id}/check`)

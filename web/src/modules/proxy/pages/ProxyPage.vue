@@ -22,6 +22,9 @@ const importText = ref("")
 const showImport = ref(false)
 const importPreview = ref([])
 const importing = ref(false)
+const showCreate = ref(false)
+const creating = ref(false)
+const createForm = ref(emptyProxyForm())
 
 // Detail drawer
 const detailVisible = ref(false)
@@ -89,7 +92,7 @@ async function previewImport() {
   const lines = importText.value.split("\n").map(l => l.trim()).filter(Boolean)
   if (!lines.length) return
   try {
-    const result = await proxyClient.bulkImport(lines)
+    const result = await proxyClient.previewImport(lines)
     importPreview.value = result.parsed || []
   } catch (e) {
     error.value = e.message
@@ -97,9 +100,11 @@ async function previewImport() {
 }
 
 async function confirmImport() {
-  importing.value = true
-  try {
-    await loadProxies()
+	importing.value = true
+	try {
+		const lines = importText.value.split("\n").map(l => l.trim()).filter(Boolean)
+		await proxyClient.bulkImport(lines)
+		await loadProxies()
     showImport.value = false
     importText.value = ""
     importPreview.value = []
@@ -107,6 +112,32 @@ async function confirmImport() {
     error.value = e.message
   } finally {
     importing.value = false
+  }
+}
+
+function emptyProxyForm() {
+  return { proxy_protocol: "http", host: "", port: 0, username: "", password: "", region: "", supplier: "", remark: "" }
+}
+
+function openCreate() {
+  createForm.value = emptyProxyForm()
+  showCreate.value = true
+}
+
+async function createProxy() {
+  if (!createForm.value.host.trim() || !Number(createForm.value.port)) {
+    error.value = "请填写代理地址和端口"
+    return
+  }
+  creating.value = true
+  try {
+    await proxyClient.create({ ...createForm.value, host: createForm.value.host.trim(), port: Number(createForm.value.port) })
+    showCreate.value = false
+    await loadProxies()
+  } catch (e) {
+    error.value = e.message || "创建代理失败"
+  } finally {
+    creating.value = false
   }
 }
 
@@ -214,6 +245,7 @@ function formatTime(t) {
     <!-- 操作栏 -->
     <div class="action-bar">
       <t-space>
+		<t-button theme="primary" @click="openCreate">新增代理</t-button>
         <t-button theme="primary" @click="showImport = true">批量导入</t-button>
         <t-button variant="outline" @click="loadProxies">刷新</t-button>
       </t-space>
@@ -264,6 +296,19 @@ function formatTime(t) {
         </t-space>
       </template>
     </t-table>
+
+    <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: '创建' }" @confirm="createProxy">
+      <t-form label-width="84px">
+        <t-form-item label="协议"><t-select v-model="createForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
+        <t-form-item label="地址"><t-input v-model="createForm.host" placeholder="例如 127.0.0.1" /></t-form-item>
+        <t-form-item label="端口"><t-input-number v-model="createForm.port" :min="1" :max="65535" /></t-form-item>
+        <t-form-item label="用户名"><t-input v-model="createForm.username" /></t-form-item>
+        <t-form-item label="密码"><t-input v-model="createForm.password" type="password" /></t-form-item>
+        <t-form-item label="地区"><t-input v-model="createForm.region" /></t-form-item>
+        <t-form-item label="供应商"><t-input v-model="createForm.supplier" /></t-form-item>
+        <t-form-item label="备注"><t-textarea v-model="createForm.remark" /></t-form-item>
+      </t-form>
+    </t-dialog>
 
     <!-- 批量导入弹窗 -->
     <t-dialog v-model:visible="showImport" header="批量导入代理" width="640px"
