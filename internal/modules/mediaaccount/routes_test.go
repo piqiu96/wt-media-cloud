@@ -209,7 +209,7 @@ func newMediaAccountRouteTest(t *testing.T) (*server.Hertz, string, *memoryStore
 		t.Fatal(err)
 	}
 	operator, err := identityService.CreateUser(admin.ID, identity.CreateUserInput{
-		Username: "operator", Password: "a-long-operator-password", Role: identity.RoleOperator, TeamID: &team.ID, GameIDs: []string{"game-a"},
+		Username: "operator", Password: "a-long-operator-password", Role: identity.RoleOperator, TeamID: &team.ID, GameIDs: []string{"game-a", "game-b"},
 	})
 	if err != nil {
 		t.Fatal(err)

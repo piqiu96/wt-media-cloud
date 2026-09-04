@@ -336,7 +336,10 @@ function splitTags(value) {
 function gameNames(gameIds) {
   const values = Array.isArray(gameIds) ? gameIds : []
   if (!values.length) return "未绑定游戏"
-  return values.map(gameId => games.value.find(game => game.id === gameId)?.name || gameId).join("、")
+  return values.map(gameId => {
+    const game = games.value.find(item => item.id === gameId)
+    return game ? game.name : `${gameId}（超出用户游戏范围）`
+  }).join("、")
 }
 
 function profileName(profileId) {

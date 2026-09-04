@@ -333,6 +333,19 @@ func RegisterRoutes(h *server.Hertz, service *Service, cfg RouteConfig) {
 		common.Success(c, filterGames(games, c))
 	})
 
+	h.GET("/api/v1/games/:game_id/references", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := AuthenticateRequest(c, service)
+		if !ok {
+			return
+		}
+		references, err := service.GameReferences(actor.ID, c.Param("game_id"))
+		if err != nil {
+			writeIdentityError(c, err)
+			return
+		}
+		common.Success(c, references)
+	})
+
 	h.POST("/api/v1/games", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := AuthenticateRequest(c, service)
 		if !ok {

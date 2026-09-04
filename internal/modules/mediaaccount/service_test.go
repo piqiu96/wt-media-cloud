@@ -462,6 +462,27 @@ func TestServiceUpdateAccountName(t *testing.T) {
 	}
 }
 
+func TestNonAdminCannotUseGameOutsideAssignedScope(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	actor.GameIDs = []string{"game-a"}
+
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-b", Platform: PlatformBilibili}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("CreateAccount(outside scope) error = %v, want ErrForbidden", err)
+	}
+	account, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	if err != nil {
+		t.Fatalf("CreateAccount(in scope) error = %v", err)
+	}
+	if _, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{GameIDs: gameIDsPtr([]string{"game-b"})}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("UpdateAccount(outside scope) error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.ListAccounts(actor, AccountFilter{GameIDs: []string{"game-b"}}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListAccounts(outside scope) error = %v, want ErrForbidden", err)
+	}
+}
+
 func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
@@ -938,5 +959,5 @@ func testUserResolver() UserResolver {
 }
 
 func mediaActor(userID identity.UserID, teamID identity.TeamID, role identity.Role) identity.PublicUser {
-	return identity.PublicUser{ID: userID, Role: role, Status: identity.UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a"}}
+	return identity.PublicUser{ID: userID, Role: role, Status: identity.UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a", "game-b", "game-z"}}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -566,10 +567,91 @@ func (s *MySQLStore) GameHasReferences(id string) (bool, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT
         (SELECT COUNT(*) FROM user_game_scopes WHERE game_id = ?) +
-        (SELECT COUNT(*) FROM media_accounts WHERE game_id = ?)`,
+		(SELECT COUNT(*) FROM media_account_games WHERE game_id = ?)`,
 		id, id,
 	).Scan(&count)
 	return count > 0, err
+}
+
+func (s *MySQLStore) ListGameReferenceSummaries() (map[string]GameReferenceSummary, error) {
+	rows, err := s.db.Query(`SELECT g.id, COALESCE(scopes.count, 0), COALESCE(accounts.count, 0)
+		FROM operation_games g
+		LEFT JOIN (SELECT game_id, COUNT(*) AS count FROM user_game_scopes GROUP BY game_id) scopes ON scopes.game_id = g.id
+		LEFT JOIN (SELECT game_id, COUNT(*) AS count FROM media_account_games GROUP BY game_id) accounts ON accounts.game_id = g.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	summaries := make(map[string]GameReferenceSummary)
+	for rows.Next() {
+		var gameID string
+		var summary GameReferenceSummary
+		if err := rows.Scan(&gameID, &summary.UserScopeCount, &summary.MediaAccountCount); err != nil {
+			return nil, err
+		}
+		summaries[gameID] = summary
+	}
+	return summaries, rows.Err()
+}
+
+func (s *MySQLStore) GameReferences(gameID string) (GameReferences, error) {
+	references := GameReferences{GameID: gameID, Users: []GameReferenceUser{}, MediaAccounts: []GameReferenceAccount{}}
+	userRows, err := s.db.Query(`SELECT u.id, u.username, u.role, u.team_id, COALESCE(t.name, '')
+		FROM user_game_scopes scopes
+		JOIN users u ON u.id = scopes.user_id
+		LEFT JOIN operation_teams t ON t.id = u.team_id
+		WHERE scopes.game_id = ? ORDER BY u.id`, gameID)
+	if err != nil {
+		return GameReferences{}, err
+	}
+	defer userRows.Close()
+	for userRows.Next() {
+		var reference GameReferenceUser
+		var teamID sql.NullInt64
+		if err := userRows.Scan(&reference.UserID, &reference.Username, &reference.Role, &teamID, &reference.TeamName); err != nil {
+			return GameReferences{}, err
+		}
+		if teamID.Valid {
+			value := TeamID(teamID.Int64)
+			reference.TeamID = &value
+		}
+		references.Users = append(references.Users, reference)
+	}
+	if err := userRows.Err(); err != nil {
+		return GameReferences{}, err
+	}
+	accountRows, err := s.db.Query(`SELECT ma.id, COALESCE(ma.name, ''), ma.platform, ma.user_id, u.username
+		FROM media_account_games relations
+		JOIN media_accounts ma ON ma.id = relations.media_account_id
+		JOIN users u ON u.id = ma.user_id
+		WHERE relations.game_id = ? ORDER BY ma.id`, gameID)
+	if err != nil {
+		return GameReferences{}, err
+	}
+	defer accountRows.Close()
+	for accountRows.Next() {
+		var reference GameReferenceAccount
+		if err := accountRows.Scan(&reference.AccountID, &reference.Name, &reference.Platform, &reference.UserID, &reference.Username); err != nil {
+			return GameReferences{}, err
+		}
+		references.MediaAccounts = append(references.MediaAccounts, reference)
+	}
+	return references, accountRows.Err()
+}
+
+func (s *MySQLStore) UserHasGameReferencesOutsideScope(userID UserID, gameIDs []string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM media_accounts accounts JOIN media_account_games relations ON relations.media_account_id = accounts.id WHERE accounts.user_id = ?`
+	args := []any{userID}
+	if len(gameIDs) > 0 {
+		query += ` AND relations.game_id NOT IN (` + strings.TrimRight(strings.Repeat("?,", len(gameIDs)), ",") + `)`
+		for _, gameID := range gameIDs {
+			args = append(args, gameID)
+		}
+	}
+	query += `)`
+	var exists bool
+	err := s.db.QueryRow(query, args...).Scan(&exists)
+	return exists, err
 }
 
 func (s *MySQLStore) CreateSession(session Session) error {

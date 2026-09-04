@@ -38,4 +38,12 @@ describe('users api client', () => {
     const client = createUsersClient({ fetch })
     await expect(client.deleteTeam(10)).rejects.toMatchObject({ message: '对象仍有业务引用，不能删除', errcode: 20003 })
   })
+
+  it('loads game reference details from the dedicated endpoint', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok({ game_id: 'naruto', users: [], media_accounts: [] }))
+    const client = createUsersClient({ fetch })
+
+    await expect(client.getGameReferences('naruto')).resolves.toMatchObject({ game_id: 'naruto' })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/games/naruto/references')
+  })
 })

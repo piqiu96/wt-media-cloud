@@ -46,6 +46,9 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
         status: filters.status,
       })
     },
+    getGameReferences(gameId) {
+      return api.get(`/games/${encodeURIComponent(gameId)}/references`)
+    },
     createGame(input) {
       return api.post('/games', { id: input.id, name: input.name, remark: input.remark })
     },

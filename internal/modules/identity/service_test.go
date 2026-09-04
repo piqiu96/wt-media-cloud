@@ -356,6 +356,64 @@ func TestReferencedGameCannotBeDisabledOrDeleted(t *testing.T) {
 	}
 }
 
+func TestAdminGameListIncludesReferenceSummaryAndDetails(t *testing.T) {
+	store := newGameMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team := mustCreateTeam(t, service, admin.ID, "火影组")
+	game, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	if err != nil {
+		t.Fatalf("CreateGame() error = %v", err)
+	}
+	operator, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{game.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	store.accountReferences[game.ID] = []GameReferenceAccount{{AccountID: "8", Name: "B站账号", Platform: "bilibili", UserID: operator.ID, Username: operator.Username}}
+
+	games, err := service.ListGames(admin.ID)
+	if err != nil {
+		t.Fatalf("ListGames() error = %v", err)
+	}
+	if len(games) != 1 || games[0].ReferenceSummary == nil || games[0].ReferenceSummary.UserScopeCount != 1 || games[0].ReferenceSummary.MediaAccountCount != 1 || games[0].ReferenceSummary.TotalCount != 2 {
+		t.Fatalf("ListGames() = %#v, want user=1 account=1 total=2", games)
+	}
+	references, err := service.GameReferences(admin.ID, game.ID)
+	if err != nil {
+		t.Fatalf("GameReferences() error = %v", err)
+	}
+	if len(references.Users) != 1 || references.Users[0].Username != "operator-a" || len(references.MediaAccounts) != 1 || references.MediaAccounts[0].AccountID != "8" {
+		t.Fatalf("GameReferences() = %#v", references)
+	}
+	if _, err := service.GameReferences(operator.ID, game.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("GameReferences(operator) error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestUserGameScopeCannotDropReferencedAccountGame(t *testing.T) {
+	store := newGameMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team := mustCreateTeam(t, service, admin.ID, "火影组")
+	naruto, _ := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	delta, _ := service.CreateGame(admin.ID, "delta", "三角洲", "")
+	operator, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{naruto.ID, delta.ID},
+	})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	store.accountReferences[naruto.ID] = []GameReferenceAccount{{AccountID: "8", UserID: operator.ID}}
+
+	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleOperator, &team.ID, []string{delta.ID}); !errors.Is(err, ErrUserGameScopeInUse) {
+		t.Fatalf("UpdateUserAccess(drop referenced game) error = %v, want ErrUserGameScopeInUse", err)
+	}
+}
+
 func TestServiceResolveGameReturnsStoredGameWithoutActorScope(t *testing.T) {
 	store := newGameMemoryStore()
 	service := NewService(store)
@@ -527,11 +585,12 @@ type failingIdentityStore struct {
 
 type gameMemoryStore struct {
 	*memoryStore
-	games map[string]OperationGame
+	games             map[string]OperationGame
+	accountReferences map[string][]GameReferenceAccount
 }
 
 func newGameMemoryStore() *gameMemoryStore {
-	return &gameMemoryStore{memoryStore: NewMemoryStore(), games: make(map[string]OperationGame)}
+	return &gameMemoryStore{memoryStore: NewMemoryStore(), games: make(map[string]OperationGame), accountReferences: make(map[string][]GameReferenceAccount)}
 }
 
 func (s *gameMemoryStore) CreateGameWithAudit(game OperationGame, event AuditEvent) error {
@@ -589,6 +648,53 @@ func (s *gameMemoryStore) GameHasReferences(id string) (bool, error) {
 	for _, user := range users {
 		for _, gameID := range user.GameIDs {
 			if gameID == id {
+				return true, nil
+			}
+		}
+	}
+	return len(s.accountReferences[id]) > 0, nil
+}
+
+func (s *gameMemoryStore) ListGameReferenceSummaries() (map[string]GameReferenceSummary, error) {
+	summaries := make(map[string]GameReferenceSummary, len(s.games))
+	for gameID := range s.games {
+		summaries[gameID] = GameReferenceSummary{MediaAccountCount: len(s.accountReferences[gameID])}
+	}
+	users, err := s.ListUsers()
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		for _, gameID := range user.GameIDs {
+			summary := summaries[gameID]
+			summary.UserScopeCount++
+			summaries[gameID] = summary
+		}
+	}
+	return summaries, nil
+}
+
+func (s *gameMemoryStore) GameReferences(gameID string) (GameReferences, error) {
+	references := GameReferences{GameID: gameID, Users: []GameReferenceUser{}, MediaAccounts: append([]GameReferenceAccount(nil), s.accountReferences[gameID]...)}
+	users, err := s.ListUsers()
+	if err != nil {
+		return GameReferences{}, err
+	}
+	for _, user := range users {
+		if containsGame(user.GameIDs, gameID) {
+			references.Users = append(references.Users, GameReferenceUser{UserID: user.ID, Username: user.Username, Role: user.Role, TeamID: user.TeamID, TeamName: user.TeamName})
+		}
+	}
+	return references, nil
+}
+
+func (s *gameMemoryStore) UserHasGameReferencesOutsideScope(userID UserID, gameIDs []string) (bool, error) {
+	for gameID, references := range s.accountReferences {
+		if containsGame(gameIDs, gameID) {
+			continue
+		}
+		for _, reference := range references {
+			if reference.UserID == userID {
 				return true, nil
 			}
 		}

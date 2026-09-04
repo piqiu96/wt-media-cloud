@@ -22,10 +22,10 @@ describe('M2-A3 management pages', () => {
   })
 
   it('gives game page search/list/filter/pagination basics', () => {
-    for (const required of ['游戏管理', '搜索游戏ID或名称', '用户数', '状态', '新建游戏', 't-table', 't-pagination', '该游戏已分配给']) {
+    for (const required of ['游戏管理', '搜索游戏ID或名称', '关联情况', '用户授权', '媒体账号', '新建游戏', 't-table', 't-pagination', '查看关联详情']) {
       expect(gamesSource).toContain(required)
     }
-    expect(gamesSource).toContain(":disabled=\"row.status === 'enabled' && row.user_count > 0\"")
-    expect(gamesSource).toContain(':disabled="row.user_count > 0"')
+    expect(gamesSource).toContain(":disabled=\"row.status === 'enabled' && hasReferences(row)\"")
+    expect(gamesSource).toContain(':disabled="hasReferences(row)"')
   })
 })

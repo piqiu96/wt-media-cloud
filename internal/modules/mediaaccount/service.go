@@ -324,6 +324,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	if !validActor(actor) || !validPlatform(platform) || len(remark) > 500 || len(name) > 128 {
 		return Account{}, ErrInvalidInput
 	}
+	target := actor
 	teamID := actor.TeamID
 	if userID != actor.ID {
 		if actor.Role != identity.RoleAdmin {
@@ -340,6 +341,9 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 			return Account{}, ErrInvalidInput
 		}
 		teamID = target.TeamID
+	}
+	if err := validateGameScope(target, gameIDs); err != nil {
+		return Account{}, err
 	}
 	now := s.now()
 	record := AccountRecord{
@@ -440,6 +444,9 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 	if err := s.validateGameIDs(filter.GameIDs); err != nil {
 		return nil, err
 	}
+	if err := validateGameScope(actor, filter.GameIDs); err != nil {
+		return nil, err
+	}
 	if actor.Role == identity.RoleOperator {
 		if filter.UserID > 0 && filter.UserID != actor.ID {
 			return nil, ErrForbidden
@@ -521,6 +528,23 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 		record.GameIDs = *replaceGameIDs
 		record.GameID = compatibilityGameID(record.GameIDs)
 	}
+	owner := actor
+	if record.UserID != actor.ID {
+		if s.users == nil {
+			return Account{}, ErrForbidden
+		}
+		resolved, found, err := s.users.ResolveUser(record.UserID)
+		if err != nil {
+			return Account{}, err
+		}
+		if !found {
+			return Account{}, ErrNotFound
+		}
+		owner = resolved
+	}
+	if err := validateGameScope(owner, record.GameIDs); err != nil {
+		return Account{}, err
+	}
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if len(name) > 128 {
@@ -601,6 +625,9 @@ func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID st
 	}
 	if record.BusinessStatus != BusinessEnabled {
 		return AccountCheckStart{}, ErrInvalidInput
+	}
+	if err := validateGameScope(actor, record.GameIDs); err != nil {
+		return AccountCheckStart{}, err
 	}
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
 		return AccountCheckStart{}, ErrProfileUnavailable
@@ -1123,6 +1150,25 @@ func (s *Service) validateGameIDs(gameIDs []string) error {
 		}
 		if !found || game.Status != identity.GameStatusEnabled {
 			return ErrInvalidInput
+		}
+	}
+	return nil
+}
+
+func validateGameScope(user identity.PublicUser, gameIDs []string) error {
+	if user.Role == identity.RoleAdmin {
+		return nil
+	}
+	for _, gameID := range gameIDs {
+		found := false
+		for _, allowedID := range user.GameIDs {
+			if allowedID == gameID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ErrForbidden
 		}
 	}
 	return nil

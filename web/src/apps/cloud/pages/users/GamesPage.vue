@@ -4,7 +4,6 @@ import { createUsersClient } from './usersApi.js'
 
 const client = createUsersClient()
 const games = ref([])
-const users = ref([])
 const loading = ref(true)
 const error = ref('')
 const filters = ref({ keyword: '', status: '' })
@@ -13,6 +12,10 @@ const dialogVisible = ref(false)
 const editingGame = ref(null)
 const gameForm = ref(emptyGameForm())
 const saving = ref(false)
+const referencesVisible = ref(false)
+const referenceGame = ref(null)
+const references = ref({ users: [], media_accounts: [] })
+const referencesLoading = ref(false)
 
 const pagedGames = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
@@ -22,7 +25,7 @@ const pagedGames = computed(() => {
 const columns = [
   { colKey: 'id', title: '游戏ID', width: 160 },
   { colKey: 'name', title: '游戏名称' },
-  { colKey: 'user_count', title: '用户数', width: 100 },
+  { colKey: 'references', title: '关联情况', width: 190 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'remark', title: '备注' },
   { colKey: 'operations', title: '操作', width: 220 },
@@ -38,17 +41,34 @@ async function loadGames() {
   loading.value = true
   error.value = ''
   try {
-    const [gameRows, userRows] = await Promise.all([client.listGames(filters.value), client.listUsers()])
-    users.value = userRows || []
-    games.value = (gameRows || []).map((game) => ({
-      ...game,
-      user_count: users.value.filter((user) => Array.isArray(user.game_ids) && user.game_ids.includes(game.id)).length,
-    }))
+    games.value = await client.listGames(filters.value) || []
     pagination.value.current = 1
   } catch (e) {
     error.value = e.message || '加载游戏失败'
   } finally {
     loading.value = false
+  }
+}
+
+function referenceSummary(game) {
+  return game.reference_summary || { user_scope_count: 0, media_account_count: 0, total_count: 0 }
+}
+
+function hasReferences(game) {
+  return referenceSummary(game).total_count > 0
+}
+
+async function openReferences(game) {
+  referenceGame.value = game
+  references.value = { users: [], media_accounts: [] }
+  referencesVisible.value = true
+  referencesLoading.value = true
+  try {
+    references.value = await client.getGameReferences(game.id)
+  } catch (e) {
+    error.value = e.message || '加载关联详情失败'
+  } finally {
+    referencesLoading.value = false
   }
 }
 
@@ -84,8 +104,8 @@ async function saveGame() {
 }
 
 async function toggleGame(game) {
-  if (game.status === 'enabled' && game.user_count > 0) {
-    error.value = `该游戏已分配给 ${game.user_count} 个用户，不能停用，请先调整用户游戏范围`
+  if (game.status === 'enabled' && hasReferences(game)) {
+    error.value = '该游戏仍有关联，请先查看关联详情并解除用户授权或媒体账号引用'
     return
   }
   try {
@@ -101,8 +121,8 @@ async function toggleGame(game) {
 }
 
 async function deleteGame(game) {
-  if (game.user_count > 0) {
-    error.value = `该游戏已分配给 ${game.user_count} 个用户，不能删除，请先调整用户游戏范围`
+  if (hasReferences(game)) {
+    error.value = '该游戏仍有关联，请先查看关联详情并解除用户授权或媒体账号引用'
     return
   }
   if (!window.confirm(`确定删除游戏 ${game.name}？已有用户或业务引用时不能删除。`)) return
@@ -132,12 +152,16 @@ async function deleteGame(game) {
         <t-button size="small" @click="loadGames">查询</t-button>
       </div>
       <t-table :data="pagedGames" :columns="columns" row-key="id" size="small" hover>
+        <template #references="{ row }">
+          <t-link v-if="hasReferences(row)" theme="primary" @click="openReferences(row)">用户 {{ referenceSummary(row).user_scope_count }} / 账号 {{ referenceSummary(row).media_account_count }}</t-link>
+          <span v-else>无关联</span>
+        </template>
         <template #status="{ row }"><t-tag :theme="row.status === 'enabled' ? 'success' : 'danger'" size="small">{{ row.status === 'enabled' ? '启用' : '停用' }}</t-tag></template>
         <template #operations="{ row }">
           <t-space>
             <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
-            <t-button size="small" variant="text" :disabled="row.status === 'enabled' && row.user_count > 0" @click="toggleGame(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</t-button>
-            <t-button size="small" variant="text" theme="danger" :disabled="row.user_count > 0" @click="deleteGame(row)">删除</t-button>
+            <t-button size="small" variant="text" :disabled="row.status === 'enabled' && hasReferences(row)" @click="toggleGame(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</t-button>
+            <t-button size="small" variant="text" theme="danger" :disabled="hasReferences(row)" @click="deleteGame(row)">删除</t-button>
           </t-space>
         </template>
       </t-table>
@@ -158,10 +182,23 @@ async function deleteGame(game) {
         <t-form-item label="备注"><t-textarea v-model="gameForm.remark" /></t-form-item>
       </t-form>
     </t-dialog>
+    <t-drawer v-model:visible="referencesVisible" :header="`${referenceGame?.name || ''} 的关联详情`" :size="'620px'" :footer="false">
+      <t-loading :loading="referencesLoading">
+        <div class="reference-section">用户授权</div>
+        <t-table :data="references.users || []" size="small" row-key="user_id" :columns="[
+          { colKey: 'user_id', title: 'UID', width: 80 }, { colKey: 'username', title: '用户名' }, { colKey: 'role', title: '角色' }, { colKey: 'team_name', title: '运营组' }
+        ]" />
+        <div class="reference-section">媒体账号</div>
+        <t-table :data="references.media_accounts || []" size="small" row-key="account_id" :columns="[
+          { colKey: 'account_id', title: '账号ID', width: 90 }, { colKey: 'name', title: '账号名称' }, { colKey: 'platform', title: '平台' }, { colKey: 'username', title: '归属用户' }
+        ]" />
+      </t-loading>
+    </t-drawer>
   </t-loading>
 </template>
 
 <style scoped>
 .filter-row { display:grid; grid-template-columns:minmax(180px, 1fr) minmax(120px, 180px) auto; gap:8px; align-items:center; margin-bottom:16px; max-width:620px; }
 .pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
+.reference-section { margin: 16px 0 8px; font-weight: 600; }
 </style>

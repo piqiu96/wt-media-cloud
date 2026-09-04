@@ -46,6 +46,7 @@ var (
 	ErrInvalidGameID        = errors.New("game id is invalid")
 	ErrGameNameTaken        = errors.New("game name is already in use")
 	ErrGameInUse            = errors.New("game is still referenced")
+	ErrUserGameScopeInUse   = errors.New("user game scope is still referenced by media accounts")
 	ErrGameUnavailable      = errors.New("game is not available")
 	ErrPasswordTooShort     = errors.New("password is too short")
 	ErrBootstrapUnavailable = errors.New("initial admin cannot be created")
@@ -67,12 +68,41 @@ const (
 )
 
 type OperationGame struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Status    GameStatus `json:"status"`
-	Remark    string     `json:"remark"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	Status           GameStatus            `json:"status"`
+	Remark           string                `json:"remark"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	ReferenceSummary *GameReferenceSummary `json:"reference_summary,omitempty"`
+}
+
+type GameReferenceSummary struct {
+	UserScopeCount    int `json:"user_scope_count"`
+	MediaAccountCount int `json:"media_account_count"`
+	TotalCount        int `json:"total_count"`
+}
+
+type GameReferenceUser struct {
+	UserID   UserID  `json:"user_id"`
+	Username string  `json:"username"`
+	Role     Role    `json:"role"`
+	TeamID   *TeamID `json:"team_id"`
+	TeamName string  `json:"team_name"`
+}
+
+type GameReferenceAccount struct {
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+	Platform  string `json:"platform"`
+	UserID    UserID `json:"user_id"`
+	Username  string `json:"username"`
+}
+
+type GameReferences struct {
+	GameID        string                 `json:"game_id"`
+	Users         []GameReferenceUser    `json:"users"`
+	MediaAccounts []GameReferenceAccount `json:"media_accounts"`
 }
 
 type User struct {
@@ -209,6 +239,12 @@ type operationGameStore interface {
 	UpdateGameWithAudit(OperationGame, AuditEvent) error
 	DeleteGameWithAudit(string, AuditEvent) error
 	GameHasReferences(string) (bool, error)
+}
+
+type gameReferenceStore interface {
+	ListGameReferenceSummaries() (map[string]GameReferenceSummary, error)
+	GameReferences(string) (GameReferences, error)
+	UserHasGameReferencesOutsideScope(UserID, []string) (bool, error)
 }
 
 type Service struct {
@@ -686,17 +722,51 @@ func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 运营/高级运营只返回 enabled 游戏（供筛选/分配）；管理员返回全量（供管理）
-	if !isAdmin(actor) && actor.Role != RoleSeniorOperator {
+	if !isAdmin(actor) {
 		enabled := make([]OperationGame, 0, len(games))
 		for _, game := range games {
-			if game.Status == GameStatusEnabled {
+			if game.Status == GameStatusEnabled && containsGame(actor.GameIDs, game.ID) {
 				enabled = append(enabled, game)
 			}
 		}
 		return enabled, nil
 	}
+	if references, ok := s.store.(gameReferenceStore); ok {
+		summaries, err := references.ListGameReferenceSummaries()
+		if err != nil {
+			return nil, err
+		}
+		for index := range games {
+			summary := summaries[games[index].ID]
+			summary.TotalCount = summary.UserScopeCount + summary.MediaAccountCount
+			games[index].ReferenceSummary = &summary
+		}
+	}
 	return games, nil
+}
+
+func (s *Service) GameReferences(actorID UserID, gameID string) (GameReferences, error) {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return GameReferences{}, err
+	}
+	if !ok || !isAdmin(actor) {
+		return GameReferences{}, ErrForbidden
+	}
+	gameStore, ok := s.store.(operationGameStore)
+	if !ok {
+		return GameReferences{}, ErrForbidden
+	}
+	if _, found, err := gameStore.FindGame(strings.TrimSpace(gameID)); err != nil {
+		return GameReferences{}, err
+	} else if !found {
+		return GameReferences{}, ErrInvalidInput
+	}
+	references, ok := s.store.(gameReferenceStore)
+	if !ok {
+		return GameReferences{}, ErrForbidden
+	}
+	return references.GameReferences(strings.TrimSpace(gameID))
 }
 
 func (s *Service) UpdateGame(actorID UserID, id, name string, status GameStatus, remark string) (OperationGame, error) {
@@ -834,6 +904,15 @@ func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, 
 		}
 		if err := s.ensureGamesAssignable(normalizedGameIDs); err != nil {
 			return PublicUser{}, err
+		}
+		if references, ok := s.store.(gameReferenceStore); ok {
+			inUse, err := references.UserHasGameReferencesOutsideScope(user.ID, normalizedGameIDs)
+			if err != nil {
+				return PublicUser{}, err
+			}
+			if inUse {
+				return PublicUser{}, ErrUserGameScopeInUse
+			}
 		}
 	}
 	user.Role = role
