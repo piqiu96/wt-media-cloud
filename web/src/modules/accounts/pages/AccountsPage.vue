@@ -34,7 +34,7 @@ const searchPlatform = ref("")
 const searchBizStatus = ref("")
 const searchLoginStatus = ref("")
 const searchTags = ref("")
-const searchGameId = ref("")
+const searchGameIds = ref([])
 const pagination = ref({ current: 1, pageSize: 20, total: 0, showJumper: true })
 
 const showCreate = ref(false)
@@ -55,7 +55,7 @@ const editVisible = ref(false)
 const editAccount = ref(null)
 const editName = ref("")
 const editRemark = ref("")
-const editGameId = ref("")
+const editGameIds = ref([])
 const editProfileId = ref("")
 const editTags = ref([])
 const savingEdit = ref(false)
@@ -89,7 +89,7 @@ onMounted(async () => {
 function defaultCreateForm() {
   return {
     userId: "",
-    gameId: "",
+    gameIds: [],
     name: "",
     platform: "bilibili",
     browserProfileId: "",
@@ -105,9 +105,6 @@ async function loadAuxiliaryData() {
   ])
   profiles.value = Array.isArray(profileList) ? profileList : []
   games.value = Array.isArray(gameList) ? gameList : []
-  if (!createForm.value.gameId) {
-    createForm.value.gameId = (user.value?.game_ids || [])[0] || games.value[0]?.id || ""
-  }
 }
 
 async function loadAccounts() {
@@ -117,7 +114,7 @@ async function loadAccounts() {
   if (searchPlatform.value) params.platform = searchPlatform.value
   if (searchBizStatus.value) params.businessStatus = searchBizStatus.value
   if (searchLoginStatus.value) params.loginStatus = searchLoginStatus.value
-  if (searchGameId.value) params.game_id = searchGameId.value
+  if (searchGameIds.value.length) params.gameIds = searchGameIds.value
   if (searchTags.value) params.anyTags = [searchTags.value]
   if (searchProfile.value) params.profile = searchProfile.value
   try {
@@ -140,7 +137,7 @@ function resetFilters() {
   searchBizStatus.value = ""
   searchLoginStatus.value = ""
   searchTags.value = ""
-  searchGameId.value = ""
+  searchGameIds.value = []
   searchProfile.value = ""
   loadAccounts()
 }
@@ -151,7 +148,7 @@ function applyStatFilter(key) {
   searchBizStatus.value = ""
   searchLoginStatus.value = ""
   searchTags.value = ""
-  searchGameId.value = ""
+  searchGameIds.value = []
   searchProfile.value = ""
   if (key === "enabled") searchBizStatus.value = "enabled"
   else if (key === "disabled") searchBizStatus.value = "disabled"
@@ -164,7 +161,6 @@ function applyStatFilter(key) {
 
 function openCreate() {
   createForm.value = defaultCreateForm()
-  createForm.value.gameId = (user.value?.game_ids || [])[0] || games.value[0]?.id || ""
   createError.value = ""
   showCreate.value = true
 }
@@ -175,7 +171,7 @@ async function createAccount() {
   try {
     await accountClient.create({
       userId: user.value?.role === "admin" ? Number(createForm.value.userId) || undefined : undefined,
-      gameId: createForm.value.gameId,
+      gameIds: createForm.value.gameIds,
       name: createForm.value.name || undefined,
       platform: createForm.value.platform,
       browserProfileId: isDesktop ? createForm.value.browserProfileId : "",
@@ -281,7 +277,7 @@ function openEdit(account) {
   editAccount.value = account
   editName.value = account.name || ""
   editRemark.value = account.remark || ""
-  editGameId.value = account.game_id || ""
+  editGameIds.value = Array.isArray(account.game_ids) ? [...account.game_ids] : []
   editProfileId.value = account.browser_profile_id || ""
   editTags.value = [...(account.tags || [])]
   editError.value = ""
@@ -296,7 +292,7 @@ async function saveEdit() {
     let updated = await accountClient.update(editAccount.value.id, {
       name: editName.value || undefined,
       remark: editRemark.value,
-      gameId: editGameId.value || "",
+      gameIds: editGameIds.value,
     })
     // 绑定窗口差异
     if (isDesktop && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
@@ -337,8 +333,10 @@ function splitTags(value) {
   return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
 }
 
-function gameName(gameId) {
-  return games.value.find(game => game.id === gameId)?.name || gameId || "-"
+function gameNames(gameIds) {
+  const values = Array.isArray(gameIds) ? gameIds : []
+  if (!values.length) return "未绑定游戏"
+  return values.map(gameId => games.value.find(game => game.id === gameId)?.name || gameId).join("、")
 }
 
 function profileName(profileId) {
@@ -353,7 +351,7 @@ function profileForAccount(account) {
 
 function executableText(account) {
   if (account.business_status !== "enabled") return "不可执行：账号已停用"
-  if (!account.game_id) return "不可执行：未绑定游戏"
+  if (!(account.game_ids || []).length) return "不可执行：未绑定游戏"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   const profile = profileForAccount(account)
   if (profile && (profile.local_status !== "active" || profile.business_status === "disabled")) return "不可执行：绑定窗口已停用"
@@ -465,7 +463,7 @@ function checkItemStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  return isDesktop && account?.business_status === "enabled" && !!account.game_id && !!account.browser_profile_id && canOperateBoundWindow(account)
+  return isDesktop && account?.business_status === "enabled" && (account.game_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
@@ -775,7 +773,7 @@ const columns = [
   { colKey: "id", title: "ID", width: 60 },
   { colKey: "platform", title: "平台", width: 70 },
   { colKey: "account_info", title: "账号信息", width: 190 },
-  { colKey: "game_id", title: "游戏", width: 80 },
+  { colKey: "game_ids", title: "游戏", width: 160 },
   { colKey: "tags", title: "标签", width: 140 },
   { colKey: "window_info", title: "浏览器窗口", width: 180 },
   { colKey: "business_status", title: "业务状态", width: 80, minWidth: 80 },
@@ -821,7 +819,7 @@ const columns = [
       </t-form>
       <t-form layout="inline" class="filter-fields">
         <t-form-item label="游戏">
-          <t-select v-model="searchGameId" placeholder="全部" clearable class="filter-control" style="min-width:140px">
+          <t-select v-model="searchGameIds" multiple clearable placeholder="全部" class="filter-control" style="min-width:180px">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
@@ -906,7 +904,7 @@ const columns = [
           <div class="account-sub">UID：{{ row.platform_account_id || '--' }}</div>
         </div>
       </template>
-      <template #game_id="{ row }">{{ gameName(row.game_id) }}</template>
+      <template #game_ids="{ row }">{{ gameNames(row.game_ids) }}</template>
       <template #tags="{ row }">
         <div class="account-tags">
           <t-tag v-for="tag in (row.tags || []).slice(0, 2)" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
@@ -960,7 +958,7 @@ const columns = [
           <t-descriptions-item label="系统账号ID">{{ accountInfoPopup.id }}</t-descriptions-item>
           <t-descriptions-item label="平台UID">{{ accountInfoPopup.platform_account_id || '--' }}</t-descriptions-item>
           <t-descriptions-item label="平台昵称">{{ accountInfoPopup.name || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="所属游戏">{{ gameName(accountInfoPopup.game_id) }}</t-descriptions-item>
+          <t-descriptions-item label="所属游戏">{{ gameNames(accountInfoPopup.game_ids) }}</t-descriptions-item>
           <t-descriptions-item label="标签">{{ (accountInfoPopup.tags || []).join('、') || '--' }}</t-descriptions-item>
           <t-descriptions-item label="业务状态">{{ bizStatusText(accountInfoPopup.business_status) }}</t-descriptions-item>
           <t-descriptions-item label="账号状态">{{ accountStatusText(accountInfoPopup) }}</t-descriptions-item>
@@ -1010,7 +1008,7 @@ const columns = [
           <t-input-number v-model="createForm.userId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
         <t-form-item label="游戏">
-          <t-select v-model="createForm.gameId" clearable placeholder="可先不绑定；启用执行前必须绑定游戏">
+          <t-select v-model="createForm.gameIds" multiple clearable placeholder="可先不绑定；启用执行前必须绑定游戏">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
@@ -1067,7 +1065,7 @@ const columns = [
           <t-input v-model="editName" maxlength="128" placeholder="账号名称，留空由检查回填" />
         </t-form-item>
         <t-form-item label="所属游戏">
-          <t-select v-model="editGameId" clearable placeholder="选择游戏">
+          <t-select v-model="editGameIds" multiple clearable placeholder="选择游戏">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select>
         </t-form-item>
@@ -1113,7 +1111,7 @@ const columns = [
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
         <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>
-        <t-descriptions-item label="游戏">{{ gameName(detailAccount.game_id) }}</t-descriptions-item>
+        <t-descriptions-item label="游戏">{{ gameNames(detailAccount.game_ids) }}</t-descriptions-item>
         <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
         <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>
       </t-descriptions>
