@@ -27,8 +27,9 @@ const (
 )
 
 var (
-	ErrInvalidInput = errors.New("proxy input is invalid")
-	ErrNotFound     = errors.New("proxy was not found")
+	ErrInvalidInput  = errors.New("proxy input is invalid")
+	ErrNotFound      = errors.New("proxy was not found")
+	ErrNotAssignable = errors.New("proxy is not assignable")
 )
 
 type ProxyConfig struct {
@@ -218,15 +219,27 @@ func (s *Service) Update(id string, input CreateProxyInput) (ProxyConfig, error)
 	if !ok {
 		return ProxyConfig{}, ErrNotFound
 	}
+	password := input.Password
+	if password == "" {
+		password = p.Password
+	}
+	connectionChanged := p.ProxyProtocol != input.ProxyProtocol || p.Host != input.Host || p.Port != input.Port || p.Username != input.Username || p.Password != password
 	p.ProxyProtocol = input.ProxyProtocol
 	p.Host = input.Host
 	p.Port = input.Port
 	p.Username = input.Username
-	p.Password = input.Password
+	p.Password = password
 	p.Region = input.Region
 	p.Supplier = input.Supplier
-	p.ExpiresAt = input.ExpiresAt
+	if input.ExpiresAt != nil {
+		p.ExpiresAt = input.ExpiresAt
+	}
 	p.Remark = input.Remark
+	if connectionChanged {
+		p.LastCheckAt = nil
+		p.LastCheckResult = ""
+		p.ObservedExitIP = ""
+	}
 	p.UpdatedAt = s.now()
 	if err := s.store.Update(p); err != nil {
 		return ProxyConfig{}, err
@@ -304,6 +317,16 @@ func (s *Service) CheckQuota(proxyID string, currentAssigned int) (bool, error) 
 		return false, nil
 	}
 	return currentAssigned < normalizedMaxProfileCount(proxy.MaxProfileCount), nil
+}
+
+func (s *Service) CheckAssignable(proxy ProxyConfig) error {
+	if proxy.BusinessStatus != BizActive || proxy.LastCheckResult != "ok" {
+		return ErrNotAssignable
+	}
+	if proxy.ExpiresAt != nil && !proxy.ExpiresAt.After(s.now()) {
+		return ErrNotAssignable
+	}
+	return nil
 }
 
 func (s *Service) SetMaxProfileCount(proxyID string, maxProfiles int) (ProxyConfig, error) {

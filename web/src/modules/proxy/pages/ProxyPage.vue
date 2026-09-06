@@ -10,6 +10,9 @@ const error = ref("")
 const taskNotice = ref("")
 const failedCheckProxy = ref(null)
 const queuedTaskId = ref("")
+const selectedRowKeys = ref([])
+const batchChecking = ref(false)
+const batchCheckResult = ref("")
 
 // Search
 const searchSupplier = ref("")
@@ -25,6 +28,10 @@ const importing = ref(false)
 const showCreate = ref(false)
 const creating = ref(false)
 const createForm = ref(emptyProxyForm())
+const editVisible = ref(false)
+const editing = ref(false)
+const editProxy = ref(null)
+const editForm = ref(emptyProxyForm())
 
 // Detail drawer
 const detailVisible = ref(false)
@@ -58,16 +65,11 @@ async function loadProxies() {
   }
 }
 
-async function updateStatus(proxy, status) {
-  try {
-    await proxyClient.updateStatus(proxy.id, status)
-    await loadProxies()
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
 async function deleteProxy(proxy) {
+	if ((proxy.assigned_profile_count || 0) > 0) {
+		error.value = `该代理仍关联 ${proxy.assigned_profile_count} 个浏览器窗口，请先到浏览器窗口页解绑或更换。`
+		return
+	}
   if (!confirm(`确定删除代理 ${proxy.host}:${proxy.port}？`)) return
   try {
     await proxyClient.delete(proxy.id)
@@ -124,6 +126,36 @@ function openCreate() {
   showCreate.value = true
 }
 
+function openEdit(proxy) {
+	editProxy.value = proxy
+	editForm.value = {
+		proxy_protocol: proxy.proxy_protocol || "http", host: proxy.host || "", port: Number(proxy.port) || 0,
+		username: proxy.username || "", password: "", region: proxy.region || "", supplier: proxy.supplier || "", remark: proxy.remark || "",
+	}
+	editVisible.value = true
+}
+
+async function saveEdit() {
+	if (!editProxy.value || !editForm.value.host.trim() || !Number(editForm.value.port)) {
+		error.value = "请填写代理地址和端口"
+		return
+	}
+	editing.value = true
+	try {
+		await proxyClient.update(editProxy.value.id, { ...editForm.value, host: editForm.value.host.trim(), port: Number(editForm.value.port) })
+		const bound = editProxy.value.assigned_profile_count || 0
+		taskNotice.value = bound > 0
+			? `代理已更新；${bound} 个关联窗口的代理配置待同步，请到浏览器窗口页重新写入并读回验证。`
+			: "代理已更新，检测结果已清空，请重新检测后再绑定窗口。"
+		editVisible.value = false
+		await loadProxies()
+	} catch (e) {
+		error.value = e.message || "更新代理失败"
+	} finally {
+		editing.value = false
+	}
+}
+
 async function createProxy() {
   if (!createForm.value.host.trim() || !Number(createForm.value.port)) {
     error.value = "请填写代理地址和端口"
@@ -157,6 +189,28 @@ async function triggerCheck(proxy) {
     error.value = e.message
     failedCheckProxy.value = proxy
   }
+}
+
+async function batchCheck() {
+	const targets = proxies.value.filter((proxy) => selectedRowKeys.value.includes(proxy.id))
+	if (!targets.length) return
+	batchChecking.value = true
+	batchCheckResult.value = ""
+	let passed = 0
+	let failed = 0
+	for (const proxy of targets) {
+		try {
+			const result = await proxyClient.check(proxy.id)
+			if (result.last_check_result === "ok") passed += 1
+			else failed += 1
+		} catch {
+			failed += 1
+		}
+	}
+	selectedRowKeys.value = []
+	batchChecking.value = false
+	batchCheckResult.value = `批量检测完成：${passed} 条正常，${failed} 条失败。`
+	await loadProxies()
 }
 
 async function queueBackgroundCheck() {
@@ -216,6 +270,7 @@ function formatTime(t) {
       <t-button size="small" variant="text" @click="queueBackgroundCheck">后台重试</t-button>
     </t-alert>
     <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
+		<t-alert v-if="batchCheckResult" :message="batchCheckResult" theme="info" style="margin-bottom:16px" closable @close="batchCheckResult=''" />
     <t-button v-if="queuedTaskId" size="small" variant="outline" style="margin:-8px 0 16px" @click="$router.push(`/execute-tasks?task_id=${encodeURIComponent(queuedTaskId)}`)">查看任务进度</t-button>
 
     <!-- 搜索/过滤栏 -->
@@ -249,6 +304,7 @@ function formatTime(t) {
       <t-space>
 		<t-button theme="primary" @click="openCreate">新增代理</t-button>
         <t-button theme="primary" @click="showImport = true">批量导入</t-button>
+			<t-button :loading="batchChecking" :disabled="!selectedRowKeys.length" @click="batchCheck">批量检测</t-button>
         <t-button variant="outline" @click="loadProxies">刷新</t-button>
       </t-space>
     </div>
@@ -260,6 +316,7 @@ function formatTime(t) {
       row-key="id"
       size="small"
       hover
+			v-model:selected-row-keys="selectedRowKeys"
       :pagination="{ pageSize: 50, total: proxies.length }"
       empty="暂无代理"
     >
@@ -286,13 +343,7 @@ function formatTime(t) {
       <template #op="{ row }">
         <t-space>
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
-          <t-dropdown :options="[
-            { value: 'active', label: '启用', disabled: row.business_status === 'active' },
-            { value: 'paused', label: '停用', disabled: row.business_status === 'paused' },
-            { value: 'expired', label: '标记过期', disabled: row.business_status === 'expired' },
-          ]" @click="(v) => updateStatus(row, v)">
-            <t-button size="small" variant="text">状态</t-button>
-          </t-dropdown>
+          <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
           <t-button size="small" variant="text" @click="triggerCheck(row)">检测</t-button>
           <t-button size="small" variant="text" @click="openQuota(row)">配额</t-button>
           <t-button size="small" variant="text" theme="danger" @click="deleteProxy(row)">删除</t-button>
@@ -310,6 +361,20 @@ function formatTime(t) {
         <t-form-item label="地区"><t-input v-model="createForm.region" /></t-form-item>
         <t-form-item label="供应商"><t-input v-model="createForm.supplier" /></t-form-item>
         <t-form-item label="备注"><t-textarea v-model="createForm.remark" /></t-form-item>
+      </t-form>
+    </t-dialog>
+
+    <t-dialog v-model:visible="editVisible" header="编辑代理" :confirm-btn="{ loading: editing, content: '保存' }" @confirm="saveEdit">
+      <t-alert v-if="(editProxy?.assigned_profile_count || 0) > 0" theme="warning" style="margin-bottom:12px">保存不会自动改写 BitBrowser；{{ editProxy.assigned_profile_count }} 个关联窗口将标记为代理配置待同步，请到浏览器窗口页重新写入并读回。</t-alert>
+      <t-form label-width="84px">
+        <t-form-item label="协议"><t-select v-model="editForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
+        <t-form-item label="地址"><t-input v-model="editForm.host" placeholder="例如 127.0.0.1（不含协议、账号和端口）" /></t-form-item>
+        <t-form-item label="端口"><t-input-number v-model="editForm.port" :min="1" :max="65535" /></t-form-item>
+        <t-form-item label="用户名"><t-input v-model="editForm.username" /></t-form-item>
+        <t-form-item label="密码"><t-input v-model="editForm.password" type="password" placeholder="留空表示不修改" /></t-form-item>
+        <t-form-item label="地区"><t-input v-model="editForm.region" /></t-form-item>
+        <t-form-item label="供应商"><t-input v-model="editForm.supplier" /></t-form-item>
+        <t-form-item label="备注"><t-textarea v-model="editForm.remark" /></t-form-item>
       </t-form>
     </t-dialog>
 

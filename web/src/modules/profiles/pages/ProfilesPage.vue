@@ -80,6 +80,8 @@ const proxyBinding = ref(false)
 const proxyProfile = ref(null)
 const proxyId = ref("")
 const availableProxies = ref([])
+const proxyById = ref({})
+const proxyBindingHint = ref("")
 const localProxyScan = ref(null)
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
@@ -235,7 +237,10 @@ async function loadProfiles() {
   error.value = ""
   loading.value = true
   try {
-    profiles.value = await bindingClient.listProfiles()
+    const [listedProfiles, proxyResult] = await Promise.all([bindingClient.listProfiles(), proxyClient.list()])
+    profiles.value = listedProfiles
+    const all = Array.isArray(proxyResult) ? proxyResult : (proxyResult?.list || [])
+    proxyById.value = Object.fromEntries(all.map((item) => [item.id, item]))
   } catch (e) {
     error.value = e.message
   } finally {
@@ -465,7 +470,11 @@ async function openProxyBinding(profile) {
   try {
     const result = await proxyClient.list({ business_status: "active" })
     const all = Array.isArray(result) ? result : (result?.list || [])
-    availableProxies.value = all.filter((item) => item.last_check_result === "ok" && (item.remaining_profile_count > 0 || item.id === profile.proxy_id))
+    proxyById.value = Object.fromEntries(all.map((item) => [item.id, item]))
+    availableProxies.value = all.filter((item) => isProxyAssignable(item) && (item.remaining_profile_count > 0 || item.id === profile.proxy_id))
+    proxyBindingHint.value = availableProxies.value.length
+      ? (proxyNeedsSync(profile) ? "当前关联代理的连接信息已变更；请先检测正常，再重新确认写入并读回。" : "")
+      : "暂无可绑定代理：仅已启用、检测正常、未过期且有剩余配额的代理可选择。请到代理管理页编辑或批量检测。"
     proxyDialogVisible.value = true
   } catch (e) {
     error.value = e.message || "无法读取可绑定代理"
@@ -474,6 +483,10 @@ async function openProxyBinding(profile) {
 
 async function confirmProxyBinding() {
   if (!proxyProfile.value) return
+  if (proxyId.value && !availableProxies.value.some((item) => item.id === proxyId.value)) {
+    error.value = "所选代理尚不可绑定，请先完成检测并确认有剩余配额。"
+    return
+  }
   proxyBinding.value = true
   error.value = ""
   try {
@@ -738,6 +751,18 @@ function proxySummary(profile) {
   return `${profile.proxy_type || "http"}://${profile.proxy_host}:${profile.proxy_port || 0}`
 }
 
+function isProxyAssignable(proxy) {
+  if (!proxy || proxy.business_status !== "active" || proxy.last_check_result !== "ok") return false
+  return !proxy.expires_at || new Date(proxy.expires_at) > new Date()
+}
+
+function proxyNeedsSync(profile) {
+  if (!profile?.proxy_id) return false
+  const proxy = proxyById.value[profile.proxy_id]
+  if (!proxy) return false
+  return proxy.proxy_protocol !== profile.proxy_type || proxy.host !== profile.proxy_host || Number(proxy.port) !== Number(profile.proxy_port)
+}
+
 function statusLabel(status) {
   return {
     active: "可用",
@@ -885,7 +910,10 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
         <template #name="{ row }">
           <div class="profile-name">{{ row.name || '-' }}</div>
         </template>
-        <template #proxy="{ row }">{{ proxySummary(row) }}</template>
+        <template #proxy="{ row }">
+          <div>{{ proxySummary(row) }}</div>
+          <t-tag v-if="proxyNeedsSync(row)" theme="warning" size="small" style="margin-top:4px">代理配置待同步</t-tag>
+        </template>
         <template #remark="{ row }">
           <div class="remark-cell">
             <div v-if="row.remark" class="remark-bit">{{ row.remark }}</div>
@@ -956,12 +984,14 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
 
     <t-dialog v-model:visible="proxyDialogVisible" header="绑定代理并同步 BitBrowser" @confirm="confirmProxyBinding" :confirm-btn="{ loading: proxyBinding, theme: 'primary', content: '写入并读回验证' }">
       <t-alert theme="info" style="margin-bottom:12px">选择代理后会写入当前窗口的 BitBrowser 配置；只有协议、地址和端口读回一致，Cloud 才更新正式关联与配额。</t-alert>
+		<t-alert v-if="proxyBindingHint" :message="proxyBindingHint" theme="warning" style="margin-bottom:12px" />
       <t-form label-width="84px">
         <t-form-item label="窗口"><span>{{ proxyProfile?.name || proxyProfile?.bit_profile_id }}</span></t-form-item>
         <t-form-item label="代理">
           <t-select v-model="proxyId" clearable placeholder="留空则解绑当前代理">
             <t-option v-for="item in availableProxies" :key="item.id" :value="item.id" :label="`${item.proxy_protocol}://${item.host}:${item.port}（剩余 ${item.remaining_profile_count ?? 0}）`" />
           </t-select>
+			<t-empty v-if="!availableProxies.length" description="暂无可绑定代理" style="margin-top:12px" />
         </t-form-item>
       </t-form>
     </t-dialog>

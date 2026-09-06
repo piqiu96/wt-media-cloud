@@ -181,6 +181,17 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !ok {
 			return
 		}
+		if bindings != nil {
+			count, countErr := bindings.CountProfilesByProxyID(c.Param("id"))
+			if countErr != nil {
+				common.InternalError(c, "代理关联窗口查询失败")
+				return
+			}
+			if count > 0 {
+				common.Conflict(c, 23006, "代理仍绑定窗口，请先在浏览器窗口页解绑或更换")
+				return
+			}
+		}
 		if err := service.Delete(c.Param("id")); err != nil {
 			writeProxyError(c, err)
 			return
@@ -405,8 +416,8 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			writeProxyError(c, err)
 			return
 		}
-		if proxy.BusinessStatus != BizActive {
-			common.Conflict(c, 23004, "代理不可用")
+		if err := service.CheckAssignable(proxy); err != nil {
+			writeProxyError(c, err)
 			return
 		}
 		if profile.ProxyID != proxy.ID {
@@ -552,6 +563,8 @@ func writeProxyError(c *hertzapp.RequestContext, err error) {
 		common.NotFound(c, 20004, "代理不存在")
 	case errors.Is(err, ErrInvalidInput):
 		common.BadRequest(c, 10001, "代理信息格式错误")
+	case errors.Is(err, ErrNotAssignable):
+		common.Conflict(c, 23007, "代理未通过检测、已停用或已过期，不能绑定窗口")
 	default:
 		common.InternalError(c, "代理服务内部错误")
 	}

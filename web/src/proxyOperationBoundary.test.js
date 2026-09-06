@@ -19,4 +19,19 @@ describe('proxy operation page boundary', () => {
     expect(profilesPage).toContain('proxyClient.unbind')
     expect(profilesPage).toContain('proxyClient.previewLocalScan')
   })
+
+  it('keeps batch checks and ledger actions in proxy management', () => {
+    expect(proxyPage).toContain('批量检测')
+    expect(proxyPage).toContain('@click="openEdit(row)"')
+    expect(proxyPage).toContain('>详情</t-button>')
+    expect(proxyPage).toContain('>检测</t-button>')
+    expect(proxyPage).toContain('>配额</t-button>')
+    expect(proxyPage).toContain('>删除</t-button>')
+    expect(proxyPage).not.toContain('>状态</t-button>')
+  })
+
+  it('makes unavailable proxy choices and pending sync visible in browser windows', () => {
+    expect(profilesPage).toContain('暂无可绑定代理')
+    expect(profilesPage).toContain('代理配置待同步')
+  })
 })

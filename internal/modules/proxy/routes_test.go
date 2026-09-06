@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
@@ -77,9 +78,59 @@ func TestUnifiedQuotaAppliesAcrossPlatforms(t *testing.T) {
 	}
 }
 
+func TestUpdateConnectionClearsPreviousCheckResult(t *testing.T) {
+	store := newRouteMemoryStore()
+	checkedAt := time.Now().UTC()
+	expiresAt := checkedAt.Add(24 * time.Hour)
+	store.items["proxy-1"] = ProxyConfig{
+		ID: "proxy-1", ProxyProtocol: ProtocolHTTP, Host: "10.0.0.1", Port: 8080, Password: "existing-secret",
+		BusinessStatus: BizActive, ExpiresAt: &expiresAt, LastCheckAt: &checkedAt, LastCheckResult: "ok", ObservedExitIP: "10.0.0.1",
+	}
+	service := NewService(store)
+
+	updated, err := service.Update("proxy-1", CreateProxyInput{ProxyProtocol: ProtocolHTTP, Host: "10.0.0.2", Port: 8080})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastCheckAt != nil || updated.LastCheckResult != "" || updated.ObservedExitIP != "" {
+		t.Fatalf("connection update retained stale check facts: %#v", updated)
+	}
+	if updated.Password != "existing-secret" {
+		t.Fatalf("empty edit password cleared the stored secret: %#v", updated)
+	}
+	if updated.ExpiresAt == nil || !updated.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("edit without expiry cleared the stored expiry: %#v", updated)
+	}
+}
+
+func TestDeleteRefusesProxyWithBoundProfiles(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", BusinessStatus: BizActive}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := &routeProfileStore{profileCount: 1}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService, profiles)
+
+	response := proxyJSON(engine, "DELETE", "/api/v1/proxies/proxy-1", "", login.Token)
+	if response.Result().StatusCode() != consts.StatusConflict {
+		t.Fatalf("delete status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	if _, found := store.items["proxy-1"]; !found {
+		t.Fatal("bound proxy was deleted")
+	}
+}
+
 func TestAssignWritesThroughAgentThenBindsReadbackProfile(t *testing.T) {
 	store := newRouteMemoryStore()
-	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, MaxProfileCount: 2}
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, LastCheckResult: "ok", MaxProfileCount: 2}
 	identityService := identity.NewService(identity.NewMemoryStore())
 	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
 		t.Fatal(err)
@@ -106,9 +157,32 @@ func TestAssignWritesThroughAgentThenBindsReadbackProfile(t *testing.T) {
 	}
 }
 
+func TestAssignRejectsProxyWithoutSuccessfulCheck(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, MaxProfileCount: 2}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := &routeProfileStore{profile: profilebinding.BrowserProfile{ID: "profile-1", UserID: 1, BitProfileID: "bit-profile-1", LocalStatus: profilebinding.ProfileActive}}
+	mutator := &routeMutator{result: ProxyMutationResult{ProfileID: "bit-profile-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, Readback: true}}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService, profiles, mutator)
+
+	response := proxyJSON(engine, "POST", "/api/v1/proxies/proxy-1/assign", `{"profile_id":"profile-1"}`, login.Token)
+	if response.Result().StatusCode() != consts.StatusConflict {
+		t.Fatalf("assign status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
 func TestAssignReplacesExistingProxyOnlyAfterNewReadback(t *testing.T) {
 	store := newRouteMemoryStore()
-	store.items["proxy-new"] = ProxyConfig{ID: "proxy-new", ProxyProtocol: ProtocolHTTP, Host: "10.0.0.2", Port: 8080, BusinessStatus: BizActive, MaxProfileCount: 2}
+	store.items["proxy-new"] = ProxyConfig{ID: "proxy-new", ProxyProtocol: ProtocolHTTP, Host: "10.0.0.2", Port: 8080, BusinessStatus: BizActive, LastCheckResult: "ok", MaxProfileCount: 2}
 	identityService := identity.NewService(identity.NewMemoryStore())
 	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
 		t.Fatal(err)
@@ -339,12 +413,15 @@ type routeProfileStore struct {
 	profile      profilebinding.BrowserProfile
 	boundProxyID string
 	unbound      bool
+	profileCount int
 }
 
 func (s *routeProfileStore) GetProfile(id string) (profilebinding.BrowserProfile, bool, error) {
 	return s.profile, s.profile.ID == id, nil
 }
-func (s *routeProfileStore) CountProfilesByProxyID(proxyID string) (int, error) { return 0, nil }
+func (s *routeProfileStore) CountProfilesByProxyID(proxyID string) (int, error) {
+	return s.profileCount, nil
+}
 func (s *routeProfileStore) BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (profilebinding.BrowserProfile, error) {
 	s.boundProxyID = proxyID
 	s.profile.ProxyID, s.profile.ProxyType, s.profile.ProxyHost, s.profile.ProxyPort = proxyID, proxyType, proxyHost, proxyPort
