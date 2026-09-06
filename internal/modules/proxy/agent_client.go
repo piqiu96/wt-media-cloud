@@ -22,6 +22,19 @@ type ProxyCheckResult struct {
 	Connectivity string `json:"connectivity"`
 }
 
+type ProxyExtractionInput struct {
+	ExtractURL    string        `json:"extract_url"`
+	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
+}
+
+type ProxyExtractionResult struct {
+	ProxyProtocol ProxyProtocol `json:"proxy_protocol"`
+	Host          string        `json:"host"`
+	Port          int           `json:"port"`
+	Username      string        `json:"username,omitempty"`
+	Password      string        `json:"password,omitempty"`
+}
+
 type ProxyMutationInput struct {
 	Operation     string        `json:"operation,omitempty"`
 	ProfileID     string        `json:"profile_id"`
@@ -43,6 +56,10 @@ type ProxyMutationResult struct {
 
 type SyncProxyChecker interface {
 	Check(context.Context, ProxyCheckInput) (ProxyCheckResult, error)
+}
+
+type SyncProxyExtractor interface {
+	Extract(context.Context, ProxyExtractionInput) (ProxyExtractionResult, error)
 }
 
 type SyncProxyMutator interface {
@@ -98,6 +115,40 @@ func (c *HTTPAgentChecker) Check(ctx context.Context, input ProxyCheckInput) (Pr
 	}
 	if envelope.Data.Connectivity == "" {
 		return ProxyCheckResult{}, fmt.Errorf("agent sync response missing connectivity")
+	}
+	return envelope.Data, nil
+}
+
+func (c *HTTPAgentChecker) Extract(ctx context.Context, input ProxyExtractionInput) (ProxyExtractionResult, error) {
+	body, err := json.Marshal(input)
+	if err != nil {
+		return ProxyExtractionResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/proxy-extract", strings.NewReader(string(body)))
+	if err != nil {
+		return ProxyExtractionResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return ProxyExtractionResult{}, fmt.Errorf("agent proxy extraction request: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ProxyExtractionResult{}, fmt.Errorf("agent proxy extraction response status %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Data ProxyExtractionResult `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return ProxyExtractionResult{}, fmt.Errorf("decode agent proxy extraction response: %w", err)
+	}
+	if envelope.Data.ProxyProtocol == "" || envelope.Data.Host == "" || envelope.Data.Port <= 0 || envelope.Data.Port > 65535 {
+		return ProxyExtractionResult{}, fmt.Errorf("agent proxy extraction response missing parsed address")
 	}
 	return envelope.Data, nil
 }

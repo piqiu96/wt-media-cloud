@@ -27,6 +27,18 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
     previewImport(lines) {
       return api.post('/proxies/import/preview', { lines })
     },
+    parseAddress(proxyAddress) {
+      return api.post('/proxies/parse', { proxy_address: proxyAddress })
+    },
+    previewExtract(data) {
+      return api.post('/proxies/extract-preview', data)
+    },
+    listBindings(id) {
+      return api.get(`/proxies/${id}/bindings`)
+    },
+    refreshDynamic(id) {
+      return api.post(`/proxies/${id}/refresh`)
+    },
     check(id) {
       return api.post(`/proxies/${id}/check`)
     },

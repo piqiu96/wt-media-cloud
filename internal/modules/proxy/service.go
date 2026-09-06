@@ -26,6 +26,13 @@ const (
 	BizExpired BusinessStatus = "expired"
 )
 
+type ProxySourceType string
+
+const (
+	ProxySourceStatic ProxySourceType = "static"
+	ProxySourceAPI    ProxySourceType = "api"
+)
+
 var (
 	ErrInvalidInput  = errors.New("proxy input is invalid")
 	ErrNotFound      = errors.New("proxy was not found")
@@ -33,38 +40,43 @@ var (
 )
 
 type ProxyConfig struct {
-	ID                    string         `json:"id"`
-	ProxyProtocol         ProxyProtocol  `json:"proxy_protocol"`
-	Host                  string         `json:"host"`
-	Port                  int            `json:"port"`
-	Username              string         `json:"username,omitempty"`
-	Password              string         `json:"password,omitempty"`
-	Region                string         `json:"region,omitempty"`
-	Supplier              string         `json:"supplier,omitempty"`
-	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
-	BusinessStatus        BusinessStatus `json:"business_status"`
-	MaxProfileCount       int            `json:"max_profile_count"`
-	LastCheckAt           *time.Time     `json:"last_check_at,omitempty"`
-	LastCheckResult       string         `json:"last_check_result,omitempty"`
-	ObservedExitIP        string         `json:"observed_exit_ip,omitempty"`
-	AssignedProfileCount  int            `json:"assigned_profile_count,omitempty"`
-	RemainingProfileCount int            `json:"remaining_profile_count,omitempty"`
-	Remark                string         `json:"remark,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	ID                    string          `json:"id"`
+	SourceType            ProxySourceType `json:"source_type"`
+	ProxyProtocol         ProxyProtocol   `json:"proxy_protocol"`
+	Host                  string          `json:"host"`
+	Port                  int             `json:"port"`
+	Username              string          `json:"username,omitempty"`
+	Password              string          `json:"password,omitempty"`
+	Region                string          `json:"region,omitempty"`
+	Supplier              string          `json:"supplier,omitempty"`
+	ExtractURL            string          `json:"-"`
+	ExtractURLConfigured  bool            `json:"extract_url_configured,omitempty"`
+	ExpiresAt             *time.Time      `json:"expires_at,omitempty"`
+	BusinessStatus        BusinessStatus  `json:"business_status"`
+	MaxProfileCount       int             `json:"max_profile_count"`
+	LastCheckAt           *time.Time      `json:"last_check_at,omitempty"`
+	LastCheckResult       string          `json:"last_check_result,omitempty"`
+	ObservedExitIP        string          `json:"observed_exit_ip,omitempty"`
+	AssignedProfileCount  int             `json:"assigned_profile_count,omitempty"`
+	RemainingProfileCount int             `json:"remaining_profile_count,omitempty"`
+	Remark                string          `json:"remark,omitempty"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 type CreateProxyInput struct {
-	ProxyProtocol   ProxyProtocol `json:"proxy_protocol"`
-	Host            string        `json:"host"`
-	Port            int           `json:"port"`
-	Username        string        `json:"username"`
-	Password        string        `json:"password"`
-	Region          string        `json:"region"`
-	Supplier        string        `json:"supplier"`
-	ExpiresAt       *time.Time    `json:"expires_at"`
-	Remark          string        `json:"remark"`
-	MaxProfileCount int           `json:"max_profile_count"`
+	SourceType      ProxySourceType `json:"source_type"`
+	ProxyProtocol   ProxyProtocol   `json:"proxy_protocol"`
+	Host            string          `json:"host"`
+	Port            int             `json:"port"`
+	Username        string          `json:"username"`
+	Password        string          `json:"password"`
+	Region          string          `json:"region"`
+	Supplier        string          `json:"supplier"`
+	ExtractURL      string          `json:"extract_url"`
+	ExpiresAt       *time.Time      `json:"expires_at"`
+	Remark          string          `json:"remark"`
+	MaxProfileCount int             `json:"max_profile_count"`
 }
 
 type BulkImportRow struct {
@@ -125,6 +137,7 @@ func (s *Service) BulkImport(rows []BulkImportRow) ([]ProxyConfig, error) {
 		now := s.now()
 		p := ProxyConfig{
 			ID:              s.newID("proxy"),
+			SourceType:      ProxySourceStatic,
 			ProxyProtocol:   row.Parsed.ProxyProtocol,
 			Host:            row.Parsed.Host,
 			Port:            row.Parsed.Port,
@@ -154,6 +167,16 @@ func (s *Service) List(filter ProxyFilter) ([]ProxyConfig, error) {
 	return s.store.List(filter)
 }
 
+// ParseAddress converts one operator-provided proxy address into canonical fields
+// without creating or updating a proxy record.
+func (s *Service) ParseAddress(raw string) (CreateProxyInput, error) {
+	parsed, err := parseProxyLine(strings.TrimSpace(raw))
+	if err != nil {
+		return CreateProxyInput{}, err
+	}
+	return *parsed, nil
+}
+
 func (s *Service) Get(id string) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {
@@ -166,9 +189,14 @@ func (s *Service) Get(id string) (ProxyConfig, error) {
 }
 
 func (s *Service) Create(input CreateProxyInput) (ProxyConfig, error) {
+	sourceType, extractURL, err := normalizedSource(input.SourceType, input.ExtractURL, "")
+	if err != nil {
+		return ProxyConfig{}, err
+	}
 	now := s.now()
 	p := ProxyConfig{
 		ID:              s.newID("proxy"),
+		SourceType:      sourceType,
 		ProxyProtocol:   input.ProxyProtocol,
 		Host:            input.Host,
 		Port:            input.Port,
@@ -176,6 +204,7 @@ func (s *Service) Create(input CreateProxyInput) (ProxyConfig, error) {
 		Password:        input.Password,
 		Region:          input.Region,
 		Supplier:        input.Supplier,
+		ExtractURL:      extractURL,
 		ExpiresAt:       input.ExpiresAt,
 		BusinessStatus:  BizActive,
 		MaxProfileCount: normalizedMaxProfileCount(input.MaxProfileCount),
@@ -196,6 +225,7 @@ func (s *Service) CreateDiscovered(input CreateProxyInput, observedProfileCount 
 	now := s.now()
 	p := ProxyConfig{
 		ID:              s.newID("proxy"),
+		SourceType:      ProxySourceStatic,
 		ProxyProtocol:   input.ProxyProtocol,
 		Host:            input.Host,
 		Port:            input.Port,
@@ -219,18 +249,28 @@ func (s *Service) Update(id string, input CreateProxyInput) (ProxyConfig, error)
 	if !ok {
 		return ProxyConfig{}, ErrNotFound
 	}
+	username := input.Username
+	if username == "" {
+		username = p.Username
+	}
 	password := input.Password
 	if password == "" {
 		password = p.Password
 	}
-	connectionChanged := p.ProxyProtocol != input.ProxyProtocol || p.Host != input.Host || p.Port != input.Port || p.Username != input.Username || p.Password != password
+	sourceType, extractURL, err := normalizedSource(input.SourceType, input.ExtractURL, p.ExtractURL)
+	if err != nil {
+		return ProxyConfig{}, err
+	}
+	connectionChanged := p.ProxyProtocol != input.ProxyProtocol || p.Host != input.Host || p.Port != input.Port || p.Username != username || p.Password != password
+	p.SourceType = sourceType
 	p.ProxyProtocol = input.ProxyProtocol
 	p.Host = input.Host
 	p.Port = input.Port
-	p.Username = input.Username
+	p.Username = username
 	p.Password = password
 	p.Region = input.Region
 	p.Supplier = input.Supplier
+	p.ExtractURL = extractURL
 	if input.ExpiresAt != nil {
 		p.ExpiresAt = input.ExpiresAt
 	}
@@ -245,6 +285,26 @@ func (s *Service) Update(id string, input CreateProxyInput) (ProxyConfig, error)
 		return ProxyConfig{}, err
 	}
 	return p, nil
+}
+
+func normalizedSource(source ProxySourceType, extractURL, existingURL string) (ProxySourceType, string, error) {
+	if source == "" {
+		source = ProxySourceStatic
+	}
+	if source != ProxySourceStatic && source != ProxySourceAPI {
+		return "", "", ErrInvalidInput
+	}
+	if source == ProxySourceStatic {
+		return source, "", nil
+	}
+	extractURL = strings.TrimSpace(extractURL)
+	if extractURL == "" {
+		extractURL = existingURL
+	}
+	if extractURL == "" {
+		return "", "", ErrInvalidInput
+	}
+	return source, extractURL, nil
 }
 
 func (s *Service) UpdateStatus(id string, status BusinessStatus) (ProxyConfig, error) {

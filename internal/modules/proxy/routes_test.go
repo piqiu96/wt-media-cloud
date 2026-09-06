@@ -59,6 +59,112 @@ func TestImportPreviewDoesNotPersistUntilConfirmed(t *testing.T) {
 	}
 }
 
+func TestParseProxyAddressReturnsCanonicalFieldsWithoutPersisting(t *testing.T) {
+	store := newRouteMemoryStore()
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService)
+
+	response := proxyJSON(engine, "POST", "/api/v1/proxies/parse", `{"proxy_address":"socks5://operator:secret@203.0.113.9:1080"}`, login.Token)
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("parse status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	var envelope struct {
+		Data CreateProxyInput `json:"data"`
+	}
+	if err := json.Unmarshal(response.Result().Body(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.ProxyProtocol != ProtocolSOCKS5 || envelope.Data.Host != "203.0.113.9" || envelope.Data.Port != 1080 || envelope.Data.Username != "operator" || envelope.Data.Password != "secret" {
+		t.Fatalf("parsed data=%#v", envelope.Data)
+	}
+	if len(store.items) != 0 {
+		t.Fatalf("parse persisted proxy data: %#v", store.items)
+	}
+}
+
+func TestProxyListMasksDynamicSourceAndCredentials(t *testing.T) {
+	store := newRouteMemoryStore()
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService)
+
+	created := proxyJSON(engine, "POST", "/api/v1/proxies", `{"source_type":"api","extract_url":"https://provider.example/extract?token=source-secret","proxy_protocol":"socks5","host":"203.0.113.9","port":1080,"username":"proxy-user","password":"proxy-secret"}`, login.Token)
+	if created.Result().StatusCode() != consts.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.Result().StatusCode(), created.Result().Body())
+	}
+	listed := proxyJSON(engine, "GET", "/api/v1/proxies", "", login.Token)
+	if listed.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("list status=%d body=%s", listed.Result().StatusCode(), listed.Result().Body())
+	}
+	body := string(listed.Result().Body())
+	for _, secret := range []string{"source-secret", "proxy-secret", "proxy-user"} {
+		if bytes.Contains(listed.Result().Body(), []byte(secret)) {
+			t.Fatalf("proxy list leaked secret %q: %s", secret, body)
+		}
+	}
+	if !bytes.Contains(listed.Result().Body(), []byte(`"source_type":"api"`)) || !bytes.Contains(listed.Result().Body(), []byte(`"extract_url_configured":true`)) {
+		t.Fatalf("dynamic source summary missing: %s", body)
+	}
+}
+
+func TestDynamicProxyPreviewRequiresLocalExtractor(t *testing.T) {
+	store := newRouteMemoryStore()
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService)
+
+	response := proxyJSON(engine, "POST", "/api/v1/proxies/extract-preview", `{"extract_url":"https://provider.example/extract"}`, login.Token)
+	if response.Result().StatusCode() != consts.StatusServiceUnavailable {
+		t.Fatalf("preview status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
+func TestProxyBindingDetailRequiresProfileVisibilityService(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", SourceType: ProxySourceStatic}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService)
+
+	response := proxyJSON(engine, "GET", "/api/v1/proxies/proxy-1/bindings", "", login.Token)
+	if response.Result().StatusCode() != consts.StatusServiceUnavailable {
+		t.Fatalf("binding detail status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+}
+
 func TestUnifiedQuotaAppliesAcrossPlatforms(t *testing.T) {
 	store := newRouteMemoryStore()
 	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", BusinessStatus: BizActive, MaxProfileCount: 2}

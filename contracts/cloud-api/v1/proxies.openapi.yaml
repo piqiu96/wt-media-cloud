@@ -1,8 +1,89 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Proxy API
-  version: 2026.09.05.1
+  version: 2026.09.06.1
 paths:
+  /api/v1/proxies/parse:
+    post:
+      operationId: parseProxyAddress
+      summary: Parse one static proxy address without persisting a proxy record.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyAddressRequest'}
+      responses:
+        '200':
+          description: Parsed canonical proxy fields.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyAddress'}
+        '400': {description: The address format is invalid.}
+  /api/v1/proxies/extract-preview:
+    post:
+      operationId: extractProxyPreview
+      summary: Ask the current local Agent to fetch and parse the first valid plain-text proxy address without persisting a proxy record.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyExtractionRequest'}
+      responses:
+        '200':
+          description: Authorized caller receives parsed draft fields; the source URL is never returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyAddress'}
+        '400': {description: Source URL or extracted proxy format is invalid.}
+        '503': {description: The current local Agent could not extract the proxy.}
+  /api/v1/proxies/{proxy_id}/bindings:
+    get:
+      operationId: listProxyBindings
+      summary: List browser windows formally bound to one proxy under the caller's existing Profile visibility.
+      security: [{sessionCookie: []}]
+      parameters:
+        - in: path
+          name: proxy_id
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Secret-free bound browser-window summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/ProxyBindingSummary'}
+        '404': {description: Proxy does not exist.}
+  /api/v1/proxies/{proxy_id}/refresh:
+    post:
+      operationId: refreshDynamicProxy
+      summary: Manually extract and check a dynamic API proxy, update the ledger connection fields, and never write BitBrowser Profiles.
+      security: [{sessionCookie: []}]
+      parameters:
+        - in: path
+          name: proxy_id
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current dynamic address was extracted and checked. Bound windows may require later resynchronization.
+        '400': {description: Proxy is not an API source or the extracted response is invalid.}
+        '503': {description: Local extraction or check did not succeed; no BitBrowser Profile was modified.}
   /api/v1/proxies/{proxy_id}/assign:
     post:
       operationId: assignProxyToProfile
@@ -105,6 +186,37 @@ components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
+    ProxyAddressRequest:
+      type: object
+      required: [proxy_address]
+      additionalProperties: false
+      properties:
+        proxy_address: {type: string, description: 'host:port, host:port:username:password, or protocol://username:password@host:port'}
+    ProxyExtractionRequest:
+      type: object
+      required: [extract_url]
+      additionalProperties: false
+      properties:
+        extract_url: {type: string, format: uri, writeOnly: true}
+        proxy_protocol: {type: string, enum: [http, https, socks5], default: http}
+    ProxyAddress:
+      type: object
+      required: [proxy_protocol, host, port]
+      properties:
+        proxy_protocol: {type: string, enum: [http, https, socks5]}
+        host: {type: string}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        username: {type: string}
+        password: {type: string, description: Only returned to the authorized draft request; never returned by proxy list or detail endpoints.}
+    ProxyBindingSummary:
+      type: object
+      required: [id, bit_profile_id, name, user_id, local_status]
+      properties:
+        id: {type: string}
+        bit_profile_id: {type: string}
+        name: {type: string}
+        user_id: {type: integer}
+        local_status: {type: string}
     ProxyAssignmentRequest:
       type: object
       required: [profile_id]

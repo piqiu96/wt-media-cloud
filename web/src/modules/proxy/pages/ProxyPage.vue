@@ -36,6 +36,8 @@ const editForm = ref(emptyProxyForm())
 // Detail drawer
 const detailVisible = ref(false)
 const detailProxy = ref(null)
+const boundProfiles = ref([])
+const loadingBindings = ref(false)
 
 // Quota dialog
 const quotaVisible = ref(false)
@@ -118,7 +120,37 @@ async function confirmImport() {
 }
 
 function emptyProxyForm() {
-  return { proxy_protocol: "http", host: "", port: 0, username: "", password: "", region: "", supplier: "", remark: "" }
+  return { source_type: "static", proxy_address: "", extract_url: "", proxy_protocol: "http", host: "", port: 0, username: "", password: "", region: "", supplier: "", remark: "" }
+}
+
+function applyParsedAddress(form, parsed) {
+  form.proxy_protocol = parsed.proxy_protocol || form.proxy_protocol
+  form.host = parsed.host || ""
+  form.port = Number(parsed.port) || 0
+  form.username = parsed.username || ""
+  form.password = parsed.password || ""
+}
+
+async function parseAddress(form) {
+  if (!form.proxy_address?.trim()) return
+  try {
+    applyParsedAddress(form, await proxyClient.parseAddress(form.proxy_address.trim()))
+  } catch (e) {
+    error.value = e.message || "代理地址无法解析"
+  }
+}
+
+async function previewExtract(form) {
+  if (!form.extract_url?.trim()) {
+    error.value = "请填写提取 URL"
+    return
+  }
+  try {
+    applyParsedAddress(form, await proxyClient.previewExtract({ extract_url: form.extract_url.trim(), proxy_protocol: form.proxy_protocol }))
+    taskNotice.value = "已提取一条代理地址；确认创建后才会写入台账。"
+  } catch (e) {
+    error.value = e.message || "动态代理提取失败"
+  }
 }
 
 function openCreate() {
@@ -129,6 +161,7 @@ function openCreate() {
 function openEdit(proxy) {
 	editProxy.value = proxy
 	editForm.value = {
+		source_type: proxy.source_type || "static", proxy_address: "", extract_url: "",
 		proxy_protocol: proxy.proxy_protocol || "http", host: proxy.host || "", port: Number(proxy.port) || 0,
 		username: proxy.username || "", password: "", region: proxy.region || "", supplier: proxy.supplier || "", remark: proxy.remark || "",
 	}
@@ -174,9 +207,19 @@ async function createProxy() {
   }
 }
 
-function openDetail(proxy) {
+async function openDetail(proxy) {
   detailProxy.value = proxy
+  boundProfiles.value = []
   detailVisible.value = true
+  loadingBindings.value = true
+  try {
+    const result = await proxyClient.listBindings(proxy.id)
+    boundProfiles.value = Array.isArray(result) ? result : []
+  } catch (e) {
+    error.value = e.message || "关联窗口查询失败"
+  } finally {
+    loadingBindings.value = false
+  }
 }
 
 async function triggerCheck(proxy) {
@@ -188,6 +231,17 @@ async function triggerCheck(proxy) {
   } catch (e) {
     error.value = e.message
     failedCheckProxy.value = proxy
+  }
+}
+
+async function refreshDynamicProxy(proxy) {
+  try {
+    await proxyClient.refreshDynamic(proxy.id)
+    taskNotice.value = (proxy.assigned_profile_count || 0) > 0 ? "动态代理已提取并检测；关联窗口待到浏览器窗口页重新同步。" : "动态代理已提取并检测。"
+    await loadProxies()
+    await openDetail(proxy)
+  } catch (e) {
+    error.value = e.message || "动态代理刷新失败"
   }
 }
 
@@ -245,12 +299,14 @@ async function saveQuota() {
 
 
 const columns = [
+  { colKey: "row-select", type: "multiple", width: 48 },
   { colKey: "host", title: "地址", width: 200 },
   { colKey: "proxy_protocol", title: "协议", width: 80 },
   { colKey: "region", title: "地区", width: 100 },
   { colKey: "supplier", title: "供应商", width: 100 },
   { colKey: "business_status", title: "状态", width: 90 },
 	{ colKey: "max_profile_count", title: "窗口容量", width: 170 },
+	{ colKey: "bindings", title: "绑定窗口", width: 120 },
 	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
 	{ colKey: "op", title: "操作", width: 220 },
@@ -334,7 +390,8 @@ function formatTime(t) {
         <BusinessStatus v-else-if="row.last_check_result" status="error" :label="row.last_check_result" />
         <span v-else style="color:var(--td-text-color-placeholder)">未检测</span>
       </template>
-		<template #max_profile_count="{ row }">{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }} 已用，{{ row.remaining_profile_count ?? (row.max_profile_count || 3) }} 剩余</template>
+      <template #max_profile_count="{ row }">{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }} 已用，{{ row.remaining_profile_count ?? (row.max_profile_count || 3) }} 剩余</template>
+      <template #bindings="{ row }"><t-button variant="text" size="small" @click="openDetail(row)">已绑定 {{ row.assigned_profile_count || 0 }} 个</t-button></template>
       <template #expires_at="{ row }">
         <span :style="row.expires_at && new Date(row.expires_at) < new Date() ? 'color:var(--td-error-color)' : ''">
           {{ formatTime(row.expires_at) }}
@@ -353,6 +410,14 @@ function formatTime(t) {
 
     <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: '创建' }" @confirm="createProxy">
       <t-form label-width="84px">
+        <t-form-item label="代理方式"><t-radio-group v-model="createForm.source_type"><t-radio value="static">静态地址</t-radio><t-radio value="api">动态 API 提取</t-radio></t-radio-group></t-form-item>
+        <template v-if="createForm.source_type === 'static'">
+          <t-form-item label="代理地址"><t-input v-model="createForm.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" @blur="parseAddress(createForm)" /></t-form-item>
+        </template>
+        <template v-else>
+          <t-form-item label="提取 URL"><t-input v-model="createForm.extract_url" placeholder="供应商 API 提取链接" /></t-form-item>
+          <t-form-item label=""><t-button size="small" @click="previewExtract(createForm)">测试提取</t-button></t-form-item>
+        </template>
         <t-form-item label="协议"><t-select v-model="createForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
         <t-form-item label="地址"><t-input v-model="createForm.host" placeholder="例如 127.0.0.1" /></t-form-item>
         <t-form-item label="端口"><t-input-number v-model="createForm.port" :min="1" :max="65535" /></t-form-item>
@@ -424,6 +489,9 @@ function formatTime(t) {
         <t-descriptions-item label="出口 IP">{{ detailProxy.observed_exit_ip || '-' }}</t-descriptions-item>
         <t-descriptions-item label="备注">{{ detailProxy.remark || '-' }}</t-descriptions-item>
       </t-descriptions>
+      <t-divider>绑定窗口</t-divider>
+      <t-loading :loading="loadingBindings"><t-table :data="boundProfiles" size="small" :columns="[{ colKey: 'name', title: '窗口' }, { colKey: 'bit_profile_id', title: 'BitBrowser ID' }, { colKey: 'user_id', title: '用户' }, { colKey: 'local_status', title: '状态' }]" row-key="id" /></t-loading>
+      <t-button v-if="detailProxy?.source_type === 'api'" style="margin-top:12px" @click="refreshDynamicProxy(detailProxy)">提取新地址并检测</t-button>
     </t-drawer>
 
     <!-- 配额弹窗 -->
