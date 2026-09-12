@@ -18,7 +18,7 @@ func NewMySQLStore(db *sql.DB) *MySQLStore {
 
 func (s *MySQLStore) Create(p ProxyConfig) error {
 	_, err := s.db.Exec(
-		`INSERT INTO proxy_configs (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO proxy_configs (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.SourceType, p.ProxyProtocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
 		nullIfEmpty(p.Region), nullIfEmpty(p.Supplier), nullIfEmpty(p.ExtractURL),
