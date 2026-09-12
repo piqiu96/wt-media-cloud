@@ -51,6 +51,12 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
     assign(proxyId, profileId) {
       return api.post(`/proxies/${proxyId}/assign`, { profile_id: profileId })
     },
+    recommend(profileIds) {
+      return api.get('/proxies/recommendations', { profile_ids: profileIds.join(',') })
+    },
+    assignBatch(proxyId, profileIds) {
+      return api.post(`/proxies/${proxyId}/assign-batch`, { profile_ids: profileIds })
+    },
     unbind(proxyId, profileId) {
       return api.post(`/proxies/${proxyId}/unbind`, { profile_id: profileId })
     },

@@ -82,6 +82,12 @@ const proxyId = ref("")
 const availableProxies = ref([])
 const proxyById = ref({})
 const proxyBindingHint = ref("")
+const batchProxyDialogVisible = ref(false)
+const batchProxyBinding = ref(false)
+const batchProxyTargets = ref([])
+const batchProxyId = ref("")
+const batchProxyCandidates = ref([])
+const batchProxyBindingHint = ref("")
 const localProxyScan = ref(null)
 let lastRuntimeRefreshAt = 0
 let lastRuntimeStatus = null
@@ -506,6 +512,67 @@ async function confirmProxyBinding() {
   }
 }
 
+function selectedProfilesForProxyBinding() {
+  return profiles.value.filter((profile) => (
+    selectedRowKeys.value.includes(profile.id)
+    && profile.local_status === "active"
+    && profile.business_status !== "disabled"
+  ))
+}
+
+async function openBatchProxyBinding() {
+  if (!isDesktopClient.value) {
+    error.value = "批量绑定代理请在Desktop客户端执行。"
+    return
+  }
+  const targets = selectedProfilesForProxyBinding()
+  if (!targets.length) {
+    error.value = "请选择至少一个可用浏览器窗口后再绑定代理。"
+    return
+  }
+  error.value = ""
+  batchProxyTargets.value = targets
+  batchProxyId.value = ""
+  batchProxyCandidates.value = []
+  batchProxyBindingHint.value = "正在按所选窗口数量、检测状态和剩余配额获取推荐代理。"
+  try {
+    const result = await proxyClient.recommend(targets.map((profile) => profile.id))
+    const candidates = Array.isArray(result) ? result : (result?.list || [])
+    batchProxyCandidates.value = candidates
+    batchProxyId.value = candidates[0]?.id || ""
+    batchProxyBindingHint.value = candidates.length
+      ? "已默认选择首个推荐代理；你也可以手动调整为其他合格候选。确认后会逐窗口写入 BitBrowser 并读回验证。"
+      : "暂无可绑定代理：候选必须已启用、检测正常、未过期，并能容纳全部所选窗口。"
+    batchProxyDialogVisible.value = true
+  } catch (e) {
+    batchProxyBindingHint.value = ""
+    error.value = e.message || "无法读取代理推荐"
+  }
+}
+
+async function confirmBatchProxyBinding() {
+  if (!batchProxyTargets.value.length) return
+  if (!batchProxyId.value || !batchProxyCandidates.value.some((proxy) => proxy.id === batchProxyId.value)) {
+    error.value = "请选择系统推荐的合格代理后再确认。"
+    return
+  }
+  batchProxyBinding.value = true
+  error.value = ""
+  try {
+    const result = await proxyClient.assignBatch(batchProxyId.value, batchProxyTargets.value.map((profile) => profile.id))
+    const succeeded = Array.isArray(result?.succeeded) ? result.succeeded.length : 0
+    const failed = Array.isArray(result?.failed) ? result.failed.length : 0
+    taskNotice.value = `批量绑定代理完成：成功 ${succeeded} 个，失败 ${failed} 个。每个成功窗口均已写入 BitBrowser 并读回验证。`
+    batchProxyDialogVisible.value = false
+    selectedRowKeys.value = []
+    await loadProfiles()
+  } catch (e) {
+    error.value = e.message || "批量代理写入或读回失败"
+  } finally {
+    batchProxyBinding.value = false
+  }
+}
+
 
 function openDetail(profile) {
   detailProfile.value = profile
@@ -865,6 +932,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
         <template v-if="isDesktopClient">
           <t-button theme="success" :disabled="!selectedRowKeys.length || Boolean(batchOperating)" @click="batchOpenWindows">批量打开</t-button>
           <t-button theme="warning" :disabled="!selectedRowKeys.length || Boolean(batchOperating)" @click="batchCloseWindows">批量关闭</t-button>
+          <t-button theme="primary" :disabled="!selectedRowKeys.length || Boolean(batchOperating) || batchProxyBinding" @click="openBatchProxyBinding">批量绑定代理</t-button>
         </template>
         <t-button variant="outline" @click="loadProfiles">刷新</t-button>
       </t-space>
@@ -992,6 +1060,20 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
             <t-option v-for="item in availableProxies" :key="item.id" :value="item.id" :label="`${item.proxy_protocol}://${item.host}:${item.port}（剩余 ${item.remaining_profile_count ?? 0}）`" />
           </t-select>
 			<t-empty v-if="!availableProxies.length" description="暂无可绑定代理" style="margin-top:12px" />
+        </t-form-item>
+      </t-form>
+    </t-dialog>
+
+    <t-dialog v-model:visible="batchProxyDialogVisible" header="批量绑定代理并同步 BitBrowser" @confirm="confirmBatchProxyBinding" :confirm-btn="{ loading: batchProxyBinding, theme: 'primary', content: '确认逐项写入并读回' }">
+      <t-alert theme="info" style="margin-bottom:12px">系统先按已启用、检测正常、未过期及总剩余配额推荐代理。确认后逐窗口执行写入与读回；失败窗口不会建立Cloud正式关联。</t-alert>
+      <t-alert v-if="batchProxyBindingHint" :message="batchProxyBindingHint" :theme="batchProxyCandidates.length ? 'info' : 'warning'" style="margin-bottom:12px" />
+      <t-form label-width="84px">
+        <t-form-item label="已选窗口"><span>{{ batchProxyTargets.length }} 个</span></t-form-item>
+        <t-form-item label="代理">
+          <t-select v-model="batchProxyId" placeholder="选择推荐代理">
+            <t-option v-for="item in batchProxyCandidates" :key="item.id" :value="item.id" :label="`${item.proxy_protocol}://${item.host}:${item.port}（剩余 ${item.remaining_profile_count ?? 0}）`" />
+          </t-select>
+          <t-empty v-if="!batchProxyCandidates.length" description="暂无可容纳全部所选窗口的代理" style="margin-top:12px" />
         </t-form-item>
       </t-form>
     </t-dialog>

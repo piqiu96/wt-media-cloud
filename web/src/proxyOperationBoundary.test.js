@@ -18,6 +18,9 @@ describe('proxy operation page boundary', () => {
     expect(profilesPage).toContain('proxyClient.assign')
     expect(profilesPage).toContain('proxyClient.unbind')
     expect(profilesPage).toContain('proxyClient.previewLocalScan')
+    expect(profilesPage).toContain('批量绑定代理')
+    expect(profilesPage).toContain('proxyClient.recommend')
+    expect(profilesPage).toContain('proxyClient.assignBatch')
   })
 
   it('keeps batch checks and ledger actions in proxy management', () => {
