@@ -100,6 +100,31 @@ func (s *MySQLStore) ResolveProfileForAccountCheck(profileID string) (string, id
 	return id, userID, bitProfileID, status == ProfileActive, true, nil
 }
 
+// ResolveProxyForAccountCheck returns only the proxy health facts needed to
+// render media-account check items. Proxy credentials and source URLs are not
+// selected or returned from this cross-module read model.
+func (s *MySQLStore) ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
+	var proxyID, businessStatus, lastCheckResult sql.NullString
+	var expiresAt sql.NullTime
+	err := s.db.QueryRow(`SELECT bp.proxy_id, pc.business_status, pc.last_check_result, pc.expires_at
+		FROM browser_profiles bp
+		JOIN proxy_configs pc ON pc.id = bp.proxy_id
+		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.proxy_id <> ''`, profileID).
+		Scan(&proxyID, &businessStatus, &lastCheckResult, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", nil, false, nil
+	}
+	if err != nil {
+		return "", "", "", nil, false, err
+	}
+	var value *time.Time
+	if expiresAt.Valid {
+		at := expiresAt.Time
+		value = &at
+	}
+	return proxyID.String, businessStatus.String, lastCheckResult.String, value, proxyID.String != "", nil
+}
+
 func (s *MySQLStore) GetProfile(profileID string) (BrowserProfile, bool, error) {
 	row := s.db.QueryRow(`SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE id = ?`, profileID)
 	profile, err := scanProfile(row)

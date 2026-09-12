@@ -255,10 +255,19 @@ type ProfileResolver interface {
 
 type ProfileFactResolver interface {
 	ResolveProfileForAccountCheck(profileID string) (id string, userID identity.UserID, bitProfileID string, active bool, found bool, err error)
+	ResolveProxyForAccountCheck(profileID string) (proxyID string, businessStatus string, lastCheckResult string, expiresAt *time.Time, bound bool, err error)
 }
 
 type SensitiveTaskCreator interface {
 	CreateAuthorizedTask(profileguard.SensitiveTask) error
+}
+
+type accountCheckProxyFact struct {
+	proxyID         string
+	businessStatus  string
+	lastCheckResult string
+	expiresAt       *time.Time
+	bound           bool
 }
 
 type UserResolver interface {
@@ -749,6 +758,10 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 		return Account{}, ErrInvalidInput
 	}
 	now := s.now()
+	proxyFact, err := s.resolveAccountCheckProxyFact(record.BrowserProfileID)
+	if err != nil {
+		return Account{}, err
+	}
 	platformAccountID := strings.TrimSpace(input.PlatformAccountID)
 	if input.LoginStatus == LoginNormal {
 		if platformAccountID == "" {
@@ -762,6 +775,7 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 			record.IdentificationStatus = IdentificationDuplicate
 			record.DuplicateOfAccountID = existing.ID
 			record.LoginStatus = LoginAccountMismatch
+			record.CheckItems = mergeCheckItems(input.CheckItems, proxyFact, now)
 			record.UpdatedAt = now
 			record.LastCheckedAt = &now
 			if err := s.store.Update(record, nil); err != nil {
@@ -790,8 +804,8 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 		record.LoginStatus = input.LoginStatus
 	}
 	// 合成 8 项检查明细：1/2 来自本检查前置（能执行到此处说明前置通过）；
-	// 3/4 代理项延后 M2-C（na）；5-8 来自 Agent 返回。
-	record.CheckItems = mergeCheckItems(input.CheckItems)
+	// 3/4 由已读回的 Profile—代理正式关系派生；5-8 来自 Agent 返回。
+	record.CheckItems = mergeCheckItems(input.CheckItems, proxyFact, now)
 	record.UpdatedAt = now
 	record.LastCheckedAt = &now
 	if err := s.store.Update(record, nil); err != nil {
@@ -1037,13 +1051,32 @@ func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string)
 	return s.ListAccounts(actor, filter)
 }
 
-// mergeCheckItems 合成账号检查 8 项明细：固定 1-4 项 + Agent 返回的 5-8 项（缺失补 na）。
-func mergeCheckItems(agentItems []AccountCheckItem) []AccountCheckItem {
+func (s *Service) resolveAccountCheckProxyFact(profileID string) (accountCheckProxyFact, error) {
+	if s.profileFacts == nil || strings.TrimSpace(profileID) == "" {
+		return accountCheckProxyFact{}, nil
+	}
+	proxyID, businessStatus, lastCheckResult, expiresAt, bound, err := s.profileFacts.ResolveProxyForAccountCheck(profileID)
+	if err != nil {
+		return accountCheckProxyFact{}, err
+	}
+	return accountCheckProxyFact{
+		proxyID:         strings.TrimSpace(proxyID),
+		businessStatus:  strings.TrimSpace(businessStatus),
+		lastCheckResult: strings.TrimSpace(lastCheckResult),
+		expiresAt:       expiresAt,
+		bound:           bound && strings.TrimSpace(proxyID) != "",
+	}, nil
+}
+
+// mergeCheckItems combines account-check facts 1-4 with Agent items 5-8.
+// Proxy checks intentionally never use na: an unbound Profile is a failed
+// connectivity precondition and has no expiry to evaluate.
+func mergeCheckItems(agentItems []AccountCheckItem, proxyFact accountCheckProxyFact, now time.Time) []AccountCheckItem {
 	fixed := []AccountCheckItem{
 		{Key: "identity_match", Label: "比特浏览器账号匹配", Status: "pass"},
 		{Key: "profile_exists", Label: "绑定窗口存在", Status: "pass"},
-		{Key: "proxy_ok", Label: "窗口代理正常", Status: "na", Message: "代理管理未接入（M2-C）"},
-		{Key: "proxy_expired", Label: "代理到期/停用", Status: "na", Message: "代理管理未接入（M2-C）"},
+		proxyCheckItem(proxyFact, now),
+		proxyExpiryCheckItem(proxyFact, now),
 	}
 	merged := make([]AccountCheckItem, 0, 8)
 	merged = append(merged, fixed...)
@@ -1064,6 +1097,46 @@ func mergeCheckItems(agentItems []AccountCheckItem) []AccountCheckItem {
 		}
 	}
 	return merged
+}
+
+func proxyCheckItem(proxyFact accountCheckProxyFact, now time.Time) AccountCheckItem {
+	item := AccountCheckItem{Key: "proxy_ok", Label: "窗口代理正常"}
+	if !proxyFact.bound {
+		item.Status, item.Message = "fail", "绑定窗口未配置正式代理关系"
+		return item
+	}
+	if proxyFact.businessStatus != "active" {
+		item.Status, item.Message = "fail", "绑定代理已停用或已过期"
+		return item
+	}
+	if proxyFact.expiresAt != nil && !proxyFact.expiresAt.After(now) {
+		item.Status, item.Message = "fail", "绑定代理已过期"
+		return item
+	}
+	if proxyFact.lastCheckResult != "ok" {
+		item.Status, item.Message = "fail", "绑定代理尚未检测正常"
+		return item
+	}
+	item.Status = "pass"
+	return item
+}
+
+func proxyExpiryCheckItem(proxyFact accountCheckProxyFact, now time.Time) AccountCheckItem {
+	item := AccountCheckItem{Key: "proxy_expired", Label: "代理到期/停用"}
+	if !proxyFact.bound {
+		item.Status, item.Message = "skip", "绑定窗口未配置代理"
+		return item
+	}
+	if proxyFact.businessStatus != "active" {
+		item.Status, item.Message = "fail", "绑定代理已停用或已过期"
+		return item
+	}
+	if proxyFact.expiresAt != nil && !proxyFact.expiresAt.After(now) {
+		item.Status, item.Message = "fail", "绑定代理已过期"
+		return item
+	}
+	item.Status = "pass"
+	return item
 }
 
 func validGroupFilters(filters AccountGroupFilters) bool {

@@ -419,6 +419,84 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	}
 }
 
+func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
+	actor := mediaActor(1, 10, identity.RoleOperator)
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	future := now.Add(24 * time.Hour)
+	past := now.Add(-time.Hour)
+	cases := []struct {
+		name           string
+		proxyFact      fakeProfileProxyFact
+		wantProxyOK    string
+		wantExpiration string
+	}{
+		{
+			name:           "checked active proxy passes both checks",
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "active", lastCheckResult: "ok", expiresAt: &future, bound: true},
+			wantProxyOK:    "pass",
+			wantExpiration: "pass",
+		},
+		{
+			name:           "missing proxy fails connectivity and skips expiry",
+			proxyFact:      fakeProfileProxyFact{},
+			wantProxyOK:    "fail",
+			wantExpiration: "skip",
+		},
+		{
+			name:           "unchecked proxy fails connectivity without claiming expiry",
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "active", lastCheckResult: "", expiresAt: &future, bound: true},
+			wantProxyOK:    "fail",
+			wantExpiration: "pass",
+		},
+		{
+			name:           "paused proxy fails both checks",
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "paused", lastCheckResult: "ok", expiresAt: &future, bound: true},
+			wantProxyOK:    "fail",
+			wantExpiration: "fail",
+		},
+		{
+			name:           "expired proxy fails both checks",
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "active", lastCheckResult: "ok", expiresAt: &past, bound: true},
+			wantProxyOK:    "fail",
+			wantExpiration: "fail",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMemoryStore()
+			facts := &fakeProfileFacts{
+				profiles: map[string]fakeProfileFact{
+					"profile-1": {id: "profile-1", userID: actor.ID, bitProfileID: "bit-profile-1", active: true},
+				},
+				proxyFacts: map[string]fakeProfileProxyFact{"profile-1": tc.proxyFact},
+			}
+			service := newTestServiceForAccountCheck(store, facts, &fakeSensitiveTasks{})
+			account, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.records[account.ID] = AccountRecord{Account: Account{
+				ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+				BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+			}}
+
+			updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
+				TaskID: "task-1", PlatformAccountID: "platform-account-1", LoginStatus: LoginNormal,
+			})
+			if err != nil {
+				t.Fatalf("ApplyLocalAccountCheckResult() error=%v", err)
+			}
+			if got := accountCheckStatus(t, updated.CheckItems, "proxy_ok"); got != tc.wantProxyOK {
+				t.Fatalf("proxy_ok=%q, want %q; checks=%#v", got, tc.wantProxyOK, updated.CheckItems)
+			}
+			if got := accountCheckStatus(t, updated.CheckItems, "proxy_expired"); got != tc.wantExpiration {
+				t.Fatalf("proxy_expired=%q, want %q; checks=%#v", got, tc.wantExpiration, updated.CheckItems)
+			}
+		})
+	}
+}
+
 func TestServiceCreateAccountStoresName(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
@@ -907,13 +985,41 @@ type fakeProfileFact struct {
 	active       bool
 }
 
+type fakeProfileProxyFact struct {
+	proxyID         string
+	businessStatus  string
+	lastCheckResult string
+	expiresAt       *time.Time
+	bound           bool
+}
+
 type fakeProfileFacts struct {
-	profiles map[string]fakeProfileFact
+	profiles   map[string]fakeProfileFact
+	proxyFacts map[string]fakeProfileProxyFact
 }
 
 func (r *fakeProfileFacts) ResolveProfileForAccountCheck(profileID string) (string, identity.UserID, string, bool, bool, error) {
 	profile, found := r.profiles[profileID]
 	return profile.id, profile.userID, profile.bitProfileID, profile.active, found, nil
+}
+
+func (r *fakeProfileFacts) ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
+	proxy, found := r.proxyFacts[profileID]
+	if !found {
+		return "", "", "", nil, false, nil
+	}
+	return proxy.proxyID, proxy.businessStatus, proxy.lastCheckResult, proxy.expiresAt, proxy.bound, nil
+}
+
+func accountCheckStatus(t *testing.T, items []AccountCheckItem, key string) string {
+	t.Helper()
+	for _, item := range items {
+		if item.Key == key {
+			return item.Status
+		}
+	}
+	t.Fatalf("missing check item %q: %#v", key, items)
+	return ""
 }
 
 type fakeSensitiveTasks struct {
