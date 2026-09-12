@@ -185,6 +185,23 @@ func TestUnifiedQuotaAppliesAcrossPlatforms(t *testing.T) {
 	}
 }
 
+func TestAgentReachableCheckResultMakesProxyAssignable(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, MaxProfileCount: 2}
+	service := NewService(store)
+
+	updated, err := service.RecordCheckResult("proxy-1", "reachable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastCheckResult != "ok" {
+		t.Fatalf("agent reachable result stored as %q, want normalized ok", updated.LastCheckResult)
+	}
+	if err := service.CheckAssignable(updated); err != nil {
+		t.Fatalf("reachable proxy rejected after normalization: %v", err)
+	}
+}
+
 func TestUpdateConnectionClearsPreviousCheckResult(t *testing.T) {
 	store := newRouteMemoryStore()
 	checkedAt := time.Now().UTC()
