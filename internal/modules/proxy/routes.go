@@ -60,6 +60,22 @@ type ProxyBindingSummary struct {
 	LocalStatus  string `json:"local_status"`
 }
 
+type ProxyBatchAssignFailure struct {
+	ProfileID string `json:"profile_id"`
+	Message   string `json:"message"`
+}
+
+type ProxyBatchAssignResult struct {
+	Succeeded []profilebinding.BrowserProfile `json:"succeeded"`
+	Failed    []ProxyBatchAssignFailure       `json:"failed"`
+}
+
+var (
+	errProfileProxyUnauthorized = errors.New("profile proxy operation is forbidden")
+	errProxyQuotaFull           = errors.New("proxy profile quota is full")
+	errProxyReadback            = errors.New("proxy agent readback failed")
+)
+
 func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity.Service, deps ...any) {
 	var tasks TaskCreator
 	var profiles ProfileLookup
@@ -130,6 +146,65 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 			proxies[index] = publicProxy(proxies[index])
 		}
 		common.Success(c, proxies)
+	})
+
+	h.GET("/api/v1/proxies/recommendations", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if profiles == nil || bindings == nil {
+			common.Failure(c, 503, 30006, "代理关联服务不可用", nil)
+			return
+		}
+		targetIDs := normalizedProfileIDs(strings.Split(c.Query("profile_ids"), ","))
+		if len(targetIDs) == 0 {
+			common.BadRequest(c, 10001, "请至少选择一个浏览器窗口")
+			return
+		}
+		targets := make([]profilebinding.BrowserProfile, 0, len(targetIDs))
+		for _, profileID := range targetIDs {
+			profile, err := ownedActiveProfile(actor, profileID, profiles)
+			if err != nil {
+				common.Forbidden(c, 11003, "没有权限查看此 Profile 的代理推荐")
+				return
+			}
+			targets = append(targets, profile)
+		}
+		candidates, err := service.List(ProxyFilter{Limit: 200})
+		if err != nil {
+			writeProxyError(c, err)
+			return
+		}
+		recommended := make([]ProxyConfig, 0, len(candidates))
+		for _, candidate := range candidates {
+			if service.CheckAssignable(candidate) != nil {
+				continue
+			}
+			required := 0
+			for _, target := range targets {
+				if target.ProxyID != candidate.ID {
+					required++
+				}
+			}
+			if required > 0 {
+				assigned, countErr := bindings.CountProfilesByProxyID(candidate.ID)
+				if countErr != nil {
+					common.InternalError(c, "代理关联窗口查询失败")
+					return
+				}
+				available, quotaErr := service.CheckQuota(candidate.ID, assigned+required-1)
+				if quotaErr != nil {
+					writeProxyError(c, quotaErr)
+					return
+				}
+				if !available {
+					continue
+				}
+			}
+			recommended = append(recommended, publicProxy(candidate))
+		}
+		common.Success(c, recommended)
 	})
 
 	h.GET("/api/v1/proxies/:id", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -532,51 +607,47 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		if !common.DecodeJSON(c, &req) {
 			return
 		}
-		profile, found, err := profiles.GetProfile(req.ProfileID)
+		updated, err := assignProxyToProfile(ctx, actor, c.Param("id"), req.ProfileID, service, profiles, bindings, mutator)
 		if err != nil {
-			common.InternalError(c, "Profile 查询失败")
-			return
-		}
-		if !found || profile.UserID != actor.ID || profile.LocalStatus != profilebinding.ProfileActive {
-			common.Forbidden(c, 11003, "没有权限分配此 Profile")
-			return
-		}
-		proxy, err := service.Get(c.Param("id"))
-		if err != nil {
-			writeProxyError(c, err)
-			return
-		}
-		if err := service.CheckAssignable(proxy); err != nil {
-			writeProxyError(c, err)
-			return
-		}
-		if profile.ProxyID != proxy.ID {
-			assigned, countErr := bindings.CountProfilesByProxyID(proxy.ID)
-			if countErr != nil {
-				common.InternalError(c, "代理关联窗口查询失败")
-				return
-			}
-			available, quotaErr := service.CheckQuota(proxy.ID, assigned)
-			if quotaErr != nil {
-				writeProxyError(c, quotaErr)
-				return
-			}
-			if !available {
-				common.Conflict(c, 23005, "代理窗口配额已满")
-				return
-			}
-		}
-		result, mutateErr := mutator.Mutate(ctx, ProxyMutationInput{Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password})
-		if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID || result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
-			common.Failure(c, 503, 30008, "Agent 写入或读回代理失败", nil)
-			return
-		}
-		updated, bindErr := bindings.BindProxy(profile.ID, proxy.ID, string(result.ProxyProtocol), result.Host, result.Port)
-		if bindErr != nil {
-			common.InternalError(c, "代理正式关系更新失败")
+			writeProxyAssignmentError(c, err)
 			return
 		}
 		common.Success(c, updated)
+	})
+
+	h.POST("/api/v1/proxies/:id/assign-batch", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if profiles == nil || bindings == nil || mutator == nil {
+			common.Failure(c, 503, 30006, "Agent 同步写入服务不可用", nil)
+			return
+		}
+		var req struct {
+			ProfileIDs []string `json:"profile_ids"`
+		}
+		if !common.DecodeJSON(c, &req) {
+			return
+		}
+		profileIDs := normalizedProfileIDs(req.ProfileIDs)
+		if len(profileIDs) == 0 {
+			common.BadRequest(c, 10001, "请至少选择一个浏览器窗口")
+			return
+		}
+		result := ProxyBatchAssignResult{
+			Succeeded: make([]profilebinding.BrowserProfile, 0, len(profileIDs)),
+			Failed:    make([]ProxyBatchAssignFailure, 0),
+		}
+		for _, profileID := range profileIDs {
+			updated, err := assignProxyToProfile(ctx, actor, c.Param("id"), profileID, service, profiles, bindings, mutator)
+			if err != nil {
+				result.Failed = append(result.Failed, ProxyBatchAssignFailure{ProfileID: profileID, Message: proxyAssignmentFailureMessage(err)})
+				continue
+			}
+			result.Succeeded = append(result.Succeeded, updated)
+		}
+		common.Success(c, result)
 	})
 
 	h.POST("/api/v1/proxies/:id/unbind", func(ctx context.Context, c *hertzapp.RequestContext) {
@@ -638,6 +709,99 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 		}
 		common.Success(c, publicProxy(proxy))
 	})
+}
+
+func normalizedProfileIDs(raw []string) []string {
+	seen := make(map[string]bool, len(raw))
+	profileIDs := make([]string, 0, len(raw))
+	for _, value := range raw {
+		profileID := strings.TrimSpace(value)
+		if profileID == "" || seen[profileID] {
+			continue
+		}
+		seen[profileID] = true
+		profileIDs = append(profileIDs, profileID)
+	}
+	return profileIDs
+}
+
+func ownedActiveProfile(actor identity.PublicUser, profileID string, profiles ProfileLookup) (profilebinding.BrowserProfile, error) {
+	profile, found, err := profiles.GetProfile(strings.TrimSpace(profileID))
+	if err != nil {
+		return profilebinding.BrowserProfile{}, err
+	}
+	if !found || profile.UserID != actor.ID || profile.LocalStatus != profilebinding.ProfileActive {
+		return profilebinding.BrowserProfile{}, errProfileProxyUnauthorized
+	}
+	return profile, nil
+}
+
+func assignProxyToProfile(ctx context.Context, actor identity.PublicUser, proxyID, profileID string, service *Service, profiles ProfileLookup, bindings ProfileProxyBinder, mutator SyncProxyMutator) (profilebinding.BrowserProfile, error) {
+	profile, err := ownedActiveProfile(actor, profileID, profiles)
+	if err != nil {
+		return profilebinding.BrowserProfile{}, err
+	}
+	proxy, err := service.Get(proxyID)
+	if err != nil {
+		return profilebinding.BrowserProfile{}, err
+	}
+	if err := service.CheckAssignable(proxy); err != nil {
+		return profilebinding.BrowserProfile{}, err
+	}
+	if profile.ProxyID != proxy.ID {
+		assigned, countErr := bindings.CountProfilesByProxyID(proxy.ID)
+		if countErr != nil {
+			return profilebinding.BrowserProfile{}, countErr
+		}
+		available, quotaErr := service.CheckQuota(proxy.ID, assigned)
+		if quotaErr != nil {
+			return profilebinding.BrowserProfile{}, quotaErr
+		}
+		if !available {
+			return profilebinding.BrowserProfile{}, errProxyQuotaFull
+		}
+	}
+	result, mutateErr := mutator.Mutate(ctx, ProxyMutationInput{Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password})
+	if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID || result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
+		return profilebinding.BrowserProfile{}, errProxyReadback
+	}
+	updated, bindErr := bindings.BindProxy(profile.ID, proxy.ID, string(result.ProxyProtocol), result.Host, result.Port)
+	if bindErr != nil {
+		return profilebinding.BrowserProfile{}, bindErr
+	}
+	return updated, nil
+}
+
+func writeProxyAssignmentError(c *hertzapp.RequestContext, err error) {
+	switch {
+	case errors.Is(err, errProfileProxyUnauthorized):
+		common.Forbidden(c, 11003, "没有权限分配此 Profile")
+	case errors.Is(err, errProxyQuotaFull):
+		common.Conflict(c, 23005, "代理窗口配额已满")
+	case errors.Is(err, errProxyReadback):
+		common.Failure(c, 503, 30008, "Agent 写入或读回代理失败", nil)
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNotAssignable):
+		writeProxyError(c, err)
+	default:
+		common.InternalError(c, "代理正式关系更新失败")
+	}
+}
+
+func proxyAssignmentFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, errProfileProxyUnauthorized):
+		return "没有权限分配此 Profile"
+	case errors.Is(err, errProxyQuotaFull):
+		return "代理窗口配额已满"
+	case errors.Is(err, ErrNotAssignable):
+		return "代理未通过检测、已停用或已过期"
+	case errors.Is(err, ErrNotFound):
+		return "代理不存在"
+	case errors.Is(err, errProxyReadback):
+		return "Agent 写入或读回代理失败"
+	default:
+		return "代理正式关系更新失败"
+	}
 }
 
 func buildLocalProxyScanPreview(service *Service, profiles ProfileLookup, scan profilebinding.ProfileScan) (LocalProxyScanPreview, error) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -312,6 +313,118 @@ func TestAssignReplacesExistingProxyOnlyAfterNewReadback(t *testing.T) {
 	}
 }
 
+func TestBatchAssignMutatesEachAuthorizedProfileAndReturnsReadback(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, LastCheckResult: "ok", MaxProfileCount: 2}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := &routeProfileStore{profiles: map[string]profilebinding.BrowserProfile{
+		"profile-1": {ID: "profile-1", UserID: 1, BitProfileID: "bit-profile-1", LocalStatus: profilebinding.ProfileActive},
+		"profile-2": {ID: "profile-2", UserID: 1, BitProfileID: "bit-profile-2", LocalStatus: profilebinding.ProfileActive},
+	}}
+	mutator := &routeMutator{results: []ProxyMutationResult{
+		{ProfileID: "bit-profile-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, Readback: true},
+		{ProfileID: "bit-profile-2", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, Readback: true},
+	}}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService, profiles, mutator)
+
+	response := proxyJSON(engine, "POST", "/api/v1/proxies/proxy-1/assign-batch", `{"profile_ids":["profile-1","profile-2"]}`, login.Token)
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("batch assign status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	if len(mutator.inputs) != 2 || profiles.profiles["profile-1"].ProxyID != "proxy-1" || profiles.profiles["profile-2"].ProxyID != "proxy-1" {
+		t.Fatalf("inputs=%#v profiles=%#v", mutator.inputs, profiles.profiles)
+	}
+	if !bytes.Contains(response.Result().Body(), []byte(`"succeeded"`)) || bytes.Contains(response.Result().Body(), []byte(`"failed":[{`)) {
+		t.Fatalf("batch response=%s", response.Result().Body())
+	}
+}
+
+func TestBatchAssignKeepsFailedProfileUnbound(t *testing.T) {
+	store := newRouteMemoryStore()
+	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, LastCheckResult: "ok", MaxProfileCount: 2}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := &routeProfileStore{profiles: map[string]profilebinding.BrowserProfile{
+		"profile-1": {ID: "profile-1", UserID: 1, BitProfileID: "bit-profile-1", LocalStatus: profilebinding.ProfileActive},
+		"profile-2": {ID: "profile-2", UserID: 1, BitProfileID: "bit-profile-2", LocalStatus: profilebinding.ProfileActive},
+	}}
+	mutator := &routeMutator{results: []ProxyMutationResult{
+		{ProfileID: "bit-profile-1", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, Readback: true},
+		{ProfileID: "bit-profile-2", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, Readback: false},
+	}}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService, profiles, mutator)
+
+	response := proxyJSON(engine, "POST", "/api/v1/proxies/proxy-1/assign-batch", `{"profile_ids":["profile-1","profile-2"]}`, login.Token)
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("batch assign status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	if profiles.profiles["profile-1"].ProxyID != "proxy-1" || profiles.profiles["profile-2"].ProxyID != "" {
+		t.Fatalf("failed batch item changed formal proxy relation: %#v", profiles.profiles)
+	}
+	if !bytes.Contains(response.Result().Body(), []byte(`"profile_id":"profile-2"`)) {
+		t.Fatalf("batch response omitted failed profile=%s", response.Result().Body())
+	}
+}
+
+func TestProxyRecommendationsRequireCheckedActiveCapacity(t *testing.T) {
+	store := newRouteMemoryStore()
+	future := time.Now().Add(time.Hour)
+	past := time.Now().Add(-time.Hour)
+	store.items = map[string]ProxyConfig{
+		"recommended": {ID: "recommended", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.1", Port: 1080, BusinessStatus: BizActive, LastCheckResult: "ok", ExpiresAt: &future, MaxProfileCount: 2},
+		"unchecked":   {ID: "unchecked", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.2", Port: 1080, BusinessStatus: BizActive, MaxProfileCount: 2},
+		"paused":      {ID: "paused", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.3", Port: 1080, BusinessStatus: BizPaused, LastCheckResult: "ok", MaxProfileCount: 2},
+		"expired":     {ID: "expired", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.4", Port: 1080, BusinessStatus: BizActive, LastCheckResult: "ok", ExpiresAt: &past, MaxProfileCount: 2},
+		"full":        {ID: "full", ProxyProtocol: ProtocolSOCKS5, Host: "127.0.0.5", Port: 1080, BusinessStatus: BizActive, LastCheckResult: "ok", ExpiresAt: &future, MaxProfileCount: 1},
+	}
+	identityService := identity.NewService(identity.NewMemoryStore())
+	if _, err := identityService.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	login, err := identityService.Login("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := &routeProfileStore{profiles: map[string]profilebinding.BrowserProfile{
+		"profile-1": {ID: "profile-1", UserID: 1, BitProfileID: "bit-profile-1", LocalStatus: profilebinding.ProfileActive},
+		"profile-2": {ID: "profile-2", UserID: 1, BitProfileID: "bit-profile-2", LocalStatus: profilebinding.ProfileActive},
+	}}
+	engine := server.New()
+	identity.RegisterRoutes(engine, identityService, identity.RouteConfig{CookieSecure: false})
+	RegisterRoutes(engine, NewService(store), identityService, profiles)
+
+	response := proxyJSON(engine, "GET", "/api/v1/proxies/recommendations?profile_ids=profile-1,profile-2", "", login.Token)
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("recommendations status=%d body=%s", response.Result().StatusCode(), response.Result().Body())
+	}
+	body := string(response.Result().Body())
+	if !strings.Contains(body, `"id":"recommended"`) {
+		t.Fatalf("missing eligible recommendation: %s", body)
+	}
+	for _, id := range []string{"unchecked", "paused", "expired", "full"} {
+		if strings.Contains(body, `"id":"`+id+`"`) {
+			t.Fatalf("ineligible proxy %q recommended: %s", id, body)
+		}
+	}
+}
+
 func TestUnbindClearsFormalProxyOnlyAfterNoProxyReadback(t *testing.T) {
 	store := newRouteMemoryStore()
 	store.items["proxy-1"] = ProxyConfig{ID: "proxy-1", ProxyProtocol: ProtocolHTTP, Host: "10.0.0.1", Port: 8080, BusinessStatus: BizActive, MaxProfileCount: 2}
@@ -517,18 +630,41 @@ func (s *routeMemoryStore) Delete(id string) error         { delete(s.items, id)
 
 type routeProfileStore struct {
 	profile      profilebinding.BrowserProfile
+	profiles     map[string]profilebinding.BrowserProfile
 	boundProxyID string
 	unbound      bool
 	profileCount int
 }
 
 func (s *routeProfileStore) GetProfile(id string) (profilebinding.BrowserProfile, bool, error) {
+	if s.profiles != nil {
+		profile, found := s.profiles[id]
+		return profile, found, nil
+	}
 	return s.profile, s.profile.ID == id, nil
 }
 func (s *routeProfileStore) CountProfilesByProxyID(proxyID string) (int, error) {
+	if s.profiles != nil {
+		count := 0
+		for _, profile := range s.profiles {
+			if profile.ProxyID == proxyID {
+				count++
+			}
+		}
+		return count, nil
+	}
 	return s.profileCount, nil
 }
 func (s *routeProfileStore) BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (profilebinding.BrowserProfile, error) {
+	if s.profiles != nil {
+		profile, found := s.profiles[profileID]
+		if !found {
+			return profilebinding.BrowserProfile{}, profilebinding.ErrProfileNotFound
+		}
+		profile.ProxyID, profile.ProxyType, profile.ProxyHost, profile.ProxyPort = proxyID, proxyType, proxyHost, proxyPort
+		s.profiles[profileID] = profile
+		return profile, nil
+	}
 	s.boundProxyID = proxyID
 	s.profile.ProxyID, s.profile.ProxyType, s.profile.ProxyHost, s.profile.ProxyPort = proxyID, proxyType, proxyHost, proxyPort
 	return s.profile, nil
@@ -543,12 +679,20 @@ func (s *routeProfileStore) UnbindProxy(profileID, expectedProxyID string) (prof
 }
 
 type routeMutator struct {
-	input  ProxyMutationInput
-	result ProxyMutationResult
+	input   ProxyMutationInput
+	inputs  []ProxyMutationInput
+	result  ProxyMutationResult
+	results []ProxyMutationResult
 }
 
 func (m *routeMutator) Mutate(_ context.Context, input ProxyMutationInput) (ProxyMutationResult, error) {
 	m.input = input
+	m.inputs = append(m.inputs, input)
+	if len(m.results) > 0 {
+		result := m.results[0]
+		m.results = m.results[1:]
+		return result, nil
+	}
 	return m.result, nil
 }
 
