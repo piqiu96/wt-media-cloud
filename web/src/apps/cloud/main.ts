@@ -5,6 +5,8 @@ import { createCloudRouter } from "./router"
 import App from "../../App.vue"
 import "tdesign-vue-next/es/style/index.css"
 import "../../shared/styles/layout.css"
+import "../../styles/design-token.css"
+import "../../shared/styles/resource-module.css"
 
 const app = createApp(App)
 const pinia = createPinia()

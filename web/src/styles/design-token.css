@@ -1,0 +1,27 @@
+:root {
+  --wt-primary: #2563EB;
+  --wt-primary-hover: #1D4ED8;
+
+  --wt-bg-page: #F8FAFC;
+  --wt-bg-card: #FFFFFF;
+
+  --wt-text-primary: #0F172A;
+  --wt-text-secondary: #334155;
+  --wt-text-tertiary: #64748B;
+
+  --wt-border: rgba(15, 23, 42, 0.06);
+
+  --wt-success: #16A34A;
+  --wt-success-bg: #DCFCE7;
+  --wt-warning: #D97706;
+  --wt-warning-bg: #FEF3C7;
+  --wt-danger: #DC2626;
+  --wt-danger-bg: #FEE2E2;
+  --wt-info-bg: #DBEAFE;
+
+  --wt-radius-sm: 8px;
+  --wt-radius-md: 12px;
+  --wt-radius-lg: 16px;
+
+  --wt-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
