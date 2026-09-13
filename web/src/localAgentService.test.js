@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { createLocalAgentService, LOCAL_AGENT_COMMANDS } from './apps/desktop/features/local-agent/service.js'
+import { startDesktopLocalAgent } from './apps/desktop/features/local-agent/init.js'
 
 describe('local agent desktop service', () => {
+  it('starts the Agent through Tauri only when Desktop is available', async () => {
+    const invoke = vi.fn(async () => 'sidecar_started')
+
+    await expect(startDesktopLocalAgent({ tauri: true, invokeImpl: invoke })).resolves.toBe(true)
+    await expect(startDesktopLocalAgent({ tauri: false, invokeImpl: invoke })).resolves.toBe(false)
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith(LOCAL_AGENT_COMMANDS.start)
+  })
+
   it('proxies profile scan through Tauri invoke', async () => {
     const snapshot = { main_user_id: 'main-user-1', profiles: [{ bit_profile_id: 'p1' }] }
     const invoke = vi.fn(async (command) => {

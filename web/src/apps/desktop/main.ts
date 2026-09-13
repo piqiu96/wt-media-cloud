@@ -4,6 +4,7 @@ import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
 import App from "./App.vue"
 import { canUseDesktop } from "../../utils.js"
+import { startDesktopLocalAgent } from "./features/local-agent/init.js"
 import "tdesign-vue-next/es/style/index.css"
 import "../../shared/styles/layout.css"
 
@@ -15,6 +16,14 @@ const router = createDesktopRouter()
 app.use(pinia)
 app.use(TDesign)
 app.use(router)
+
+// The release shell owns the Local Agent lifecycle. This invokes only the
+// Tauri Rust bridge; browser previews remain side-effect free.
+// This entrypoint is compiled only for the Desktop shell, so do not depend on
+// heuristic WebView globals to decide whether the Rust bridge is available.
+void startDesktopLocalAgent({ tauri: true }).catch((error) => {
+  console.warn("Local Agent startup failed; use the environment page to retry.", error)
+})
 
 // Auth guard
 router.beforeEach(async (to, from, next) => {
