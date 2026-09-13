@@ -1,7 +1,11 @@
 <script setup>
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { createProxyClient } from "../../../shared/api/proxy.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
+import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
+import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
+import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
+import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 
 const proxyClient = createProxyClient()
 const proxies = ref([])
@@ -44,6 +48,13 @@ const quotaVisible = ref(false)
 const quotaProxyId = ref("")
 const quotaMax = ref(1)
 const savingQuota = ref(false)
+
+const proxyStatItems = computed(() => [
+  { key: "total", label: "代理总数", value: proxies.value.length, tone: "info" },
+  { key: "available", label: "可用代理", value: proxies.value.filter((proxy) => proxy.business_status === "active" && proxy.last_check_result === "ok").length, tone: "success" },
+  { key: "attention", label: "异常代理", value: proxies.value.filter((proxy) => proxy.last_check_result && proxy.last_check_result !== "ok").length, tone: "danger" },
+  { key: "bound", label: "已绑定窗口", value: proxies.value.reduce((total, proxy) => total + Number(proxy.assigned_profile_count || 0), 0), tone: "warning" },
+])
 
 
 onMounted(() => { loadProxies() })
@@ -320,6 +331,14 @@ function formatTime(t) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
+  <div class="wt-resource-page">
+    <ResourcePageHeader title="代理管理" description="管理代理资源池、连通性和窗口绑定">
+      <template #actions>
+        <t-button theme="primary" @click="openCreate">新增代理</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="loadProxies">刷新</t-button>
+      </template>
+    </ResourcePageHeader>
+    <ResourceStatGrid :items="proxyStatItems" />
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-alert v-if="failedCheckProxy" theme="warning" style="margin-bottom:16px">
       同步检测失败时才需要后台任务：
@@ -329,6 +348,7 @@ function formatTime(t) {
 		<t-alert v-if="batchCheckResult" :message="batchCheckResult" theme="info" style="margin-bottom:16px" closable @close="batchCheckResult=''" />
     <t-button v-if="queuedTaskId" size="small" variant="outline" style="margin:-8px 0 16px" @click="$router.push(`/execute-tasks?task_id=${encodeURIComponent(queuedTaskId)}`)">查看任务进度</t-button>
 
+    <ResourceCard class="proxy-resource-card">
     <!-- 搜索/过滤栏 -->
     <t-card class="search-bar" :bordered="true">
       <t-form layout="inline">
@@ -358,15 +378,13 @@ function formatTime(t) {
     <!-- 操作栏 -->
     <div class="action-bar">
       <t-space>
-		<t-button theme="primary" @click="openCreate">新增代理</t-button>
-        <t-button theme="primary" @click="showImport = true">批量导入</t-button>
-			<t-button :loading="batchChecking" :disabled="!selectedRowKeys.length" @click="batchCheck">批量检测</t-button>
-        <t-button variant="outline" @click="loadProxies">刷新</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="showImport = true">批量导入</t-button>
+			<t-button class="wt-secondary-button" variant="outline" :loading="batchChecking" :disabled="!selectedRowKeys.length" @click="batchCheck">批量检测</t-button>
       </t-space>
     </div>
 
     <!-- 表格 -->
-    <t-table
+    <t-table class="wt-resource-table"
       :data="proxies"
       :columns="columns"
       row-key="id"
@@ -383,12 +401,12 @@ function formatTime(t) {
         </div>
       </template>
       <template #business_status="{ row }">
-        <BusinessStatus :status="row.business_status === 'active' ? 'normal' : row.business_status === 'paused' ? 'paused' : 'expired'" />
+        <ResourceStatusBadge :tone="row.business_status === 'active' ? 'success' : 'warning'" :label="row.business_status === 'active' ? '可用' : row.business_status === 'paused' ? '停用' : '过期'" />
       </template>
       <template #last_check_result="{ row }">
-        <BusinessStatus v-if="row.last_check_result === 'ok'" status="success" label="正常" />
-        <BusinessStatus v-else-if="row.last_check_result" status="error" :label="row.last_check_result" />
-        <span v-else style="color:var(--td-text-color-placeholder)">未检测</span>
+        <ResourceStatusBadge v-if="row.last_check_result === 'ok'" tone="success" label="正常" />
+        <ResourceStatusBadge v-else-if="row.last_check_result" tone="danger" :label="row.last_check_result" />
+        <ResourceStatusBadge v-else tone="neutral" label="未检测" />
       </template>
       <template #max_profile_count="{ row }">{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }} 已用，{{ row.remaining_profile_count ?? (row.max_profile_count || 3) }} 剩余</template>
       <template #bindings="{ row }"><t-button variant="text" size="small" @click="openDetail(row)">已绑定 {{ row.assigned_profile_count || 0 }} 个</t-button></template>
@@ -407,6 +425,7 @@ function formatTime(t) {
         </t-space>
       </template>
     </t-table>
+    </ResourceCard>
 
     <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: '创建' }" @confirm="createProxy">
       <t-form label-width="84px">
@@ -503,11 +522,13 @@ function formatTime(t) {
       </t-form>
     </t-dialog>
 
+  </div>
   </t-loading>
 </template>
 
 <style scoped>
 .search-bar { margin-bottom: 12px; }
+.proxy-resource-card { padding: 18px 20px; }
 .action-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .proxy-addr { font-weight: 500; }
 .proxy-user { color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 2px; }

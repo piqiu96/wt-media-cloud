@@ -6,6 +6,10 @@ import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
+import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
+import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
+import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
+import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 // Static import: a dynamic import() of a node_modules bare specifier does not
 // resolve in the packaged Tauri WebView ("Module name ... does not resolve to a
 // valid file"). invoke is only called inside __TAURI_INTERNALS__-guarded code,
@@ -767,6 +771,12 @@ const stats = computed(() => ({
 // 统计卡片：分两组展示（业务状态 / 账号健康），点击应用对应筛选
 const bizStatItems = { total: { label: "总账号" }, enabled: { label: "启用" }, disabled: { label: "停用" } }
 const healthStatItems = { normal: { label: "正常" }, abnormal: { label: "异常" }, pending: { label: "待检查" } }
+const resourceAccountStats = computed(() => [
+  { key: "total", label: "账号总数", value: stats.value.total, tone: "info" },
+  { key: "normal", label: "正常账号", value: stats.value.normal, tone: "success" },
+  { key: "abnormal", label: "异常账号", value: stats.value.abnormal, tone: "danger" },
+  { key: "unbound", label: "未绑定环境", value: accounts.value.filter((account) => !account.browser_profile_id).length, tone: "warning" },
+])
 
 const currentBatchStats = computed(batchStats)
 const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
@@ -789,10 +799,14 @@ const columns = [
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-    <div class="page-header">
-      <h1 class="page-title">社媒账号</h1>
-      <p class="page-subtitle">管理社媒账号资料、浏览器窗口关联和账号检查状态</p>
-    </div>
+  <div class="wt-resource-page">
+    <ResourcePageHeader title="社媒账号" description="管理账号资产、浏览器环境关联和账号检查状态">
+      <template #actions>
+        <t-button theme="primary" @click="openCreate">新增账号</t-button>
+        <t-button v-if="isDesktop" class="wt-secondary-button" variant="outline" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
+      </template>
+    </ResourcePageHeader>
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-alert
       v-if="!isDesktop"
@@ -801,20 +815,10 @@ const columns = [
       style="margin-bottom:16px"
     />
 
-    <div class="stats-row">
-      <span class="stats-group">业务状态</span>
-      <t-card v-for="(item, key) in bizStatItems" :key="key" class="stat-card" @click="applyStatFilter(key)">
-        <div class="stat-label">{{ item.label }}</div>
-        <div class="stat-num">{{ stats[key] }}</div>
-      </t-card>
-      <span class="stats-group">账号健康</span>
-      <t-card v-for="(item, key) in healthStatItems" :key="key" class="stat-card" @click="applyStatFilter(key)">
-        <div class="stat-label">{{ item.label }}</div>
-        <div class="stat-num">{{ stats[key] }}</div>
-      </t-card>
-    </div>
+    <ResourceStatGrid :items="resourceAccountStats" @select="applyStatFilter" />
 
-    <t-card class="search-bar" :bordered="true">
+    <ResourceCard class="account-resource-card">
+    <t-card class="search-bar wt-resource-filter" :bordered="true">
       <t-form layout="inline">
         <t-form-item label="综合搜索">
           <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable class="search-input" />
@@ -863,14 +867,6 @@ const columns = [
       </t-form>
     </t-card>
 
-    <div class="action-bar">
-      <t-space>
-        <t-button theme="primary" @click="openCreate">新增账号</t-button>
-        <t-button v-if="isDesktop" variant="outline" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
-        <t-button variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
-      </t-space>
-    </div>
-
     <t-card v-if="batchResults.length" title="批量检查结果" :bordered="true" class="batch-result-card">
       <div class="batch-summary">
         共 {{ currentBatchStats.total }} 项，成功 {{ currentBatchStats.success }}，失败 {{ currentBatchStats.failed }}，跳过 {{ currentBatchStats.skipped }}，等待 {{ currentBatchStats.pending }}
@@ -888,7 +884,7 @@ const columns = [
       </div>
     </t-card>
 
-    <t-table
+    <t-table class="wt-resource-table"
       :data="accounts"
       :columns="columns"
       v-model:selected-row-keys="selectedAccountIds"
@@ -923,10 +919,10 @@ const columns = [
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
       <template #business_status="{ row }">
-        <t-tag :theme="row.business_status === 'enabled' ? 'success' : 'default'" variant="light">{{ bizStatusText(row.business_status) }}</t-tag>
+        <ResourceStatusBadge :tone="row.business_status === 'enabled' ? 'success' : 'neutral'" :label="bizStatusText(row.business_status)" />
       </template>
       <template #account_status="{ row }">
-        <t-tag :theme="accountStatusTheme(row)" variant="light">{{ accountStatusText(row) }}</t-tag>
+        <ResourceStatusBadge :tone="accountStatusTheme(row) === 'success' ? 'success' : accountStatusTheme(row) === 'danger' ? 'danger' : accountStatusTheme(row) === 'warning' ? 'warning' : 'neutral'" :label="accountStatusText(row)" />
       </template>
       <template #last_checked_at="{ row }">
         <span :title="row.last_checked_at ? formatTime(row.last_checked_at) : ''">{{ relativeTime(row.last_checked_at) }}</span>
@@ -946,6 +942,7 @@ const columns = [
         </t-space>
       </template>
     </t-table>
+    </ResourceCard>
 
     <!-- 账号信息弹窗（点击昵称） -->
     <t-dialog :visible="accountInfoPopup !== null" @close="accountInfoPopup = null" header="账号信息" :footer="false" width="480px">
@@ -1168,13 +1165,12 @@ const columns = [
         <t-button size="small" variant="outline" @click="copyCookie('original_cookie')">复制原始 Cookie</t-button>
       </t-space>
     </t-dialog>
+  </div>
   </t-loading>
 </template>
 
 <style scoped>
-.page-header { margin-bottom: 16px; }
-.page-title { font-size: 20px; font-weight: 600; margin: 0; color: var(--td-text-color-primary); }
-.page-subtitle { font-size: 14px; color: var(--td-text-color-secondary); margin: 4px 0 0; }
+.account-resource-card { padding: 18px 20px; }
 .form-section { font-weight: 600; font-size: 13px; color: var(--td-text-color-secondary); margin: 12px 0 6px; }
 .form-section:first-child { margin-top: 0; }
 .stats-row { display: flex; align-items: stretch; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
