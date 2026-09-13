@@ -16,4 +16,17 @@ describe('application navigation', () => {
     expect(source).toContain('<t-submenu')
     expect(source).toContain('v-model:expanded="expandedGroups"')
   })
+
+  it('keeps expanded groups across reloads while locating the active route', () => {
+    expect(source).toContain("const SIDEBAR_EXPANDED_GROUPS_KEY = 'wt-media:sidebar-expanded-groups'")
+    expect(source).toContain('localStorage.setItem(SIDEBAR_EXPANDED_GROUPS_KEY')
+    expect(source).toContain('!expandedGroups.value.includes(activeGroup.value)')
+  })
+
+  it('uses the modern oriental sidebar visual language', () => {
+    expect(source).toContain('background: #FAFAF8')
+    expect(source).toContain('rgba(30, 64, 175, 0.06)')
+    expect(source).toContain('border-left: 3px solid #2563EB')
+    expect(source).toContain('font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif')
+  })
 })

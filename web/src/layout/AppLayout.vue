@@ -7,7 +7,8 @@ import { createSessionClient } from '../shared/api/session.js'
 const route = useRoute()
 const router = useRouter()
 const collapsed = ref(false)
-const expandedGroups = ref([])
+const SIDEBAR_EXPANDED_GROUPS_KEY = 'wt-media:sidebar-expanded-groups'
+const expandedGroups = ref(readExpandedGroups())
 const sessionClient = createSessionClient()
 const currentUser = ref(null)
 
@@ -84,8 +85,27 @@ const allItems = computed(() => {
 
 watch([() => route.path, allItems], ([path, items]) => {
   const activeGroup = items.find((item) => item.children?.some((child) => child.path === path))
-  expandedGroups.value = activeGroup ? [activeGroup.value] : []
+  if (activeGroup && !expandedGroups.value.includes(activeGroup.value)) {
+    expandedGroups.value = [...expandedGroups.value, activeGroup.value]
+  }
 }, { immediate: true })
+
+watch(expandedGroups, (groups) => {
+  try {
+    localStorage.setItem(SIDEBAR_EXPANDED_GROUPS_KEY, JSON.stringify(groups))
+  } catch {
+    // Keep navigation usable if browser storage is unavailable.
+  }
+}, { deep: true })
+
+function readExpandedGroups() {
+  try {
+    const storedGroups = JSON.parse(localStorage.getItem(SIDEBAR_EXPANDED_GROUPS_KEY) || '[]')
+    return Array.isArray(storedGroups) ? storedGroups.filter((group) => typeof group === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 function navigate(path) {
   if (path) router.push(path)
@@ -103,9 +123,12 @@ async function logout() {
 <template>
   <t-layout class="app-shell">
     <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
-      <div class="sidebar-header" @click="router.push('/')">
-        <span v-if="!collapsed" class="sidebar-title">WT Media</span>
-        <span v-else class="sidebar-title-mini">W</span>
+      <div class="sidebar-header" :class="{ 'is-collapsed': collapsed }" @click="router.push('/')">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <div v-if="!collapsed" class="brand-copy">
+          <span class="brand-kicker">内容运营平台</span>
+          <span class="sidebar-title">WT Media</span>
+        </div>
       </div>
       <t-menu
         :value="route.path"
@@ -160,22 +183,132 @@ async function logout() {
 
 <style scoped>
 .app-shell { height: 100%; }
-.app-aside { height: 100%; overflow-y: auto; flex-shrink: 0; }
+.app-aside {
+  height: 100%;
+  overflow-y: auto;
+  flex-shrink: 0;
+  background: #FAFAF8;
+  border-right: 1px solid rgba(0, 0, 0, 0.04);
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  transition: width 0.2s ease;
+}
 .app-main { height: 100%; min-width: 0; overflow: hidden; }
 .sidebar-header {
-  height: 48px;
+  height: 76px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
   cursor: pointer;
-  border-bottom: 1px solid var(--td-component-stroke);
 }
-.sidebar-title { font-weight: 700; font-size: 18px; letter-spacing: 0.04em; }
-.sidebar-title-mini { font-weight: 700; font-size: 20px; }
+.sidebar-header.is-collapsed { justify-content: center; padding: 0; }
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  border-radius: 8px;
+  color: #F8FAFC;
+  background: #243B53;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.08em;
+}
+.brand-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.brand-kicker { color: #9CA3AF; font-size: 11px; line-height: 1; letter-spacing: 0.08em; }
+.sidebar-title { color: #273142; font-size: 15px; line-height: 1.2; font-weight: 600; letter-spacing: 0.04em; }
+
+:deep(.t-default-menu) {
+  width: 100%;
+  padding: 4px 0 24px;
+  background: transparent;
+  font-family: inherit;
+  transition: width 0.2s ease;
+}
+:deep(.t-default-menu .t-menu__item) {
+  height: 44px;
+  margin: 1px 10px;
+  padding: 0 20px;
+  border-radius: 8px;
+  color: #4B5563;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 44px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+:deep(.t-default-menu .t-menu__item .t-icon) {
+  width: 18px;
+  height: 18px;
+  margin-right: 10px;
+  color: currentColor;
+  font-size: 18px;
+}
+:deep(.t-default-menu .t-menu__item:hover:not(.t-is-active):not(.t-is-disabled)) {
+  background: rgba(0, 0, 0, 0.03);
+}
+:deep(.t-default-menu .t-submenu > .t-menu__item.t-is-opened),
+:deep(.t-menu .t-submenu.t-is-active > .t-menu__item),
+:deep(.t-menu .t-submenu.t-is-active > .t-menu__item .t-icon) {
+  color: #4B5563;
+  background: transparent;
+}
+:deep(.t-default-menu .t-submenu > .t-menu__item:hover) { background: rgba(0, 0, 0, 0.03); }
+:deep(.t-default-menu .t-menu__sub) {
+  position: relative;
+  margin: 2px 20px 7px 30px;
+  padding: 2px 0;
+  overflow: hidden;
+  transition: height 0.2s ease;
+}
+:deep(.t-default-menu .t-menu__sub::before) {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 8px;
+  width: 1px;
+  background: rgba(75, 85, 99, 0.18);
+}
+:deep(.t-default-menu .t-menu__sub .t-menu__item) {
+  height: 40px;
+  margin: 1px 0;
+  padding: 0 12px 0 20px;
+  color: #6B7280;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 40px;
+}
+:deep(.t-default-menu .t-menu__sub .t-menu__item .t-icon) {
+  width: 16px;
+  height: 16px;
+  margin-right: 10px;
+  font-size: 16px;
+}
+:deep(.t-default-menu .t-menu__sub .t-menu__item.t-is-active:not(.t-is-opened)) {
+  padding-left: 17px;
+  border-left: 3px solid #2563EB;
+  border-radius: 8px;
+  color: #1D4ED8;
+  background: rgba(30, 64, 175, 0.06);
+}
+:deep(.t-default-menu .t-menu__sub .t-menu__item.t-is-active .t-icon) { color: #1D4ED8; }
+:deep(.t-default-menu .t-submenu .t-submenu-icon) {
+  width: 14px;
+  height: 14px;
+  opacity: 0.5;
+  transition: transform 0.2s ease;
+}
+:deep(.t-default-menu .t-submenu.t-is-opened .t-submenu-icon) { transform: rotate(180deg); }
+:deep(.t-default-menu.t-is-collapsed .t-menu .t-menu__item) { margin: 1px 10px; padding: 0; }
+:deep(.t-default-menu.t-is-collapsed .t-menu__item .t-icon) { margin-right: 0; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 24px; background: var(--td-bg-color-container);
-  border-bottom: 1px solid var(--td-component-stroke); height: 48px;
+  padding: 0 24px; background: #FFFDFC;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04); height: 52px;
   flex-shrink: 0;
 }
 .content-area {
