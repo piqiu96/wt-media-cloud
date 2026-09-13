@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isDesktop } from '../utils.js'
 import { createSessionClient } from '../shared/api/session.js'
@@ -7,47 +7,50 @@ import { createSessionClient } from '../shared/api/session.js'
 const route = useRoute()
 const router = useRouter()
 const collapsed = ref(false)
+const expandedGroups = ref([])
 const sessionClient = createSessionClient()
 const currentUser = ref(null)
 
 const menuItems = [
   { title: '工作台', path: '/', icon: 'dashboard' },
-
-  { group: '内容发现' },
-  { title: '内容发现', path: '/discovery', icon: 'browse' },
-
-  { group: '内容生产' },
-  { title: '素材库', path: '/material-library', icon: 'gallery' },
-  { title: '我的素材', path: '/my-material', icon: 'file-icon' },
-  { title: '合成任务', path: '/compose', icon: 'play-circle' },
-  { title: '成片管理', path: '/finished-media', icon: 'video' },
-
-  { group: '运营执行' },
-  { title: '发布管理', path: '/publish', icon: 'send' },
-  { title: '互动管理', path: '/interact', icon: 'chat' },
-  { title: '执行任务', path: '/execute-tasks', icon: 'check-circle' },
-
-  { group: '数据分析' },
-  { title: '数据统计', path: '/stats', icon: 'chart-bar' },
-
-  { group: '资源管理' },
-  { title: '社媒账号', path: '/accounts', icon: 'user' },
-  { title: '账号开户', path: '/account-opening', icon: 'add' },
-  { title: '代理管理', path: '/proxies', icon: 'link' },
-  { title: '浏览器窗口', path: '/browser-windows', icon: 'desktop' },
-  { title: '合成策略', path: '/compose-strategy', icon: 'setting' },
-  { title: '评论模板', path: '/comment-templates', icon: 'comment' },
-
-  { group: '系统' },
-  { title: '用户管理', path: '/users', icon: 'user-setting' },
-  { title: '运营分组', path: '/operation-teams', icon: 'organization' },
-  { title: '游戏管理', path: '/games', icon: 'gamepad' },
+  { value: 'discovery', title: '内容发现', icon: 'browse', children: [
+    { title: '内容发现', path: '/discovery', icon: 'browse' },
+  ] },
+  { value: 'production', title: '内容生产', icon: 'gallery', children: [
+    { title: '素材库', path: '/material-library', icon: 'gallery' },
+    { title: '我的素材', path: '/my-material', icon: 'file-icon' },
+    { title: '合成任务', path: '/compose', icon: 'play-circle' },
+    { title: '成片管理', path: '/finished-media', icon: 'video' },
+  ] },
+  { value: 'operations', title: '运营执行', icon: 'send', children: [
+    { title: '发布管理', path: '/publish', icon: 'send' },
+    { title: '互动管理', path: '/interact', icon: 'chat' },
+    { title: '执行任务', path: '/execute-tasks', icon: 'check-circle' },
+  ] },
+  { value: 'analytics', title: '数据分析', icon: 'chart-bar', children: [
+    { title: '数据统计', path: '/stats', icon: 'chart-bar' },
+  ] },
+  { value: 'operation-resources', title: '运营资源', icon: 'folder', children: [
+    { title: '浏览器窗口', path: '/browser-windows', icon: 'desktop' },
+    { title: '代理管理', path: '/proxies', icon: 'link' },
+    { title: '社媒账号', path: '/accounts', icon: 'user' },
+  ] },
+  { value: 'resource-management', title: '资源管理', icon: 'setting', children: [
+    { title: '合成策略', path: '/compose-strategy', icon: 'setting' },
+    { title: '评论模板', path: '/comment-templates', icon: 'comment' },
+  ] },
+  { value: 'system', title: '系统', icon: 'setting', children: [
+    { title: '用户管理', path: '/users', icon: 'user-setting' },
+    { title: '运营分组', path: '/operation-teams', icon: 'organization' },
+    { title: '游戏管理', path: '/games', icon: 'gamepad' },
+  ] },
 ]
 
 const desktopItems = [
-  { group: '本地环境' },
-  { title: 'Agent 状态', path: '/agent', icon: 'server' },
-  { title: '本地日志', path: '/logs', icon: 'file' },
+  { value: 'local-environment', title: '本地环境', icon: 'server', children: [
+    { title: 'Agent 状态', path: '/agent', icon: 'server' },
+    { title: '本地日志', path: '/logs', icon: 'file' },
+  ] },
 ]
 
 const adminOnlyPaths = new Set(['/users', '/operation-teams', '/games'])
@@ -70,29 +73,19 @@ const allItems = computed(() => {
     for (const path of adminOnlyPaths) hiddenPaths.add(path)
   }
   const sourceItems = isDesktop() ? [...menuItems, ...desktopItems] : menuItems
-  return removeEmptyGroups(sourceItems.filter((item) => !item.path || !hiddenPaths.has(item.path)))
+  return sourceItems
+    .map((item) => {
+      if (!item.children) return hiddenPaths.has(item.path) ? null : item
+      const children = item.children.filter((child) => !hiddenPaths.has(child.path))
+      return children.length > 0 ? { ...item, children } : null
+    })
+    .filter(Boolean)
 })
 
-function removeEmptyGroups(items) {
-  const result = []
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index]
-    if (item.group && !item.path) {
-      let hasVisibleChild = false
-      for (let nextIndex = index + 1; nextIndex < items.length; nextIndex += 1) {
-        const next = items[nextIndex]
-        if (next.group && !next.path) break
-        if (next.path) {
-          hasVisibleChild = true
-          break
-        }
-      }
-      if (!hasVisibleChild) continue
-    }
-    result.push(item)
-  }
-  return result
-}
+watch([() => route.path, allItems], ([path, items]) => {
+  const activeGroup = items.find((item) => item.children?.some((child) => child.path === path))
+  expandedGroups.value = activeGroup ? [activeGroup.value] : []
+}, { immediate: true })
 
 function navigate(path) {
   if (path) router.push(path)
@@ -118,10 +111,21 @@ async function logout() {
         :value="route.path"
         :collapsed="collapsed"
         theme="light"
+        v-model:expanded="expandedGroups"
         @change="navigate"
       >
-        <template v-for="item in allItems" :key="item.path || item.group">
-          <t-menu-group v-if="!item.path && item.group" :title="collapsed ? '' : item.group" />
+        <template v-for="item in allItems" :key="item.path || item.value">
+          <t-submenu v-if="item.children" :value="item.value" :title="item.title">
+            <template #icon>
+              <t-icon :name="item.icon" />
+            </template>
+            <t-menu-item v-for="child in item.children" :key="child.path" :value="child.path">
+              <template #icon>
+                <t-icon :name="child.icon" />
+              </template>
+              {{ child.title }}
+            </t-menu-item>
+          </t-submenu>
           <t-menu-item v-else :value="item.path">
             <template #icon>
               <t-icon :name="item.icon" />
