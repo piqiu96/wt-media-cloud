@@ -6,6 +6,10 @@ import { createProfileBindingClient } from "../../../shared/api/profileBindings.
 import { createProxyClient } from "../../../shared/api/proxy.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
+import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
+import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
+import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
+import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 import { isDesktop } from "../../../utils.js"
 // Static import: a dynamic import() of a node_modules bare specifier does not
 // resolve in the packaged Tauri WebView ("Module name ... does not resolve to a
@@ -153,6 +157,22 @@ const pagedProfiles = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
   return filteredProfiles.value.slice(start, start + pagination.value.pageSize)
 })
+
+const profileStatItems = computed(() => [
+  { key: "total", label: "窗口总数", value: profiles.value.length, tone: "info" },
+  { key: "open", label: "运行中", value: profiles.value.filter((profile) => isWindowOpen(profile)).length, tone: "success" },
+  { key: "bound_proxy", label: "已绑代理", value: profiles.value.filter((profile) => profile.proxy_id).length, tone: "info" },
+  { key: "attention", label: "需关注", value: profiles.value.filter((profile) => profile.local_status !== "active" || profile.business_status === "disabled").length, tone: "warning" },
+])
+
+function applyProfileStatFilter(key) {
+  businessFilter.value = ""
+  runningFilter.value = ""
+  statusFilter.value = ""
+  if (key === "open") runningFilter.value = "open"
+  if (key === "bound_proxy") filterRemark.value = ""
+  if (key === "attention") statusFilter.value = "local_missing"
+}
 
 watch(filteredProfiles, (list) => {
   const maxPage = Math.max(1, Math.ceil(list.length / (pagination.value.pageSize || 20)))
@@ -915,6 +935,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
+  <div class="wt-resource-page">
     <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
     <t-alert v-if="identityError" :message="identityError" theme="warning" style="margin-bottom:16px" closable @close="identityError=''" />
@@ -925,20 +946,27 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       style="margin-bottom:16px"
     />
 
-    <div class="action-bar">
-      <t-space wrap>
+    <ResourcePageHeader title="浏览器窗口" description="管理 BitBrowser 浏览环境、窗口状态和账号绑定">
+      <template #actions>
         <t-button v-if="isDesktopClient" theme="primary" @click="openCreateDialog">新建窗口</t-button>
-        <t-button v-if="isDesktopClient" :loading="scanning" @click="triggerScan">扫描本机窗口</t-button>
+        <t-button v-if="isDesktopClient" class="wt-secondary-button" variant="outline" :loading="scanning" @click="triggerScan">扫描本机窗口</t-button>
         <template v-if="isDesktopClient">
-          <t-button theme="success" :disabled="!selectedRowKeys.length || Boolean(batchOperating)" @click="batchOpenWindows">批量打开</t-button>
-          <t-button theme="warning" :disabled="!selectedRowKeys.length || Boolean(batchOperating)" @click="batchCloseWindows">批量关闭</t-button>
-          <t-button theme="primary" :disabled="!selectedRowKeys.length || Boolean(batchOperating) || batchProxyBinding" @click="openBatchProxyBinding">批量绑定代理</t-button>
+          <t-dropdown trigger="click">
+            <t-button class="wt-secondary-button" variant="outline" :disabled="!selectedRowKeys.length || Boolean(batchOperating)">批量操作</t-button>
+            <t-dropdown-menu>
+              <t-dropdown-item @click="batchOpenWindows">批量打开</t-dropdown-item>
+              <t-dropdown-item @click="batchCloseWindows">批量关闭</t-dropdown-item>
+              <t-dropdown-item :disabled="batchProxyBinding" @click="openBatchProxyBinding">批量绑定代理</t-dropdown-item>
+            </t-dropdown-menu>
+          </t-dropdown>
         </template>
-        <t-button variant="outline" @click="loadProfiles">刷新</t-button>
-      </t-space>
-    </div>
+        <t-button class="wt-secondary-button" variant="outline" @click="loadProfiles">刷新</t-button>
+      </template>
+    </ResourcePageHeader>
 
-    <t-card title="浏览器窗口" :bordered="true">
+    <ResourceStatGrid :items="profileStatItems" @select="applyProfileStatFilter" />
+
+    <ResourceCard class="window-resource-card">
       <div class="filter-bar">
         <t-space wrap>
           <t-input v-model="filterId" clearable placeholder="ID" style="width:90px" />
@@ -963,6 +991,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       </div>
       <div class="table-scroll-wrap">
       <t-table
+        class="wt-resource-table"
         :data="pagedProfiles"
         :columns="columns"
         row-key="id"
@@ -980,7 +1009,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
         </template>
         <template #proxy="{ row }">
           <div>{{ proxySummary(row) }}</div>
-          <t-tag v-if="proxyNeedsSync(row)" theme="warning" size="small" style="margin-top:4px">代理配置待同步</t-tag>
+          <ResourceStatusBadge v-if="proxyNeedsSync(row)" tone="warning" label="待同步" />
         </template>
         <template #remark="{ row }">
           <div class="remark-cell">
@@ -990,23 +1019,28 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           </div>
         </template>
         <template #business_status="{ row }">
-          <t-tag :theme="row.business_status === 'disabled' ? 'danger' : 'success'" variant="light">{{ businessStatusLabel(row.business_status) }}</t-tag>
+          <ResourceStatusBadge :tone="row.business_status === 'disabled' ? 'danger' : 'success'" :label="businessStatusLabel(row.business_status)" />
         </template>
         <template #running="{ row }">
-          <t-tag :theme="isWindowOpen(row) ? 'success' : (openStates[row.id] === false ? 'default' : 'warning')" variant="light">{{ openStateLabel(row) }}</t-tag>
+          <ResourceStatusBadge :tone="isWindowOpen(row) ? 'success' : (openStates[row.id] === false ? 'neutral' : 'warning')" :label="openStateLabel(row)" />
         </template>
         <template #last_synced_at="{ row }">{{ formatTime(row.last_synced_at) }}</template>
         <template #op="{ row }">
-          <t-space>
-            <t-button size="small" variant="outline" @click="openDetail(row)">详情</t-button>
-            <t-button v-if="isAdmin" size="small" variant="outline" @click="openAssignProfile(row)">分配</t-button>
-            <template v-if="isDesktopClient">
-              <t-button v-if="!isWindowOpen(row)" size="small" theme="success" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
-              <t-button v-else size="small" theme="danger" :loading="operatingProfileId === `close:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
-              <t-button size="small" variant="outline" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProxyBinding(row)">绑定代理</t-button>
-              <t-button size="small" variant="outline" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
-              <t-button size="small" variant="text" theme="warning" :loading="operatingProfileId === `biz:${row.id}`" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
-            </template>
+          <t-space class="wt-resource-actions">
+            <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+            <t-button v-if="isDesktopClient && !isWindowOpen(row)" size="small" theme="primary" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
+            <t-dropdown v-if="isDesktopClient || isAdmin" trigger="click">
+              <t-button size="small" class="wt-secondary-button" variant="outline">更多</t-button>
+              <t-dropdown-menu>
+                <t-dropdown-item v-if="isAdmin" @click="openAssignProfile(row)">分配</t-dropdown-item>
+                <template v-if="isDesktopClient">
+                  <t-dropdown-item :disabled="!isWindowOpen(row) || row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-dropdown-item>
+                  <t-dropdown-item :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProxyBinding(row)">绑定代理</t-dropdown-item>
+                  <t-dropdown-item :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-dropdown-item>
+                  <t-dropdown-item :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-dropdown-item>
+                </template>
+              </t-dropdown-menu>
+            </t-dropdown>
           </t-space>
         </template>
       </t-table>
@@ -1020,7 +1054,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           show-jumper
         />
       </div>
-    </t-card>
+    </ResourceCard>
 
     <!-- 新建窗口 -->
     <t-dialog v-model:visible="showCreate" header="新建BitBrowser窗口" @confirm="createProfile" :confirm-btn="{ loading: creating, theme: 'primary', content: '创建并同步' }">
@@ -1236,11 +1270,11 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       />
       <p>{{ restoreConfirmMessage }}</p>
     </t-dialog>
+  </div>
   </t-loading>
 </template>
 
 <style scoped>
-.action-bar { margin-bottom: 12px; }
 .filter-bar { margin-bottom: 12px; }
 .profile-name { font-weight: 500; }
 .remark-cell { line-height: 1.5; }
@@ -1250,4 +1284,6 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
 .diff-fields { white-space: pre-line; color: #e34d59; line-height: 1.6; }
 .table-scroll-wrap { overflow-x: auto; width: 100%; }
 .pagination-bar { margin-top: 12px; display: flex; justify-content: flex-end; }
+.window-resource-card { padding: 18px 20px; }
+.window-resource-card :deep(.resource-status-badge) { margin-top: 4px; }
 </style>
