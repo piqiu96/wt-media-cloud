@@ -792,8 +792,7 @@ const columns = [
   { colKey: "business_status", title: "业务状态", width: 80, minWidth: 80 },
   { colKey: "account_status", title: "账号状态", width: 90, minWidth: 90 },
   { colKey: "last_checked_at", title: "最近检查", width: 110, minWidth: 110 },
-  { colKey: "cookie", title: "Cookie", width: 80 },
-  { colKey: "op", title: "操作", width: 400, fixed: "right" },
+  { colKey: "op", title: "操作", width: 250, fixed: "right" },
 ]
 </script>
 
@@ -818,7 +817,7 @@ const columns = [
     <ResourceStatGrid :items="resourceAccountStats" @select="applyStatFilter" />
 
     <ResourceCard class="account-resource-card">
-    <t-card class="search-bar wt-resource-filter" :bordered="true">
+    <div class="search-bar wt-resource-filter">
       <t-form layout="inline">
         <t-form-item label="综合搜索">
           <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable class="search-input" />
@@ -865,7 +864,7 @@ const columns = [
           <t-button style="margin-left:8px" @click="resetFilters">重置</t-button>
         </t-form-item>
       </t-form>
-    </t-card>
+    </div>
 
     <t-card v-if="batchResults.length" title="批量检查结果" :bordered="true" class="batch-result-card">
       <div class="batch-summary">
@@ -927,18 +926,19 @@ const columns = [
       <template #last_checked_at="{ row }">
         <span :title="row.last_checked_at ? formatTime(row.last_checked_at) : ''">{{ relativeTime(row.last_checked_at) }}</span>
       </template>
-      <template #cookie="{ row }">
-        <t-button size="small" variant="outline" @click="openCookieDialog(row)">查看</t-button>
-      </template>
       <template #op="{ row }">
         <t-space size="small" class="op-cell">
-          <template v-if="isDesktop && canOperateBoundWindow(row)">
-            <t-button size="small" variant="outline" :loading="operatingProfileId === `open:${profileForAccount(row)?.bit_profile_id || ''}` || operatingProfileId === `close:${profileForAccount(row)?.bit_profile_id || ''}`" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
-          </template>
           <t-button size="small" theme="primary" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
           <t-button size="small" variant="outline" @click="openDetail(row)">查看</t-button>
-          <t-button size="small" variant="outline" @click="openEdit(row)">编辑</t-button>
-          <t-button size="small" variant="outline" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
+          <t-dropdown trigger="click">
+            <t-button size="small" variant="text" aria-label="更多账号操作">更多</t-button>
+            <t-dropdown-menu>
+              <t-dropdown-item v-if="isDesktop && canOperateBoundWindow(row)" :disabled="Boolean(operatingProfileId)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-dropdown-item>
+              <t-dropdown-item @click="openCookieDialog(row)">查看 Cookie</t-dropdown-item>
+              <t-dropdown-item @click="openEdit(row)">编辑</t-dropdown-item>
+              <t-dropdown-item @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-dropdown-item>
+            </t-dropdown-menu>
+          </t-dropdown>
         </t-space>
       </template>
     </t-table>

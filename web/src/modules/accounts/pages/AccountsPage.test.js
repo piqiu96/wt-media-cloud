@@ -15,4 +15,11 @@ describe('media account resource page', () => {
     expect(source).toContain('@click="checkFromRow(row)"')
     expect(source).toContain('@click="toggleBizStatus(row)"')
   })
+
+  it('uses a compact account action column without a separate cookie column', () => {
+    expect(source).toContain('<t-dropdown')
+    expect(source).not.toContain('{ colKey: "cookie", title: "Cookie"')
+    expect(source).toContain('@click="openCookieDialog(row)"')
+    expect(source).toContain('@click="openEdit(row)"')
+  })
 })

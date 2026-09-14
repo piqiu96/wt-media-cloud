@@ -15,4 +15,11 @@ describe('proxy resource page', () => {
     expect(source).toContain('@click="deleteProxy(row)"')
     expect(source).toContain('@click="triggerCheck(row)"')
   })
+
+  it('keeps secondary proxy actions in a compact overflow menu', () => {
+    expect(source).toContain('<t-dropdown')
+    expect(source).toContain('@click="openEdit(row)"')
+    expect(source).toContain('@click="openQuota(row)"')
+    expect(source).toContain('@click="deleteProxy(row)"')
+  })
 })

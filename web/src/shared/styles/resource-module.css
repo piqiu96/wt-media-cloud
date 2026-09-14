@@ -4,7 +4,6 @@
   font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
 
-.wt-resource-page .wt-resource-filter,
 .wt-resource-page .wt-resource-card {
   background: var(--wt-bg-card);
   border: 1px solid var(--wt-border);
@@ -12,8 +11,22 @@
   box-shadow: var(--wt-shadow-card);
 }
 
-.wt-resource-page .wt-resource-filter { margin-bottom: 16px; }
-.wt-resource-page .wt-resource-filter .t-card__body { padding: 16px 20px; }
+/* Filters sit inside the resource card: a quiet divider keeps the page dense
+   without introducing a second, template-like card around the form. */
+.wt-resource-page .wt-resource-filter {
+  margin-bottom: 16px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--wt-border);
+}
+
+.wt-resource-page .wt-resource-filter .t-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.wt-resource-page .wt-resource-filter .t-form__item { margin: 0; }
 
 .wt-resource-page .wt-resource-actions {
   display: flex;

@@ -320,7 +320,7 @@ const columns = [
 	{ colKey: "bindings", title: "绑定窗口", width: 120 },
 	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
-	{ colKey: "op", title: "操作", width: 220 },
+	{ colKey: "op", title: "操作", width: 190, fixed: "right" },
 ]
 
 function formatTime(t) {
@@ -350,7 +350,7 @@ function formatTime(t) {
 
     <ResourceCard class="proxy-resource-card">
     <!-- 搜索/过滤栏 -->
-    <t-card class="search-bar" :bordered="true">
+    <div class="search-bar wt-resource-filter">
       <t-form layout="inline">
         <t-form-item label="状态">
           <t-select v-model="searchBizStatus" placeholder="全部" clearable style="width:120px">
@@ -373,10 +373,10 @@ function formatTime(t) {
           <t-button @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
         </t-form-item>
       </t-form>
-    </t-card>
+    </div>
 
     <!-- 操作栏 -->
-    <div class="action-bar">
+    <div class="action-bar wt-resource-actions">
       <t-space>
         <t-button class="wt-secondary-button" variant="outline" @click="showImport = true">批量导入</t-button>
 			<t-button class="wt-secondary-button" variant="outline" :loading="batchChecking" :disabled="!selectedRowKeys.length" @click="batchCheck">批量检测</t-button>
@@ -416,12 +416,17 @@ function formatTime(t) {
         </span>
       </template>
       <template #op="{ row }">
-        <t-space>
+        <t-space size="small" class="op-cell">
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
-          <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
           <t-button size="small" variant="text" @click="triggerCheck(row)">检测</t-button>
-          <t-button size="small" variant="text" @click="openQuota(row)">配额</t-button>
-          <t-button size="small" variant="text" theme="danger" @click="deleteProxy(row)">删除</t-button>
+          <t-dropdown trigger="click">
+            <t-button size="small" variant="text" aria-label="更多代理操作">更多</t-button>
+            <t-dropdown-menu>
+              <t-dropdown-item @click="openEdit(row)">编辑</t-dropdown-item>
+              <t-dropdown-item @click="openQuota(row)">设置配额</t-dropdown-item>
+              <t-dropdown-item class="wt-danger-button" @click="deleteProxy(row)">删除</t-dropdown-item>
+            </t-dropdown-menu>
+          </t-dropdown>
         </t-space>
       </template>
     </t-table>
@@ -530,6 +535,7 @@ function formatTime(t) {
 .search-bar { margin-bottom: 12px; }
 .proxy-resource-card { padding: 18px 20px; }
 .action-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.op-cell { white-space: nowrap; }
 .proxy-addr { font-weight: 500; }
 .proxy-user { color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 2px; }
 </style>
