@@ -328,7 +328,7 @@ const columns = [
 	{ colKey: "bindings", title: "绑定窗口", width: 120 },
 	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
-	{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" },
+	{ colKey: "op", title: "操作", width: 340, fixed: "right" },
 ]
 
 function formatTime(t) {

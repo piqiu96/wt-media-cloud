@@ -33,6 +33,6 @@ describe('media account resource page', () => {
   it('keeps account filter labels and a six-action-width operation column', () => {
     expect(source).toContain('>综合搜索</span>')
     expect(source).toContain('>账号状态</span>')
-    expect(source).toContain('{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 400, fixed: "right" }')
   })
 })

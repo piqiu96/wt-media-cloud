@@ -23,7 +23,7 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the browser window operation column pinned during horizontal scrolling', () => {
-    expect(source).toContain('{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 320, fixed: "right" }')
   })
 
   it('keeps the filter field labels visible', () => {

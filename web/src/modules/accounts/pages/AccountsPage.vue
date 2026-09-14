@@ -796,7 +796,7 @@ const columns = [
   { colKey: "business_status", title: "业务状态", width: 80, minWidth: 80 },
   { colKey: "account_status", title: "账号状态", width: 90, minWidth: 90 },
   { colKey: "last_checked_at", title: "最近检查", width: 110, minWidth: 110 },
-  { colKey: "op", title: "操作", minWidth: 260, fixed: "right" },
+  { colKey: "op", title: "操作", width: 400, fixed: "right" },
 ]
 </script>
 

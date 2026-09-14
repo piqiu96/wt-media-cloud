@@ -33,6 +33,6 @@ describe('proxy resource page', () => {
   it('keeps proxy filter labels and a six-action-width operation column', () => {
     expect(source).toContain('>代理状态</span>')
     expect(source).toContain('>供应商</span>')
-    expect(source).toContain('{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 340, fixed: "right" }')
   })
 })
