@@ -1009,7 +1009,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
         </template>
         <template #proxy="{ row }">
           <div>{{ proxySummary(row) }}</div>
-          <ResourceStatusBadge v-if="proxyNeedsSync(row)" tone="warning" label="待同步" />
+          <ResourceStatusBadge v-if="proxyNeedsSync(row)" tone="warning" label="代理配置待同步" />
         </template>
         <template #remark="{ row }">
           <div class="remark-cell">

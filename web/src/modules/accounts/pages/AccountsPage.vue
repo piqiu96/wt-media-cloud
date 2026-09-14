@@ -803,7 +803,7 @@ const columns = [
     <ResourcePageHeader title="社媒账号" description="管理账号资产、浏览器环境关联和账号检查状态">
       <template #actions>
         <t-button theme="primary" @click="openCreate">新增账号</t-button>
-        <t-button v-if="isDesktop" class="wt-secondary-button" variant="outline" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
+        <t-button v-if="isDesktop" variant="outline" class="wt-secondary-button" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </template>
     </ResourcePageHeader>
