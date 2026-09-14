@@ -328,7 +328,7 @@ const columns = [
 	{ colKey: "bindings", title: "绑定窗口", width: 120 },
 	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
-	{ colKey: "op", title: "操作", width: 190, fixed: "right" },
+	{ colKey: "op", title: "操作", width: 420, fixed: "right" },
 ]
 
 function formatTime(t) {
@@ -360,14 +360,14 @@ function formatTime(t) {
     <!-- 搜索/过滤栏 -->
     <div class="filter-bar">
       <t-space wrap>
-        <t-select v-model="searchBizStatus" placeholder="状态" clearable style="width:120px">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">代理状态</span><t-select v-model="searchBizStatus" placeholder="状态" clearable style="width:120px">
           <t-option value="active" label="正常" />
           <t-option value="paused" label="停用" />
           <t-option value="expired" label="过期" />
-        </t-select>
-        <t-input v-model="searchSupplier" placeholder="供应商" clearable style="width:140px" />
-        <t-input v-model="searchRegion" placeholder="地区" clearable style="width:140px" />
-        <t-input v-model="searchText" placeholder="搜索 IP / 备注" clearable style="width:160px" />
+        </t-select></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="searchSupplier" placeholder="供应商" clearable style="width:140px" /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="searchRegion" placeholder="地区" clearable style="width:140px" /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="IP / 备注" clearable style="width:160px" /></label>
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadProxies">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>

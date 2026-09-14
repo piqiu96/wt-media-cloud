@@ -29,4 +29,10 @@ describe('media account resource page', () => {
     expect(source).toContain(":scroll=\"{ x: 'max-content' }\"")
     expect(source).toContain('class="pagination-bar"')
   })
+
+  it('keeps account filter labels and a six-action-width operation column', () => {
+    expect(source).toContain('>综合搜索</span>')
+    expect(source).toContain('>账号状态</span>')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 420, fixed: "right" }')
+  })
 })

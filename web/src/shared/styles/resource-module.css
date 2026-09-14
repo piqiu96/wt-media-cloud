@@ -33,7 +33,8 @@
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
-  max-width: 320px;
+  /* Six compact row actions fit without compressing the table data area. */
+  max-width: 520px;
   white-space: nowrap;
 }
 
@@ -58,9 +59,27 @@
   margin: 0 !important;
 }
 
-.wt-resource-page .filter-bar > .t-space > .t-space__item > .t-input,
-.wt-resource-page .filter-bar > .t-space > .t-space__item > .t-select {
+.wt-resource-page .wt-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  color: var(--wt-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.wt-resource-page .wt-filter-field__label {
+  flex: 0 0 auto;
+}
+
+.wt-resource-page .wt-filter-field > .t-input,
+.wt-resource-page .wt-filter-field > .t-select {
+  flex: 1 1 auto;
   width: 100% !important;
+  min-width: 0;
 }
 
 .wt-resource-page .wt-filter-actions {

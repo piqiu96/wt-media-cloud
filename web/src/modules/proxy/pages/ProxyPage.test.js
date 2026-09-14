@@ -29,4 +29,10 @@ describe('proxy resource page', () => {
     expect(source).toContain(":scroll=\"{ x: 'max-content' }\"")
     expect(source).toContain('class="pagination-bar"')
   })
+
+  it('keeps proxy filter labels and a six-action-width operation column', () => {
+    expect(source).toContain('>代理状态</span>')
+    expect(source).toContain('>供应商</span>')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 420, fixed: "right" }')
+  })
 })

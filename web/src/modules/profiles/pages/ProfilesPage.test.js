@@ -23,6 +23,12 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the browser window operation column pinned during horizontal scrolling', () => {
-    expect(source).toContain('{ colKey: "op", title: "操作", width: 200, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 420, fixed: "right" }')
+  })
+
+  it('keeps the filter field labels visible', () => {
+    expect(source).toContain('>窗口 ID</span>')
+    expect(source).toContain('>授权用户</span>')
+    expect(source).toContain('>Cloud 状态</span>')
   })
 })

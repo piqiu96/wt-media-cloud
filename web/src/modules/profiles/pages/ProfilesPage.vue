@@ -874,7 +874,7 @@ const columns = [
   { colKey: "business_status", title: "状态", width: 70 },
   { colKey: "running", title: "运行", width: 60 },
   { colKey: "last_synced_at", title: "同步时间", width: 130 },
-  { colKey: "op", title: "操作", width: 200, fixed: "right" },
+  { colKey: "op", title: "操作", width: 420, fixed: "right" },
 ]
 
 // Profile lookup from scan profiles list
@@ -969,24 +969,15 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
     <ResourceCard class="window-resource-card">
       <div class="filter-bar">
         <t-space wrap>
-          <t-input v-model="filterId" clearable placeholder="ID" style="width:90px" />
-          <t-input v-model="filterName" clearable placeholder="名称" style="width:120px" />
-          <t-select v-model="filterGroup" clearable placeholder="分组" style="width:140px" :options="groupFilterOptions" filterable />
-          <t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:170px" />
-          <t-input v-model="filterRemark" clearable placeholder="备注" style="width:110px" />
-          <t-select v-model="businessFilter" clearable placeholder="状态" style="width:90px">
-            <t-option value="enabled" label="启用" />
-            <t-option value="disabled" label="停用" />
-          </t-select>
-          <t-select v-model="runningFilter" clearable placeholder="运行" style="width:90px">
-            <t-option value="open" label="打开" />
-            <t-option value="closed" label="关闭" />
-          </t-select>
-          <t-select v-model="userFilter" clearable placeholder="授权用户" style="width:120px" :options="userFilterOptions" filterable />
-          <t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:110px">
-            <t-option value="active" label="可用" />
-            <t-option value="local_missing" label="本机缺失" />
-          </t-select>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">窗口 ID</span><t-input v-model="filterId" clearable placeholder="ID" style="width:90px" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">名称</span><t-input v-model="filterName" clearable placeholder="名称" style="width:120px" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">分组</span><t-select v-model="filterGroup" clearable placeholder="分组" style="width:140px" :options="groupFilterOptions" filterable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">Bit ID</span><t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:170px" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">备注</span><t-input v-model="filterRemark" clearable placeholder="备注" style="width:110px" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="businessFilter" clearable placeholder="状态" style="width:90px"><t-option value="enabled" label="启用" /><t-option value="disabled" label="停用" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">运行状态</span><t-select v-model="runningFilter" clearable placeholder="运行" style="width:90px"><t-option value="open" label="打开" /><t-option value="closed" label="关闭" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">授权用户</span><t-select v-model="userFilter" clearable placeholder="授权用户" style="width:120px" :options="userFilterOptions" filterable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">Cloud 状态</span><t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:110px"><t-option value="active" label="可用" /><t-option value="local_missing" label="本机缺失" /></t-select></label>
         </t-space>
       </div>
       <div class="table-scroll-wrap">
