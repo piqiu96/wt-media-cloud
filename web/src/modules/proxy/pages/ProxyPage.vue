@@ -17,6 +17,7 @@ const queuedTaskId = ref("")
 const selectedRowKeys = ref([])
 const batchChecking = ref(false)
 const batchCheckResult = ref("")
+const pagination = ref({ current: 1, pageSize: 50, total: 0 })
 
 // Search
 const searchSupplier = ref("")
@@ -56,6 +57,11 @@ const proxyStatItems = computed(() => [
   { key: "bound", label: "已绑定窗口", value: proxies.value.reduce((total, proxy) => total + Number(proxy.assigned_profile_count || 0), 0), tone: "warning" },
 ])
 
+const pagedProxies = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return proxies.value.slice(start, start + pagination.value.pageSize)
+})
+
 
 onMounted(() => { loadProxies() })
 
@@ -71,6 +77,8 @@ async function loadProxies() {
     const result = await proxyClient.list(params)
     // Be defensive while older Cloud instances may still return data: null.
     proxies.value = Array.isArray(result) ? result : (Array.isArray(result?.list) ? result.list : [])
+    pagination.value.total = proxies.value.length
+    pagination.value.current = 1
   } catch (e) {
     error.value = e.message
   } finally {
@@ -350,29 +358,19 @@ function formatTime(t) {
 
     <ResourceCard class="proxy-resource-card">
     <!-- 搜索/过滤栏 -->
-    <div class="search-bar wt-resource-filter">
-      <t-form layout="inline">
-        <t-form-item label="状态">
-          <t-select v-model="searchBizStatus" placeholder="全部" clearable style="width:120px">
-            <t-option value="active" label="正常" />
-            <t-option value="paused" label="停用" />
-            <t-option value="expired" label="过期" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="供应商">
-          <t-input v-model="searchSupplier" placeholder="筛选" clearable style="width:140px" />
-        </t-form-item>
-        <t-form-item label="地区">
-          <t-input v-model="searchRegion" placeholder="筛选" clearable style="width:140px" />
-        </t-form-item>
-        <t-form-item label="搜索">
-          <t-input v-model="searchText" placeholder="IP/备注" clearable style="width:140px" />
-        </t-form-item>
-        <t-form-item>
-          <t-button theme="primary" @click="loadProxies">查询</t-button>
-          <t-button @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
-        </t-form-item>
-      </t-form>
+    <div class="filter-bar">
+      <t-space wrap>
+        <t-select v-model="searchBizStatus" placeholder="状态" clearable style="width:120px">
+          <t-option value="active" label="正常" />
+          <t-option value="paused" label="停用" />
+          <t-option value="expired" label="过期" />
+        </t-select>
+        <t-input v-model="searchSupplier" placeholder="供应商" clearable style="width:140px" />
+        <t-input v-model="searchRegion" placeholder="地区" clearable style="width:140px" />
+        <t-input v-model="searchText" placeholder="搜索 IP / 备注" clearable style="width:160px" />
+        <t-button theme="primary" @click="loadProxies">查询</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
+      </t-space>
     </div>
 
     <!-- 操作栏 -->
@@ -384,14 +382,15 @@ function formatTime(t) {
     </div>
 
     <!-- 表格 -->
+    <div class="table-scroll-wrap">
     <t-table class="wt-resource-table"
-      :data="proxies"
+      :data="pagedProxies"
       :columns="columns"
       row-key="id"
       size="small"
       hover
 			v-model:selected-row-keys="selectedRowKeys"
-      :pagination="{ pageSize: 50, total: proxies.length }"
+      :scroll="{ x: 'max-content' }"
       empty="暂无代理"
     >
       <template #host="{ row }">
@@ -417,10 +416,10 @@ function formatTime(t) {
       </template>
       <template #op="{ row }">
         <t-space size="small" class="op-cell">
-          <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
-          <t-button size="small" variant="text" @click="triggerCheck(row)">检测</t-button>
+          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+          <t-button size="small" theme="primary" @click="triggerCheck(row)">检测</t-button>
           <t-dropdown trigger="click">
-            <t-button size="small" variant="text" aria-label="更多代理操作">更多</t-button>
+            <t-button size="small" class="wt-secondary-button" variant="outline" aria-label="更多代理操作">更多</t-button>
             <t-dropdown-menu>
               <t-dropdown-item @click="openEdit(row)">编辑</t-dropdown-item>
               <t-dropdown-item @click="openQuota(row)">设置配额</t-dropdown-item>
@@ -430,6 +429,10 @@ function formatTime(t) {
         </t-space>
       </template>
     </t-table>
+    </div>
+    <div class="pagination-bar">
+      <t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" :page-size-options="[10, 20, 50, 100]" show-jumper />
+    </div>
     </ResourceCard>
 
     <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: '创建' }" @confirm="createProxy">
@@ -532,7 +535,6 @@ function formatTime(t) {
 </template>
 
 <style scoped>
-.search-bar { margin-bottom: 12px; }
 .proxy-resource-card { padding: 18px 20px; }
 .action-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .op-cell { white-space: nowrap; }

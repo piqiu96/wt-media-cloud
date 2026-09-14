@@ -780,6 +780,10 @@ const resourceAccountStats = computed(() => [
 
 const currentBatchStats = computed(batchStats)
 const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
+const pagedAccounts = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return accounts.value.slice(start, start + pagination.value.pageSize)
+})
 
 const columns = [
   { colKey: "row-select", type: "multiple", width: 40 },
@@ -817,53 +821,35 @@ const columns = [
     <ResourceStatGrid :items="resourceAccountStats" @select="applyStatFilter" />
 
     <ResourceCard class="account-resource-card">
-    <div class="search-bar wt-resource-filter">
-      <t-form layout="inline">
-        <t-form-item label="综合搜索">
-          <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable class="search-input" />
-        </t-form-item>
-      </t-form>
-      <t-form layout="inline" class="filter-fields">
-        <t-form-item label="游戏">
-          <t-select v-model="searchGameIds" multiple clearable placeholder="全部" class="filter-control" style="min-width:180px">
+    <div class="filter-bar">
+      <t-space wrap>
+        <t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable style="width:220px" />
+        <t-select v-model="searchGameIds" multiple clearable placeholder="游戏" style="width:180px">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="平台">
-          <t-select v-model="searchPlatform" placeholder="全部" clearable class="filter-control" style="min-width:120px">
+        </t-select>
+        <t-select v-model="searchPlatform" placeholder="平台" clearable style="width:120px">
             <t-option value="bilibili" label="哔哩" />
             <t-option value="baijiahao" label="百度" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="业务状态">
-          <t-select v-model="searchBizStatus" placeholder="全部" clearable class="filter-control" style="min-width:120px">
+        </t-select>
+        <t-select v-model="searchBizStatus" placeholder="业务状态" clearable style="width:120px">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="账号状态">
-          <t-select v-model="searchLoginStatus" placeholder="全部" clearable class="filter-control" style="min-width:130px">
+        </t-select>
+        <t-select v-model="searchLoginStatus" placeholder="账号状态" clearable style="width:130px">
             <t-option value="normal" label="正常" />
             <t-option value="not_logged_in" label="未登录" />
             <t-option value="expired" label="登录失效" />
             <t-option value="account_mismatch" label="账号不匹配" />
             <t-option value="restricted" label="账号受限" />
             <t-option value="environment_error" label="检查失败" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="标签">
-          <t-select v-model="searchTags" placeholder="全部" clearable class="filter-control" style="min-width:140px">
+        </t-select>
+        <t-select v-model="searchTags" placeholder="标签" clearable style="width:140px">
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
-          </t-select>
-        </t-form-item>
-        <t-form-item label="窗口">
-          <t-input v-model="searchProfile" placeholder="窗口名/序号/BitID/ID" clearable class="filter-control" style="min-width:180px" />
-        </t-form-item>
-        <t-form-item class="filter-actions">
-          <t-button theme="primary" @click="loadAccounts">查询</t-button>
-          <t-button style="margin-left:8px" @click="resetFilters">重置</t-button>
-        </t-form-item>
-      </t-form>
+        </t-select>
+        <t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable style="width:190px" />
+        <t-button theme="primary" @click="loadAccounts">查询</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+      </t-space>
     </div>
 
     <t-card v-if="batchResults.length" title="批量检查结果" :bordered="true" class="batch-result-card">
@@ -883,15 +869,15 @@ const columns = [
       </div>
     </t-card>
 
+    <div class="table-scroll-wrap">
     <t-table class="wt-resource-table"
-      :data="accounts"
+      :data="pagedAccounts"
       :columns="columns"
       v-model:selected-row-keys="selectedAccountIds"
       :row-key="(r) => r.id"
       size="small"
       hover
-      :pagination="pagination"
-      @page-change="onPageChange"
+      :scroll="{ x: 'max-content' }"
       empty="暂无媒体账号"
     >
       <template #id="{ row }"><span class="account-id" :title="`系统账号ID：${row.id}（点击复制）`" @click="copyAccountId(row)">{{ row.id }}</span></template>
@@ -929,9 +915,9 @@ const columns = [
       <template #op="{ row }">
         <t-space size="small" class="op-cell">
           <t-button size="small" theme="primary" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
-          <t-button size="small" variant="outline" @click="openDetail(row)">查看</t-button>
+          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
           <t-dropdown trigger="click">
-            <t-button size="small" variant="text" aria-label="更多账号操作">更多</t-button>
+            <t-button size="small" class="wt-secondary-button" variant="outline" aria-label="更多账号操作">更多</t-button>
             <t-dropdown-menu>
               <t-dropdown-item v-if="isDesktop && canOperateBoundWindow(row)" :disabled="Boolean(operatingProfileId)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-dropdown-item>
               <t-dropdown-item @click="openCookieDialog(row)">查看 Cookie</t-dropdown-item>
@@ -942,6 +928,10 @@ const columns = [
         </t-space>
       </template>
     </t-table>
+    </div>
+    <div class="pagination-bar">
+      <t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" :page-size-options="[10, 20, 50, 100]" show-jumper />
+    </div>
     </ResourceCard>
 
     <!-- 账号信息弹窗（点击昵称） -->
@@ -1179,12 +1169,6 @@ const columns = [
 .stat-card :deep(.t-card__body) { padding: 12px 16px; }
 .stat-label { font-size: 12px; color: var(--td-text-color-secondary, #666); }
 .stat-num { font-size: 20px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
-.search-bar { margin-bottom: 16px; }
-.search-input { width: 100%; max-width: 440px; }
-.filter-control { max-width: 100%; }
-.filter-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 12px; }
-.filter-fields :deep(.t-form__item) { margin: 0; }
-.filter-actions { margin-left: auto; }
 .batch-result-card { margin-bottom: 16px; }
 .cookie-box {
   max-height: 160px;

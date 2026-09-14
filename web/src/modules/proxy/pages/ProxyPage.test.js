@@ -22,4 +22,11 @@ describe('proxy resource page', () => {
     expect(source).toContain('@click="openQuota(row)"')
     expect(source).toContain('@click="deleteProxy(row)"')
   })
+
+  it('uses the browser-window resource table structure', () => {
+    expect(source).toContain('class="filter-bar"')
+    expect(source).toContain('class="table-scroll-wrap"')
+    expect(source).toContain(":scroll=\"{ x: 'max-content' }\"")
+    expect(source).toContain('class="pagination-bar"')
+  })
 })

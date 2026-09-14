@@ -22,4 +22,11 @@ describe('media account resource page', () => {
     expect(source).toContain('@click="openCookieDialog(row)"')
     expect(source).toContain('@click="openEdit(row)"')
   })
+
+  it('uses the browser-window resource table structure', () => {
+    expect(source).toContain('class="filter-bar"')
+    expect(source).toContain('class="table-scroll-wrap"')
+    expect(source).toContain(":scroll=\"{ x: 'max-content' }\"")
+    expect(source).toContain('class="pagination-bar"')
+  })
 })

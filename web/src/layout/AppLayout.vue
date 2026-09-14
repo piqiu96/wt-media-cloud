@@ -83,6 +83,16 @@ const allItems = computed(() => {
     .filter(Boolean)
 })
 
+const breadcrumbItems = computed(() => {
+  const group = allItems.value.find((item) => item.children?.some((child) => child.path === route.path))
+  if (group) {
+    const child = group.children.find((item) => item.path === route.path)
+    return child ? [group.title, child.title] : [group.title]
+  }
+  const item = allItems.value.find((candidate) => candidate.path === route.path)
+  return [route.meta?.title || item?.title || String(route.name || '')]
+})
+
 watch([() => route.path, allItems], ([path, items]) => {
   const activeGroup = items.find((item) => item.children?.some((child) => child.path === path))
   if (activeGroup && !expandedGroups.value.includes(activeGroup.value)) {
@@ -165,8 +175,8 @@ async function logout() {
           <t-button variant="text" @click="collapsed = !collapsed">
             <t-icon :name="collapsed ? 'menu-unfold' : 'menu-fold'" />
           </t-button>
-          <t-breadcrumb>
-            <t-breadcrumb-item>{{ route.meta?.title || route.name }}</t-breadcrumb-item>
+          <t-breadcrumb aria-label="当前页面位置">
+            <t-breadcrumb-item v-for="item in breadcrumbItems" :key="item">{{ item }}</t-breadcrumb-item>
           </t-breadcrumb>
         </div>
         <div style="display:flex; gap:8px">

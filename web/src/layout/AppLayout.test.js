@@ -23,6 +23,12 @@ describe('application navigation', () => {
     expect(source).toContain('!expandedGroups.value.includes(activeGroup.value)')
   })
 
+  it('renders resource pages with their navigation hierarchy instead of internal route names', () => {
+    expect(source).toContain('const breadcrumbItems = computed')
+    expect(source).toContain('group.title, child.title')
+    expect(source).toContain('v-for="item in breadcrumbItems"')
+  })
+
   it('uses the modern oriental sidebar visual language', () => {
     expect(source).toContain('background: #FAFAF8')
     expect(source).toContain('rgba(30, 64, 175, 0.06)')
