@@ -13,8 +13,8 @@ describe('browser window resource page', () => {
     expect(source).toContain('profileStatItems')
   })
 
-  it('keeps every existing window operation reachable through the action menu', () => {
-    expect(source).toContain('<t-dropdown')
+  it('shows all five routine window operations directly instead of hiding them in an overflow menu', () => {
+    expect(source).not.toContain('>更多</t-button>')
     expect(source).toContain('@click="openProfile(row)"')
     expect(source).toContain('@click="closeProfile(row)"')
     expect(source).toContain('@click="openProxyBinding(row)"')
@@ -23,7 +23,7 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the browser window operation column pinned during horizontal scrolling', () => {
-    expect(source).toContain('{ colKey: "op", title: "操作", width: 420, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" }')
   })
 
   it('keeps the filter field labels visible', () => {

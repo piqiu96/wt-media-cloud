@@ -874,7 +874,7 @@ const columns = [
   { colKey: "business_status", title: "状态", width: 70 },
   { colKey: "running", title: "运行", width: 60 },
   { colKey: "last_synced_at", title: "同步时间", width: 130 },
-  { colKey: "op", title: "操作", width: 420, fixed: "right" },
+  { colKey: "op", title: "操作", minWidth: 260, fixed: "right" },
 ]
 
 // Profile lookup from scan profiles list
@@ -969,15 +969,15 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
     <ResourceCard class="window-resource-card">
       <div class="filter-bar">
         <t-space wrap>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">窗口 ID</span><t-input v-model="filterId" clearable placeholder="ID" style="width:90px" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">名称</span><t-input v-model="filterName" clearable placeholder="名称" style="width:120px" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">分组</span><t-select v-model="filterGroup" clearable placeholder="分组" style="width:140px" :options="groupFilterOptions" filterable /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">Bit ID</span><t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:170px" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">备注</span><t-input v-model="filterRemark" clearable placeholder="备注" style="width:110px" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="businessFilter" clearable placeholder="状态" style="width:90px"><t-option value="enabled" label="启用" /><t-option value="disabled" label="停用" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">运行状态</span><t-select v-model="runningFilter" clearable placeholder="运行" style="width:90px"><t-option value="open" label="打开" /><t-option value="closed" label="关闭" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">授权用户</span><t-select v-model="userFilter" clearable placeholder="授权用户" style="width:120px" :options="userFilterOptions" filterable /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">Cloud 状态</span><t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:110px"><t-option value="active" label="可用" /><t-option value="local_missing" label="本机缺失" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">窗口 ID</span><t-input v-model="filterId" clearable placeholder="ID" style="width:100%" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">名称</span><t-input v-model="filterName" clearable placeholder="名称" style="width:100%" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">分组</span><t-select v-model="filterGroup" clearable placeholder="分组" style="width:100%" :options="groupFilterOptions" filterable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">Bit ID</span><t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:100%" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">备注</span><t-input v-model="filterRemark" clearable placeholder="备注" style="width:100%" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="businessFilter" clearable placeholder="状态" style="width:100%"><t-option value="enabled" label="启用" /><t-option value="disabled" label="停用" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">运行状态</span><t-select v-model="runningFilter" clearable placeholder="运行" style="width:100%"><t-option value="open" label="打开" /><t-option value="closed" label="关闭" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">授权用户</span><t-select v-model="userFilter" clearable placeholder="授权用户" style="width:100%" :options="userFilterOptions" filterable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">Cloud 状态</span><t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:100%"><t-option value="active" label="可用" /><t-option value="local_missing" label="本机缺失" /></t-select></label>
         </t-space>
       </div>
       <div class="table-scroll-wrap">
@@ -1020,18 +1020,11 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           <t-space class="wt-resource-actions">
             <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
             <t-button v-if="isDesktopClient && !isWindowOpen(row)" size="small" theme="primary" :loading="operatingProfileId === `open:${row.bit_profile_id}`" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProfile(row)">打开</t-button>
-            <t-dropdown v-if="isDesktopClient || isAdmin" trigger="click">
-              <t-button size="small" class="wt-secondary-button" variant="outline">更多</t-button>
-              <t-dropdown-menu>
-                <t-dropdown-item v-if="isAdmin" @click="openAssignProfile(row)">分配</t-dropdown-item>
-                <template v-if="isDesktopClient">
-                  <t-dropdown-item :disabled="!isWindowOpen(row) || row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-dropdown-item>
-                  <t-dropdown-item :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProxyBinding(row)">绑定代理</t-dropdown-item>
-                  <t-dropdown-item :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-dropdown-item>
-                  <t-dropdown-item :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-dropdown-item>
-                </template>
-              </t-dropdown-menu>
-            </t-dropdown>
+            <t-button v-if="isDesktopClient && isWindowOpen(row)" size="small" class="wt-secondary-button" variant="outline" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="closeProfile(row)">关闭</t-button>
+            <t-button v-if="isDesktopClient" size="small" class="wt-secondary-button" variant="outline" :disabled="row.business_status === 'disabled' || row.local_status !== 'active' || Boolean(operatingProfileId)" @click="openProxyBinding(row)">绑定代理</t-button>
+            <t-button v-if="isDesktopClient" size="small" class="wt-secondary-button" variant="outline" :disabled="Boolean(operatingProfileId)" @click="openEdit(row)">编辑</t-button>
+            <t-button v-if="isDesktopClient" size="small" class="wt-secondary-button" variant="outline" :disabled="row.local_status !== 'active' || Boolean(operatingProfileId)" @click="toggleBusinessStatus(row)">{{ row.business_status === 'disabled' ? '启用' : '停用' }}</t-button>
+            <t-button v-if="isAdmin" size="small" class="wt-secondary-button" variant="outline" @click="openAssignProfile(row)">分配</t-button>
           </t-space>
         </template>
       </t-table>

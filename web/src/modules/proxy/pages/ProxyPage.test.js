@@ -16,8 +16,8 @@ describe('proxy resource page', () => {
     expect(source).toContain('@click="triggerCheck(row)"')
   })
 
-  it('keeps secondary proxy actions in a compact overflow menu', () => {
-    expect(source).toContain('<t-dropdown')
+  it('shows all five proxy operations directly when they fit the operation column', () => {
+    expect(source).not.toContain('<t-dropdown')
     expect(source).toContain('@click="openEdit(row)"')
     expect(source).toContain('@click="openQuota(row)"')
     expect(source).toContain('@click="deleteProxy(row)"')
@@ -33,6 +33,6 @@ describe('proxy resource page', () => {
   it('keeps proxy filter labels and a six-action-width operation column', () => {
     expect(source).toContain('>代理状态</span>')
     expect(source).toContain('>供应商</span>')
-    expect(source).toContain('{ colKey: "op", title: "操作", width: 420, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" }')
   })
 })

@@ -28,8 +28,8 @@ describe('proxy operation page boundary', () => {
     expect(proxyPage).toContain('@click="openEdit(row)"')
     expect(proxyPage).toContain('>详情</t-button>')
     expect(proxyPage).toContain('>检测</t-button>')
-    expect(proxyPage).toContain('>设置配额</t-dropdown-item>')
-    expect(proxyPage).toContain('>删除</t-dropdown-item>')
+    expect(proxyPage).toContain('>设置配额</t-button>')
+    expect(proxyPage).toContain('>删除</t-button>')
     expect(proxyPage).not.toContain('>状态</t-button>')
   })
 

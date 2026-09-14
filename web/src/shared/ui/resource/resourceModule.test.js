@@ -27,12 +27,13 @@ describe('operation resource design primitives', () => {
     expect(read('../../../styles/design-token.css')).toContain('--wt-primary: #2563EB')
   })
 
-  it('keeps resource filters within a responsive four-column grid and pins table operations', () => {
+  it('keeps resource filters wide and responsive while table operations remain pinned', () => {
     const styles = read('../../styles/resource-module.css')
 
-    expect(styles).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))')
-    expect(styles).toContain('@media (max-width: 1400px)')
-    expect(styles).toContain('@media (max-width: 980px)')
+    expect(styles).toContain('grid-template-columns: repeat(4, minmax(220px, 1fr))')
+    expect(styles).toContain('@media (max-width: 1560px)')
+    expect(styles).toContain('@media (max-width: 1180px)')
+    expect(styles).toContain('width: max-content')
     expect(styles).toContain('.t-table__fixed-right')
   })
 })

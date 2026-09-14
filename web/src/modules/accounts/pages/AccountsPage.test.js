@@ -16,8 +16,8 @@ describe('media account resource page', () => {
     expect(source).toContain('@click="toggleBizStatus(row)"')
   })
 
-  it('uses a compact account action column without a separate cookie column', () => {
-    expect(source).toContain('<t-dropdown')
+  it('shows the routine account operations directly without a separate cookie column', () => {
+    expect(source).not.toContain('<t-dropdown')
     expect(source).not.toContain('{ colKey: "cookie", title: "Cookie"')
     expect(source).toContain('@click="openCookieDialog(row)"')
     expect(source).toContain('@click="openEdit(row)"')
@@ -33,6 +33,6 @@ describe('media account resource page', () => {
   it('keeps account filter labels and a six-action-width operation column', () => {
     expect(source).toContain('>综合搜索</span>')
     expect(source).toContain('>账号状态</span>')
-    expect(source).toContain('{ colKey: "op", title: "操作", width: 420, fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", minWidth: 260, fixed: "right" }')
   })
 })
