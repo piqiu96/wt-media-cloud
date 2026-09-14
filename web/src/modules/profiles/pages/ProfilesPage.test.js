@@ -31,4 +31,11 @@ describe('browser window resource page', () => {
     expect(source).toContain('>授权用户</span>')
     expect(source).toContain('>Cloud 状态</span>')
   })
+
+  it('provides the same query and reset controls as the other resource pages', () => {
+    expect(source).toContain('@click="applyFilters"')
+    expect(source).toContain('@click="resetFilters"')
+    expect(source).toContain('>查询</t-button>')
+    expect(source).toContain('>重置</t-button>')
+  })
 })

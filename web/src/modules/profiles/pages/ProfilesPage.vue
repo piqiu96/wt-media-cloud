@@ -174,6 +174,24 @@ function applyProfileStatFilter(key) {
   if (key === "attention") statusFilter.value = "local_missing"
 }
 
+async function applyFilters() {
+  pagination.value.current = 1
+  await loadProfiles()
+}
+
+async function resetFilters() {
+  filterId.value = ""
+  filterName.value = ""
+  filterGroup.value = ""
+  filterBitId.value = ""
+  filterRemark.value = ""
+  statusFilter.value = ""
+  businessFilter.value = ""
+  runningFilter.value = ""
+  userFilter.value = ""
+  await applyFilters()
+}
+
 watch(filteredProfiles, (list) => {
   const maxPage = Math.max(1, Math.ceil(list.length / (pagination.value.pageSize || 20)))
   if (pagination.value.current > maxPage) pagination.value.current = maxPage
@@ -978,6 +996,10 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           <label class="wt-filter-field"><span class="wt-filter-field__label">运行状态</span><t-select v-model="runningFilter" clearable placeholder="运行" style="width:100%"><t-option value="open" label="打开" /><t-option value="closed" label="关闭" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">授权用户</span><t-select v-model="userFilter" clearable placeholder="授权用户" style="width:100%" :options="userFilterOptions" filterable /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">Cloud 状态</span><t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:100%"><t-option value="active" label="可用" /><t-option value="local_missing" label="本机缺失" /></t-select></label>
+          <div class="wt-filter-actions">
+            <t-button theme="primary" :loading="loading" @click="applyFilters">查询</t-button>
+            <t-button class="wt-secondary-button" variant="outline" :disabled="loading" @click="resetFilters">重置</t-button>
+          </div>
         </t-space>
       </div>
       <div class="table-scroll-wrap">
