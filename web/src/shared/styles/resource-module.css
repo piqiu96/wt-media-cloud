@@ -32,7 +32,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  max-width: 320px;
+  white-space: nowrap;
 }
 
 .wt-resource-page .filter-bar {
@@ -41,7 +43,46 @@
   border-bottom: 1px solid var(--wt-border);
 }
 
-.wt-resource-page .table-scroll-wrap { overflow-x: auto; }
+/* All resource filters share the browser-window layout: no more than four
+   controls in one row, then a natural wrap as the available workspace narrows. */
+.wt-resource-page .filter-bar > .t-space {
+  display: grid !important;
+  width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 16px !important;
+}
+
+.wt-resource-page .filter-bar > .t-space > .t-space__item {
+  width: 100%;
+  min-width: 0;
+  margin: 0 !important;
+}
+
+.wt-resource-page .filter-bar > .t-space > .t-space__item > .t-input,
+.wt-resource-page .filter-bar > .t-space > .t-space__item > .t-select {
+  width: 100% !important;
+}
+
+.wt-resource-page .wt-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+@media (max-width: 1400px) {
+  .wt-resource-page .filter-bar > .t-space { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 980px) {
+  .wt-resource-page .filter-bar > .t-space { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.wt-resource-page .table-scroll-wrap { overflow-x: auto; width: 100%; }
+
+.wt-resource-page .wt-resource-table .t-table__fixed-right {
+  box-shadow: -8px 0 12px rgba(15, 23, 42, 0.04);
+}
 
 .wt-resource-page .pagination-bar {
   display: flex;

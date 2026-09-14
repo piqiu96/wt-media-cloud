@@ -368,8 +368,10 @@ function formatTime(t) {
         <t-input v-model="searchSupplier" placeholder="供应商" clearable style="width:140px" />
         <t-input v-model="searchRegion" placeholder="地区" clearable style="width:140px" />
         <t-input v-model="searchText" placeholder="搜索 IP / 备注" clearable style="width:160px" />
-        <t-button theme="primary" @click="loadProxies">查询</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
+        <div class="wt-filter-actions">
+          <t-button theme="primary" @click="loadProxies">查询</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
+        </div>
       </t-space>
     </div>
 

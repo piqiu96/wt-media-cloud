@@ -21,4 +21,8 @@ describe('browser window resource page', () => {
     expect(source).toContain('@click="openEdit(row)"')
     expect(source).toContain('@click="toggleBusinessStatus(row)"')
   })
+
+  it('keeps the browser window operation column pinned during horizontal scrolling', () => {
+    expect(source).toContain('{ colKey: "op", title: "操作", width: 200, fixed: "right" }')
+  })
 })

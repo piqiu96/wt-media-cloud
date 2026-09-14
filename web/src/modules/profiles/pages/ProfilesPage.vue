@@ -874,7 +874,7 @@ const columns = [
   { colKey: "business_status", title: "状态", width: 70 },
   { colKey: "running", title: "运行", width: 60 },
   { colKey: "last_synced_at", title: "同步时间", width: 130 },
-  { colKey: "op", title: "操作", width: 200 },
+  { colKey: "op", title: "操作", width: 200, fixed: "right" },
 ]
 
 // Profile lookup from scan profiles list

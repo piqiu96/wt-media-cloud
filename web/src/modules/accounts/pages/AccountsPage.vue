@@ -847,8 +847,10 @@ const columns = [
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
         </t-select>
         <t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable style="width:190px" />
-        <t-button theme="primary" @click="loadAccounts">查询</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+        <div class="wt-filter-actions">
+          <t-button theme="primary" @click="loadAccounts">查询</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+        </div>
       </t-space>
     </div>
 

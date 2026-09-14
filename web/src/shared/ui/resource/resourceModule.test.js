@@ -26,4 +26,13 @@ describe('operation resource design primitives', () => {
     expect(read('ResourceStatusBadge.vue')).toContain("tone: { type: String, default: 'neutral' }")
     expect(read('../../../styles/design-token.css')).toContain('--wt-primary: #2563EB')
   })
+
+  it('keeps resource filters within a responsive four-column grid and pins table operations', () => {
+    const styles = read('../../styles/resource-module.css')
+
+    expect(styles).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))')
+    expect(styles).toContain('@media (max-width: 1400px)')
+    expect(styles).toContain('@media (max-width: 980px)')
+    expect(styles).toContain('.t-table__fixed-right')
+  })
 })
