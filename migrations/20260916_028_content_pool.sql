@@ -1,0 +1,43 @@
+CREATE TABLE source_contents (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    team_id BIGINT UNSIGNED NOT NULL,
+    platform VARCHAR(32) NOT NULL,
+    platform_content_id VARCHAR(255) NOT NULL,
+    title VARCHAR(500) NOT NULL DEFAULT '',
+    description TEXT NULL,
+    cover_url TEXT NULL,
+    source_url TEXT NULL,
+    author_id VARCHAR(255) NULL,
+    author_name VARCHAR(255) NULL,
+    source_type VARCHAR(32) NOT NULL,
+    published_at DATETIME(6) NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    ignored_reason VARCHAR(255) NULL,
+    raw_json JSON NOT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_source_contents_team_platform_content (team_id, platform, platform_content_id),
+    KEY idx_source_contents_team_status_created (team_id, status, created_at),
+    CONSTRAINT fk_source_contents_team FOREIGN KEY (team_id) REFERENCES operation_teams(id),
+    CONSTRAINT fk_source_contents_created_by FOREIGN KEY (created_by) REFERENCES users(id),
+    CONSTRAINT chk_source_contents_status CHECK (status IN ('pending', 'material_created', 'ignored'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE materials (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    team_id BIGINT UNSIGNED NOT NULL,
+    source_content_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(500) NOT NULL DEFAULT '',
+    source_snapshot JSON NOT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_materials_source_content (source_content_id),
+    KEY idx_materials_team_created (team_id, created_at),
+    CONSTRAINT fk_materials_team FOREIGN KEY (team_id) REFERENCES operation_teams(id),
+    CONSTRAINT fk_materials_source_content FOREIGN KEY (source_content_id) REFERENCES source_contents(id),
+    CONSTRAINT fk_materials_created_by FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

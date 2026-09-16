@@ -19,6 +19,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/infra/scheduler"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
+	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
@@ -86,6 +87,7 @@ func NewServer() (*Server, error) {
 			mediaaccount.WithGameResolver(identityService),
 		), identityService, taskStore)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv(), profileService, runtimeService)
+		contentpool.RegisterRoutes(engine, contentpool.NewService(contentpool.NewMySQLStore(result.db)), identityService)
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}

@@ -14,8 +14,10 @@ const currentUser = ref(null)
 
 const menuItems = [
   { title: '工作台', path: '/', icon: 'dashboard' },
-  { value: 'discovery', title: '内容发现', icon: 'browse', children: [
-    { title: '内容发现', path: '/discovery', icon: 'browse' },
+  { value: 'discovery', title: '内容挖掘', icon: 'browse', children: [
+    { title: '内容池', path: '/content-pool', icon: 'browse' },
+    { title: '挖掘策略', path: '/discovery-strategies', icon: 'setting' },
+    { title: '挖掘任务', path: '/crawl-tasks', icon: 'time' },
   ] },
   { value: 'production', title: '内容生产', icon: 'gallery', children: [
     { title: '素材库', path: '/material-library', icon: 'gallery' },

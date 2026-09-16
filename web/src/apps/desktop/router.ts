@@ -9,8 +9,11 @@ export function createDesktopRouter() {
       component: () => import("../../layout/AppLayout.vue"),
       children: [
         { path: "", name: "Dashboard", component: () => import("../../modules/dashboard/pages/DashboardPage.vue") },
-        { path: "discovery", name: "Discovery", component: () => import("../../shared/ui/ComingSoon.vue") },
-        { path: "material-library", name: "MaterialLibrary", component: () => import("../../shared/ui/ComingSoon.vue") },
+        { path: "discovery", redirect: "/content-pool" },
+        { path: "content-pool", name: "ContentPool", component: () => import("../../modules/contentpool/pages/ContentPoolPage.vue") },
+        { path: "discovery-strategies", name: "DiscoveryStrategies", component: () => import("../../shared/ui/ComingSoon.vue") },
+        { path: "crawl-tasks", name: "CrawlTasks", component: () => import("../../shared/ui/ComingSoon.vue") },
+        { path: "material-library", name: "MaterialLibrary", component: () => import("../../modules/contentpool/pages/ContentPoolPage.vue") },
         { path: "my-material", name: "MyMaterial", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "compose", name: "Compose", component: () => import("../../shared/ui/ComingSoon.vue") },
         { path: "finished-media", name: "FinishedMedia", component: () => import("../../shared/ui/ComingSoon.vue") },
