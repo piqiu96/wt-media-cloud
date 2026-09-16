@@ -7,4 +7,5 @@ web/node_modules/
 *.log
 *.pid
 /server
+.env.local
 .pytest_cache/
