@@ -18,6 +18,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/infra/scheduler"
+	"github.com/wt-media/wt-media-cloud/internal/infra/worker"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
@@ -32,6 +33,7 @@ type Server struct {
 	engine *server.Hertz
 	addr   string
 	db     *sql.DB
+	cancel context.CancelFunc
 }
 
 func NewServer() (*Server, error) {
@@ -45,6 +47,8 @@ func NewServer() (*Server, error) {
 	registerHealthRoutes(engine)
 
 	result := &Server{engine: engine, addr: cfg.HTTPAddr}
+	backgroundCtx, cancel := context.WithCancel(context.Background())
+	result.cancel = cancel
 
 	var taskStore *cloudagent.MySQLTaskStore
 	var agentRegistry *cloudagent.MySQLRegistry
@@ -91,7 +95,8 @@ func NewServer() (*Server, error) {
 		contentpool.RegisterRoutes(engine, contentPoolService, identityService)
 		discoveryService := contentpool.NewDiscoveryService(contentpool.NewMySQLDiscoveryStore(result.db), contentPoolService, contentpool.NewDouyinCrawlerFromEnv())
 		contentpool.RegisterDiscoveryRoutes(engine, discoveryService, identityService)
-		scheduler.StartDiscoveryScheduler(discoveryService)
+		scheduler.StartDiscoveryScheduler(backgroundCtx, discoveryService, time.Minute)
+		worker.StartDiscoveryWorker(backgroundCtx, discoveryService, 5*time.Second, 10)
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}
@@ -111,6 +116,9 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) Close() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.db == nil {
 		return nil
 	}

@@ -1,10 +1,13 @@
 package contentpool
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
@@ -91,7 +94,7 @@ func scanStrategy(row interface{ Scan(...any) error }) (DiscoveryStrategy, error
 func (s *MySQLDiscoveryStore) CreateCrawlTask(v CrawlTask) (CrawlTask, error) {
 	snapshot, _ := json.Marshal(v.Snapshot)
 	stats, _ := json.Marshal(v.Stats)
-	res, err := s.db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,task_type,platform,status,snapshot_json,stats_json,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	res, err := s.db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if err != nil {
 		return CrawlTask{}, err
 	}
@@ -100,7 +103,7 @@ func (s *MySQLDiscoveryStore) CreateCrawlTask(v CrawlTask) (CrawlTask, error) {
 }
 
 func (s *MySQLDiscoveryStore) ListCrawlTasks(team *identity.TeamID, strategyID *int64) ([]CrawlTask, error) {
-	query := `SELECT id,team_id,strategy_id,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks`
+	query := `SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks`
 	var cond []string
 	var args []any
 	if team != nil {
@@ -132,7 +135,7 @@ func (s *MySQLDiscoveryStore) ListCrawlTasks(team *identity.TeamID, strategyID *
 }
 
 func (s *MySQLDiscoveryStore) FindCrawlTask(id int64) (CrawlTask, bool, error) {
-	v, err := scanCrawlTask(s.db.QueryRow(`SELECT id,team_id,strategy_id,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE id = ?`, id))
+	v, err := scanCrawlTask(s.db.QueryRow(`SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CrawlTask{}, false, nil
 	}
@@ -150,15 +153,51 @@ func (s *MySQLDiscoveryStore) UpdateCrawlTask(v CrawlTask) (CrawlTask, error) {
 	return v, nil
 }
 
+func (s *MySQLDiscoveryStore) ClaimPendingCrawlTask(now time.Time) (CrawlTask, bool, error) {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return CrawlTask{}, false, err
+	}
+	defer tx.Rollback()
+	query := `SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at
+		FROM crawl_tasks WHERE status = 'pending' ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`
+	task, err := scanCrawlTask(tx.QueryRow(query))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CrawlTask{}, false, nil
+	}
+	if err != nil {
+		return CrawlTask{}, false, err
+	}
+	task.Status = CrawlRunning
+	task.TaskID = fmt.Sprintf("crawl-%d", task.ID)
+	task.StartedAt = &now
+	task.UpdatedAt = now
+	result, err := tx.Exec(`UPDATE crawl_tasks SET task_id=?,status='running',started_at=?,updated_at=? WHERE id=? AND status='pending'`, task.TaskID, now, now, task.ID)
+	if err != nil {
+		return CrawlTask{}, false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		if err == nil {
+			err = errors.New("crawl task claim lost")
+		}
+		return CrawlTask{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CrawlTask{}, false, err
+	}
+	return task, true, nil
+}
+
 func scanCrawlTask(row interface{ Scan(...any) error }) (CrawlTask, error) {
 	var v CrawlTask
 	var team, createdBy int64
 	var strategyID sql.NullInt64
-	var taskID, errorMsg sql.NullString
+	var scheduleKey, taskID, errorMsg sql.NullString
 	var status string
 	var snapshot, stats, results []byte
 	var started, finished sql.NullTime
-	err := row.Scan(&v.ID, &team, &strategyID, &taskID, &v.TaskType, &v.Platform, &status, &snapshot, &stats, &results, &errorMsg, &started, &finished, &createdBy, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &team, &strategyID, &scheduleKey, &taskID, &v.TaskType, &v.Platform, &status, &snapshot, &stats, &results, &errorMsg, &started, &finished, &createdBy, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return v, err
 	}
@@ -170,6 +209,7 @@ func scanCrawlTask(row interface{ Scan(...any) error }) (CrawlTask, error) {
 		v.StrategyID = &n
 	}
 	v.TaskID = taskID.String
+	v.ScheduleKey = scheduleKey.String
 	v.Error = errorMsg.String
 	_ = json.Unmarshal(snapshot, &v.Snapshot)
 	_ = json.Unmarshal(stats, &v.Stats)

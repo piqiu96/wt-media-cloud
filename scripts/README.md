@@ -12,6 +12,8 @@ Expose common commands with stable names.
 | `health.sh` | Probe `/healthz` and `/api/v1/health`. |
 | `stop.sh` | Stop the process recorded by the PID file. |
 | `verify-health.sh` | Run tests, start the server temporarily, probe health, and stop it. |
+| `run-discovery-scheduler.sh` | Run one due-strategy scan by default; pass `--interval 1m` without `--once` for a standalone scheduler loop. |
+| `run-discovery-worker.sh` | Drain one bounded pending-task batch by default; pass `--interval 5s` without `--once` for a standalone worker loop. |
 
 Local scripts source `scripts/local-env.sh` before starting or migrating Cloud. By default local development and acceptance use:
 
@@ -23,3 +25,5 @@ Local scripts source `scripts/local-env.sh` before starting or migrating Cloud. 
 Do not create a new local database for every CHG/Task. Apply table changes to the stable local database through migrations or explicit acceptance data updates. Override `WT_MEDIA_MYSQL_DSN` only when intentionally running an isolated test.
 
 `WT_MEDIA_CLOUD_HTTP_ADDR` controls the listen address. `WT_MEDIA_CLOUD_PID_FILE` and `WT_MEDIA_CLOUD_LOG_FILE` can override the default files under `.cache/`. Set `WT_MEDIA_CLOUD_GOPATH` when you want scripts to use a project-local Go module cache instead of the current shell `GOPATH`.
+
+The normal Cloud server starts API Server, Discovery Scheduler, and Discovery Worker together. The two discovery scripts are separate operational entry points: Scheduler only creates `pending crawl_tasks`; Worker exclusively claims and executes them. Do not replace these with a script that calls the crawler directly.

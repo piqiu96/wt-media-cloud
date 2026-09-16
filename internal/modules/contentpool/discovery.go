@@ -44,22 +44,23 @@ const (
 )
 
 type CrawlTask struct {
-	ID         int64            `json:"id"`
-	TeamID     identity.TeamID  `json:"team_id"`
-	StrategyID *int64           `json:"strategy_id,omitempty"`
-	TaskID     string           `json:"task_id,omitempty"`
-	TaskType   string           `json:"task_type"`
-	Platform   string           `json:"platform"`
-	Status     CrawlStatus      `json:"status"`
-	Snapshot   map[string]any   `json:"snapshot"`
-	Stats      CrawlStats       `json:"stats"`
-	Results    []map[string]any `json:"results,omitempty"`
-	Error      string           `json:"error,omitempty"`
-	StartedAt  *time.Time       `json:"started_at,omitempty"`
-	FinishedAt *time.Time       `json:"finished_at,omitempty"`
-	CreatedBy  identity.UserID  `json:"created_by"`
-	CreatedAt  time.Time        `json:"created_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
+	ID          int64            `json:"id"`
+	TeamID      identity.TeamID  `json:"team_id"`
+	StrategyID  *int64           `json:"strategy_id,omitempty"`
+	ScheduleKey string           `json:"schedule_key,omitempty"`
+	TaskID      string           `json:"task_id,omitempty"`
+	TaskType    string           `json:"task_type"`
+	Platform    string           `json:"platform"`
+	Status      CrawlStatus      `json:"status"`
+	Snapshot    map[string]any   `json:"snapshot"`
+	Stats       CrawlStats       `json:"stats"`
+	Results     []map[string]any `json:"results,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	StartedAt   *time.Time       `json:"started_at,omitempty"`
+	FinishedAt  *time.Time       `json:"finished_at,omitempty"`
+	CreatedBy   identity.UserID  `json:"created_by"`
+	CreatedAt   time.Time        `json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
 }
 
 type CrawlStats struct {
@@ -79,6 +80,7 @@ type DiscoveryStore interface {
 	ListCrawlTasks(*identity.TeamID, *int64) ([]CrawlTask, error)
 	FindCrawlTask(int64) (CrawlTask, bool, error)
 	UpdateCrawlTask(CrawlTask) (CrawlTask, error)
+	ClaimPendingCrawlTask(time.Time) (CrawlTask, bool, error)
 }
 
 type DiscoveryService struct {
@@ -236,6 +238,10 @@ func (s *DiscoveryService) UpdateStrategy(actor identity.PublicUser, id int64, i
 }
 
 func (s *DiscoveryService) CreateRun(actor identity.PublicUser, strategyID int64) (CrawlTask, error) {
+	return s.createRun(actor, strategyID, "")
+}
+
+func (s *DiscoveryService) createRun(actor identity.PublicUser, strategyID int64, scheduleKey string) (CrawlTask, error) {
 	strategy, ok, err := s.store.FindStrategy(strategyID)
 	if err != nil {
 		return CrawlTask{}, err
@@ -249,9 +255,6 @@ func (s *DiscoveryService) CreateRun(actor identity.PublicUser, strategyID int64
 	if strategy.Status != StrategyEnabled {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
-	if s.crawler == nil {
-		return CrawlTask{}, ErrDiscoveryInvalid
-	}
 	if strategy.StrategyType == "keyword" && strings.TrimSpace(fmt.Sprint(strategy.Config["keyword"])) == "" && len(anyStringSlice(strategy.Config["keywords"])) == 0 {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
@@ -259,12 +262,10 @@ func (s *DiscoveryService) CreateRun(actor identity.PublicUser, strategyID int64
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
 	now := s.now()
-	task := CrawlTask{TeamID: strategy.TeamID, StrategyID: &strategy.ID, TaskType: "discovery_task", Platform: strategy.Platform, Status: CrawlPending, Snapshot: cloneMap(strategy.Config), CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
-	created, err := s.store.CreateCrawlTask(task)
-	if err != nil {
-		return CrawlTask{}, err
-	}
-	return s.execute(created, actor, strategy.StrategyType, strategy.Config, false)
+	snapshot := cloneMap(strategy.Config)
+	snapshot["operation"] = strategy.StrategyType
+	task := CrawlTask{TeamID: strategy.TeamID, StrategyID: &strategy.ID, ScheduleKey: scheduleKey, TaskType: "discovery_task", Platform: strategy.Platform, Status: CrawlPending, Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
+	return s.store.CreateCrawlTask(task)
 }
 
 func (s *DiscoveryService) CreateManualRun(actor identity.PublicUser, platform, operation string, config map[string]any) (CrawlTask, error) {
@@ -281,32 +282,54 @@ func (s *DiscoveryService) CreateManualRun(actor identity.PublicUser, platform, 
 	if (operation == "keyword" && strings.TrimSpace(fmt.Sprint(config["keyword"])) == "") || (operation == "author" && strings.TrimSpace(fmt.Sprint(config["author"])) == "") {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
-	if s.crawler == nil {
-		return CrawlTask{}, ErrDiscoveryInvalid
-	}
 	now := s.now()
 	snapshot := cloneMap(config)
 	snapshot["operation"] = operation
 	task := CrawlTask{TeamID: *team, TaskType: "manual_discovery_task", Platform: strings.TrimSpace(platform), Status: CrawlPending, Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}
-	created, err := s.store.CreateCrawlTask(task)
-	if err != nil {
-		return CrawlTask{}, err
-	}
-	return s.execute(created, actor, operation, config, true)
+	return s.store.CreateCrawlTask(task)
 }
 
-func (s *DiscoveryService) execute(task CrawlTask, actor identity.PublicUser, operation string, config map[string]any, manual bool) (CrawlTask, error) {
-	now := s.now()
-	task.TaskID = fmt.Sprintf("crawl-%d", task.ID)
-	task.Status = CrawlRunning
-	task.StartedAt = &now
-	task.UpdatedAt = now
-	if updated, err := s.store.UpdateCrawlTask(task); err != nil {
-		return CrawlTask{}, err
-	} else {
-		task = updated
+// RunNext is the Discovery Worker entry point. It atomically claims one
+// pending task before doing any external work, so Scheduler/API callers only
+// enqueue facts and concurrent workers cannot execute the same task.
+func (s *DiscoveryService) RunNext(ctx context.Context) (bool, error) {
+	task, found, err := s.store.ClaimPendingCrawlTask(s.now())
+	if err != nil || !found {
+		return found, err
 	}
-	result, crawlErr := s.crawler.Discover(context.Background(), CrawlerRequest{Platform: task.Platform, Operation: operation, Config: cloneMap(config)})
+	if s.crawler == nil {
+		return true, s.failClaimedTask(task, ErrDiscoveryInvalid)
+	}
+	operation := strings.TrimSpace(fmt.Sprint(task.Snapshot["operation"]))
+	if (operation == "" || operation == "<nil>") && task.StrategyID != nil {
+		strategy, ok, findErr := s.store.FindStrategy(*task.StrategyID)
+		if findErr != nil {
+			return true, s.failClaimedTask(task, findErr)
+		}
+		if ok {
+			operation = strategy.StrategyType
+		}
+	}
+	if operation != "url" && operation != "keyword" && operation != "author" {
+		return true, s.failClaimedTask(task, ErrDiscoveryInvalid)
+	}
+	manual := task.TaskType == "manual_discovery_task"
+	_, err = s.executeClaimed(ctx, task, operation, task.Snapshot, manual)
+	return true, err
+}
+
+func (s *DiscoveryService) failClaimedTask(task CrawlTask, cause error) error {
+	finished := s.now()
+	task.Status = CrawlFailed
+	task.Error = cause.Error()
+	task.FinishedAt = &finished
+	task.UpdatedAt = finished
+	_, err := s.store.UpdateCrawlTask(task)
+	return err
+}
+
+func (s *DiscoveryService) executeClaimed(ctx context.Context, task CrawlTask, operation string, config map[string]any, manual bool) (CrawlTask, error) {
+	result, crawlErr := s.crawler.Discover(ctx, CrawlerRequest{Platform: task.Platform, Operation: operation, Config: cloneMap(config)})
 	scanned := result.Scanned
 	if scanned == 0 && len(result.Items) > 0 {
 		scanned = len(result.Items)
@@ -322,7 +345,7 @@ func (s *DiscoveryService) execute(task CrawlTask, actor identity.PublicUser, op
 		}
 		for _, item := range result.Items {
 			team := task.TeamID
-			_, err := s.content.CreateSource(actorForTask(actor, task), SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]), Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
+			_, err := s.content.CreateSource(actorForTask(task), SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]), Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
 			if errors.Is(err, ErrDuplicate) {
 				task.Stats.Duplicate++
 			} else if err != nil {
@@ -345,13 +368,9 @@ func (s *DiscoveryService) execute(task CrawlTask, actor identity.PublicUser, op
 	return updated, err
 }
 
-func actorForTask(actor identity.PublicUser, task CrawlTask) identity.PublicUser {
-	if actor.Role == identity.RoleAdmin {
-		return actor
-	}
+func actorForTask(task CrawlTask) identity.PublicUser {
 	team := task.TeamID
-	actor.TeamID = &team
-	return actor
+	return identity.PublicUser{ID: task.CreatedBy, Role: identity.RoleOperator, TeamID: &team}
 }
 
 func (s *DiscoveryService) ListCrawlTasks(actor identity.PublicUser, strategyID *int64) ([]CrawlTask, error) {
@@ -362,8 +381,8 @@ func (s *DiscoveryService) ListCrawlTasks(actor identity.PublicUser, strategyID 
 	return s.store.ListCrawlTasks(team, strategyID)
 }
 
-// RunDue triggers enabled strategies whose simple schedule is due. Scheduling
-// remains a host concern; this method only applies business idempotency rules.
+// RunDue only creates pending tasks for enabled strategies whose schedule is
+// due. Discovery Worker execution is intentionally outside this call stack.
 func (s *DiscoveryService) RunDue(now time.Time) int {
 	strategies, err := s.store.ListStrategies(nil)
 	if err != nil {
@@ -385,11 +404,25 @@ func (s *DiscoveryService) RunDue(now time.Time) int {
 		if len(previous) > 0 && sameScheduleWindow(previous[0].CreatedAt.In(location), strategy.Schedule, localNow) {
 			continue
 		}
-		if _, err := s.CreateRun(identity.PublicUser{ID: strategy.CreatedBy, Role: identity.RoleAdmin}, strategy.ID); err == nil {
+		if _, err := s.createRun(identity.PublicUser{ID: strategy.CreatedBy, Role: identity.RoleAdmin}, strategy.ID, scheduleWindowKey(strategy.Schedule, localNow)); err == nil {
 			triggered++
 		}
 	}
 	return triggered
+}
+
+func scheduleWindowKey(schedule string, now time.Time) string {
+	value := strings.TrimSpace(schedule)
+	if strings.HasPrefix(value, "daily ") {
+		return "daily:" + now.Format("2006-01-02") + ":" + strings.TrimSpace(strings.TrimPrefix(value, "daily "))
+	}
+	if strings.HasPrefix(value, "interval:") {
+		minutes, err := strconv.Atoi(strings.TrimPrefix(value, "interval:"))
+		if err == nil && minutes > 0 {
+			return fmt.Sprintf("interval:%d:%d", minutes, now.Unix()/int64(minutes*60))
+		}
+	}
+	return ""
 }
 
 func scheduleDue(schedule string, now time.Time) bool {

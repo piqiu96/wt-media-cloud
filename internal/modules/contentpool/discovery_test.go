@@ -2,6 +2,7 @@ package contentpool
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ type discoveryMemory struct {
 	strategies map[int64]DiscoveryStrategy
 	tasks      map[int64]CrawlTask
 	next       int64
+	claims     int
 }
 
 func newDiscoveryMemory() *discoveryMemory {
@@ -74,7 +76,23 @@ func (m *discoveryMemory) UpdateCrawlTask(v CrawlTask) (CrawlTask, error) {
 	return v, nil
 }
 
-func TestDiscoveryRunExecutesCloudCrawlerAndPreservesTeam(t *testing.T) {
+func (m *discoveryMemory) ClaimPendingCrawlTask(now time.Time) (CrawlTask, bool, error) {
+	for id, task := range m.tasks {
+		if task.Status != CrawlPending {
+			continue
+		}
+		task.Status = CrawlRunning
+		task.TaskID = fmt.Sprintf("crawl-%d", task.ID)
+		task.StartedAt = &now
+		task.UpdatedAt = now
+		m.tasks[id] = task
+		m.claims++
+		return task, true, nil
+	}
+	return CrawlTask{}, false, nil
+}
+
+func TestDiscoveryRunQueuesThenWorkerExecutesCloudCrawler(t *testing.T) {
 	store := newDiscoveryMemory()
 	content := NewService(newMemoryStore())
 	service := NewDiscoveryService(store, content)
@@ -90,8 +108,16 @@ func TestDiscoveryRunExecutesCloudCrawlerAndPreservesTeam(t *testing.T) {
 		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "run-1", "title": "run"}}}, nil
 	}))
 	run, err := service.CreateRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, strategy.ID)
-	if err != nil || run.TaskID == "" || run.TeamID != team || run.Status != CrawlSuccess {
+	if err != nil || run.TaskID != "" || run.TeamID != team || run.Status != CrawlPending {
 		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	processed, err := service.RunNext(context.Background())
+	if err != nil || !processed {
+		t.Fatalf("processed=%v err=%v", processed, err)
+	}
+	completed, _, _ := store.FindCrawlTask(run.ID)
+	if completed.TaskID == "" || completed.Status != CrawlSuccess {
+		t.Fatalf("completed=%+v", completed)
 	}
 }
 
@@ -101,7 +127,7 @@ func TestManualRunPersistsOperationForResultProjection(t *testing.T) {
 	team := identity.TeamID(7)
 	service.SetCrawler(fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
 	task, err := service.CreateManualRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
-	if err != nil || task.Snapshot["operation"] != "url" {
+	if err != nil || task.Snapshot["operation"] != "url" || task.Status != CrawlPending {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
 }
@@ -117,6 +143,9 @@ func TestDiscoveryResultDeduplicatesIntoContentPool(t *testing.T) {
 	task, err := service.CreateManualRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if processed, runErr := service.RunNext(context.Background()); runErr != nil || !processed {
+		t.Fatalf("processed=%v err=%v", processed, runErr)
 	}
 	if len(contentStore.items) != 1 {
 		t.Fatalf("expected one unique source, got %d", len(contentStore.items))
@@ -141,6 +170,9 @@ func TestManualSearchStoresResultsUntilSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if processed, runErr := service.RunNext(context.Background()); runErr != nil || !processed {
+		t.Fatalf("processed=%v err=%v", processed, runErr)
+	}
 	updated, _, _ := store.FindCrawlTask(task.ID)
 	if len(contentStore.items) != 0 || len(updated.Results) != 2 || updated.Stats.Found != 2 {
 		t.Fatalf("expected unpromoted search results, content=%d task=%+v", len(contentStore.items), updated)
@@ -162,11 +194,72 @@ func TestRunDueUsesStrategyTimezone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.SetCrawler(fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
+	calls := 0
+	service.SetCrawler(fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { calls++; return CrawlerResult{}, nil }))
 	if got := service.RunDue(time.Date(2026, 9, 16, 1, 0, 0, 0, time.UTC)); got != 1 {
 		t.Fatalf("expected Asia/Shanghai 09:00 trigger, got %d", got)
 	}
-	_ = strategy
+	tasks, _ := store.ListCrawlTasks(&team, &strategy.ID)
+	if len(tasks) != 1 || tasks[0].Status != CrawlPending || tasks[0].ScheduleKey == "" || calls != 0 {
+		t.Fatalf("expected one pending task without crawler execution, tasks=%+v calls=%d", tasks, calls)
+	}
+}
+
+func TestWorkerClaimsPendingTaskOnlyOnce(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{}, nil
+	}))
+	team := identity.TeamID(7)
+	actor := identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "one", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateRun(actor, strategy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, runErr := service.RunNext(context.Background()); runErr != nil || !processed {
+		t.Fatalf("processed=%v err=%v", processed, runErr)
+	}
+	if processed, runErr := service.RunNext(context.Background()); runErr != nil || processed {
+		t.Fatalf("second processed=%v err=%v", processed, runErr)
+	}
+	completed, _, _ := store.FindCrawlTask(task.ID)
+	if store.claims != 1 || completed.Status != CrawlSuccess {
+		t.Fatalf("claims=%d task=%+v", store.claims, completed)
+	}
+}
+
+func TestWorkerRecoversLegacyStrategyTaskWithoutOperationSnapshot(t *testing.T) {
+	store := newDiscoveryMemory()
+	calls := 0
+	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, req CrawlerRequest) (CrawlerResult, error) {
+		calls++
+		if req.Operation != "keyword" {
+			t.Fatalf("operation=%q", req.Operation)
+		}
+		return CrawlerResult{}, nil
+	}))
+	team := identity.TeamID(7)
+	actor := identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "legacy", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	task, err := store.CreateCrawlTask(CrawlTask{TeamID: team, StrategyID: &strategy.ID, TaskType: "discovery_task", Platform: "douyin", Status: CrawlPending, Snapshot: map[string]any{"keyword": "demo"}, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, runErr := service.RunNext(context.Background()); runErr != nil || !processed {
+		t.Fatalf("processed=%v err=%v", processed, runErr)
+	}
+	completed, _, _ := store.FindCrawlTask(task.ID)
+	if calls != 1 || completed.Status != CrawlSuccess {
+		t.Fatalf("calls=%d task=%+v", calls, completed)
+	}
 }
 
 func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {

@@ -20,7 +20,7 @@ func (c *cloudCrawlerStub) Discover(_ context.Context, request CrawlerRequest) (
 	}}}, nil
 }
 
-func TestCreateRunExecutesCloudCrawlerAndProjectsSource(t *testing.T) {
+func TestCreateRunQueuesAndWorkerProjectsSource(t *testing.T) {
 	store := newDiscoveryMemory()
 	contentStore := newMemoryStore()
 	crawler := &cloudCrawlerStub{}
@@ -39,8 +39,16 @@ func TestCreateRunExecutesCloudCrawlerAndProjectsSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if task.Status != CrawlPending || len(crawler.requests) != 0 || len(contentStore.items) != 0 {
+		t.Fatalf("expected queued Cloud run without side effects, task=%+v requests=%d content=%d", task, len(crawler.requests), len(contentStore.items))
+	}
+	processed, err := service.RunNext(context.Background())
+	if err != nil || !processed {
+		t.Fatalf("processed=%v err=%v", processed, err)
+	}
+	task, _, _ = store.FindCrawlTask(task.ID)
 	if task.Status != CrawlSuccess || task.Stats.Added != 1 {
-		t.Fatalf("expected completed Cloud run, got %+v", task)
+		t.Fatalf("expected completed worker run, got %+v", task)
 	}
 	if len(crawler.requests) != 1 || crawler.requests[0].Operation != "keyword" {
 		t.Fatalf("unexpected crawler requests: %+v", crawler.requests)

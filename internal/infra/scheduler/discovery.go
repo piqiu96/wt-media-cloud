@@ -1,17 +1,35 @@
 package scheduler
 
-import "time"
+import (
+	"context"
+	"log"
+	"time"
+)
 
 type DiscoveryTicker interface{ RunDue(time.Time) int }
 
-// StartDiscoveryScheduler provides a small host-controlled trigger loop. It
-// intentionally does not parse arbitrary cron or expose a workflow engine.
-func StartDiscoveryScheduler(service DiscoveryTicker) {
+func RunDiscoverySchedulerOnce(service DiscoveryTicker, now time.Time) int {
+	return service.RunDue(now.UTC())
+}
+
+// StartDiscoveryScheduler starts only the strategy-to-task scheduling loop.
+// Task execution belongs to Discovery Worker.
+func StartDiscoveryScheduler(ctx context.Context, service DiscoveryTicker, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for now := range ticker.C {
-			service.RunDue(now.UTC())
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				if triggered := RunDiscoverySchedulerOnce(service, now); triggered > 0 {
+					log.Printf("[discovery-scheduler] queued %d crawl task(s)", triggered)
+				}
+			}
 		}
 	}()
 }
