@@ -1,6 +1,7 @@
 package contentpool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
 
@@ -82,10 +82,10 @@ type DiscoveryStore interface {
 }
 
 type DiscoveryService struct {
-	store      DiscoveryStore
-	content    *Service
-	now        func() time.Time
-	createTask func(cloudagent.CreateTaskRequest) cloudagent.Task
+	store   DiscoveryStore
+	content *Service
+	now     func() time.Time
+	crawler Crawler
 }
 
 var (
@@ -97,13 +97,17 @@ var (
 	ErrDiscoverySelection = errors.New("discovery result selection is invalid")
 )
 
-func NewDiscoveryService(store DiscoveryStore, content *Service) *DiscoveryService {
-	return &DiscoveryService{store: store, content: content, now: time.Now}
+func NewDiscoveryService(store DiscoveryStore, content *Service, crawlers ...Crawler) *DiscoveryService {
+	var crawler Crawler
+	if len(crawlers) > 0 {
+		crawler = crawlers[0]
+	} else {
+		crawler = NewDouyinCrawlerFromEnv()
+	}
+	return &DiscoveryService{store: store, content: content, now: time.Now, crawler: crawler}
 }
 
-func (s *DiscoveryService) SetTaskCreator(create func(cloudagent.CreateTaskRequest) cloudagent.Task) {
-	s.createTask = create
-}
+func (s *DiscoveryService) SetCrawler(crawler Crawler) { s.crawler = crawler }
 
 func (s *DiscoveryService) scope(actor identity.PublicUser, team *identity.TeamID) (*identity.TeamID, error) {
 	if actor.Role == identity.RoleAdmin {
@@ -245,7 +249,7 @@ func (s *DiscoveryService) CreateRun(actor identity.PublicUser, strategyID int64
 	if strategy.Status != StrategyEnabled {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
-	if s.createTask == nil {
+	if s.crawler == nil {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
 	if strategy.StrategyType == "keyword" && strings.TrimSpace(fmt.Sprint(strategy.Config["keyword"])) == "" && len(anyStringSlice(strategy.Config["keywords"])) == 0 {
@@ -260,18 +264,7 @@ func (s *DiscoveryService) CreateRun(actor identity.PublicUser, strategyID int64
 	if err != nil {
 		return CrawlTask{}, err
 	}
-	payload := cloneMap(strategy.Config)
-	payload["operation"] = strategy.StrategyType
-	payload["platform"] = strategy.Platform
-	payload["crawl_task_id"] = created.ID
-	cloudTask := cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeDiscovery.String(), IdempotencyKey: fmt.Sprintf("crawl:%d", created.ID), Payload: payload}
-	assigned := s.createTask(cloudTask)
-	created.TaskID = assigned.TaskID
-	_, err = s.store.UpdateCrawlTask(created)
-	if err != nil {
-		return CrawlTask{}, err
-	}
-	return created, nil
+	return s.execute(created, actor, strategy.StrategyType, strategy.Config, false)
 }
 
 func (s *DiscoveryService) CreateManualRun(actor identity.PublicUser, platform, operation string, config map[string]any) (CrawlTask, error) {
@@ -288,7 +281,7 @@ func (s *DiscoveryService) CreateManualRun(actor identity.PublicUser, platform, 
 	if (operation == "keyword" && strings.TrimSpace(fmt.Sprint(config["keyword"])) == "") || (operation == "author" && strings.TrimSpace(fmt.Sprint(config["author"])) == "") {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
-	if s.createTask == nil {
+	if s.crawler == nil {
 		return CrawlTask{}, ErrDiscoveryInvalid
 	}
 	now := s.now()
@@ -299,17 +292,66 @@ func (s *DiscoveryService) CreateManualRun(actor identity.PublicUser, platform, 
 	if err != nil {
 		return CrawlTask{}, err
 	}
-	payload := cloneMap(config)
-	payload["operation"] = operation
-	payload["platform"] = platform
-	payload["crawl_task_id"] = created.ID
-	assigned := s.createTask(cloudagent.CreateTaskRequest{TaskType: cloudagent.TaskTypeDiscovery.String(), IdempotencyKey: fmt.Sprintf("crawl:%d", created.ID), Payload: payload})
-	created.TaskID = assigned.TaskID
-	_, err = s.store.UpdateCrawlTask(created)
-	if err != nil {
+	return s.execute(created, actor, operation, config, true)
+}
+
+func (s *DiscoveryService) execute(task CrawlTask, actor identity.PublicUser, operation string, config map[string]any, manual bool) (CrawlTask, error) {
+	now := s.now()
+	task.TaskID = fmt.Sprintf("crawl-%d", task.ID)
+	task.Status = CrawlRunning
+	task.StartedAt = &now
+	task.UpdatedAt = now
+	if updated, err := s.store.UpdateCrawlTask(task); err != nil {
 		return CrawlTask{}, err
+	} else {
+		task = updated
 	}
-	return created, nil
+	result, crawlErr := s.crawler.Discover(context.Background(), CrawlerRequest{Platform: task.Platform, Operation: operation, Config: cloneMap(config)})
+	scanned := result.Scanned
+	if scanned == 0 && len(result.Items) > 0 {
+		scanned = len(result.Items)
+	}
+	task.Stats = CrawlStats{Scanned: scanned, Found: len(result.Items), Failed: result.Failed}
+	if manual && (operation == "keyword" || operation == "author") {
+		task.Results = dedupeResultItems(result.Items)
+		task.Stats.Found = len(task.Results)
+	} else {
+		sourceType := "strategy"
+		if operation == "url" {
+			sourceType = "link"
+		}
+		for _, item := range result.Items {
+			team := task.TeamID
+			_, err := s.content.CreateSource(actorForTask(actor, task), SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]), Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
+			if errors.Is(err, ErrDuplicate) {
+				task.Stats.Duplicate++
+			} else if err != nil {
+				task.Stats.Failed++
+			} else {
+				task.Stats.Added++
+			}
+		}
+	}
+	finished := s.now()
+	task.FinishedAt = &finished
+	task.UpdatedAt = finished
+	if crawlErr != nil {
+		task.Status = CrawlFailed
+		task.Error = crawlErr.Error()
+	} else {
+		task.Status = CrawlSuccess
+	}
+	updated, err := s.store.UpdateCrawlTask(task)
+	return updated, err
+}
+
+func actorForTask(actor identity.PublicUser, task CrawlTask) identity.PublicUser {
+	if actor.Role == identity.RoleAdmin {
+		return actor
+	}
+	team := task.TeamID
+	actor.TeamID = &team
+	return actor
 }
 
 func (s *DiscoveryService) ListCrawlTasks(actor identity.PublicUser, strategyID *int64) ([]CrawlTask, error) {
@@ -456,90 +498,6 @@ func (s *DiscoveryService) ConfirmResults(actor identity.PublicUser, id int64, i
 	task.UpdatedAt = s.now()
 	_, err = s.store.UpdateCrawlTask(task)
 	return task, err
-}
-
-// HandleTaskResult is called by Cloud-Agent task reporting after a discovery task succeeds.
-func (s *DiscoveryService) HandleTaskResult(taskID string, result map[string]any) error {
-	id, err := strconv.ParseInt(fmt.Sprint(result["crawl_task_id"]), 10, 64)
-	if err != nil || id <= 0 {
-		return ErrCrawlTaskNotFound
-	}
-	task, ok, err := s.store.FindCrawlTask(id)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrCrawlTaskNotFound
-	}
-	items := resultItems(result["items"])
-	stats := CrawlStats{Scanned: len(items), Found: len(items)}
-	sourceType := "strategy"
-	if task.TaskType == "manual_discovery_task" {
-		sourceType = fmt.Sprint(task.Snapshot["operation"])
-		if sourceType == "url" {
-			sourceType = "link"
-		}
-	}
-	if sourceType == "keyword" || sourceType == "author" {
-		items = dedupeResultItems(items)
-		stats.Scanned, stats.Found = len(items), len(items)
-	}
-	task.Results = items
-	if sourceType == "keyword" || sourceType == "author" {
-		now := s.now()
-		task.Status = CrawlSuccess
-		task.Stats = stats
-		task.FinishedAt = &now
-		task.UpdatedAt = now
-		_, err = s.store.UpdateCrawlTask(task)
-		return err
-	}
-	for _, raw := range items {
-		item := raw
-		team := task.TeamID
-		_, err = s.content.CreateSource(identity.PublicUser{ID: task.CreatedBy, Role: identity.RoleAdmin}, SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]), Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
-		if errors.Is(err, ErrDuplicate) {
-			stats.Duplicate++
-			continue
-		}
-		if err != nil {
-			stats.Failed++
-			continue
-		}
-		stats.Added++
-	}
-	now := s.now()
-	task.Status = CrawlSuccess
-	task.Stats = stats
-	task.FinishedAt = &now
-	task.UpdatedAt = now
-	_, err = s.store.UpdateCrawlTask(task)
-	return err
-}
-
-func (s *DiscoveryService) HandleTaskProgress(taskID string, status CrawlStatus, message string) error {
-	if taskID == "" {
-		return ErrCrawlTaskNotFound
-	}
-	items, err := s.store.ListCrawlTasks(nil, nil)
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		if item.TaskID != taskID {
-			continue
-		}
-		item.Status = status
-		item.Error = message
-		item.UpdatedAt = s.now()
-		if status == CrawlFailed {
-			finished := item.UpdatedAt
-			item.FinishedAt = &finished
-		}
-		_, err = s.store.UpdateCrawlTask(item)
-		return err
-	}
-	return ErrCrawlTaskNotFound
 }
 
 func cloneMap(input map[string]any) map[string]any {

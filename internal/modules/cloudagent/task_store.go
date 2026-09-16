@@ -86,7 +86,6 @@ const (
 	TaskTypeProfileUpdate                 // 7: update BitBrowser Profile
 	TaskTypeProxyCheck                    // 8: verify proxy through Agent
 	TaskTypeProxyMutation                 // 9: assign proxy to BitBrowser Profile
-	TaskTypeDiscovery                     // 10: discover external content via channel adapter
 )
 
 func (t TaskType) String() string {
@@ -111,8 +110,6 @@ func (t TaskType) String() string {
 		return "proxy_check_task"
 	case TaskTypeProxyMutation:
 		return "proxy_mutation_task"
-	case TaskTypeDiscovery:
-		return "discovery_task"
 	default:
 		return fmt.Sprintf("unknown(%d)", t)
 	}
@@ -140,8 +137,6 @@ func ParseTaskType(s string) (TaskType, bool) {
 		return TaskTypeProxyCheck, true
 	case "proxy_mutation_task":
 		return TaskTypeProxyMutation, true
-	case "discovery_task":
-		return TaskTypeDiscovery, true
 	default:
 		return TaskTypeNoop, false
 	}

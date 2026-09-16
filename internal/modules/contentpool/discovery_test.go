@@ -1,13 +1,18 @@
 package contentpool
 
 import (
-	"errors"
+	"context"
 	"testing"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 )
+
+type fixedCrawler func(context.Context, CrawlerRequest) (CrawlerResult, error)
+
+func (f fixedCrawler) Discover(ctx context.Context, req CrawlerRequest) (CrawlerResult, error) {
+	return f(ctx, req)
+}
 
 type discoveryMemory struct {
 	strategies map[int64]DiscoveryStrategy
@@ -69,7 +74,7 @@ func (m *discoveryMemory) UpdateCrawlTask(v CrawlTask) (CrawlTask, error) {
 	return v, nil
 }
 
-func TestDiscoveryRunCreatesCloudTaskAndPreservesTeam(t *testing.T) {
+func TestDiscoveryRunExecutesCloudCrawlerAndPreservesTeam(t *testing.T) {
 	store := newDiscoveryMemory()
 	content := NewService(newMemoryStore())
 	service := NewDiscoveryService(store, content)
@@ -78,14 +83,14 @@ func TestDiscoveryRunCreatesCloudTaskAndPreservesTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.SetTaskCreator(func(req cloudagent.CreateTaskRequest) cloudagent.Task {
-		if req.TaskType != "discovery_task" {
-			t.Fatalf("unexpected task type %s", req.TaskType)
+	service.SetCrawler(fixedCrawler(func(_ context.Context, req CrawlerRequest) (CrawlerResult, error) {
+		if req.Operation != "keyword" {
+			t.Fatalf("unexpected operation %s", req.Operation)
 		}
-		return cloudagent.Task{TaskID: "task-1", TaskType: req.TaskType}
-	})
+		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "run-1", "title": "run"}}}, nil
+	}))
 	run, err := service.CreateRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, strategy.ID)
-	if err != nil || run.TaskID != "task-1" || run.TeamID != team {
+	if err != nil || run.TaskID == "" || run.TeamID != team || run.Status != CrawlSuccess {
 		t.Fatalf("run=%+v err=%v", run, err)
 	}
 }
@@ -94,9 +99,7 @@ func TestManualRunPersistsOperationForResultProjection(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identity.TeamID(7)
-	service.SetTaskCreator(func(req cloudagent.CreateTaskRequest) cloudagent.Task {
-		return cloudagent.Task{TaskID: "manual-1", TaskType: req.TaskType}
-	})
+	service.SetCrawler(fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
 	task, err := service.CreateManualRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
 	if err != nil || task.Snapshot["operation"] != "url" {
 		t.Fatalf("task=%+v err=%v", task, err)
@@ -107,12 +110,12 @@ func TestDiscoveryResultDeduplicatesIntoContentPool(t *testing.T) {
 	contentStore := newMemoryStore()
 	content := NewService(contentStore)
 	store := newDiscoveryMemory()
-	service := NewDiscoveryService(store, content)
+	service := NewDiscoveryService(store, content, fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "a1", "title": "demo"}, {"platform_content_id": "a1", "title": "demo"}}}, nil
+	}))
 	team := identity.TeamID(7)
-	now := time.Now()
-	task, _ := store.CreateCrawlTask(CrawlTask{TeamID: team, TaskType: "manual_discovery_task", Platform: "douyin", Status: CrawlPending, Snapshot: map[string]any{"operation": "url"}, CreatedBy: 2, CreatedAt: now, UpdatedAt: now})
-	result := map[string]any{"crawl_task_id": task.ID, "items": []any{map[string]any{"platform_content_id": "a1", "title": "demo"}, map[string]any{"platform_content_id": "a1", "title": "demo"}}}
-	if err := service.HandleTaskResult("task-1", result); err != nil {
+	task, err := service.CreateManualRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(contentStore.items) != 1 {
@@ -125,20 +128,17 @@ func TestDiscoveryResultDeduplicatesIntoContentPool(t *testing.T) {
 	if updated.Status != CrawlSuccess || updated.Stats.Added != 1 || updated.Stats.Duplicate != 1 {
 		t.Fatalf("unexpected stats %+v", updated.Stats)
 	}
-	if err := service.HandleTaskResult("task-1", map[string]any{"crawl_task_id": 999}); !errors.Is(err, ErrCrawlTaskNotFound) {
-		t.Fatalf("missing task error=%v", err)
-	}
 }
 
 func TestManualSearchStoresResultsUntilSelection(t *testing.T) {
 	contentStore := newMemoryStore()
-	service := NewDiscoveryService(newDiscoveryMemory(), NewService(contentStore))
+	service := NewDiscoveryService(newDiscoveryMemory(), NewService(contentStore), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "a1", "title": "one"}, {"platform_content_id": "a1", "title": "one duplicate"}, {"platform_content_id": "a2", "title": "two"}}}, nil
+	}))
 	store := service.store.(*discoveryMemory)
 	team := identity.TeamID(7)
-	now := time.Now()
-	task, _ := store.CreateCrawlTask(CrawlTask{TeamID: team, TaskType: "manual_discovery_task", Platform: "douyin", Status: CrawlPending, Snapshot: map[string]any{"operation": "keyword"}, CreatedBy: 2, CreatedAt: now, UpdatedAt: now})
-	items := []map[string]any{{"platform_content_id": "a1", "title": "one"}, {"platform_content_id": "a1", "title": "one duplicate"}, {"platform_content_id": "a2", "title": "two"}}
-	if err := service.HandleTaskResult("task-1", map[string]any{"crawl_task_id": task.ID, "items": items}); err != nil {
+	task, err := service.CreateManualRun(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}, "douyin", "keyword", map[string]any{"keyword": "demo"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	updated, _, _ := store.FindCrawlTask(task.ID)
@@ -162,9 +162,7 @@ func TestRunDueUsesStrategyTimezone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.SetTaskCreator(func(req cloudagent.CreateTaskRequest) cloudagent.Task {
-		return cloudagent.Task{TaskID: "scheduled-1", TaskType: req.TaskType}
-	})
+	service.SetCrawler(fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
 	if got := service.RunDue(time.Date(2026, 9, 16, 1, 0, 0, 0, time.UTC)); got != 1 {
 		t.Fatalf("expected Asia/Shanghai 09:00 trigger, got %d", got)
 	}
@@ -173,7 +171,7 @@ func TestRunDueUsesStrategyTimezone(t *testing.T) {
 
 func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {
 	store := newDiscoveryMemory()
-	service := NewDiscoveryService(store, NewService(newMemoryStore()))
+	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
 	team := identity.TeamID(9)
 	actor := identity.PublicUser{ID: 3, Role: identity.RoleOperator, TeamID: &team}
 	created, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "old", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"one"}}})

@@ -26,7 +26,7 @@ function typeLabel(type) { return type === 'author' ? '博主策略' : '关键�
 <template>
   <t-loading :loading="loading" :show-overlay="true"><div class="wt-resource-page strategy-page">
     <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-    <ResourcePageHeader title="挖掘策略" description="定义关键词与博主的自动发现规则，执行由 Cloud Agent 任务负责">
+    <ResourcePageHeader title="挖掘策略" description="定义关键词与博主的自动发现规则，执行由 Cloud Scheduler 与 Crawler 负责">
       <template #actions><t-button theme="primary" @click="openCreate">新增策略</t-button><t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button></template>
     </ResourcePageHeader>
     <ResourceCard class="strategy-card"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="id" hover :scroll="{ x: '900px' }" empty="暂无挖掘策略">
