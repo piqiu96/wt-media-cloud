@@ -12,10 +12,16 @@ import (
 
 // MySQLTaskStore persists tasks in MySQL. Falls back to in-memory when db is nil.
 type MySQLTaskStore struct {
-	db  *sql.DB
-	now func() time.Time
-	mem *TaskStore // fallback when db is nil
+	db            *sql.DB
+	now           func() time.Time
+	mem           *TaskStore // fallback when db is nil
+	resultHandler func(Task) error
 }
+
+// SetResultHandler lets a business module project verified Agent results into
+// its own Cloud-owned tables without coupling the universal task package to a
+// specific feature.
+func (s *MySQLTaskStore) SetResultHandler(handler func(Task) error) { s.resultHandler = handler }
 
 func NewMySQLTaskStore(db *sql.DB) *MySQLTaskStore {
 	return &MySQLTaskStore{
@@ -49,15 +55,11 @@ func (s *MySQLTaskStore) Create(req CreateTaskRequest) Task {
 
 	// Idempotency check with INSERT ... ON DUPLICATE KEY.
 	if req.IdempotencyKey != "" {
-		err := s.db.QueryRow(
-			`SELECT task_id, task_type, status, COALESCE(idempotency_key,''), COALESCE(agent_id,''),
-			        created_at, COALESCE(lease_expires_at,''), progress, COALESCE(message,''),
-			        COALESCE(updated_at,''), COALESCE(error_code,'')
-			 FROM tasks WHERE idempotency_key = ?`, req.IdempotencyKey,
-		).Scan(&taskID, &taskType, &status, &req.IdempotencyKey, &taskID, &taskID, &taskID,
-			&taskID, &taskID, &taskID, &taskID)
-		if err == nil {
-			// Return existing task. Full scan approach below is simpler.
+		var existingID string
+		if err := s.db.QueryRow(`SELECT task_id FROM tasks WHERE idempotency_key = ?`, req.IdempotencyKey).Scan(&existingID); err == nil {
+			if existing, getErr := s.Get(existingID); getErr == nil {
+				return existing
+			}
 		}
 	}
 
@@ -165,7 +167,11 @@ func (s *MySQLTaskStore) Claim(req ClaimTaskRequest) (Task, error) {
 
 func (s *MySQLTaskStore) Report(taskID string, req ReportTaskRequest) (Task, error) {
 	if s.db == nil {
-		return s.mem.Report(taskID, req)
+		task, err := s.mem.Report(taskID, req)
+		if err == nil && s.resultHandler != nil {
+			_ = s.resultHandler(task)
+		}
+		return task, err
 	}
 
 	reqStatus, ok := ParseTaskStatus(req.Status)
@@ -198,8 +204,13 @@ func (s *MySQLTaskStore) Report(taskID string, req ReportTaskRequest) (Task, err
 		return task, ErrTaskAlreadyTerminal
 	}
 	updated, err := s.Get(taskID)
-	if err == nil && req.Status == TaskStatusSucceeded.String() && req.Result != nil {
-		_ = s.projectResult(updated)
+	if err == nil {
+		if req.Status == TaskStatusSucceeded.String() && req.Result != nil {
+			_ = s.projectResult(updated)
+		}
+		if s.resultHandler != nil {
+			_ = s.resultHandler(updated)
+		}
 	}
 	return updated, err
 }

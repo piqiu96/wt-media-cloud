@@ -3,12 +3,14 @@ import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoute } from 'vue-router'
 import { createContentPoolClient } from '../../../shared/api/contentPool.js'
+import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 
 const client = createContentPoolClient()
+const discovery = createDiscoveryClient()
 const route = useRoute()
 const isLibrary = computed(() => route.path === '/material-library')
 const rows = ref([])
@@ -23,6 +25,20 @@ const detail = ref(null)
 const pagination = ref({ current: 1, pageSize: 20 })
 const selectedRowKeys = ref([])
 const batchLoading = ref(false)
+const manualVisible = ref(false)
+const manualMode = ref('url')
+const manualLoading = ref(false)
+const manualTask = ref(null)
+const manualResults = ref([])
+const selectedResultKeys = ref([])
+const manualForm = ref({ platform: 'douyin', url: '', keyword: '', author: '' })
+
+const resultColumns = [
+  { colKey: 'row-select', type: 'multiple', width: 48 },
+  { colKey: 'title', title: '标题', minWidth: 280 },
+  { colKey: 'author_name', title: '作者', width: 150 },
+  { colKey: 'published_at', title: '发布时间', width: 170 },
+]
 
 const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
@@ -74,6 +90,74 @@ function reset() {
   load()
 }
 
+function openManual(mode) {
+  manualMode.value = mode
+  manualTask.value = null
+  manualResults.value = []
+  selectedResultKeys.value = []
+  manualForm.value = { platform: 'douyin', url: '', keyword: '', author: '' }
+  manualVisible.value = true
+}
+
+function manualTitle() {
+  return ({ url: '分享链接导入', keyword: '关键词搜索', author: '博主搜索' })[manualMode.value]
+}
+
+async function confirmManual() {
+  if (manualTask.value && manualMode.value !== 'url') {
+    await confirmSelected()
+    return
+  }
+  manualLoading.value = true
+  try {
+    const form = manualForm.value
+    const urls = form.url.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean)
+    const task = manualMode.value === 'url'
+      ? await discovery.importUrl({ platform: form.platform, ...(urls.length > 1 ? { urls } : { url: urls[0] || '' }) })
+      : manualMode.value === 'keyword'
+        ? await discovery.search({ platform: form.platform, keyword: form.keyword.trim(), limit: 20 })
+        : await discovery.authorSearch({ platform: form.platform, author: form.author.trim(), limit: 20 })
+    manualTask.value = task
+    if (manualMode.value === 'url') {
+      manualVisible.value = false
+      MessagePlugin.success('链接解析任务已创建，完成后内容会自动进入内容池')
+      return
+    }
+    await waitForSearchTask(task.id)
+  } catch (e) {
+    error.value = e.message || '挖掘任务创建失败'
+  } finally { manualLoading.value = false }
+}
+
+async function waitForSearchTask(id) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const task = await discovery.getTask(id)
+    manualTask.value = task
+    if (task.status === 'success') {
+      manualResults.value = task.results || []
+      selectedResultKeys.value = []
+      return
+    }
+    if (task.status === 'failed') throw new Error(task.error || '搜索任务执行失败')
+    await new Promise((resolve) => setTimeout(resolve, 600))
+  }
+  throw new Error('搜索任务仍在执行，请稍后在挖掘任务中查看')
+}
+
+async function confirmSelected() {
+  if (!manualTask.value || !selectedResultKeys.value.length) {
+    MessagePlugin.warning('请至少选择一条内容')
+    return
+  }
+  manualLoading.value = true
+  try {
+    await discovery.confirmResults(manualTask.value.id, selectedResultKeys.value)
+    manualVisible.value = false
+    await load()
+    MessagePlugin.success(`已将 ${selectedResultKeys.value.length} 条内容加入内容池`)
+  } catch (e) { error.value = e.message || '内容入池失败' } finally { manualLoading.value = false }
+}
+
 async function openDetail(row) {
   try {
     detail.value = await client.get(row.id)
@@ -120,7 +204,9 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
       <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader :title="isLibrary ? '素材库' : '内容池'" :description="isLibrary ? '查看已从内容池沉淀的素材及其来源关系' : '统一管理人工发现与自动挖掘进入系统的外部内容'">
         <template #actions>
-          <t-button v-if="!isLibrary" theme="primary" @click="MessagePlugin.info('链接导入将在 M3-B 接入抖音解析适配器')">导入链接</t-button>
+          <t-button v-if="!isLibrary" theme="primary" @click="openManual('url')">导入链接</t-button>
+          <t-button v-if="!isLibrary" class="wt-secondary-button" variant="outline" @click="openManual('keyword')">关键词搜索</t-button>
+          <t-button v-if="!isLibrary" class="wt-secondary-button" variant="outline" @click="openManual('author')">博主搜索</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
@@ -163,6 +249,19 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
           <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
         </t-descriptions>
       </t-drawer>
+      <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="760px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualTask && manualMode !== 'url' ? '加入内容池' : '开始执行' }" @confirm="confirmManual">
+        <t-form label-width="88px">
+          <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+          <t-form-item v-if="manualMode === 'url'" label="内容链接"><t-textarea v-model="manualForm.url" :rows="4" placeholder="粘贴视频链接，支持单条或批量（每行一条）" /></t-form-item>
+          <t-form-item v-else-if="manualMode === 'keyword'" label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
+          <t-form-item v-else label="博主账号"><t-input v-model="manualForm.author" placeholder="输入作者 UID、名称或主页标识" /></t-form-item>
+        </t-form>
+        <t-alert v-if="manualTask && manualMode !== 'url'" theme="info" :message="manualTask.status === 'success' ? `搜索完成，发现 ${manualTask.stats?.found || 0} 条，请选择后加入内容池` : '正在执行搜索，请稍候…'" style="margin: 12px 0" />
+        <t-table v-if="manualMode !== 'url' && manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
+          <template #title="{ row }"><div class="title-cell"><span>{{ row.title || '未命名内容' }}</span><small>{{ row.platform_content_id }}</small></div></template>
+          <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
+        </t-table>
+      </t-dialog>
     </div>
   </t-loading>
 </template>

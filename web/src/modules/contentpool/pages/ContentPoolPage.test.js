@@ -11,6 +11,9 @@ describe('content pool page', () => {
     expect(source).toContain('导入链接')
     expect(source).toContain('转素材')
     expect(source).toContain('内容 ID')
+    expect(source).toContain('关键词搜索')
+    expect(source).toContain('博主搜索')
+    expect(source).toContain('confirmResults')
   })
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {

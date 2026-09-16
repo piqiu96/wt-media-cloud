@@ -1,0 +1,17 @@
+<script setup>
+import { onMounted, ref } from 'vue'
+import { createDiscoveryClient } from '../../../shared/api/discovery.js'
+import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
+import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
+import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+
+const client = createDiscoveryClient(); const rows = ref([]); const loading = ref(false); const error = ref(''); const detail = ref(null); const visible = ref(false)
+const columns = [{ colKey: 'id', title: '任务 ID', width: 100 }, { colKey: 'task_id', title: '执行任务', width: 180 }, { colKey: 'platform', title: '平台', width: 100 }, { colKey: 'status', title: '状态', width: 110 }, { colKey: 'stats', title: '执行结果', minWidth: 220 }, { colKey: 'created_at', title: '创建时间', width: 180 }, { colKey: 'op', title: '操作', width: 120, fixed: 'right' }]
+onMounted(load)
+async function load() { loading.value = true; try { const data = await client.listTasks(); rows.value = Array.isArray(data) ? data : [] } catch (e) { error.value = e.message || '任务加载失败' } finally { loading.value = false } }
+async function open(row) { try { detail.value = await client.getTask(row.id); visible.value = true } catch (e) { error.value = e.message || '任务详情加载失败' } }
+function tone(status) { return status === 'success' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'info' : 'warning' }
+function label(status) { return ({ pending: '待执行', running: '执行中', success: '成功', failed: '失败' })[status] || status }
+</script>
+<template><t-loading :loading="loading" :show-overlay="true"><div class="wt-resource-page task-page"><t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" /><ResourcePageHeader title="挖掘任务" description="查看策略与人工搜索触发的执行记录及入池统计"><template #actions><t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button></template></ResourcePageHeader><ResourceCard class="task-card"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="id" hover :scroll="{ x: '1000px' }" empty="暂无挖掘任务"><template #status="{ row }"><ResourceStatusBadge :tone="tone(row.status)" :label="label(row.status)" /></template><template #stats="{ row }">新增 {{ row.stats?.added || 0 }} · 重复 {{ row.stats?.duplicate || 0 }} · 失败 {{ row.stats?.failed || 0 }}</template><template #op="{ row }"><t-button size="small" class="wt-secondary-button" variant="outline" @click="open(row)">查看详情</t-button></template></t-table></div></ResourceCard><t-drawer v-model:visible="visible" header="挖掘任务详情" size="520px" :footer="false"><t-descriptions v-if="detail" bordered :column="1"><t-descriptions-item label="任务 ID">{{ detail.id }} / {{ detail.task_id || '-' }}</t-descriptions-item><t-descriptions-item label="平台">{{ detail.platform }}</t-descriptions-item><t-descriptions-item label="状态"><ResourceStatusBadge :tone="tone(detail.status)" :label="label(detail.status)" /></t-descriptions-item><t-descriptions-item label="统计">扫描 {{ detail.stats?.scanned || 0 }}，发现 {{ detail.stats?.found || 0 }}，新增 {{ detail.stats?.added || 0 }}，重复 {{ detail.stats?.duplicate || 0 }}，失败 {{ detail.stats?.failed || 0 }}</t-descriptions-item><t-descriptions-item label="错误">{{ detail.error || '-' }}</t-descriptions-item></t-descriptions></t-drawer></div></t-loading></template>
+<style scoped>.task-card { padding: 18px 20px; }</style>

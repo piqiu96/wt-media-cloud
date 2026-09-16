@@ -87,7 +87,31 @@ func NewServer() (*Server, error) {
 			mediaaccount.WithGameResolver(identityService),
 		), identityService, taskStore)
 		proxy.RegisterRoutes(engine, proxy.NewService(proxy.NewMySQLStore(result.db)), identityService, taskStore, profileStore, proxy.NewHTTPAgentCheckerFromEnv(), profileService, runtimeService)
-		contentpool.RegisterRoutes(engine, contentpool.NewService(contentpool.NewMySQLStore(result.db)), identityService)
+		contentPoolService := contentpool.NewService(contentpool.NewMySQLStore(result.db))
+		contentpool.RegisterRoutes(engine, contentPoolService, identityService)
+		discoveryService := contentpool.NewDiscoveryService(contentpool.NewMySQLDiscoveryStore(result.db), contentPoolService)
+		discoveryService.SetTaskCreator(taskStore.Create)
+		taskStore.SetResultHandler(func(task cloudagent.Task) error {
+			if task.TaskType != cloudagent.TaskTypeDiscovery.String() {
+				return nil
+			}
+			if task.Status == cloudagent.TaskStatusRunning.String() {
+				return discoveryService.HandleTaskProgress(task.TaskID, contentpool.CrawlRunning, task.Message)
+			}
+			if task.Status == cloudagent.TaskStatusFailed.String() {
+				return discoveryService.HandleTaskProgress(task.TaskID, contentpool.CrawlFailed, task.Message)
+			}
+			result := task.Result
+			if result == nil {
+				result = map[string]any{}
+			}
+			if _, ok := result["crawl_task_id"]; !ok && task.Payload != nil {
+				result["crawl_task_id"] = task.Payload["crawl_task_id"]
+			}
+			return discoveryService.HandleTaskResult(task.TaskID, result)
+		})
+		contentpool.RegisterDiscoveryRoutes(engine, discoveryService, identityService)
+		scheduler.StartDiscoveryScheduler(discoveryService)
 	} else if cfg.InitialAdminUsername != "" || cfg.InitialAdminPassword != "" {
 		return nil, fmt.Errorf("identity bootstrap requires WT_MEDIA_MYSQL_DSN")
 	}
