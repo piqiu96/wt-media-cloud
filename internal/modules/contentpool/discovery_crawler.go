@@ -147,6 +147,12 @@ func (c *DouyinCrawler) fetchByURL(ctx context.Context, source string) (map[stri
 
 func (c *DouyinCrawler) search(ctx context.Context, keyword string, limit, offset int) ([]map[string]any, error) {
 	fields := map[string]string{"keywords": keyword, "limit": strconv.Itoa(clamp(limit, 1, 30)), "offset": strconv.Itoa(max(offset, 0)), "sort_type": "0", "content_type": "1", "publish_time": "0", "filter_duration": "0"}
+	// itfaba's /dyRank contract expects the Douyin cookie in the ck form
+	// field (the reference client uses the same value), in addition to the
+	// optional HTTP Cookie header used by other endpoints.
+	if c.cookie != "" {
+		fields["ck"] = c.cookie
+	}
 	var payload map[string]any
 	if err := c.post(ctx, "/dyRank", fields, &payload); err != nil {
 		return nil, err

@@ -13,12 +13,12 @@ func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		seen = r.URL.Path + "?" + r.URL.RawQuery
 		body, _ := io.ReadAll(r.Body)
-		if r.URL.Path != "/dyRank" || r.URL.Query().Get("apiKey") != "secret-key" || !strings.Contains(string(body), "keywords=%E7%8E%8B%E8%80%85%E8%8D%A3%E8%80%80") {
+		if r.URL.Path != "/dyRank" || r.URL.Query().Get("apiKey") != "secret-key" || !strings.Contains(string(body), "keywords=%E7%8E%8B%E8%80%85%E8%8D%A3%E8%80%80") || !strings.Contains(string(body), "ck=server-cookie") {
 			t.Fatalf("unexpected request %s body=%s", r.URL.String(), body)
 		}
 		return jsonResponse(`{"result":1,"data":{"data":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"}}}]}}`), nil
 	})}
-	crawler := &DouyinCrawler{base: "http://crawler.test", apiKey: "secret-key", client: client}
+	crawler := &DouyinCrawler{base: "http://crawler.test", apiKey: "secret-key", cookie: "server-cookie", client: client}
 	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "王者荣耀"}})
 	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" {
 		t.Fatalf("unexpected result=%+v err=%v", result, err)
