@@ -187,6 +187,22 @@ func RegisterRoutes(h *server.Hertz, service *Service, identityService *identity
 }
 
 func RegisterDiscoveryRoutes(h *server.Hertz, service *DiscoveryService, identityService *identity.Service) {
+	h.POST("/api/v1/discovery-scheduler/run-due", func(ctx context.Context, c *hertzapp.RequestContext) {
+		actor, ok := identity.AuthenticateRequest(c, identityService)
+		if !ok {
+			return
+		}
+		if actor.Role != identity.RoleAdmin {
+			common.Forbidden(c, 11003, "没有权限执行调度")
+			return
+		}
+		now := time.Now().UTC()
+		common.Success(c, map[string]any{
+			"at":        now,
+			"triggered": service.RunDue(now),
+		})
+	})
+
 	h.POST("/api/v1/content-pool/search", func(ctx context.Context, c *hertzapp.RequestContext) {
 		actor, ok := identity.AuthenticateRequest(c, identityService)
 		if !ok {
