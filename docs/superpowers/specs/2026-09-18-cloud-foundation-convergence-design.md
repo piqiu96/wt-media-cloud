@@ -43,12 +43,10 @@ wt-media-cloud/
 ├── internal/
 │   ├── bootstrap/
 │   │   ├── bootstrap.go
-│   │   ├── resources.go
-│   │   ├── modules.go
+│   │   ├── resource.go
 │   │   ├── routes.go
 │   │   └── jobs.go
 │   ├── config/
-│   ├── server/
 │   ├── infra/
 │   │   ├── database/
 │   │   ├── cache/
@@ -75,17 +73,17 @@ wt-media-cloud/
 
 ### 4.1 调用方向
 
-Server 的固定调用方向是：
+HTTP Server 的固定调用方向是：
 
 ```text
-cmd/server
-  -> internal/server.Run
+cmd/server/main.go
+  -> cmd/server/server.go
   -> bootstrap.InitializeServer
   -> Hertz.Run
   -> bootstrap.Close
 ```
 
-`internal/server` 只负责启动、信号监听、优雅关闭和调用 Bootstrap。它不读取配置、不创建基础资源、不组装业务模块、不注册路由。
+`cmd/server/main.go` 只调用同包的运行函数。`cmd/server/server.go` 负责调用 Bootstrap、启动 Hertz、监听退出信号和优雅关闭；它不读取或解析业务配置、不创建基础资源、不组装业务模块、不注册路由。不再创建只有一层转发作用的 `internal/server` 包。
 
 ### 4.2 Bootstrap 入口
 
@@ -98,10 +96,11 @@ Bootstrap 提供进程级入口：
 
 所有初始化都必须从 `bootstrap.go` 的上述入口发起。辅助文件只承载私有实现：
 
-- `resources.go`：基础资源初始化与关闭函数；
-- `modules.go`：必要的模块组装和单向跨模块连接；
+- `resource.go`：基础资源初始化、失败回滚与关闭函数；
 - `routes.go`：连接模块路由，不创建业务资源；
 - `jobs.go`：连接 Scheduler、Worker 与 Job，不实现业务任务。
+
+采用包级 Service 和 Repository 后不再存在需要集中构造的 Module 对象，因此不创建 `modules.go`。跨模块调用遵循固定的单向 Service 依赖，模块路由由 `routes.go` 直接注册。
 
 每个入口只初始化当前进程真正需要的资源。初始化任一步骤失败时，按逆序关闭已经成功初始化的资源并返回原始错误。
 
@@ -110,7 +109,12 @@ Bootstrap 提供进程级入口：
 基础资源由各自的 Infra 包私有保存，通过只读 Getter 对外提供。禁止导出可变全局变量。
 
 ```go
-var primary *gorm.DB
+const defaultDatabaseName = "primary"
+
+var (
+    db       *gorm.DB
+    namedDBs map[string]*gorm.DB
+)
 
 func DB() *gorm.DB
 func Named(name string) (*gorm.DB, bool)
@@ -253,9 +257,13 @@ logger.Panic()
 
 Metrics 和 Tracing 由各自 Infra 包提供私有实例和只读 Getter，并由 Bootstrap 初始化。当前没有真实后端时保持 Noop 实现，调用方不需要判空。HTTP Middleware、Client 和 Job 使用相同的基础接口。
 
-## 9. Server、Router 与 Module
+## 9. Cmd Server、Router 与 Module
 
-### 9.1 Router
+### 9.1 Cmd Server
+
+`cmd/server/server.go` 只管理 HTTP 进程生命周期：调用 `bootstrap.InitializeServer`、启动 Hertz、处理 `SIGINT`/`SIGTERM`、停止接收请求、等待优雅关闭并调用资源关闭函数。所有 Config、Logger、DB、Client、Middleware 和 Router 初始化仍然由 Bootstrap 发起。
+
+### 9.2 Router
 
 Router 只声明 Method、Path 和函数 Handler：
 
@@ -265,7 +273,7 @@ h.POST("/api/v1/auth/login", Login)
 
 Router 不创建 Service、Repository、Client、Scheduler 或 Worker，不启动后台任务。
 
-### 9.2 Handler
+### 9.3 Handler
 
 Handler 使用函数，不创建 Handler Struct：
 
@@ -277,7 +285,7 @@ func Login(ctx context.Context, c *app.RequestContext) {
 
 Handler 负责 HTTP 解码、认证上下文、调用 Service 和写入统一响应，不包含业务规则和 SQL。
 
-### 9.3 模块结构
+### 9.4 模块结构
 
 每个模块最终结构为：
 
@@ -454,7 +462,7 @@ go-sqlmock
 1. 更新 `AGENTS.md` 和架构规范，消除旧 Runtime 与 Agent 边界规则；
 2. 调整 Config Schema，并完成 GORM、多数据库和日志基础资源；
 3. 建立受控全局 Infra Getter，迁移并删除 `runtime.Runtime`；
-4. 建立 `internal/server` 和进程级 Bootstrap，删除 `internal/app`；
+4. 在 `cmd/server/server.go` 建立 HTTP 生命周期，完成进程级 Bootstrap，并删除 `internal/app`；
 5. 完成 Router、Scheduler、Job、Worker 和 Client 边界；
 6. 按依赖顺序迁移模块：`identity`、`cloudagent`、`runtimebinding`、`profilebinding`、`profileguard`、`mediaaccount`、`proxy`、`contentpool`；
 7. 完成人工同步搜索和 Web 调整；
