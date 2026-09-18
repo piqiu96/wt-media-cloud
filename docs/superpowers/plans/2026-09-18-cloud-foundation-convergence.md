@@ -640,31 +640,31 @@ git commit -m "refactor: migrate profile runtime modules"
 - Consumes: Identity, Cloud-Agent, Runtime-Binding, Profile-Binding, Profile-Guard Service functions and `agent.Get()`.
 - Produces: package-level account/proxy operations and Job-compatible expiry operation.
 
-- [ ] **Step 1: Add failing account/proxy boundary tests**
+- [x] **Step 1: Add failing account/proxy boundary tests**
 
 Cover account CRUD/identification/check/cookie/profile/tag/group flows; proxy parse/import/CRUD/status/check/quota flows; verify Agent calls remain behind the typed Agent Client.
 
-- [ ] **Step 2: Run module tests**
+- [x] **Step 2: Run module tests**
 
 Run: `go test ./internal/modules/mediaaccount/... ./internal/modules/proxy/... ./internal/jobs -count=1`
 
-- [ ] **Step 3: Move DTO/model ownership and convert repositories**
+- [x] **Step 3: Move DTO/model ownership and convert repositories**
 
 Move actual Account, AccountGroup, ProxyConfig and request/filter types to `model`/`dto`. Convert SQL stores to `database.DB()` package functions and private GORM helpers. Preserve SQL and error mapping.
 
-- [ ] **Step 4: Convert Service receivers to package functions**
+- [x] **Step 4: Convert Service receivers to package functions**
 
 Keep every current public Media Account operation (`CreateAccount` through account-group queries) and Proxy operation (`BulkParse` through `SetMaxProfileCount`) with the same inputs/results, adjusted only to import `model`/`dto` types. Replace resolver/options injection with the approved one-way Service calls.
 
-- [ ] **Step 5: Move root handlers and simplify routers**
+- [x] **Step 5: Move root handlers and simplify routers**
 
 Eliminate `deps ...any` from Proxy routing. Each Router binds named handler functions only; handlers call package-level Service functions.
 
-- [ ] **Step 6: Update proxy expiry Job**
+- [x] **Step 6: Update proxy expiry Job**
 
 Make the Job call Proxy Service functions and `logger.Job()`; it must not accept raw DB or Logger parameters.
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run:
 
@@ -675,7 +675,7 @@ rg -n 'deps \.\.\.any|NewService|NewMySQLStore|\*Service' internal/modules/media
 
 Expected: tests pass; scan prints nothing in production code.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/modules/mediaaccount internal/modules/proxy internal/jobs/proxy_expiry.go

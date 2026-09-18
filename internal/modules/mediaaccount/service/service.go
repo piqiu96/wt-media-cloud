@@ -1,265 +1,114 @@
 // Package mediaaccount owns Cloud media-account facts, assignment, and tags.
-package mediaaccount
+package service
 
 import (
 	"encoding/json"
-	"errors"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/common"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
-	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
+	profileguardservice "github.com/wt-media/wt-media-cloud/internal/modules/profileguard/service"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
-type Platform string
+type (
+	Platform             = model.Platform
+	IdentificationStatus = model.IdentificationStatus
+	BusinessStatus       = model.BusinessStatus
+	LoginStatus          = model.LoginStatus
+	Account              = model.Account
+	AccountRecord        = model.AccountRecord
+	AccountCheckItem     = model.AccountCheckItem
+	AccountGroup         = model.AccountGroup
 
-const (
-	PlatformDouyin    Platform = "douyin"
-	PlatformBilibili  Platform = "bilibili"
-	PlatformBaijiahao Platform = "baijiahao"
+	CreateAccountInput      = dto.CreateAccountInput
+	IdentifyAccountInput    = dto.IdentifyAccountInput
+	AccountCheckStartInput  = dto.AccountCheckStartInput
+	AccountCheckStart       = dto.AccountCheckStart
+	AccountCheckResultInput = dto.AccountCheckResultInput
+	CookieReadStartInput    = dto.CookieReadStartInput
+	CookieReadStart         = dto.CookieReadStart
+	CookieReadResultInput   = dto.CookieReadResultInput
+	UpdateAccountInput      = dto.UpdateAccountInput
+	AccountFilter           = dto.AccountFilter
+	AccountQuery            = dto.AccountFilter
+	AccountGroupFilters     = dto.AccountGroupFilters
+	CreateAccountGroupInput = dto.CreateAccountGroupInput
+	UpdateAccountGroupInput = dto.UpdateAccountGroupInput
 )
 
-type IdentificationStatus string
-
 const (
-	IdentificationPending    IdentificationStatus = "pending_identification"
-	IdentificationIdentified IdentificationStatus = "identified"
-	IdentificationDuplicate  IdentificationStatus = "duplicate"
-)
-
-type BusinessStatus string
-
-const (
-	BusinessEnabled  BusinessStatus = "enabled"
-	BusinessDisabled BusinessStatus = "disabled"
-)
-
-type LoginStatus string
-
-const (
-	LoginUnknown            LoginStatus = "unknown"
-	LoginNormal             LoginStatus = "normal"
-	LoginNotLoggedIn        LoginStatus = "not_logged_in"
-	LoginVerificationNeeded LoginStatus = "verification_needed"
-	LoginExpired            LoginStatus = "expired"
-	LoginRestricted         LoginStatus = "restricted"
-	LoginAccountMismatch    LoginStatus = "account_mismatch"
-	LoginEnvironmentError   LoginStatus = "environment_error"
+	PlatformDouyin           = model.PlatformDouyin
+	PlatformBilibili         = model.PlatformBilibili
+	PlatformBaijiahao        = model.PlatformBaijiahao
+	IdentificationPending    = model.IdentificationPending
+	IdentificationIdentified = model.IdentificationIdentified
+	IdentificationDuplicate  = model.IdentificationDuplicate
+	BusinessEnabled          = model.BusinessEnabled
+	BusinessDisabled         = model.BusinessDisabled
+	LoginUnknown             = model.LoginUnknown
+	LoginNormal              = model.LoginNormal
+	LoginNotLoggedIn         = model.LoginNotLoggedIn
+	LoginVerificationNeeded  = model.LoginVerificationNeeded
+	LoginExpired             = model.LoginExpired
+	LoginRestricted          = model.LoginRestricted
+	LoginAccountMismatch     = model.LoginAccountMismatch
+	LoginEnvironmentError    = model.LoginEnvironmentError
 )
 
 var (
-	ErrForbidden            = errors.New("media account operation is forbidden")
-	ErrInvalidInput         = errors.New("media account input is invalid")
-	ErrNotFound             = errors.New("media account was not found")
-	ErrDuplicateAccount     = errors.New("media account already exists for this user and platform")
-	ErrProfileUnavailable   = errors.New("browser profile is unavailable")
-	ErrProfilePlatformTaken = errors.New("browser profile already has an account for this platform")
+	ErrForbidden            = model.ErrForbidden
+	ErrInvalidInput         = model.ErrInvalidInput
+	ErrNotFound             = model.ErrNotFound
+	ErrDuplicateAccount     = model.ErrDuplicateAccount
+	ErrProfileUnavailable   = model.ErrProfileUnavailable
+	ErrProfilePlatformTaken = model.ErrProfilePlatformTaken
 )
-
-// Account is the API-safe representation. Cookie values are intentionally
-// absent and must remain internal to AccountRecord.
-type Account struct {
-	ID                    string               `json:"id"`
-	UserID                identity.UserID      `json:"user_id"`
-	TeamID                *identity.TeamID     `json:"team_id"`
-	GameIDs               []string             `json:"game_ids"`
-	GameID                string               `json:"game_id"`
-	Platform              Platform             `json:"platform"`
-	PlatformAccountID     string               `json:"platform_account_id,omitempty"`
-	Name                  string               `json:"name,omitempty"`
-	AvatarURL             string               `json:"avatar_url,omitempty"`
-	BrowserProfileID      string               `json:"browser_profile_id,omitempty"`
-	Remark                string               `json:"remark,omitempty"`
-	IdentificationStatus  IdentificationStatus `json:"identification_status"`
-	DuplicateOfAccountID  string               `json:"duplicate_of_account_id,omitempty"`
-	BusinessStatus        BusinessStatus       `json:"business_status"`
-	LoginStatus           LoginStatus          `json:"login_status"`
-	CookieStatus          string               `json:"cookie_status,omitempty"`
-	ActiveCookieUpdatedAt *time.Time           `json:"active_cookie_updated_at,omitempty"`
-	LastCheckedAt         *time.Time           `json:"last_checked_at,omitempty"`
-	CheckItems            []AccountCheckItem   `json:"check_items,omitempty"`
-	Tags                  []string             `json:"tags"`
-	CreatedAt             time.Time            `json:"created_at"`
-	UpdatedAt             time.Time            `json:"updated_at"`
-}
-
-type AccountRecord struct {
-	Account
-	OriginalCookie string
-	ActiveCookie   string
-}
-
-type CreateAccountInput struct {
-	UserID           identity.UserID
-	GameIDs          []string
-	GameID           string
-	Name             string
-	Platform         Platform
-	OriginalCookie   string
-	BrowserProfileID string
-	Remark           string
-	Tags             []string
-}
-
-type IdentifyAccountInput struct {
-	PlatformAccountID string
-	Name              string
-	AvatarURL         string
-	LoginStatus       LoginStatus
-}
-
-type AccountCheckStartInput struct {
-	NodeID string
-}
-
-type AccountCheckStart struct {
-	TaskID                    string      `json:"task_id"`
-	AccountID                 string      `json:"account_id"`
-	BrowserProfileID          string      `json:"browser_profile_id"`
-	BitProfileID              string      `json:"bit_profile_id"`
-	Platform                  Platform    `json:"platform"`
-	ExpectedPlatformAccountID string      `json:"expected_platform_account_id,omitempty"`
-	LoginStatus               LoginStatus `json:"login_status"`
-}
-
-type AccountCheckResultInput struct {
-	TaskID            string
-	PlatformAccountID string
-	Name              string
-	AvatarURL         string
-	LoginStatus       LoginStatus
-	Message           string
-	CheckItems        []AccountCheckItem // Agent 返回的第 5-8 项；1-4 项由 Cloud 合成
-}
-
-type CookieReadStartInput struct {
-	NodeID string
-}
-
-type CookieReadStart struct {
-	TaskID           string   `json:"task_id"`
-	AccountID        string   `json:"account_id"`
-	BrowserProfileID string   `json:"browser_profile_id"`
-	BitProfileID     string   `json:"bit_profile_id"`
-	Platform         Platform `json:"platform"`
-}
-
-type CookieReadResultInput struct {
-	TaskID  string
-	Cookies []map[string]any
-}
-
-type UpdateAccountInput struct {
-	BusinessStatus BusinessStatus
-	LoginStatus    LoginStatus
-	Remark         *string
-	GameIDs        *[]string
-	GameID         *string
-	Name           *string
-}
-
-type AccountFilter struct {
-	UserID         identity.UserID
-	GameIDs        []string
-	GameID         string
-	Platform       Platform
-	BusinessStatus BusinessStatus
-	LoginStatus    LoginStatus
-	Search         string
-	ProfileSearch  string
-	AnyTags        []string
-	AllTags        []string
-	ExcludeTags    []string
-}
-
-type AccountQuery = AccountFilter
-
-// AccountGroupFilters 是账号组保存的筛选条件（AccountFilter 子集，均可为空=不筛选）。
-type AccountGroupFilters struct {
-	GameIDs        []string       `json:"game_ids,omitempty"`
-	GameID         string         `json:"game_id,omitempty"`
-	Platform       Platform       `json:"platform,omitempty"`
-	BusinessStatus BusinessStatus `json:"business_status,omitempty"`
-	LoginStatus    LoginStatus    `json:"login_status,omitempty"`
-	Search         string         `json:"search,omitempty"`
-	AnyTags        []string       `json:"any_tags,omitempty"`
-	AllTags        []string       `json:"all_tags,omitempty"`
-	ExcludeTags    []string       `json:"exclude_tags,omitempty"`
-}
-
-// AccountCheckItem 是账号检查 8 项中的一项结果（PRD 3.3.10）。
-// Status: pass=通过 | fail=不通过 | skip=跳过 | na=不适用（未接入/延后）。
-type AccountCheckItem struct {
-	Key     string `json:"key"`
-	Label   string `json:"label"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
-}
-
-type AccountGroup struct {
-	ID        string              `json:"id"`
-	UserID    identity.UserID     `json:"user_id"`
-	TeamID    *identity.TeamID    `json:"team_id,omitempty"`
-	Name      string              `json:"name"`
-	Filters   AccountGroupFilters `json:"filters"`
-	SortOrder int                 `json:"sort_order"`
-	CreatedAt time.Time           `json:"created_at"`
-	UpdatedAt time.Time           `json:"updated_at"`
-}
-
-type CreateAccountGroupInput struct {
-	Name    string              `json:"name"`
-	Filters AccountGroupFilters `json:"filters"`
-}
-
-type UpdateAccountGroupInput struct {
-	Name    *string              `json:"name"`
-	Filters *AccountGroupFilters `json:"filters"`
-}
 
 type Store interface {
 	Create(record AccountRecord) (string, error)
 	Find(id string) (AccountRecord, bool, error)
-	FindByIdentity(userID identity.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
+	FindByIdentity(userID identityservice.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
 	Update(AccountRecord, *[]string) error
 	List(AccountQuery) ([]AccountRecord, error)
-	AddTags(userID identity.UserID, accountIDs, tags []string, createdAt time.Time) error
-	RemoveTags(userID identity.UserID, accountIDs, tags []string) error
+	AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error
+	RemoveTags(userID identityservice.UserID, accountIDs, tags []string) error
 	ListTags(accountIDs []string) (map[string][]string, error)
-	AppendAudit(identity.AuditEvent) error
+	AppendAudit(identityservice.AuditEvent) error
 	CreateGroup(group AccountGroup) (string, error)
 	FindGroup(id string) (AccountGroup, bool, error)
-	ListGroups(userID identity.UserID) ([]AccountGroup, error)
+	ListGroups(userID identityservice.UserID) ([]AccountGroup, error)
 	UpdateGroup(AccountGroup) error
 	DeleteGroup(id string) error
 }
 
-type Service struct {
+type accountService struct {
 	store          Store
-	profiles       ProfileResolver
-	profileFacts   ProfileFactResolver
-	sensitiveTasks SensitiveTaskCreator
-	users          UserResolver
-	games          GameResolver
+	profiles       profileResolver
+	profileFacts   profileFactResolver
+	sensitiveTasks sensitiveTaskCreator
+	users          userResolver
+	games          gameResolver
 	now            func() time.Time
 	newID          func(string) string
 }
 
-type ProfileResolver interface {
-	ResolveProfile(profileID string) (userID identity.UserID, active bool, found bool, err error)
+type profileResolver interface {
+	ResolveProfile(profileID string) (userID identityservice.UserID, active bool, found bool, err error)
 }
 
-type ProfileFactResolver interface {
-	ResolveProfileForAccountCheck(profileID string) (id string, userID identity.UserID, bitProfileID string, active bool, found bool, err error)
+type profileFactResolver interface {
+	ResolveProfileForAccountCheck(profileID string) (id string, userID identityservice.UserID, bitProfileID string, active bool, found bool, err error)
 	ResolveProxyForAccountCheck(profileID string) (proxyID string, businessStatus string, lastCheckResult string, expiresAt *time.Time, bound bool, err error)
 }
 
-type SensitiveTaskCreator interface {
-	CreateAuthorizedTask(profileguard.SensitiveTask) error
+type sensitiveTaskCreator interface {
+	CreateAuthorizedTask(profileguardservice.SensitiveTask) error
 }
 
 type accountCheckProxyFact struct {
@@ -270,55 +119,55 @@ type accountCheckProxyFact struct {
 	bound           bool
 }
 
-type UserResolver interface {
-	ResolveUser(userID identity.UserID) (identity.PublicUser, bool, error)
+type userResolver interface {
+	ResolveUser(userID identityservice.UserID) (identityservice.PublicUser, bool, error)
 }
 
-// GameResolver exposes enabled-game facts to the media-account module without
+// gameResolver exposes enabled-game facts to the media-account module without
 // copying the identity store or applying user game-scope permissions.
-type GameResolver interface {
-	ResolveGame(gameID string) (identity.OperationGame, bool, error)
+type gameResolver interface {
+	ResolveGame(gameID string) (identityservice.OperationGame, bool, error)
 }
 
-type Option func(*Service)
+type option func(*accountService)
 
-func WithClock(now func() time.Time) Option {
-	return func(service *Service) { service.now = now }
+func withClock(now func() time.Time) option {
+	return func(service *accountService) { service.now = now }
 }
 
-func WithIDGenerator(newID func(string) string) Option {
-	return func(service *Service) { service.newID = newID }
+func withIDGenerator(newID func(string) string) option {
+	return func(service *accountService) { service.newID = newID }
 }
 
-func WithProfileResolver(resolver ProfileResolver) Option {
-	return func(service *Service) { service.profiles = resolver }
+func withProfileResolver(resolver profileResolver) option {
+	return func(service *accountService) { service.profiles = resolver }
 }
 
-func WithProfileFactResolver(resolver ProfileFactResolver) Option {
-	return func(service *Service) { service.profileFacts = resolver }
+func withProfileFactResolver(resolver profileFactResolver) option {
+	return func(service *accountService) { service.profileFacts = resolver }
 }
 
-func WithSensitiveTaskCreator(creator SensitiveTaskCreator) Option {
-	return func(service *Service) { service.sensitiveTasks = creator }
+func withSensitiveTaskCreator(creator sensitiveTaskCreator) option {
+	return func(service *accountService) { service.sensitiveTasks = creator }
 }
 
-func WithUserResolver(resolver UserResolver) Option {
-	return func(service *Service) { service.users = resolver }
+func withUserResolver(resolver userResolver) option {
+	return func(service *accountService) { service.users = resolver }
 }
 
-func WithGameResolver(resolver GameResolver) Option {
-	return func(service *Service) { service.games = resolver }
+func withGameResolver(resolver gameResolver) option {
+	return func(service *accountService) { service.games = resolver }
 }
 
-func NewService(store Store, options ...Option) *Service {
-	service := &Service{store: store, now: func() time.Time { return time.Now().UTC() }, newID: common.NewID}
+func newAccountService(store Store, options ...option) *accountService {
+	service := &accountService{store: store, now: func() time.Time { return time.Now().UTC() }, newID: id.NewID}
 	for _, option := range options {
 		option(service)
 	}
 	return service
 }
 
-func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountInput) (Account, error) {
+func (s *accountService) CreateAccount(actor identityservice.PublicUser, input CreateAccountInput) (Account, error) {
 	userID := input.UserID
 	if userID <= 0 {
 		userID = actor.ID
@@ -336,7 +185,7 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 	target := actor
 	teamID := actor.TeamID
 	if userID != actor.ID {
-		if actor.Role != identity.RoleAdmin {
+		if actor.Role != identityservice.RoleAdmin {
 			return Account{}, ErrForbidden
 		}
 		if s.users == nil {
@@ -401,12 +250,12 @@ func (s *Service) CreateAccount(actor identity.PublicUser, input CreateAccountIn
 
 // GetAccountRecord returns the full account record including cookies.
 // Intended only for trusted operations like cookie export.
-func (s *Service) GetAccountRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
+func (s *accountService) GetAccountRecord(actor identityservice.PublicUser, accountID string) (AccountRecord, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return AccountRecord{}, err
 	}
-	if actor.ID != record.UserID && actor.Role != identity.RoleAdmin {
+	if actor.ID != record.UserID && actor.Role != identityservice.RoleAdmin {
 		return AccountRecord{}, ErrForbidden
 	}
 	return record, nil
@@ -414,7 +263,7 @@ func (s *Service) GetAccountRecord(actor identity.PublicUser, accountID string) 
 
 // GetOwnedAccountRecord authorizes a local sensitive operation. Even admins
 // and senior operators must not operate another user's Desktop resources.
-func (s *Service) GetOwnedAccountRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
+func (s *accountService) GetOwnedAccountRecord(actor identityservice.PublicUser, accountID string) (AccountRecord, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return AccountRecord{}, err
@@ -425,7 +274,7 @@ func (s *Service) GetOwnedAccountRecord(actor identity.PublicUser, accountID str
 	return record, nil
 }
 
-func (s *Service) GetAccount(actor identity.PublicUser, accountID string) (Account, error) {
+func (s *accountService) GetAccount(actor identityservice.PublicUser, accountID string) (Account, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -437,7 +286,7 @@ func (s *Service) GetAccount(actor identity.PublicUser, accountID string) (Accou
 	return accounts[0], nil
 }
 
-func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) ([]Account, error) {
+func (s *accountService) ListAccounts(actor identityservice.PublicUser, filter AccountFilter) ([]Account, error) {
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
@@ -456,7 +305,7 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 	if err := validateGameScope(actor, filter.GameIDs); err != nil {
 		return nil, err
 	}
-	if actor.Role == identity.RoleOperator {
+	if actor.Role == identityservice.RoleOperator {
 		if filter.UserID > 0 && filter.UserID != actor.ID {
 			return nil, ErrForbidden
 		}
@@ -505,7 +354,7 @@ func (s *Service) ListAccounts(actor identity.PublicUser, filter AccountFilter) 
 	return s.attachTags(visible)
 }
 
-func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, input UpdateAccountInput) (Account, error) {
+func (s *accountService) UpdateAccount(actor identityservice.PublicUser, accountID string, input UpdateAccountInput) (Account, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -576,7 +425,7 @@ func (s *Service) UpdateAccount(actor identity.PublicUser, accountID string, inp
 	return record.Account, nil
 }
 
-func (s *Service) IdentifyAccount(actor identity.PublicUser, accountID string, input IdentifyAccountInput) (Account, error) {
+func (s *accountService) IdentifyAccount(actor identityservice.PublicUser, accountID string, input IdentifyAccountInput) (Account, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -621,8 +470,8 @@ func (s *Service) IdentifyAccount(actor identity.PublicUser, accountID string, i
 	return record.Account, nil
 }
 
-func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID string, input AccountCheckStartInput) (AccountCheckStart, error) {
-	if actor.Role != identity.RoleOperator {
+func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser, accountID string, input AccountCheckStartInput) (AccountCheckStart, error) {
+	if actor.Role != identityservice.RoleOperator {
 		return AccountCheckStart{}, ErrForbidden
 	}
 	if s.profileFacts == nil || s.sensitiveTasks == nil {
@@ -654,9 +503,9 @@ func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID st
 	}
 	now := s.now()
 	taskID := s.newID("sensitive-account-check")
-	task := profileguard.SensitiveTask{
+	task := profileguardservice.SensitiveTask{
 		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
-		Operation: profileguard.OperationAuthenticatedAccountCheck, Status: profileguard.TaskAuthorized,
+		Operation: profileguardservice.OperationAuthenticatedAccountCheck, Status: profileguardservice.TaskAuthorized,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.sensitiveTasks.CreateAuthorizedTask(task); err != nil {
@@ -673,8 +522,8 @@ func (s *Service) StartLocalAccountCheck(actor identity.PublicUser, accountID st
 	}, nil
 }
 
-func (s *Service) StartCookieRead(actor identity.PublicUser, accountID string, input CookieReadStartInput) (CookieReadStart, error) {
-	if actor.Role != identity.RoleOperator {
+func (s *accountService) StartCookieRead(actor identityservice.PublicUser, accountID string, input CookieReadStartInput) (CookieReadStart, error) {
+	if actor.Role != identityservice.RoleOperator {
 		return CookieReadStart{}, ErrForbidden
 	}
 	if s.profileFacts == nil || s.sensitiveTasks == nil {
@@ -703,9 +552,9 @@ func (s *Service) StartCookieRead(actor identity.PublicUser, accountID string, i
 	}
 	now := s.now()
 	taskID := s.newID("sensitive-cookie-read")
-	task := profileguard.SensitiveTask{
+	task := profileguardservice.SensitiveTask{
 		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
-		Operation: profileguard.OperationCookieRead, Status: profileguard.TaskAuthorized,
+		Operation: profileguardservice.OperationCookieRead, Status: profileguardservice.TaskAuthorized,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.sensitiveTasks.CreateAuthorizedTask(task); err != nil {
@@ -721,7 +570,7 @@ func (s *Service) StartCookieRead(actor identity.PublicUser, accountID string, i
 	}, nil
 }
 
-func (s *Service) ApplyCookieReadResult(actor identity.PublicUser, accountID string, input CookieReadResultInput) (Account, error) {
+func (s *accountService) ApplyCookieReadResult(actor identityservice.PublicUser, accountID string, input CookieReadResultInput) (Account, error) {
 	record, err := s.GetOwnedAccountRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -749,7 +598,7 @@ func (s *Service) ApplyCookieReadResult(actor identity.PublicUser, accountID str
 	return record.Account, nil
 }
 
-func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accountID string, input AccountCheckResultInput) (Account, error) {
+func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.PublicUser, accountID string, input AccountCheckResultInput) (Account, error) {
 	record, err := s.GetOwnedAccountRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -819,15 +668,15 @@ func (s *Service) ApplyLocalAccountCheckResult(actor identity.PublicUser, accoun
 	return record.Account, nil
 }
 
-func (s *Service) AddTags(actor identity.PublicUser, accountIDs, tags []string) error {
+func (s *accountService) AddTags(actor identityservice.PublicUser, accountIDs, tags []string) error {
 	return s.changeTags(actor, accountIDs, tags, true)
 }
 
-func (s *Service) RemoveTags(actor identity.PublicUser, accountIDs, tags []string) error {
+func (s *accountService) RemoveTags(actor identityservice.PublicUser, accountIDs, tags []string) error {
 	return s.changeTags(actor, accountIDs, tags, false)
 }
 
-func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID string) (Account, error) {
+func (s *accountService) BindProfile(actor identityservice.PublicUser, accountID, profileID string) (Account, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -872,7 +721,7 @@ func (s *Service) BindProfile(actor identity.PublicUser, accountID, profileID st
 	return record.Account, nil
 }
 
-func (s *Service) UnbindProfile(actor identity.PublicUser, accountID string) (Account, error) {
+func (s *accountService) UnbindProfile(actor identityservice.PublicUser, accountID string) (Account, error) {
 	record, err := s.authorizedRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -896,13 +745,13 @@ func (s *Service) UnbindProfile(actor identity.PublicUser, accountID string) (Ac
 	return record.Account, nil
 }
 
-func (s *Service) changeTags(actor identity.PublicUser, accountIDs, tags []string, add bool) error {
+func (s *accountService) changeTags(actor identityservice.PublicUser, accountIDs, tags []string, add bool) error {
 	accountIDs = normalizeStrings(accountIDs)
 	normalizedTags, err := normalizeTags(tags)
 	if err != nil || len(accountIDs) == 0 || len(normalizedTags) == 0 {
 		return ErrInvalidInput
 	}
-	byUser := map[identity.UserID][]string{}
+	byUser := map[identityservice.UserID][]string{}
 	for _, accountID := range accountIDs {
 		record, err := s.authorizedRecord(actor, accountID)
 		if err != nil {
@@ -932,7 +781,7 @@ func (s *Service) changeTags(actor identity.PublicUser, accountIDs, tags []strin
 	return nil
 }
 
-func (s *Service) CreateAccountGroup(actor identity.PublicUser, input CreateAccountGroupInput) (AccountGroup, error) {
+func (s *accountService) CreateAccountGroup(actor identityservice.PublicUser, input CreateAccountGroupInput) (AccountGroup, error) {
 	if !validActor(actor) {
 		return AccountGroup{}, ErrForbidden
 	}
@@ -959,14 +808,14 @@ func (s *Service) CreateAccountGroup(actor identity.PublicUser, input CreateAcco
 	return group, nil
 }
 
-func (s *Service) ListAccountGroups(actor identity.PublicUser) ([]AccountGroup, error) {
+func (s *accountService) ListAccountGroups(actor identityservice.PublicUser) ([]AccountGroup, error) {
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
 	return s.store.ListGroups(actor.ID)
 }
 
-func (s *Service) UpdateAccountGroup(actor identity.PublicUser, groupID string, input UpdateAccountGroupInput) (AccountGroup, error) {
+func (s *accountService) UpdateAccountGroup(actor identityservice.PublicUser, groupID string, input UpdateAccountGroupInput) (AccountGroup, error) {
 	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
 		return AccountGroup{}, ErrForbidden
 	}
@@ -977,7 +826,7 @@ func (s *Service) UpdateAccountGroup(actor identity.PublicUser, groupID string, 
 	if !found {
 		return AccountGroup{}, ErrNotFound
 	}
-	if group.UserID != actor.ID && actor.Role != identity.RoleAdmin {
+	if group.UserID != actor.ID && actor.Role != identityservice.RoleAdmin {
 		return AccountGroup{}, ErrForbidden
 	}
 	if input.Name != nil {
@@ -1001,7 +850,7 @@ func (s *Service) UpdateAccountGroup(actor identity.PublicUser, groupID string, 
 	return group, nil
 }
 
-func (s *Service) DeleteAccountGroup(actor identity.PublicUser, groupID string) error {
+func (s *accountService) DeleteAccountGroup(actor identityservice.PublicUser, groupID string) error {
 	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
 		return ErrForbidden
 	}
@@ -1012,13 +861,13 @@ func (s *Service) DeleteAccountGroup(actor identity.PublicUser, groupID string) 
 	if !found {
 		return ErrNotFound
 	}
-	if group.UserID != actor.ID && actor.Role != identity.RoleAdmin {
+	if group.UserID != actor.ID && actor.Role != identityservice.RoleAdmin {
 		return ErrForbidden
 	}
 	return s.store.DeleteGroup(groupID)
 }
 
-func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string) ([]Account, error) {
+func (s *accountService) ListAccountsByGroup(actor identityservice.PublicUser, groupID string) ([]Account, error) {
 	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
 		return nil, ErrForbidden
 	}
@@ -1029,7 +878,7 @@ func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string)
 	if !found {
 		return nil, ErrNotFound
 	}
-	if group.UserID != actor.ID && actor.Role != identity.RoleAdmin {
+	if group.UserID != actor.ID && actor.Role != identityservice.RoleAdmin {
 		return nil, ErrForbidden
 	}
 	filter := AccountFilter{UserID: actor.ID}
@@ -1051,7 +900,7 @@ func (s *Service) ListAccountsByGroup(actor identity.PublicUser, groupID string)
 	return s.ListAccounts(actor, filter)
 }
 
-func (s *Service) resolveAccountCheckProxyFact(profileID string) (accountCheckProxyFact, error) {
+func (s *accountService) resolveAccountCheckProxyFact(profileID string) (accountCheckProxyFact, error) {
 	if s.profileFacts == nil || strings.TrimSpace(profileID) == "" {
 		return accountCheckProxyFact{}, nil
 	}
@@ -1152,7 +1001,7 @@ func validGroupFilters(filters AccountGroupFilters) bool {
 	return true
 }
 
-func (s *Service) normalizeGroupFilters(filters AccountGroupFilters) (AccountGroupFilters, error) {
+func (s *accountService) normalizeGroupFilters(filters AccountGroupFilters) (AccountGroupFilters, error) {
 	if !validGroupFilters(filters) {
 		return AccountGroupFilters{}, ErrInvalidInput
 	}
@@ -1171,7 +1020,7 @@ func (s *Service) normalizeGroupFilters(filters AccountGroupFilters) (AccountGro
 	return filters, nil
 }
 
-func (s *Service) resolveCreateGameIDs(gameIDs []string, gameID string) ([]string, error) {
+func (s *accountService) resolveCreateGameIDs(gameIDs []string, gameID string) ([]string, error) {
 	gameIDs = normalizeGameIDs(gameIDs)
 	gameID = strings.TrimSpace(gameID)
 	if gameID != "" {
@@ -1188,7 +1037,7 @@ func (s *Service) resolveCreateGameIDs(gameIDs []string, gameID string) ([]strin
 	return gameIDs, nil
 }
 
-func (s *Service) resolveUpdateGameIDs(gameIDs *[]string, gameID *string) (*[]string, error) {
+func (s *accountService) resolveUpdateGameIDs(gameIDs *[]string, gameID *string) (*[]string, error) {
 	if gameIDs == nil && gameID == nil {
 		return nil, nil
 	}
@@ -1209,7 +1058,7 @@ func (s *Service) resolveUpdateGameIDs(gameIDs *[]string, gameID *string) (*[]st
 	return &resolved, nil
 }
 
-func (s *Service) validateGameIDs(gameIDs []string) error {
+func (s *accountService) validateGameIDs(gameIDs []string) error {
 	if s.games == nil && len(gameIDs) > 0 {
 		return ErrInvalidInput
 	}
@@ -1221,15 +1070,15 @@ func (s *Service) validateGameIDs(gameIDs []string) error {
 		if err != nil {
 			return err
 		}
-		if !found || game.Status != identity.GameStatusEnabled {
+		if !found || game.Status != identityservice.GameStatusEnabled {
 			return ErrInvalidInput
 		}
 	}
 	return nil
 }
 
-func validateGameScope(user identity.PublicUser, gameIDs []string) error {
-	if user.Role == identity.RoleAdmin {
+func validateGameScope(user identityservice.PublicUser, gameIDs []string) error {
+	if user.Role == identityservice.RoleAdmin {
 		return nil
 	}
 	for _, gameID := range gameIDs {
@@ -1251,6 +1100,9 @@ func normalizeGameIDs(gameIDs []string) []string {
 	return normalizeStrings(gameIDs)
 }
 
+// NormalizeGameIDs canonicalizes game identifiers at HTTP and persistence boundaries.
+func NormalizeGameIDs(gameIDs []string) []string { return normalizeGameIDs(gameIDs) }
+
 func compatibilityGameID(gameIDs []string) string {
 	if len(gameIDs) == 0 {
 		return ""
@@ -1258,7 +1110,10 @@ func compatibilityGameID(gameIDs []string) string {
 	return gameIDs[0]
 }
 
-func (s *Service) authorizedRecord(actor identity.PublicUser, accountID string) (AccountRecord, error) {
+// CompatibilityGameID preserves the legacy single-game projection.
+func CompatibilityGameID(gameIDs []string) string { return compatibilityGameID(gameIDs) }
+
+func (s *accountService) authorizedRecord(actor identityservice.PublicUser, accountID string) (AccountRecord, error) {
 	if !validActor(actor) || strings.TrimSpace(accountID) == "" {
 		return AccountRecord{}, ErrForbidden
 	}
@@ -1275,7 +1130,7 @@ func (s *Service) authorizedRecord(actor identity.PublicUser, accountID string) 
 	return record, nil
 }
 
-func (s *Service) attachTags(records []AccountRecord) ([]Account, error) {
+func (s *accountService) attachTags(records []AccountRecord) ([]Account, error) {
 	ids := make([]string, 0, len(records))
 	for _, record := range records {
 		ids = append(ids, record.ID)
@@ -1296,18 +1151,18 @@ func (s *Service) attachTags(records []AccountRecord) ([]Account, error) {
 	return accounts, nil
 }
 
-func (s *Service) audit(actorID identity.UserID, action, accountID string, summary map[string]string) error {
-	return s.store.AppendAudit(identity.AuditEvent{
+func (s *accountService) audit(actorID identityservice.UserID, action, accountID string, summary map[string]string) error {
+	return s.store.AppendAudit(identityservice.AuditEvent{
 		ID: s.newID("audit"), ActorUserID: actorID, Action: action,
 		TargetType: "media_account", TargetID: accountID, Summary: summary, CreatedAt: s.now(),
 	})
 }
 
-func validActor(actor identity.PublicUser) bool {
-	if actor.ID <= 0 || actor.Status != identity.UserStatusEnabled {
+func validActor(actor identityservice.PublicUser) bool {
+	if actor.ID <= 0 || actor.Status != identityservice.UserStatusEnabled {
 		return false
 	}
-	return actor.Role == identity.RoleOperator || actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleAdmin
+	return actor.Role == identityservice.RoleOperator || actor.Role == identityservice.RoleSeniorOperator || actor.Role == identityservice.RoleAdmin
 }
 
 func validPlatform(platform Platform) bool {

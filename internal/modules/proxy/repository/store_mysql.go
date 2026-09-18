@@ -1,23 +1,24 @@
-package proxy
+package repository
 
 import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/wt-media/wt-media-cloud/internal/infra/database"
+	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
+	"gorm.io/gorm"
 )
 
 const proxyColumns = `id, source_type, proxy_protocol, host, port, username, password, region, supplier, extract_url, expires_at, business_status, max_profile_count, last_check_at, last_check_result, observed_exit_ip, remark, created_at, updated_at`
 
-type MySQLStore struct {
-	db *sql.DB
+func Create(p model.ProxyConfig) error {
+	return create(database.DB(), p)
 }
 
-func NewMySQLStore(db *sql.DB) *MySQLStore {
-	return &MySQLStore{db: db}
-}
-
-func (s *MySQLStore) Create(p ProxyConfig) error {
-	_, err := s.db.Exec(
+func create(db *gorm.DB, p model.ProxyConfig) error {
+	err := execSQL(db,
 		`INSERT INTO proxy_configs (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.SourceType, p.ProxyProtocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
@@ -30,19 +31,27 @@ func (s *MySQLStore) Create(p ProxyConfig) error {
 	return err
 }
 
-func (s *MySQLStore) FindByID(id string) (ProxyConfig, bool, error) {
-	row := s.db.QueryRow(`SELECT `+proxyColumns+` FROM proxy_configs WHERE id = ?`, id)
+func FindByID(id string) (model.ProxyConfig, bool, error) {
+	return findByID(database.DB(), id)
+}
+
+func findByID(db *gorm.DB, id string) (model.ProxyConfig, bool, error) {
+	row := queryRow(db, `SELECT `+proxyColumns+` FROM proxy_configs WHERE id = ?`, id)
 	p, err := scanProxy(row)
 	if err == sql.ErrNoRows {
-		return ProxyConfig{}, false, nil
+		return model.ProxyConfig{}, false, nil
 	}
 	if err != nil {
-		return ProxyConfig{}, false, err
+		return model.ProxyConfig{}, false, err
 	}
 	return p, true, nil
 }
 
-func (s *MySQLStore) List(filter ProxyFilter) ([]ProxyConfig, error) {
+func List(filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
+	return list(database.DB(), filter)
+}
+
+func list(db *gorm.DB, filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
 	var conditions []string
 	var args []interface{}
 
@@ -72,14 +81,14 @@ func (s *MySQLStore) List(filter ProxyFilter) ([]ProxyConfig, error) {
 	query := fmt.Sprintf("SELECT %s FROM proxy_configs%s ORDER BY created_at DESC LIMIT ? OFFSET ?", proxyColumns, where)
 	args = append(args, filter.Limit, filter.Offset)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := queryRows(db, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	// Keep collection endpoints JSON-array shaped even when the database is empty.
-	results := make([]ProxyConfig, 0)
+	results := make([]model.ProxyConfig, 0)
 	for rows.Next() {
 		p, err := scanProxy(rows)
 		if err != nil {
@@ -90,8 +99,12 @@ func (s *MySQLStore) List(filter ProxyFilter) ([]ProxyConfig, error) {
 	return results, rows.Err()
 }
 
-func (s *MySQLStore) Update(p ProxyConfig) error {
-	_, err := s.db.Exec(
+func Update(p model.ProxyConfig) error {
+	return update(database.DB(), p)
+}
+
+func update(db *gorm.DB, p model.ProxyConfig) error {
+	err := execSQL(db,
 		`UPDATE proxy_configs SET source_type=?, proxy_protocol=?, host=?, port=?, username=?, password=?, region=?, supplier=?, extract_url=?, expires_at=?, business_status=?, max_profile_count=?, last_check_at=?, last_check_result=?, observed_exit_ip=?, remark=?, updated_at=? WHERE id=?`,
 		p.SourceType, p.ProxyProtocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
@@ -104,9 +117,25 @@ func (s *MySQLStore) Update(p ProxyConfig) error {
 	return err
 }
 
-func (s *MySQLStore) Delete(id string) error {
-	_, err := s.db.Exec(`DELETE FROM proxy_configs WHERE id = ?`, id)
+func Delete(id string) error {
+	return delete(database.DB(), id)
+}
+
+func delete(db *gorm.DB, id string) error {
+	err := execSQL(db, `DELETE FROM proxy_configs WHERE id = ?`, id)
 	return err
+}
+
+func queryRow(db *gorm.DB, query string, args ...any) *sql.Row {
+	return db.Raw(query, args...).Row()
+}
+
+func queryRows(db *gorm.DB, query string, args ...any) (*sql.Rows, error) {
+	return db.Raw(query, args...).Rows()
+}
+
+func execSQL(db *gorm.DB, query string, args ...any) error {
+	return db.Exec(query, args...).Error
 }
 
 // --- Scanner ---
@@ -115,8 +144,8 @@ type scannable interface {
 	Scan(dest ...interface{}) error
 }
 
-func scanProxy(row scannable) (ProxyConfig, error) {
-	var p ProxyConfig
+func scanProxy(row scannable) (model.ProxyConfig, error) {
+	var p model.ProxyConfig
 	var username, password, region, supplier, extractURL, lastCheckResult, observedExitIP, remark sql.NullString
 	var expiresAt, lastCheckAt sql.NullTime
 
@@ -128,7 +157,7 @@ func scanProxy(row scannable) (ProxyConfig, error) {
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
-		return ProxyConfig{}, err
+		return model.ProxyConfig{}, err
 	}
 
 	p.Username = username.String

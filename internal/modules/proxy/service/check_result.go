@@ -1,8 +1,8 @@
-package proxy
+package service
 
 import "strings"
 
-func (s *Service) RecordCheckResult(id, result string) (ProxyConfig, error) {
+func (s *proxyService) RecordCheckResult(id, result string) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return ProxyConfig{}, err

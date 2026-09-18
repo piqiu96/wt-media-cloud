@@ -1,36 +1,40 @@
-package proxy
+package service
 
 import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
-type ProxyProtocol string
+type (
+	ProxyProtocol   = model.ProxyProtocol
+	BusinessStatus  = model.BusinessStatus
+	ProxySourceType = model.ProxySourceType
+	ProxyConfig     = model.ProxyConfig
 
-const (
-	ProtocolHTTP   ProxyProtocol = "http"
-	ProtocolHTTPS  ProxyProtocol = "https"
-	ProtocolSOCKS5 ProxyProtocol = "socks5"
+	CreateProxyInput = dto.CreateProxyInput
+	BulkImportRow    = dto.BulkImportRow
+	ProxyFilter      = dto.ProxyFilter
 )
 
-type BusinessStatus string
-
 const (
-	BizActive  BusinessStatus = "active"
-	BizPaused  BusinessStatus = "paused"
-	BizExpired BusinessStatus = "expired"
-)
+	ProtocolHTTP      = model.ProtocolHTTP
+	ProtocolHTTPS     = model.ProtocolHTTPS
+	ProtocolSOCKS5    = model.ProtocolSOCKS5
+	BizActive         = model.BizActive
+	BizPaused         = model.BizPaused
+	BizExpired        = model.BizExpired
+	ProxySourceStatic = model.ProxySourceStatic
+	ProxySourceAPI    = model.ProxySourceAPI
 
-type ProxySourceType string
-
-const (
-	ProxySourceStatic ProxySourceType = "static"
-	ProxySourceAPI    ProxySourceType = "api"
+	DefaultMaxProfiles = 3
 )
 
 var (
@@ -38,52 +42,6 @@ var (
 	ErrNotFound      = errors.New("proxy was not found")
 	ErrNotAssignable = errors.New("proxy is not assignable")
 )
-
-type ProxyConfig struct {
-	ID                    string          `json:"id"`
-	SourceType            ProxySourceType `json:"source_type"`
-	ProxyProtocol         ProxyProtocol   `json:"proxy_protocol"`
-	Host                  string          `json:"host"`
-	Port                  int             `json:"port"`
-	Username              string          `json:"username,omitempty"`
-	Password              string          `json:"password,omitempty"`
-	Region                string          `json:"region,omitempty"`
-	Supplier              string          `json:"supplier,omitempty"`
-	ExtractURL            string          `json:"-"`
-	ExtractURLConfigured  bool            `json:"extract_url_configured,omitempty"`
-	ExpiresAt             *time.Time      `json:"expires_at,omitempty"`
-	BusinessStatus        BusinessStatus  `json:"business_status"`
-	MaxProfileCount       int             `json:"max_profile_count"`
-	LastCheckAt           *time.Time      `json:"last_check_at,omitempty"`
-	LastCheckResult       string          `json:"last_check_result,omitempty"`
-	ObservedExitIP        string          `json:"observed_exit_ip,omitempty"`
-	AssignedProfileCount  int             `json:"assigned_profile_count,omitempty"`
-	RemainingProfileCount int             `json:"remaining_profile_count,omitempty"`
-	Remark                string          `json:"remark,omitempty"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at"`
-}
-
-type CreateProxyInput struct {
-	SourceType      ProxySourceType `json:"source_type"`
-	ProxyProtocol   ProxyProtocol   `json:"proxy_protocol"`
-	Host            string          `json:"host"`
-	Port            int             `json:"port"`
-	Username        string          `json:"username"`
-	Password        string          `json:"password"`
-	Region          string          `json:"region"`
-	Supplier        string          `json:"supplier"`
-	ExtractURL      string          `json:"extract_url"`
-	ExpiresAt       *time.Time      `json:"expires_at"`
-	Remark          string          `json:"remark"`
-	MaxProfileCount int             `json:"max_profile_count"`
-}
-
-type BulkImportRow struct {
-	Raw    string            `json:"raw"`
-	Parsed *CreateProxyInput `json:"parsed,omitempty"`
-	Error  string            `json:"error,omitempty"`
-}
 
 type Store interface {
 	Create(ProxyConfig) error
@@ -93,22 +51,22 @@ type Store interface {
 	Delete(id string) error
 }
 
-type Service struct {
+type proxyService struct {
 	store Store
 	newID func(string) string
 	now   func() time.Time
 }
 
-func NewService(store Store) *Service {
-	return &Service{
+func newProxyService(store Store) *proxyService {
+	return &proxyService{
 		store: store,
-		newID: common.NewID,
+		newID: id.NewID,
 		now:   time.Now,
 	}
 }
 
 // BulkParse parses raw proxy lines without persisting.
-func (s *Service) BulkParse(lines []string) []BulkImportRow {
+func (s *proxyService) BulkParse(lines []string) []BulkImportRow {
 	var results []BulkImportRow
 	for _, raw := range lines {
 		raw = strings.TrimSpace(raw)
@@ -128,7 +86,7 @@ func (s *Service) BulkParse(lines []string) []BulkImportRow {
 }
 
 // BulkImport validates and persists parsed proxy lines.
-func (s *Service) BulkImport(rows []BulkImportRow) ([]ProxyConfig, error) {
+func (s *proxyService) BulkImport(rows []BulkImportRow) ([]ProxyConfig, error) {
 	var results []ProxyConfig
 	for _, row := range rows {
 		if row.Parsed == nil {
@@ -160,7 +118,7 @@ func (s *Service) BulkImport(rows []BulkImportRow) ([]ProxyConfig, error) {
 	return results, nil
 }
 
-func (s *Service) List(filter ProxyFilter) ([]ProxyConfig, error) {
+func (s *proxyService) List(filter ProxyFilter) ([]ProxyConfig, error) {
 	if filter.Limit <= 0 || filter.Limit > 200 {
 		filter.Limit = 50
 	}
@@ -169,7 +127,7 @@ func (s *Service) List(filter ProxyFilter) ([]ProxyConfig, error) {
 
 // ParseAddress converts one operator-provided proxy address into canonical fields
 // without creating or updating a proxy record.
-func (s *Service) ParseAddress(raw string) (CreateProxyInput, error) {
+func (s *proxyService) ParseAddress(raw string) (CreateProxyInput, error) {
 	parsed, err := parseProxyLine(strings.TrimSpace(raw))
 	if err != nil {
 		return CreateProxyInput{}, err
@@ -177,7 +135,7 @@ func (s *Service) ParseAddress(raw string) (CreateProxyInput, error) {
 	return *parsed, nil
 }
 
-func (s *Service) Get(id string) (ProxyConfig, error) {
+func (s *proxyService) Get(id string) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return ProxyConfig{}, err
@@ -188,7 +146,7 @@ func (s *Service) Get(id string) (ProxyConfig, error) {
 	return p, nil
 }
 
-func (s *Service) Create(input CreateProxyInput) (ProxyConfig, error) {
+func (s *proxyService) Create(input CreateProxyInput) (ProxyConfig, error) {
 	sourceType, extractURL, err := normalizedSource(input.SourceType, input.ExtractURL, "")
 	if err != nil {
 		return ProxyConfig{}, err
@@ -221,7 +179,7 @@ func (s *Service) Create(input CreateProxyInput) (ProxyConfig, error) {
 // CreateDiscovered records a proxy observed in a trusted local Profile scan.
 // It is paused until an operator supplements and checks it, so it cannot be
 // selected by normal allocation flows merely because it was observed locally.
-func (s *Service) CreateDiscovered(input CreateProxyInput, observedProfileCount int) (ProxyConfig, error) {
+func (s *proxyService) CreateDiscovered(input CreateProxyInput, observedProfileCount int) (ProxyConfig, error) {
 	now := s.now()
 	p := ProxyConfig{
 		ID:              s.newID("proxy"),
@@ -241,7 +199,7 @@ func (s *Service) CreateDiscovered(input CreateProxyInput, observedProfileCount 
 	return p, nil
 }
 
-func (s *Service) Update(id string, input CreateProxyInput) (ProxyConfig, error) {
+func (s *proxyService) Update(id string, input CreateProxyInput) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return ProxyConfig{}, err
@@ -307,7 +265,7 @@ func normalizedSource(source ProxySourceType, extractURL, existingURL string) (P
 	return source, extractURL, nil
 }
 
-func (s *Service) UpdateStatus(id string, status BusinessStatus) (ProxyConfig, error) {
+func (s *proxyService) UpdateStatus(id string, status BusinessStatus) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return ProxyConfig{}, err
@@ -323,7 +281,7 @@ func (s *Service) UpdateStatus(id string, status BusinessStatus) (ProxyConfig, e
 	return p, nil
 }
 
-func (s *Service) Delete(id string) error {
+func (s *proxyService) Delete(id string) error {
 	_, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return err
@@ -336,7 +294,7 @@ func (s *Service) Delete(id string) error {
 
 // TriggerCheck performs a basic TCP connectivity check on the proxy.
 // Full protocol-level check requires Agent-side execution.
-func (s *Service) TriggerCheck(id string) (ProxyConfig, error) {
+func (s *proxyService) TriggerCheck(id string) (ProxyConfig, error) {
 	p, ok, err := s.store.FindByID(id)
 	if err != nil {
 		return ProxyConfig{}, err
@@ -356,7 +314,7 @@ func (s *Service) TriggerCheck(id string) (ProxyConfig, error) {
 
 // checkTCPConnect attempts a basic TCP dial to validate host:port reachability.
 func checkTCPConnect(host string, port int) string {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := proxyDialAddress(host, port)
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return fmt.Sprintf("unreachable: %v", err)
@@ -365,10 +323,12 @@ func checkTCPConnect(host string, port int) string {
 	return "reachable"
 }
 
-const DefaultMaxProfiles = 3
+func proxyDialAddress(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
 
 // CheckQuota verifies a proxy has cross-platform capacity.
-func (s *Service) CheckQuota(proxyID string, currentAssigned int) (bool, error) {
+func (s *proxyService) CheckQuota(proxyID string, currentAssigned int) (bool, error) {
 	proxy, ok, err := s.store.FindByID(proxyID)
 	if err != nil {
 		return false, err
@@ -379,7 +339,7 @@ func (s *Service) CheckQuota(proxyID string, currentAssigned int) (bool, error) 
 	return currentAssigned < normalizedMaxProfileCount(proxy.MaxProfileCount), nil
 }
 
-func (s *Service) CheckAssignable(proxy ProxyConfig) error {
+func (s *proxyService) CheckAssignable(proxy ProxyConfig) error {
 	if proxy.BusinessStatus != BizActive || proxy.LastCheckResult != "ok" {
 		return ErrNotAssignable
 	}
@@ -389,7 +349,7 @@ func (s *Service) CheckAssignable(proxy ProxyConfig) error {
 	return nil
 }
 
-func (s *Service) SetMaxProfileCount(proxyID string, maxProfiles int) (ProxyConfig, error) {
+func (s *proxyService) SetMaxProfileCount(proxyID string, maxProfiles int) (ProxyConfig, error) {
 	proxy, ok, err := s.store.FindByID(proxyID)
 	if err != nil {
 		return ProxyConfig{}, err
@@ -415,17 +375,8 @@ func normalizedMaxProfileCount(value int) int {
 	return value
 }
 
-// --- Helpers ---
-
-type ProxyFilter struct {
-	Platform       string `json:"platform"`
-	Supplier       string `json:"supplier"`
-	BusinessStatus string `json:"business_status"`
-	Region         string `json:"region"`
-	Search         string `json:"search"`
-	Limit          int    `json:"limit"`
-	Offset         int    `json:"offset"`
-}
+// NormalizedMaxProfileCount applies the module's default quota at transport boundaries.
+func NormalizedMaxProfileCount(value int) int { return normalizedMaxProfileCount(value) }
 
 func parseProxyLine(raw string) (*CreateProxyInput, error) {
 	// Format 1: protocol://user:pass@host:port

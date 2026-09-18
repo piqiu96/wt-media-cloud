@@ -1,4 +1,4 @@
-package mediaaccount
+package repository
 
 import (
 	"database/sql"
@@ -9,27 +9,47 @@ import (
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
-	"github.com/wt-media/wt-media-cloud/internal/common"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/infra/database"
+	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
+	"gorm.io/gorm"
 )
 
 const accountColumns = `id, user_id, team_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, check_items, created_at, updated_at`
 
-type MySQLStore struct {
-	db *sql.DB
+func queryRow(db *gorm.DB, query string, args ...any) *sql.Row {
+	return db.Raw(query, args...).Row()
 }
 
-func NewMySQLStore(db *sql.DB) *MySQLStore {
-	return &MySQLStore{db: db}
+func queryRows(db *gorm.DB, query string, args ...any) (*sql.Rows, error) {
+	return db.Raw(query, args...).Rows()
 }
 
-func (s *MySQLStore) Create(record AccountRecord) (string, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	result, err := tx.Exec(
+func execSQL(db *gorm.DB, query string, args ...any) (int64, error) {
+	result := db.Exec(query, args...)
+	return result.RowsAffected, result.Error
+}
+
+func lastInsertID(db *gorm.DB) (int64, error) {
+	var inserted int64
+	err := queryRow(db, "SELECT LAST_INSERT_ID()").Scan(&inserted)
+	return inserted, err
+}
+
+func rollbackTx(tx *gorm.DB) {
+	_ = tx.Rollback().Error
+}
+
+func Create(record model.AccountRecord) (string, error) {
+	return create(database.DB(), record)
+}
+
+func create(db *gorm.DB, record model.AccountRecord) (string, error) {
+	tx := db.Begin()
+	defer rollbackTx(tx)
+	_, err := execSQL(tx,
 		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.UserID, record.TeamID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
@@ -38,12 +58,12 @@ func (s *MySQLStore) Create(record AccountRecord) (string, error) {
 		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.CreatedAt, record.UpdatedAt,
 	)
 	if duplicateKey(err) {
-		return "", ErrDuplicateAccount
+		return "", model.ErrDuplicateAccount
 	}
 	if err != nil {
 		return "", err
 	}
-	id, err := result.LastInsertId()
+	id, err := lastInsertID(db)
 	if err != nil {
 		return "", err
 	}
@@ -51,52 +71,69 @@ func (s *MySQLStore) Create(record AccountRecord) (string, error) {
 	if err := replaceAccountGameIDs(tx, accountID, record.GameIDs); err != nil {
 		return "", err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return "", err
 	}
 	return accountID, nil
 }
 
-func (s *MySQLStore) Find(id string) (AccountRecord, bool, error) {
-	return s.find(`SELECT `+accountColumns+` FROM media_accounts WHERE id = ?`, id)
+func Find(id string) (model.AccountRecord, bool, error) {
+	return findByID(database.DB(), id)
 }
 
-func (s *MySQLStore) FindByIdentity(userID identity.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error) {
-	return s.find(
+func FindByID(id string) (model.AccountRecord, bool, error) {
+	return findByID(database.DB(), id)
+}
+
+func findByID(db *gorm.DB, id string) (model.AccountRecord, bool, error) {
+	return findByQuery(db, `SELECT `+accountColumns+` FROM media_accounts WHERE id = ?`, id)
+}
+
+func FindByIdentity(userID identitymodel.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
+	return findByIdentity(database.DB(), userID, platform, platformAccountID)
+}
+
+func findByIdentity(db *gorm.DB, userID identitymodel.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
+	return findByQuery(db,
 		`SELECT `+accountColumns+` FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`,
 		userID, platform, platformAccountID,
 	)
 }
 
-func (s *MySQLStore) FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error) {
-	return s.find(
+func FindByProfilePlatform(profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
+	return findByProfilePlatform(database.DB(), profileID, platform)
+}
+
+func findByProfilePlatform(db *gorm.DB, profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
+	return findByQuery(db,
 		`SELECT `+accountColumns+` FROM media_accounts WHERE browser_profile_id = ? AND platform = ? LIMIT 1`,
 		profileID, platform,
 	)
 }
 
-func (s *MySQLStore) find(query string, args ...any) (AccountRecord, bool, error) {
-	record, err := scanAccount(s.db.QueryRow(query, args...))
+func findByQuery(db *gorm.DB, query string, args ...any) (model.AccountRecord, bool, error) {
+	record, err := scanAccount(queryRow(db, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
-		return AccountRecord{}, false, nil
+		return model.AccountRecord{}, false, nil
 	}
 	if err != nil {
-		return AccountRecord{}, false, err
+		return model.AccountRecord{}, false, err
 	}
-	records := []AccountRecord{record}
-	if err := s.loadGameIDs(records); err != nil {
-		return AccountRecord{}, false, err
+	records := []model.AccountRecord{record}
+	if err := loadGameIDs(db, records); err != nil {
+		return model.AccountRecord{}, false, err
 	}
 	return records[0], true, nil
 }
 
-func (s *MySQLStore) Update(record AccountRecord, replaceGameIDs *[]string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.Exec(
+func Update(record model.AccountRecord, replaceGameIDs *[]string) error {
+	return update(database.DB(), record, replaceGameIDs)
+}
+
+func update(db *gorm.DB, record model.AccountRecord, replaceGameIDs *[]string) error {
+	tx := db.Begin()
+	defer rollbackTx(tx)
+	result, err := execSQL(tx,
 		`UPDATE media_accounts SET user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, check_items = ?, updated_at = ? WHERE id = ?`,
 		record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
 		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
@@ -105,27 +142,27 @@ func (s *MySQLStore) Update(record AccountRecord, replaceGameIDs *[]string) erro
 		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.UpdatedAt, record.ID,
 	)
 	if duplicateKey(err) {
-		return ErrDuplicateAccount
+		return model.ErrDuplicateAccount
 	}
 	if err != nil {
 		return err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return ErrNotFound
+	if result == 0 {
+		return model.ErrNotFound
 	}
 	if replaceGameIDs != nil {
 		if err := replaceAccountGameIDs(tx, record.ID, *replaceGameIDs); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return tx.Commit().Error
 }
 
-func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
+func List(query dto.AccountFilter) ([]model.AccountRecord, error) {
+	return list(database.DB(), query)
+}
+
+func list(db *gorm.DB, query dto.AccountFilter) ([]model.AccountRecord, error) {
 	statement := `SELECT ` + accountColumns + ` FROM media_accounts`
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 3)
@@ -166,12 +203,12 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	}
 	statement += " ORDER BY created_at, id"
 
-	rows, err := s.db.Query(statement, args...)
+	rows, err := queryRows(db, statement, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	records := make([]AccountRecord, 0)
+	records := make([]model.AccountRecord, 0)
 	for rows.Next() {
 		record, err := scanAccount(rows)
 		if err != nil {
@@ -182,7 +219,7 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.loadGameIDs(records); err != nil {
+	if err := loadGameIDs(db, records); err != nil {
 		return nil, err
 	}
 	if len(query.AnyTags) == 0 && len(query.AllTags) == 0 && len(query.ExcludeTags) == 0 {
@@ -192,7 +229,7 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	for _, record := range records {
 		ids = append(ids, record.ID)
 	}
-	tagsByAccount, err := s.ListTags(ids)
+	tagsByAccount, err := listTags(db, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -205,28 +242,24 @@ func (s *MySQLStore) List(query AccountQuery) ([]AccountRecord, error) {
 	return filtered, nil
 }
 
-type accountGameExecutor interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}
-
-func replaceAccountGameIDs(executor accountGameExecutor, accountID string, gameIDs []string) error {
-	if _, err := executor.Exec(`DELETE FROM media_account_games WHERE media_account_id = ?`, accountID); err != nil {
+func replaceAccountGameIDs(db *gorm.DB, accountID string, gameIDs []string) error {
+	if err := db.Exec(`DELETE FROM media_account_games WHERE media_account_id = ?`, accountID).Error; err != nil {
 		return err
 	}
 	for _, gameID := range gameIDs {
-		if _, err := executor.Exec(`INSERT INTO media_account_games (media_account_id, game_id) VALUES (?, ?)`, accountID, gameID); err != nil {
+		if err := db.Exec(`INSERT INTO media_account_games (media_account_id, game_id) VALUES (?, ?)`, accountID, gameID).Error; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *MySQLStore) loadGameIDs(records []AccountRecord) error {
+func loadGameIDs(db *gorm.DB, records []model.AccountRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
 	ids := make([]string, 0, len(records))
-	byID := make(map[string]*AccountRecord, len(records))
+	byID := make(map[string]*model.AccountRecord, len(records))
 	for index := range records {
 		ids = append(ids, records[index].ID)
 		byID[records[index].ID] = &records[index]
@@ -235,7 +268,7 @@ func (s *MySQLStore) loadGameIDs(records []AccountRecord) error {
 	for index, id := range ids {
 		args[index] = id
 	}
-	rows, err := s.db.Query(
+	rows, err := queryRows(db,
 		`SELECT media_account_id, game_id FROM media_account_games WHERE media_account_id IN (`+placeholders(len(ids))+`) ORDER BY media_account_id, game_id`,
 		args...,
 	)
@@ -261,26 +294,46 @@ func (s *MySQLStore) loadGameIDs(records []AccountRecord) error {
 	return nil
 }
 
-func (s *MySQLStore) AddTags(userID identity.UserID, accountIDs, tags []string, createdAt time.Time) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
+func compatibilityGameID(gameIDs []string) string {
+	if len(gameIDs) == 0 {
+		return ""
 	}
-	defer tx.Rollback()
+	return gameIDs[0]
+}
+
+func Delete(id string) error {
+	return delete(database.DB(), id)
+}
+
+func delete(db *gorm.DB, id string) error {
+	return db.Exec(`DELETE FROM media_accounts WHERE id = ?`, id).Error
+}
+
+func AddTags(userID identitymodel.UserID, accountIDs, tags []string, createdAt time.Time) error {
+	return addTags(database.DB(), userID, accountIDs, tags, createdAt)
+}
+
+func addTags(db *gorm.DB, userID identitymodel.UserID, accountIDs, tags []string, createdAt time.Time) error {
+	tx := db.Begin()
+	defer rollbackTx(tx)
 	for _, accountID := range accountIDs {
 		for _, tag := range tags {
-			if _, err := tx.Exec(
+			if _, err := execSQL(tx,
 				`INSERT IGNORE INTO media_account_tags (id, user_id, media_account_id, tag_name, created_at) VALUES (?, ?, ?, ?, ?)`,
-				common.NewID("media_account_tag"), userID, accountID, tag, createdAt,
+				id.NewID("media_account_tag"), userID, accountID, tag, createdAt,
 			); err != nil {
 				return err
 			}
 		}
 	}
-	return tx.Commit()
+	return tx.Commit().Error
 }
 
-func (s *MySQLStore) RemoveTags(userID identity.UserID, accountIDs, tags []string) error {
+func RemoveTags(userID identitymodel.UserID, accountIDs, tags []string) error {
+	return removeTags(database.DB(), userID, accountIDs, tags)
+}
+
+func removeTags(db *gorm.DB, userID identitymodel.UserID, accountIDs, tags []string) error {
 	if len(accountIDs) == 0 || len(tags) == 0 {
 		return nil
 	}
@@ -292,14 +345,18 @@ func (s *MySQLStore) RemoveTags(userID identity.UserID, accountIDs, tags []strin
 	for _, tag := range tags {
 		args = append(args, tag)
 	}
-	_, err := s.db.Exec(
+	_, err := execSQL(db,
 		`DELETE FROM media_account_tags WHERE user_id = ? AND media_account_id IN (`+placeholders(len(accountIDs))+`) AND tag_name IN (`+placeholders(len(tags))+`)`,
 		args...,
 	)
 	return err
 }
 
-func (s *MySQLStore) ListTags(accountIDs []string) (map[string][]string, error) {
+func ListTags(accountIDs []string) (map[string][]string, error) {
+	return listTags(database.DB(), accountIDs)
+}
+
+func listTags(db *gorm.DB, accountIDs []string) (map[string][]string, error) {
 	result := make(map[string][]string, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return result, nil
@@ -308,7 +365,7 @@ func (s *MySQLStore) ListTags(accountIDs []string) (map[string][]string, error) 
 	for i, accountID := range accountIDs {
 		args[i] = accountID
 	}
-	rows, err := s.db.Query(
+	rows, err := queryRows(db,
 		`SELECT media_account_id, tag_name FROM media_account_tags WHERE media_account_id IN (`+placeholders(len(accountIDs))+`) ORDER BY media_account_id, tag_name`,
 		args...,
 	)
@@ -326,12 +383,16 @@ func (s *MySQLStore) ListTags(accountIDs []string) (map[string][]string, error) 
 	return result, rows.Err()
 }
 
-func (s *MySQLStore) AppendAudit(event identity.AuditEvent) error {
+func AppendAudit(event identitymodel.AuditEvent) error {
+	return appendAudit(database.DB(), event)
+}
+
+func appendAudit(db *gorm.DB, event identitymodel.AuditEvent) error {
 	summary, err := json.Marshal(event.Summary)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(
+	_, err = execSQL(db,
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, NULLIF(?, 0), ?, ?, NULLIF(?, ''), ?, ?)`,
 		event.ID, event.ActorUserID, event.Action, event.TargetType, event.TargetID, summary, event.CreatedAt,
 	)
@@ -342,8 +403,8 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanAccount(row scanner) (AccountRecord, error) {
-	var record AccountRecord
+func scanAccount(row scanner) (model.AccountRecord, error) {
+	var record model.AccountRecord
 	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
@@ -356,7 +417,7 @@ func scanAccount(row scanner) (AccountRecord, error) {
 		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt,
 	)
 	if err != nil {
-		return AccountRecord{}, err
+		return model.AccountRecord{}, err
 	}
 	record.PlatformAccountID = platformAccountID.String
 	record.Name = name.String
@@ -432,40 +493,52 @@ func recordMatchesTags(tags, anyTags, allTags, excludeTags []string) bool {
 
 const accountGroupColumns = `id, user_id, team_id, name, filters, sort_order, created_at, updated_at`
 
-func (s *MySQLStore) CreateGroup(group AccountGroup) (string, error) {
+func CreateGroup(group model.AccountGroup) (string, error) {
+	return createGroup(database.DB(), group)
+}
+
+func createGroup(db *gorm.DB, group model.AccountGroup) (string, error) {
 	filtersJSON, err := json.Marshal(group.Filters)
 	if err != nil {
 		return "", err
 	}
-	result, err := s.db.Exec(
+	_, err = execSQL(db,
 		`INSERT INTO account_groups (user_id, team_id, name, filters, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		group.UserID, group.TeamID, group.Name, string(filtersJSON), group.SortOrder, group.CreatedAt, group.UpdatedAt,
 	)
 	if err != nil {
 		return "", err
 	}
-	id, err := result.LastInsertId()
+	id, err := lastInsertID(db)
 	if err != nil {
 		return "", err
 	}
 	return strconv.FormatInt(id, 10), nil
 }
 
-func (s *MySQLStore) FindGroup(id string) (AccountGroup, bool, error) {
-	group, err := scanAccountGroup(s.db.QueryRow(`SELECT `+accountGroupColumns+` FROM account_groups WHERE id = ?`, id))
+func FindGroup(id string) (model.AccountGroup, bool, error) {
+	return findGroup(database.DB(), id)
+}
+
+func findGroup(db *gorm.DB, id string) (model.AccountGroup, bool, error) {
+	group, err := scanAccountGroup(queryRow(db, `SELECT `+accountGroupColumns+` FROM account_groups WHERE id = ?`, id))
 	if err != nil {
-		return AccountGroup{}, false, err
+		return model.AccountGroup{}, false, err
 	}
 	return group, group.ID != "", nil
 }
 
-func (s *MySQLStore) ListGroups(userID identity.UserID) ([]AccountGroup, error) {
-	rows, err := s.db.Query(`SELECT `+accountGroupColumns+` FROM account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
+func ListGroups(userID identitymodel.UserID) ([]model.AccountGroup, error) {
+	return listGroups(database.DB(), userID)
+}
+
+func listGroups(db *gorm.DB, userID identitymodel.UserID) ([]model.AccountGroup, error) {
+	rows, err := queryRows(db, `SELECT `+accountGroupColumns+` FROM account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	groups := []AccountGroup{}
+	groups := []model.AccountGroup{}
 	for rows.Next() {
 		group, err := scanAccountGroup(rows)
 		if err != nil {
@@ -476,38 +549,46 @@ func (s *MySQLStore) ListGroups(userID identity.UserID) ([]AccountGroup, error) 
 	return groups, rows.Err()
 }
 
-func (s *MySQLStore) UpdateGroup(group AccountGroup) error {
+func UpdateGroup(group model.AccountGroup) error {
+	return updateGroup(database.DB(), group)
+}
+
+func updateGroup(db *gorm.DB, group model.AccountGroup) error {
 	filtersJSON, err := json.Marshal(group.Filters)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(
+	_, err = execSQL(db,
 		`UPDATE account_groups SET name = ?, filters = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
 		group.Name, string(filtersJSON), group.SortOrder, group.UpdatedAt, group.ID,
 	)
 	return err
 }
 
-func (s *MySQLStore) DeleteGroup(id string) error {
-	_, err := s.db.Exec(`DELETE FROM account_groups WHERE id = ?`, id)
+func DeleteGroup(id string) error {
+	return deleteGroup(database.DB(), id)
+}
+
+func deleteGroup(db *gorm.DB, id string) error {
+	_, err := execSQL(db, `DELETE FROM account_groups WHERE id = ?`, id)
 	return err
 }
 
-func scanAccountGroup(row interface{ Scan(...any) error }) (AccountGroup, error) {
-	var group AccountGroup
+func scanAccountGroup(row interface{ Scan(...any) error }) (model.AccountGroup, error) {
+	var group model.AccountGroup
 	var filtersJSON []byte
 	if err := row.Scan(&group.ID, &group.UserID, &group.TeamID, &group.Name, &filtersJSON, &group.SortOrder, &group.CreatedAt, &group.UpdatedAt); err != nil {
-		return AccountGroup{}, err
+		return model.AccountGroup{}, err
 	}
 	if len(filtersJSON) > 0 {
 		if err := json.Unmarshal(filtersJSON, &group.Filters); err != nil {
-			return AccountGroup{}, err
+			return model.AccountGroup{}, err
 		}
 	}
 	return group, nil
 }
 
-func marshalCheckItems(items []AccountCheckItem) any {
+func marshalCheckItems(items []model.AccountCheckItem) any {
 	if len(items) == 0 {
 		return nil
 	}
@@ -517,5 +598,3 @@ func marshalCheckItems(items []AccountCheckItem) any {
 	}
 	return string(raw)
 }
-
-var _ Store = (*MySQLStore)(nil)
