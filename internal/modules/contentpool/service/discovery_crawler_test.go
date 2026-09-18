@@ -1,0 +1,72 @@
+package service
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"testing"
+
+	"github.com/wt-media/wt-media-cloud/internal/config"
+	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
+)
+
+func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/dyRank" || r.URL.Query().Get("apiKey") != "secret-key" {
+			t.Fatalf("unexpected request %s", r.URL.String())
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if got := r.PostForm.Get("keywords"); got != "王者荣耀" || r.PostForm.Get("ck") != "server-cookie" {
+			t.Fatalf("unexpected form %v", r.PostForm)
+		}
+		_, _ = w.Write([]byte(`{"result":1,"data":{"data":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"}}}]}}`))
+	}))
+	defer server.Close()
+
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(server))
+	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "王者荣耀"}})
+	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" {
+		t.Fatalf("unexpected result=%+v err=%v", result, err)
+	}
+}
+
+func TestDouyinCrawlerRejectsMissingCredentials(t *testing.T) {
+	_, err := (&DouyinCrawler{}).Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "demo"}})
+	if err != ErrCrawlerUnavailable {
+		t.Fatalf("expected missing credential error, got %v", err)
+	}
+}
+
+func TestDouyinCrawlerBatchURLKeepsSuccessfulItemsWhenOneFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if r.PostForm.Get("shorturl") == "bad" {
+			http.Error(w, "", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"result":1,"data":{"aweme_id":"a1","desc":"ok"}}`))
+	}))
+	defer server.Close()
+
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(server))
+	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "url", Config: map[string]any{"urls": []any{"bad", "good"}}})
+	if err != nil || result.Failed != 1 || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" {
+		t.Fatalf("unexpected batch result=%+v err=%v", result, err)
+	}
+}
+
+func testDouyinClient(server *httptest.Server) *douyinclient.Client {
+	parsed, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(parsed.Port())
+	return douyinclient.NewWithHTTPClient(
+		config.ClientConfig{Name: "douyin", Scheme: parsed.Scheme, Host: parsed.Hostname(), Port: port, Retry: config.RetryConfig{Attempts: 1}},
+		config.DouyinCredentialConfig{APIKey: "secret-key", Cookie: "server-cookie"},
+		server.Client(),
+	)
+}

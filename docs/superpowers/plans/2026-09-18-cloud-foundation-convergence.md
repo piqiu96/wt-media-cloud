@@ -375,7 +375,7 @@ git commit -m "refactor: add typed cloud observability resources"
 - Produces: `douyin.Initialize(config.ClientConfig, config.DouyinCredentialConfig) error`, `douyin.Get() *Client`.
 - Produces typed methods `Search`, `FindAuthor`, `FetchByURL`; removes production use of generic `Post` outside the client package.
 
-- [ ] **Step 1: Write failing transport/credential tests**
+- [x] **Step 1: Write failing transport/credential tests**
 
 Test with `httptest.Server`:
 
@@ -388,21 +388,21 @@ func TestClientRetriesOnlyConfiguredTransportFailures(t *testing.T)
 func TestClientMapsNonSuccessStatus(t *testing.T)
 ```
 
-- [ ] **Step 2: Run Client tests and verify failure**
+- [x] **Step 2: Run Client tests and verify failure**
 
 Run: `go test ./internal/infra/client/... -count=1`
 
 Expected: FAIL because credentials are embedded in Client config and Douyin exposes generic `Post`.
 
-- [ ] **Step 3: Implement private initialized clients and typed calls**
+- [x] **Step 3: Implement private initialized clients and typed calls**
 
 Keep constructors accepting an injected `*http.Client` for tests. Production `Initialize` builds the HTTP transport from host, port, timeout, and retry configuration, then combines separately loaded credentials internally. Business request types must not contain Cookie, API Key, or arbitrary Header maps.
 
-- [ ] **Step 4: Update current consumers**
+- [x] **Step 4: Update current consumers**
 
 Replace `NewAgentChecker(rt.Clients.Agent)` and Douyin crawler injection with `agent.Get()` and `douyin.Get()`. Keep Cloud direct Douyin access and Agent-only local execution boundaries.
 
-- [ ] **Step 5: Run Client and consumer tests**
+- [x] **Step 5: Run Client and consumer tests**
 
 Run:
 
@@ -413,7 +413,7 @@ go test ./internal/modules/proxy/service ./internal/modules/contentpool/service 
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/infra/client internal/modules/proxy/service/agent_client.go internal/modules/contentpool/service/discovery_crawler.go internal/modules/contentpool/service/discovery_crawler_test.go
