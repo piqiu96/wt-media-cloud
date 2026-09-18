@@ -313,7 +313,7 @@ git commit -m "refactor: manage mysql through private gorm registry"
 - Produces: `logger.Initialize(config.LoggerConfigs) error`, six typed logger getters, and `logger.Close() error`.
 - Produces: Noop-safe `metrics.Get() Recorder` and `tracing.Get() Tracer`.
 
-- [ ] **Step 1: Write failing six-file logger tests**
+- [x] **Step 1: Write failing six-file logger tests**
 
 Use a temporary log directory and verify:
 
@@ -325,13 +325,13 @@ func TestCloseFlushesAndClosesEveryFile(t *testing.T)
 func TestMetricsAndTracingDefaultToNoop(t *testing.T)
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `go test ./internal/infra/logger ./internal/infra/metrics ./internal/infra/tracing ./internal/middleware -count=1`
 
 Expected: FAIL because the current logger writes only to stdout and has no typed global getters.
 
-- [ ] **Step 3: Implement the resource APIs**
+- [x] **Step 3: Implement the resource APIs**
 
 Expose only:
 
@@ -346,13 +346,13 @@ func Panic() *slog.Logger
 
 Keep file handles and logger instances private. Make initialization atomic: do not publish any logger until all six files open successfully; close already-opened files on failure. Update request middleware to derive correlation fields from `logger.Access()`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `go test -race ./internal/infra/logger ./internal/infra/metrics ./internal/infra/tracing ./internal/middleware -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/infra/logger internal/infra/metrics internal/infra/tracing internal/middleware
