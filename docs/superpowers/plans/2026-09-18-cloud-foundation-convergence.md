@@ -231,7 +231,7 @@ git commit -m "refactor: establish strict cloud configuration"
 - Consumes: `[]config.DatabaseConfig`.
 - Produces: `database.Initialize([]config.DatabaseConfig) error`, `database.DB() *gorm.DB`, `database.Named(string) (*gorm.DB, bool)`, `database.Close() error`.
 
-- [ ] **Step 1: Add failing GORM registry tests using `go-sqlmock`**
+- [x] **Step 1: Add failing GORM registry tests using `go-sqlmock`**
 
 Test the private registry through a dependency seam:
 
@@ -253,13 +253,13 @@ gormDB, err := gorm.Open(mysql.New(mysql.Config{
 }), &gorm.Config{})
 ```
 
-- [ ] **Step 2: Run database tests and verify failure**
+- [x] **Step 2: Run database tests and verify failure**
 
 Run: `go test ./internal/infra/database/... -count=1`
 
 Expected: FAIL because the package still exposes `OpenMySQL(string) (*sql.DB, error)`.
 
-- [ ] **Step 3: Add GORM dependencies and implement the registry**
+- [x] **Step 3: Add GORM dependencies and implement the registry**
 
 Use:
 
@@ -275,11 +275,11 @@ var (
 
 Production `Initialize` constructs a MySQL DSN from split fields, opens every configured database, applies pool settings to the underlying `*sql.DB`, pings it, and publishes the complete immutable map only after all opens succeed. `DB()` must panic with a clear initialization error if called before Bootstrap initializes it.
 
-- [ ] **Step 4: Convert migration execution without changing SQL**
+- [x] **Step 4: Convert migration execution without changing SQL**
 
 Change the migration runner to accept `*gorm.DB`, use `Transaction`, and execute existing migration SQL with `tx.Exec`. Do not edit migration SQL or table definitions.
 
-- [ ] **Step 5: Run database and migration tests**
+- [x] **Step 5: Run database and migration tests**
 
 Run:
 
@@ -290,7 +290,7 @@ go test -race ./internal/infra/database/... -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add go.mod go.sum internal/infra/database
