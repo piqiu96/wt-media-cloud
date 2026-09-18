@@ -4,51 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
 	"strconv"
 	"strings"
 	"time"
+
+	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
+	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
 )
-
-// CrawlerRequest is the Cloud-owned input to a channel adapter. Credentials
-// are deliberately absent: adapters read them only from the server runtime.
-type CrawlerRequest struct {
-	Platform  string
-	Operation string
-	Config    map[string]any
-}
-
-type CrawlerResult struct {
-	Items   []map[string]any
-	Scanned int
-	Failed  int
-}
-
-type Crawler interface {
-	Discover(context.Context, CrawlerRequest) (CrawlerResult, error)
-}
 
 var ErrCrawlerUnavailable = errors.New("content crawler is not configured")
 
-type DouyinCrawler struct {
-	client *douyinclient.Client
-	lazy   bool
+type douyinCrawler struct{ client *douyinclient.Client }
+
+func newDouyinCrawler() *douyinCrawler { return &douyinCrawler{client: douyinclient.Get()} }
+func newDouyinCrawlerWithClient(client *douyinclient.Client) *douyinCrawler {
+	return &douyinCrawler{client: client}
 }
 
-func NewDouyinCrawler() *DouyinCrawler {
-	return &DouyinCrawler{lazy: true}
-}
-func NewDouyinCrawlerWithClient(client *douyinclient.Client) *DouyinCrawler {
-	return &DouyinCrawler{client: client}
-}
-
-func (c *DouyinCrawler) Discover(ctx context.Context, request CrawlerRequest) (CrawlerResult, error) {
-	client := c.activeClient()
-	if client == nil || !client.Configured() {
-		return CrawlerResult{}, ErrCrawlerUnavailable
+func (c *douyinCrawler) Discover(ctx context.Context, request dto.CrawlerRequest) (dto.CrawlerResult, error) {
+	if c == nil || c.client == nil || !c.client.Configured() {
+		return dto.CrawlerResult{}, ErrCrawlerUnavailable
 	}
 	if strings.TrimSpace(request.Platform) != "douyin" {
-		return CrawlerResult{}, fmt.Errorf("unsupported discovery platform: %s", request.Platform)
+		return dto.CrawlerResult{}, fmt.Errorf("unsupported discovery platform: %s", request.Platform)
 	}
 	config := request.Config
 	if config == nil {
@@ -60,7 +38,7 @@ func (c *DouyinCrawler) Discover(ctx context.Context, request CrawlerRequest) (C
 		if len(urls) == 0 {
 			urls = []string{strings.TrimSpace(fmt.Sprint(config["url"]))}
 		}
-		result := CrawlerResult{}
+		result := dto.CrawlerResult{}
 		for _, source := range urls {
 			if source == "" {
 				continue
@@ -84,7 +62,7 @@ func (c *DouyinCrawler) Discover(ctx context.Context, request CrawlerRequest) (C
 		if len(keywords) == 0 {
 			keywords = []string{strings.TrimSpace(fmt.Sprint(config["keyword"]))}
 		}
-		result := CrawlerResult{}
+		result := dto.CrawlerResult{}
 		for _, keyword := range keywords {
 			if keyword == "" {
 				continue
@@ -108,61 +86,38 @@ func (c *DouyinCrawler) Discover(ctx context.Context, request CrawlerRequest) (C
 		}
 		items, err := c.authorPosts(ctx, author, intValue(config["limit"], 20), intValue(config["offset"], 0))
 		if err != nil {
-			return CrawlerResult{Failed: 1}, err
+			return dto.CrawlerResult{Failed: 1}, err
 		}
-		return CrawlerResult{Items: items, Scanned: len(items)}, nil
+		return dto.CrawlerResult{Items: items, Scanned: len(items)}, nil
 	default:
-		return CrawlerResult{}, fmt.Errorf("unsupported discovery operation: %s", request.Operation)
+		return dto.CrawlerResult{}, fmt.Errorf("unsupported discovery operation: %s", request.Operation)
 	}
 }
 
-func (c *DouyinCrawler) activeClient() *douyinclient.Client {
-	if c == nil {
-		return nil
-	}
-	if c.lazy {
-		return douyinclient.Get()
-	}
-	return c.client
-}
-
-func (c *DouyinCrawler) fetchByURL(ctx context.Context, source string) (map[string]any, error) {
+func (c *douyinCrawler) fetchByURL(ctx context.Context, source string) (map[string]any, error) {
 	if strings.TrimSpace(source) == "" {
 		return nil, errors.New("source URL is required")
 	}
-	payload, err := c.activeClient().FetchByURL(ctx, douyinclient.FetchByURLRequest{URL: source})
+	payload, err := c.client.FetchByURL(ctx, douyinclient.FetchByURLRequest{URL: source})
 	if err != nil {
 		return nil, err
 	}
 	data, _ := payload["data"].(map[string]any)
-	if len(data) == 0 {
-		return nil, nil
-	}
 	return normalizeDouyinItem(data), nil
 }
-
-func (c *DouyinCrawler) search(ctx context.Context, keyword string, limit, offset int) ([]map[string]any, error) {
-	payload, err := c.activeClient().Search(ctx, douyinclient.SearchRequest{
-		Keyword: keyword,
-		Limit:   limit,
-		Offset:  offset,
-	})
+func (c *douyinCrawler) search(ctx context.Context, keyword string, limit, offset int) ([]map[string]any, error) {
+	payload, err := c.client.Search(ctx, douyinclient.SearchRequest{Keyword: keyword, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, err
 	}
 	data, _ := payload["data"].(map[string]any)
 	return normalizeDouyinList(data), nil
 }
-
-func (c *DouyinCrawler) authorPosts(ctx context.Context, author string, limit, offset int) ([]map[string]any, error) {
+func (c *douyinCrawler) authorPosts(ctx context.Context, author string, limit, offset int) ([]map[string]any, error) {
 	if author == "" {
 		return nil, errors.New("author is required")
 	}
-	payload, err := c.activeClient().FindAuthor(ctx, douyinclient.FindAuthorRequest{
-		Author: author,
-		Limit:  limit,
-		Offset: offset,
-	})
+	payload, err := c.client.FindAuthor(ctx, douyinclient.FindAuthorRequest{Author: author, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +129,6 @@ func (c *DouyinCrawler) authorPosts(ctx context.Context, author string, limit, o
 	}
 	return normalizeDouyinList(data), nil
 }
-
 func normalizeDouyinList(data map[string]any) []map[string]any {
 	values := []any{}
 	if raw, ok := data["data"].([]any); ok {
@@ -195,8 +149,10 @@ func normalizeDouyinList(data map[string]any) []map[string]any {
 	}
 	return out
 }
-
 func normalizeDouyinItem(item map[string]any) map[string]any {
+	if item == nil {
+		return nil
+	}
 	id := strings.TrimSpace(fmt.Sprint(item["aweme_id"]))
 	if id == "" || id == "<nil>" {
 		id = strings.TrimSpace(fmt.Sprint(item["id"]))
@@ -214,14 +170,12 @@ func normalizeDouyinItem(item map[string]any) map[string]any {
 	if cover == "" {
 		cover = firstNestedURL(video, "cover")
 	}
-	created := int64Value(item["create_time"])
 	published := ""
-	if created > 0 {
+	if created := int64Value(item["create_time"]); created > 0 {
 		published = time.Unix(created, 0).UTC().Format(time.RFC3339)
 	}
 	return map[string]any{"platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": fmt.Sprint(author["uid"]), "author_name": fmt.Sprint(author["nickname"]), "published_at": published, "raw": item}
 }
-
 func firstNestedURL(parent map[string]any, key string) string {
 	child, _ := parent[key].(map[string]any)
 	values, _ := child["url_list"].([]any)
@@ -249,46 +203,31 @@ func stringValues(value any) []string {
 	return out
 }
 func intValue(value any, fallback int) int {
-	switch v := value.(type) {
+	switch value := value.(type) {
 	case float64:
-		return int(v)
+		return int(value)
 	case int:
-		return v
+		return value
 	case string:
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
 		}
 	}
 	return fallback
 }
 func int64Value(value any) int64 {
-	switch v := value.(type) {
+	switch value := value.(type) {
 	case float64:
-		return int64(v)
+		return int64(value)
 	case int64:
-		return v
+		return value
 	case int:
-		return int64(v)
+		return int64(value)
 	case string:
-		n, _ := strconv.ParseInt(v, 10, 64)
-		return n
+		parsed, _ := strconv.ParseInt(value, 10, 64)
+		return parsed
 	}
 	return 0
-}
-func clamp(value, low, high int) int {
-	if value < low {
-		return low
-	}
-	if value > high {
-		return high
-	}
-	return value
-}
-func max(value, low int) int {
-	if value < low {
-		return low
-	}
-	return value
 }
 func truncate(value string, limit int) string {
 	if len(value) <= limit {

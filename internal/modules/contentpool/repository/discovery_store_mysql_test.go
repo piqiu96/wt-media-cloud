@@ -1,11 +1,15 @@
-package contentpool
+package repository
 
 import (
+	"database/sql"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 func TestClaimPendingCrawlTaskLocksAndTransitionsExactlyOneTask(t *testing.T) {
@@ -25,11 +29,11 @@ func TestClaimPendingCrawlTaskLocksAndTransitionsExactlyOneTask(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	task, found, err := NewMySQLDiscoveryStore(db).ClaimPendingCrawlTask(now)
+	task, found, err := claimPendingCrawlTask(testGORM(db), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || task.ID != 9 || task.Status != CrawlRunning || task.TaskID != "crawl-9" || task.StartedAt == nil || !task.StartedAt.Equal(now) {
+	if !found || task.ID != 9 || task.Status != model.CrawlRunning || task.TaskID != "crawl-9" || task.StartedAt == nil || !task.StartedAt.Equal(now) {
 		t.Fatalf("claimed task=%+v found=%v", task, found)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -48,11 +52,19 @@ func TestClaimPendingCrawlTaskReturnsEmptyWithoutUpdate(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "strategy_id", "schedule_key", "task_id", "task_type", "platform", "status", "snapshot_json", "stats_json", "result_json", "error_message", "started_at", "finished_at", "created_by", "created_at", "updated_at"}))
 	mock.ExpectRollback()
 
-	_, found, err := NewMySQLDiscoveryStore(db).ClaimPendingCrawlTask(time.Now())
+	_, found, err := claimPendingCrawlTask(testGORM(db), time.Now())
 	if err != nil || found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func testGORM(db *sql.DB) *gorm.DB {
+	value, err := gorm.Open(mysql.New(mysql.Config{Conn: db, SkipInitializeWithVersion: true}), &gorm.Config{})
+	if err != nil {
+		panic(err)
+	}
+	return value
 }

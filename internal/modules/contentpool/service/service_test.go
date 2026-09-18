@@ -1,4 +1,4 @@
-package contentpool
+package service
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 )
 
 type memoryStore struct {
@@ -55,7 +55,7 @@ func (m *memoryStore) UpdateStatus(id int64, status Status, reason string) (Sour
 	return v, nil
 }
 
-func (m *memoryStore) Materialize(id int64, creator identity.UserID, now time.Time) (Material, error) {
+func (m *memoryStore) Materialize(id int64, creator identityservice.UserID, now time.Time) (Material, error) {
 	v, ok := m.items[id]
 	if !ok {
 		return Material{}, ErrNotFound
@@ -68,15 +68,15 @@ func (m *memoryStore) Materialize(id int64, creator identity.UserID, now time.Ti
 
 func TestScopeIsTeamWideAndAdminCanSeeAll(t *testing.T) {
 	service := NewService(newMemoryStore())
-	teamA, teamB := identity.TeamID(10), identity.TeamID(20)
-	operator := identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &teamA}
+	teamA, teamB := identityservice.TeamID(10), identityservice.TeamID(20)
+	operator := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &teamA}
 	if _, err := service.Scope(operator, nil); err != nil {
 		t.Fatalf("operator should access own team: %v", err)
 	}
 	if _, err := service.Scope(operator, &teamB); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("operator should be forbidden from another team, got %v", err)
 	}
-	admin := identity.PublicUser{ID: 1, Role: identity.RoleAdmin}
+	admin := identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}
 	if scope, err := service.Scope(admin, nil); err != nil || scope != nil {
 		t.Fatalf("admin should access all teams, scope=%v err=%v", scope, err)
 	}
@@ -87,8 +87,8 @@ func TestCreateSourceNormalizesAndRejectsDuplicate(t *testing.T) {
 	service := NewService(store)
 	now := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return now }
-	team := identity.TeamID(10)
-	actor := identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}
+	team := identityservice.TeamID(10)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
 	first, err := service.CreateSource(actor, SourceInput{Platform: " douyin ", PlatformContentID: " aweme-1 ", SourceType: "search", RawJSON: json.RawMessage(`{"vid":"aweme-1"}`)})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
@@ -104,15 +104,15 @@ func TestCreateSourceNormalizesAndRejectsDuplicate(t *testing.T) {
 func TestMaterializeIsTeamScoped(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)
-	teamA, teamB := identity.TeamID(10), identity.TeamID(20)
-	created, err := service.CreateSource(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &teamA}, SourceInput{Platform: "douyin", PlatformContentID: "aweme-2", SourceType: "url", Title: "demo"})
+	teamA, teamB := identityservice.TeamID(10), identityservice.TeamID(20)
+	created, err := service.CreateSource(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &teamA}, SourceInput{Platform: "douyin", PlatformContentID: "aweme-2", SourceType: "url", Title: "demo"})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	if _, err := service.Materialize(identity.PublicUser{ID: 3, Role: identity.RoleOperator, TeamID: &teamB}, created.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := service.Materialize(identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &teamB}, created.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("cross-team materialization should be forbidden, got %v", err)
 	}
-	material, err := service.Materialize(identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &teamA}, created.ID)
+	material, err := service.Materialize(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &teamA}, created.ID)
 	if err != nil || material.SourceContentID != created.ID {
 		t.Fatalf("materialize own team source: %+v err=%v", material, err)
 	}

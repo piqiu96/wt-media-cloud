@@ -1,10 +1,10 @@
-package contentpool
+package service
 
 import (
 	"context"
 	"testing"
 
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 )
 
 type cloudCrawlerStub struct {
@@ -25,8 +25,8 @@ func TestCreateRunQueuesAndWorkerProjectsSource(t *testing.T) {
 	contentStore := newMemoryStore()
 	crawler := &cloudCrawlerStub{}
 	service := NewDiscoveryService(store, NewService(contentStore), crawler)
-	team := identity.TeamID(7)
-	actor := identity.PublicUser{ID: 2, Role: identity.RoleOperator, TeamID: &team}
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
 		TeamID: team, Name: "Cloud 热点", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled,

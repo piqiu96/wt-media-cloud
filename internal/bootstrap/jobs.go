@@ -6,9 +6,7 @@ import (
 	"syscall"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
-	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	"github.com/wt-media/wt-media-cloud/internal/jobs"
-	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
 	"github.com/wt-media/wt-media-cloud/internal/scheduler"
 )
 
@@ -17,13 +15,12 @@ func runSchedulerProcess() error {
 	defer stop()
 
 	cfg := config.Get()
-	service := newDiscoveryService()
 	runner := scheduler.New()
 	runner.Register("discovery-schedule", cfg.Scheduler.DiscoveryInterval.Duration, func(ctx context.Context) error {
-		return jobs.RunDiscoverySchedule(ctx, service)
+		return jobs.RunDiscoverySchedule(ctx)
 	})
 	runner.Register("proxy-expiry", cfg.Scheduler.ProxyExpiryInterval.Duration, func(ctx context.Context) error {
-		return jobs.RunProxyExpiry(ctx, legacySQLDB(), logger.Job())
+		return jobs.RunProxyExpiry(ctx)
 	})
 	runner.Start(ctx)
 	<-ctx.Done()
@@ -35,22 +32,11 @@ func runWorkerProcess() error {
 	defer stop()
 
 	cfg := config.Get()
-	service := newDiscoveryService()
 	runner := scheduler.New()
 	runner.Register("discovery-worker", cfg.Scheduler.WorkerInterval.Duration, func(ctx context.Context) error {
-		return jobs.RunDiscoveryWorker(ctx, service, cfg.Scheduler.WorkerBatchSize)
+		return jobs.RunDiscoveryWorker(ctx, cfg.Scheduler.WorkerBatchSize)
 	})
 	runner.Start(ctx)
 	<-ctx.Done()
 	return nil
-}
-
-func newDiscoveryService() *contentpool.DiscoveryService {
-	db := legacySQLDB()
-	contentService := contentpool.NewService(contentpool.NewMySQLStore(db))
-	return contentpool.NewDiscoveryService(
-		contentpool.NewMySQLDiscoveryStore(db),
-		contentService,
-		contentpool.NewDouyinCrawler(),
-	)
 }

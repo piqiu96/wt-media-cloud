@@ -716,23 +716,23 @@ Run: `go test ./internal/modules/contentpool/... ./internal/jobs ./internal/sche
 
 Expected: FAIL while HTTP route bootstrap starts scheduled jobs and service structs remain.
 
-- [ ] **Step 3: Move Content Pool DTO/model types and repository functions**
+- [x] **Step 3: Move Content Pool DTO/model types and repository functions**
 
 Move SourceContent, Material, Strategy, CrawlTask and CrawlStats declarations to Model; move filters/inputs to DTO. Convert both stores to package-level wrappers over private GORM functions.
 
-- [ ] **Step 4: Convert Content Pool and Discovery services**
+- [x] **Step 4: Convert Content Pool and Discovery services**
 
 Keep package functions for content CRUD/materialization, strategy CRUD/status/manual scheduled run, `RunDue`, `RunNext`, task list/get, and historical confirmation. Scheduled execution uses `douyin.Get()` synchronously inside the Worker path.
 
-- [ ] **Step 5: Enforce process separation**
+- [x] **Step 5: Enforce process separation**
 
 Scheduler loads config through `InitializeScheduler`, runs `RunDue`, and creates tasks only. Worker loads through `InitializeWorker`, atomically claims pending tasks, runs the crawler synchronously, persists outcomes, and honors configured batch size. Remove command flags that override validated config unless they are diagnostic `--once` controls.
 
-- [ ] **Step 6: Move handlers to module root**
+- [x] **Step 6: Move handlers to module root**
 
 Root router files bind named handler functions. No route registers or starts Scheduler jobs.
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify (reduced at user request)**
 
 Run:
 
@@ -743,7 +743,12 @@ rg -n 'time\.NewTicker' internal cmd --glob '*.go'
 
 Expected: tests pass; only `internal/scheduler` contains `time.NewTicker`.
 
-- [ ] **Step 8: Commit**
+User-requested reduced verification recorded on 2026-09-19: no `go test` or
+race run. Module `go build`, `go vet`, `git diff --check`, and the ticker and
+production-boundary scans were run instead. Command-package build remains
+blocked by pre-existing transitional references in `internal/bootstrap/routes.go`.
+
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/modules/contentpool internal/jobs internal/scheduler internal/bootstrap/jobs.go cmd/discovery-scheduler cmd/discovery-worker
