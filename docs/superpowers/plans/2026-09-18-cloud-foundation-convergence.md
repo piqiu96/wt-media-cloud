@@ -58,7 +58,7 @@
 - Consumes: approved architecture spec.
 - Produces: executable source-boundary checks used by the rest of the migration.
 
-- [ ] **Step 1: Write a failing boundary test**
+- [x] **Step 1: Write a failing boundary test**
 
 Create a table-driven test that walks production `.go` files and rejects forbidden patterns:
 
@@ -74,13 +74,13 @@ func TestProductionArchitectureBoundaries(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the boundary test and record current failures**
+- [x] **Step 2: Run the boundary test and record current failures**
 
 Run: `go test ./internal/architecture -run TestProductionArchitectureBoundaries -count=1`
 
-Expected: FAIL until the legacy module/runtime paths are removed; failures must name file and line.
+Expected RED result: the strict test lists the ten module repositories that still import `database/sql`. Record those exact files as an explicit legacy baseline so Task 1 ends green, no new violation can be introduced, and later module tasks must shrink the baseline as they migrate each repository.
 
-- [ ] **Step 3: Rewrite the architecture rules**
+- [x] **Step 3: Rewrite the architecture rules**
 
 Replace the old Runtime and Agent-only requirements with these exact rules:
 
@@ -92,11 +92,11 @@ Cloud 可直接调用公开平台数据 API；本地浏览器、Profile、文件
 
 Document `cmd/server/server.go`, `bootstrap/resource.go`, the absence of `modules.go`, GORM, six physical logs, synchronous search, and `shared/api`/`shared/id`.
 
-- [ ] **Step 4: Mark the superseded implementation plan as historical**
+- [x] **Step 4: Mark the superseded implementation plan as historical**
 
 Add a notice linking to this plan and remove instructions that add resources to `runtime.Runtime`.
 
-- [ ] **Step 5: Verify documentation consistency**
+- [x] **Step 5: Verify documentation consistency**
 
 Run:
 
@@ -107,7 +107,7 @@ git diff --check
 
 Expected: no active rule contradicts the approved spec; historical text is explicitly labeled.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add AGENTS.md docs/arch/wt-media-cloud-arch.md docs/superpowers/plans/2026-09-17-complete-architecture-migration.md internal/architecture/boundary_test.go
