@@ -1,18 +1,9 @@
 package main
 
-import (
-	"log"
-
-	"github.com/wt-media/wt-media-cloud/internal/app"
-)
+import "log"
 
 func main() {
-	server, err := app.NewServer()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer server.Close()
-	if err := server.Run(); err != nil {
+	if err := run(); err != nil {
 		log.Fatal(err)
 	}
 }

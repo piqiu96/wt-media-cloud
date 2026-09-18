@@ -447,7 +447,7 @@ git commit -m "refactor: separate client transport and credentials"
 - Produces: `bootstrap.InitializeWorker() (func() error, error)`.
 - Produces: `bootstrap.InitializeMigration() (func() error, error)`.
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Cover ordered initialization, rollback, idempotent close, and cmd-level stop:
 
@@ -459,17 +459,17 @@ func TestInitializeSchedulerDoesNotInitializeDouyinClient(t *testing.T)
 func TestServerRunClosesEngineBeforeBootstrapResources(t *testing.T)
 ```
 
-- [ ] **Step 2: Run lifecycle tests and verify failure**
+- [x] **Step 2: Run lifecycle tests and verify failure**
 
 Run: `go test ./internal/bootstrap ./cmd/server -count=1`
 
 Expected: FAIL because Bootstrap still returns Runtime/App wrappers and starts Scheduler jobs from route registration.
 
-- [ ] **Step 3: Implement Bootstrap entry points**
+- [x] **Step 3: Implement Bootstrap entry points**
 
 `bootstrap.go` controls the sequence; `resource.go` contains private helpers and a reverse-order close stack. `routes.go` installs Middleware and calls module route functions only. `jobs.go` exposes private Scheduler/Worker job connection helpers and never starts them for HTTP Server.
 
-- [ ] **Step 4: Implement `cmd/server/server.go`**
+- [x] **Step 4: Implement `cmd/server/server.go`**
 
 Keep `main.go` minimal:
 
@@ -483,11 +483,11 @@ func main() {
 
 `run` initializes through Bootstrap, starts Hertz, handles `SIGINT`/`SIGTERM`, shuts down HTTP first, and then calls the idempotent resource closer.
 
-- [ ] **Step 5: Update non-HTTP commands and remove Runtime/App**
+- [x] **Step 5: Update non-HTTP commands and remove Runtime/App**
 
 Each command calls only its matching Bootstrap initializer. Scheduler and Worker read their already validated intervals and batch size from `config.Get()` after Bootstrap initializes Config; they do not reload files. Delete `internal/runtime` and `internal/app` after all imports are gone.
 
-- [ ] **Step 6: Run lifecycle tests and a compile sweep**
+- [x] **Step 6: Run lifecycle tests and a compile sweep**
 
 Run:
 
@@ -499,7 +499,7 @@ rg -n 'internal/(runtime|app)|NewRuntime|NewDiscoveryRuntime' --glob '*.go'
 
 Expected: tests and compile pass; `rg` prints nothing.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/bootstrap cmd internal/runtime internal/app
