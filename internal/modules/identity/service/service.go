@@ -1,208 +1,75 @@
 // Package identity owns Cloud users, roles, game scopes, and sessions.
-package identity
+package service
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"golang.org/x/crypto/bcrypt"
 )
 
-type Role string
-
-type UserID int64
-
-type TeamID int64
-
 const (
-	RoleOperator       Role = "operator"
-	RoleSeniorOperator Role = "senior_operator"
-	RoleAdmin          Role = "admin"
+	RoleOperator       = model.RoleOperator
+	RoleSeniorOperator = model.RoleSeniorOperator
+	RoleAdmin          = model.RoleAdmin
+
+	UserStatusEnabled  = model.UserStatusEnabled
+	UserStatusDisabled = model.UserStatusDisabled
+
+	GameStatusEnabled  = model.GameStatusEnabled
+	GameStatusDisabled = model.GameStatusDisabled
 )
 
-type UserStatus string
+type (
+	Role                 = model.Role
+	UserID               = model.UserID
+	TeamID               = model.TeamID
+	UserStatus           = model.UserStatus
+	OperationTeam        = model.OperationTeam
+	GameStatus           = model.GameStatus
+	OperationGame        = model.OperationGame
+	GameReferenceSummary = model.GameReferenceSummary
+	GameReferenceUser    = model.GameReferenceUser
+	GameReferenceAccount = model.GameReferenceAccount
+	User                 = model.User
+	PublicUser           = model.PublicUser
+	Session              = model.Session
+	AuditEvent           = model.AuditEvent
+)
 
-const (
-	UserStatusEnabled  UserStatus = "enabled"
-	UserStatusDisabled UserStatus = "disabled"
+type (
+	LoginResult     = dto.LoginResult
+	LoginOptions    = dto.LoginOptions
+	AuthContext     = dto.AuthContext
+	CreateUserInput = dto.CreateUserInput
 )
 
 var (
-	ErrAuthenticationFailed = errors.New("authentication failed")
-	ErrSessionInvalid       = errors.New("session is invalid")
-	ErrForbidden            = errors.New("operation is forbidden")
-	ErrInvalidInput         = errors.New("identity input is invalid")
-	ErrUsernameTaken        = errors.New("username is already in use")
-	ErrTeamNameTaken        = errors.New("team name is already in use")
-	ErrTeamInUse            = errors.New("team is still referenced")
-	ErrGameIDTaken          = errors.New("game id is already in use")
-	ErrInvalidGameID        = errors.New("game id is invalid")
-	ErrGameNameTaken        = errors.New("game name is already in use")
-	ErrGameInUse            = errors.New("game is still referenced")
-	ErrUserGameScopeInUse   = errors.New("user game scope is still referenced by media accounts")
-	ErrGameUnavailable      = errors.New("game is not available")
-	ErrPasswordTooShort     = errors.New("password is too short")
-	ErrBootstrapUnavailable = errors.New("initial admin cannot be created")
-	ErrSessionReplaceNeeded = errors.New("active session replacement requires confirmation")
+	ErrAuthenticationFailed = model.ErrAuthenticationFailed
+	ErrSessionInvalid       = model.ErrSessionInvalid
+	ErrForbidden            = model.ErrForbidden
+	ErrInvalidInput         = model.ErrInvalidInput
+	ErrUsernameTaken        = model.ErrUsernameTaken
+	ErrTeamNameTaken        = model.ErrTeamNameTaken
+	ErrTeamInUse            = model.ErrTeamInUse
+	ErrGameIDTaken          = model.ErrGameIDTaken
+	ErrInvalidGameID        = model.ErrInvalidGameID
+	ErrGameNameTaken        = model.ErrGameNameTaken
+	ErrGameInUse            = model.ErrGameInUse
+	ErrUserGameScopeInUse   = model.ErrUserGameScopeInUse
+	ErrGameUnavailable      = model.ErrGameUnavailable
+	ErrPasswordTooShort     = model.ErrPasswordTooShort
+	ErrBootstrapUnavailable = model.ErrBootstrapUnavailable
+	ErrSessionReplaceNeeded = model.ErrSessionReplaceNeeded
 )
-
-type OperationTeam struct {
-	ID        TeamID    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type GameStatus string
-
-const (
-	GameStatusEnabled  GameStatus = "enabled"
-	GameStatusDisabled GameStatus = "disabled"
-)
-
-type OperationGame struct {
-	ID               string                `json:"id"`
-	Name             string                `json:"name"`
-	Status           GameStatus            `json:"status"`
-	Remark           string                `json:"remark"`
-	CreatedAt        time.Time             `json:"created_at"`
-	UpdatedAt        time.Time             `json:"updated_at"`
-	ReferenceSummary *GameReferenceSummary `json:"reference_summary,omitempty"`
-}
-
-type GameReferenceSummary struct {
-	UserScopeCount    int `json:"user_scope_count"`
-	MediaAccountCount int `json:"media_account_count"`
-	TotalCount        int `json:"total_count"`
-}
-
-type GameReferenceUser struct {
-	UserID   UserID  `json:"user_id"`
-	Username string  `json:"username"`
-	Role     Role    `json:"role"`
-	TeamID   *TeamID `json:"team_id"`
-	TeamName string  `json:"team_name"`
-}
-
-type GameReferenceAccount struct {
-	AccountID string `json:"account_id"`
-	Name      string `json:"name"`
-	Platform  string `json:"platform"`
-	UserID    UserID `json:"user_id"`
-	Username  string `json:"username"`
-}
-
-type GameReferences struct {
-	GameID        string                 `json:"game_id"`
-	Users         []GameReferenceUser    `json:"users"`
-	MediaAccounts []GameReferenceAccount `json:"media_accounts"`
-}
-
-type User struct {
-	ID           UserID
-	Username     string
-	PasswordHash string
-	Role         Role
-	Status       UserStatus
-	TeamID       *TeamID
-	TeamName     string
-	GameIDs      []string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-// PublicUser is safe to return from an authenticated API. It has no password
-// or session material.
-type PublicUser struct {
-	ID       UserID     `json:"id"`
-	Username string     `json:"username"`
-	Role     Role       `json:"role"`
-	Status   UserStatus `json:"status"`
-	TeamID   *TeamID    `json:"team_id"`
-	TeamName string     `json:"team_name"`
-	GameIDs  []string   `json:"game_ids"`
-}
-
-type Session struct {
-	ID        string
-	UserID    UserID
-	TokenHash string
-	CreatedAt time.Time
-	InvalidAt *time.Time
-}
-
-type LoginResult struct {
-	Token string
-	User  PublicUser
-}
-
-type LoginOptions struct {
-	ReplaceExisting bool
-}
-
-// CanAccess applies the single Cloud data-scope rule shared by business modules.
-func (u PublicUser) CanAccess(ownerID UserID, teamID *TeamID, gameID string) bool {
-	if u.Status != UserStatusEnabled {
-		return false
-	}
-	if u.Role == RoleAdmin {
-		return true
-	}
-	if !containsGame(u.GameIDs, gameID) {
-		return false
-	}
-	if u.Role == RoleSeniorOperator {
-		return u.TeamID != nil && teamID != nil && *u.TeamID == *teamID
-	}
-	return u.Role == RoleOperator && u.ID == ownerID
-}
-
-// CanAccessOwnedResource applies the shared scope rule for resources, such as
-// Browser Profiles, that do not belong to a game.
-func (u PublicUser) CanAccessOwnedResource(ownerID UserID, teamID *TeamID) bool {
-	if u.Status != UserStatusEnabled {
-		return false
-	}
-	if u.Role == RoleAdmin {
-		return true
-	}
-	if u.Role == RoleSeniorOperator {
-		return u.TeamID != nil && teamID != nil && *u.TeamID == *teamID
-	}
-	return u.Role == RoleOperator && u.ID == ownerID
-}
-
-// AuthContext exposes server-side session identity to trusted Cloud modules
-// without returning the raw session token to an API consumer.
-type AuthContext struct {
-	User    PublicUser
-	Session Session
-}
-
-type CreateUserInput struct {
-	Username string
-	Password string
-	Role     Role
-	TeamID   *TeamID
-	GameIDs  []string
-}
-
-type AuditEvent struct {
-	ID          string
-	ActorUserID UserID
-	Action      string
-	TargetType  string
-	TargetID    string
-	Summary     map[string]string
-	CreatedAt   time.Time
-}
 
 type Store interface {
 	CountUsers() (int, error)
@@ -243,7 +110,7 @@ type operationGameStore interface {
 
 type gameReferenceStore interface {
 	ListGameReferenceSummaries() (map[string]GameReferenceSummary, error)
-	GameReferences(string) (GameReferences, error)
+	GameReferences(string) (model.GameReferences, error)
 	UserHasGameReferencesOutsideScope(UserID, []string) (bool, error)
 }
 
@@ -284,8 +151,8 @@ func NewService(store Store, options ...Option) *Service {
 	service := &Service{
 		store:     store,
 		now:       func() time.Time { return time.Now().UTC() },
-		newID:     common.NewID,
-		newToken:  common.NewToken,
+		newID:     id.NewID,
+		newToken:  id.NewToken,
 		passwords: bcryptHasher{},
 	}
 	for _, option := range options {
@@ -745,26 +612,26 @@ func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
 	return games, nil
 }
 
-func (s *Service) GameReferences(actorID UserID, gameID string) (GameReferences, error) {
+func (s *Service) GameReferences(actorID UserID, gameID string) (model.GameReferences, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
-		return GameReferences{}, err
+		return model.GameReferences{}, err
 	}
 	if !ok || !isAdmin(actor) {
-		return GameReferences{}, ErrForbidden
+		return model.GameReferences{}, ErrForbidden
 	}
 	gameStore, ok := s.store.(operationGameStore)
 	if !ok {
-		return GameReferences{}, ErrForbidden
+		return model.GameReferences{}, ErrForbidden
 	}
 	if _, found, err := gameStore.FindGame(strings.TrimSpace(gameID)); err != nil {
-		return GameReferences{}, err
+		return model.GameReferences{}, err
 	} else if !found {
-		return GameReferences{}, ErrInvalidInput
+		return model.GameReferences{}, ErrInvalidInput
 	}
 	references, ok := s.store.(gameReferenceStore)
 	if !ok {
-		return GameReferences{}, ErrForbidden
+		return model.GameReferences{}, ErrForbidden
 	}
 	return references.GameReferences(strings.TrimSpace(gameID))
 }

@@ -1,206 +1,111 @@
-package cloudagent
+package service
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/common"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
-// TaskStatus represents the formal state machine for task lifecycle.
-type TaskStatus int
+type (
+	TaskStatus        = model.TaskStatus
+	TaskType          = model.TaskType
+	Task              = model.Task
+	CreateTaskRequest = dto.CreateTaskRequest
+	ClaimTaskRequest  = dto.ClaimTaskRequest
+	ReportTaskRequest = dto.ReportTaskRequest
+	CancelTaskRequest = dto.CancelTaskRequest
+)
 
 const (
-	TaskStatusPending   TaskStatus = iota // 0: awaiting claim
-	TaskStatusLeased                      // 1: claimed by an agent, lease active
-	TaskStatusRunning                     // 2: agent reported execution started
-	TaskStatusSucceeded                   // 3: agent reported success
-	TaskStatusFailed                      // 4: agent reported failure
-	TaskStatusCancelled                   // 5: cancelled by operator or system
+	TaskStatusPending   = model.TaskStatusPending
+	TaskStatusLeased    = model.TaskStatusLeased
+	TaskStatusRunning   = model.TaskStatusRunning
+	TaskStatusSucceeded = model.TaskStatusSucceeded
+	TaskStatusFailed    = model.TaskStatusFailed
+	TaskStatusCancelled = model.TaskStatusCancelled
+
+	TaskTypeNoop          = model.TaskTypeNoop
+	TaskTypeCookieRead    = model.TaskTypeCookieRead
+	TaskTypeCookieWrite   = model.TaskTypeCookieWrite
+	TaskTypeAccountCheck  = model.TaskTypeAccountCheck
+	TaskTypeProfileCreate = model.TaskTypeProfileCreate
+	TaskTypeProfileOpen   = model.TaskTypeProfileOpen
+	TaskTypeProfileClose  = model.TaskTypeProfileClose
+	TaskTypeProfileUpdate = model.TaskTypeProfileUpdate
+	TaskTypeProxyCheck    = model.TaskTypeProxyCheck
+	TaskTypeProxyMutation = model.TaskTypeProxyMutation
+
+	DefaultLeaseS = 60
 )
 
-// String returns the JSON-safe string representation.
-func (s TaskStatus) String() string {
-	switch s {
-	case TaskStatusPending:
-		return "pending"
-	case TaskStatusLeased:
-		return "leased"
-	case TaskStatusRunning:
-		return "running"
-	case TaskStatusSucceeded:
-		return "succeeded"
-	case TaskStatusFailed:
-		return "failed"
-	case TaskStatusCancelled:
-		return "cancelled"
-	default:
-		return fmt.Sprintf("unknown(%d)", s)
-	}
-}
+var (
+	ErrTaskNotFound        = model.ErrTaskNotFound
+	ErrNoPendingTask       = model.ErrNoPendingTask
+	ErrTaskLeaseTaken      = model.ErrTaskLeaseTaken
+	ErrInvalidTask         = model.ErrInvalidTask
+	ErrTaskAgentMismatch   = model.ErrTaskAgentMismatch
+	ErrTaskAlreadyTerminal = model.ErrTaskAlreadyTerminal
+	ErrInvalidStatus       = model.ErrInvalidStatus
+	ErrInvalidTaskType     = model.ErrInvalidTaskType
+	ErrTaskNotRetryable    = model.ErrTaskNotRetryable
+)
 
-// ParseTaskStatus converts a string to TaskStatus.
-func ParseTaskStatus(s string) (TaskStatus, bool) {
-	switch s {
-	case "pending":
+func ParseTaskStatus(value string) (TaskStatus, bool) {
+	switch value {
+	case TaskStatusPending.String():
 		return TaskStatusPending, true
-	case "leased":
+	case TaskStatusLeased.String():
 		return TaskStatusLeased, true
-	case "running":
+	case TaskStatusRunning.String():
 		return TaskStatusRunning, true
-	case "succeeded":
+	case TaskStatusSucceeded.String():
 		return TaskStatusSucceeded, true
-	case "failed":
+	case TaskStatusFailed.String():
 		return TaskStatusFailed, true
-	case "cancelled":
+	case TaskStatusCancelled.String():
 		return TaskStatusCancelled, true
 	default:
 		return TaskStatusPending, false
 	}
 }
 
-// ValidReportStatus returns true if status is a valid report target.
-func ValidReportStatus(s TaskStatus) bool {
-	return s == TaskStatusRunning || s == TaskStatusSucceeded || s == TaskStatusFailed
+func ValidReportStatus(status TaskStatus) bool {
+	return status == TaskStatusRunning || status == TaskStatusSucceeded || status == TaskStatusFailed
 }
 
-// IsTerminal returns true if the task has reached a final state.
-func IsTerminal(s TaskStatus) bool {
-	return s == TaskStatusSucceeded || s == TaskStatusFailed || s == TaskStatusCancelled
+func IsTerminal(status TaskStatus) bool {
+	return status == TaskStatusSucceeded || status == TaskStatusFailed || status == TaskStatusCancelled
 }
 
-// TaskType represents the formal task type classification.
-type TaskType int
-
-const (
-	TaskTypeNoop          TaskType = iota // 0: built-in verification task
-	TaskTypeCookieRead                    // 1: read cookies from BitBrowser Profile
-	TaskTypeCookieWrite                   // 2: write cookies to BitBrowser Profile
-	TaskTypeAccountCheck                  // 3: check platform login status
-	TaskTypeProfileCreate                 // 4: create BitBrowser Profile
-	TaskTypeProfileOpen                   // 5: open BitBrowser Profile
-	TaskTypeProfileClose                  // 6: close BitBrowser Profile
-	TaskTypeProfileUpdate                 // 7: update BitBrowser Profile
-	TaskTypeProxyCheck                    // 8: verify proxy through Agent
-	TaskTypeProxyMutation                 // 9: assign proxy to BitBrowser Profile
-)
-
-func (t TaskType) String() string {
-	switch t {
-	case TaskTypeNoop:
-		return "noop_task"
-	case TaskTypeCookieRead:
-		return "cookie_read_task"
-	case TaskTypeCookieWrite:
-		return "cookie_write_task"
-	case TaskTypeAccountCheck:
-		return "account_check_task"
-	case TaskTypeProfileCreate:
-		return "profile_create_task"
-	case TaskTypeProfileOpen:
-		return "profile_open_task"
-	case TaskTypeProfileClose:
-		return "profile_close_task"
-	case TaskTypeProfileUpdate:
-		return "profile_update_task"
-	case TaskTypeProxyCheck:
-		return "proxy_check_task"
-	case TaskTypeProxyMutation:
-		return "proxy_mutation_task"
-	default:
-		return fmt.Sprintf("unknown(%d)", t)
-	}
-}
-
-func ParseTaskType(s string) (TaskType, bool) {
-	switch s {
-	case "noop_task":
+func ParseTaskType(value string) (TaskType, bool) {
+	switch value {
+	case TaskTypeNoop.String():
 		return TaskTypeNoop, true
-	case "cookie_read_task":
+	case TaskTypeCookieRead.String():
 		return TaskTypeCookieRead, true
-	case "cookie_write_task":
+	case TaskTypeCookieWrite.String():
 		return TaskTypeCookieWrite, true
-	case "account_check_task":
+	case TaskTypeAccountCheck.String():
 		return TaskTypeAccountCheck, true
-	case "profile_create_task":
+	case TaskTypeProfileCreate.String():
 		return TaskTypeProfileCreate, true
-	case "profile_open_task":
+	case TaskTypeProfileOpen.String():
 		return TaskTypeProfileOpen, true
-	case "profile_close_task":
+	case TaskTypeProfileClose.String():
 		return TaskTypeProfileClose, true
-	case "profile_update_task":
+	case TaskTypeProfileUpdate.String():
 		return TaskTypeProfileUpdate, true
-	case "proxy_check_task":
+	case TaskTypeProxyCheck.String():
 		return TaskTypeProxyCheck, true
-	case "proxy_mutation_task":
+	case TaskTypeProxyMutation.String():
 		return TaskTypeProxyMutation, true
 	default:
 		return TaskTypeNoop, false
 	}
-}
-
-const (
-	DefaultLeaseS = 60
-)
-
-var (
-	ErrTaskNotFound        = errors.New("task not found")
-	ErrNoPendingTask       = errors.New("no pending task")
-	ErrTaskLeaseTaken      = errors.New("task lease taken")
-	ErrInvalidTask         = errors.New("invalid task")
-	ErrTaskAgentMismatch   = errors.New("task agent mismatch")
-	ErrTaskAlreadyTerminal = errors.New("task already in terminal state")
-	ErrInvalidStatus       = errors.New("invalid task status")
-	ErrInvalidTaskType     = errors.New("invalid task type")
-	ErrTaskNotRetryable    = errors.New("task is not retryable")
-)
-
-// CreateTaskRequest is used to create a new task.
-type CreateTaskRequest struct {
-	TaskType       string         `json:"task_type"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	Payload        map[string]any `json:"payload,omitempty"`
-}
-
-// ClaimTaskRequest is used by an agent to claim a pending task.
-type ClaimTaskRequest struct {
-	AgentID      string `json:"agent_id"`
-	LeaseSeconds int    `json:"lease_seconds"`
-}
-
-// Task is the formal universal task model.
-type Task struct {
-	TaskID         string         `json:"task_id"`
-	TaskType       string         `json:"task_type"`
-	Status         string         `json:"status"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	AgentID        string         `json:"agent_id,omitempty"`
-	CreatedAt      string         `json:"created_at"`
-	LeaseExpiresAt string         `json:"lease_expires_at,omitempty"`
-	Progress       int            `json:"progress,omitempty"`
-	Message        string         `json:"message,omitempty"`
-	UpdatedAt      string         `json:"updated_at,omitempty"`
-	ErrorCode      string         `json:"error_code,omitempty"`
-	Payload        map[string]any `json:"payload,omitempty"`
-	Result         map[string]any `json:"result,omitempty"`
-}
-
-// ReportTaskRequest is used by an agent to report task progress or result.
-type ReportTaskRequest struct {
-	AgentID   string         `json:"agent_id"`
-	Status    string         `json:"status"`
-	Progress  int            `json:"progress"`
-	Message   string         `json:"message"`
-	ErrorCode string         `json:"error_code,omitempty"`
-	Result    map[string]any `json:"result,omitempty"`
-}
-
-// CancelTaskRequest is used to cancel a pending or running task.
-type CancelTaskRequest struct {
-	Message string `json:"message"`
 }
 
 // TaskStore provides thread-safe in-memory task storage.
@@ -216,7 +121,7 @@ type TaskStore struct {
 func NewTaskStore() *TaskStore {
 	return &TaskStore{
 		now:         func() time.Time { return time.Now().UTC() },
-		newID:       func() string { return common.NewID("task") },
+		newID:       func() string { return id.NewID("task") },
 		tasks:       make(map[string]Task),
 		idempotency: make(map[string]string),
 	}
@@ -228,6 +133,9 @@ func NewTaskStoreWithClock(now func() time.Time, newID func() string) *TaskStore
 	store.newID = newID
 	return store
 }
+
+// SetClock replaces the task clock for deterministic repository tests.
+func (s *TaskStore) SetClock(now func() time.Time) { s.now = now }
 
 // Create adds a new task. TaskType defaults to noop_task if empty.
 func (s *TaskStore) Create(req CreateTaskRequest) Task {

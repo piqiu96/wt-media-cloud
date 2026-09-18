@@ -1,4 +1,4 @@
-package cloudagent
+package service
 
 import "testing"
 

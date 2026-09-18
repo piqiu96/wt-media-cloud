@@ -1,7 +1,8 @@
-package identity
+package service
 
 import (
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"strings"
 	"testing"
 	"time"
@@ -674,11 +675,11 @@ func (s *gameMemoryStore) ListGameReferenceSummaries() (map[string]GameReference
 	return summaries, nil
 }
 
-func (s *gameMemoryStore) GameReferences(gameID string) (GameReferences, error) {
-	references := GameReferences{GameID: gameID, Users: []GameReferenceUser{}, MediaAccounts: append([]GameReferenceAccount(nil), s.accountReferences[gameID]...)}
+func (s *gameMemoryStore) GameReferences(gameID string) (model.GameReferences, error) {
+	references := model.GameReferences{GameID: gameID, Users: []model.GameReferenceUser{}, MediaAccounts: append([]model.GameReferenceAccount(nil), s.accountReferences[gameID]...)}
 	users, err := s.ListUsers()
 	if err != nil {
-		return GameReferences{}, err
+		return model.GameReferences{}, err
 	}
 	for _, user := range users {
 		if containsGame(user.GameIDs, gameID) {

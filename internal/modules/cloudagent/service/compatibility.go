@@ -1,6 +1,10 @@
-package cloudagent
+package service
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/model"
+)
 
 const (
 	APIName                      = "cloud-agent"
@@ -9,14 +13,7 @@ const (
 	MinimumAgentContractRevision = "2026.07.14.7"
 )
 
-type Compatibility struct {
-	API                          string   `json:"api"`
-	MajorVersion                 string   `json:"major_version"`
-	ContractRevision             string   `json:"contract_revision"`
-	MinimumAgentContractRevision string   `json:"minimum_agent_contract_revision"`
-	CompatibleAgentMajorVersions []string `json:"compatible_agent_major_versions"`
-	Status                       string   `json:"status"`
-}
+type Compatibility = model.Compatibility
 
 func CurrentCompatibility() Compatibility {
 	return Compatibility{

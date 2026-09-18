@@ -517,17 +517,17 @@ git commit -m "refactor: centralize process bootstrap lifecycle"
 - Produces package-level Identity operations matching the current Service method names.
 - Produces package-level Cloud-Agent registry/task operations and keeps contract constants unchanged.
 
-- [ ] **Step 1: Move type-source tests to `model` and `dto`**
+- [x] **Step 1: Move type-source tests to `model` and `dto`**
 
 Add compile-time tests proving `model.User`, `model.PublicUser`, `model.Task`, and DTO request types are declarations, not aliases back to Service. Keep contract values and JSON tags unchanged.
 
-- [ ] **Step 2: Run module tests and verify the type tests fail**
+- [x] **Step 2: Run module tests and verify the type tests fail**
 
 Run: `go test ./internal/modules/identity/... ./internal/modules/cloudagent/... -count=1`
 
 Expected: FAIL while root routers still re-export Service types.
 
-- [ ] **Step 3: Convert repositories to package functions**
+- [x] **Step 3: Convert repositories to package functions**
 
 Public repository functions obtain `database.DB()` and call private DB-accepting implementations, for example:
 
@@ -541,11 +541,11 @@ func findUserByUsername(db *gorm.DB, username string) (model.User, bool, error)
 
 Use `go-sqlmock` for repository tests and remove constructors that only copy the same database pointer.
 
-- [ ] **Step 4: Convert services to package functions**
+- [x] **Step 4: Convert services to package functions**
 
 Preserve current operation names and behavior: Identity includes `BootstrapAdmin`, `CreateUser`, `Login`, `Authenticate`, team/game/user administration and audit operations. Cloud-Agent includes compatibility checks, registration, heartbeat, task create/claim/report/cancel, and task type/status validation. Private helpers may accept clocks/generators for deterministic tests.
 
-- [ ] **Step 5: Move handlers to module root and simplify routers**
+- [x] **Step 5: Move handlers to module root and simplify routers**
 
 Create root `handler*.go`; make `router.go` contain only direct bindings such as:
 
@@ -557,7 +557,7 @@ func RegisterRoutes(h *server.Hertz) {
 
 Delete `handler/` after tests move to the root package. Remove root aliases and constructor exports.
 
-- [ ] **Step 6: Run tests and boundary scan**
+- [x] **Step 6: Run tests and boundary scan**
 
 Run:
 
@@ -569,7 +569,7 @@ rg -n '= .*service\.|NewService|NewMySQL' internal/modules/identity/router.go in
 
 Expected: tests pass; router scan prints nothing.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/modules/identity internal/modules/cloudagent

@@ -1,9 +1,11 @@
-package cloudagent
+package service
 
 import (
-	"errors"
 	"sync"
 	"time"
+
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/dto"
+	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/model"
 )
 
 const (
@@ -12,36 +14,17 @@ const (
 )
 
 var (
-	ErrAgentNotFound     = errors.New("agent not found")
-	ErrInvalidAgent      = errors.New("invalid agent")
-	ErrIncompatibleAgent = errors.New("incompatible agent contract")
-	ErrSessionInvalid    = errors.New("agent session was invalidated by user re-login")
+	ErrAgentNotFound     = model.ErrAgentNotFound
+	ErrInvalidAgent      = model.ErrInvalidAgent
+	ErrIncompatibleAgent = model.ErrIncompatibleAgent
+	ErrSessionInvalid    = model.ErrSessionInvalid
 )
 
-type RegisterAgentRequest struct {
-	AgentID              string   `json:"agent_id"`
-	Mode                 string   `json:"mode"`
-	Version              string   `json:"version"`
-	ContractMajorVersion string   `json:"contract_major_version"`
-	ContractRevision     string   `json:"contract_revision"`
-	Capabilities         []string `json:"capabilities"`
-}
-
-type HeartbeatRequest struct {
-	Status string `json:"status"`
-}
-
-type AgentNode struct {
-	AgentID              string   `json:"agent_id"`
-	Mode                 string   `json:"mode"`
-	Version              string   `json:"version"`
-	ContractMajorVersion string   `json:"contract_major_version"`
-	ContractRevision     string   `json:"contract_revision"`
-	Status               string   `json:"status"`
-	RegisteredAt         string   `json:"registered_at"`
-	LastHeartbeatAt      string   `json:"last_heartbeat_at"`
-	Capabilities         []string `json:"capabilities"`
-}
+type (
+	RegisterAgentRequest = dto.RegisterAgentRequest
+	HeartbeatRequest     = dto.HeartbeatRequest
+	AgentNode            = model.AgentNode
+)
 
 type Registry struct {
 	mu     sync.Mutex
