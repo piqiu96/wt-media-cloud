@@ -1,0 +1,7 @@
+name: wt-media-cloud
+server:
+  http_addr: :8080
+  session_cookie_secure: true
+initial_admin:
+  username: ""
+  password: ""

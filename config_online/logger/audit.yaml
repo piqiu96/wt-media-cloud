@@ -1,0 +1,3 @@
+path: logs/audit.log
+level: info
+format: json

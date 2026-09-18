@@ -138,7 +138,7 @@ git commit -m "docs: align cloud architecture boundaries"
 - Produces: `config.Initialize() error`, `config.Get() Config`, `config.Load() (Config, error)`, `config.LoadFromDir(string) (Config, error)`, `Config.Validate() error`.
 - Produces: `Config.App.Server`, `Config.Databases`, `Config.Loggers`, `Config.Clients`, `Config.Credentials`, `Config.Scheduler`.
 
-- [ ] **Step 1: Replace tests with the approved config contract**
+- [x] **Step 1: Replace tests with the approved config contract**
 
 Cover these exact behaviors:
 
@@ -153,13 +153,13 @@ func TestSchedulerDurationsAndBatchSizeAreValidated(t *testing.T)
 func TestInitializePublishesValidatedReadOnlyConfig(t *testing.T)
 ```
 
-- [ ] **Step 2: Run tests and verify the old schema fails**
+- [x] **Step 2: Run tests and verify the old schema fails**
 
 Run: `go test ./internal/config -count=1`
 
 Expected: FAIL because Server is still separate, MySQL uses DSN, and credentials are embedded in Client config.
 
-- [ ] **Step 3: Implement the strict schema**
+- [x] **Step 3: Implement the strict schema**
 
 Use these core types:
 
@@ -200,17 +200,17 @@ type Duration struct { time.Duration }
 
 Implement `Duration.UnmarshalYAML` with `time.ParseDuration`, and use it for Client, Scheduler, Worker, pool-lifetime, and retry intervals. Decode YAML with `yaml.Decoder.KnownFields(true)`. Scan only database connection YAML files, exclude migration configuration explicitly, require the code-fixed name `primary`, and remove all environment overrides and `WT_MEDIA_CONFIG_DIR` handling. `Initialize` atomically publishes a validated private Config; `Get` returns the immutable value and fails fast before initialization.
 
-- [ ] **Step 4: Create the approved YAML layout**
+- [x] **Step 4: Create the approved YAML layout**
 
 Move HTTP settings into `app.yaml`; keep Scheduler/Worker values under `scheduler/scheduler.yaml`; keep transport-only values in Client files and secrets/headers in Credential files. Each logger config contains `path`, `level`, and `format`, with paths fixed to the corresponding `logs/*.log` file. Do not add `default` or `enabled` to database files.
 
-- [ ] **Step 5: Run config tests**
+- [x] **Step 5: Run config tests**
 
 Run: `go test ./internal/config -count=1`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/config config config_online

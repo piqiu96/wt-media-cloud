@@ -1,0 +1,4 @@
+proxy_expiry_interval: 6h
+discovery_interval: 1m
+worker_interval: 5s
+worker_batch_size: 10

@@ -1,0 +1,3 @@
+path: logs/panic.log
+level: info
+format: json
