@@ -587,31 +587,31 @@ git commit -m "refactor: migrate identity and cloudagent modules"
 - Consumes: package-level Identity and Cloud-Agent APIs from Task 7.
 - Produces: package-level runtime trust, profile binding, and sensitive-operation guard functions.
 
-- [ ] **Step 1: Add failing dependency-direction and behavior tests**
+- [x] **Step 1: Add failing dependency-direction and behavior tests**
 
 Test ticket issue/register/trust, scan submit/confirm/profile ownership, and guard preflight/renew/finish. Add an import scan that rejects cross-module Repository imports.
 
-- [ ] **Step 2: Run current tests and capture failures**
+- [x] **Step 2: Run current tests and capture failures**
 
 Run: `go test ./internal/modules/runtimebinding/... ./internal/modules/profilebinding/... ./internal/modules/profileguard/... -count=1`
 
-- [ ] **Step 3: Move actual DTO/model declarations**
+- [x] **Step 3: Move actual DTO/model declarations**
 
 Move Binding, Profile, Scan, SensitiveTask, Permit, request, and response types out of Service. Update Service and Repository imports so `model` and `dto` never import Service.
 
-- [ ] **Step 4: Convert repositories and services**
+- [x] **Step 4: Convert repositories and services**
 
 Repositories use `database.DB()` wrappers with private `*gorm.DB` implementations. Convert these public receiver methods to same-name package functions: Runtime Binding `IssueTicket`, `RegisterLocal`, `CheckLocalTrust`, `ReportRuntime`, `AuthenticateNode`; Profile Binding `SubmitScan`, `GetScan`, confirmations, profile CRUD/ownership; Profile Guard `Preflight`, `Renew`, `Finish`.
 
-- [ ] **Step 5: Replace injected cross-module objects with one-way Service calls**
+- [x] **Step 5: Replace injected cross-module objects with one-way Service calls**
 
 Runtime Binding may call Identity Service; Profile Binding may call Identity and Cloud-Agent Service; Profile Guard may call Runtime-Binding Service. No module may import another module's Repository.
 
-- [ ] **Step 6: Move handlers to roots and delete facades**
+- [x] **Step 6: Move handlers to roots and delete facades**
 
 Register direct handler functions in each root `router.go`, delete handler subpackages, and remove aliases/constructors from root routers.
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run:
 
@@ -622,7 +622,7 @@ rg -n 'modules/.*/repository' internal/modules/runtimebinding internal/modules/p
 
 Expected: tests pass; cross-module Repository scan prints nothing.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/modules/runtimebinding internal/modules/profilebinding internal/modules/profileguard
