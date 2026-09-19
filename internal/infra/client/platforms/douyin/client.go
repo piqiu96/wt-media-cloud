@@ -19,18 +19,22 @@ import (
 
 type SearchRequest struct {
 	Keyword string
-	Limit   int
+	Count   int
 	Offset  int
 }
 
 type FindAuthorRequest struct {
-	Author string
-	Limit  int
-	Offset int
+	SecUID    string
+	Count     int
+	MaxCursor int64
 }
 
 type FetchByURLRequest struct {
 	URL string
+}
+
+type FetchByIDsRequest struct {
+	IDs []string
 }
 
 type Client struct {
@@ -121,35 +125,59 @@ func (c *Client) Configured() bool {
 	return c != nil && strings.TrimSpace(c.apiKey) != ""
 }
 
-// Search requests keyword search results from the public Douyin data API.
+// Search requests keyword video results from the public Douyin data API.
 func (c *Client) Search(ctx context.Context, request SearchRequest) (map[string]any, error) {
 	values := map[string]string{
-		"keywords":        request.Keyword,
-		"limit":           strconv.Itoa(clamp(request.Limit, 1, 30)),
-		"offset":          strconv.Itoa(max(request.Offset, 0)),
-		"sort_type":       "0",
-		"content_type":    "1",
-		"publish_time":    "0",
-		"filter_duration": "0",
+		"keywords": request.Keyword,
+		"count":    strconv.Itoa(clamp(request.Count, 1, 30)),
+		"offset":   strconv.Itoa(max(request.Offset, 0)),
 	}
 	if c.cookie != "" {
 		values["ck"] = c.cookie
 	}
 	var payload map[string]any
-	err := c.postForm(ctx, "/dyRank", values, &payload)
+	err := c.postForm(ctx, "/v2dysearchvideo", values, &payload)
 	return payload, err
 }
 
-// FindAuthor requests an author's posts from the public Douyin data API.
+// FindAuthor requests an author's videos by sec_uid from the public Douyin data API.
 func (c *Client) FindAuthor(ctx context.Context, request FindAuthorRequest) (map[string]any, error) {
 	values := map[string]string{
-		"uid":      request.Author,
-		"nickname": request.Author,
-		"limit":    strconv.Itoa(clamp(request.Limit, 1, 30)),
-		"offset":   strconv.Itoa(max(request.Offset, 0)),
+		"sec_uid":    strings.TrimSpace(request.SecUID),
+		"count":      strconv.Itoa(clamp(request.Count, 1, 20)),
+		"max_cursor": strconv.FormatInt(request.MaxCursor, 10),
+	}
+	if c.cookie != "" {
+		values["ck"] = c.cookie
 	}
 	var payload map[string]any
-	err := c.postForm(ctx, "/dyUser/detail", values, &payload)
+	err := c.postForm(ctx, "/v5/dyhome", values, &payload)
+	return payload, err
+}
+
+// FetchByIDs requests details for up to ten Douyin video IDs in one call.
+func (c *Client) FetchByIDs(ctx context.Context, request FetchByIDsRequest) (map[string]any, error) {
+	ids := make([]string, 0, len(request.IDs))
+	seen := make(map[string]struct{}, len(request.IDs))
+	for _, id := range request.IDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[string]any{}, errors.New("douyin video IDs are required")
+	}
+	if len(ids) > 10 {
+		return map[string]any{}, errors.New("douyin video IDs exceed batch limit of 10")
+	}
+	var payload map[string]any
+	err := c.postForm(ctx, "/batchDyVideo", map[string]string{"ids": strings.Join(ids, ",")}, &payload)
 	return payload, err
 }
 

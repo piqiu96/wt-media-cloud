@@ -15,14 +15,12 @@ import (
 
 func TestDouyinSearchBuildsTypedRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertDouyinRequest(t, r, "/dyRank", "search-secret", "search-cookie")
+		assertDouyinRequest(t, r, "/v2dysearchvideo", "search-secret", "search-cookie")
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
 		}
 		want := map[string]string{
-			"keywords": "王者荣耀", "limit": "20", "offset": "10",
-			"sort_type": "0", "content_type": "1", "publish_time": "0",
-			"filter_duration": "0", "ck": "search-cookie",
+			"keywords": "王者荣耀", "count": "20", "offset": "10", "ck": "search-cookie",
 		}
 		for key, value := range want {
 			if got := r.PostForm.Get(key); got != value {
@@ -38,7 +36,7 @@ func TestDouyinSearchBuildsTypedRequest(t *testing.T) {
 		config.DouyinCredentialConfig{APIKey: "search-secret", Cookie: "search-cookie", Headers: map[string]string{"X-Client": "wt-media-cloud"}},
 		server.Client(),
 	)
-	payload, err := client.Search(context.Background(), SearchRequest{Keyword: "王者荣耀", Limit: 20, Offset: 10})
+	payload, err := client.Search(context.Background(), SearchRequest{Keyword: "王者荣耀", Count: 20, Offset: 10})
 	if err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
@@ -51,11 +49,11 @@ func TestDouyinSearchBuildsTypedRequest(t *testing.T) {
 
 func TestDouyinFindAuthorBuildsTypedRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertDouyinRequest(t, r, "/dyUser/detail", "author-secret", "author-cookie")
+		assertDouyinRequest(t, r, "/v5/dyhome", "author-secret", "author-cookie")
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
 		}
-		for key, value := range map[string]string{"uid": "author-1", "nickname": "author-1", "limit": "10", "offset": "5"} {
+		for key, value := range map[string]string{"sec_uid": "sec-author-1", "count": "10", "max_cursor": "123", "ck": "author-cookie"} {
 			if got := r.PostForm.Get(key); got != value {
 				t.Errorf("form %s = %q, want %q", key, got, value)
 			}
@@ -65,7 +63,7 @@ func TestDouyinFindAuthorBuildsTypedRequest(t *testing.T) {
 	defer server.Close()
 
 	client := NewWithHTTPClient(clientConfigForTest(server.URL), config.DouyinCredentialConfig{APIKey: "author-secret", Cookie: "author-cookie"}, server.Client())
-	payload, err := client.FindAuthor(context.Background(), FindAuthorRequest{Author: "author-1", Limit: 10, Offset: 5})
+	payload, err := client.FindAuthor(context.Background(), FindAuthorRequest{SecUID: "sec-author-1", Count: 10, MaxCursor: 123})
 	if err != nil {
 		t.Fatalf("FindAuthor() error = %v", err)
 	}
@@ -96,6 +94,39 @@ func TestDouyinFetchByURLBuildsTypedRequest(t *testing.T) {
 	data, _ := payload["data"].(map[string]any)
 	if data["aweme_id"] != "a1" {
 		t.Fatalf("video payload = %#v", payload)
+	}
+}
+
+func TestDouyinFetchByIDsBuildsTypedRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertDouyinRequest(t, r, "/batchDyVideo", "batch-secret", "batch-cookie")
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
+		if got := r.PostForm.Get("ids"); got != "1,2,3" {
+			t.Errorf("ids = %q, want 1,2,3", got)
+		}
+		_, _ = w.Write([]byte(`{"result":1,"data":[{"aweme_id":"a1"},{"aweme_id":"a2"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewWithHTTPClient(clientConfigForTest(server.URL), config.DouyinCredentialConfig{APIKey: "batch-secret", Cookie: "batch-cookie"}, server.Client())
+	payload, err := client.FetchByIDs(context.Background(), FetchByIDsRequest{IDs: []string{"1", "2", "2", " 3 "}})
+	if err != nil {
+		t.Fatalf("FetchByIDs() error = %v", err)
+	}
+	values, ok := payload["data"].([]any)
+	if !ok || len(values) != 2 {
+		t.Fatalf("batch payload = %#v, want two-item data array", payload)
+	}
+}
+
+func TestDouyinFetchByIDsValidatesCount(t *testing.T) {
+	client := NewWithHTTPClient(clientConfigForTest("http://douyin.invalid"), config.DouyinCredentialConfig{APIKey: "secret"}, nil)
+	for _, ids := range [][]string{nil, {""}, {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}} {
+		if _, err := client.FetchByIDs(context.Background(), FetchByIDsRequest{IDs: ids}); err == nil {
+			t.Fatalf("FetchByIDs(%d IDs) succeeded, want error", len(ids))
+		}
 	}
 }
 
