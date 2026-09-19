@@ -260,7 +260,7 @@ func writeValidConfig(t *testing.T, root string) {
 	writeDatabaseConfig(t, root, "primary.toml", "primary")
 	writeConfigFile(t, root, "cache/redis.toml", "url = \"\"\n")
 	for _, category := range []string{"app", "access", "job", "external", "audit", "panic"} {
-		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n")
+		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	}
 	writeConfigFile(t, root, "clients/agent.toml", "name = \"agent\"\nscheme = \"http\"\nhost = \"127.0.0.1\"\nport = 8765\ntimeout = \"7s\"\n\n[retry]\nattempts = 2\ninterval = \"300ms\"\n")
 	writeConfigFile(t, root, "clients/platforms/douyin.toml", "name = \"douyin\"\nscheme = \"https\"\nhost = \"api.itfaba.com\"\nport = 443\ntimeout = \"30s\"\n\n[retry]\nattempts = 2\ninterval = \"300ms\"\n")

@@ -22,9 +22,11 @@ func RequestContext() hertzapp.HandlerFunc {
 		c.Set("request_id", requestID)
 		c.Set("logid", traceID)
 		c.Next(ctx)
-		logger.Access().
-			With("trace_id", traceID, "request_id", requestID, "module", "http").
-			InfoContext(ctx, "request completed", "method", string(c.Method()), "path", string(c.Path()), "status", c.Response.StatusCode(), "duration", time.Since(started).String())
+		logger.Access().CtxInfof(
+			ctx,
+			"request completed method=%s path=%s status=%d duration=%s",
+			string(c.Method()), string(c.Path()), c.Response.StatusCode(), time.Since(started).String(),
+		)
 	}
 }
 

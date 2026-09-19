@@ -89,9 +89,18 @@ type LoggerConfigs struct {
 }
 
 type LoggerConfig struct {
-	Path   string `toml:"path"`
-	Level  string `toml:"level"`
-	Format string `toml:"format"`
+	Path     string         `toml:"path"`
+	Level    string         `toml:"level"`
+	Format   string         `toml:"format"`
+	Rotation RotationConfig `toml:"rotation"`
+}
+
+type RotationConfig struct {
+	MaxSize    int  `toml:"max_size"`
+	MaxAge     int  `toml:"max_age"`
+	MaxBackups int  `toml:"max_backups"`
+	Compress   bool `toml:"compress"`
+	LocalTime  bool `toml:"local_time"`
 }
 
 type ClientsConfig struct {
@@ -258,8 +267,14 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(logger.Path) == "" {
 			return fmt.Errorf("logger.%s.path is required", name)
 		}
-		if logger.Format != "json" && logger.Format != "text" {
-			return fmt.Errorf("logger.%s.format must be json or text", name)
+		if logger.Format != "json" && logger.Format != "text" && logger.Format != "console" {
+			return fmt.Errorf("logger.%s.format must be json, console, or text", name)
+		}
+		if logger.Rotation.MaxSize <= 0 {
+			return fmt.Errorf("logger.%s.rotation.max_size must be greater than zero", name)
+		}
+		if logger.Rotation.MaxAge < 0 || logger.Rotation.MaxBackups < 0 {
+			return fmt.Errorf("logger.%s.rotation.max_age and max_backups must not be negative", name)
 		}
 	}
 	if err := validateClient("agent", c.Clients.Agent); err != nil {

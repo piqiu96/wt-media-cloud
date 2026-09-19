@@ -1,3 +1,10 @@
 format = 'json'
 level = 'info'
 path = 'logs/audit.log'
+
+[rotation]
+max_size = 500
+max_age = 30
+max_backups = 10
+compress = true
+local_time = true
