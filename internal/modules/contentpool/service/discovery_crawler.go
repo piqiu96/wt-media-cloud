@@ -38,25 +38,7 @@ func (c *douyinCrawler) Discover(ctx context.Context, request dto.CrawlerRequest
 		if len(urls) == 0 {
 			urls = []string{strings.TrimSpace(fmt.Sprint(config["url"]))}
 		}
-		result := dto.CrawlerResult{}
-		for _, source := range urls {
-			if source == "" {
-				continue
-			}
-			result.Scanned++
-			item, err := c.fetchByURL(ctx, source)
-			if err != nil {
-				result.Failed++
-				continue
-			}
-			if item != nil {
-				result.Items = append(result.Items, item)
-			}
-		}
-		if len(result.Items) == 0 && result.Failed > 0 {
-			return result, errors.New("douyin url discovery failed")
-		}
-		return result, nil
+		return c.discoverURLs(ctx, urls)
 	case "keyword":
 		keywords := stringValues(config["keywords"])
 		if len(keywords) == 0 {
@@ -98,6 +80,52 @@ func (c *douyinCrawler) Discover(ctx context.Context, request dto.CrawlerRequest
 	}
 }
 
+func (c *douyinCrawler) discoverURLs(ctx context.Context, urls []string) (dto.CrawlerResult, error) {
+	result := dto.CrawlerResult{}
+	ids := make([]string, 0, len(urls))
+	shortURLs := make([]string, 0, len(urls))
+	seen := make(map[string]struct{}, len(urls))
+	for _, source := range urls {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		if _, exists := seen[source]; exists {
+			continue
+		}
+		seen[source] = struct{}{}
+		if _, err := strconv.ParseUint(source, 10, 64); err == nil {
+			ids = append(ids, source)
+		} else {
+			shortURLs = append(shortURLs, source)
+		}
+	}
+	result.Scanned = len(ids) + len(shortURLs)
+	for start := 0; start < len(ids); start += 10 {
+		end := min(start+10, len(ids))
+		items, err := c.fetchByIDs(ctx, ids[start:end])
+		if err != nil {
+			result.Failed += end - start
+			continue
+		}
+		result.Items = append(result.Items, items...)
+	}
+	for _, source := range shortURLs {
+		item, err := c.fetchByURL(ctx, source)
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		if item != nil {
+			result.Items = append(result.Items, item)
+		}
+	}
+	if len(result.Items) == 0 && result.Failed > 0 {
+		return result, errors.New("douyin url discovery failed")
+	}
+	return result, nil
+}
+
 func (c *douyinCrawler) fetchByURL(ctx context.Context, source string) (map[string]any, error) {
 	if strings.TrimSpace(source) == "" {
 		return nil, errors.New("source URL is required")
@@ -109,6 +137,14 @@ func (c *douyinCrawler) fetchByURL(ctx context.Context, source string) (map[stri
 	data, _ := payload["data"].(map[string]any)
 	return normalizeDouyinItem(data), nil
 }
+func (c *douyinCrawler) fetchByIDs(ctx context.Context, ids []string) ([]map[string]any, error) {
+	payload, err := c.client.FetchByIDs(ctx, douyinclient.FetchByIDsRequest{IDs: ids})
+	if err != nil {
+		return nil, err
+	}
+	return normalizeDouyinPayload(payload), nil
+}
+
 func (c *douyinCrawler) search(ctx context.Context, keyword string, limit, offset int) ([]map[string]any, error) {
 	payload, err := c.client.Search(ctx, douyinclient.SearchRequest{Keyword: keyword, Count: limit, Offset: offset})
 	if err != nil {

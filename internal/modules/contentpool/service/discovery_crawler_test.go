@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
@@ -69,4 +70,53 @@ func testDouyinClient(server *httptest.Server) *douyinclient.Client {
 		config.DouyinCredentialConfig{APIKey: "secret-key", Cookie: "server-cookie"},
 		server.Client(),
 	)
+}
+
+func TestDouyinCrawlerBatchURLChunksNumericIDsAndKeepsShortURLFallback(t *testing.T) {
+	batches := make([][]string, 0, 2)
+	shortCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
+		switch r.URL.Path {
+		case "/batchDyVideo":
+			ids := strings.Split(r.PostForm.Get("ids"), ",")
+			batches = append(batches, ids)
+			items := make([]string, 0, len(ids))
+			for _, id := range ids {
+				items = append(items, `{"aweme_id":"`+id+`","desc":"batch"}`)
+			}
+			_, _ = w.Write([]byte(`{"result":1,"data":[` + strings.Join(items, ",") + `]}`))
+		case "/dyVideo/detail":
+			shortCalls++
+			if got := r.PostForm.Get("shorturl"); got != "https://v.douyin.test/demo" {
+				t.Errorf("shorturl = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"result":1,"data":{"aweme_id":"short-1","desc":"short"}}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	ids := make([]string, 11)
+	for index := range ids {
+		ids[index] = strconv.Itoa(index + 1)
+	}
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(server))
+	result, err := crawler.Discover(context.Background(), CrawlerRequest{
+		Platform:  "douyin",
+		Operation: "url",
+		Config:    map[string]any{"urls": append(ids, "https://v.douyin.test/demo")},
+	})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if len(batches) != 2 || len(batches[0]) != 10 || len(batches[1]) != 1 || batches[1][0] != "11" {
+		t.Fatalf("batches = %#v", batches)
+	}
+	if shortCalls != 1 || len(result.Items) != 12 || result.Failed != 0 {
+		t.Fatalf("result=%+v shortCalls=%d", result, shortCalls)
+	}
 }
