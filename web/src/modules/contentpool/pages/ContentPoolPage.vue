@@ -31,6 +31,7 @@ const manualLoading = ref(false)
 const manualSearched = ref(false)
 const manualResults = ref([])
 const selectedResultKeys = ref([])
+const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
 const manualForm = ref({ platform: 'douyin', url: '', keyword: '', author: '' })
 
 const resultColumns = [
@@ -95,6 +96,7 @@ function openManual(mode) {
   manualSearched.value = false
   manualResults.value = []
   selectedResultKeys.value = []
+  resetManualPagination()
   manualForm.value = { platform: 'douyin', url: '', keyword: '', author: '' }
   manualVisible.value = true
 }
@@ -103,31 +105,64 @@ function manualTitle() {
   return ({ url: '分享链接导入', keyword: '关键词搜索', author: '博主搜索' })[manualMode.value]
 }
 
-async function confirmManual() {
-  if (manualResults.value.length && manualMode.value !== 'url') {
-    await confirmSelected()
-    return
-  }
+function resetManualPagination() {
+  manualPagination.value = { nextOffset: 0, maxCursor: 0, hasMore: false }
+}
+
+async function searchManual(reset = false) {
+  if (reset) resetManualPagination()
   manualLoading.value = true
   try {
     const form = manualForm.value
-    const urls = form.url.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean)
-    const result = manualMode.value === 'url'
-      ? await discovery.importUrl({ platform: form.platform, ...(urls.length > 1 ? { urls } : { url: urls[0] || '' }) })
-      : manualMode.value === 'keyword'
-        ? await discovery.search({ platform: form.platform, keyword: form.keyword.trim(), limit: 20 })
-        : await discovery.authorSearch({ platform: form.platform, author: form.author.trim(), limit: 20 })
-    if (manualMode.value === 'url') {
-      manualVisible.value = false
-      MessagePlugin.success('链接解析任务已创建，完成后内容会自动进入内容池')
-      return
-    }
+    const result = manualMode.value === 'keyword'
+      ? await discovery.search({
+        platform: form.platform,
+        keyword: form.keyword.trim(),
+        limit: 20,
+        offset: manualPagination.value.nextOffset || 0,
+      })
+      : await discovery.authorSearch({
+        platform: form.platform,
+        author: form.author.trim(),
+        limit: 20,
+        max_cursor: manualPagination.value.maxCursor || 0,
+      })
     manualResults.value = Array.isArray(result?.items) ? result.items : []
     selectedResultKeys.value = []
     manualSearched.value = true
+    manualPagination.value = {
+      nextOffset: Number(result?.next_offset || 0),
+      maxCursor: Number(result?.max_cursor || 0),
+      hasMore: Boolean(result?.has_more),
+    }
   } catch (e) {
-    error.value = e.message || (manualMode.value === 'url' ? '链接解析任务创建失败' : '搜索失败')
-  } finally { manualLoading.value = false }
+    error.value = e.message || '搜索失败'
+  } finally {
+    manualLoading.value = false
+  }
+}
+
+async function confirmManual() {
+  if (manualMode.value === 'url') {
+    manualLoading.value = true
+    try {
+      const form = manualForm.value
+      const urls = form.url.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean)
+      await discovery.importUrl({ platform: form.platform, ...(urls.length > 1 ? { urls } : { url: urls[0] || '' }) })
+      manualVisible.value = false
+      MessagePlugin.success('链接解析任务已创建，完成后内容会自动进入内容池')
+    } catch (e) {
+      error.value = e.message || '链接解析任务创建失败'
+    } finally {
+      manualLoading.value = false
+    }
+    return
+  }
+  if (!manualResults.value.length) {
+    await searchManual(true)
+    return
+  }
+  await confirmSelected()
 }
 
 async function confirmSelected() {
@@ -241,13 +276,17 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
           <t-form-item v-if="manualMode === 'url'" label="内容链接"><t-textarea v-model="manualForm.url" :rows="4" placeholder="粘贴视频链接，支持单条或批量（每行一条）" /></t-form-item>
           <t-form-item v-else-if="manualMode === 'keyword'" label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
-          <t-form-item v-else label="博主账号"><t-input v-model="manualForm.author" placeholder="输入作者 UID、名称或主页标识" /></t-form-item>
+          <t-form-item v-else label="博主 sec_uid"><t-input v-model="manualForm.author" placeholder="输入抖音博主 sec_uid（MS4wLjAB...）" /></t-form-item>
         </t-form>
         <t-alert v-if="manualSearched && manualMode !== 'url'" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
         <t-table v-if="manualMode !== 'url' && manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
           <template #title="{ row }"><div class="title-cell"><span>{{ row.title || '未命名内容' }}</span><small>{{ row.platform_content_id }}</small></div></template>
           <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
         </t-table>
+        <div v-if="manualMode !== 'url' && manualSearched" class="manual-search-actions">
+          <t-button variant="outline" :loading="manualLoading" @click="searchManual(true)">重新搜索</t-button>
+          <t-button variant="outline" :loading="manualLoading" :disabled="!manualPagination.hasMore" @click="searchManual()">下一页</t-button>
+        </div>
       </t-dialog>
     </div>
   </t-loading>
@@ -259,4 +298,5 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
 .title-cell span { color: var(--wt-text-primary); font-weight: 500; }
 .title-cell small { color: var(--wt-text-tertiary); font-size: 12px; }
 .content-pool-page :deep(.wt-resource-actions) { max-width: 360px; }
+.manual-search-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 </style>

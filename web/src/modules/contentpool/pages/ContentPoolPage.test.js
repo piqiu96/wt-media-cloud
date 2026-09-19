@@ -17,6 +17,16 @@ describe('content pool page', () => {
     expect(source).toContain('discovery.importResults')
   })
 
+  it('aligns author search and pagination with the Douyin provider contracts', () => {
+    expect(source).toContain('sec_uid')
+    expect(source).toContain('manualPagination')
+    expect(source).toContain('next_offset')
+    expect(source).toContain('max_cursor')
+    expect(source).toContain('has_more')
+    expect(source).toContain('searchManual(true)')
+    expect(source).toContain('max_cursor: manualPagination.value.maxCursor || 0')
+  })
+
   it('renders synchronous search results without polling a crawl task', () => {
     expect(source).not.toContain('discovery.getTask')
     expect(source).not.toContain('waitForSearchTask')
