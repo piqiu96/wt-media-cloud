@@ -32,7 +32,7 @@ const manualSearched = ref(false)
 const manualResults = ref([])
 const selectedResultKeys = ref([])
 const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
-const manualForm = ref({ platform: 'douyin', url: '', keyword: '', author: '' })
+const manualForm = ref({ platform: 'douyin', url: '', keyword: '' })
 
 const resultColumns = [
   { colKey: 'row-select', type: 'multiple', width: 48 },
@@ -97,12 +97,12 @@ function openManual(mode) {
   manualResults.value = []
   selectedResultKeys.value = []
   resetManualPagination()
-  manualForm.value = { platform: 'douyin', url: '', keyword: '', author: '' }
+  manualForm.value = { platform: 'douyin', url: '', keyword: '' }
   manualVisible.value = true
 }
 
 function manualTitle() {
-  return ({ url: '分享链接导入', keyword: '关键词搜索', author: '博主搜索' })[manualMode.value]
+  return ({ url: '分享链接导入', keyword: '关键词搜索' })[manualMode.value]
 }
 
 function resetManualPagination() {
@@ -114,19 +114,12 @@ async function searchManual(reset = false) {
   manualLoading.value = true
   try {
     const form = manualForm.value
-    const result = manualMode.value === 'keyword'
-      ? await discovery.search({
-        platform: form.platform,
-        keyword: form.keyword.trim(),
-        limit: 20,
-        offset: manualPagination.value.nextOffset || 0,
-      })
-      : await discovery.authorSearch({
-        platform: form.platform,
-        author: form.author.trim(),
-        limit: 20,
-        max_cursor: manualPagination.value.maxCursor || 0,
-      })
+    const result = await discovery.search({
+      platform: form.platform,
+      keyword: form.keyword.trim(),
+      limit: 20,
+      offset: manualPagination.value.nextOffset || 0,
+    })
     manualResults.value = Array.isArray(result?.items) ? result.items : []
     selectedResultKeys.value = []
     manualSearched.value = true
@@ -173,7 +166,7 @@ async function confirmSelected() {
   manualLoading.value = true
   try {
     const selected = manualResults.value.filter((item) => selectedResultKeys.value.includes(item.platform_content_id))
-    const result = await discovery.importResults({ platform: manualForm.value.platform, source_type: manualMode.value === 'author' ? 'author' : 'search', items: selected })
+    const result = await discovery.importResults({ platform: manualForm.value.platform, source_type: 'search', items: selected })
     manualVisible.value = false
     await load()
     MessagePlugin.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
@@ -228,7 +221,6 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
         <template #actions>
           <t-button v-if="!isLibrary" theme="primary" @click="openManual('url')">导入链接</t-button>
           <t-button v-if="!isLibrary" class="wt-secondary-button" variant="outline" @click="openManual('keyword')">关键词搜索</t-button>
-          <t-button v-if="!isLibrary" class="wt-secondary-button" variant="outline" @click="openManual('author')">博主搜索</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
@@ -275,8 +267,7 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
         <t-form label-width="88px">
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
           <t-form-item v-if="manualMode === 'url'" label="内容链接"><t-textarea v-model="manualForm.url" :rows="4" placeholder="粘贴视频链接，支持单条或批量（每行一条）" /></t-form-item>
-          <t-form-item v-else-if="manualMode === 'keyword'" label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
-          <t-form-item v-else label="博主 sec_uid"><t-input v-model="manualForm.author" placeholder="输入抖音博主 sec_uid（MS4wLjAB...）" /></t-form-item>
+          <t-form-item v-else label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
         </t-form>
         <t-alert v-if="manualSearched && manualMode !== 'url'" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
         <t-table v-if="manualMode !== 'url' && manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">

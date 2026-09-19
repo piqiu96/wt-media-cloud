@@ -12,19 +12,17 @@ describe('content pool page', () => {
     expect(source).toContain('转素材')
     expect(source).toContain('内容 ID')
     expect(source).toContain('关键词搜索')
-    expect(source).toContain('博主搜索')
     expect(source).toContain('result?.items')
     expect(source).toContain('discovery.importResults')
   })
 
-  it('aligns author search and pagination with the Douyin provider contracts', () => {
-    expect(source).toContain('sec_uid')
+  it('hides unavailable Douyin author search and keeps keyword pagination', () => {
+    expect(source).not.toContain("openManual('author')")
+    expect(source).not.toContain('discovery.authorSearch')
     expect(source).toContain('manualPagination')
     expect(source).toContain('next_offset')
-    expect(source).toContain('max_cursor')
     expect(source).toContain('has_more')
     expect(source).toContain('searchManual(true)')
-    expect(source).toContain('max_cursor: manualPagination.value.maxCursor || 0')
   })
 
   it('renders synchronous search results without polling a crawl task', () => {

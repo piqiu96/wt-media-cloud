@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -39,6 +40,16 @@ func TestDouyinCrawlerRejectsMissingCredentials(t *testing.T) {
 	_, err := (&DouyinCrawler{}).Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "demo"}})
 	if err != ErrCrawlerUnavailable {
 		t.Fatalf("expected missing credential error, got %v", err)
+	}
+}
+
+func TestDouyinCrawlerAuthorIsTemporarilyUnavailable(t *testing.T) {
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected provider request %s", r.URL.Path)
+	}))))
+	_, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "author", Config: map[string]any{"author": "sec-author"}})
+	if !errors.Is(err, ErrDouyinAuthorUnavailable) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

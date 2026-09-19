@@ -47,31 +47,8 @@ func searchWithClient(ctx context.Context, input dto.SearchInput, client manualS
 	}, nil
 }
 
-func findAuthorWithClient(ctx context.Context, input dto.AuthorSearchInput, client manualSearchClient) (dto.SearchResponse, error) {
-	input.Platform = strings.TrimSpace(input.Platform)
-	input.Author = strings.TrimSpace(input.Author)
-	if input.Platform != "douyin" || input.Author == "" || input.MaxCursor < 0 {
-		return dto.SearchResponse{}, ErrDiscoveryInvalid
-	}
-	if client == nil || !client.Configured() {
-		return dto.SearchResponse{}, ErrCrawlerUnavailable
-	}
-	input.Limit = normalizedAuthorLimit(input.Limit)
-	payload, err := client.FindAuthor(ctx, douyinclient.FindAuthorRequest{SecUID: input.Author, Count: input.Limit, MaxCursor: input.MaxCursor})
-	if err != nil {
-		return dto.SearchResponse{}, err
-	}
-	data := payloadData(payload)
-	if detail, ok := data["aweme_detail"].(map[string]any); ok {
-		if item := normalizeDouyinItem(detail); item != nil {
-			return dto.SearchResponse{Items: typedSearchResults([]map[string]any{item})}, nil
-		}
-	}
-	return dto.SearchResponse{
-		Items:     typedSearchResults(normalizeDouyinList(data)),
-		MaxCursor: intValue64(data["max_cursor"]),
-		HasMore:   boolValue(data["has_more"]),
-	}, nil
+func findAuthorWithClient(ctx context.Context, input dto.AuthorSearchInput, _ manualSearchClient) (dto.SearchResponse, error) {
+	return dto.SearchResponse{}, ErrDouyinAuthorUnavailable
 }
 
 func normalizedSearchLimit(value int) int {

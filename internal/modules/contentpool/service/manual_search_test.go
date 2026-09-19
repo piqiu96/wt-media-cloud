@@ -49,17 +49,11 @@ func TestKeywordSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
 	}
 }
 
-func TestAuthorSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
+func TestAuthorSearchIsTemporarilyUnavailable(t *testing.T) {
 	client := &searchClientStub{}
-	result, err := findAuthorWithClient(context.Background(), dto.AuthorSearchInput{Platform: "douyin", Author: "sec-author", Limit: 12, MaxCursor: 123}, client)
-	if err != nil || client.authorCalls != 1 || len(result.Items) != 1 || result.Items[0].PlatformContentID != "author-1" {
-		t.Fatalf("result=%+v calls=%d err=%v", result, client.authorCalls, err)
-	}
-	if client.authorReq.SecUID != "sec-author" || client.authorReq.Count != 12 || client.authorReq.MaxCursor != 123 {
-		t.Fatalf("author request=%+v", client.authorReq)
-	}
-	if result.MaxCursor != 456 || !result.HasMore {
-		t.Fatalf("author pagination=%+v", result)
+	_, err := findAuthorWithClient(context.Background(), dto.AuthorSearchInput{Platform: "douyin", Author: "sec-author", Limit: 12, MaxCursor: 123}, client)
+	if !errors.Is(err, ErrDouyinAuthorUnavailable) || client.authorCalls != 0 {
+		t.Fatalf("err=%v authorCalls=%d", err, client.authorCalls)
 	}
 }
 

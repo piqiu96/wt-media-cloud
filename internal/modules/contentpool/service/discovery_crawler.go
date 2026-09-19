@@ -12,7 +12,10 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
 )
 
-var ErrCrawlerUnavailable = errors.New("content crawler is not configured")
+var (
+	ErrCrawlerUnavailable      = errors.New("content crawler is not configured")
+	ErrDouyinAuthorUnavailable = errors.New("douyin author discovery is temporarily unavailable")
+)
 
 type douyinCrawler struct{ client *douyinclient.Client }
 
@@ -62,19 +65,7 @@ func (c *douyinCrawler) Discover(ctx context.Context, request dto.CrawlerRequest
 		}
 		return result, nil
 	case "author":
-		author := strings.TrimSpace(fmt.Sprint(config["author"]))
-		if author == "" {
-			author = strings.TrimSpace(fmt.Sprint(config["author_id"]))
-		}
-		maxCursor := int64Value(config["max_cursor"])
-		if maxCursor == 0 {
-			maxCursor = int64(intValue(config["offset"], 0))
-		}
-		items, err := c.authorPosts(ctx, author, intValue(config["limit"], 20), maxCursor)
-		if err != nil {
-			return dto.CrawlerResult{Failed: 1}, err
-		}
-		return dto.CrawlerResult{Items: items, Scanned: len(items)}, nil
+		return dto.CrawlerResult{}, ErrDouyinAuthorUnavailable
 	default:
 		return dto.CrawlerResult{}, fmt.Errorf("unsupported discovery operation: %s", request.Operation)
 	}

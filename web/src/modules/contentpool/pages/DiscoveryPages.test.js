@@ -4,11 +4,13 @@ import { describe, expect, it } from 'vitest'
 const read = (name) => readFileSync(new URL(`./${name}`, import.meta.url), 'utf8')
 
 describe('discovery strategy and task pages', () => {
-  it('exposes keyword and author strategy configuration', () => {
+  it('exposes keyword strategy configuration while author strategies await maintenance', () => {
     const source = read('DiscoveryStrategiesPage.vue')
     expect(source).toContain('strategy_type')
     expect(source).toContain('关键词')
-    expect(source).toContain('博主')
+    expect(source).toContain('博主（维护中）')
+    expect(source).toContain('value="author" disabled')
+    expect(source).toContain("row.strategy_type === 'author'")
     expect(source).toContain('立即执行')
     expect(source).toContain('编辑')
   })

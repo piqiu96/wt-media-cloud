@@ -456,6 +456,8 @@ func writeContentError(c *hertzapp.RequestContext, err error) {
 }
 func writeDiscoveryError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, contentservice.ErrDouyinAuthorUnavailable):
+		api.BadRequest(c, 14006, "博主搜索接口维护中")
 	case errors.Is(err, contentservice.ErrDiscoveryForbidden):
 		api.Forbidden(c, 11003, "没有权限访问该团队资源")
 	case errors.Is(err, contentservice.ErrStrategyNotFound):
