@@ -13,6 +13,7 @@ export function createDiscoveryClient({ base = '/api/v1', fetch = globalThis.fet
     confirmResults(id, ids) { return api.post(`/crawl-tasks/${id}/confirm`, { ids }) },
     search(data) { return api.post('/content-pool/search', data) },
     authorSearch(data) { return api.post('/content-pool/author-search', data) },
+    importResults(data) { return api.post('/content-pool/import-results', data) },
     importUrl(data) { return api.post('/content-pool/import-url', data) },
   }
 }

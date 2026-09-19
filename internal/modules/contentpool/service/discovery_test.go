@@ -159,7 +159,7 @@ func TestDiscoveryResultDeduplicatesIntoContentPool(t *testing.T) {
 	}
 }
 
-func TestManualSearchStoresResultsUntilSelection(t *testing.T) {
+func TestHistoricalManualTaskConfirmationStillWorks(t *testing.T) {
 	contentStore := newMemoryStore()
 	service := NewDiscoveryService(newDiscoveryMemory(), NewService(contentStore), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
 		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "a1", "title": "one"}, {"platform_content_id": "a1", "title": "one duplicate"}, {"platform_content_id": "a2", "title": "two"}}}, nil

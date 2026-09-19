@@ -772,7 +772,7 @@ git commit -m "refactor: separate discovery scheduling and execution"
 - Produces: `POST /api/v1/content-pool/import-results` for validated selected-result ingestion.
 - Preserves: historical Crawl Task list/get/confirm APIs.
 
-- [ ] **Step 1: Write failing Cloud API tests**
+- [x] **Step 1: Write failing Cloud API tests**
 
 Verify search returns results in the same request, no Crawl Task is inserted, and import validates scope and deduplicates:
 
@@ -784,13 +784,17 @@ func TestImportResultsUsesExistingContentPoolDeduplication(t *testing.T)
 func TestHistoricalManualTaskConfirmationStillWorks(t *testing.T)
 ```
 
-- [ ] **Step 2: Run Content Pool tests and verify failure**
+- [x] **Step 2: Record the pre-change failure reason**
 
 Run: `go test ./internal/modules/contentpool/... -count=1`
 
 Expected: FAIL because current search creates `manual_discovery_task`.
 
-- [ ] **Step 3: Implement synchronous Service functions and handlers**
+User-requested reduced verification recorded on 2026-09-19: the RED cause was
+confirmed from the existing Handler/Web call chain (`CreateManualRun` plus
+`getTask` polling), but `go test` was deliberately not executed.
+
+- [x] **Step 3: Implement synchronous Service functions and handlers**
 
 Use these DTO shapes:
 
@@ -814,15 +818,15 @@ type ImportResultsRequest struct {
 
 Search calls the typed Douyin Client directly and returns normalized items. Import treats the payload as untrusted, rechecks actor/team scope and required fields, then calls existing create/deduplication logic. Do not create a search task.
 
-- [ ] **Step 4: Write failing Web tests**
+- [x] **Step 4: Write failing Web tests**
 
 Assert `ContentPoolPage.vue` does not call `getTask` or poll, displays returned items immediately, and sends selected items to `importResults`.
 
-- [ ] **Step 5: Update Web source only**
+- [x] **Step 5: Update Web source only**
 
 Change `discovery.search` and `authorSearch` consumers to read `result.items`; add `importResults(data)`; remove `waitForSearchTask`; keep Crawl Task pages for scheduled/history records. Do not build or modify `web/dist-*`.
 
-- [ ] **Step 6: Verify Cloud and Web**
+- [x] **Step 6: Verify Cloud and Web**
 
 Run:
 
@@ -833,7 +837,13 @@ npm --prefix web test -- --run src/modules/contentpool/pages/ContentPoolPage.tes
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+User-requested reduced verification recorded on 2026-09-19: no `go test`,
+race, or `npm test` command was run. Content Pool `go build` and `go vet`, a
+Cloud Web build directed to `/private/tmp/wt-media-cloud-task11-cloud`,
+`git diff --check`, and production-boundary scans passed instead. Tracked
+`web/dist-*` state was left unchanged.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/modules/contentpool web/src/shared/api/discovery.js web/src/modules/contentpool/pages/ContentPoolPage.vue web/src/modules/contentpool/pages/ContentPoolPage.test.js

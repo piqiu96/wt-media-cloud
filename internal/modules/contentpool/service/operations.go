@@ -56,3 +56,15 @@ func GetCrawlTask(actor identityservice.PublicUser, id int64) (model.CrawlTask, 
 func ConfirmResults(actor identityservice.PublicUser, id int64, ids []string) (model.CrawlTask, error) {
 	return defaultDiscoveryService().confirmResults(actor, id, ids)
 }
+
+func Search(ctx context.Context, input dto.SearchInput) (dto.SearchResponse, error) {
+	return searchWithClient(ctx, input, douyinClient())
+}
+
+func FindAuthor(ctx context.Context, input dto.AuthorSearchInput) (dto.SearchResponse, error) {
+	return findAuthorWithClient(ctx, input, douyinClient())
+}
+
+func ImportResults(actor identityservice.PublicUser, input dto.ImportResultsRequest) (dto.ImportResultsResponse, error) {
+	return defaultContentService().importResults(actor, input)
+}

@@ -43,3 +43,53 @@ type CrawlerResult struct {
 	Scanned int
 	Failed  int
 }
+
+type SearchInput struct {
+	Platform string
+	Keyword  string
+	Limit    int
+	Offset   int
+}
+
+type AuthorSearchInput struct {
+	Platform string
+	Author   string
+	Limit    int
+	Offset   int
+}
+
+type SearchResult struct {
+	PlatformContentID string     `json:"platform_content_id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description"`
+	CoverURL          string     `json:"cover_url"`
+	SourceURL         string     `json:"source_url"`
+	AuthorID          string     `json:"author_id"`
+	AuthorName        string     `json:"author_name"`
+	PublishedAt       *time.Time `json:"published_at,omitempty"`
+}
+
+type SearchResponse struct {
+	Items []SearchResult `json:"items"`
+}
+
+type ImportResultsRequest struct {
+	TeamID     *identitymodel.TeamID `json:"team_id,omitempty"`
+	Platform   string                `json:"platform"`
+	SourceType string                `json:"source_type,omitempty"`
+	Items      []SearchResult        `json:"items"`
+}
+
+type ImportItemResult struct {
+	PlatformContentID string `json:"platform_content_id"`
+	Status            string `json:"status"`
+	SourceID          int64  `json:"source_id,omitempty"`
+	Message           string `json:"message,omitempty"`
+}
+
+type ImportResultsResponse struct {
+	Imported  int                `json:"imported"`
+	Duplicate int                `json:"duplicate"`
+	Failed    int                `json:"failed"`
+	Items     []ImportItemResult `json:"items"`
+}

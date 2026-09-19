@@ -203,12 +203,54 @@ func RunDueDiscovery(_ context.Context, c *hertzapp.RequestContext) {
 	now := time.Now().UTC()
 	api.Success(c, map[string]any{"at": now, "triggered": contentservice.RunDue(now)})
 }
-func SearchContent(_ context.Context, c *hertzapp.RequestContext) { createManualTask(c, "keyword") }
-func AuthorSearchContent(_ context.Context, c *hertzapp.RequestContext) {
-	createManualTask(c, "author")
+func SearchContent(ctx context.Context, c *hertzapp.RequestContext) {
+	if _, ok := actor(c); !ok {
+		return
+	}
+	var request manualSearchRequest
+	if !api.DecodeJSON(c, &request) {
+		return
+	}
+	result, err := contentservice.Search(ctx, dto.SearchInput{Platform: request.Platform, Keyword: request.Keyword, Limit: request.Limit, Offset: request.Offset})
+	if err != nil {
+		writeDiscoveryError(c, err)
+		return
+	}
+	api.Success(c, result)
 }
-func ImportContentURL(_ context.Context, c *hertzapp.RequestContext) { createManualTask(c, "url") }
-func createManualTask(c *hertzapp.RequestContext, operation string) {
+func AuthorSearchContent(ctx context.Context, c *hertzapp.RequestContext) {
+	if _, ok := actor(c); !ok {
+		return
+	}
+	var request manualSearchRequest
+	if !api.DecodeJSON(c, &request) {
+		return
+	}
+	result, err := contentservice.FindAuthor(ctx, dto.AuthorSearchInput{Platform: request.Platform, Author: request.Author, Limit: request.Limit, Offset: request.Offset})
+	if err != nil {
+		writeDiscoveryError(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+func ImportSearchResults(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	var request dto.ImportResultsRequest
+	if !api.DecodeJSON(c, &request) {
+		return
+	}
+	result, err := contentservice.ImportResults(actor, request)
+	if err != nil {
+		writeImportResultsError(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+func ImportContentURL(_ context.Context, c *hertzapp.RequestContext) { createURLImportTask(c) }
+func createURLImportTask(c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
 		return
@@ -221,26 +263,19 @@ func createManualTask(c *hertzapp.RequestContext, operation string) {
 		request.Limit = 20
 	}
 	config := map[string]any{"limit": request.Limit, "offset": request.Offset}
-	switch operation {
-	case "keyword":
-		config["keyword"] = request.Keyword
-	case "author":
-		config["author"] = request.Author
-	case "url":
-		urls := append([]string{}, request.URLs...)
-		if strings.TrimSpace(request.URL) != "" {
-			urls = append([]string{strings.TrimSpace(request.URL)}, urls...)
-		}
-		if len(urls) == 0 {
-			writeDiscoveryError(c, contentservice.ErrDiscoveryInvalid)
-			return
-		}
-		config["url"] = urls[0]
-		if len(urls) > 1 {
-			config["urls"] = urls
-		}
+	urls := append([]string{}, request.URLs...)
+	if strings.TrimSpace(request.URL) != "" {
+		urls = append([]string{strings.TrimSpace(request.URL)}, urls...)
 	}
-	item, err := contentservice.CreateManualRun(actor, request.Platform, operation, config)
+	if len(urls) == 0 {
+		writeDiscoveryError(c, contentservice.ErrDiscoveryInvalid)
+		return
+	}
+	config["url"] = urls[0]
+	if len(urls) > 1 {
+		config["urls"] = urls
+	}
+	item, err := contentservice.CreateManualRun(actor, request.Platform, "url", config)
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return
@@ -434,5 +469,13 @@ func writeDiscoveryError(c *hertzapp.RequestContext, err error) {
 		api.BadRequest(c, 14008, "请选择可入池的搜索结果")
 	default:
 		api.InternalError(c, "挖掘服务内部错误")
+	}
+}
+func writeImportResultsError(c *hertzapp.RequestContext, err error) {
+	switch {
+	case errors.Is(err, contentservice.ErrForbidden), errors.Is(err, contentservice.ErrInvalidInput):
+		writeContentError(c, err)
+	default:
+		writeDiscoveryError(c, err)
 	}
 }

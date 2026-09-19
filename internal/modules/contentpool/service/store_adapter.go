@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
@@ -13,7 +14,11 @@ import (
 type mysqlContentStore struct{}
 
 func (mysqlContentStore) CreateSource(v model.SourceContent, raw json.RawMessage) (model.SourceContent, error) {
-	return repository.CreateSource(v, raw)
+	item, err := repository.CreateSource(v, raw)
+	if err != nil && strings.HasPrefix(err.Error(), ErrDuplicate.Error()) {
+		return model.SourceContent{}, ErrDuplicate
+	}
+	return item, err
 }
 func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContent, error) {
 	return repository.ListSources(v)

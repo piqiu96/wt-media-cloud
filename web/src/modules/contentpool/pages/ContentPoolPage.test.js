@@ -13,7 +13,20 @@ describe('content pool page', () => {
     expect(source).toContain('内容 ID')
     expect(source).toContain('关键词搜索')
     expect(source).toContain('博主搜索')
-    expect(source).toContain('confirmResults')
+    expect(source).toContain('result?.items')
+    expect(source).toContain('discovery.importResults')
+  })
+
+  it('renders synchronous search results without polling a crawl task', () => {
+    expect(source).not.toContain('discovery.getTask')
+    expect(source).not.toContain('waitForSearchTask')
+    expect(source).not.toContain('setTimeout')
+    expect(source).toContain('manualResults.value = Array.isArray(result?.items) ? result.items : []')
+  })
+
+  it('imports only the results selected by the user', () => {
+    expect(source).toContain('manualResults.value.filter')
+    expect(source).toContain('items: selected')
   })
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {

@@ -13,6 +13,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/discovery-scheduler/run-due", RunDueDiscovery)
 	h.POST("/api/v1/content-pool/search", SearchContent)
 	h.POST("/api/v1/content-pool/author-search", AuthorSearchContent)
+	h.POST("/api/v1/content-pool/import-results", ImportSearchResults)
 	h.POST("/api/v1/content-pool/import-url", ImportContentURL)
 	h.GET("/api/v1/discovery-strategies", ListDiscoveryStrategies)
 	h.POST("/api/v1/discovery-strategies", CreateDiscoveryStrategy)

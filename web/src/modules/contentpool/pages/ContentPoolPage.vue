@@ -28,7 +28,7 @@ const batchLoading = ref(false)
 const manualVisible = ref(false)
 const manualMode = ref('url')
 const manualLoading = ref(false)
-const manualTask = ref(null)
+const manualSearched = ref(false)
 const manualResults = ref([])
 const selectedResultKeys = ref([])
 const manualForm = ref({ platform: 'douyin', url: '', keyword: '', author: '' })
@@ -92,7 +92,7 @@ function reset() {
 
 function openManual(mode) {
   manualMode.value = mode
-  manualTask.value = null
+  manualSearched.value = false
   manualResults.value = []
   selectedResultKeys.value = []
   manualForm.value = { platform: 'douyin', url: '', keyword: '', author: '' }
@@ -104,7 +104,7 @@ function manualTitle() {
 }
 
 async function confirmManual() {
-  if (manualTask.value && manualMode.value !== 'url') {
+  if (manualResults.value.length && manualMode.value !== 'url') {
     await confirmSelected()
     return
   }
@@ -112,49 +112,36 @@ async function confirmManual() {
   try {
     const form = manualForm.value
     const urls = form.url.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean)
-    const task = manualMode.value === 'url'
+    const result = manualMode.value === 'url'
       ? await discovery.importUrl({ platform: form.platform, ...(urls.length > 1 ? { urls } : { url: urls[0] || '' }) })
       : manualMode.value === 'keyword'
         ? await discovery.search({ platform: form.platform, keyword: form.keyword.trim(), limit: 20 })
         : await discovery.authorSearch({ platform: form.platform, author: form.author.trim(), limit: 20 })
-    manualTask.value = task
     if (manualMode.value === 'url') {
       manualVisible.value = false
       MessagePlugin.success('链接解析任务已创建，完成后内容会自动进入内容池')
       return
     }
-    await waitForSearchTask(task.id)
+    manualResults.value = Array.isArray(result?.items) ? result.items : []
+    selectedResultKeys.value = []
+    manualSearched.value = true
   } catch (e) {
-    error.value = e.message || '挖掘任务创建失败'
+    error.value = e.message || (manualMode.value === 'url' ? '链接解析任务创建失败' : '搜索失败')
   } finally { manualLoading.value = false }
 }
 
-async function waitForSearchTask(id) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const task = await discovery.getTask(id)
-    manualTask.value = task
-    if (task.status === 'success') {
-      manualResults.value = task.results || []
-      selectedResultKeys.value = []
-      return
-    }
-    if (task.status === 'failed') throw new Error(task.error || '搜索任务执行失败')
-    await new Promise((resolve) => setTimeout(resolve, 600))
-  }
-  throw new Error('搜索任务仍在执行，请稍后在挖掘任务中查看')
-}
-
 async function confirmSelected() {
-  if (!manualTask.value || !selectedResultKeys.value.length) {
+  if (!selectedResultKeys.value.length) {
     MessagePlugin.warning('请至少选择一条内容')
     return
   }
   manualLoading.value = true
   try {
-    await discovery.confirmResults(manualTask.value.id, selectedResultKeys.value)
+    const selected = manualResults.value.filter((item) => selectedResultKeys.value.includes(item.platform_content_id))
+    const result = await discovery.importResults({ platform: manualForm.value.platform, source_type: manualMode.value === 'author' ? 'author' : 'search', items: selected })
     manualVisible.value = false
     await load()
-    MessagePlugin.success(`已将 ${selectedResultKeys.value.length} 条内容加入内容池`)
+    MessagePlugin.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
   } catch (e) { error.value = e.message || '内容入池失败' } finally { manualLoading.value = false }
 }
 
@@ -249,14 +236,14 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
           <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
         </t-descriptions>
       </t-drawer>
-      <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="760px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualTask && manualMode !== 'url' ? '加入内容池' : '开始执行' }" @confirm="confirmManual">
+      <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="760px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualResults.length && manualMode !== 'url' ? '加入内容池' : '开始执行' }" @confirm="confirmManual">
         <t-form label-width="88px">
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
           <t-form-item v-if="manualMode === 'url'" label="内容链接"><t-textarea v-model="manualForm.url" :rows="4" placeholder="粘贴视频链接，支持单条或批量（每行一条）" /></t-form-item>
           <t-form-item v-else-if="manualMode === 'keyword'" label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
           <t-form-item v-else label="博主账号"><t-input v-model="manualForm.author" placeholder="输入作者 UID、名称或主页标识" /></t-form-item>
         </t-form>
-        <t-alert v-if="manualTask && manualMode !== 'url'" theme="info" :message="manualTask.status === 'success' ? `搜索完成，发现 ${manualTask.stats?.found || 0} 条，请选择后加入内容池` : '正在执行搜索，请稍候…'" style="margin: 12px 0" />
+        <t-alert v-if="manualSearched && manualMode !== 'url'" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
         <t-table v-if="manualMode !== 'url' && manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
           <template #title="{ row }"><div class="title-cell"><span>{{ row.title || '未命名内容' }}</span><small>{{ row.platform_content_id }}</small></div></template>
           <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
