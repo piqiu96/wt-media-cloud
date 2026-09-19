@@ -1,5 +1,164 @@
-# WT Media Cloud
+# WT Media Cloud AI Development Rules
 
-Follow `AGENTS.md` for repository boundaries.
+## 项目定位
 
-Before changing contracts, update the Cloud-owned contract files first, then generated consumers in other repositories.
+本项目：
+
+Go + Hertz + Modular Monolith。
+
+禁止提前微服务化。
+
+------------------------------------------------------------------------
+
+# 目录规则
+
+## cmd
+
+只负责启动入口。
+
+## internal/bootstrap
+
+只负责生命周期。
+
+## internal/runtime
+
+保存运行资源。
+
+禁止创建全局单例。
+
+## internal/infra
+
+基础设施：
+
+-   database
+-   redis
+-   logger
+-   client
+-   metrics
+-   tracing
+
+## internal/modules
+
+业务代码。
+
+------------------------------------------------------------------------
+
+# 配置规则
+
+配置文件只允许：
+
+    /config
+    /config_online
+
+禁止在 internal 存放 yaml/json。
+
+internal/config 只负责：
+
+-   加载
+-   校验
+-   Struct定义
+
+------------------------------------------------------------------------
+
+# 基础能力规则
+
+禁止业务模块初始化：
+
+-   MySQL
+-   Redis
+-   Logger
+-   Client
+
+必须通过 Runtime 获取。
+
+------------------------------------------------------------------------
+
+# 外部服务规则
+
+新增第三方服务必须：
+
+1.  增加 config/clients 配置；
+2.  创建 internal/infra/client 实现；
+3.  接入 Runtime；
+4.  增加日志、trace、metrics。
+
+禁止业务代码直接 HTTP 调用。
+
+------------------------------------------------------------------------
+
+# 日志规则
+
+禁止：
+
+    fmt.Println
+
+必须使用统一 Logger。
+
+日志必须包含：
+
+-   trace_id
+-   request_id
+-   module
+
+------------------------------------------------------------------------
+
+# 定时任务规则
+
+禁止：
+
+    time.NewTicker
+
+业务自行启动任务。
+
+所有定时任务必须：
+
+    internal/jobs
+
+通过 scheduler 注册。
+
+------------------------------------------------------------------------
+
+# 模块规则
+
+新增模块必须：
+
+    modules/{module}
+
+    handler
+    service
+    repository
+    model
+    dto
+
+------------------------------------------------------------------------
+
+# API规则
+
+所有接口返回：
+
+-   errcode
+-   message
+-   data
+-   logid
+
+------------------------------------------------------------------------
+
+# 修改原则
+
+修改代码前：
+
+1.  阅读已有架构；
+2.  优先复用已有基础能力；
+3.  不新增重复框架；
+4.  不创建万能目录。
+
+------------------------------------------------------------------------
+
+# 提交要求
+
+代码必须：
+
+-   可运行；
+-   符合分层；
+-   无重复初始化；
+-   不破坏架构边界。

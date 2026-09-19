@@ -3,6 +3,8 @@
 bin/
 dist/
 web/dist/
+web/dist-cloud/
+web/dist-desktop/
 web/node_modules/
 *.log
 *.pid

@@ -8,14 +8,17 @@ import (
 
 // InitializeServer initializes HTTP-only resources and registers routes.
 func InitializeServer() (*server.Hertz, func() error, error) {
-	return initializeServer(
-		serverResourcePlan(),
-		config.Get().App.Server.HTTPAddr,
-		func(addr string) *server.Hertz {
-			return server.Default(server.WithHostPorts(addr))
-		},
-		registerRoutes,
-	)
+	closer, err := initializeResources(serverResourcePlan())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	engine := server.Default(server.WithHostPorts(config.Get().App.Server.HTTPAddr))
+	if err := registerRoutes(engine); err != nil {
+		_ = closer()
+		return nil, nil, err
+	}
+	return engine, closer, nil
 }
 
 // InitializeScheduler initializes only resources required by the scheduler process
