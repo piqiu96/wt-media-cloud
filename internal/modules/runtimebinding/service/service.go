@@ -73,7 +73,7 @@ func WithFreshness(freshness time.Duration) Option {
 	return func(s *Service) { s.freshness = freshness }
 }
 
-func NewService(store Store, options ...Option) *Service {
+func newService(store Store, options ...Option) *Service {
 	service := &Service{
 		store:     store,
 		now:       func() time.Time { return time.Now().UTC() },

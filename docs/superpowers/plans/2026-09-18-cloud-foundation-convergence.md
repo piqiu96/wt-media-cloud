@@ -860,7 +860,7 @@ git commit -m "feat: make douyin discovery search synchronous"
 - Consumes: all previous task outputs.
 - Produces: one clean, buildable modular-monolith architecture matching the spec.
 
-- [ ] **Step 1: Run structural scans and remove only confirmed dead code**
+- [x] **Step 1: Run structural scans and remove only confirmed dead code**
 
 Run:
 
@@ -872,7 +872,7 @@ rg -n 'http\.Client\s*\{|os\.(Getenv|LookupEnv)\(|time\.NewTicker\(' internal/mo
 
 Expected before cleanup: remaining transitional references are listed. Delete or migrate each listed production reference; do not delete historical migrations or compatibility APIs still covered by tests.
 
-- [ ] **Step 2: Format and tidy**
+- [x] **Step 2: Format and tidy**
 
 Run:
 
@@ -881,7 +881,7 @@ gofmt -w cmd internal
 go mod tidy
 ```
 
-- [ ] **Step 3: Run complete Go verification**
+- [x] **Step 3: Run complete Go verification**
 
 Run:
 
@@ -893,7 +893,7 @@ go vet ./...
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Run Web verification without rebuilding tracked distributions**
+- [x] **Step 4: Run Web verification without rebuilding tracked distributions**
 
 Run:
 
@@ -906,7 +906,7 @@ git status --short web/dist-cloud web/dist-desktop
 
 Expected: tests and both source builds pass; tracked `web/dist-*` status is unchanged from the pre-task baseline.
 
-- [ ] **Step 5: Run final boundary and hygiene checks**
+- [x] **Step 5: Run final boundary and hygiene checks**
 
 Run:
 
@@ -920,11 +920,11 @@ rg -n 'time\.NewTicker' internal cmd --glob '*.go'
 
 Expected: all tests/checks pass; `gofmt -l` prints nothing; no Runtime/App references; only `internal/scheduler` owns ticker creation.
 
-- [ ] **Step 6: Review the final diff by responsibility**
+- [x] **Step 6: Review the final diff by responsibility**
 
 Confirm the diff contains no database schema changes, unrelated build artifacts, secret material outside approved config files, or accidental route/error-code changes. Record any intentionally preserved compatibility code in the final report.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add AGENTS.md README.md cmd config config_online docs internal go.mod go.sum web/src

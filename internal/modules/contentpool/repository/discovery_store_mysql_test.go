@@ -50,7 +50,7 @@ func TestClaimPendingCrawlTaskReturnsEmptyWithoutUpdate(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM crawl_tasks WHERE status = 'pending'.*FOR UPDATE SKIP LOCKED").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "strategy_id", "schedule_key", "task_id", "task_type", "platform", "status", "snapshot_json", "stats_json", "result_json", "error_message", "started_at", "finished_at", "created_by", "created_at", "updated_at"}))
-	mock.ExpectRollback()
+	mock.ExpectCommit()
 
 	_, found, err := claimPendingCrawlTask(testGORM(db), time.Now())
 	if err != nil || found {

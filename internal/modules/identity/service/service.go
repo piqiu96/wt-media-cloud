@@ -147,7 +147,7 @@ func WithTokenGenerator(newToken func() string) Option {
 	return func(service *Service) { service.newToken = newToken }
 }
 
-func NewService(store Store, options ...Option) *Service {
+func newService(store Store, options ...Option) *Service {
 	service := &Service{
 		store:     store,
 		now:       func() time.Time { return time.Now().UTC() },

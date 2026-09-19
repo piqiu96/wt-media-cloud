@@ -99,7 +99,7 @@ func WithScanTTL(ttl time.Duration) Option {
 	return func(service *Service) { service.scanTTL = ttl }
 }
 
-func NewService(store Store, options ...Option) *Service {
+func newService(store Store, options ...Option) *Service {
 	service := &Service{
 		store:   store,
 		now:     func() time.Time { return time.Now().UTC() },

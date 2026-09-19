@@ -8,7 +8,7 @@ import (
 )
 
 func TestUserTeamModelMigration(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "migrations", "20260722_012_user_team_model.sql")
+	path := filepath.Join("..", "..", "..", "..", "migrations", "20260722_012_user_team_model.sql")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migration: %v", err)

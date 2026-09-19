@@ -1,4 +1,5 @@
-package common
+// Package id provides process-local opaque identifier and token generation.
+package id
 
 import (
 	"crypto/rand"

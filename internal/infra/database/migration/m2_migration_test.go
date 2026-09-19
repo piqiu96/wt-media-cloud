@@ -8,7 +8,7 @@ import (
 )
 
 func TestM2MigrationsUseCompatibleStringForeignKeys(t *testing.T) {
-	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	migrationsDir := filepath.Join("..", "..", "..", "..", "migrations")
 	entries, err := filepath.Glob(filepath.Join(migrationsDir, "20260714_*.sql"))
 	if err != nil {
 		t.Fatalf("Glob() error = %v", err)

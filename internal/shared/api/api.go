@@ -1,8 +1,8 @@
-package common
+// Package api defines the shared Cloud HTTP response envelope and helpers.
+package api
 
 import (
 	"encoding/json"
-	"fmt"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -48,7 +48,7 @@ func Created(c *hertzapp.RequestContext, data interface{}) {
 	})
 }
 
-// Page writes a paginated response.
+// Page writes a paginated api.
 func Page(c *hertzapp.RequestContext, items interface{}, page, pageSize, total int) {
 	logID := resolveLogID(c)
 	c.JSON(consts.StatusOK, ApiResponse{
@@ -144,79 +144,4 @@ func DecodeJSON(c *hertzapp.RequestContext, dst interface{}) bool {
 		return false
 	}
 	return true
-}
-
-// ---- Deprecated compatibility wrappers (to be removed after full migration) ----
-
-// JSONData is deprecated. Use Success() instead.
-func JSONData(c *hertzapp.RequestContext, status int, data interface{}) {
-	Success(c, data)
-}
-
-// JSONError is deprecated. Use Failure() or typed helpers instead.
-func JSONError(c *hertzapp.RequestContext, status int, code, message string) {
-	errcode := legacyCodeToInt(code)
-	Failure(c, status, errcode, message, &ApiError{Type: code})
-}
-
-func legacyCodeToInt(code string) int {
-	// Simple mapping for migration period
-	switch code {
-	case "invalid_json":
-		return 10001
-	case "authentication_required":
-		return 11001
-	case "forbidden":
-		return 11003
-	case "invalid_identity_request":
-		return 11004
-	case "not_found", "task_not_found", "media_account_not_found", "agent_not_found", "sensitive_task_not_found":
-		return 20004
-	case "username_taken":
-		return 20001
-	case "invalid_task", "invalid_media_account_request", "invalid_sensitive_preflight":
-		return 10001
-	case "no_pending_task":
-		return 30001
-	case "task_agent_mismatch":
-		return 30002
-	case "task_already_terminal":
-		return 30003
-	case "invalid_agent", "agent_registry_error":
-		return 30004
-	case "incompatible_agent_contract":
-		return 30005
-	case "duplicate_media_account":
-		return 20009
-	case "profile_platform_account_taken", "browser_profile_unavailable":
-		return 23001
-	case "bitbrowser_identity_unverifiable":
-		return 23002
-	case "sensitive_credential_invalid":
-		return 11001
-	case "sensitive_task_assignment_mismatch":
-		return 11003
-	case "profile_runtime_unavailable":
-		return 23003
-	case "binding_ticket_invalid", "bound_session_invalid", "node_credential_invalid":
-		return 11001
-	case "runtime_binding_forbidden":
-		return 11003
-	case "profile_runtime_ownership_mismatch":
-		return 23003
-	case "incompatible_agent":
-		return 30004
-	default:
-		return 99999
-	}
-}
-
-// Ensure forward-compatibility: old front-end can still read .data and .error.code
-// by embedding them in the new structure.
-func init() {
-	// Verify ApiResponse is serializable
-	resp := ApiResponse{ErrCode: 0, Message: "success", Data: nil, LogID: "test"}
-	if _, err := json.Marshal(resp); err != nil {
-		panic(fmt.Sprintf("ApiResponse serialization failed: %v", err))
-	}
 }

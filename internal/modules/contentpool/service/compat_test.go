@@ -26,9 +26,15 @@ func NewDiscoveryService(store DiscoveryStore, content *Service, crawlers ...Cra
 	if len(crawlers) > 0 {
 		selected = crawlers[0]
 	} else {
-		selected = newDouyinCrawler()
+		selected = unavailableCrawler{}
 	}
 	return newDiscoveryService(store, content, selected)
+}
+
+type unavailableCrawler struct{}
+
+func (unavailableCrawler) Discover(context.Context, dto.CrawlerRequest) (dto.CrawlerResult, error) {
+	return dto.CrawlerResult{}, ErrCrawlerUnavailable
 }
 func NewDouyinCrawler() *DouyinCrawler { return newDouyinCrawler() }
 func NewDouyinCrawlerWithClient(client *douyinclient.Client) *DouyinCrawler {

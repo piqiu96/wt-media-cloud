@@ -90,7 +90,7 @@ func WithSecretGenerator(newSecret func() string) Option {
 	return func(s *Service) { s.newSecret = newSecret }
 }
 
-func NewService(store Store, nodes NodeAuthenticator, options ...Option) *Service {
+func newService(store Store, nodes NodeAuthenticator, options ...Option) *Service {
 	service := &Service{
 		store: store, nodes: nodes, now: func() time.Time { return time.Now().UTC() }, newID: id.NewID,
 		newSecret: randomSecret, permitTTL: 2 * time.Minute, freshness: 90 * time.Second, maxRenewal: 2 * time.Minute,
