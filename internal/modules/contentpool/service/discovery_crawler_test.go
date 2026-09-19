@@ -14,16 +14,16 @@ import (
 
 func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/dyRank" || r.URL.Query().Get("apiKey") != "secret-key" {
+		if r.URL.Path != "/v2dysearchvideo" || r.URL.Query().Get("apiKey") != "secret-key" {
 			t.Fatalf("unexpected request %s", r.URL.String())
 		}
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
 		}
-		if got := r.PostForm.Get("keywords"); got != "王者荣耀" || r.PostForm.Get("ck") != "server-cookie" {
+		if got := r.PostForm.Get("keywords"); got != "王者荣耀" || r.PostForm.Get("count") != "20" || r.PostForm.Get("ck") != "server-cookie" {
 			t.Fatalf("unexpected form %v", r.PostForm)
 		}
-		_, _ = w.Write([]byte(`{"result":1,"data":{"data":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"}}}]}}`))
+		_, _ = w.Write([]byte(`{"result":1,"data":{"datalist":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"}}}]}}`))
 	}))
 	defer server.Close()
 

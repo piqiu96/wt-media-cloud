@@ -35,24 +35,29 @@ func searchWithClient(ctx context.Context, input dto.SearchInput, client manualS
 		return dto.SearchResponse{}, ErrCrawlerUnavailable
 	}
 	input.Limit = normalizedSearchLimit(input.Limit)
-	payload, err := client.Search(ctx, douyinclient.SearchRequest{Keyword: input.Keyword, Limit: input.Limit, Offset: input.Offset})
+	payload, err := client.Search(ctx, douyinclient.SearchRequest{Keyword: input.Keyword, Count: input.Limit, Offset: input.Offset})
 	if err != nil {
 		return dto.SearchResponse{}, err
 	}
-	return dto.SearchResponse{Items: typedSearchResults(normalizeDouyinList(payloadData(payload)))}, nil
+	data := payloadData(payload)
+	return dto.SearchResponse{
+		Items:      typedSearchResults(normalizeDouyinList(data)),
+		NextOffset: intValue64(data["cursor"], data["next_page"]),
+		HasMore:    boolValue(data["has_more"]),
+	}, nil
 }
 
 func findAuthorWithClient(ctx context.Context, input dto.AuthorSearchInput, client manualSearchClient) (dto.SearchResponse, error) {
 	input.Platform = strings.TrimSpace(input.Platform)
 	input.Author = strings.TrimSpace(input.Author)
-	if input.Platform != "douyin" || input.Author == "" || input.Offset < 0 {
+	if input.Platform != "douyin" || input.Author == "" || input.MaxCursor < 0 {
 		return dto.SearchResponse{}, ErrDiscoveryInvalid
 	}
 	if client == nil || !client.Configured() {
 		return dto.SearchResponse{}, ErrCrawlerUnavailable
 	}
-	input.Limit = normalizedSearchLimit(input.Limit)
-	payload, err := client.FindAuthor(ctx, douyinclient.FindAuthorRequest{Author: input.Author, Limit: input.Limit, Offset: input.Offset})
+	input.Limit = normalizedAuthorLimit(input.Limit)
+	payload, err := client.FindAuthor(ctx, douyinclient.FindAuthorRequest{SecUID: input.Author, Count: input.Limit, MaxCursor: input.MaxCursor})
 	if err != nil {
 		return dto.SearchResponse{}, err
 	}
@@ -62,7 +67,11 @@ func findAuthorWithClient(ctx context.Context, input dto.AuthorSearchInput, clie
 			return dto.SearchResponse{Items: typedSearchResults([]map[string]any{item})}, nil
 		}
 	}
-	return dto.SearchResponse{Items: typedSearchResults(normalizeDouyinList(data))}, nil
+	return dto.SearchResponse{
+		Items:     typedSearchResults(normalizeDouyinList(data)),
+		MaxCursor: intValue64(data["max_cursor"]),
+		HasMore:   boolValue(data["has_more"]),
+	}, nil
 }
 
 func normalizedSearchLimit(value int) int {
@@ -71,6 +80,16 @@ func normalizedSearchLimit(value int) int {
 	}
 	if value > 30 {
 		return 30
+	}
+	return value
+}
+
+func normalizedAuthorLimit(value int) int {
+	if value <= 0 {
+		return 20
+	}
+	if value > 20 {
+		return 20
 	}
 	return value
 }

@@ -52,10 +52,10 @@ type SearchInput struct {
 }
 
 type AuthorSearchInput struct {
-	Platform string
-	Author   string
-	Limit    int
-	Offset   int
+	Platform  string
+	Author    string
+	Limit     int
+	MaxCursor int64
 }
 
 type SearchResult struct {
@@ -70,7 +70,10 @@ type SearchResult struct {
 }
 
 type SearchResponse struct {
-	Items []SearchResult `json:"items"`
+	Items      []SearchResult `json:"items"`
+	NextOffset int64          `json:"next_offset,omitempty"`
+	MaxCursor  int64          `json:"max_cursor,omitempty"`
+	HasMore    bool           `json:"has_more,omitempty"`
 }
 
 type ImportResultsRequest struct {

@@ -84,7 +84,11 @@ func (c *douyinCrawler) Discover(ctx context.Context, request dto.CrawlerRequest
 		if author == "" {
 			author = strings.TrimSpace(fmt.Sprint(config["author_id"]))
 		}
-		items, err := c.authorPosts(ctx, author, intValue(config["limit"], 20), intValue(config["offset"], 0))
+		maxCursor := int64Value(config["max_cursor"])
+		if maxCursor == 0 {
+			maxCursor = int64(intValue(config["offset"], 0))
+		}
+		items, err := c.authorPosts(ctx, author, intValue(config["limit"], 20), maxCursor)
 		if err != nil {
 			return dto.CrawlerResult{Failed: 1}, err
 		}
@@ -106,18 +110,17 @@ func (c *douyinCrawler) fetchByURL(ctx context.Context, source string) (map[stri
 	return normalizeDouyinItem(data), nil
 }
 func (c *douyinCrawler) search(ctx context.Context, keyword string, limit, offset int) ([]map[string]any, error) {
-	payload, err := c.client.Search(ctx, douyinclient.SearchRequest{Keyword: keyword, Limit: limit, Offset: offset})
+	payload, err := c.client.Search(ctx, douyinclient.SearchRequest{Keyword: keyword, Count: limit, Offset: offset})
 	if err != nil {
 		return nil, err
 	}
-	data, _ := payload["data"].(map[string]any)
-	return normalizeDouyinList(data), nil
+	return normalizeDouyinPayload(payload), nil
 }
-func (c *douyinCrawler) authorPosts(ctx context.Context, author string, limit, offset int) ([]map[string]any, error) {
+func (c *douyinCrawler) authorPosts(ctx context.Context, author string, limit int, maxCursor int64) ([]map[string]any, error) {
 	if author == "" {
 		return nil, errors.New("author is required")
 	}
-	payload, err := c.client.FindAuthor(ctx, douyinclient.FindAuthorRequest{Author: author, Limit: limit, Offset: offset})
+	payload, err := c.client.FindAuthor(ctx, douyinclient.FindAuthorRequest{SecUID: author, Count: limit, MaxCursor: maxCursor})
 	if err != nil {
 		return nil, err
 	}
@@ -129,13 +132,26 @@ func (c *douyinCrawler) authorPosts(ctx context.Context, author string, limit, o
 	}
 	return normalizeDouyinList(data), nil
 }
+func normalizeDouyinPayload(payload map[string]any) []map[string]any {
+	if values, ok := payload["data"].([]any); ok {
+		return normalizeDouyinValues(values)
+	}
+	return normalizeDouyinList(payloadData(payload))
+}
+
 func normalizeDouyinList(data map[string]any) []map[string]any {
 	values := []any{}
-	if raw, ok := data["data"].([]any); ok {
+	if raw, ok := data["datalist"].([]any); ok {
+		values = raw
+	} else if raw, ok := data["data"].([]any); ok {
 		values = raw
 	} else if raw, ok := data["aweme_list"].([]any); ok {
 		values = raw
 	}
+	return normalizeDouyinValues(values)
+}
+
+func normalizeDouyinValues(values []any) []map[string]any {
 	out := make([]map[string]any, 0, len(values))
 	for _, value := range values {
 		if item, ok := value.(map[string]any); ok {
@@ -148,6 +164,32 @@ func normalizeDouyinList(data map[string]any) []map[string]any {
 		}
 	}
 	return out
+}
+
+func intValue64(values ...any) int64 {
+	for _, value := range values {
+		if parsed := int64Value(value); parsed != 0 {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func boolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case string:
+		return typed == "1" || strings.EqualFold(typed, "true")
+	default:
+		return false
+	}
 }
 func normalizeDouyinItem(item map[string]any) map[string]any {
 	if item == nil {

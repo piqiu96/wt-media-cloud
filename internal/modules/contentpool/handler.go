@@ -51,13 +51,14 @@ type strategyRequest struct {
 	Status       model.StrategyStatus    `json:"status"`
 }
 type manualSearchRequest struct {
-	Platform string   `json:"platform"`
-	Keyword  string   `json:"keyword"`
-	Author   string   `json:"author"`
-	URL      string   `json:"url"`
-	URLs     []string `json:"urls"`
-	Limit    int      `json:"limit"`
-	Offset   int      `json:"offset"`
+	Platform  string   `json:"platform"`
+	Keyword   string   `json:"keyword"`
+	Author    string   `json:"author"`
+	URL       string   `json:"url"`
+	URLs      []string `json:"urls"`
+	Limit     int      `json:"limit"`
+	Offset    int      `json:"offset"`
+	MaxCursor int64    `json:"max_cursor"`
 }
 
 func actor(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
@@ -226,7 +227,7 @@ func AuthorSearchContent(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &request) {
 		return
 	}
-	result, err := contentservice.FindAuthor(ctx, dto.AuthorSearchInput{Platform: request.Platform, Author: request.Author, Limit: request.Limit, Offset: request.Offset})
+	result, err := contentservice.FindAuthor(ctx, dto.AuthorSearchInput{Platform: request.Platform, Author: request.Author, Limit: request.Limit, MaxCursor: request.MaxCursor})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return

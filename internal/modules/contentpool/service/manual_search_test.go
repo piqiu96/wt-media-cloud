@@ -13,31 +13,53 @@ import (
 type searchClientStub struct {
 	searchCalls int
 	authorCalls int
+	searchReq   douyinclient.SearchRequest
+	authorReq   douyinclient.FindAuthorRequest
 }
 
 func (*searchClientStub) Configured() bool { return true }
-func (s *searchClientStub) Search(_ context.Context, _ douyinclient.SearchRequest) (map[string]any, error) {
+func (s *searchClientStub) Search(_ context.Context, request douyinclient.SearchRequest) (map[string]any, error) {
 	s.searchCalls++
-	return map[string]any{"data": map[string]any{"aweme_list": []any{map[string]any{"aweme_id": "keyword-1", "desc": "关键词结果"}}}}, nil
+	s.searchReq = request
+	return map[string]any{"data": map[string]any{
+		"datalist": []any{map[string]any{"aweme_info": map[string]any{"aweme_id": "keyword-1", "desc": "关键词结果"}}},
+		"cursor":   float64(30), "has_more": float64(1),
+	}}, nil
 }
-func (s *searchClientStub) FindAuthor(_ context.Context, _ douyinclient.FindAuthorRequest) (map[string]any, error) {
+func (s *searchClientStub) FindAuthor(_ context.Context, request douyinclient.FindAuthorRequest) (map[string]any, error) {
 	s.authorCalls++
-	return map[string]any{"data": map[string]any{"aweme_detail": map[string]any{"aweme_id": "author-1", "desc": "博主结果"}}}, nil
+	s.authorReq = request
+	return map[string]any{"data": map[string]any{
+		"aweme_list": []any{map[string]any{"aweme_id": "author-1", "desc": "博主结果"}},
+		"max_cursor": float64(456), "has_more": true,
+	}}, nil
 }
 
 func TestKeywordSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
 	client := &searchClientStub{}
-	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Keyword: "游戏"}, client)
+	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Keyword: "游戏", Limit: 15, Offset: 10}, client)
 	if err != nil || client.searchCalls != 1 || len(result.Items) != 1 || result.Items[0].PlatformContentID != "keyword-1" {
 		t.Fatalf("result=%+v calls=%d err=%v", result, client.searchCalls, err)
+	}
+	if client.searchReq.Keyword != "游戏" || client.searchReq.Count != 15 || client.searchReq.Offset != 10 {
+		t.Fatalf("search request=%+v", client.searchReq)
+	}
+	if result.NextOffset != 30 || !result.HasMore {
+		t.Fatalf("search pagination=%+v", result)
 	}
 }
 
 func TestAuthorSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
 	client := &searchClientStub{}
-	result, err := findAuthorWithClient(context.Background(), dto.AuthorSearchInput{Platform: "douyin", Author: "作者"}, client)
+	result, err := findAuthorWithClient(context.Background(), dto.AuthorSearchInput{Platform: "douyin", Author: "sec-author", Limit: 12, MaxCursor: 123}, client)
 	if err != nil || client.authorCalls != 1 || len(result.Items) != 1 || result.Items[0].PlatformContentID != "author-1" {
 		t.Fatalf("result=%+v calls=%d err=%v", result, client.authorCalls, err)
+	}
+	if client.authorReq.SecUID != "sec-author" || client.authorReq.Count != 12 || client.authorReq.MaxCursor != 123 {
+		t.Fatalf("author request=%+v", client.authorReq)
+	}
+	if result.MaxCursor != 456 || !result.HasMore {
+		t.Fatalf("author pagination=%+v", result)
 	}
 }
 
