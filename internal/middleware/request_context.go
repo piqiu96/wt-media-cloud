@@ -8,6 +8,7 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
+	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
 )
 
 func RequestContext() hertzapp.HandlerFunc {
@@ -21,10 +22,17 @@ func RequestContext() hertzapp.HandlerFunc {
 		c.Set("trace_id", traceID)
 		c.Set("request_id", requestID)
 		c.Set("logid", traceID)
+		ctx = requestctx.WithTraceID(ctx, traceID)
+		ctx = requestctx.WithRequestID(ctx, requestID)
 		c.Next(ctx)
+		if value, exists := c.Get("user_id"); exists {
+			if userID, valid := value.(int64); valid && userID > 0 {
+				ctx = requestctx.WithUserID(ctx, userID)
+			}
+		}
 		logger.Access().CtxInfof(
 			ctx,
-			"request completed method=%s path=%s status=%d duration=%s",
+			"module=http request completed method=%s path=%s status=%d duration=%s",
 			string(c.Method()), string(c.Path()), c.Response.StatusCode(), time.Since(started).String(),
 		)
 	}

@@ -144,3 +144,21 @@ func read(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+func TestContextLogsOmitMissingIdentityFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty-context.log")
+	instance, err := logger.New(logger.Config{Path: path, Level: "info", Format: "json"})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	instance.CtxInfof(context.Background(), "empty context marker")
+	if err := instance.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	data := read(t, path)
+	for _, field := range []string{`"trace_id"`, `"request_id"`, `"user_id"`} {
+		if strings.Contains(data, field) {
+			t.Fatalf("empty context log unexpectedly contains %s: %q", field, data)
+		}
+	}
+}

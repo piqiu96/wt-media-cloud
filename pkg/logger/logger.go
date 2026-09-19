@@ -3,6 +3,7 @@
 package logger
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -36,6 +37,7 @@ type RotationConfig struct {
 // Logger is a Hertz FullLogger backed by two Zap cores.
 type Logger struct {
 	*hertzzap.Logger
+	zapLogger *zap.Logger
 
 	main *lumberjack.Logger
 	wf   *lumberjack.Logger
@@ -88,7 +90,59 @@ func New(cfg Config) (*Logger, error) {
 		hertzzap.WithZapOptions(zap.AddCaller()),
 	)
 
-	return &Logger{Logger: hertzLogger, main: main, wf: wf}, nil
+	return &Logger{Logger: hertzLogger, zapLogger: hertzLogger.Logger(), main: main, wf: wf}, nil
+}
+
+// CtxTracef writes a trace-level message with non-empty generic context fields.
+func (l *Logger) CtxTracef(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.DebugLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) CtxDebugf(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.DebugLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) CtxInfof(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.InfoLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) CtxNoticef(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.WarnLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) CtxWarnf(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.WarnLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) CtxErrorf(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.ErrorLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) CtxFatalf(ctx context.Context, format string, args ...any) {
+	l.logContext(ctx, zap.FatalLevel, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) logContext(ctx context.Context, level zapcore.Level, message string) {
+	fields := contextFields(ctx)
+	if level == zap.FatalLevel {
+		l.zapLogger.Fatal(message, fields...)
+		return
+	}
+	l.zapLogger.Log(level, message, fields...)
+}
+
+func contextFields(ctx context.Context) []zap.Field {
+	var fields []zap.Field
+	if traceID, ok := ctx.Value("trace_id").(string); ok && traceID != "" {
+		fields = append(fields, zap.String("trace_id", traceID))
+	}
+	if requestID, ok := ctx.Value("request_id").(string); ok && requestID != "" {
+		fields = append(fields, zap.String("request_id", requestID))
+	}
+	if userID, ok := ctx.Value("user_id").(int64); ok && userID != 0 {
+		fields = append(fields, zap.Int64("user_id", userID))
+	}
+	return fields
 }
 
 // Close syncs and closes both writers and is safe to call repeatedly.

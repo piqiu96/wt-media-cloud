@@ -25,6 +25,7 @@ import (
 func registerRoutes(engine *server.Hertz) error {
 	engine.Use(middleware.LocalDesktopCORS())
 	engine.Use(middleware.RequestContext())
+	engine.Use(identity.IdentityContext())
 	registerHealthRoutes(engine)
 
 	cfg := config.Get()

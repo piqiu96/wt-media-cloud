@@ -11,9 +11,11 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
 )
 
 const SessionCookieName = "wt_media_session"
+const identityContextKey = "identity_auth_context"
 
 type RouteConfig struct {
 	CookieSecure bool
@@ -482,6 +484,26 @@ func filterUsers(users []identityservice.PublicUser, c *hertzapp.RequestContext)
 	return result, nil
 }
 
+// IdentityContext opportunistically resolves a valid session before business
+// routes. Missing or invalid credentials do not reject public endpoints.
+func IdentityContext() hertzapp.HandlerFunc {
+	return func(ctx context.Context, c *hertzapp.RequestContext) {
+		token := sessionToken(c)
+		if token == "" {
+			c.Next(ctx)
+			return
+		}
+		authContext, err := identityservice.AuthenticateContext(token)
+		if err != nil {
+			c.Next(ctx)
+			return
+		}
+		c.Set(identityContextKey, authContext)
+		c.Set("user_id", int64(authContext.User.ID))
+		c.Next(requestctx.WithUserID(ctx, int64(authContext.User.ID)))
+	}
+}
+
 // AuthenticateRequest resolves the server-side session Cookie for other Cloud
 // business modules. Callers never receive the raw session token.
 func AuthenticateRequest(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
@@ -504,12 +526,19 @@ func sessionToken(c *hertzapp.RequestContext) string {
 // resource to the current server-side session ID. It never returns the raw
 // Cookie token to an API api.
 func AuthenticateRequestContext(c *hertzapp.RequestContext) (identityservice.AuthContext, bool) {
-	context, err := identityservice.AuthenticateContext(sessionToken(c))
+	if cached, exists := c.Get(identityContextKey); exists {
+		if authContext, valid := cached.(identityservice.AuthContext); valid {
+			return authContext, true
+		}
+	}
+	authContext, err := identityservice.AuthenticateContext(sessionToken(c))
 	if err != nil {
 		writeIdentityError(c, err)
 		return identityservice.AuthContext{}, false
 	}
-	return context, true
+	c.Set(identityContextKey, authContext)
+	c.Set("user_id", int64(authContext.User.ID))
+	return authContext, true
 }
 
 func writeIdentityError(c *hertzapp.RequestContext, err error) {
