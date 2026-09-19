@@ -14,6 +14,8 @@ describe('content pool page', () => {
     expect(source).toContain('关键词搜索')
     expect(source).toContain('result?.items')
     expect(source).toContain('discovery.importResults')
+    expect(source).toContain('loadManualContext')
+    expect(source).toContain('team_id: selectedTeamID()')
   })
 
   it('hides unavailable Douyin author search and keeps keyword pagination', () => {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -274,5 +275,18 @@ func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {
 	updated, err := service.UpdateStrategy(actor, created.ID, DiscoveryStrategy{Name: "new", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"two"}}, Status: StrategyEnabled})
 	if err != nil || updated.Name != "new" || updated.TeamID != team || updated.Status != StrategyEnabled {
 		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+}
+
+func TestAdminManualRunUsesExplicitTeamScope(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()))
+	if _, err := service.CreateManualRunWithTeam(identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}, nil, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"}); !errors.Is(err, ErrDiscoveryInvalid) {
+		t.Fatalf("admin without team err=%v", err)
+	}
+	team := identityservice.TeamID(7)
+	task, err := service.CreateManualRunWithTeam(identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}, &team, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
+	if err != nil || task.TeamID != team {
+		t.Fatalf("task=%+v err=%v", task, err)
 	}
 }

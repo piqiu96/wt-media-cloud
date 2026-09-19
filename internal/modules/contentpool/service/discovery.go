@@ -206,7 +206,11 @@ func (s *discoveryService) createRun(actor identityservice.PublicUser, strategyI
 }
 
 func (s *discoveryService) createManualRun(actor identityservice.PublicUser, platform, operation string, config map[string]any) (model.CrawlTask, error) {
-	team, err := s.scope(actor, nil)
+	return s.createManualRunWithTeam(actor, nil, platform, operation, config)
+}
+
+func (s *discoveryService) createManualRunWithTeam(actor identityservice.PublicUser, requested *identityservice.TeamID, platform, operation string, config map[string]any) (model.CrawlTask, error) {
+	team, err := s.scope(actor, requested)
 	if err != nil {
 		return model.CrawlTask{}, err
 	}

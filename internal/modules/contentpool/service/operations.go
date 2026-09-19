@@ -45,6 +45,10 @@ func CreateRun(actor identityservice.PublicUser, strategyID int64) (model.CrawlT
 func CreateManualRun(actor identityservice.PublicUser, platform, operation string, config map[string]any) (model.CrawlTask, error) {
 	return defaultDiscoveryService().createManualRun(actor, platform, operation, config)
 }
+
+func CreateManualRunWithTeam(actor identityservice.PublicUser, requested *identityservice.TeamID, platform, operation string, config map[string]any) (model.CrawlTask, error) {
+	return defaultDiscoveryService().createManualRunWithTeam(actor, requested, platform, operation, config)
+}
 func RunDue(now time.Time) int                  { return defaultDiscoveryService().runDue(now) }
 func RunNext(ctx context.Context) (bool, error) { return defaultDiscoveryService().runNext(ctx) }
 func ListCrawlTasks(actor identityservice.PublicUser, strategyID *int64) ([]model.CrawlTask, error) {

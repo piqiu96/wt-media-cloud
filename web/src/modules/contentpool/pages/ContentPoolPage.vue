@@ -4,6 +4,8 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoute } from 'vue-router'
 import { createContentPoolClient } from '../../../shared/api/contentPool.js'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
+import { createSessionClient } from '../../../shared/api/session.js'
+import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
@@ -11,6 +13,8 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
+const session = createSessionClient()
+const users = createUsersClient()
 const route = useRoute()
 const isLibrary = computed(() => route.path === '/material-library')
 const rows = ref([])
@@ -33,6 +37,8 @@ const manualResults = ref([])
 const selectedResultKeys = ref([])
 const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
 const manualForm = ref({ platform: 'douyin', url: '', keyword: '' })
+const manualTeamId = ref('')
+const teams = ref([])
 
 const resultColumns = [
   { colKey: 'row-select', type: 'multiple', width: 48 },
@@ -65,7 +71,10 @@ const columns = [
   { colKey: 'op', title: '操作', width: 250, fixed: 'right' },
 ]
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadManualContext()
+})
 
 async function load() {
   loading.value = true
@@ -105,6 +114,24 @@ function manualTitle() {
   return ({ url: '分享链接导入', keyword: '关键词搜索' })[manualMode.value]
 }
 
+async function loadManualContext() {
+  try {
+    const user = await session.me()
+    if (user?.role === 'admin') {
+      const data = await users.listTeams()
+      teams.value = Array.isArray(data) ? data : []
+    } else {
+      manualTeamId.value = user?.team_id || ''
+    }
+  } catch {
+    teams.value = []
+  }
+}
+
+function selectedTeamID() {
+  return manualTeamId.value ? Number(manualTeamId.value) : undefined
+}
+
 function resetManualPagination() {
   manualPagination.value = { nextOffset: 0, maxCursor: 0, hasMore: false }
 }
@@ -141,7 +168,7 @@ async function confirmManual() {
     try {
       const form = manualForm.value
       const urls = form.url.split(/\r?\n|,/).map((value) => value.trim()).filter(Boolean)
-      await discovery.importUrl({ platform: form.platform, ...(urls.length > 1 ? { urls } : { url: urls[0] || '' }) })
+      await discovery.importUrl({ platform: form.platform, team_id: selectedTeamID(), ...(urls.length > 1 ? { urls } : { url: urls[0] || '' }) })
       manualVisible.value = false
       MessagePlugin.success('链接解析任务已创建，完成后内容会自动进入内容池')
     } catch (e) {
@@ -151,7 +178,11 @@ async function confirmManual() {
     }
     return
   }
-  if (!manualResults.value.length) {
+  if (!selectedTeamID()) {
+      MessagePlugin.warning('请选择运营团队')
+      return
+    }
+    if (!manualResults.value.length) {
     await searchManual(true)
     return
   }
@@ -166,7 +197,7 @@ async function confirmSelected() {
   manualLoading.value = true
   try {
     const selected = manualResults.value.filter((item) => selectedResultKeys.value.includes(item.platform_content_id))
-    const result = await discovery.importResults({ platform: manualForm.value.platform, source_type: 'search', items: selected })
+    const result = await discovery.importResults({ platform: manualForm.value.platform, team_id: selectedTeamID(), source_type: 'search', items: selected })
     manualVisible.value = false
     await load()
     MessagePlugin.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
@@ -265,6 +296,7 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
       </t-drawer>
       <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="760px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualResults.length && manualMode !== 'url' ? '加入内容池' : '开始执行' }" @confirm="confirmManual">
         <t-form label-width="88px">
+          <t-form-item label="运营团队"><t-select v-model="manualTeamId" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
           <t-form-item v-if="manualMode === 'url'" label="内容链接"><t-textarea v-model="manualForm.url" :rows="4" placeholder="粘贴视频链接，支持单条或批量（每行一条）" /></t-form-item>
           <t-form-item v-else label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>

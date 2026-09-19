@@ -51,14 +51,15 @@ type strategyRequest struct {
 	Status       model.StrategyStatus    `json:"status"`
 }
 type manualSearchRequest struct {
-	Platform  string   `json:"platform"`
-	Keyword   string   `json:"keyword"`
-	Author    string   `json:"author"`
-	URL       string   `json:"url"`
-	URLs      []string `json:"urls"`
-	Limit     int      `json:"limit"`
-	Offset    int      `json:"offset"`
-	MaxCursor int64    `json:"max_cursor"`
+	TeamID    *identityservice.TeamID `json:"team_id"`
+	Platform  string                  `json:"platform"`
+	Keyword   string                  `json:"keyword"`
+	Author    string                  `json:"author"`
+	URL       string                  `json:"url"`
+	URLs      []string                `json:"urls"`
+	Limit     int                     `json:"limit"`
+	Offset    int                     `json:"offset"`
+	MaxCursor int64                   `json:"max_cursor"`
 }
 
 func actor(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
@@ -276,7 +277,7 @@ func createURLImportTask(c *hertzapp.RequestContext) {
 	if len(urls) > 1 {
 		config["urls"] = urls
 	}
-	item, err := contentservice.CreateManualRun(actor, request.Platform, "url", config)
+	item, err := contentservice.CreateManualRunWithTeam(actor, request.TeamID, request.Platform, "url", config)
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return

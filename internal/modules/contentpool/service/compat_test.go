@@ -78,6 +78,10 @@ func (s *discoveryService) UpdateStrategy(actor identityservice.PublicUser, id i
 func (s *discoveryService) CreateRun(actor identityservice.PublicUser, id int64) (model.CrawlTask, error) {
 	return s.createRun(actor, id, "")
 }
+func (s *discoveryService) CreateManualRunWithTeam(actor identityservice.PublicUser, requested *identityservice.TeamID, platform, operation string, config map[string]any) (model.CrawlTask, error) {
+	return s.createManualRunWithTeam(actor, requested, platform, operation, config)
+}
+
 func (s *discoveryService) CreateManualRun(actor identityservice.PublicUser, platform, operation string, config map[string]any) (model.CrawlTask, error) {
 	return s.createManualRun(actor, platform, operation, config)
 }
