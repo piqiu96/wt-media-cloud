@@ -1,9 +1,9 @@
 name: primary
 host: 127.0.0.1
 port: 3306
-database: wt_media
+database: wt_media_cloud
 username: root
-password: ""
+password: root123
 charset: utf8mb4
 parse_time: true
 location: Local
