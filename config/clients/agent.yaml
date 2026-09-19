@@ -1,8 +1,0 @@
-name: agent
-scheme: http
-host: 127.0.0.1
-port: 8765
-timeout: 7s
-retry:
-  attempts: 2
-  interval: 300ms

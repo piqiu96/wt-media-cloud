@@ -1,0 +1,9 @@
+host = '127.0.0.1'
+name = 'agent'
+port = 8765
+scheme = 'http'
+timeout = '7s'
+
+[retry]
+attempts = 2
+interval = '300ms'
