@@ -15,6 +15,7 @@ import (
 
 // Config is the transport-only schema for one Hertz client instance.
 type Config struct {
+	BaseURL    string           `toml:"base_url"`
 	Timeout    Duration         `toml:"timeout"`
 	Connection ConnectionConfig `toml:"connection"`
 	Retry      RetryConfig      `toml:"retry"`
@@ -62,7 +63,7 @@ type Client struct {
 
 // New builds one validated Hertz client and applies middleware in order.
 func New(cfg Config, middlewares ...hertzclient.Middleware) (*Client, func() error, error) {
-	if err := validate(cfg); err != nil {
+	if err := Validate(cfg); err != nil {
 		return nil, nil, err
 	}
 
@@ -81,6 +82,9 @@ func New(cfg Config, middlewares ...hertzclient.Middleware) (*Client, func() err
 	raw, err := hertzclient.NewClient(options...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build hertz client: %w", err)
+	}
+	raw.RetryIfFunc = func(_ *protocol.Request, _ *protocol.Response, err error) bool {
+		return err != nil
 	}
 	for _, middleware := range middlewares {
 		raw.Use(middleware)
@@ -118,7 +122,8 @@ func retryOptions(cfg RetryConfig) []retry.Option {
 	}
 }
 
-func validate(cfg Config) error {
+// Validate reports whether one HTTP client configuration is complete and safe.
+func Validate(cfg Config) error {
 	if cfg.Timeout.Duration <= 0 {
 		return errors.New("http client timeout must be greater than zero")
 	}

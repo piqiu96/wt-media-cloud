@@ -153,13 +153,13 @@
 - Produces: unchanged typed protocol methods and package lifecycle functions.
 
 **Steps:**
-- [ ] Preserve current protocol assertions in tests while changing transport expectations to Hertz.
-- [ ] Run both client test packages and confirm migration failure.
-- [ ] Replace `net/http` transport fields with Hertz wrappers.
-- [ ] Move client TOML under `clients/http` while leaving credentials unchanged.
-- [ ] Add external observation middleware without leaking credentials or response bodies.
-- [ ] Run `go test ./internal/infra/client/...`.
-- [ ] Commit.
+- [x] Preserve current protocol assertions in tests while changing transport expectations to Hertz.
+- [x] Run both client test packages and confirm migration failure.
+- [x] Replace `net/http` transport fields with Hertz wrappers.
+- [x] Move client TOML under `clients/http` while leaving credentials unchanged.
+- [x] Add external observation middleware without leaking credentials or response bodies.
+- [x] Run `go test ./internal/infra/client/...`.
+- [x] Commit.
 
 ### Task 7: Integrate bootstrap ordering and Hertz logger
 

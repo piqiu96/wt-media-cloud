@@ -137,8 +137,9 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromDir() error = %v", err)
 	}
-	if got, want := cfg.Clients.Douyin.Host, "api.itfaba.com"; got != want {
-		t.Fatalf("Douyin client host = %q, want %q", got, want)
+	douyin, ok := cfg.HTTPClient("douyin")
+	if !ok || douyin.BaseURL != "https://api.itfaba.com" {
+		t.Fatalf("Douyin client = %+v, found=%v", douyin, ok)
 	}
 	if got, want := cfg.Credentials.Douyin.APIKey, "douyin-key"; got != want {
 		t.Fatalf("Douyin API key = %q, want %q", got, want)
@@ -216,13 +217,13 @@ func TestLoadFromDirRejectsUnknownTOMLFieldWithPath(t *testing.T) {
 func TestLoadFromDirRejectsInvalidDurationWithPath(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "clients/agent.toml", "name = \"agent\"\nscheme = \"http\"\nhost = \"127.0.0.1\"\nport = 8765\ntimeout = \"eventually\"\n\n[retry]\nattempts = 2\ninterval = \"300ms\"\n")
+	writeConfigFile(t, dir, "clients/http/agent.toml", "base_url = \"http://127.0.0.1:8765\"\ntimeout = \"eventually\"\n\n[retry]\nattempts = 2\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil {
 		t.Fatal("LoadFromDir() error = nil, want invalid duration error")
 	}
-	if !strings.Contains(err.Error(), filepath.Join(dir, "clients", "agent.toml")) || !strings.Contains(err.Error(), "eventually") {
+	if !strings.Contains(err.Error(), filepath.Join(dir, "clients", "http", "agent.toml")) || !strings.Contains(err.Error(), "eventually") {
 		t.Fatalf("LoadFromDir() error = %v, want file path and invalid duration", err)
 	}
 }
@@ -235,7 +236,8 @@ func TestDurationUsesTimeParseDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromDir() error = %v", err)
 	}
-	if got, want := cfg.Clients.Agent.Timeout.Duration, 7*time.Second; got != want {
+	agent, _ := cfg.HTTPClient("agent")
+	if got, want := agent.Timeout.Duration, 7*time.Second; got != want {
 		t.Fatalf("Agent timeout = %s, want %s", got, want)
 	}
 	if got, want := cfg.Scheduler.DiscoveryInterval.Duration, time.Minute; got != want {
@@ -262,12 +264,17 @@ func writeValidConfig(t *testing.T, root string) {
 	for _, category := range []string{"app", "access", "job", "external", "audit", "panic"} {
 		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	}
-	writeConfigFile(t, root, "clients/agent.toml", "name = \"agent\"\nscheme = \"http\"\nhost = \"127.0.0.1\"\nport = 8765\ntimeout = \"7s\"\n\n[retry]\nattempts = 2\ninterval = \"300ms\"\n")
-	writeConfigFile(t, root, "clients/platforms/douyin.toml", "name = \"douyin\"\nscheme = \"https\"\nhost = \"api.itfaba.com\"\nport = 443\ntimeout = \"30s\"\n\n[retry]\nattempts = 2\ninterval = \"300ms\"\n")
+	writeHTTPClient(t, root, "agent", "http://127.0.0.1:8765", "7s")
+	writeHTTPClient(t, root, "douyin", "https://api.itfaba.com", "30s")
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
 	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
 	writeConfigFile(t, root, "observability/health.toml", "health_path = \"/api/v1/health\"\n")
+}
+
+func writeHTTPClient(t *testing.T, root, name, baseURL, timeout string) {
+	t.Helper()
+	writeConfigFile(t, root, "clients/http/"+name+".toml", "base_url = "+strconv.Quote(baseURL)+"\ntimeout = "+strconv.Quote(timeout)+"\n\n[connection]\ndial_timeout = \"1s\"\n\n[retry]\nattempts = 2\ndelay = \"300ms\"\nmax_delay = \"2s\"\npolicy = \"fixed\"\n")
 }
 
 func validAppTOML(name string) string {

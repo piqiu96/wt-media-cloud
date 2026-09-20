@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	toml "github.com/pelletier/go-toml/v2"
+	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 	pkgconfig "github.com/wt-media/wt-media-cloud/pkg/config"
 )
 
@@ -104,22 +106,23 @@ type RotationConfig struct {
 }
 
 type ClientsConfig struct {
-	Agent  ClientConfig
-	Douyin ClientConfig
+	HTTP []ClientConfig
 }
 
 type ClientConfig struct {
-	Name    string      `toml:"name"`
-	Scheme  string      `toml:"scheme"`
-	Host    string      `toml:"host"`
-	Port    int         `toml:"port"`
-	Timeout Duration    `toml:"timeout"`
-	Retry   RetryConfig `toml:"retry"`
+	Name    string
+	BaseURL string
+	Timeout Duration
 }
 
-type RetryConfig struct {
-	Attempts int      `toml:"attempts"`
-	Interval Duration `toml:"interval"`
+// HTTPClient returns one semantic client connection by filename-derived name.
+func (c Config) HTTPClient(name string) (ClientConfig, bool) {
+	for _, client := range c.Clients.HTTP {
+		if client.Name == name {
+			return client, true
+		}
+	}
+	return ClientConfig{}, false
 }
 
 type CredentialsConfig struct {
@@ -223,12 +226,11 @@ func LoadFromDir(root string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	if err := requiredTOML(filepath.Join(root, "clients", "agent.toml"), &cfg.Clients.Agent); err != nil {
+	clients, err := loadHTTPClients(filepath.Join(root, "clients", "http"))
+	if err != nil {
 		return Config{}, err
 	}
-	if err := requiredTOML(filepath.Join(root, "clients", "platforms", "douyin.toml"), &cfg.Clients.Douyin); err != nil {
-		return Config{}, err
-	}
+	cfg.Clients.HTTP = clients
 	if err := optionalTOML(filepath.Join(root, "credentials", "agent.toml"), &cfg.Credentials.Agent); err != nil {
 		return Config{}, err
 	}
@@ -277,10 +279,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("logger.%s.rotation.max_age and max_backups must not be negative", name)
 		}
 	}
-	if err := validateClient("agent", c.Clients.Agent); err != nil {
-		return err
-	}
-	if err := validateClient("douyin", c.Clients.Douyin); err != nil {
+	if err := validateHTTPClients(c.Clients.HTTP); err != nil {
 		return err
 	}
 	if c.Scheduler.ProxyExpiryInterval.Duration <= 0 {
@@ -329,23 +328,59 @@ func validateDatabases(databases []DatabaseConfig) error {
 	return nil
 }
 
-func validateClient(name string, client ClientConfig) error {
-	if client.Name == "" || client.Scheme == "" || client.Host == "" || client.Port <= 0 {
-		return fmt.Errorf("client.%s requires name, scheme, host, and port", name)
+func validateHTTPClients(clients []ClientConfig) error {
+	seen := make(map[string]struct{}, len(clients))
+	for _, client := range clients {
+		if _, duplicate := seen[client.Name]; duplicate {
+			return fmt.Errorf("duplicate http client name %q", client.Name)
+		}
+		seen[client.Name] = struct{}{}
+		if strings.TrimSpace(client.BaseURL) == "" {
+			return fmt.Errorf("http client %q base_url is required", client.Name)
+		}
+		parsed, err := url.Parse(strings.TrimSpace(client.BaseURL))
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("http client %q base_url must be an absolute http or https URL", client.Name)
+		}
+		if client.Timeout.Duration <= 0 {
+			return fmt.Errorf("http client %q timeout must be greater than zero", client.Name)
+		}
 	}
-	if client.Scheme != "http" && client.Scheme != "https" {
-		return fmt.Errorf("client.%s.scheme must be http or https", name)
-	}
-	if client.Timeout.Duration <= 0 {
-		return fmt.Errorf("client.%s.timeout must be greater than zero", name)
-	}
-	if client.Retry.Attempts <= 0 {
-		return fmt.Errorf("client.%s.retry.attempts must be greater than zero", name)
-	}
-	if client.Retry.Interval.Duration < 0 {
-		return fmt.Errorf("client.%s.retry.interval must not be negative", name)
+	for _, name := range []string{"agent", "douyin"} {
+		if _, exists := seen[name]; !exists {
+			return fmt.Errorf("http client %q is required", name)
+		}
 	}
 	return nil
+}
+
+func loadHTTPClients(directory string) ([]ClientConfig, error) {
+	documents, err := pkgconfig.LoadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("http clients directory %s does not exist", directory)
+	}
+	if err != nil {
+		return nil, err
+	}
+	clients := make([]ClientConfig, 0, len(documents))
+	for _, document := range documents {
+		if document.Format != pkgconfig.FormatTOML {
+			return nil, fmt.Errorf("Cloud config must use TOML: %s", document.Path)
+		}
+		var transport httpclient.Config
+		if err := decodeDocument(document.Path, document, &transport); err != nil {
+			return nil, err
+		}
+		if err := httpclient.Validate(transport); err != nil {
+			return nil, fmt.Errorf("http client %s: %w", document.Name, err)
+		}
+		clients = append(clients, ClientConfig{
+			Name:    document.Name,
+			BaseURL: strings.TrimSpace(transport.BaseURL),
+			Timeout: Duration{Duration: transport.Timeout.Duration},
+		})
+	}
+	return clients, nil
 }
 
 func loadDatabases(directory string) ([]DatabaseConfig, error) {
@@ -429,6 +464,7 @@ func loadCloudDocument(path string) (pkgconfig.Document, error) {
 func clone(source Config) Config {
 	cloned := source
 	cloned.Databases = append([]DatabaseConfig(nil), source.Databases...)
+	cloned.Clients.HTTP = append([]ClientConfig(nil), source.Clients.HTTP...)
 	cloned.Credentials.Douyin.Headers = cloneStringMap(source.Credentials.Douyin.Headers)
 	return cloned
 }

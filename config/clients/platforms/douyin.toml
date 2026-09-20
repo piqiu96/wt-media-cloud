@@ -1,9 +1,0 @@
-host = 'api.itfaba.com'
-name = 'douyin'
-port = 443
-scheme = 'https'
-timeout = '30s'
-
-[retry]
-attempts = 2
-interval = '300ms'
