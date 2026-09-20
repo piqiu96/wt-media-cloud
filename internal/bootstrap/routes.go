@@ -66,7 +66,3 @@ func registerHealthRoutes(h *server.Hertz) {
 		api.Success(c, map[string]string{"status": "ok"})
 	})
 }
-
-func configServerAddr() string {
-	return config.Get().App.Server.HTTPAddr
-}

@@ -1,13 +1,11 @@
 # Cloud Scripts
 
-Expose common commands with stable names.
-
 | Script | Purpose |
 |---|---|
 | `bootstrap.sh` | Download Go modules and install Web dependencies with `npm ci`. |
 | `test.sh` | Run Cloud Go tests and Cloud Web Vitest tests. |
 | `build.sh` | Build the Cloud server binary and Cloud Web Vite assets. |
-| `migrate.sh` | Apply MySQL migrations from `migrations/` using `WT_MEDIA_MYSQL_DSN`. |
+| `migrate.sh` | Apply migrations from `migrations/` using `config/database/primary.toml`. |
 | `start.sh` | Start the Cloud server in the background, wait for `/healthz`, and write a PID file. |
 | `health.sh` | Probe `/healthz` and `/api/v1/health`. |
 | `stop.sh` | Stop the process recorded by the PID file. |
@@ -15,15 +13,8 @@ Expose common commands with stable names.
 | `run-discovery-scheduler.sh` | Run one due-strategy scan by default; pass `--interval 1m` without `--once` for a standalone scheduler loop. |
 | `run-discovery-worker.sh` | Drain one bounded pending-task batch by default; pass `--interval 5s` without `--once` for a standalone worker loop. |
 
-Local scripts source `scripts/local-env.sh` before starting or migrating Cloud. By default local development and acceptance use:
+Runtime connection values come from `config/`. In particular, migration reads `config/database/primary.toml`, and the server listen address comes from `config/app.toml`.
 
-- MySQL database: `wt_media_cloud`
-- MySQL DSN: `root:root123@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&multiStatements=true`
-- HTTP address: `127.0.0.1:18080`
-- Cookie secure flag: `WT_MEDIA_SESSION_COOKIE_SECURE=false`
+`WT_MEDIA_CLOUD_HTTP_ADDR` controls only the health-probe address used by scripts. Keep it aligned with `config/app.toml`. `WT_MEDIA_CLOUD_PID_FILE`, `WT_MEDIA_CLOUD_LOG_FILE`, `WT_MEDIA_CLOUD_BINARY_FILE`, and `WT_MEDIA_CLOUD_GOPATH` remain script-level operational overrides.
 
-Do not create a new local database for every CHG/Task. Apply table changes to the stable local database through migrations or explicit acceptance data updates. Override `WT_MEDIA_MYSQL_DSN` only when intentionally running an isolated test.
-
-`WT_MEDIA_CLOUD_HTTP_ADDR` controls the listen address. `WT_MEDIA_CLOUD_PID_FILE` and `WT_MEDIA_CLOUD_LOG_FILE` can override the default files under `.cache/`. Set `WT_MEDIA_CLOUD_GOPATH` when you want scripts to use a project-local Go module cache instead of the current shell `GOPATH`.
-
-The normal Cloud server starts API Server, Discovery Scheduler, and Discovery Worker together. The two discovery scripts are separate operational entry points: Scheduler only creates `pending crawl_tasks`; Worker exclusively claims and executes them. Do not replace these with a script that calls the crawler directly.
+The normal Cloud server starts the API Server, Discovery Scheduler, and Discovery Worker together. Scheduler and Worker scripts are separate operational entrypoints: the Scheduler only creates pending `crawl_tasks`; the Worker exclusively claims and executes them.

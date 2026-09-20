@@ -15,12 +15,13 @@ func RunProxyExpiry(ctx context.Context) error {
 	}
 	jobLogger := logger.Job()
 	for _, proxy := range proxies {
-		jobLogger.Info("proxy expiry checked",
-			"module", "jobs.proxy_expiry",
-			"proxy_id", proxy.ID,
-			"host", proxy.Host,
-			"port", proxy.Port,
-			"status", proxy.LastCheckResult,
+		jobLogger.Infof(
+			"proxy expiry checked module=%s proxy_id=%s host=%s port=%d status=%s",
+			"jobs.proxy_expiry",
+			proxy.ID,
+			proxy.Host,
+			proxy.Port,
+			proxy.LastCheckResult,
 		)
 	}
 	return nil

@@ -65,7 +65,6 @@ type Account struct {
 	UserID                identitymodel.UserID  `json:"user_id"`
 	TeamID                *identitymodel.TeamID `json:"team_id"`
 	GameIDs               []string              `json:"game_ids"`
-	GameID                string                `json:"game_id"`
 	Platform              Platform              `json:"platform"`
 	PlatformAccountID     string                `json:"platform_account_id,omitempty"`
 	Name                  string                `json:"name,omitempty"`
@@ -93,7 +92,6 @@ type AccountRecord struct {
 
 type AccountGroupFilters struct {
 	GameIDs        []string       `json:"game_ids,omitempty"`
-	GameID         string         `json:"game_id,omitempty"`
 	Platform       Platform       `json:"platform,omitempty"`
 	BusinessStatus BusinessStatus `json:"business_status,omitempty"`
 	LoginStatus    LoginStatus    `json:"login_status,omitempty"`

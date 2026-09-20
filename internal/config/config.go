@@ -28,14 +28,12 @@ var current struct {
 }
 
 type Config struct {
-	App           AppConfig
-	Databases     []DatabaseConfig
-	Cache         CacheConfig
-	Loggers       LoggerConfigs
-	Clients       ClientsConfig
-	Credentials   CredentialsConfig
-	Scheduler     SchedulerConfig
-	Observability ObservabilityConfig
+	App         AppConfig
+	Databases   []DatabaseConfig
+	Loggers     LoggerConfigs
+	Clients     ClientsConfig
+	Credentials CredentialsConfig
+	Scheduler   SchedulerConfig
 }
 
 type AppConfig struct {
@@ -71,14 +69,6 @@ type DatabasePoolConfig struct {
 	MaxIdle     int      `toml:"max_idle"`
 	MaxOpen     int      `toml:"max_open"`
 	MaxLifetime Duration `toml:"max_lifetime"`
-}
-
-type CacheConfig struct {
-	Redis RedisConfig
-}
-
-type RedisConfig struct {
-	URL string `toml:"url"`
 }
 
 type LoggerConfigs struct {
@@ -147,10 +137,6 @@ type SchedulerConfig struct {
 	WorkerBatchSize     int      `toml:"worker_batch_size"`
 }
 
-type ObservabilityConfig struct {
-	HealthPath string `toml:"health_path"`
-}
-
 // Duration is a strict YAML duration parsed with time.ParseDuration.
 type Duration struct {
 	time.Duration
@@ -207,9 +193,6 @@ func LoadFromDir(root string) (Config, error) {
 	}
 	cfg.Databases = databases
 
-	if err := optionalTOML(filepath.Join(root, "cache", "redis.toml"), &cfg.Cache.Redis); err != nil {
-		return Config{}, err
-	}
 	loggerFiles := []struct {
 		name string
 		dst  *LoggerConfig
@@ -238,9 +221,6 @@ func LoadFromDir(root string) (Config, error) {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "scheduler", "scheduler.toml"), &cfg.Scheduler); err != nil {
-		return Config{}, err
-	}
-	if err := optionalTOML(filepath.Join(root, "observability", "health.toml"), &cfg.Observability); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {

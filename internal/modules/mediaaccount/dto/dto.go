@@ -2,8 +2,6 @@
 package dto
 
 import (
-	"time"
-
 	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
 )
@@ -11,7 +9,6 @@ import (
 type CreateAccountInput struct {
 	UserID           identitymodel.UserID
 	GameIDs          []string
-	GameID           string
 	Name             string
 	Platform         model.Platform
 	OriginalCookie   string
@@ -69,14 +66,12 @@ type UpdateAccountInput struct {
 	LoginStatus    model.LoginStatus
 	Remark         *string
 	GameIDs        *[]string
-	GameID         *string
 	Name           *string
 }
 
 type AccountFilter struct {
 	UserID         identitymodel.UserID
 	GameIDs        []string
-	GameID         string
 	Platform       model.Platform
 	BusinessStatus model.BusinessStatus
 	LoginStatus    model.LoginStatus
@@ -98,5 +93,3 @@ type UpdateAccountGroupInput struct {
 	Name    *string              `json:"name"`
 	Filters *AccountGroupFilters `json:"filters"`
 }
-
-var _ = time.Time{}

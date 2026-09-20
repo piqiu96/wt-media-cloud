@@ -22,10 +22,11 @@ func External(name string) hertzclient.Middleware {
 			if err != nil {
 				logger.External().CtxErrorf(
 					ctx,
-					"external http failed name=%s method=%s uri=%s error=%s duration=%s",
+					"external http failed name=%s method=%s host=%s path=%s error=%s duration=%s",
 					name,
 					string(request.Header.Method()),
-					request.URI().String(),
+					string(request.URI().Host()),
+					string(request.URI().Path()),
 					err.Error(),
 					duration,
 				)
@@ -34,10 +35,11 @@ func External(name string) hertzclient.Middleware {
 
 			logger.External().CtxInfof(
 				ctx,
-				"external http completed name=%s method=%s uri=%s status=%d duration=%s",
+				"external http completed name=%s method=%s host=%s path=%s status=%d duration=%s",
 				name,
 				string(request.Header.Method()),
-				request.URI().String(),
+				string(request.URI().Host()),
+				string(request.URI().Path()),
 				response.StatusCode(),
 				duration,
 			)

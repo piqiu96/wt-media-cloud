@@ -70,7 +70,7 @@ func createUserWithAudit(db *gorm.DB, user model.User, event model.AuditEvent) (
 
 func createUserTx(tx *gorm.DB, user model.User) (model.UserID, error) {
 	_, err := execSQL(tx,
-		`INSERT INTO users (legacy_id, username, password_hash, role, status, team_id, created_at, updated_at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (username, password_hash, role, status, team_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		user.Username, user.PasswordHash, user.Role, user.Status, user.TeamID, user.CreatedAt, user.UpdatedAt,
 	)
 	if err != nil {

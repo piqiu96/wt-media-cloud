@@ -235,13 +235,6 @@ func (s *discoveryService) runNext(ctx context.Context) (bool, error) {
 		return true, s.failClaimedTask(task, ErrDiscoveryInvalid)
 	}
 	operation := strings.TrimSpace(fmt.Sprint(task.Snapshot["operation"]))
-	if (operation == "" || operation == "<nil>") && task.StrategyID != nil {
-		if strategy, ok, e := s.store.FindStrategy(*task.StrategyID); e != nil {
-			return true, s.failClaimedTask(task, e)
-		} else if ok {
-			operation = strategy.StrategyType
-		}
-	}
 	if operation != "url" && operation != "keyword" && operation != "author" {
 		return true, s.failClaimedTask(task, ErrDiscoveryInvalid)
 	}

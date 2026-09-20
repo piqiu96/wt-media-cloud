@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/json"
 	"errors"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,15 +19,12 @@ func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
 	account, err := service.CreateAccount(actor, CreateAccountInput{
-		GameID:         "game-a",
+		GameIDs:        []string{"game-a"},
 		Platform:       PlatformBilibili,
 		OriginalCookie: "secret-cookie",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
-	}
-	if account.UserID != actor.ID || account.GameID != "game-a" {
-		t.Fatalf("account scope = %#v", account)
 	}
 	if account.IdentificationStatus != IdentificationPending || account.BusinessStatus != BusinessEnabled || account.LoginStatus != LoginUnknown {
 		t.Fatalf("account defaults = %#v", account)
@@ -58,12 +54,9 @@ func TestServiceAllowsLedgerAccountWithoutGame(t *testing.T) {
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
-	account, err := service.CreateAccount(actor, CreateAccountInput{Platform: PlatformBilibili, Remark: "先建台账后绑定游戏"})
+	_, err := service.CreateAccount(actor, CreateAccountInput{Platform: PlatformBilibili, Remark: "先建台账后绑定游戏"})
 	if err != nil {
 		t.Fatalf("CreateAccount(no game) error = %v", err)
-	}
-	if account.GameID != "" || account.BusinessStatus != BusinessEnabled || account.LoginStatus != LoginUnknown {
-		t.Fatalf("account defaults = %#v", account)
 	}
 }
 
@@ -71,7 +64,7 @@ func TestServiceRejectsCrossUserScope(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := mediaActor(1, 10, identityservice.RoleSeniorOperator)
 
-	_, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameID: "game-a", Platform: PlatformDouyin})
+	_, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("cross-user error = %v, want ErrForbidden", err)
 	}
@@ -91,11 +84,8 @@ func TestServiceAllowsEnabledPublicGamesAndNormalizesTheirSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
-	if want := []string{"game-a", "game-b"}; !reflect.DeepEqual(account.GameIDs, want) {
+	if want := []string{"game-a", "game-b"}; strings.Join(account.GameIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("GameIDs = %#v, want %#v", account.GameIDs, want)
-	}
-	if account.GameID != "game-a" {
-		t.Fatalf("compatibility GameID = %q, want game-a", account.GameID)
 	}
 }
 
@@ -115,16 +105,13 @@ func TestServiceReplacesAndClearsEntireGameSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateAccount(replace) error = %v", err)
 	}
-	if want := []string{"game-b", "game-z"}; !reflect.DeepEqual(updated.GameIDs, want) {
-		t.Fatalf("replaced GameIDs = %#v, want %#v", updated.GameIDs, want)
-	}
 
 	updated, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{GameIDs: gameIDsPtr([]string{})})
 	if err != nil {
 		t.Fatalf("UpdateAccount(clear) error = %v", err)
 	}
-	if len(updated.GameIDs) != 0 || updated.GameID != "" {
-		t.Fatalf("cleared games = %#v", updated)
+	if len(updated.GameIDs) != 0 {
+		t.Fatalf("cleared GameIDs = %#v", updated.GameIDs)
 	}
 }
 
@@ -146,12 +133,12 @@ func TestServiceAdminCanAssignGlobalAccount(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := identityservice.PublicUser{ID: identityservice.UserID(99), Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 
-	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameID: "game-z", Platform: PlatformBaijiahao})
+	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-z"}, Platform: PlatformBaijiahao})
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
-	if account.UserID != identityservice.UserID(2) || account.GameID != "game-z" {
-		t.Fatalf("account = %#v", account)
+	if account.UserID != identityservice.UserID(2) {
+		t.Fatalf("account user = %d, want 2", account.UserID)
 	}
 }
 
@@ -164,11 +151,11 @@ func TestServiceSeniorCanManageButCannotCreateSameTeamGameAccountForAnotherUser(
 	service := newAccountService(store, withUserResolver(users), withGameResolver(defaultTestGameResolver()))
 	actor := mediaActor(1, teamID, identityservice.RoleSeniorOperator)
 
-	if _, err := service.CreateAccount(actor, CreateAccountInput{UserID: 2, GameID: "game-a", Platform: PlatformDouyin}); !errors.Is(err, ErrForbidden) {
+	if _, err := service.CreateAccount(actor, CreateAccountInput{UserID: 2, GameIDs: []string{"game-a"}, Platform: PlatformDouyin}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("CreateAccount(same team/game) error=%v, want ErrForbidden", err)
 	}
 	store.records["account-2"] = AccountRecord{Account: Account{
-		ID: "account-2", UserID: 2, TeamID: &teamID, GameID: "game-a", Platform: PlatformDouyin,
+		ID: "account-2", UserID: 2, TeamID: &teamID, GameIDs: []string{"game-a"}, Platform: PlatformDouyin,
 	}}
 	if _, err := service.UpdateAccount(actor, "account-2", UpdateAccountInput{BusinessStatus: BusinessDisabled}); err != nil {
 		t.Fatalf("UpdateAccount(same team/game) error=%v", err)
@@ -179,7 +166,7 @@ func TestFullCookieRecordRejectsSeniorForAnotherUsersAccount(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identityservice.TeamID(10)
 	store.records["account-1"] = AccountRecord{
-		Account:        Account{ID: "account-1", UserID: 2, TeamID: &teamID, GameID: "game-a"},
+		Account:        Account{ID: "account-1", UserID: 2, TeamID: &teamID, GameIDs: []string{"game-a"}},
 		OriginalCookie: "secret-cookie",
 	}
 	service := newAccountService(store)
@@ -208,7 +195,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
-	first, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili, OriginalCookie: "first-secret"})
+	first, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili, OriginalCookie: "first-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +207,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 		t.Fatalf("identified = %#v", identified)
 	}
 
-	candidate, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili, OriginalCookie: "candidate-secret"})
+	candidate, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili, OriginalCookie: "candidate-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +231,7 @@ func TestServiceIdentityUniquenessIsPerUser(t *testing.T) {
 	admin := identityservice.PublicUser{ID: identityservice.UserID(99), Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 
 	for _, userID := range []identityservice.UserID{1, 2} {
-		account, err := service.CreateAccount(admin, CreateAccountInput{UserID: userID, GameID: "game-a", Platform: PlatformDouyin})
+		account, err := service.CreateAccount(admin, CreateAccountInput{UserID: userID, GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -258,7 +245,7 @@ func TestServiceValidatesBusinessAndLoginStatusesIndependently(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformDouyin})
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
 
 	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{BusinessStatus: BusinessDisabled, LoginStatus: LoginVerificationNeeded})
 	if err != nil {
@@ -277,8 +264,8 @@ func TestServiceBulkTagsAndFilters(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformDouyin})
-	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 
 	if err := service.AddTags(actor, []string{first.ID, second.ID}, []string{" launch ", "vip", "vip"}); err != nil {
 		t.Fatalf("AddTags() error = %v", err)
@@ -301,7 +288,7 @@ func TestServiceRejectsTaggingAnotherUsersAccount(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	admin := identityservice.PublicUser{ID: identityservice.UserID(99), Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
-	account, _ := service.CreateAccount(admin, CreateAccountInput{UserID: identityservice.UserID(2), GameID: "game-a", Platform: PlatformDouyin})
+	account, _ := service.CreateAccount(admin, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
 	err := service.AddTags(actor, []string{account.ID}, []string{"forbidden"})
@@ -315,8 +302,8 @@ func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 	resolver := &fakeProfileResolver{profiles: map[string]identityservice.UserID{"profile-1": 1, "profile-2": 2}, inactive: map[string]bool{}}
 	service := newTestServiceWithProfiles(store, resolver)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformDouyin})
-	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformDouyin})
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
 
 	bound, err := service.BindProfile(actor, first.ID, "profile-1")
 	if err != nil || bound.BrowserProfileID != "profile-1" {
@@ -344,7 +331,7 @@ func TestServiceUnbindsProfileAndRejectsDisabledBinding(t *testing.T) {
 	resolver := &fakeProfileResolver{profiles: map[string]identityservice.UserID{"profile-1": 1}, inactive: map[string]bool{}}
 	service := newTestServiceWithProfiles(store, resolver)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 	bound, err := service.BindProfile(actor, account.ID, "profile-1")
 	if err != nil {
 		t.Fatalf("BindProfile() error=%v", err)
@@ -357,7 +344,7 @@ func TestServiceUnbindsProfileAndRejectsDisabledBinding(t *testing.T) {
 	if unbound.BrowserProfileID != "" || unbound.LoginStatus != LoginUnknown {
 		t.Fatalf("unbound account = %#v", unbound)
 	}
-	store.records[account.ID] = AccountRecord{Account: Account{ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili, BusinessStatus: BusinessDisabled, LoginStatus: LoginUnknown}}
+	store.records[account.ID] = AccountRecord{Account: Account{ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili, BusinessStatus: BusinessDisabled, LoginStatus: LoginUnknown}}
 	if _, err := service.BindProfile(actor, account.ID, "profile-1"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("disabled BindProfile() error=%v, want ErrInvalidInput", err)
 	}
@@ -371,9 +358,9 @@ func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testi
 	tasks := &fakeSensitiveTasks{}
 	service := newTestServiceForAccountCheck(store, facts, tasks)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 	store.records[account.ID] = AccountRecord{Account: Account{
-		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
 		BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
 	}}
 
@@ -397,14 +384,14 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
-	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 	store.records[first.ID] = AccountRecord{Account: Account{
-		ID: first.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		ID: first.ID, UserID: actor.ID, TeamID: actor.TeamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
 		PlatformAccountID: "uid-1", IdentificationStatus: IdentificationIdentified, BusinessStatus: BusinessEnabled, LoginStatus: LoginNormal,
 	}}
 	store.records[second.ID] = AccountRecord{Account: Account{
-		ID: second.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		ID: second.ID, UserID: actor.ID, TeamID: actor.TeamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
 		BrowserProfileID: "profile-2", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
 	}}
 
@@ -472,12 +459,12 @@ func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
 				proxyFacts: map[string]fakeProfileProxyFact{"profile-1": tc.proxyFact},
 			}
 			service := newTestServiceForAccountCheck(store, facts, &fakeSensitiveTasks{})
-			account, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+			account, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 			if err != nil {
 				t.Fatal(err)
 			}
 			store.records[account.ID] = AccountRecord{Account: Account{
-				ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+				ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
 				BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
 			}}
 
@@ -503,7 +490,7 @@ func TestServiceCreateAccountStoresName(t *testing.T) {
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
 	account, err := service.CreateAccount(actor, CreateAccountInput{
-		GameID: "game-a", Platform: PlatformBilibili, Name: "  测试昵称  ",
+		GameIDs: []string{"game-a"}, Platform: PlatformBilibili, Name: "  测试昵称  ",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
@@ -521,7 +508,7 @@ func TestServiceUpdateAccountName(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili, Name: "原名"})
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili, Name: "原名"})
 
 	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Name: strPtr("  新名  ")})
 	if err != nil {
@@ -546,10 +533,10 @@ func TestNonAdminCannotUseGameOutsideAssignedScope(t *testing.T) {
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	actor.GameIDs = []string{"game-a"}
 
-	if _, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-b", Platform: PlatformBilibili}); !errors.Is(err, ErrForbidden) {
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-b"}, Platform: PlatformBilibili}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("CreateAccount(outside scope) error = %v, want ErrForbidden", err)
 	}
-	account, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	account, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 	if err != nil {
 		t.Fatalf("CreateAccount(in scope) error = %v", err)
 	}
@@ -565,7 +552,7 @@ func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili})
+	account, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
 
 	// name 为空时回填
 	updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
@@ -580,7 +567,7 @@ func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
 
 	// 已有 name 不被覆盖
 	store.records[account.ID] = AccountRecord{Account: Account{
-		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameID: "game-a", Platform: PlatformBilibili,
+		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
 		PlatformAccountID: "uid-1", Name: "已有名", IdentificationStatus: IdentificationIdentified,
 		BusinessStatus: BusinessEnabled, LoginStatus: LoginNormal,
 	}}
@@ -599,8 +586,8 @@ func TestServiceFiltersByStatusAndSearch(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	first, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili, Remark: "重点账号"})
-	second, _ := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBaijiahao, Remark: "普通账号"})
+	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili, Remark: "重点账号"})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaijiahao, Remark: "普通账号"})
 	firstRecord, _, _ := store.Find(first.ID)
 	firstRecord.BusinessStatus = BusinessDisabled
 	firstRecord.LoginStatus = LoginExpired
@@ -675,10 +662,10 @@ func TestServiceAccountGroupApplyFilters(t *testing.T) {
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
-	if _, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBilibili}); err != nil {
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili}); err != nil {
 		t.Fatalf("create bilibili: %v", err)
 	}
-	if _, err := service.CreateAccount(actor, CreateAccountInput{GameID: "game-a", Platform: PlatformBaijiahao}); err != nil {
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaijiahao}); err != nil {
 		t.Fatalf("create baijiahao: %v", err)
 	}
 	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{Name: "仅B站", Filters: AccountGroupFilters{Platform: PlatformBilibili}})
@@ -780,7 +767,6 @@ func (s *memoryStore) Create(record AccountRecord) (string, error) {
 	record.ID = strconv.FormatInt(s.accountSeq, 10)
 	s.gameIDs[record.ID] = append([]string(nil), record.GameIDs...)
 	record.GameIDs = nil
-	record.GameID = ""
 	s.records[record.ID] = record
 	return record.ID, nil
 }
@@ -813,7 +799,6 @@ func (s *memoryStore) Update(record AccountRecord, replaceGameIDs *[]string) err
 		s.gameIDs[record.ID] = append([]string(nil), (*replaceGameIDs)...)
 	}
 	record.GameIDs = nil
-	record.GameID = ""
 	s.records[record.ID] = record
 	return nil
 }
@@ -851,7 +836,6 @@ func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {
 
 func (s *memoryStore) withGameIDs(record AccountRecord) AccountRecord {
 	record.GameIDs = append([]string(nil), s.gameIDs[record.ID]...)
-	record.GameID = compatibilityGameID(record.GameIDs)
 	return record
 }
 

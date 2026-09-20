@@ -288,17 +288,7 @@ func loadGameIDs(db *gorm.DB, records []model.AccountRecord) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for index := range records {
-		records[index].GameID = compatibilityGameID(records[index].GameIDs)
-	}
 	return nil
-}
-
-func compatibilityGameID(gameIDs []string) string {
-	if len(gameIDs) == 0 {
-		return ""
-	}
-	return gameIDs[0]
 }
 
 func Delete(id string) error {

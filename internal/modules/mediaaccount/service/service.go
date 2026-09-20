@@ -172,7 +172,7 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 	if userID <= 0 {
 		userID = actor.ID
 	}
-	gameIDs, err := s.resolveCreateGameIDs(input.GameIDs, input.GameID)
+	gameIDs, err := s.resolveCreateGameIDs(input.GameIDs)
 	if err != nil {
 		return Account{}, err
 	}
@@ -209,7 +209,6 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 			UserID:               userID,
 			TeamID:               teamID,
 			GameIDs:              gameIDs,
-			GameID:               compatibilityGameID(gameIDs),
 			Platform:             platform,
 			Name:                 name,
 			Remark:               remark,
@@ -291,14 +290,6 @@ func (s *accountService) ListAccounts(actor identityservice.PublicUser, filter A
 		return nil, ErrForbidden
 	}
 	filter.GameIDs = normalizeGameIDs(filter.GameIDs)
-	if filter.GameID = strings.TrimSpace(filter.GameID); filter.GameID != "" {
-		if len(filter.GameIDs) > 0 && (len(filter.GameIDs) != 1 || filter.GameIDs[0] != filter.GameID) {
-			return nil, ErrInvalidInput
-		}
-		if len(filter.GameIDs) == 0 {
-			filter.GameIDs = []string{filter.GameID}
-		}
-	}
 	if err := s.validateGameIDs(filter.GameIDs); err != nil {
 		return nil, err
 	}
@@ -378,13 +369,12 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 		}
 		record.Remark = remark
 	}
-	replaceGameIDs, err := s.resolveUpdateGameIDs(input.GameIDs, input.GameID)
+	replaceGameIDs, err := s.resolveUpdateGameIDs(input.GameIDs)
 	if err != nil {
 		return Account{}, err
 	}
 	if replaceGameIDs != nil {
 		record.GameIDs = *replaceGameIDs
-		record.GameID = compatibilityGameID(record.GameIDs)
 	}
 	owner := actor
 	if record.UserID != actor.ID {
@@ -410,7 +400,7 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 		}
 		record.Name = name
 	}
-	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameIDs == nil && input.GameID == nil && input.Name == nil {
+	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameIDs == nil && input.Name == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()
@@ -883,7 +873,6 @@ func (s *accountService) ListAccountsByGroup(actor identityservice.PublicUser, g
 	}
 	filter := AccountFilter{UserID: actor.ID}
 	filter.GameIDs = append([]string(nil), group.Filters.GameIDs...)
-	filter.GameID = group.Filters.GameID
 	if group.Filters.Platform != "" {
 		filter.Platform = group.Filters.Platform
 	}
@@ -1006,52 +995,25 @@ func (s *accountService) normalizeGroupFilters(filters AccountGroupFilters) (Acc
 		return AccountGroupFilters{}, ErrInvalidInput
 	}
 	filters.GameIDs = normalizeGameIDs(filters.GameIDs)
-	if filters.GameID = strings.TrimSpace(filters.GameID); filters.GameID != "" {
-		if len(filters.GameIDs) > 0 && (len(filters.GameIDs) != 1 || filters.GameIDs[0] != filters.GameID) {
-			return AccountGroupFilters{}, ErrInvalidInput
-		}
-		if len(filters.GameIDs) == 0 {
-			filters.GameIDs = []string{filters.GameID}
-		}
-	}
 	if err := s.validateGameIDs(filters.GameIDs); err != nil {
 		return AccountGroupFilters{}, err
 	}
 	return filters, nil
 }
 
-func (s *accountService) resolveCreateGameIDs(gameIDs []string, gameID string) ([]string, error) {
+func (s *accountService) resolveCreateGameIDs(gameIDs []string) ([]string, error) {
 	gameIDs = normalizeGameIDs(gameIDs)
-	gameID = strings.TrimSpace(gameID)
-	if gameID != "" {
-		if len(gameIDs) > 0 && (len(gameIDs) != 1 || gameIDs[0] != gameID) {
-			return nil, ErrInvalidInput
-		}
-		if len(gameIDs) == 0 {
-			gameIDs = []string{gameID}
-		}
-	}
 	if err := s.validateGameIDs(gameIDs); err != nil {
 		return nil, err
 	}
 	return gameIDs, nil
 }
 
-func (s *accountService) resolveUpdateGameIDs(gameIDs *[]string, gameID *string) (*[]string, error) {
-	if gameIDs == nil && gameID == nil {
+func (s *accountService) resolveUpdateGameIDs(gameIDs *[]string) (*[]string, error) {
+	if gameIDs == nil {
 		return nil, nil
 	}
-	if gameIDs != nil {
-		resolved, err := s.resolveCreateGameIDs(*gameIDs, "")
-		if err != nil {
-			return nil, err
-		}
-		if gameID != nil && strings.TrimSpace(*gameID) != "" && (len(resolved) != 1 || resolved[0] != strings.TrimSpace(*gameID)) {
-			return nil, ErrInvalidInput
-		}
-		return &resolved, nil
-	}
-	resolved, err := s.resolveCreateGameIDs(nil, *gameID)
+	resolved, err := s.resolveCreateGameIDs(*gameIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1102,16 +1064,6 @@ func normalizeGameIDs(gameIDs []string) []string {
 
 // NormalizeGameIDs canonicalizes game identifiers at HTTP and persistence boundaries.
 func NormalizeGameIDs(gameIDs []string) []string { return normalizeGameIDs(gameIDs) }
-
-func compatibilityGameID(gameIDs []string) string {
-	if len(gameIDs) == 0 {
-		return ""
-	}
-	return gameIDs[0]
-}
-
-// CompatibilityGameID preserves the legacy single-game projection.
-func CompatibilityGameID(gameIDs []string) string { return compatibilityGameID(gameIDs) }
 
 func (s *accountService) authorizedRecord(actor identityservice.PublicUser, accountID string) (AccountRecord, error) {
 	if !validActor(actor) || strings.TrimSpace(accountID) == "" {

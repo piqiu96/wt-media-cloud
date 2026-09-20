@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,6 +97,7 @@ func testDouyinClient(t *testing.T, server *httptest.Server) *douyinclient.Clien
 }
 
 func TestDouyinCrawlerBatchURLChunksNumericIDsAndKeepsShortURLFallback(t *testing.T) {
+	var mu sync.Mutex
 	batches := make([][]string, 0, 2)
 	shortCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,14 +107,18 @@ func TestDouyinCrawlerBatchURLChunksNumericIDsAndKeepsShortURLFallback(t *testin
 		switch r.URL.Path {
 		case "/batchDyVideo":
 			ids := strings.Split(r.PostForm.Get("ids"), ",")
+			mu.Lock()
 			batches = append(batches, ids)
+			mu.Unlock()
 			items := make([]string, 0, len(ids))
 			for _, id := range ids {
 				items = append(items, `{"aweme_id":"`+id+`","desc":"batch"}`)
 			}
 			_, _ = w.Write([]byte(`{"result":1,"data":[` + strings.Join(items, ",") + `]}`))
 		case "/dyVideo/detail":
+			mu.Lock()
 			shortCalls++
+			mu.Unlock()
 			if got := r.PostForm.Get("shorturl"); got != "https://v.douyin.test/demo" {
 				t.Errorf("shorturl = %q", got)
 			}
@@ -136,6 +142,8 @@ func TestDouyinCrawlerBatchURLChunksNumericIDsAndKeepsShortURLFallback(t *testin
 	if err != nil {
 		t.Fatalf("Discover() error = %v", err)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(batches) != 2 || len(batches[0]) != 10 || len(batches[1]) != 1 || batches[1][0] != "11" {
 		t.Fatalf("batches = %#v", batches)
 	}

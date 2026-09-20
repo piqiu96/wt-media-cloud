@@ -233,36 +233,6 @@ func TestWorkerClaimsPendingTaskOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestWorkerRecoversLegacyStrategyTaskWithoutOperationSnapshot(t *testing.T) {
-	store := newDiscoveryMemory()
-	calls := 0
-	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, req CrawlerRequest) (CrawlerResult, error) {
-		calls++
-		if req.Operation != "keyword" {
-			t.Fatalf("operation=%q", req.Operation)
-		}
-		return CrawlerResult{}, nil
-	}))
-	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
-	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "legacy", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	task, err := store.CreateCrawlTask(CrawlTask{TeamID: team, StrategyID: &strategy.ID, TaskType: "discovery_task", Platform: "douyin", Status: CrawlPending, Snapshot: map[string]any{"keyword": "demo"}, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed, runErr := service.RunNext(context.Background()); runErr != nil || !processed {
-		t.Fatalf("processed=%v err=%v", processed, runErr)
-	}
-	completed, _, _ := store.FindCrawlTask(task.ID)
-	if calls != 1 || completed.Status != CrawlSuccess {
-		t.Fatalf("calls=%d task=%+v", calls, completed)
-	}
-}
-
 func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))

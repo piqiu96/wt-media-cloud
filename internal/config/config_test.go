@@ -260,7 +260,6 @@ func writeValidConfig(t *testing.T, root string) {
 	t.Helper()
 	writeConfigFile(t, root, "app.toml", validAppTOML("wt-media-cloud"))
 	writeDatabaseConfig(t, root, "primary.toml", "primary")
-	writeConfigFile(t, root, "cache/redis.toml", "url = \"\"\n")
 	for _, category := range []string{"app", "access", "job", "external", "audit", "panic"} {
 		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	}
@@ -269,7 +268,6 @@ func writeValidConfig(t *testing.T, root string) {
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
 	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
-	writeConfigFile(t, root, "observability/health.toml", "health_path = \"/api/v1/health\"\n")
 }
 
 func writeHTTPClient(t *testing.T, root, name, baseURL, timeout string) {

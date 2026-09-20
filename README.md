@@ -1,26 +1,30 @@
 # wt-media-cloud
 
-Cloud runtime skeleton for the modular social media operations platform.
+WT Media Cloud is a Go + CloudWeGo Hertz modular monolith. It owns Cloud APIs, business facts, public-platform data integration, discovery scheduling, and the unified business Web source.
 
 ## Responsibilities
 
-- Cloud-owned API and contract boundaries.
-- Basic HTTP process startup and health checks.
-- Infrastructure placeholders for configuration, database, object storage, logging, and scheduler adapters.
-- Unified business Web source location.
+- Cloud API and Cloud–Agent contract boundaries.
+- Config, logger, database, HTTP client, and process bootstrap.
+- Identity, media account, content pool, profile, proxy, and discovery modules.
+- Server, migration, scheduler, and worker process entrypoints.
 
-## Bootstrap
+## Configuration
 
-The M0 Cloud backend is a Go modular monolith skeleton using CloudWeGo Hertz for HTTP APIs. It exposes health checks only. Formal user, account, Agent, task, publication, discovery, production, interaction, and analytics modules are intentionally not implemented in M0.
+Runtime code always reads `./config`. The `config_online` directory is a release-time drop-in replacement for `config`.
 
-Runtime configuration:
+Important files:
 
-- `WT_MEDIA_CLOUD_HTTP_ADDR`: listen address, default `:8080`
-- `WT_MEDIA_MYSQL_DSN`: MySQL DSN for the Cloud database
-- `WT_MEDIA_INITIAL_ADMIN_USERNAME`: one-time initial administrator username for an empty identity database
-- `WT_MEDIA_INITIAL_ADMIN_PASSWORD`: one-time initial administrator password; no default is provided
-- Legacy `WT_MEDIA_INITIAL_TECHNICIAN_*` names remain accepted when the new admin variables are unset.
-- `WT_MEDIA_SESSION_COOKIE_SECURE`: secure-cookie flag, default `true`; set `false` only for local HTTP development
+```text
+config/app.toml
+config/database/primary.toml
+config/scheduler/scheduler.toml
+config/logger/*.toml
+config/clients/http/*.toml
+config/credentials/*.toml
+```
+
+The HTTP address, cookie secure flag, initial administrator, database connection, scheduler intervals, loggers, clients, and credentials are configured in TOML. Go runtime code does not read `WT_MEDIA_MYSQL_DSN`, initial-admin environment variables, or cookie-secure environment variables.
 
 Apply migrations with:
 
@@ -28,39 +32,38 @@ Apply migrations with:
 scripts/migrate.sh
 ```
 
-Local scripts default to the stable local database `wt_media_cloud` through `scripts/local-env.sh`:
-
-```text
-root:root123@tcp(127.0.0.1:3306)/wt_media_cloud?parseTime=true&multiStatements=true
-```
-
-For local M/CHG acceptance, use this stable database and modify its tables through migrations or explicit acceptance data updates. Do not create a new database for every Task. Override `WT_MEDIA_MYSQL_DSN` only when intentionally running isolated CI or destructive experiments.
-
-The migration command creates the DSN database when missing, records applied versions in `schema_migrations`, and skips already applied migrations on repeat runs.
+Local development uses the stable `wt_media_cloud` database configured by `config/database/primary.toml`. Apply schema changes through migrations instead of creating a new database for each task.
 
 ## Key Directories
 
-- `cmd/server`: process entrypoint.
-- `internal/app`: app assembly and route wiring.
-- `internal/infra`: database, logger, object storage, and scheduler adapters.
-- `contracts`: Cloud-owned contracts.
-- `web`: unified business Web source.
+```text
+cmd/                 process entrypoints
+internal/bootstrap/  production initialization orchestration
+internal/config/     Cloud config schema, validation, and getters
+internal/infra/      database, logger, clients, metrics, and tracing
+internal/modules/    business modules
+pkg/                 reusable generic config, logger, and HTTP-client code
+contracts/           Cloud-owned contracts
+web/                 unified business Web source
+```
 
-## M0 Verification
+## Verification
 
-Use Go 1.26.5 for M0 Cloud verification. From this repository:
+The module requires Go 1.24.0 or newer; the current local verification toolchain is Go 1.26.5.
 
 ```text
 scripts/bootstrap.sh
 scripts/test.sh
 scripts/build.sh
-WT_MEDIA_CLOUD_HTTP_ADDR=127.0.0.1:18080 scripts/verify-health.sh
+scripts/verify-health.sh
 ```
 
-For foreground process management in a local terminal:
+For foreground process management:
 
 ```text
-WT_MEDIA_CLOUD_HTTP_ADDR=127.0.0.1:18080 scripts/start.sh
-WT_MEDIA_CLOUD_HTTP_ADDR=127.0.0.1:18080 scripts/health.sh
+scripts/start.sh
+scripts/health.sh
 scripts/stop.sh
 ```
+
+`WT_MEDIA_CLOUD_HTTP_ADDR` only selects the health-probe address used by scripts. The server listen address comes from `config/app.toml`; keep those values aligned in local development.

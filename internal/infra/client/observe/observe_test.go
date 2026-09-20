@@ -19,25 +19,30 @@ import (
 func TestExternalLogsSuccessWithoutResponseBody(t *testing.T) {
 	logDir := initializeLogger(t)
 	middleware := observe.External("douyin")
+	request := protocol.AcquireRequest()
+	request.SetRequestURI("https://api.example.test/v1/items?apiKey=credential-should-not-log")
 	called := false
 	err := middleware(func(_ context.Context, _ *protocol.Request, response *protocol.Response) error {
 		called = true
 		response.SetStatusCode(200)
 		response.SetBodyString(`{"secret":"should-not-log"}`)
 		return nil
-	})(requestctx.WithTraceID(context.Background(), "tr-observe"), protocol.AcquireRequest(), protocol.AcquireResponse())
+	})(requestctx.WithTraceID(context.Background(), "tr-observe"), request, protocol.AcquireResponse())
 	if err != nil || !called {
 		t.Fatalf("called=%v err=%v", called, err)
 	}
 
 	data := read(t, filepath.Join(logDir, "external.log"))
-	for _, field := range []string{"name=douyin", "status=200", `"trace_id":"tr-observe"`} {
+	for _, field := range []string{"name=douyin", "host=api.example.test", "path=/v1/items", "status=200", `"trace_id":"tr-observe"`} {
 		if !strings.Contains(data, field) {
 			t.Fatalf("external log missing %s: %q", field, data)
 		}
 	}
-	if strings.Contains(data, "should-not-log") {
-		t.Fatalf("external log leaked response body: %q", data)
+	if strings.Contains(data, "credential-should-not-log") || strings.Contains(data, "should-not-log") {
+		t.Fatalf("external log leaked credential or response body: %q", data)
+	}
+	if strings.Contains(data, "apiKey=") {
+		t.Fatalf("external log leaked query string: %q", data)
 	}
 }
 
