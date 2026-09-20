@@ -4,6 +4,8 @@ package model
 import (
 	"errors"
 	"time"
+
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 var (
@@ -27,9 +29,9 @@ var (
 
 type Role string
 
-type UserID int64
+type UserID = sharedidentity.UserID
 
-type TeamID int64
+type TeamID = sharedidentity.TeamID
 
 const (
 	RoleOperator       Role = "operator"
@@ -129,15 +131,7 @@ type Session struct {
 	InvalidAt *time.Time
 }
 
-type AuditEvent struct {
-	ID          string
-	ActorUserID UserID
-	Action      string
-	TargetType  string
-	TargetID    string
-	Summary     map[string]string
-	CreatedAt   time.Time
-}
+type AuditEvent = sharedidentity.AuditEvent
 
 // CanAccess applies the single Cloud data-scope rule shared by business modules.
 func (u PublicUser) CanAccess(ownerID UserID, teamID *TeamID, gameID string) bool {

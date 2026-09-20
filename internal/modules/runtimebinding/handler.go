@@ -6,14 +6,14 @@ import (
 	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	cloudagentservice "github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
 func IssueBindingTicket(ctx context.Context, c *hertzapp.RequestContext) {
-	auth, ok := identity.AuthenticateRequestContext(c)
+	auth, ok := middleware.AuthenticateRequestContext(c)
 	if !ok {
 		return
 	}

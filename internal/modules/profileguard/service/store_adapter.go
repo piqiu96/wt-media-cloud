@@ -14,8 +14,8 @@ type mysqlStore struct{}
 func (mysqlStore) FindAuthorizedTask(taskID string) (model.SensitiveTask, bool, error) {
 	return repository.FindAuthorizedTask(taskID)
 }
-func (mysqlStore) AcquirePermit(task model.SensitiveTask, node runtimeservice.AgentNode, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
-	return repository.AcquirePermit(task, node, permit, at, freshness)
+func (mysqlStore) AcquirePermit(task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
+	return repository.AcquirePermit(task, nodeID, permit, at, freshness)
 }
 func (mysqlStore) RenewPermit(permitID, nodeID, credentialHash string, at, expiresAt time.Time) (time.Time, error) {
 	return repository.RenewPermit(permitID, nodeID, credentialHash, at, expiresAt)

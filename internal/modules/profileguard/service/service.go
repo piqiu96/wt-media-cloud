@@ -66,7 +66,7 @@ type NodeAuthenticator interface {
 
 type Store interface {
 	FindAuthorizedTask(taskID string) (SensitiveTask, bool, error)
-	AcquirePermit(task SensitiveTask, node runtimeservice.AgentNode, permit Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error)
+	AcquirePermit(task SensitiveTask, nodeID string, permit Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error)
 	RenewPermit(permitID, nodeID, credentialHash string, at, expiresAt time.Time) (time.Time, error)
 	FinishPermit(permitID, nodeID, credentialHash string, outcome FinishOutcome, at time.Time) error
 }
@@ -126,7 +126,7 @@ func (s *Service) Preflight(nodeID, nodeCredential, taskID string) (PreflightOut
 		NodeID: node.ID, Operation: task.Operation, Status: PermitActive, CredentialHash: secretHash(secret),
 		AcquiredAt: now, ExpiresAt: now.Add(s.permitTTL),
 	}
-	outcome, err := s.store.AcquirePermit(task, node, permit, now, s.freshness)
+	outcome, err := s.store.AcquirePermit(task, node.ID, permit, now, s.freshness)
 	if err != nil {
 		return PreflightOutcome{}, err
 	}

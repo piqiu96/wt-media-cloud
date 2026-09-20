@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 type SourceInput struct {
-	TeamID            *identitymodel.TeamID
+	TeamID            *sharedidentity.TeamID
 	Platform          string
 	PlatformContentID string
 	Title             string
@@ -25,7 +25,7 @@ type SourceInput struct {
 }
 
 type Filter struct {
-	TeamID     *identitymodel.TeamID
+	TeamID     *sharedidentity.TeamID
 	Platform   string
 	Status     model.Status
 	SourceType string
@@ -77,10 +77,10 @@ type SearchResponse struct {
 }
 
 type ImportResultsRequest struct {
-	TeamID     *identitymodel.TeamID `json:"team_id,omitempty"`
-	Platform   string                `json:"platform"`
-	SourceType string                `json:"source_type,omitempty"`
-	Items      []SearchResult        `json:"items"`
+	TeamID     *sharedidentity.TeamID `json:"team_id,omitempty"`
+	Platform   string                 `json:"platform"`
+	SourceType string                 `json:"source_type,omitempty"`
+	Items      []SearchResult         `json:"items"`
 }
 
 type ImportItemResult struct {

@@ -10,10 +10,10 @@ import (
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -89,11 +89,11 @@ func findByID(db *gorm.DB, id string) (model.AccountRecord, bool, error) {
 	return findByQuery(db, `SELECT `+accountColumns+` FROM media_accounts WHERE id = ?`, id)
 }
 
-func FindByIdentity(userID identitymodel.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
+func FindByIdentity(userID sharedidentity.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
 	return findByIdentity(database.DB(), userID, platform, platformAccountID)
 }
 
-func findByIdentity(db *gorm.DB, userID identitymodel.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
+func findByIdentity(db *gorm.DB, userID sharedidentity.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
 	return findByQuery(db,
 		`SELECT `+accountColumns+` FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`,
 		userID, platform, platformAccountID,
@@ -299,11 +299,11 @@ func delete(db *gorm.DB, id string) error {
 	return db.Exec(`DELETE FROM media_accounts WHERE id = ?`, id).Error
 }
 
-func AddTags(userID identitymodel.UserID, accountIDs, tags []string, createdAt time.Time) error {
+func AddTags(userID sharedidentity.UserID, accountIDs, tags []string, createdAt time.Time) error {
 	return addTags(database.DB(), userID, accountIDs, tags, createdAt)
 }
 
-func addTags(db *gorm.DB, userID identitymodel.UserID, accountIDs, tags []string, createdAt time.Time) error {
+func addTags(db *gorm.DB, userID sharedidentity.UserID, accountIDs, tags []string, createdAt time.Time) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	for _, accountID := range accountIDs {
@@ -319,11 +319,11 @@ func addTags(db *gorm.DB, userID identitymodel.UserID, accountIDs, tags []string
 	return tx.Commit().Error
 }
 
-func RemoveTags(userID identitymodel.UserID, accountIDs, tags []string) error {
+func RemoveTags(userID sharedidentity.UserID, accountIDs, tags []string) error {
 	return removeTags(database.DB(), userID, accountIDs, tags)
 }
 
-func removeTags(db *gorm.DB, userID identitymodel.UserID, accountIDs, tags []string) error {
+func removeTags(db *gorm.DB, userID sharedidentity.UserID, accountIDs, tags []string) error {
 	if len(accountIDs) == 0 || len(tags) == 0 {
 		return nil
 	}
@@ -373,11 +373,11 @@ func listTags(db *gorm.DB, accountIDs []string) (map[string][]string, error) {
 	return result, rows.Err()
 }
 
-func AppendAudit(event identitymodel.AuditEvent) error {
+func AppendAudit(event sharedidentity.AuditEvent) error {
 	return appendAudit(database.DB(), event)
 }
 
-func appendAudit(db *gorm.DB, event identitymodel.AuditEvent) error {
+func appendAudit(db *gorm.DB, event sharedidentity.AuditEvent) error {
 	summary, err := json.Marshal(event.Summary)
 	if err != nil {
 		return err
@@ -518,11 +518,11 @@ func findGroup(db *gorm.DB, id string) (model.AccountGroup, bool, error) {
 	return group, group.ID != "", nil
 }
 
-func ListGroups(userID identitymodel.UserID) ([]model.AccountGroup, error) {
+func ListGroups(userID sharedidentity.UserID) ([]model.AccountGroup, error) {
 	return listGroups(database.DB(), userID)
 }
 
-func listGroups(db *gorm.DB, userID identitymodel.UserID) ([]model.AccountGroup, error) {
+func listGroups(db *gorm.DB, userID sharedidentity.UserID) ([]model.AccountGroup, error) {
 	rows, err := queryRows(db, `SELECT `+accountGroupColumns+` FROM account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
 	if err != nil {
 		return nil, err

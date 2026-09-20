@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	cloudagentservice "github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	proxyservice "github.com/wt-media/wt-media-cloud/internal/modules/proxy/service"
@@ -58,7 +58,7 @@ var (
 )
 
 func ListProxies(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -88,7 +88,7 @@ func ListProxies(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, proxies)
 }
 func ProxyRecommendations(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -142,7 +142,7 @@ func ProxyRecommendations(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, recommended)
 }
 func GetProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -154,7 +154,7 @@ func GetProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, publicProxy(proxy))
 }
 func GetProxyBindings(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -176,7 +176,7 @@ func GetProxyBindings(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, result)
 }
 func ParseProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -194,7 +194,7 @@ func ParseProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, parsed)
 }
 func PreviewProxyExtraction(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -210,7 +210,7 @@ func PreviewProxyExtraction(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, result)
 }
 func RefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -246,7 +246,7 @@ func RefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, publicProxy(updated))
 }
 func CreateProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -262,7 +262,7 @@ func CreateProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, publicProxy(proxy))
 }
 func UpdateProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -278,7 +278,7 @@ func UpdateProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, publicProxy(proxy))
 }
 func UpdateProxyStatus(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -296,7 +296,7 @@ func UpdateProxyStatus(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, publicProxy(proxy))
 }
 func DeleteProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -316,7 +316,7 @@ func DeleteProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 func PreviewProxyImport(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -330,7 +330,7 @@ func PreviewProxyImport(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, map[string]interface{}{"parsed": parsed})
 }
 func ImportProxies(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -352,7 +352,7 @@ func ImportProxies(ctx context.Context, c *hertzapp.RequestContext) {
 	})
 }
 func PreviewLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -375,7 +375,7 @@ func PreviewLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, preview)
 }
 func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -443,7 +443,7 @@ func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, preview)
 }
 func CheckProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -465,7 +465,7 @@ func CheckProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, publicProxy(updated))
 }
 func CheckProxyInBackground(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -482,7 +482,7 @@ func CheckProxyInBackground(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, task)
 }
 func AssignProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -500,7 +500,7 @@ func AssignProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, updated)
 }
 func AssignProxyBatch(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -530,7 +530,7 @@ func AssignProxyBatch(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, result)
 }
 func UnbindProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -566,7 +566,7 @@ func UnbindProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, updated)
 }
 func SetProxyQuota(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := identity.AuthenticateRequest(c)
+	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}

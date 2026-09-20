@@ -35,7 +35,7 @@ func (s *fakeStore) FindAuthorizedTask(taskID string) (SensitiveTask, bool, erro
 	return s.task, s.taskFound && s.task.ID == taskID, nil
 }
 
-func (s *fakeStore) AcquirePermit(task SensitiveTask, node runtimeservice.AgentNode, permit Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error) {
+func (s *fakeStore) AcquirePermit(task SensitiveTask, nodeID string, permit Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error) {
 	s.storedPermit = permit
 	if s.acquireOutcome.Outcome != "" {
 		return s.acquireOutcome, nil

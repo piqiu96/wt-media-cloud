@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 var (
@@ -57,37 +57,37 @@ const (
 )
 
 type BitAccountBinding struct {
-	UserID         identitymodel.UserID `json:"user_id"`
-	MainUserID     string               `json:"main_user_id"`
-	Status         BitAccountStatus     `json:"status"`
-	BoundAt        *time.Time           `json:"bound_at,omitempty"`
-	LastVerifiedAt *time.Time           `json:"last_verified_at,omitempty"`
+	UserID         sharedidentity.UserID `json:"user_id"`
+	MainUserID     string                `json:"main_user_id"`
+	Status         BitAccountStatus      `json:"status"`
+	BoundAt        *time.Time            `json:"bound_at,omitempty"`
+	LastVerifiedAt *time.Time            `json:"last_verified_at,omitempty"`
 }
 
 type BrowserProfile struct {
-	ID             string                `json:"id"`
-	UserID         identitymodel.UserID  `json:"user_id"`
-	TeamID         *identitymodel.TeamID `json:"team_id"`
-	BitProfileID   string                `json:"bit_profile_id"`
-	MainUserID     string                `json:"main_user_id"`
-	ProfileUserID  string                `json:"profile_user_id"`
-	Name           string                `json:"name"`
-	Seq            int                   `json:"seq,omitempty"`
-	GroupID        string                `json:"group_id,omitempty"`
-	GroupName      string                `json:"group_name,omitempty"`
-	BitStatus      string                `json:"bit_status,omitempty"`
-	BitUpdatedAt   string                `json:"bit_updated_at,omitempty"`
-	ProxyType      string                `json:"proxy_type,omitempty"`
-	ProxyHost      string                `json:"proxy_host,omitempty"`
-	ProxyPort      int                   `json:"proxy_port,omitempty"`
-	ProxyID        string                `json:"proxy_id,omitempty"`
-	Remark         string                `json:"remark,omitempty"`
-	CloudRemark    string                `json:"cloud_remark,omitempty"`
-	BusinessStatus ProfileBusinessStatus `json:"business_status"`
-	LocalStatus    ProfileLocalStatus    `json:"local_status"`
-	LastSyncedAt   time.Time             `json:"last_synced_at"`
-	CreatedAt      time.Time             `json:"created_at"`
-	UpdatedAt      time.Time             `json:"updated_at"`
+	ID             string                 `json:"id"`
+	UserID         sharedidentity.UserID  `json:"user_id"`
+	TeamID         *sharedidentity.TeamID `json:"team_id"`
+	BitProfileID   string                 `json:"bit_profile_id"`
+	MainUserID     string                 `json:"main_user_id"`
+	ProfileUserID  string                 `json:"profile_user_id"`
+	Name           string                 `json:"name"`
+	Seq            int                    `json:"seq,omitempty"`
+	GroupID        string                 `json:"group_id,omitempty"`
+	GroupName      string                 `json:"group_name,omitempty"`
+	BitStatus      string                 `json:"bit_status,omitempty"`
+	BitUpdatedAt   string                 `json:"bit_updated_at,omitempty"`
+	ProxyType      string                 `json:"proxy_type,omitempty"`
+	ProxyHost      string                 `json:"proxy_host,omitempty"`
+	ProxyPort      int                    `json:"proxy_port,omitempty"`
+	ProxyID        string                 `json:"proxy_id,omitempty"`
+	Remark         string                 `json:"remark,omitempty"`
+	CloudRemark    string                 `json:"cloud_remark,omitempty"`
+	BusinessStatus ProfileBusinessStatus  `json:"business_status"`
+	LocalStatus    ProfileLocalStatus     `json:"local_status"`
+	LastSyncedAt   time.Time              `json:"last_synced_at"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 type ProfileDiff struct {
@@ -98,14 +98,14 @@ type ProfileDiff struct {
 }
 
 type ProfileScan struct {
-	ID          string                `json:"id"`
-	UserID      identitymodel.UserID  `json:"user_id"`
-	TeamID      *identitymodel.TeamID `json:"team_id"`
-	MainUserID  string                `json:"main_user_id"`
-	Status      ScanStatus            `json:"status"`
-	Profiles    []BrowserProfile      `json:"profiles"`
-	Diff        []ProfileDiff         `json:"diff"`
-	CreatedAt   time.Time             `json:"created_at"`
-	ExpiresAt   time.Time             `json:"expires_at"`
-	ConfirmedAt *time.Time            `json:"confirmed_at,omitempty"`
+	ID          string                 `json:"id"`
+	UserID      sharedidentity.UserID  `json:"user_id"`
+	TeamID      *sharedidentity.TeamID `json:"team_id"`
+	MainUserID  string                 `json:"main_user_id"`
+	Status      ScanStatus             `json:"status"`
+	Profiles    []BrowserProfile       `json:"profiles"`
+	Diff        []ProfileDiff          `json:"diff"`
+	CreatedAt   time.Time              `json:"created_at"`
+	ExpiresAt   time.Time              `json:"expires_at"`
+	ConfirmedAt *time.Time             `json:"confirmed_at,omitempty"`
 }

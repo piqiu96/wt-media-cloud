@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	cloudagentservice "github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	accountservice "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
@@ -84,7 +84,7 @@ type updateAccountGroupRequest struct {
 }
 
 func CreateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -104,7 +104,7 @@ func CreateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, account)
 }
 func ListMediaAccounts(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -143,7 +143,7 @@ func RemoveMediaAccountTags(ctx context.Context, c *hertzapp.RequestContext) {
 	changeTags(c, false)
 }
 func GetMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -155,7 +155,7 @@ func GetMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, account)
 }
 func UpdateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -174,7 +174,7 @@ func UpdateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, account)
 }
 func IdentifyMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -190,7 +190,7 @@ func IdentifyMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, account)
 }
 func StartMediaAccountCheck(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -206,7 +206,7 @@ func StartMediaAccountCheck(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, start)
 }
 func ApplyMediaAccountCheckResult(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -222,7 +222,7 @@ func ApplyMediaAccountCheckResult(ctx context.Context, c *hertzapp.RequestContex
 	api.Success(c, account)
 }
 func ReadMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -239,7 +239,7 @@ func ReadMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, task)
 }
 func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -255,7 +255,7 @@ func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext
 	api.Created(c, start)
 }
 func ApplyMediaAccountCookieReadResult(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -271,7 +271,7 @@ func ApplyMediaAccountCookieReadResult(ctx context.Context, c *hertzapp.RequestC
 	api.Success(c, account)
 }
 func GetMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -286,7 +286,7 @@ func GetMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 	})
 }
 func BindMediaAccountProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -302,7 +302,7 @@ func BindMediaAccountProfile(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, account)
 }
 func UnbindMediaAccountProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -314,7 +314,7 @@ func UnbindMediaAccountProfile(ctx context.Context, c *hertzapp.RequestContext) 
 	api.Success(c, account)
 }
 func CreateAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -330,7 +330,7 @@ func CreateAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, group)
 }
 func ListAccountGroups(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -342,7 +342,7 @@ func ListAccountGroups(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, groups)
 }
 func ListAccountsByGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -354,7 +354,7 @@ func ListAccountsByGroup(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, accounts)
 }
 func UpdateAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -370,7 +370,7 @@ func UpdateAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, group)
 }
 func DeleteAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -382,7 +382,7 @@ func DeleteAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
 }
 
 func changeTags(c *hertzapp.RequestContext, add bool) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}

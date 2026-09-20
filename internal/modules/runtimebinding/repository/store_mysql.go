@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -64,11 +64,11 @@ func consumeTicket(db *gorm.DB, tokenHash string, at time.Time) (model.BindingTi
 	return ticket, found, nil
 }
 
-func IsSessionActive(sessionID string, userID identitymodel.UserID, at time.Time) (bool, error) {
+func IsSessionActive(sessionID string, userID sharedidentity.UserID, at time.Time) (bool, error) {
 	return isSessionActive(database.DB(), sessionID, userID, at)
 }
 
-func isSessionActive(db *gorm.DB, sessionID string, userID identitymodel.UserID, _ time.Time) (bool, error) {
+func isSessionActive(db *gorm.DB, sessionID string, userID sharedidentity.UserID, _ time.Time) (bool, error) {
 	var active bool
 	err := db.Raw(`SELECT EXISTS(SELECT 1 FROM user_sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = ? AND s.user_id = ? AND s.invalidated_at IS NULL AND u.status = 'enabled')`, sessionID, userID).
@@ -114,11 +114,11 @@ func findNodeByCredentialHash(db *gorm.DB, hash string) (model.AgentNode, bool, 
 	return node, true, nil
 }
 
-func CheckLocalTrust(userID identitymodel.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
+func CheckLocalTrust(userID sharedidentity.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
 	return checkLocalTrust(database.DB(), userID, nodeID, at, freshness)
 }
 
-func checkLocalTrust(db *gorm.DB, userID identitymodel.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
+func checkLocalTrust(db *gorm.DB, userID sharedidentity.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
 	var trusted bool
 	err := db.Raw(`SELECT EXISTS(
 		SELECT 1 FROM local_agent_nodes n
@@ -132,11 +132,11 @@ func checkLocalTrust(db *gorm.DB, userID identitymodel.UserID, nodeID string, at
 	return trusted, err
 }
 
-func ValidateRuntimeProfiles(userID identitymodel.UserID, mainUserID string, profileIDs []string) (bool, error) {
+func ValidateRuntimeProfiles(userID sharedidentity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	return validateRuntimeProfiles(database.DB(), userID, mainUserID, profileIDs)
 }
 
-func validateRuntimeProfiles(db *gorm.DB, userID identitymodel.UserID, mainUserID string, profileIDs []string) (bool, error) {
+func validateRuntimeProfiles(db *gorm.DB, userID sharedidentity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	var boundMain sql.NullString
 	err := db.Raw(`SELECT bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`, userID).Row().Scan(&boundMain)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -9,10 +9,10 @@ import (
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
 	contentservice "github.com/wt-media/wt-media-cloud/internal/modules/contentpool/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
@@ -63,7 +63,7 @@ type manualSearchRequest struct {
 }
 
 func actor(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
-	return identity.AuthenticateRequest(c)
+	return middleware.AuthenticateRequest(c)
 }
 func contentID(c *hertzapp.RequestContext, name, message string) (int64, bool) {
 	value, err := strconv.ParseInt(c.Param(name), 10, 64)

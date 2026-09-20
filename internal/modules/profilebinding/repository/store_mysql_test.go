@@ -7,8 +7,8 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	mysqlgorm "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -31,9 +31,9 @@ func TestFindBindingUsesGORMAndMapsIdentity(t *testing.T) {
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, bit_main_user_id, bit_account_status")).
-		WithArgs(identitymodel.UserID(1)).
+		WithArgs(sharedidentity.UserID(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "bit_main_user_id", "bit_account_status", "bit_account_bound_at", "bit_account_last_verified_at"}).
-			AddRow(identitymodel.UserID(1), "main-user-1", "bound", now, now))
+			AddRow(sharedidentity.UserID(1), "main-user-1", "bound", now, now))
 
 	binding, found, err := findBinding(db, 1)
 	if err != nil || !found {

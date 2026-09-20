@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
 const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, proxy_id, remark, cloud_remark, business_status, local_status, last_synced_at, created_at, updated_at`
 
-func FindBinding(userID identitymodel.UserID) (model.BitAccountBinding, bool, error) {
+func FindBinding(userID sharedidentity.UserID) (model.BitAccountBinding, bool, error) {
 	return findBinding(database.DB(), userID)
 }
 
@@ -37,7 +37,7 @@ func rollbackTx(tx *gorm.DB) {
 	_ = tx.Rollback().Error
 }
 
-func findBinding(db *gorm.DB, userID identitymodel.UserID) (model.BitAccountBinding, bool, error) {
+func findBinding(db *gorm.DB, userID sharedidentity.UserID) (model.BitAccountBinding, bool, error) {
 	var binding model.BitAccountBinding
 	var mainUserID, status sql.NullString
 	var boundAt, verifiedAt sql.NullTime
@@ -66,11 +66,11 @@ func findBinding(db *gorm.DB, userID identitymodel.UserID) (model.BitAccountBind
 	return binding, true, nil
 }
 
-func ListProfiles(userID identitymodel.UserID) ([]model.BrowserProfile, error) {
+func ListProfiles(userID sharedidentity.UserID) ([]model.BrowserProfile, error) {
 	return listProfilesByUser(database.DB(), userID)
 }
 
-func listProfilesByUser(db *gorm.DB, userID identitymodel.UserID) ([]model.BrowserProfile, error) {
+func listProfilesByUser(db *gorm.DB, userID sharedidentity.UserID) ([]model.BrowserProfile, error) {
 	return listProfilesByQuery(db, `SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE user_id = ? ORDER BY id DESC`, userID)
 }
 
@@ -99,12 +99,12 @@ func listProfilesByQuery(db *gorm.DB, query string, args ...any) ([]model.Browse
 	return profiles, rows.Err()
 }
 
-func ResolveProfile(profileID string) (identitymodel.UserID, bool, bool, error) {
+func ResolveProfile(profileID string) (sharedidentity.UserID, bool, bool, error) {
 	return resolveProfile(database.DB(), profileID)
 }
 
-func resolveProfile(db *gorm.DB, profileID string) (identitymodel.UserID, bool, bool, error) {
-	var userID identitymodel.UserID
+func resolveProfile(db *gorm.DB, profileID string) (sharedidentity.UserID, bool, bool, error) {
+	var userID sharedidentity.UserID
 	var status model.ProfileLocalStatus
 	err := queryRow(db, `SELECT user_id, local_status FROM browser_profiles WHERE id = ?`, profileID).Scan(&userID, &status)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -116,13 +116,13 @@ func resolveProfile(db *gorm.DB, profileID string) (identitymodel.UserID, bool, 
 	return userID, status == model.ProfileActive, true, nil
 }
 
-func ResolveProfileForAccountCheck(profileID string) (string, identitymodel.UserID, string, bool, bool, error) {
+func ResolveProfileForAccountCheck(profileID string) (string, sharedidentity.UserID, string, bool, bool, error) {
 	return resolveProfileForAccountCheck(database.DB(), profileID)
 }
 
-func resolveProfileForAccountCheck(db *gorm.DB, profileID string) (string, identitymodel.UserID, string, bool, bool, error) {
+func resolveProfileForAccountCheck(db *gorm.DB, profileID string) (string, sharedidentity.UserID, string, bool, bool, error) {
 	var id string
-	var userID identitymodel.UserID
+	var userID sharedidentity.UserID
 	var bitProfileID string
 	var status model.ProfileLocalStatus
 	err := queryRow(db, `SELECT id, user_id, bit_profile_id, local_status FROM browser_profiles WHERE id = ?`, profileID).
@@ -432,11 +432,11 @@ func confirmMainIdentityDirect(db *gorm.DB, binding model.BitAccountBinding, at 
 	return tx.Commit().Error
 }
 
-func ClearMainIdentity(userID identitymodel.UserID, actorID identitymodel.UserID, at time.Time) error {
+func ClearMainIdentity(userID sharedidentity.UserID, actorID sharedidentity.UserID, at time.Time) error {
 	return clearMainIdentity(database.DB(), userID, actorID, at)
 }
 
-func clearMainIdentity(db *gorm.DB, userID identitymodel.UserID, actorID identitymodel.UserID, at time.Time) error {
+func clearMainIdentity(db *gorm.DB, userID sharedidentity.UserID, actorID sharedidentity.UserID, at time.Time) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	result, err := execSQL(tx,
@@ -632,11 +632,11 @@ func profileHasAccountReferences(db *gorm.DB, profileID string) (bool, error) {
 	return count > 0, nil
 }
 
-func AssignProfileOwner(profileID string, userID identitymodel.UserID, teamID *identitymodel.TeamID, actorID identitymodel.UserID, at time.Time) error {
+func AssignProfileOwner(profileID string, userID sharedidentity.UserID, teamID *sharedidentity.TeamID, actorID sharedidentity.UserID, at time.Time) error {
 	return assignProfileOwner(database.DB(), profileID, userID, teamID, actorID, at)
 }
 
-func assignProfileOwner(db *gorm.DB, profileID string, userID identitymodel.UserID, teamID *identitymodel.TeamID, actorID identitymodel.UserID, at time.Time) error {
+func assignProfileOwner(db *gorm.DB, profileID string, userID sharedidentity.UserID, teamID *sharedidentity.TeamID, actorID sharedidentity.UserID, at time.Time) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	result, err := execSQL(tx,
@@ -659,7 +659,7 @@ func assignProfileOwner(db *gorm.DB, profileID string, userID identitymodel.User
 	return tx.Commit().Error
 }
 
-func sqlTeamID(teamID *identitymodel.TeamID) any {
+func sqlTeamID(teamID *sharedidentity.TeamID) any {
 	if teamID == nil {
 		return nil
 	}

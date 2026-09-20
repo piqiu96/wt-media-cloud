@@ -10,12 +10,9 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/wt-media/wt-media-cloud/internal/config"
+	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
-	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
 )
-
-const SessionCookieName = "wt_media_session"
-const identityContextKey = "identity_auth_context"
 
 type RouteConfig struct {
 	CookieSecure bool
@@ -106,7 +103,7 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), config.Get().App.Server.SessionCookieSecure)
-	c.SetCookie(SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
+	c.SetCookie(middleware.SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
 	if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
 		// Packaged Desktop cannot round-trip the cross-site cookie, so it
 		// receives the session token in the body and sends it back as the
@@ -117,24 +114,24 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, result.User)
 }
 func Me(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
 	api.Success(c, actor)
 }
 func Logout(ctx context.Context, c *hertzapp.RequestContext) {
-	token := string(c.Cookie(SessionCookieName))
+	token := string(c.Cookie(middleware.SessionCookieName))
 	if err := identityservice.Logout(token); err != nil {
 		writeIdentityError(c, err)
 		return
 	}
 	sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), config.Get().App.Server.SessionCookieSecure)
-	c.SetCookie(SessionCookieName, "", -1, "/", "", sameSite, secure, true)
+	c.SetCookie(middleware.SessionCookieName, "", -1, "/", "", sameSite, secure, true)
 	api.NoContent(c)
 }
 func CreateUser(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -150,7 +147,7 @@ func CreateUser(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, oneTimePasswordResult{User: user, OneTimePassword: req.Password})
 }
 func UpdateUser(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -171,7 +168,7 @@ func UpdateUser(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, user)
 }
 func ResetPassword(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -191,7 +188,7 @@ func ResetPassword(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, passwordResetResult{OneTimePassword: req.NewPassword})
 }
 func ChangePassword(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -204,11 +201,11 @@ func ChangePassword(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), config.Get().App.Server.SessionCookieSecure)
-	c.SetCookie(SessionCookieName, "", -1, "/", "", sameSite, secure, true)
+	c.SetCookie(middleware.SessionCookieName, "", -1, "/", "", sameSite, secure, true)
 	api.NoContent(c)
 }
 func ListUsers(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -229,7 +226,7 @@ func ListUsers(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, filtered)
 }
 func DeleteUser(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -245,7 +242,7 @@ func DeleteUser(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 func ListTeams(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -257,7 +254,7 @@ func ListTeams(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, teams)
 }
 func CreateTeam(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -273,7 +270,7 @@ func CreateTeam(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, team)
 }
 func UpdateTeam(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -294,7 +291,7 @@ func UpdateTeam(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, team)
 }
 func DeleteTeam(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -310,7 +307,7 @@ func DeleteTeam(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 func ListGames(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -322,7 +319,7 @@ func ListGames(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, filterGames(games, c))
 }
 func GameReferences(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -334,7 +331,7 @@ func GameReferences(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, references)
 }
 func CreateGame(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -350,7 +347,7 @@ func CreateGame(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, game)
 }
 func UpdateGame(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -366,7 +363,7 @@ func UpdateGame(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, game)
 }
 func DeleteGame(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -377,7 +374,7 @@ func DeleteGame(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 func ListAuditLogs(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -484,61 +481,13 @@ func filterUsers(users []identityservice.PublicUser, c *hertzapp.RequestContext)
 	return result, nil
 }
 
-// IdentityContext opportunistically resolves a valid session before business
-// routes. Missing or invalid credentials do not reject public endpoints.
-func IdentityContext() hertzapp.HandlerFunc {
-	return func(ctx context.Context, c *hertzapp.RequestContext) {
-		token := sessionToken(c)
-		if token == "" {
-			c.Next(ctx)
-			return
-		}
-		authContext, err := identityservice.AuthenticateContext(token)
-		if err != nil {
-			c.Next(ctx)
-			return
-		}
-		c.Set(identityContextKey, authContext)
-		c.Set("user_id", int64(authContext.User.ID))
-		c.Next(requestctx.WithUserID(ctx, int64(authContext.User.ID)))
-	}
-}
-
-// AuthenticateRequest resolves the server-side session Cookie for other Cloud
-// business modules. Callers never receive the raw session token.
-func AuthenticateRequest(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
-	context, ok := AuthenticateRequestContext(c)
-	return context.User, ok
-}
-
 // sessionToken returns the current session token from the cookie first, then
-// falls back to the X-Session-Token header. The packaged Desktop WebView is
-// cross-site to the local Cloud API and does not round-trip cookies, so it
-// carries the token as a header instead.
+// falls back to the X-Session-Token header.
 func sessionToken(c *hertzapp.RequestContext) string {
-	if token := string(c.Cookie(SessionCookieName)); token != "" {
+	if token := string(c.Cookie(middleware.SessionCookieName)); token != "" {
 		return token
 	}
 	return string(c.GetHeader("X-Session-Token"))
-}
-
-// AuthenticateRequestContext is for trusted Cloud modules that must bind a
-// resource to the current server-side session ID. It never returns the raw
-// Cookie token to an API api.
-func AuthenticateRequestContext(c *hertzapp.RequestContext) (identityservice.AuthContext, bool) {
-	if cached, exists := c.Get(identityContextKey); exists {
-		if authContext, valid := cached.(identityservice.AuthContext); valid {
-			return authContext, true
-		}
-	}
-	authContext, err := identityservice.AuthenticateContext(sessionToken(c))
-	if err != nil {
-		writeIdentityError(c, err)
-		return identityservice.AuthContext{}, false
-	}
-	c.Set(identityContextKey, authContext)
-	c.Set("user_id", int64(authContext.User.ID))
-	return authContext, true
 }
 
 func writeIdentityError(c *hertzapp.RequestContext, err error) {

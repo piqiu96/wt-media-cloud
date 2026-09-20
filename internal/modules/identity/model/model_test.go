@@ -9,15 +9,16 @@ func TestIdentityModelTypesAreDeclaredInModelPackage(t *testing.T) {
 	tests := []struct {
 		name string
 		got  reflect.Type
+		want string
 	}{
-		{name: "User", got: reflect.TypeFor[User]()},
-		{name: "PublicUser", got: reflect.TypeFor[PublicUser]()},
-		{name: "Session", got: reflect.TypeFor[Session]()},
-		{name: "AuditEvent", got: reflect.TypeFor[AuditEvent]()},
+		{name: "User", got: reflect.TypeFor[User](), want: "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"},
+		{name: "PublicUser", got: reflect.TypeFor[PublicUser](), want: "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"},
+		{name: "Session", got: reflect.TypeFor[Session](), want: "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"},
+		{name: "AuditEvent", got: reflect.TypeFor[AuditEvent](), want: "github.com/wt-media/wt-media-cloud/internal/shared/identity"},
 	}
 	for _, test := range tests {
-		if got, want := test.got.PkgPath(), "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"; got != want {
-			t.Fatalf("%s PkgPath = %q, want %q", test.name, got, want)
+		if got := test.got.PkgPath(); got != test.want {
+			t.Fatalf("%s PkgPath = %q, want %q", test.name, got, test.want)
 		}
 	}
 }

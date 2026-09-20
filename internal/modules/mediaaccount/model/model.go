@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 var (
@@ -61,27 +61,27 @@ type AccountCheckItem struct {
 }
 
 type Account struct {
-	ID                    string                `json:"id"`
-	UserID                identitymodel.UserID  `json:"user_id"`
-	TeamID                *identitymodel.TeamID `json:"team_id"`
-	GameIDs               []string              `json:"game_ids"`
-	Platform              Platform              `json:"platform"`
-	PlatformAccountID     string                `json:"platform_account_id,omitempty"`
-	Name                  string                `json:"name,omitempty"`
-	AvatarURL             string                `json:"avatar_url,omitempty"`
-	BrowserProfileID      string                `json:"browser_profile_id,omitempty"`
-	Remark                string                `json:"remark,omitempty"`
-	IdentificationStatus  IdentificationStatus  `json:"identification_status"`
-	DuplicateOfAccountID  string                `json:"duplicate_of_account_id,omitempty"`
-	BusinessStatus        BusinessStatus        `json:"business_status"`
-	LoginStatus           LoginStatus           `json:"login_status"`
-	CookieStatus          string                `json:"cookie_status,omitempty"`
-	ActiveCookieUpdatedAt *time.Time            `json:"active_cookie_updated_at,omitempty"`
-	LastCheckedAt         *time.Time            `json:"last_checked_at,omitempty"`
-	CheckItems            []AccountCheckItem    `json:"check_items,omitempty"`
-	Tags                  []string              `json:"tags"`
-	CreatedAt             time.Time             `json:"created_at"`
-	UpdatedAt             time.Time             `json:"updated_at"`
+	ID                    string                 `json:"id"`
+	UserID                sharedidentity.UserID  `json:"user_id"`
+	TeamID                *sharedidentity.TeamID `json:"team_id"`
+	GameIDs               []string               `json:"game_ids"`
+	Platform              Platform               `json:"platform"`
+	PlatformAccountID     string                 `json:"platform_account_id,omitempty"`
+	Name                  string                 `json:"name,omitempty"`
+	AvatarURL             string                 `json:"avatar_url,omitempty"`
+	BrowserProfileID      string                 `json:"browser_profile_id,omitempty"`
+	Remark                string                 `json:"remark,omitempty"`
+	IdentificationStatus  IdentificationStatus   `json:"identification_status"`
+	DuplicateOfAccountID  string                 `json:"duplicate_of_account_id,omitempty"`
+	BusinessStatus        BusinessStatus         `json:"business_status"`
+	LoginStatus           LoginStatus            `json:"login_status"`
+	CookieStatus          string                 `json:"cookie_status,omitempty"`
+	ActiveCookieUpdatedAt *time.Time             `json:"active_cookie_updated_at,omitempty"`
+	LastCheckedAt         *time.Time             `json:"last_checked_at,omitempty"`
+	CheckItems            []AccountCheckItem     `json:"check_items,omitempty"`
+	Tags                  []string               `json:"tags"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 }
 
 type AccountRecord struct {
@@ -102,12 +102,12 @@ type AccountGroupFilters struct {
 }
 
 type AccountGroup struct {
-	ID        string                `json:"id"`
-	UserID    identitymodel.UserID  `json:"user_id"`
-	TeamID    *identitymodel.TeamID `json:"team_id,omitempty"`
-	Name      string                `json:"name"`
-	Filters   AccountGroupFilters   `json:"filters"`
-	SortOrder int                   `json:"sort_order"`
-	CreatedAt time.Time             `json:"created_at"`
-	UpdatedAt time.Time             `json:"updated_at"`
+	ID        string                 `json:"id"`
+	UserID    sharedidentity.UserID  `json:"user_id"`
+	TeamID    *sharedidentity.TeamID `json:"team_id,omitempty"`
+	Name      string                 `json:"name"`
+	Filters   AccountGroupFilters    `json:"filters"`
+	SortOrder int                    `json:"sort_order"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }

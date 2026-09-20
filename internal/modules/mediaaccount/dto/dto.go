@@ -2,12 +2,12 @@
 package dto
 
 import (
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 type CreateAccountInput struct {
-	UserID           identitymodel.UserID
+	UserID           sharedidentity.UserID
 	GameIDs          []string
 	Name             string
 	Platform         model.Platform
@@ -70,7 +70,7 @@ type UpdateAccountInput struct {
 }
 
 type AccountFilter struct {
-	UserID         identitymodel.UserID
+	UserID         sharedidentity.UserID
 	GameIDs        []string
 	Platform       model.Platform
 	BusinessStatus model.BusinessStatus

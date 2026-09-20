@@ -8,7 +8,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	"gorm.io/gorm"
 )
 
@@ -42,11 +41,11 @@ func findAuthorizedTask(db *gorm.DB, taskID string) (model.SensitiveTask, bool, 
 	return task, true, nil
 }
 
-func AcquirePermit(task model.SensitiveTask, node runtimeservice.AgentNode, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
-	return acquirePermit(database.DB(), task, node, permit, at, freshness)
+func AcquirePermit(task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
+	return acquirePermit(database.DB(), task, nodeID, permit, at, freshness)
 }
 
-func acquirePermit(db *gorm.DB, task model.SensitiveTask, node runtimeservice.AgentNode, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
+func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
 	outcome := dto.PreflightOutcome{}
 	err := db.Transaction(func(tx *gorm.DB) error {
 		var profileID string
@@ -69,7 +68,7 @@ func acquirePermit(db *gorm.DB, task model.SensitiveTask, node runtimeservice.Ag
 			AND u.status = 'enabled' AND s.invalidated_at IS NULL AND n.status = 'online'
 			AND n.bitbrowser_status = 'normal' AND n.reported_main_user_id = u.bit_main_user_id
 			AND rp.status = 'visible' AND rp.main_user_id = u.bit_main_user_id AND rp.last_seen_at >= ?`,
-			task.ID, task.UserID, task.ProfileID, node.ID, task.Operation, task.BitProfileID, at.Add(-freshness),
+			task.ID, task.UserID, task.ProfileID, nodeID, task.Operation, task.BitProfileID, at.Add(-freshness),
 		).Row().Scan(&validCount); err != nil {
 			return err
 		}

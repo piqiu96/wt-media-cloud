@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 var (
@@ -61,21 +61,21 @@ const (
 )
 
 type SensitiveTask struct {
-	ID           string               `json:"id"`
-	UserID       identitymodel.UserID `json:"user_id"`
-	ProfileID    string               `json:"profile_id"`
-	BitProfileID string               `json:"bit_profile_id"`
-	NodeID       string               `json:"node_id"`
-	Operation    SensitiveOperation   `json:"operation"`
-	Status       TaskStatus           `json:"status"`
-	CreatedAt    time.Time            `json:"created_at"`
-	UpdatedAt    time.Time            `json:"updated_at"`
+	ID           string                `json:"id"`
+	UserID       sharedidentity.UserID `json:"user_id"`
+	ProfileID    string                `json:"profile_id"`
+	BitProfileID string                `json:"bit_profile_id"`
+	NodeID       string                `json:"node_id"`
+	Operation    SensitiveOperation    `json:"operation"`
+	Status       TaskStatus            `json:"status"`
+	CreatedAt    time.Time             `json:"created_at"`
+	UpdatedAt    time.Time             `json:"updated_at"`
 }
 
 type Permit struct {
 	ID             string
 	TaskID         string
-	UserID         identitymodel.UserID
+	UserID         sharedidentity.UserID
 	ProfileID      string
 	NodeID         string
 	Operation      SensitiveOperation

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
+	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
@@ -28,7 +28,7 @@ type assignProfileOwnerRequest struct {
 }
 
 func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -52,7 +52,7 @@ func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, scan)
 }
 func GetProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -64,7 +64,7 @@ func GetProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, scan)
 }
 func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -84,7 +84,7 @@ func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, scan)
 }
 func ConfirmScanMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -96,7 +96,7 @@ func ConfirmScanMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, scan)
 }
 func ConfirmMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -112,7 +112,7 @@ func ConfirmMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, binding)
 }
 func ClearMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -128,7 +128,7 @@ func ClearMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 func RejectProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -139,7 +139,7 @@ func RejectProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 func ListBrowserProfiles(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -160,25 +160,25 @@ func ListBrowserProfiles(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, profiles)
 }
 func CreateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	if _, ok := identity.AuthenticateRequest(c); !ok {
+	if _, ok := middleware.AuthenticateRequest(c); !ok {
 		return
 	}
 	writeDesktopOnlyProfileOperation(c)
 }
 func OpenBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	if _, ok := identity.AuthenticateRequest(c); !ok {
+	if _, ok := middleware.AuthenticateRequest(c); !ok {
 		return
 	}
 	writeDesktopOnlyProfileOperation(c)
 }
 func CloseBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	if _, ok := identity.AuthenticateRequest(c); !ok {
+	if _, ok := middleware.AuthenticateRequest(c); !ok {
 		return
 	}
 	writeDesktopOnlyProfileOperation(c)
 }
 func UpdateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -194,7 +194,7 @@ func UpdateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, profile)
 }
 func AssignBrowserProfileOwner(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -220,7 +220,7 @@ func AssignBrowserProfileOwner(ctx context.Context, c *hertzapp.RequestContext) 
 	api.Success(c, profile)
 }
 func DeleteBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := identity.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}

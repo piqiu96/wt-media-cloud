@@ -12,7 +12,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -143,7 +143,7 @@ func materialize(db *gorm.DB, id int64, creator int64, now time.Time) (model.Mat
 		if err := tx.Raw("SELECT LAST_INSERT_ID()").Row().Scan(&out.ID); err != nil {
 			return err
 		}
-		out.TeamID, out.SourceContentID, out.Title, out.CreatedBy, out.CreatedAt, out.UpdatedAt = source.TeamID, source.ID, source.Title, identitymodel.UserID(creator), now, now
+		out.TeamID, out.SourceContentID, out.Title, out.CreatedBy, out.CreatedAt, out.UpdatedAt = source.TeamID, source.ID, source.Title, sharedidentity.UserID(creator), now, now
 		_ = json.Unmarshal(snapshot, &out.SourceSnapshot)
 		return tx.Exec(`UPDATE source_contents SET status = 'material_created', ignored_reason = NULL, updated_at = ? WHERE id = ?`, now, id).Error
 	})
@@ -162,8 +162,8 @@ func scanSource(row scannable) (model.SourceContent, error) {
 	if err != nil {
 		return item, err
 	}
-	item.TeamID = identitymodel.TeamID(team)
-	item.CreatedBy = identitymodel.UserID(creator)
+	item.TeamID = sharedidentity.TeamID(team)
+	item.CreatedBy = sharedidentity.UserID(creator)
 	item.Status = model.Status(status)
 	item.Description, item.CoverURL, item.SourceURL, item.AuthorID, item.AuthorName, item.SourceType, item.IgnoredReason = description.String, cover.String, url.String, authorID.String, authorName.String, sourceType.String, reason.String
 	if published.Valid {

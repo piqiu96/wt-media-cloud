@@ -11,7 +11,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
-	identitymodel "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -33,10 +33,10 @@ func createStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStra
 	}
 	return v, nil
 }
-func ListStrategies(team *identitymodel.TeamID) ([]model.DiscoveryStrategy, error) {
+func ListStrategies(team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
 	return listStrategies(database.DB(), team)
 }
-func listStrategies(db *gorm.DB, team *identitymodel.TeamID) ([]model.DiscoveryStrategy, error) {
+func listStrategies(db *gorm.DB, team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
 	query := `SELECT id,team_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies`
 	args := []any{}
 	if team != nil {
@@ -98,10 +98,10 @@ func createCrawlTask(db *gorm.DB, v model.CrawlTask) (model.CrawlTask, error) {
 	}
 	return v, nil
 }
-func ListCrawlTasks(team *identitymodel.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
+func ListCrawlTasks(team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
 	return listCrawlTasks(database.DB(), team, strategyID)
 }
-func listCrawlTasks(db *gorm.DB, team *identitymodel.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
+func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
 	query := `SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks`
 	conditions := []string{}
 	args := []any{}
@@ -196,8 +196,8 @@ func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 	if err != nil {
 		return item, err
 	}
-	item.TeamID = identitymodel.TeamID(team)
-	item.CreatedBy = identitymodel.UserID(creator)
+	item.TeamID = sharedidentity.TeamID(team)
+	item.CreatedBy = sharedidentity.UserID(creator)
 	item.Status = model.StrategyStatus(status)
 	_ = json.Unmarshal(raw, &item.Config)
 	if item.Config == nil {
@@ -217,8 +217,8 @@ func scanCrawlTask(row scannable) (model.CrawlTask, error) {
 	if err != nil {
 		return item, err
 	}
-	item.TeamID = identitymodel.TeamID(team)
-	item.CreatedBy = identitymodel.UserID(creator)
+	item.TeamID = sharedidentity.TeamID(team)
+	item.CreatedBy = sharedidentity.UserID(creator)
 	item.Status = model.CrawlStatus(status)
 	if strategyID.Valid {
 		value := strategyID.Int64
