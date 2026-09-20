@@ -108,9 +108,9 @@ func clientConfigForTest(rawURL string) config.ClientConfig {
 
 func newTransport(attempts int) *httpclient.Client {
 	instance, closer, err := httpclient.New(httpclient.Config{
-		Timeout:    httpclient.Duration{5 * time.Second},
-		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{time.Second}},
-		Retry:      httpclient.RetryConfig{Attempts: attempts, Delay: httpclient.Duration{}, Policy: "fixed"},
+		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
+		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
+		Retry:      httpclient.RetryConfig{Attempts: attempts, Delay: httpclient.Duration{Duration: 0}, Policy: "fixed"},
 	})
 	if err != nil {
 		panic(err)

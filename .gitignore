@@ -7,6 +7,7 @@ web/dist-cloud/
 web/dist-desktop/
 web/node_modules/
 *.log
+logs/
 *.pid
 /server
 .env.local

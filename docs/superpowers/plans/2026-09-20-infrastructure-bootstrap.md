@@ -188,11 +188,11 @@
 - No Redis/OSS files
 
 **Steps:**
-- [ ] Add architecture checks forbidding business imports of `pkg/config`, `pkg/logger`, and `pkg/clients/http`.
-- [ ] Scan for stale YAML references and obsolete `slog` production use.
-- [ ] Run `gofmt` over changed Go files.
-- [ ] Run `go test ./...`.
-- [ ] Run `go vet ./...`.
-- [ ] Run migration against local `wt_media_cloud`.
-- [ ] Start server and worker smoke checks.
-- [ ] Commit final cleanup.
+- [x] Add architecture checks forbidding business imports of `pkg/config`, `pkg/logger`, and `pkg/clients/http`.
+- [x] Scan for stale YAML references and obsolete `slog` production use.
+- [x] Run `gofmt` over changed Go files.
+- [x] Run `go test ./...`.
+- [x] Run `go vet ./...`.
+- [x] Run migration against local `wt_media_cloud`.
+- [x] Start server and worker smoke checks.
+- [x] Commit final cleanup.
