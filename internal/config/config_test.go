@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ func TestLoadAlwaysUsesConfigDirectory(t *testing.T) {
 	writeValidConfig(t, filepath.Join(root, "config"))
 	other := t.TempDir()
 	writeValidConfig(t, other)
-	writeConfigFile(t, other, "app.yaml", validAppYAML("wrong-app"))
+	writeConfigFile(t, other, "app.yaml", validAppYAMLIgnored("wrong-app"))
 	t.Setenv("WT_MEDIA_CONFIG_DIR", other)
 	t.Chdir(root)
 
@@ -27,7 +28,7 @@ func TestLoadAlwaysUsesConfigDirectory(t *testing.T) {
 	}
 }
 
-func TestLoadFromDirReadsServerFromAppYAML(t *testing.T) {
+func TestLoadFromDirReadsServerFromAppTOML(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
 
@@ -43,13 +44,30 @@ func TestLoadFromDirReadsServerFromAppYAML(t *testing.T) {
 	}
 }
 
+func TestLoadFromDirAcceptsReleaseConfigTree(t *testing.T) {
+	if _, err := LoadFromDir("../../config_online"); err != nil {
+		t.Fatalf("LoadFromDir(config_online) error = %v", err)
+	}
+}
+
+func TestLoadFromDirRejectsNonTOMLCloudConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+	writeConfigFile(t, dir, "database/extra.yaml", "name: extra\n")
+
+	_, err := LoadFromDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "Cloud config must use TOML") {
+		t.Fatalf("LoadFromDir() error = %v, want non-TOML rejection", err)
+	}
+}
+
 func TestLoadFromDirRequiresPrimaryDatabase(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	if err := os.Remove(filepath.Join(dir, "database", "primary.yaml")); err != nil {
+	if err := os.Remove(filepath.Join(dir, "database", "primary.toml")); err != nil {
 		t.Fatal(err)
 	}
-	writeDatabaseConfig(t, dir, "analytics.yaml", "analytics")
+	writeDatabaseConfig(t, dir, "analytics.toml", "analytics")
 
 	_, err := LoadFromDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "primary") {
@@ -60,7 +78,7 @@ func TestLoadFromDirRequiresPrimaryDatabase(t *testing.T) {
 func TestLoadFromDirRejectsDuplicateDatabaseNames(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeDatabaseConfig(t, dir, "duplicate.yaml", "primary")
+	writeDatabaseConfig(t, dir, "duplicate.toml", "primary")
 
 	_, err := LoadFromDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "duplicate database name") {
@@ -71,7 +89,7 @@ func TestLoadFromDirRejectsDuplicateDatabaseNames(t *testing.T) {
 func TestLoadFromDirIgnoresMigrationConfigWhenScanningDatabases(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "database/migration.yaml", "directory: migrations\nunknown_migration_field: true\n")
+	writeConfigFile(t, dir, "database/migration.toml", "directory = \"migrations\"\nunknown_migration_field = true\n")
 
 	cfg, err := LoadFromDir(dir)
 	if err != nil {
@@ -119,8 +137,9 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromDir() error = %v", err)
 	}
-	if got, want := cfg.Clients.Douyin.Host, "api.itfaba.com"; got != want {
-		t.Fatalf("Douyin client host = %q, want %q", got, want)
+	douyin, ok := cfg.HTTPClient("douyin")
+	if !ok || douyin.BaseURL != "https://api.itfaba.com" {
+		t.Fatalf("Douyin client = %+v, found=%v", douyin, ok)
 	}
 	if got, want := cfg.Credentials.Douyin.APIKey, "douyin-key"; got != want {
 		t.Fatalf("Douyin API key = %q, want %q", got, want)
@@ -140,7 +159,7 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 func TestSchedulerDurationsAndBatchSizeAreValidated(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "scheduler/scheduler.yaml", "proxy_expiry_interval: 6h\ndiscovery_interval: 1m\nworker_interval: 5s\nworker_batch_size: 0\n")
+	writeConfigFile(t, dir, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 0\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "worker_batch_size") {
@@ -181,16 +200,16 @@ func TestGetPanicsBeforeInitialize(t *testing.T) {
 	_ = Get()
 }
 
-func TestLoadFromDirRejectsUnknownYAMLFieldWithPath(t *testing.T) {
+func TestLoadFromDirRejectsUnknownTOMLFieldWithPath(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "app.yaml", validAppYAML("wt-media-cloud")+"unknown_field: true\n")
+	writeConfigFile(t, dir, "app.toml", validAppTOML("wt-media-cloud")+"unknown_field = true\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil {
 		t.Fatal("LoadFromDir() error = nil, want unknown field error")
 	}
-	if !strings.Contains(err.Error(), filepath.Join(dir, "app.yaml")) || !strings.Contains(err.Error(), "unknown_field") {
+	if !strings.Contains(err.Error(), filepath.Join(dir, "app.toml")) || !strings.Contains(err.Error(), "unknown fields") {
 		t.Fatalf("LoadFromDir() error = %v, want file path and unknown field", err)
 	}
 }
@@ -198,13 +217,13 @@ func TestLoadFromDirRejectsUnknownYAMLFieldWithPath(t *testing.T) {
 func TestLoadFromDirRejectsInvalidDurationWithPath(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "clients/agent.yaml", "name: agent\nscheme: http\nhost: 127.0.0.1\nport: 8765\ntimeout: eventually\nretry:\n  attempts: 2\n  interval: 300ms\n")
+	writeConfigFile(t, dir, "clients/http/agent.toml", "base_url = \"http://127.0.0.1:8765\"\ntimeout = \"eventually\"\n\n[retry]\nattempts = 2\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil {
 		t.Fatal("LoadFromDir() error = nil, want invalid duration error")
 	}
-	if !strings.Contains(err.Error(), filepath.Join(dir, "clients", "agent.yaml")) || !strings.Contains(err.Error(), "eventually") {
+	if !strings.Contains(err.Error(), filepath.Join(dir, "clients", "http", "agent.toml")) || !strings.Contains(err.Error(), "eventually") {
 		t.Fatalf("LoadFromDir() error = %v, want file path and invalid duration", err)
 	}
 }
@@ -217,7 +236,8 @@ func TestDurationUsesTimeParseDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromDir() error = %v", err)
 	}
-	if got, want := cfg.Clients.Agent.Timeout.Duration, 7*time.Second; got != want {
+	agent, _ := cfg.HTTPClient("agent")
+	if got, want := agent.Timeout.Duration, 7*time.Second; got != want {
 		t.Fatalf("Agent timeout = %s, want %s", got, want)
 	}
 	if got, want := cfg.Scheduler.DiscoveryInterval.Duration, time.Minute; got != want {
@@ -228,7 +248,7 @@ func TestDurationUsesTimeParseDuration(t *testing.T) {
 func TestConfigValidateRejectsPartialInitialAdmin(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "app.yaml", "name: wt-media-cloud\nserver:\n  http_addr: 127.0.0.1:8080\n  session_cookie_secure: true\ninitial_admin:\n  username: admin\n")
+	writeConfigFile(t, dir, "app.toml", validAppTOML("wt-media-cloud")+"[initial_admin]\nusername = \"admin\"\npassword = \"\"\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "initial_admin") {
@@ -238,27 +258,36 @@ func TestConfigValidateRejectsPartialInitialAdmin(t *testing.T) {
 
 func writeValidConfig(t *testing.T, root string) {
 	t.Helper()
-	writeConfigFile(t, root, "app.yaml", validAppYAML("wt-media-cloud"))
-	writeDatabaseConfig(t, root, "primary.yaml", "primary")
-	writeConfigFile(t, root, "cache/redis.yaml", "url: \"\"\n")
+	writeConfigFile(t, root, "app.toml", validAppTOML("wt-media-cloud"))
+	writeDatabaseConfig(t, root, "primary.toml", "primary")
+	writeConfigFile(t, root, "cache/redis.toml", "url = \"\"\n")
 	for _, category := range []string{"app", "access", "job", "external", "audit", "panic"} {
-		writeConfigFile(t, root, "logger/"+category+".yaml", "path: logs/"+category+".log\nlevel: info\nformat: json\n")
+		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	}
-	writeConfigFile(t, root, "clients/agent.yaml", "name: agent\nscheme: http\nhost: 127.0.0.1\nport: 8765\ntimeout: 7s\nretry:\n  attempts: 2\n  interval: 300ms\n")
-	writeConfigFile(t, root, "clients/platforms/douyin.yaml", "name: douyin\nscheme: https\nhost: api.itfaba.com\nport: 443\ntimeout: 30s\nretry:\n  attempts: 2\n  interval: 300ms\n")
-	writeConfigFile(t, root, "credentials/agent.yaml", "auth_token: agent-token\n")
-	writeConfigFile(t, root, "credentials/douyin.yaml", "api_key: douyin-key\ncookie: douyin-cookie\nheaders:\n  User-Agent: WT-Media-Cloud/1\n")
-	writeConfigFile(t, root, "scheduler/scheduler.yaml", "proxy_expiry_interval: 6h\ndiscovery_interval: 1m\nworker_interval: 5s\nworker_batch_size: 10\n")
-	writeConfigFile(t, root, "observability/health.yaml", "health_path: /api/v1/health\n")
+	writeHTTPClient(t, root, "agent", "http://127.0.0.1:8765", "7s")
+	writeHTTPClient(t, root, "douyin", "https://api.itfaba.com", "30s")
+	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
+	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
+	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
+	writeConfigFile(t, root, "observability/health.toml", "health_path = \"/api/v1/health\"\n")
 }
 
-func validAppYAML(name string) string {
-	return "name: " + name + "\nserver:\n  http_addr: 127.0.0.1:8080\n  session_cookie_secure: true\ninitial_admin:\n  username: \"\"\n  password: \"\"\n"
+func writeHTTPClient(t *testing.T, root, name, baseURL, timeout string) {
+	t.Helper()
+	writeConfigFile(t, root, "clients/http/"+name+".toml", "base_url = "+strconv.Quote(baseURL)+"\ntimeout = "+strconv.Quote(timeout)+"\n\n[connection]\ndial_timeout = \"1s\"\n\n[retry]\nattempts = 2\ndelay = \"300ms\"\nmax_delay = \"2s\"\npolicy = \"fixed\"\n")
+}
+
+func validAppTOML(name string) string {
+	return "name = " + strconv.Quote(name) + "\n\n[server]\nhttp_addr = \"127.0.0.1:8080\"\nsession_cookie_secure = true\n\n[initial_admin]\nusername = \"\"\npassword = \"\"\n"
+}
+
+func validAppYAMLIgnored(name string) string {
+	return "name: " + name + "\nserver:\n  http_addr: 127.0.0.1:1\n  session_cookie_secure: true\ninitial_admin:\n  username: \"\"\n  password: \"\"\n"
 }
 
 func writeDatabaseConfig(t *testing.T, root, fileName, name string) {
 	t.Helper()
-	writeConfigFile(t, root, "database/"+fileName, "name: "+name+"\nhost: 127.0.0.1\nport: 3306\ndatabase: wt_media\nusername: root\npassword: secret\ncharset: utf8mb4\nparse_time: true\nlocation: Local\npool:\n  max_idle: 10\n  max_open: 50\n  max_lifetime: 30m\n")
+	writeConfigFile(t, root, "database/"+fileName, "name = "+strconv.Quote(name)+"\nhost = \"127.0.0.1\"\nport = 3306\ndatabase = \"wt_media\"\nusername = \"root\"\npassword = \"secret\"\ncharset = \"utf8mb4\"\nparse_time = true\nlocation = \"Local\"\n\n[pool]\nmax_idle = 10\nmax_open = 50\nmax_lifetime = \"30m\"\n")
 }
 
 func writeConfigFile(t *testing.T, root, name, contents string) {

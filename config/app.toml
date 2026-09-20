@@ -1,0 +1,9 @@
+name = 'wt-media-cloud'
+
+[initial_admin]
+password = ''
+username = ''
+
+[server]
+http_addr = '127.0.0.1:18080'
+session_cookie_secure = false

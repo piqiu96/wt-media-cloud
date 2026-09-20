@@ -3,16 +3,16 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
+	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
+	pkgconfig "github.com/wt-media/wt-media-cloud/pkg/config"
 )
 
 func TestAgentClientAddsCredentialWithoutBusinessPassingHeaders(t *testing.T) {
@@ -38,10 +38,10 @@ func TestAgentClientAddsCredentialWithoutBusinessPassingHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewWithHTTPClient(
-		clientConfigForTest(server.URL),
+	client := NewWithClient(
+		server.URL,
 		config.AgentCredentialConfig{AuthToken: "agent-secret"},
-		server.Client(),
+		newTransport(1),
 	)
 	result, err := client.CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1", Port: 1080})
 	if err != nil {
@@ -61,6 +61,7 @@ func TestInitializePublishesConfiguredAgentClient(t *testing.T) {
 	}))
 	defer server.Close()
 
+	closeHTTPClient(t, initializeHTTPClient(t, "agent", 1))
 	_ = Close()
 	if err := Initialize(clientConfigForTest(server.URL), config.AgentCredentialConfig{AuthToken: "initialize-secret"}); err != nil {
 		t.Fatalf("Initialize() error = %v", err)
@@ -80,44 +81,21 @@ func TestInitializePublishesConfiguredAgentClient(t *testing.T) {
 	}
 }
 
-func TestClientRetriesOnlyConfiguredTransportFailures(t *testing.T) {
+func TestClientDoesNotRetryNonSuccessResponses(t *testing.T) {
 	attempts := 0
-	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
-		if attempts < 3 {
-			return nil, io.ErrUnexpectedEOF
-		}
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(`{"data":{"connectivity":"ok"}}`)),
-			Header:     make(http.Header),
-			Request:    request,
-		}, nil
-	})
-	connection := clientConfigForTest("http://agent.example")
-	connection.Retry = config.RetryConfig{Attempts: 3, Interval: config.Duration{}}
-	client := NewWithHTTPClient(connection, config.AgentCredentialConfig{AuthToken: "secret"}, &http.Client{Transport: transport})
+		http.Error(w, `{"message":"agent unavailable"}`, http.StatusBadGateway)
+	}))
+	defer server.Close()
 
-	if _, err := client.CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1"}); err != nil {
-		t.Fatalf("CheckProxy() error = %v", err)
-	}
-	if attempts != 3 {
-		t.Fatalf("transport attempts = %d, want 3", attempts)
-	}
-
-	attempts = 0
-	nonSuccess := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		attempts++
-		return &http.Response{
-			StatusCode: http.StatusBadGateway,
-			Body:       io.NopCloser(strings.NewReader(`{"message":"agent unavailable"}`)),
-			Header:     make(http.Header),
-			Request:    request,
-		}, nil
-	})
-	client = NewWithHTTPClient(connection, config.AgentCredentialConfig{AuthToken: "secret"}, &http.Client{Transport: nonSuccess})
-	if _, err := client.CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1"}); err == nil {
+	client := NewWithClient(server.URL, config.AgentCredentialConfig{AuthToken: "secret"}, newTransport(3))
+	_, err := client.CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1"})
+	if err == nil {
 		t.Fatal("CheckProxy() with HTTP 502 succeeded")
+	}
+	if !strings.Contains(err.Error(), "502") || !strings.Contains(err.Error(), "agent unavailable") {
+		t.Fatalf("error = %v, want status and response body", err)
 	}
 	if attempts != 1 {
 		t.Fatalf("HTTP status attempts = %d, want 1", attempts)
@@ -125,36 +103,37 @@ func TestClientRetriesOnlyConfiguredTransportFailures(t *testing.T) {
 }
 
 func clientConfigForTest(rawURL string) config.ClientConfig {
-	parsed, err := url.Parse(rawURL)
+	return config.ClientConfig{Name: "agent", BaseURL: rawURL, Timeout: config.Duration{Duration: 5 * time.Second}}
+}
+
+func newTransport(attempts int) *httpclient.Client {
+	instance, closer, err := httpclient.New(httpclient.Config{
+		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
+		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
+		Retry:      httpclient.RetryConfig{Attempts: attempts, Delay: httpclient.Duration{Duration: 0}, Policy: "fixed"},
+	})
 	if err != nil {
 		panic(err)
 	}
-	return config.ClientConfig{
-		Name:    "agent",
-		Scheme:  parsed.Scheme,
-		Host:    parsed.Hostname(),
-		Port:    portForTest(parsed),
-		Timeout: config.Duration{Duration: 5 * time.Second},
-		Retry:   config.RetryConfig{Attempts: 1, Interval: config.Duration{}},
-	}
+	_ = closer
+	return instance
 }
 
-func portForTest(parsed *url.URL) int {
-	if parsed.Port() == "" {
-		if parsed.Scheme == "https" {
-			return 443
+func initializeHTTPClient(t *testing.T, name string, attempts int) func() error {
+	t.Helper()
+	content := "timeout = \"5s\"\n[connection]\ndial_timeout = \"1s\"\n[retry]\nattempts = " + strconv.Itoa(attempts) + "\npolicy = \"fixed\"\n"
+	closer, err := httpclient.Initialize([]pkgconfig.Document{{Name: name, Format: pkgconfig.FormatTOML, Raw: []byte(content)}}, nil)
+	if err != nil {
+		t.Fatalf("initialize http client: %v", err)
+	}
+	return closer
+}
+
+func closeHTTPClient(t *testing.T, closer func() error) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := closer(); err != nil {
+			t.Fatalf("close http client: %v", err)
 		}
-		return 80
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		panic(err)
-	}
-	return port
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return f(request)
+	})
 }

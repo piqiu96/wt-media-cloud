@@ -34,6 +34,7 @@ func TestProductionArchitectureBoundaries(t *testing.T) {
 	}
 	checks := []boundaryCheck{
 		{name: "module_http_client", root: "../modules", pattern: regexp.MustCompile(`http\.Client\s*\{`), message: "modules must use internal/infra/client"},
+		{name: "module_generic_infrastructure_import", root: "../modules", pattern: regexp.MustCompile(`github\.com/wt-media/wt-media-cloud/pkg/(config|logger|clients/http)`), message: "modules must use internal semantic infrastructure boundaries"},
 		{name: "module_ticker", root: "../modules", pattern: regexp.MustCompile(`time\.NewTicker\(`), message: "modules must not own scheduler timing"},
 		{name: "module_environment", root: "../modules", pattern: regexp.MustCompile(`os\.(Getenv|LookupEnv)\(`), message: "modules must not read process configuration"},
 		{name: "module_database_sql", root: "../modules", pattern: regexp.MustCompile(`"database/sql"`), message: "module repositories must use the GORM database boundary"},

@@ -6,15 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/wt-media/wt-media-cloud/internal/config"
+	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
 type SearchRequest struct {
@@ -38,13 +37,11 @@ type FetchByIDsRequest struct {
 }
 
 type Client struct {
-	baseURL    string
-	apiKey     string
-	cookie     string
-	headers    map[string]string
-	httpClient *http.Client
-	attempts   int
-	interval   time.Duration
+	baseURL   string
+	apiKey    string
+	cookie    string
+	headers   map[string]string
+	transport *httpclient.Client
 }
 
 type resourceState struct {
@@ -59,7 +56,7 @@ func Initialize(connection config.ClientConfig, credential config.DouyinCredenti
 	if err := validateConnection(connection); err != nil {
 		return err
 	}
-	client := NewWithHTTPClient(connection, credential, nil)
+	client := NewWithClient(strings.TrimRight(connection.BaseURL, "/"), credential, httpclient.Get(connection.Name))
 	resources.Lock()
 	defer resources.Unlock()
 	if resources.client != nil {
@@ -89,19 +86,13 @@ func Close() error {
 	if client == nil {
 		return nil
 	}
-	client.httpClient.CloseIdleConnections()
 	return nil
 }
 
-// NewWithHTTPClient builds a testable Douyin client with an injected HTTP transport.
-func NewWithHTTPClient(connection config.ClientConfig, credential config.DouyinCredentialConfig, httpClient *http.Client) *Client {
-	if httpClient == nil {
-		httpClient = &http.Client{}
-	}
-	httpClient.Timeout = connection.Timeout.Duration
-	attempts := connection.Retry.Attempts
-	if attempts < 1 {
-		attempts = 1
+// NewWithClient builds a testable Douyin client over an initialized Hertz transport.
+func NewWithClient(baseURL string, credential config.DouyinCredentialConfig, transport *httpclient.Client) *Client {
+	if transport == nil {
+		panic("douyin: Hertz transport is required")
 	}
 	headers := make(map[string]string, len(credential.Headers))
 	for key, value := range credential.Headers {
@@ -110,13 +101,11 @@ func NewWithHTTPClient(connection config.ClientConfig, credential config.DouyinC
 		}
 	}
 	return &Client{
-		baseURL:    buildBaseURL(connection),
-		apiKey:     credential.APIKey,
-		cookie:     credential.Cookie,
-		headers:    headers,
-		httpClient: httpClient,
-		attempts:   attempts,
-		interval:   connection.Retry.Interval.Duration,
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		apiKey:    credential.APIKey,
+		cookie:    credential.Cookie,
+		headers:   headers,
+		transport: transport,
 	}
 }
 
@@ -196,83 +185,41 @@ func (c *Client) FetchByURL(ctx context.Context, request FetchByURLRequest) (map
 }
 
 func (c *Client) postForm(ctx context.Context, path string, fields map[string]string, target *map[string]any) error {
-	return doRequest(ctx, c.httpClient, c.attempts, c.interval, func() (*http.Request, error) {
-		values := make(url.Values, len(fields))
-		for key, value := range fields {
-			values.Set(key, value)
-		}
-		endpoint := c.baseURL + path + "?apiKey=" + url.QueryEscape(c.apiKey)
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(values.Encode()))
-		if err != nil {
-			return nil, err
-		}
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		request.Header.Set("User-Agent", "WT-Media-Cloud/1")
-		for key, value := range c.headers {
-			request.Header.Set(key, value)
-		}
-		if c.cookie != "" {
-			request.Header.Set("Cookie", c.cookie)
-		}
-		return request, nil
-	}, func(response *http.Response) error {
-		if err := json.NewDecoder(response.Body).Decode(target); err != nil {
-			return fmt.Errorf("decode douyin response: %w", err)
-		}
-		if !successValue((*target)["result"]) {
-			return errors.New("douyin API rejected request")
-		}
-		return nil
-	})
-}
+	values := url.Values{}
+	for key, value := range fields {
+		values.Set(key, value)
+	}
+	endpoint := c.baseURL + path + "?apiKey=" + url.QueryEscape(c.apiKey)
 
-func doRequest(
-	ctx context.Context,
-	httpClient *http.Client,
-	attempts int,
-	interval time.Duration,
-	newRequest func() (*http.Request, error),
-	handleSuccess func(*http.Response) error,
-) error {
-	for attempt := 1; attempt <= attempts; attempt++ {
-		request, err := newRequest()
-		if err != nil {
-			return err
-		}
-		response, err := httpClient.Do(request)
-		if err != nil {
-			if attempt == attempts {
-				return err
-			}
-			if err := sleepWithContext(ctx, interval); err != nil {
-				return err
-			}
-			continue
-		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-			_ = response.Body.Close()
-			return fmt.Errorf("douyin http status %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
-		}
-		err = handleSuccess(response)
-		_ = response.Body.Close()
+	request := protocol.AcquireRequest()
+	response := protocol.AcquireResponse()
+	defer protocol.ReleaseRequest(request)
+	defer protocol.ReleaseResponse(response)
+	request.SetMethod("POST")
+	request.SetRequestURI(endpoint)
+	request.SetBodyRaw([]byte(values.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("User-Agent", "WT-Media-Cloud/1")
+	for key, value := range c.headers {
+		request.Header.Set(key, value)
+	}
+	if c.cookie != "" {
+		request.Header.Set("Cookie", c.cookie)
+	}
+
+	if err := c.transport.Do(ctx, request, response); err != nil {
 		return err
 	}
+	if response.StatusCode() < 200 || response.StatusCode() >= 300 {
+		return fmt.Errorf("douyin http status %d: %s", response.StatusCode(), strings.TrimSpace(string(response.BodyBytes())))
+	}
+	if err := json.Unmarshal(response.BodyBytes(), target); err != nil {
+		return fmt.Errorf("decode douyin response: %w", err)
+	}
+	if !successValue((*target)["result"]) {
+		return errors.New("douyin API rejected request")
+	}
 	return nil
-}
-
-func sleepWithContext(ctx context.Context, interval time.Duration) error {
-	if interval <= 0 {
-		return ctx.Err()
-	}
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func successValue(value any) bool {
@@ -289,33 +236,20 @@ func successValue(value any) bool {
 }
 
 func validateConnection(connection config.ClientConfig) error {
-	if connection.Scheme != "http" && connection.Scheme != "https" {
-		return errors.New("douyin client scheme must be http or https")
+	if strings.TrimSpace(connection.Name) == "" {
+		return errors.New("douyin client name is required")
 	}
-	if strings.TrimSpace(connection.Host) == "" {
-		return errors.New("douyin client host is required")
+	if strings.TrimSpace(connection.BaseURL) == "" {
+		return errors.New("douyin client base_url is required")
 	}
-	if connection.Port <= 0 || connection.Port > 65535 {
-		return errors.New("douyin client port is invalid")
+	parsed, err := url.Parse(strings.TrimSpace(connection.BaseURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return errors.New("douyin client base_url must be an absolute http or https URL")
 	}
 	if connection.Timeout.Duration <= 0 {
 		return errors.New("douyin client timeout must be greater than zero")
 	}
-	if connection.Retry.Attempts < 1 {
-		return errors.New("douyin client retry attempts must be greater than zero")
-	}
-	if connection.Retry.Interval.Duration < 0 {
-		return errors.New("douyin client retry interval cannot be negative")
-	}
 	return nil
-}
-
-func buildBaseURL(connection config.ClientConfig) string {
-	host := connection.Host
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-	return connection.Scheme + "://" + host + ":" + strconv.Itoa(connection.Port)
 }
 
 func clamp(value, low, high int) int {

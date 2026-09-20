@@ -58,7 +58,7 @@ Bootstrap 提供四个进程入口：
 - `InitializeWorker`
 - `InitializeMigration`
 
-每个进程只初始化自身所需资源。初始化失败时按逆序回滚，关闭操作必须幂等。
+每个进程只初始化自身所需资源。Server 初始化 Config、Logger/Hertz Logger、Metrics、Tracing、Database、HTTP Client、Agent/Douyin 语义 Client 后启动 Hertz Server；Worker 只初始化 Douyin HTTP Client；Scheduler 不初始化外部 HTTP Client。初始化失败时按逆序回滚，关闭操作必须幂等。
 
 ## 4. 受控基础资源
 
@@ -78,10 +78,10 @@ func Named(name string) (*gorm.DB, bool)
 - 运行时始终读取 `./config`。
 - `config_online` 只在发布打包时替换产物中的 `config`。
 - `internal/config` 只包含加载、Schema、校验和只读 Getter。
-- HTTP 参数位于 `app.yaml`。
+- HTTP 参数位于 `app.toml`。
 - Scheduler/Worker 配置独立位于 `config/scheduler`。
 - 每个数据库使用独立配置文件；代码固定 `primary` 为默认库，不使用 `default` 或 `enabled`。
-- Client 文件只描述名称、协议、主机、端口、超时和重试。
+- HTTP Client 文件位于 `config/clients/http/`，文件名即实例名，只描述 `base_url`、超时、连接池和重试。
 - Cookie、API Key 和固定 Header 按需放在独立 credentials 配置中。
 
 ## 6. Database 与 Repository
@@ -107,11 +107,11 @@ audit.log
 panic.log
 ```
 
-调用入口为 `logger.App()`、`Access()`、`Job()`、`External()`、`Audit()`、`Panic()`。请求日志支持 `trace_id`、`request_id` 和 `module`。Metrics 和 Tracing 未接入后端时使用 Noop 实现。
+调用入口为 `logger.App()`、`Access()`、`Job()`、`External()`、`Audit()`、`Panic()`。每个 Logger 同时写入普通文件和 `.wf` 文件；`.wf` 记录 WARN、ERROR 和 FATAL。上下文日志自动携带非空的 `trace_id`、`request_id` 和 `user_id`。Metrics 和 Tracing 未接入后端时使用 Noop 实现。
 
 ## 8. Client 与执行边界
 
-所有外部 HTTP 协议位于 `internal/infra/client`，向业务暴露类型化方法，统一处理连接、超时、重试、错误映射、日志、Metrics 和 Tracing。业务代码不直接创建 `http.Client`。
+所有外部 HTTP 协议位于 `internal/infra/client`，底层复用 Hertz Client 和 `pkg/clients/http` 的窄类型 Registry，向业务暴露类型化方法，统一处理连接、超时、重试、错误映射、日志、Metrics 和 Tracing。业务代码不直接创建 `http.Client`，也不导入 `pkg/config`、`pkg/logger` 或 `pkg/clients/http`。
 
 Cloud 可以直接抓取抖音等公开平台数据，并维护服务端所需凭证和代理连接。Desktop Agent 只负责本地浏览器、Profile、账号登录态、文件和 FFmpeg 等本机能力。
 

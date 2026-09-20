@@ -15,6 +15,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
 )
 
 func TestRequestContextUsesIncomingRequestIDAndKeepsLogID(t *testing.T) {
@@ -24,6 +25,10 @@ func TestRequestContextUsesIncomingRequestIDAndKeepsLogID(t *testing.T) {
 	engine.GET("/check", func(ctx context.Context, c *hertzapp.RequestContext) {
 		traceID, _ := c.Get("trace_id")
 		requestID, _ := c.Get("request_id")
+		if requestctx.TraceID(ctx) != traceID.(string) || requestctx.RequestID(ctx) != requestID.(string) {
+			api.InternalError(c, "context id mismatch")
+			return
+		}
 		api.Success(c, map[string]string{"trace_id": traceID.(string), "request_id": requestID.(string)})
 	})
 
@@ -53,7 +58,15 @@ func TestRequestLoggerContainsTraceRequestAndModule(t *testing.T) {
 	dir := initializeRequestLogger(t)
 	engine := server.New()
 	engine.Use(RequestContext())
+	engine.Use(func(ctx context.Context, c *hertzapp.RequestContext) {
+		c.Set("user_id", int64(7))
+		c.Next(requestctx.WithUserID(ctx, 7))
+	})
 	engine.GET("/check", func(ctx context.Context, c *hertzapp.RequestContext) {
+		if requestctx.UserID(ctx) != 7 {
+			api.InternalError(c, "context id mismatch")
+			return
+		}
 		api.Success(c, map[string]string{"ok": "yes"})
 	})
 
@@ -67,7 +80,7 @@ func TestRequestLoggerContainsTraceRequestAndModule(t *testing.T) {
 		t.Fatalf("read access log: %v", err)
 	}
 	output := string(data)
-	for _, field := range []string{`"trace_id":"tr`, `"request_id":"request-456"`, `"module":"http"`} {
+	for _, field := range []string{`"trace_id":"tr`, `"request_id":"request-456"`, "module=http", `"user_id":7`} {
 		if !strings.Contains(output, field) {
 			t.Fatalf("request log %q does not contain %s", output, field)
 		}
@@ -81,7 +94,7 @@ func initializeRequestLogger(t *testing.T) string {
 		App:      config.LoggerConfig{Path: filepath.Join(dir, "app.log"), Level: "info", Format: "json"},
 		Access:   config.LoggerConfig{Path: filepath.Join(dir, "access.log"), Level: "info", Format: "json"},
 		Job:      config.LoggerConfig{Path: filepath.Join(dir, "job.log"), Level: "info", Format: "json"},
-		External: config.LoggerConfig{Path: filepath.Join(dir, "external.log"), Level: "info", Format: "json"},
+		External: config.LoggerConfig{Path: filepath.Join(dir, "external.log"), Level: "info", Format: "json", Rotation: testRotation()},
 		Audit:    config.LoggerConfig{Path: filepath.Join(dir, "audit.log"), Level: "info", Format: "json"},
 		Panic:    config.LoggerConfig{Path: filepath.Join(dir, "panic.log"), Level: "info", Format: "json"},
 	}
@@ -94,4 +107,8 @@ func initializeRequestLogger(t *testing.T) string {
 		}
 	})
 	return dir
+}
+
+func testRotation() config.RotationConfig {
+	return config.RotationConfig{MaxSize: 10, MaxAge: 30, MaxBackups: 10}
 }

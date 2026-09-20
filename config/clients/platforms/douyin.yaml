@@ -1,8 +1,0 @@
-name: douyin
-scheme: https
-host: api.itfaba.com
-port: 443
-timeout: 30s
-retry:
-  attempts: 2
-  interval: 300ms
