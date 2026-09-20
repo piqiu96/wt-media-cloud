@@ -2,6 +2,9 @@ package bootstrap
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -9,7 +12,7 @@ import (
 
 func TestInitializeServerInitializesResourcesInOrder(t *testing.T) {
 	var order []string
-	steps := testResourceSteps(&order, "config", "logger", "metrics", "tracing", "database", "agent-client", "douyin-client")
+	steps := testResourceSteps(&order, "config", "logger", "metrics", "tracing", "database", "http-clients", "agent-client", "douyin-client")
 
 	engine, closer, err := initializeServer(
 		steps,
@@ -35,7 +38,7 @@ func TestInitializeServerInitializesResourcesInOrder(t *testing.T) {
 
 	want := []string{
 		"open:config", "open:logger", "open:metrics", "open:tracing",
-		"open:database", "open:agent-client", "open:douyin-client",
+		"open:database", "open:http-clients", "open:agent-client", "open:douyin-client",
 		"engine:test-addr", "routes",
 	}
 	assertOrder(t, order[:len(want)], want)
@@ -68,10 +71,42 @@ func TestInitializeServerRollsBackInReverseOrder(t *testing.T) {
 	assertOrder(t, order, []string{"open:first", "open:second", "open:third", "close:second", "close:first"})
 }
 
-func TestInitializeWorkerDoesNotInitializeHTTPOnlyResources(t *testing.T) {
+func TestInitializeWorkerInitializesOnlyDouyinHTTPClient(t *testing.T) {
 	names := resourceStepNames(workerResourcePlan())
-	want := []string{"config", "logger", "metrics", "tracing", "database", "douyin-client"}
+	want := []string{"config", "logger", "metrics", "tracing", "database", "http-clients", "douyin-client"}
 	assertOrder(t, names, want)
+}
+
+func TestLoadHTTPClientDocumentsSelectsOnlyRequestedNames(t *testing.T) {
+	dir := t.TempDir()
+	writeHTTPClientDocument(t, dir, "agent")
+	writeHTTPClientDocument(t, dir, "douyin")
+
+	documents, err := loadHTTPClientDocuments(dir, "douyin")
+	if err != nil {
+		t.Fatalf("loadHTTPClientDocuments() error = %v", err)
+	}
+	if len(documents) != 1 || documents[0].Name != "douyin" {
+		t.Fatalf("documents = %#v, want only douyin", documents)
+	}
+}
+
+func TestLoadHTTPClientDocumentsRejectsMissingName(t *testing.T) {
+	dir := t.TempDir()
+	writeHTTPClientDocument(t, dir, "agent")
+
+	if _, err := loadHTTPClientDocuments(dir, "missing"); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("loadHTTPClientDocuments() error = %v, want missing name", err)
+	}
+}
+
+func writeHTTPClientDocument(t *testing.T, dir, name string) {
+	t.Helper()
+	path := filepath.Join(dir, name+".toml")
+	content := "timeout = \"1s\"\n[retry]\nattempts = 1\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write HTTP client config: %v", err)
+	}
 }
 
 func TestInitializeSchedulerDoesNotInitializeDouyinClient(t *testing.T) {

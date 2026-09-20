@@ -5,13 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
+	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
 func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T) {
@@ -29,7 +30,7 @@ func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T
 	}))
 	defer server.Close()
 
-	crawler := NewDouyinCrawlerWithClient(testDouyinClient(server))
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(t, server))
 	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "王者荣耀"}})
 	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" {
 		t.Fatalf("unexpected result=%+v err=%v", result, err)
@@ -44,7 +45,7 @@ func TestDouyinCrawlerRejectsMissingCredentials(t *testing.T) {
 }
 
 func TestDouyinCrawlerAuthorIsTemporarilyUnavailable(t *testing.T) {
-	crawler := NewDouyinCrawlerWithClient(testDouyinClient(httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(t, httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected provider request %s", r.URL.Path)
 	}))))
 	_, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "author", Config: map[string]any{"author": "sec-author"}})
@@ -66,20 +67,31 @@ func TestDouyinCrawlerBatchURLKeepsSuccessfulItemsWhenOneFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	crawler := NewDouyinCrawlerWithClient(testDouyinClient(server))
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(t, server))
 	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "url", Config: map[string]any{"urls": []any{"bad", "good"}}})
 	if err != nil || result.Failed != 1 || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" {
 		t.Fatalf("unexpected batch result=%+v err=%v", result, err)
 	}
 }
 
-func testDouyinClient(server *httptest.Server) *douyinclient.Client {
-	parsed, _ := url.Parse(server.URL)
-	port, _ := strconv.Atoi(parsed.Port())
-	return douyinclient.NewWithHTTPClient(
-		config.ClientConfig{Name: "douyin", Scheme: parsed.Scheme, Host: parsed.Hostname(), Port: port, Retry: config.RetryConfig{Attempts: 1}},
+func testDouyinClient(t *testing.T, server *httptest.Server) *douyinclient.Client {
+	transport, closer, err := httpclient.New(httpclient.Config{
+		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
+		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
+		Retry:      httpclient.RetryConfig{Attempts: 1, Policy: "fixed"},
+	})
+	if err != nil {
+		panic(err)
+	}
+	t.Cleanup(func() {
+		if err := closer(); err != nil {
+			t.Errorf("close HTTP client: %v", err)
+		}
+	})
+	return douyinclient.NewWithClient(
+		server.URL,
 		config.DouyinCredentialConfig{APIKey: "secret-key", Cookie: "server-cookie"},
-		server.Client(),
+		transport,
 	)
 }
 
@@ -115,7 +127,7 @@ func TestDouyinCrawlerBatchURLChunksNumericIDsAndKeepsShortURLFallback(t *testin
 	for index := range ids {
 		ids[index] = strconv.Itoa(index + 1)
 	}
-	crawler := NewDouyinCrawlerWithClient(testDouyinClient(server))
+	crawler := NewDouyinCrawlerWithClient(testDouyinClient(t, server))
 	result, err := crawler.Discover(context.Background(), CrawlerRequest{
 		Platform:  "douyin",
 		Operation: "url",

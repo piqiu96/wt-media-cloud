@@ -2,16 +2,26 @@ package bootstrap
 
 import (
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
+	"github.com/cloudwego/hertz/pkg/app/client"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
+	"github.com/wt-media/wt-media-cloud/internal/infra/client/observe"
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
+	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
+	pkgconfig "github.com/wt-media/wt-media-cloud/pkg/config"
 )
+
+const httpClientsConfigDirectory = "config/clients/http"
 
 type resourceStep struct {
 	name string
@@ -25,6 +35,7 @@ func serverResourcePlan() []resourceStep {
 		metricsResource(),
 		tracingResource(),
 		databaseResource(),
+		httpClientsResource("agent", "douyin"),
 		agentClientResource(),
 		douyinClientResource(),
 	}
@@ -47,6 +58,7 @@ func workerResourcePlan() []resourceStep {
 		metricsResource(),
 		tracingResource(),
 		databaseResource(),
+		httpClientsResource("douyin"),
 		douyinClientResource(),
 	}
 }
@@ -117,6 +129,7 @@ func loggerResource() resourceStep {
 			if err := logger.Initialize(cfg.Loggers); err != nil {
 				return nil, err
 			}
+			installHertzLoggers()
 			return logger.Close, nil
 		},
 	}
@@ -159,12 +172,66 @@ func databaseResource() resourceStep {
 	}
 }
 
+func installHertzLoggers() {
+	hlog.SetLogger(logger.App())
+	hlog.SetSystemLogger(logger.Panic())
+}
+
+func httpClientsResource(names ...string) resourceStep {
+	return resourceStep{
+		name: "http-clients",
+		open: func() (func() error, error) {
+			documents, err := loadHTTPClientDocuments(httpClientsConfigDirectory, names...)
+			if err != nil {
+				return nil, err
+			}
+			middlewares := make(map[string][]client.Middleware, len(names))
+			for _, name := range names {
+				middlewares[name] = []client.Middleware{observe.External(name)}
+			}
+			closer, err := httpclient.Initialize(documents, middlewares)
+			if err != nil {
+				return nil, err
+			}
+			return closer, nil
+		},
+	}
+}
+
+func loadHTTPClientDocuments(directory string, names ...string) ([]pkgconfig.Document, error) {
+	documents, err := pkgconfig.LoadDir(directory)
+	if err != nil {
+		return nil, fmt.Errorf("load HTTP client config: %w", err)
+	}
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		wanted[name] = struct{}{}
+	}
+	selected := make([]pkgconfig.Document, 0, len(names))
+	for _, document := range documents {
+		if _, exists := wanted[document.Name]; exists {
+			selected = append(selected, document)
+			delete(wanted, document.Name)
+		}
+	}
+	if len(wanted) != 0 {
+		missing := make([]string, 0, len(wanted))
+		for name := range wanted {
+			missing = append(missing, name)
+		}
+		sort.Strings(missing)
+		return nil, fmt.Errorf("HTTP client config not found: %s", strings.Join(missing, ", "))
+	}
+	return selected, nil
+}
+
 func agentClientResource() resourceStep {
 	return resourceStep{
 		name: "agent-client",
 		open: func() (func() error, error) {
 			cfg := config.Get()
-			if err := agentclient.Initialize(cfg.Clients.Agent, cfg.Credentials.Agent); err != nil {
+			connection, _ := cfg.HTTPClient("agent")
+			if err := agentclient.Initialize(connection, cfg.Credentials.Agent); err != nil {
 				return nil, err
 			}
 			return agentclient.Close, nil
@@ -177,7 +244,8 @@ func douyinClientResource() resourceStep {
 		name: "douyin-client",
 		open: func() (func() error, error) {
 			cfg := config.Get()
-			if err := douyinclient.Initialize(cfg.Clients.Douyin, cfg.Credentials.Douyin); err != nil {
+			connection, _ := cfg.HTTPClient("douyin")
+			if err := douyinclient.Initialize(connection, cfg.Credentials.Douyin); err != nil {
 				return nil, err
 			}
 			return douyinclient.Close, nil

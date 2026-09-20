@@ -173,12 +173,12 @@
 - Produces: unchanged public bootstrap entrypoints.
 
 **Steps:**
-- [ ] Update order tests for config, logger/Hertz integration, metrics, tracing, database, HTTP clients, and process-specific runtime.
-- [ ] Run bootstrap tests and confirm failure.
-- [ ] Add the HTTP resource step after database.
-- [ ] Install Hertz default/system loggers after logger initialization.
-- [ ] Run `go test ./internal/bootstrap`.
-- [ ] Commit.
+- [x] Update order tests for config, logger/Hertz integration, metrics, tracing, database, HTTP clients, and process-specific runtime.
+- [x] Run bootstrap tests and confirm failure.
+- [x] Add the HTTP resource step after database.
+- [x] Install Hertz default/system loggers after logger initialization.
+- [x] Run `go test ./internal/bootstrap`.
+- [x] Commit.
 
 ### Task 8: Final verification and cleanup
 
