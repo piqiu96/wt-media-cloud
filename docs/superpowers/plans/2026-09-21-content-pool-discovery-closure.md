@@ -126,14 +126,14 @@ In progress.
 
 **Steps:**
 
-- [ ] Evaluate thresholds using the task snapshot.
-- [ ] Call the existing unified materialize service for qualifying items.
-- [ ] Mark qualifying results as automatically materialized.
-- [ ] Keep non-qualifying contents pending.
-- [ ] Preserve source content when material conversion fails and record failure reason.
-- [ ] Add tests for AND pass, OR pass, and threshold failure.
-- [ ] Run `go test ./internal/modules/contentpool/service -run 'TestAutomaticMaterial|TestDiscovery'`.
-- [ ] Commit.
+- [x] Evaluate thresholds using the task snapshot.
+- [x] Call the existing unified materialize service for qualifying items.
+- [x] Mark qualifying results as automatically materialized.
+- [x] Keep non-qualifying contents pending.
+- [x] Preserve source content when material conversion fails and record failure reason.
+- [x] Add tests for AND pass, OR pass, and threshold failure.
+- [x] Run `go test ./internal/modules/contentpool/service -run 'TestAutomaticMaterial|TestDiscovery'`.
+- [x] Commit.
 
 **Acceptance:**
 

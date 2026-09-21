@@ -322,9 +322,23 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 				item["failure_reason"] = err.Error()
 			default:
 				task.Stats.Added++
-				task.Stats.Pending++
-				item["processing_status"] = "pending"
 				item["source_content_id"] = source.ID
+				if !shouldAutoMaterialize(task.Snapshot, item) {
+					task.Stats.Pending++
+					item["processing_status"] = "pending"
+					break
+				}
+				material, materialErr := s.content.materialize(actorForTask(task), source.ID)
+				if materialErr != nil {
+					task.Stats.Failed++
+					task.Stats.Pending++
+					item["processing_status"] = "material_failed"
+					item["failure_reason"] = materialErr.Error()
+					break
+				}
+				task.Stats.AutoMaterialized++
+				item["processing_status"] = "auto_materialized"
+				item["material_id"] = material.ID
 			}
 		}
 		task.Stats.Found = len(task.Results)
@@ -338,6 +352,38 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 	}
 	_, err := s.store.UpdateCrawlTask(task)
 	return err
+}
+
+func shouldAutoMaterialize(snapshot map[string]any, item map[string]any) bool {
+	if !boolValue(snapshot["auto_material"]) {
+		return false
+	}
+	likeThreshold := int64Value(snapshot["like_threshold"])
+	favoriteThreshold := int64Value(snapshot["favorite_threshold"])
+	conditions := make([]bool, 0, 2)
+	if likeThreshold > 0 {
+		conditions = append(conditions, int64Value(item["like_count"]) >= likeThreshold)
+	}
+	if favoriteThreshold > 0 {
+		conditions = append(conditions, int64Value(item["favorite_count"]) >= favoriteThreshold)
+	}
+	if len(conditions) == 0 {
+		return false
+	}
+	if strings.EqualFold(fmt.Sprint(snapshot["material_rule"]), "OR") {
+		for _, passed := range conditions {
+			if passed {
+				return true
+			}
+		}
+		return false
+	}
+	for _, passed := range conditions {
+		if !passed {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *discoveryService) runDue(now time.Time) int {

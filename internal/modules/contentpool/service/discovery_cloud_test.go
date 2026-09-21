@@ -108,3 +108,80 @@ func TestWorkerProjectsTaskResultDetails(t *testing.T) {
 		t.Fatalf("unexpected task stats: %+v", task.Stats)
 	}
 }
+
+func TestAutomaticMaterializationUsesTaskThresholdSnapshot(t *testing.T) {
+	store := newDiscoveryMemory()
+	contentStore := newMemoryStore()
+	crawler := &cloudCrawlerStub{}
+	service := NewDiscoveryService(store, NewService(contentStore), crawler)
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
+		TeamID: team, Name: "自动素材", StrategyType: "keyword", Platform: "douyin",
+		Config: map[string]any{
+			"keyword": "三角洲", "auto_material": true, "material_rule": "AND",
+			"like_threshold": 10000, "favorite_threshold": 500,
+		}, Status: StrategyEnabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	crawler.items = []map[string]any{
+		{"platform_content_id": "and-pass", "title": "both pass", "like_count": 12000, "favorite_count": 700},
+		{"platform_content_id": "and-fail", "title": "favorite only", "like_count": 8000, "favorite_count": 900},
+	}
+	task, err := service.CreateRun(actor, strategy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.RunNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	task, _, _ = store.FindCrawlTask(task.ID)
+	if contentStore.items[1].Status != StatusMaterialCreated || contentStore.items[1].MaterialID == nil {
+		t.Fatalf("expected AND-pass source to be materialized: %+v", contentStore.items[1])
+	}
+	if contentStore.items[2].Status != StatusPending || contentStore.items[2].MaterialID != nil {
+		t.Fatalf("expected AND-fail source to remain pending: %+v", contentStore.items[2])
+	}
+	if task.Stats.AutoMaterialized != 1 || task.Stats.Pending != 1 || task.Stats.Failed != 0 {
+		t.Fatalf("unexpected automatic material stats: %+v", task.Stats)
+	}
+	if task.Results[0]["processing_status"] != "auto_materialized" || task.Results[0]["material_id"] != *contentStore.items[1].MaterialID {
+		t.Fatalf("unexpected materialized result: %+v", task.Results[0])
+	}
+	if task.Results[1]["processing_status"] != "pending" {
+		t.Fatalf("unexpected pending result: %+v", task.Results[1])
+	}
+}
+
+func TestAutomaticMaterializationSupportsORRule(t *testing.T) {
+	store := newDiscoveryMemory()
+	contentStore := newMemoryStore()
+	crawler := &cloudCrawlerStub{}
+	service := NewDiscoveryService(store, NewService(contentStore), crawler)
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
+		TeamID: team, Name: "OR 素材", StrategyType: "keyword", Platform: "douyin",
+		Config: map[string]any{
+			"keyword": "热点", "auto_material": true, "material_rule": "OR",
+			"like_threshold": 10000, "favorite_threshold": 500,
+		}, Status: StrategyEnabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	crawler.items = []map[string]any{{"platform_content_id": "or-pass", "like_count": 8000, "favorite_count": 900}}
+	task, err := service.CreateRun(actor, strategy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.RunNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	task, _, _ = store.FindCrawlTask(task.ID)
+	if contentStore.items[1].Status != StatusMaterialCreated || task.Stats.AutoMaterialized != 1 || task.Stats.Pending != 0 {
+		t.Fatalf("expected OR-pass materialization, source=%+v stats=%+v", contentStore.items[1], task.Stats)
+	}
+}
