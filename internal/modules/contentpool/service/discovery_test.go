@@ -260,3 +260,53 @@ func TestAdminManualRunUsesExplicitTeamScope(t *testing.T) {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
 }
+
+func TestStrategyMaterialConfigValidationAndSnapshot(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{}, nil
+	}))
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	base := func() DiscoveryStrategy {
+		return DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Status: StrategyEnabled}
+	}
+
+	invalid := base()
+	invalid.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "AND"}
+	if _, err := service.CreateStrategy(actor, invalid); !errors.Is(err, ErrDiscoveryInvalid) {
+		t.Fatalf("auto material without positive threshold should be invalid, got %v", err)
+	}
+	invalid.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "XOR", "like_threshold": 10000}
+	if _, err := service.CreateStrategy(actor, invalid); !errors.Is(err, ErrDiscoveryInvalid) {
+		t.Fatalf("unsupported material rule should be invalid, got %v", err)
+	}
+
+	input := base()
+	input.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "and", "like_threshold": 10000, "favorite_threshold": 500}
+	strategy, err := service.CreateStrategy(actor, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strategy.Config["material_rule"] != "AND" || strategy.Config["like_threshold"] != int64(10000) {
+		t.Fatalf("material config was not normalized: %+v", strategy.Config)
+	}
+
+	task, err := service.CreateRun(actor, strategy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Snapshot["strategy_id"] != strategy.ID || task.Snapshot["strategy_name"] != "热点" || task.Snapshot["strategy_type"] != "keyword" || task.Snapshot["platform"] != "douyin" || task.Snapshot["schedule"] != "manual" || task.Snapshot["operation"] != "keyword" {
+		t.Fatalf("task strategy snapshot is incomplete: %+v", task.Snapshot)
+	}
+
+	updated := base()
+	updated.Name = "新热点"
+	updated.Config = map[string]any{"keyword": "new", "auto_material": true, "material_rule": "OR", "like_threshold": 20000, "favorite_threshold": 1000}
+	if _, err = service.UpdateStrategy(actor, strategy.ID, updated); err != nil {
+		t.Fatal(err)
+	}
+	if task.Snapshot["strategy_name"] != "热点" || task.Snapshot["material_rule"] != "AND" || task.Snapshot["like_threshold"] != int64(10000) {
+		t.Fatalf("historical task snapshot was changed: %+v", task.Snapshot)
+	}
+}

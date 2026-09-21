@@ -98,6 +98,32 @@ func validStrategy(input model.DiscoveryStrategy) bool {
 	return strings.TrimSpace(fmt.Sprint(input.Config["author"])) != "" || strings.TrimSpace(fmt.Sprint(input.Config["author_id"])) != ""
 }
 
+func normalizeMaterialConfig(config map[string]any) bool {
+	if config == nil {
+		return false
+	}
+	autoMaterial := boolValue(config["auto_material"])
+	rule := "AND"
+	if value, exists := config["material_rule"]; exists {
+		if text := strings.ToUpper(strings.TrimSpace(fmt.Sprint(value))); text != "" && text != "<NIL>" {
+			rule = text
+		}
+	}
+	if rule != "AND" && rule != "OR" {
+		return false
+	}
+	likeThreshold := int64Value(config["like_threshold"])
+	favoriteThreshold := int64Value(config["favorite_threshold"])
+	if autoMaterial && likeThreshold <= 0 && favoriteThreshold <= 0 {
+		return false
+	}
+	config["auto_material"] = autoMaterial
+	config["material_rule"] = rule
+	config["like_threshold"] = likeThreshold
+	config["favorite_threshold"] = favoriteThreshold
+	return true
+}
+
 func (s *discoveryService) createStrategy(actor identityservice.PublicUser, input model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	team, err := s.scope(actor, &input.TeamID)
 	if err != nil {
@@ -109,7 +135,7 @@ func (s *discoveryService) createStrategy(actor identityservice.PublicUser, inpu
 	if input.Config == nil {
 		input.Config = map[string]any{}
 	}
-	if !validStrategy(input) {
+	if !validStrategy(input) || !normalizeMaterialConfig(input.Config) {
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
 	if input.Timezone == "" {
@@ -166,7 +192,7 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 	if input.Config == nil {
 		input.Config = map[string]any{}
 	}
-	if !validStrategy(input) {
+	if !validStrategy(input) || !normalizeMaterialConfig(input.Config) {
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
 	if input.Schedule == "" {
@@ -196,11 +222,16 @@ func (s *discoveryService) createRun(actor identityservice.PublicUser, strategyI
 	if _, err = s.scope(actor, &strategy.TeamID); err != nil {
 		return model.CrawlTask{}, err
 	}
-	if strategy.Status != model.StrategyEnabled || !validStrategy(strategy) {
+	if strategy.Status != model.StrategyEnabled || !validStrategy(strategy) || !normalizeMaterialConfig(strategy.Config) {
 		return model.CrawlTask{}, ErrDiscoveryInvalid
 	}
 	now := s.now()
 	snapshot := cloneMap(strategy.Config)
+	snapshot["strategy_id"] = strategy.ID
+	snapshot["strategy_name"] = strategy.Name
+	snapshot["strategy_type"] = strategy.StrategyType
+	snapshot["platform"] = strategy.Platform
+	snapshot["schedule"] = strategy.Schedule
 	snapshot["operation"] = strategy.StrategyType
 	return s.store.CreateCrawlTask(model.CrawlTask{TeamID: strategy.TeamID, StrategyID: &strategy.ID, ScheduleKey: scheduleKey, TaskType: "discovery_task", Platform: strategy.Platform, Status: model.CrawlPending, Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now})
 }

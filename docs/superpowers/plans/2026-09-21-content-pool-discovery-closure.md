@@ -69,14 +69,14 @@ In progress.
 
 **Steps:**
 
-- [ ] Validate `auto_material`, `material_rule`, `like_threshold`, and `favorite_threshold`.
-- [ ] Support only `AND` and `OR`.
-- [ ] Ignore thresholds less than or equal to zero.
-- [ ] Require at least one positive threshold when auto materialization is enabled.
-- [ ] Copy strategy ID, name, type, platform, schedule, and config into task snapshot.
-- [ ] Add tests for AND, OR, disabled thresholds, and invalid configuration.
-- [ ] Run `go test ./internal/modules/contentpool/service -run 'TestStrategy|TestCreateRun'`.
-- [ ] Commit.
+- [x] Validate `auto_material`, `material_rule`, `like_threshold`, and `favorite_threshold`.
+- [x] Support only `AND` and `OR`.
+- [x] Ignore thresholds less than or equal to zero.
+- [x] Require at least one positive threshold when auto materialization is enabled.
+- [x] Copy strategy ID, name, type, platform, schedule, and config into task snapshot.
+- [x] Add tests for AND, OR, disabled thresholds, and invalid configuration.
+- [x] Run `go test ./internal/modules/contentpool/service -run 'TestStrategy|TestCreateRun'`.
+- [x] Commit.
 
 **Acceptance:**
 
