@@ -8,17 +8,16 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"gorm.io/gorm"
 )
 
-func CreateTask(req dto.CreateTaskRequest) model.Task {
+func CreateTask(req CreateTaskInput) model.Task {
 	return createTask(database.DB(), req)
 }
 
-func createTask(db *gorm.DB, req dto.CreateTaskRequest) model.Task {
+func createTask(db *gorm.DB, req CreateTaskInput) model.Task {
 	taskType := req.TaskType
 	if taskType == "" {
 		taskType = model.TaskTypeNoop.String()
@@ -108,11 +107,11 @@ func retryTask(db *gorm.DB, taskID string) (model.Task, error) {
 	return getTask(db, retryID)
 }
 
-func ClaimTask(req dto.ClaimTaskRequest) (model.Task, error) {
+func ClaimTask(req ClaimTaskInput) (model.Task, error) {
 	return claimTask(database.DB(), req)
 }
 
-func claimTask(db *gorm.DB, req dto.ClaimTaskRequest) (model.Task, error) {
+func claimTask(db *gorm.DB, req ClaimTaskInput) (model.Task, error) {
 	leaseSeconds := req.LeaseSeconds
 	if leaseSeconds <= 0 {
 		leaseSeconds = 60
@@ -138,11 +137,11 @@ func claimTask(db *gorm.DB, req dto.ClaimTaskRequest) (model.Task, error) {
 	return getTask(db, taskID)
 }
 
-func ReportTask(taskID string, req dto.ReportTaskRequest) (model.Task, error) {
+func ReportTask(taskID string, req ReportTaskInput) (model.Task, error) {
 	return reportTask(database.DB(), taskID, req)
 }
 
-func reportTask(db *gorm.DB, taskID string, req dto.ReportTaskRequest) (model.Task, error) {
+func reportTask(db *gorm.DB, taskID string, req ReportTaskInput) (model.Task, error) {
 	reqStatus, ok := parseTaskStatus(req.Status)
 	if !ok || !validReportStatus(reqStatus) {
 		return model.Task{}, model.ErrInvalidStatus
@@ -195,11 +194,11 @@ func countTasksByStatus(db *gorm.DB) map[string]int {
 	return counts
 }
 
-func CancelTask(taskID string, req dto.CancelTaskRequest) (model.Task, error) {
+func CancelTask(taskID string, req CancelTaskInput) (model.Task, error) {
 	return cancelTask(database.DB(), taskID, req)
 }
 
-func cancelTask(db *gorm.DB, taskID string, req dto.CancelTaskRequest) (model.Task, error) {
+func cancelTask(db *gorm.DB, taskID string, req CancelTaskInput) (model.Task, error) {
 	result := db.Exec(`UPDATE tasks SET status = 'cancelled', message = ?, updated_at = ?
 		WHERE task_id = ? AND status NOT IN ('succeeded','failed','cancelled')`, req.Message, time.Now().UTC(), taskID)
 	if result.Error != nil {

@@ -108,7 +108,7 @@ func MarkExpiringProxies(ctx context.Context) ([]model.ProxyConfig, error) {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	proxies, err := repository.List(dto.ProxyFilter{BusinessStatus: string(model.BizActive), Limit: 1000})
+	proxies, err := repository.List(repository.ProxyFilter{BusinessStatus: string(model.BizActive), Limit: 1000})
 	if err != nil {
 		return nil, err
 	}

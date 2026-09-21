@@ -21,7 +21,13 @@ func (mysqlContentStore) CreateSource(v model.SourceContent, raw json.RawMessage
 	return item, err
 }
 func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContent, error) {
-	return repository.ListSources(v)
+	return repository.ListSources(repository.Filter{
+		TeamID:     v.TeamID,
+		Platform:   v.Platform,
+		Status:     v.Status,
+		SourceType: v.SourceType,
+		Search:     v.Search,
+	})
 }
 func (mysqlContentStore) FindSource(id int64) (model.SourceContent, bool, error) {
 	return repository.FindSource(id)

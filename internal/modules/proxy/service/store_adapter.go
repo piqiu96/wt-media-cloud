@@ -13,7 +13,15 @@ func (mysqlStore) FindByID(id string) (model.ProxyConfig, bool, error) {
 	return repository.FindByID(id)
 }
 func (mysqlStore) List(filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
-	return repository.List(filter)
+	return repository.List(repository.ProxyFilter{
+		Platform:       filter.Platform,
+		Supplier:       filter.Supplier,
+		BusinessStatus: filter.BusinessStatus,
+		Region:         filter.Region,
+		Search:         filter.Search,
+		Limit:          filter.Limit,
+		Offset:         filter.Offset,
+	})
 }
 func (mysqlStore) Update(proxy model.ProxyConfig) error { return repository.Update(proxy) }
 func (mysqlStore) Delete(id string) error               { return repository.Delete(id) }

@@ -50,6 +50,16 @@ func TestRepositoriesDoNotImportForeignModules(t *testing.T) {
 	}
 }
 
+func TestRepositoriesDoNotImportDTOs(t *testing.T) {
+	matches, err := findLayerImports("../modules", "repository", "dto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("repositories must use persistence inputs instead of DTOs:\n%s", strings.Join(matches, "\n"))
+	}
+}
+
 func TestModelsAndDTOsDoNotImportForeignModels(t *testing.T) {
 	for _, layer := range []string{"model", "dto"} {
 		matches, err := findForeignLayerImports("../modules", layer, "model")
@@ -76,6 +86,32 @@ func findMatches(root string, pattern *regexp.Regexp) ([]string, error) {
 			return err
 		}
 		if pattern.Match(contents) {
+			matches = append(matches, filepath.ToSlash(path))
+		}
+		return nil
+	})
+	sort.Strings(matches)
+	return matches, err
+}
+
+func findLayerImports(root, sourceLayer, importedLayer string) ([]string, error) {
+	importPattern := regexp.MustCompile(`"github\.com/wt-media/wt-media-cloud/internal/modules/([^/"]+)/` + importedLayer + `"`)
+	var matches []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		if !strings.Contains(filepath.ToSlash(path), "/"+sourceLayer+"/") {
+			return nil
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if importPattern.Match(contents) {
 			matches = append(matches, filepath.ToSlash(path))
 		}
 		return nil

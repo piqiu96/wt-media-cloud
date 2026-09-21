@@ -15,7 +15,17 @@ func (mysqlStore) FindAuthorizedTask(taskID string) (model.SensitiveTask, bool, 
 	return repository.FindAuthorizedTask(taskID)
 }
 func (mysqlStore) AcquirePermit(task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
-	return repository.AcquirePermit(task, nodeID, permit, at, freshness)
+	outcome, err := repository.AcquirePermit(task, nodeID, permit, at, freshness)
+	if err != nil {
+		return dto.PreflightOutcome{}, err
+	}
+	return dto.PreflightOutcome{
+		Outcome:          outcome.Outcome,
+		PermitID:         outcome.PermitID,
+		PermitCredential: outcome.PermitCredential,
+		ProfileID:        outcome.ProfileID,
+		ExpiresAt:        outcome.ExpiresAt,
+	}, nil
 }
 func (mysqlStore) RenewPermit(permitID, nodeID, credentialHash string, at, expiresAt time.Time) (time.Time, error) {
 	return repository.RenewPermit(permitID, nodeID, credentialHash, at, expiresAt)

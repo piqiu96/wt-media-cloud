@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
 	"gorm.io/gorm"
 )
@@ -47,11 +46,11 @@ func findByID(db *gorm.DB, id string) (model.ProxyConfig, bool, error) {
 	return p, true, nil
 }
 
-func List(filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
+func List(filter ProxyFilter) ([]model.ProxyConfig, error) {
 	return list(database.DB(), filter)
 }
 
-func list(db *gorm.DB, filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
+func list(db *gorm.DB, filter ProxyFilter) ([]model.ProxyConfig, error) {
 	var conditions []string
 	var args []interface{}
 

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
 	"gorm.io/gorm"
 )
@@ -41,12 +40,12 @@ func findAuthorizedTask(db *gorm.DB, taskID string) (model.SensitiveTask, bool, 
 	return task, true, nil
 }
 
-func AcquirePermit(task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
+func AcquirePermit(task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error) {
 	return acquirePermit(database.DB(), task, nodeID, permit, at, freshness)
 }
 
-func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (dto.PreflightOutcome, error) {
-	outcome := dto.PreflightOutcome{}
+func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error) {
+	outcome := PreflightOutcome{}
 	err := db.Transaction(func(tx *gorm.DB) error {
 		var profileID string
 		if err := tx.Raw(`SELECT id FROM browser_profiles WHERE id = ? FOR UPDATE`, task.ProfileID).Row().Scan(&profileID); err != nil {
@@ -86,11 +85,11 @@ func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit 
 		}
 		if err == nil {
 			if priorStatus == model.PermitReviewRequired {
-				outcome = dto.PreflightOutcome{Outcome: model.OutcomeReviewRequired, ProfileID: task.ProfileID}
+				outcome = PreflightOutcome{Outcome: model.OutcomeReviewRequired, ProfileID: task.ProfileID}
 				return nil
 			}
 			if priorStatus == model.PermitActive && priorExpires.After(at) {
-				outcome = dto.PreflightOutcome{Outcome: model.OutcomeWaiting, PermitID: priorID, ProfileID: task.ProfileID, ExpiresAt: &priorExpires}
+				outcome = PreflightOutcome{Outcome: model.OutcomeWaiting, PermitID: priorID, ProfileID: task.ProfileID, ExpiresAt: &priorExpires}
 				return nil
 			}
 			if priorStatus == model.PermitActive {
@@ -103,7 +102,7 @@ func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit 
 					model.TaskReviewRequired, at, priorID).Error; err != nil {
 					return err
 				}
-				outcome = dto.PreflightOutcome{Outcome: model.OutcomeReviewRequired, ProfileID: task.ProfileID}
+				outcome = PreflightOutcome{Outcome: model.OutcomeReviewRequired, ProfileID: task.ProfileID}
 				return nil
 			}
 		}
@@ -123,11 +122,11 @@ func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit 
 		if result.RowsAffected != 1 {
 			return model.ErrTaskAssignmentMismatch
 		}
-		outcome = dto.PreflightOutcome{Outcome: model.OutcomeGranted, PermitID: permit.ID, ProfileID: task.ProfileID, ExpiresAt: &permit.ExpiresAt}
+		outcome = PreflightOutcome{Outcome: model.OutcomeGranted, PermitID: permit.ID, ProfileID: task.ProfileID, ExpiresAt: &permit.ExpiresAt}
 		return nil
 	})
 	if err != nil {
-		return dto.PreflightOutcome{}, err
+		return PreflightOutcome{}, err
 	}
 	return outcome, nil
 }

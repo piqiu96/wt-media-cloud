@@ -368,3 +368,59 @@ go test -race ./...
    - 先做第一批正确性与确定性清理。
    - 再做第二批模块边界矫正。
    - 不把两批混合成一个大而全重构。
+
+## 7. 执行状态（2026-09-21 更新）
+
+### 已完成
+
+1. **阶段基线**
+   - 提交：`b4c6968`
+   - 产物：本基线文档。
+
+2. **第一批正确性与确定性清理**
+   - 提交：`44050b7`
+   - External HTTP 日志不再记录 query，Douyin `apiKey` 不会进入 `external.log`。
+   - 修复 Douyin crawler 测试 Mock 数据竞态。
+   - 删除 `users.legacy_id` 残留写入。
+   - 删除 Redis / Health 占位配置与 Schema。
+   - 删除禁止或多余空目录。
+   - MediaAccount 收敛到 `game_ids`，移除单游戏 `game_id` 兼容投影。
+   - Discovery 任务快照必须显式携带 `operation`，移除历史任务回退。
+   - 修正 proxy expiry Hertz 日志调用。
+   - 执行 `go mod tidy`。
+   - README 与脚本更新为 TOML 配置模型。
+
+3. **第二批模块边界矫正**
+   - 提交：`ac33705`
+   - 新增 `internal/shared/identity`，稳定 `UserID`、`TeamID`、`AuditEvent` 契约唯一来源。
+   - 新增 `internal/middleware/identity.go`，业务 Handler 不再导入 Identity 根包。
+   - `profileguard/repository` 不再依赖 `runtimebinding/service`，只接收已认证 `nodeID`。
+   - 架构测试禁止模块直接创建或持有数据库连接。
+   - 架构测试禁止 Repository 导入外部模块。
+   - 架构测试禁止 Model / DTO 导入外部 Model。
+
+4. **Repository-DTO 分层解耦**
+   - 分支：`codex/repository-dto-boundaries-20260921`
+   - CloudAgent、ContentPool、MediaAccount、ProfileGuard、Proxy、RuntimeBinding Repository 均不再导入模块 DTO。
+   - Repository 使用本地 persistence input / filter / outcome 类型。
+   - DTO 到持久化输入的转换集中在 Service 边界完成。
+   - 架构测试新增 `TestRepositoriesDoNotImportDTOs`，防止回退。
+
+### 当前剩余事项
+
+1. **Metrics / Tracing 后端**
+   - 当前仍为刻意 Noop 实现。
+   - 需要后续选择 OpenTelemetry / Prometheus / 厂商后端并确定核心埋点范围。
+
+2. **线上凭证注入**
+   - 本地 Douyin Cookie / API Key 按已确认策略保留。
+   - `config_online` 继续保持部署注入模式。
+   - 上线前仍建议轮换已进入 Git 历史的凭证。
+
+3. **发布前轻量集成验证**
+   - migration smoke。
+   - server `/healthz` 与 `/api/v1/health` smoke。
+   - worker smoke。
+   - 最终发布前执行一次 `go test -race ./...`。
+
+以上三项属于后续发布或可观测性阶段，不再阻塞当前架构收敛。

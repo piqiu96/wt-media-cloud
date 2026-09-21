@@ -27,7 +27,18 @@ func (mysqlStore) Update(record model.AccountRecord, replaceGameIDs *[]string) e
 	return repository.Update(record, replaceGameIDs)
 }
 func (mysqlStore) List(query dto.AccountFilter) ([]model.AccountRecord, error) {
-	return repository.List(query)
+	return repository.List(repository.AccountFilter{
+		UserID:         query.UserID,
+		GameIDs:        query.GameIDs,
+		Platform:       query.Platform,
+		BusinessStatus: query.BusinessStatus,
+		LoginStatus:    query.LoginStatus,
+		Search:         query.Search,
+		ProfileSearch:  query.ProfileSearch,
+		AnyTags:        query.AnyTags,
+		AllTags:        query.AllTags,
+		ExcludeTags:    query.ExcludeTags,
+	})
 }
 func (mysqlStore) AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error {
 	return repository.AddTags(userID, accountIDs, tags, createdAt)

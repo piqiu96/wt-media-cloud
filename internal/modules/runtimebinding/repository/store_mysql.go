@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
@@ -163,11 +162,11 @@ func validateRuntimeProfiles(db *gorm.DB, userID sharedidentity.UserID, mainUser
 	return count == len(profileIDs), err
 }
 
-func ApplyRuntimeReport(node model.AgentNode, report dto.RuntimeReport, at time.Time) error {
+func ApplyRuntimeReport(node model.AgentNode, report RuntimeReport, at time.Time) error {
 	return applyRuntimeReport(database.DB(), node, report, at)
 }
 
-func applyRuntimeReport(db *gorm.DB, node model.AgentNode, report dto.RuntimeReport, at time.Time) error {
+func applyRuntimeReport(db *gorm.DB, node model.AgentNode, report RuntimeReport, at time.Time) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		result := tx.Exec(`UPDATE local_agent_nodes SET status = ?, last_heartbeat_at = ?, operating_system = ?,
 			cpu_architecture = ?, agent_version = ?, python_version = ?, ffmpeg_status = ?, ffmpeg_version = ?,

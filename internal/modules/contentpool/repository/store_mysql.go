@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
@@ -37,10 +36,10 @@ func createSource(db *gorm.DB, v model.SourceContent, raw json.RawMessage) (mode
 	return v, nil
 }
 
-func ListSources(filter dto.Filter) ([]model.SourceContent, error) {
+func ListSources(filter Filter) ([]model.SourceContent, error) {
 	return listSources(database.DB(), filter)
 }
-func listSources(db *gorm.DB, filter dto.Filter) ([]model.SourceContent, error) {
+func listSources(db *gorm.DB, filter Filter) ([]model.SourceContent, error) {
 	query := `SELECT ` + sourceColumns + ` FROM source_contents`
 	conditions := []string{}
 	args := []any{}

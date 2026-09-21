@@ -8,16 +8,15 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/model"
 	"gorm.io/gorm"
 )
 
-func RegisterAgent(req dto.RegisterAgentRequest) (model.AgentNode, error) {
+func RegisterAgent(req RegisterAgentInput) (model.AgentNode, error) {
 	return registerAgent(database.DB(), req)
 }
 
-func registerAgent(db *gorm.DB, req dto.RegisterAgentRequest) (model.AgentNode, error) {
+func registerAgent(db *gorm.DB, req RegisterAgentInput) (model.AgentNode, error) {
 	now := time.Now().UTC()
 	capabilities, _ := json.Marshal(req.Capabilities)
 	if err := db.Exec(`INSERT INTO agent_nodes (agent_id, mode, version, contract_major_version, contract_revision,
@@ -39,11 +38,11 @@ func registerAgent(db *gorm.DB, req dto.RegisterAgentRequest) (model.AgentNode, 
 	return getAgent(db, req.AgentID)
 }
 
-func Heartbeat(agentID string, req dto.HeartbeatRequest) (model.AgentNode, error) {
+func Heartbeat(agentID string, req HeartbeatInput) (model.AgentNode, error) {
 	return heartbeat(database.DB(), agentID, req)
 }
 
-func heartbeat(db *gorm.DB, agentID string, req dto.HeartbeatRequest) (model.AgentNode, error) {
+func heartbeat(db *gorm.DB, agentID string, req HeartbeatInput) (model.AgentNode, error) {
 	status := req.Status
 	if status == "" {
 		status = "online"

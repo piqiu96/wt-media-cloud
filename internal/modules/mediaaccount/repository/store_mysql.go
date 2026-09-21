@@ -10,7 +10,6 @@ import (
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
@@ -158,11 +157,11 @@ func update(db *gorm.DB, record model.AccountRecord, replaceGameIDs *[]string) e
 	return tx.Commit().Error
 }
 
-func List(query dto.AccountFilter) ([]model.AccountRecord, error) {
+func List(query AccountFilter) ([]model.AccountRecord, error) {
 	return list(database.DB(), query)
 }
 
-func list(db *gorm.DB, query dto.AccountFilter) ([]model.AccountRecord, error) {
+func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
 	statement := `SELECT ` + accountColumns + ` FROM media_accounts`
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 3)

@@ -31,5 +31,16 @@ func (mysqlStore) ValidateRuntimeProfiles(userID sharedidentity.UserID, mainUser
 	return repository.ValidateRuntimeProfiles(userID, mainUserID, profileIDs)
 }
 func (mysqlStore) ApplyRuntimeReport(node model.AgentNode, report dto.RuntimeReport, at time.Time) error {
-	return repository.ApplyRuntimeReport(node, report, at)
+	return repository.ApplyRuntimeReport(node, repository.RuntimeReport{
+		OperatingSystem:  report.OperatingSystem,
+		CPUArchitecture:  report.CPUArchitecture,
+		AgentVersion:     report.AgentVersion,
+		PythonVersion:    report.PythonVersion,
+		FFmpeg:           report.FFmpeg,
+		WorkdirStatus:    report.WorkdirStatus,
+		Disk:             report.Disk,
+		BitBrowserStatus: report.BitBrowserStatus,
+		MainUserID:       report.MainUserID,
+		BitProfileIDs:    report.BitProfileIDs,
+	}, at)
 }
