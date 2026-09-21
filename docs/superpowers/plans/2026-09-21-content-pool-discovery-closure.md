@@ -267,10 +267,10 @@ In progress.
 
 **Steps:**
 
-- [ ] Run `gofmt` on modified Go files.
-- [ ] Run `go test ./internal/modules/contentpool/...`.
-- [ ] Run the focused frontend tests.
-- [ ] Start or restart the existing local Cloud backend and Web process.
+- [x] Run `gofmt` on modified Go files.
+- [x] Run `go test ./internal/modules/contentpool/...`.
+- [x] Run the focused frontend tests.
+- [x] Start or restart the existing local Cloud backend and Web process.
 - [ ] Validate the primary real-data loop:
   - create/update strategy,
   - run strategy,
@@ -278,8 +278,8 @@ In progress.
   - verify source content,
   - verify automatic material,
   - open content pool.
-- [ ] Record exact verification results and remaining risks in the handoff.
-- [ ] Commit final state.
+- [x] Record exact verification results and remaining risks in the handoff.
+- [x] Commit final state.
 
 **Acceptance:**
 
