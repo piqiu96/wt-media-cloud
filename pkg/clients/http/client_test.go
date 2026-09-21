@@ -58,6 +58,27 @@ policy = "backoff"
 	}
 }
 
+func TestNewEnablesTLSForHTTPS(t *testing.T) {
+	instance, closer, err := New(Config{
+		Name:     "https-test",
+		Timeout:  Duration{time.Second},
+		Endpoint: EndpointConfig{Scheme: "https", Host: "api.example.test", Port: 443},
+		Connection: ConnectionConfig{
+			DialTimeout: Duration{time.Second},
+		},
+		Retry: RetryConfig{Attempts: 1},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer closer()
+
+	options := instance.hertz.GetOptions()
+	if options.TLSConfig == nil || options.TLSConfig.ServerName != "api.example.test" {
+		t.Fatalf("HTTPS TLS config missing: %+v", options.TLSConfig)
+	}
+}
+
 func TestNewAppliesNamedMiddleware(t *testing.T) {
 	calls := make([]string, 0, 2)
 	middleware := func(next hertzclient.Endpoint) hertzclient.Endpoint {

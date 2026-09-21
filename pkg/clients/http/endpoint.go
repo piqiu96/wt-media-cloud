@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	"github.com/cloudwego/hertz/pkg/app/client/loadbalance"
 	"github.com/cloudwego/hertz/pkg/network"
-	"github.com/cloudwego/hertz/pkg/network/dialer"
+	"github.com/cloudwego/hertz/pkg/network/standard"
 )
 
 // EndpointConfig describes one logical HTTP endpoint and optional dial addresses.
@@ -102,7 +102,7 @@ func newEndpointDialer(endpoint EndpointConfig) network.Dialer {
 		instances = append(instances, discovery.NewInstance("tcp", address, 1, nil))
 	}
 	return endpointDialer{
-		inner:          dialer.DefaultDialer(),
+		inner:          standard.NewDialer(),
 		logicalAddress: endpoint.LogicalAddress(),
 		instances:      instances,
 		balancer:       loadbalance.NewWeightedBalancer(),

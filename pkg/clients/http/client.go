@@ -3,6 +3,7 @@ package httpclient
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
@@ -80,6 +81,12 @@ func New(cfg Config, middlewares ...hertzclient.Middleware) (*Client, func() err
 		hertzclient.WithMaxConnWaitTimeout(cfg.Connection.MaxConnWaitTimeout.Duration),
 		hertzclient.WithKeepAlive(cfg.Connection.KeepAlive),
 		hertzclient.WithRetryConfig(retryOptions(cfg.Retry)...),
+	}
+	if cfg.Endpoint.Scheme == "https" {
+		options = append(options, hertzclient.WithTLSConfig(&tls.Config{
+			ServerName: cfg.Endpoint.Host,
+			MinVersion: tls.VersionTLS12,
+		}))
 	}
 	if endpointDialer := newEndpointDialer(cfg.Endpoint); endpointDialer != nil {
 		options = append(options, hertzclient.WithDialer(endpointDialer))
