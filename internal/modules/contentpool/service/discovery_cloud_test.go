@@ -185,3 +185,51 @@ func TestAutomaticMaterializationSupportsORRule(t *testing.T) {
 		t.Fatalf("expected OR-pass materialization, source=%+v stats=%+v", contentStore.items[1], task.Stats)
 	}
 }
+
+func TestRetryFailedOnlyProcessesFailedItems(t *testing.T) {
+	store := newDiscoveryMemory()
+	contentStore := newMemoryStore()
+	content := NewService(contentStore)
+	service := NewDiscoveryService(store, content, fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{}, nil
+	}))
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	source, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-failed", SourceType: "strategy", LikeCount: 12000, FavoriteCount: 700})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-pending", SourceType: "strategy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := CrawlTask{
+		TeamID: team, TaskType: "discovery_task", Platform: "douyin", Status: CrawlFailed,
+		Snapshot: map[string]any{"auto_material": true, "material_rule": "AND", "like_threshold": 10000, "favorite_threshold": 500},
+		Stats:    CrawlStats{Scanned: 2, Found: 2, Failed: 1, Pending: 1},
+		Results: []map[string]any{
+			{"platform_content_id": source.PlatformContentID, "source_content_id": source.ID, "processing_status": "material_failed", "failure_reason": "provider failed"},
+			{"platform_content_id": pending.PlatformContentID, "source_content_id": pending.ID, "processing_status": "pending"},
+		},
+	}
+	task, err = store.CreateCrawlTask(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.retryFailed(actor, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != CrawlSuccess || updated.Stats.Failed != 0 || updated.Stats.AutoMaterialized != 1 || updated.Stats.Pending != 1 {
+		t.Fatalf("unexpected retry result: %+v", updated)
+	}
+	if updated.Results[0]["processing_status"] != "auto_materialized" || updated.Results[1]["processing_status"] != "pending" {
+		t.Fatalf("only failed item should be retried: %+v", updated.Results)
+	}
+	if source, _, _ := contentStore.FindSource(source.ID); source.Status != StatusMaterialCreated || source.MaterialID == nil {
+		t.Fatalf("failed source should be materialized: %+v", source)
+	}
+	if pending, _, _ := contentStore.FindSource(pending.ID); pending.Status != StatusPending || pending.MaterialID != nil {
+		t.Fatalf("pending source should not be materialized: %+v", pending)
+	}
+}

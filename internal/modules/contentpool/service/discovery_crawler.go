@@ -55,6 +55,7 @@ func (c *douyinCrawler) Discover(ctx context.Context, request dto.CrawlerRequest
 			items, err := c.search(ctx, keyword, intValue(config["limit"], 20), intValue(config["offset"], 0))
 			if err != nil {
 				result.Failed++
+				result.Failures = append(result.Failures, map[string]any{"failure_key": keyword, "operation": "keyword", "failure_reason": err.Error()})
 				continue
 			}
 			result.Scanned += len(items)
@@ -97,6 +98,9 @@ func (c *douyinCrawler) discoverURLs(ctx context.Context, urls []string) (dto.Cr
 		items, err := c.fetchByIDs(ctx, ids[start:end])
 		if err != nil {
 			result.Failed += end - start
+			for _, id := range ids[start:end] {
+				result.Failures = append(result.Failures, map[string]any{"failure_key": id, "operation": "url", "failure_reason": err.Error()})
+			}
 			continue
 		}
 		result.Items = append(result.Items, items...)
@@ -105,6 +109,7 @@ func (c *douyinCrawler) discoverURLs(ctx context.Context, urls []string) (dto.Cr
 		item, err := c.fetchByURL(ctx, source)
 		if err != nil {
 			result.Failed++
+			result.Failures = append(result.Failures, map[string]any{"failure_key": source, "operation": "url", "failure_reason": err.Error()})
 			continue
 		}
 		if item != nil {

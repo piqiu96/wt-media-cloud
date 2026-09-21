@@ -46,9 +46,10 @@ type CrawlerRequest struct {
 }
 
 type CrawlerResult struct {
-	Items   []map[string]any
-	Scanned int
-	Failed  int
+	Items    []map[string]any
+	Failures []map[string]any
+	Scanned  int
+	Failed   int
 }
 
 type SearchInput struct {
@@ -102,4 +103,18 @@ type ImportResultsResponse struct {
 	Duplicate int                `json:"duplicate"`
 	Failed    int                `json:"failed"`
 	Items     []ImportItemResult `json:"items"`
+}
+
+type BatchOperationItem struct {
+	ID       int64                `json:"id"`
+	Success  bool                 `json:"success"`
+	Message  string               `json:"message,omitempty"`
+	Source   *model.SourceContent `json:"source,omitempty"`
+	Material *model.Material      `json:"material,omitempty"`
+}
+
+type BatchOperationResponse struct {
+	Succeeded int                  `json:"succeeded"`
+	Failed    int                  `json:"failed"`
+	Items     []BatchOperationItem `json:"items"`
 }

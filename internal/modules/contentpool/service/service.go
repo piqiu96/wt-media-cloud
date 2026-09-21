@@ -122,19 +122,43 @@ func (s *contentService) setStatus(actor identityservice.PublicUser, id int64, s
 	return s.store.UpdateStatus(id, status, reason, auditNote)
 }
 
-func (s *contentService) batchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) ([]model.SourceContent, error) {
+func (s *contentService) batchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) (dto.BatchOperationResponse, error) {
 	if len(ids) == 0 || len(ids) > 500 {
-		return nil, ErrInvalidInput
+		return dto.BatchOperationResponse{}, ErrInvalidInput
 	}
-	updated := make([]model.SourceContent, 0, len(ids))
+	result := dto.BatchOperationResponse{Items: make([]dto.BatchOperationItem, 0, len(ids))}
 	for _, id := range ids {
 		item, err := s.setStatus(actor, id, status, reason, auditNote)
 		if err != nil {
-			return updated, err
+			result.Failed++
+			result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Message: err.Error()})
+			continue
 		}
-		updated = append(updated, item)
+		result.Succeeded++
+		result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Success: true, Source: &item})
 	}
-	return updated, nil
+	return result, nil
+}
+
+func (s *contentService) batchMaterialize(actor identityservice.PublicUser, ids []int64) dto.BatchOperationResponse {
+	result := dto.BatchOperationResponse{Items: make([]dto.BatchOperationItem, 0, len(ids))}
+	for _, id := range ids {
+		material, err := s.materialize(actor, id)
+		if err != nil {
+			result.Failed++
+			result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Message: err.Error()})
+			continue
+		}
+		source, found, err := s.get(actor, id)
+		if err != nil || !found {
+			result.Failed++
+			result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Message: ErrNotFound.Error()})
+			continue
+		}
+		result.Succeeded++
+		result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Success: true, Source: &source, Material: &material})
+	}
+	return result
 }
 
 func (s *contentService) materialize(actor identityservice.PublicUser, id int64) (model.Material, error) {

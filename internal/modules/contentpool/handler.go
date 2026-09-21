@@ -179,6 +179,19 @@ func UpdateContentStatus(_ context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, item)
 }
+func BatchMaterializeContent(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	var request struct {
+		IDs []int64 `json:"ids"`
+	}
+	if !api.DecodeJSON(c, &request) {
+		return
+	}
+	api.Success(c, contentservice.BatchMaterialize(actor, request.IDs))
+}
 func MaterializeContent(_ context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
@@ -415,6 +428,22 @@ func GetCrawlTask(_ context.Context, c *hertzapp.RequestContext) {
 	}
 	if !found {
 		api.NotFound(c, 14004, "挖掘任务不存在")
+		return
+	}
+	api.Success(c, item)
+}
+func RetryFailedCrawlTask(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := contentID(c, "id", "任务 ID 无效")
+	if !ok {
+		return
+	}
+	item, err := contentservice.RetryFailed(actor, id)
+	if err != nil {
+		writeDiscoveryError(c, err)
 		return
 	}
 	api.Success(c, item)

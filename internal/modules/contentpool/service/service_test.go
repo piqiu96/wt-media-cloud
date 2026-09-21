@@ -130,3 +130,70 @@ func TestMaterializeIsTeamScoped(t *testing.T) {
 		t.Fatalf("materialize own team source: %+v err=%v", material, err)
 	}
 }
+
+func TestBatchSetStatusProcessesItemsIndependently(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(store)
+	team := identityservice.TeamID(10)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	first, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "batch-1", SourceType: "search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "batch-2", SourceType: "search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Materialize(actor, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.batchSetStatus(actor, []int64{first.ID, second.ID}, StatusPending, "restore", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Succeeded != 1 || result.Failed != 1 || len(result.Items) != 2 {
+		t.Fatalf("expected independent batch result: %+v", result)
+	}
+	if result.Items[0].Success || result.Items[1].Message != "" {
+		t.Fatalf("unexpected batch items: %+v", result.Items)
+	}
+	if store.items[second.ID].Status != StatusPending {
+		t.Fatalf("second item should be restored: %+v", store.items[second.ID])
+	}
+}
+
+type failingMaterializeStore struct {
+	*memoryStore
+	failIDs map[int64]struct{}
+}
+
+func (s *failingMaterializeStore) Materialize(id int64, creator identityservice.UserID, now time.Time) (Material, error) {
+	if _, exists := s.failIDs[id]; exists {
+		return Material{}, errors.New("material provider failed")
+	}
+	return s.memoryStore.Materialize(id, creator, now)
+}
+
+func TestBatchMaterializeProcessesItemsIndependently(t *testing.T) {
+	memory := newMemoryStore()
+	store := &failingMaterializeStore{memoryStore: memory, failIDs: map[int64]struct{}{}}
+	service := NewService(store)
+	team := identityservice.TeamID(10)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	first, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "material-1", SourceType: "search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "material-2", SourceType: "search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.failIDs[first.ID] = struct{}{}
+	result := service.batchMaterialize(actor, []int64{first.ID, second.ID})
+	if result.Succeeded != 1 || result.Failed != 1 || len(result.Items) != 2 {
+		t.Fatalf("expected independent materialize result: %+v", result)
+	}
+	if result.Items[0].Success || !result.Items[1].Success || store.items[second.ID].Status != StatusMaterialCreated {
+		t.Fatalf("unexpected materialize result: %+v", result)
+	}
+}

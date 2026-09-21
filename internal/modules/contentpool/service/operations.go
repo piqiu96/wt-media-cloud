@@ -21,11 +21,14 @@ func Get(actor identityservice.PublicUser, id int64) (model.SourceContent, bool,
 func SetStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {
 	return defaultContentService().setStatus(actor, id, status, reason, auditNote)
 }
-func BatchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) ([]model.SourceContent, error) {
+func BatchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) (dto.BatchOperationResponse, error) {
 	return defaultContentService().batchSetStatus(actor, ids, status, reason, auditNote)
 }
 func Materialize(actor identityservice.PublicUser, id int64) (model.Material, error) {
 	return defaultContentService().materialize(actor, id)
+}
+func BatchMaterialize(actor identityservice.PublicUser, ids []int64) dto.BatchOperationResponse {
+	return defaultContentService().batchMaterialize(actor, ids)
 }
 func ListStrategies(actor identityservice.PublicUser) ([]model.DiscoveryStrategy, error) {
 	return defaultDiscoveryService().listStrategies(actor)
@@ -56,6 +59,9 @@ func ListCrawlTasks(actor identityservice.PublicUser, strategyID *int64) ([]mode
 }
 func GetCrawlTask(actor identityservice.PublicUser, id int64) (model.CrawlTask, bool, error) {
 	return defaultDiscoveryService().getCrawlTask(actor, id)
+}
+func RetryFailed(actor identityservice.PublicUser, id int64) (model.CrawlTask, error) {
+	return defaultDiscoveryService().retryFailed(actor, id)
 }
 func ConfirmResults(actor identityservice.PublicUser, id int64, ids []string) (model.CrawlTask, error) {
 	return defaultDiscoveryService().confirmResults(actor, id, ids)

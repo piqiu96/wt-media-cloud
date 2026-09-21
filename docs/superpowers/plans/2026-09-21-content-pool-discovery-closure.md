@@ -157,14 +157,14 @@ In progress.
 
 **Steps:**
 
-- [ ] Implement independent batch materialize results.
-- [ ] Implement independent batch ignore/restore behavior where not already complete.
-- [ ] Add `POST /crawl-tasks/:id/retry-failed`.
-- [ ] Retry only failed result items.
-- [ ] Prevent successful and already-materialized items from being reprocessed.
-- [ ] Add tests for retry deduplication and partial retry failure.
-- [ ] Run `go test ./internal/modules/contentpool/service -run 'TestBatch|TestRetry'`.
-- [ ] Commit.
+- [x] Implement independent batch materialize results.
+- [x] Implement independent batch ignore/restore behavior where not already complete.
+- [x] Add `POST /crawl-tasks/:id/retry-failed`.
+- [x] Retry only failed result items.
+- [x] Prevent successful and already-materialized items from being reprocessed.
+- [x] Add tests for retry deduplication and partial retry failure.
+- [x] Run `go test ./internal/modules/contentpool/service -run 'TestBatch|TestRetry'`.
+- [x] Commit.
 
 **Acceptance:**
 

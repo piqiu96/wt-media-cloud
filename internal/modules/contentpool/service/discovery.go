@@ -297,51 +297,19 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 		if operation == "url" {
 			sourceType = "link"
 		}
-		task.Results = make([]map[string]any, 0, len(result.Items))
+		task.Results = make([]map[string]any, 0, len(result.Items)+len(result.Failures))
 		for _, rawItem := range result.Items {
 			item := cloneMap(rawItem)
 			task.Results = append(task.Results, item)
-			team := task.TeamID
-			taskID := task.ID
-			source, err := s.content.createSource(actorForTask(task), dto.SourceInput{
-				TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]),
-				Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]),
-				CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]),
-				AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]),
-				SourceType: sourceType, StrategyID: task.StrategyID, CrawlTaskID: &taskID,
-				LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]),
-				PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item),
-			})
-			switch {
-			case errors.Is(err, ErrDuplicate):
-				task.Stats.Duplicate++
-				item["processing_status"] = "duplicate"
-			case err != nil:
-				task.Stats.Failed++
-				item["processing_status"] = "failed"
-				item["failure_reason"] = err.Error()
-			default:
-				task.Stats.Added++
-				item["source_content_id"] = source.ID
-				if !shouldAutoMaterialize(task.Snapshot, item) {
-					task.Stats.Pending++
-					item["processing_status"] = "pending"
-					break
-				}
-				material, materialErr := s.content.materialize(actorForTask(task), source.ID)
-				if materialErr != nil {
-					task.Stats.Failed++
-					task.Stats.Pending++
-					item["processing_status"] = "material_failed"
-					item["failure_reason"] = materialErr.Error()
-					break
-				}
-				task.Stats.AutoMaterialized++
-				item["processing_status"] = "auto_materialized"
-				item["material_id"] = material.ID
-			}
+			s.projectDiscoveredItem(&task, item, sourceType)
 		}
-		task.Stats.Found = len(task.Results)
+		for _, failure := range result.Failures {
+			item := cloneMap(failure)
+			item["processing_status"] = "failed"
+			task.Results = append(task.Results, item)
+			task.Stats.Failed++
+		}
+		task.Stats.Found = len(result.Items)
 	}
 	now := s.now()
 	task.FinishedAt, task.UpdatedAt = &now, now
@@ -352,6 +320,166 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 	}
 	_, err := s.store.UpdateCrawlTask(task)
 	return err
+}
+
+func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map[string]any, sourceType string) {
+	team := task.TeamID
+	taskID := task.ID
+	source, err := s.content.createSource(actorForTask(*task), dto.SourceInput{
+		TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]),
+		Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]),
+		CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]),
+		AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]),
+		SourceType: sourceType, StrategyID: task.StrategyID, CrawlTaskID: &taskID,
+		LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]),
+		PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item),
+	})
+	switch {
+	case errors.Is(err, ErrDuplicate):
+		task.Stats.Duplicate++
+		item["processing_status"] = "duplicate"
+	case err != nil:
+		task.Stats.Failed++
+		item["processing_status"] = "failed"
+		item["failure_reason"] = err.Error()
+	default:
+		task.Stats.Added++
+		item["source_content_id"] = source.ID
+		if !shouldAutoMaterialize(task.Snapshot, item) {
+			task.Stats.Pending++
+			item["processing_status"] = "pending"
+			return
+		}
+		material, materialErr := s.content.materialize(actorForTask(*task), source.ID)
+		if materialErr != nil {
+			task.Stats.Failed++
+			task.Stats.Pending++
+			item["processing_status"] = "material_failed"
+			item["failure_reason"] = materialErr.Error()
+			return
+		}
+		task.Stats.AutoMaterialized++
+		item["processing_status"] = "auto_materialized"
+		item["material_id"] = material.ID
+	}
+}
+
+func (s *discoveryService) retryFailed(actor identityservice.PublicUser, id int64) (model.CrawlTask, error) {
+	task, ok, err := s.store.FindCrawlTask(id)
+	if err != nil {
+		return model.CrawlTask{}, err
+	}
+	if !ok {
+		return model.CrawlTask{}, ErrCrawlTaskNotFound
+	}
+	if _, err = s.scope(actor, &task.TeamID); err != nil {
+		return model.CrawlTask{}, err
+	}
+	if task.Status != model.CrawlFailed {
+		return model.CrawlTask{}, ErrDiscoverySelection
+	}
+	results := make([]map[string]any, 0, len(task.Results))
+	for _, item := range task.Results {
+		status := fmt.Sprint(item["processing_status"])
+		if status != "failed" && status != "material_failed" {
+			results = append(results, item)
+			continue
+		}
+		sourceID := int64Value(item["source_content_id"])
+		if sourceID > 0 {
+			if status == "material_failed" {
+				source, found, sourceErr := s.content.get(actor, sourceID)
+				if sourceErr != nil || !found {
+					item["failure_reason"] = ErrNotFound.Error()
+					results = append(results, item)
+					continue
+				}
+				thresholdItem := map[string]any{"like_count": source.LikeCount, "favorite_count": source.FavoriteCount}
+				if !shouldAutoMaterialize(task.Snapshot, thresholdItem) {
+					item["processing_status"] = "pending"
+					delete(item, "failure_reason")
+					results = append(results, item)
+					continue
+				}
+				material, materialErr := s.content.materialize(actor, sourceID)
+				if materialErr != nil {
+					item["failure_reason"] = materialErr.Error()
+					results = append(results, item)
+					continue
+				}
+				item["processing_status"] = "auto_materialized"
+				item["material_id"] = material.ID
+				delete(item, "failure_reason")
+			}
+			results = append(results, item)
+			continue
+		}
+		if s.crawler == nil {
+			results = append(results, item)
+			continue
+		}
+		operation := fmt.Sprint(item["operation"])
+		if operation == "" {
+			operation = fmt.Sprint(task.Snapshot["operation"])
+		}
+		key := strings.TrimSpace(fmt.Sprint(item["failure_key"]))
+		if key == "" {
+			results = append(results, item)
+			continue
+		}
+		config := map[string]any{"url": key}
+		if operation == "keyword" {
+			config = map[string]any{"keyword": key, "limit": intValue(task.Snapshot["limit"], 20)}
+		}
+		retryResult, retryErr := s.crawler.Discover(context.Background(), dto.CrawlerRequest{Platform: task.Platform, Operation: operation, Config: config})
+		if retryErr != nil || len(retryResult.Items) == 0 {
+			if retryErr != nil {
+				item["failure_reason"] = retryErr.Error()
+			}
+			results = append(results, item)
+			continue
+		}
+		sourceType := "strategy"
+		if operation == "url" {
+			sourceType = "link"
+		}
+		for _, rawItem := range retryResult.Items {
+			retried := cloneMap(rawItem)
+			results = append(results, retried)
+			s.projectDiscoveredItem(&task, retried, sourceType)
+		}
+	}
+	task.Results = results
+	recalculateCrawlStats(&task)
+	task.UpdatedAt = s.now()
+	if task.Stats.Failed == 0 {
+		task.Status, task.Error = model.CrawlSuccess, ""
+		now := s.now()
+		task.FinishedAt = &now
+	}
+	return s.store.UpdateCrawlTask(task)
+}
+
+func recalculateCrawlStats(task *model.CrawlTask) {
+	stats := model.CrawlStats{Scanned: task.Stats.Scanned, Found: len(task.Results)}
+	for _, item := range task.Results {
+		switch fmt.Sprint(item["processing_status"]) {
+		case "pending", "material_failed":
+			stats.Added++
+			stats.Pending++
+			if fmt.Sprint(item["processing_status"]) == "material_failed" {
+				stats.Failed++
+			}
+		case "auto_materialized":
+			stats.Added++
+			stats.AutoMaterialized++
+		case "duplicate":
+			stats.Duplicate++
+		case "failed":
+			stats.Failed++
+		}
+	}
+	task.Stats = stats
 }
 
 func shouldAutoMaterialize(snapshot map[string]any, item map[string]any) bool {

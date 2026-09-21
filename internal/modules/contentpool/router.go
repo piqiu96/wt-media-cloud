@@ -10,6 +10,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/content-pool/batch/status", BatchUpdateContentStatus)
 	h.POST("/api/v1/content-pool/:id/status", UpdateContentStatus)
 	h.POST("/api/v1/content-pool/:id/materialize", MaterializeContent)
+	h.POST("/api/v1/content-pool/batch/materialize", BatchMaterializeContent)
 	h.POST("/api/v1/discovery-scheduler/run-due", RunDueDiscovery)
 	h.POST("/api/v1/content-pool/search", SearchContent)
 	h.POST("/api/v1/content-pool/author-search", AuthorSearchContent)
@@ -22,5 +23,6 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/discovery-strategies/:id/run", RunDiscoveryStrategy)
 	h.GET("/api/v1/crawl-tasks", ListCrawlTasks)
 	h.GET("/api/v1/crawl-tasks/:id", GetCrawlTask)
+	h.POST("/api/v1/crawl-tasks/:id/retry-failed", RetryFailedCrawlTask)
 	h.POST("/api/v1/crawl-tasks/:id/confirm", ConfirmCrawlTask)
 }
