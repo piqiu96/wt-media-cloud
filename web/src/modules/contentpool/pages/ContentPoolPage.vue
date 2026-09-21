@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { createContentPoolClient } from '../../../shared/api/contentPool.js'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import { createSessionClient } from '../../../shared/api/session.js'
@@ -16,6 +16,7 @@ const discovery = createDiscoveryClient()
 const session = createSessionClient()
 const users = createUsersClient()
 const route = useRoute()
+const router = useRouter()
 const isLibrary = computed(() => route.path === '/material-library')
 const rows = ref([])
 const loading = ref(false)
@@ -24,6 +25,11 @@ const search = ref('')
 const platform = ref('')
 const sourceType = ref('')
 const status = ref('')
+const strategyFilter = ref(route.query.strategy_id ? String(route.query.strategy_id) : '')
+const taskFilter = ref(route.query.crawl_task_id ? String(route.query.crawl_task_id) : '')
+const reviewMode = ref(false)
+const currentReviewID = ref(null)
+const reviewNote = ref('')
 const detailVisible = ref(false)
 const detail = ref(null)
 const pagination = ref({ current: 1, pageSize: 20 })
@@ -64,9 +70,14 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 80 },
   { colKey: 'title', title: '标题', minWidth: 260 },
   { colKey: 'platform', title: '平台', width: 110 },
-  { colKey: 'author_name', title: '作者', width: 150 },
-  { colKey: 'source_type', title: '来源方式', width: 120 },
-  { colKey: 'published_at', title: '发布时间', width: 180 },
+  { colKey: 'author_name', title: '作者', width: 140 },
+  { colKey: 'like_count', title: '点赞', width: 100 },
+  { colKey: 'favorite_count', title: '收藏', width: 100 },
+  { colKey: 'source_type', title: '来源方式', width: 110 },
+  { colKey: 'strategy_id', title: '来源策略', width: 110 },
+  { colKey: 'crawl_task_id', title: '来源任务', width: 110 },
+  { colKey: 'published_at', title: '发布时间', width: 170 },
+  { colKey: 'created_at', title: '发现时间', width: 170 },
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'op', title: '操作', width: 250, fixed: 'right' },
 ]
@@ -80,7 +91,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await client.list({ search: search.value.trim(), platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value })
+    const result = await client.list({ search: search.value.trim(), platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined })
     rows.value = Array.isArray(result) ? result : []
     pagination.value.current = 1
   } catch (e) {
@@ -96,7 +107,7 @@ function applyStatFilter(key) {
 }
 
 function reset() {
-  search.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''
+  search.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''
   load()
 }
 
@@ -211,31 +222,82 @@ async function openDetail(row) {
   } catch (e) { error.value = e.message || '内容详情加载失败' }
 }
 
-async function materialize(row) {
+async function materialize(row, reload = true) {
   try {
     await client.materialize(row.id)
-    await load()
+    if (reload) await load()
     MessagePlugin.success('已转为素材，来源关系已保留')
   } catch (e) { error.value = e.message || '转素材失败' }
 }
 
-async function updateStatus(row, nextStatus) {
+async function updateStatus(row, nextStatus, auditNote = '', reload = true) {
   try {
-    await client.setStatus(row.id, nextStatus, nextStatus === 'ignored' ? '人工忽略' : '')
-    await load()
+    await client.setStatus(row.id, nextStatus, nextStatus === 'ignored' ? '人工忽略' : '', auditNote)
+    if (reload) await load()
     MessagePlugin.success(nextStatus === 'ignored' ? '内容已忽略' : '内容已恢复待处理')
   } catch (e) { error.value = e.message || '状态更新失败' }
 }
 
-async function batchIgnore() {
+async function batchMaterialize() {
   if (!selectedRowKeys.value.length) return
   batchLoading.value = true
   try {
-    await client.batchSetStatus(selectedRowKeys.value.map(Number), 'ignored', '批量人工忽略')
+    const result = await client.batchMaterialize(selectedRowKeys.value.map(Number))
     selectedRowKeys.value = []
     await load()
-    MessagePlugin.success('已批量忽略所选内容')
-  } catch (e) { error.value = e.message || '批量处理失败' } finally { batchLoading.value = false }
+    MessagePlugin.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+  } catch (e) {
+    error.value = e.message || '批量转素材失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function batchSetStatus(nextStatus, reason) {
+  if (!selectedRowKeys.value.length) return
+  batchLoading.value = true
+  try {
+    const result = await client.batchSetStatus(selectedRowKeys.value.map(Number), nextStatus, reason, reviewNote.value)
+    selectedRowKeys.value = []
+    await load()
+    MessagePlugin.success(`处理成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+  } catch (e) {
+    error.value = e.message || '批量处理失败'
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+async function enterReviewMode() {
+  status.value = 'pending'
+  await load()
+  const first = rows.value.find((row) => row.status === 'pending')
+  if (!first) {
+    MessagePlugin.info('当前没有待处理内容')
+    return
+  }
+  reviewMode.value = true
+  reviewNote.value = ''
+  await openDetail(first)
+  currentReviewID.value = first.id
+}
+
+async function reviewAction(action) {
+  const row = rows.value.find((item) => item.id === currentReviewID.value)
+  if (!row) return
+  if (action === 'materialize') await materialize(row, false)
+  if (action === 'ignore') await updateStatus(row, 'ignored', reviewNote.value, false)
+  const next = rows.value.find((item) => item.status === 'pending' && item.id !== row.id)
+  if (!next) {
+    reviewMode.value = false
+    currentReviewID.value = null
+    detailVisible.value = false
+    MessagePlugin.success('待处理内容已审核完成')
+    return
+  }
+  currentReviewID.value = next.id
+  reviewNote.value = ''
+  await openDetail(next)
 }
 
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
@@ -252,6 +314,7 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
         <template #actions>
           <t-button v-if="!isLibrary" theme="primary" @click="openManual('url')">导入链接</t-button>
           <t-button v-if="!isLibrary" class="wt-secondary-button" variant="outline" @click="openManual('keyword')">关键词搜索</t-button>
+          <t-button v-if="!isLibrary" class="wt-secondary-button" variant="outline" @click="enterReviewMode">进入审核模式</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
@@ -263,14 +326,19 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="分享链接" /><t-option value="search" label="关键词搜索" /><t-option value="author" label="博主搜索" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
-            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchIgnore">批量忽略</t-button></div>
+            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button></div>
           </t-space>
         </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="{ x: '1100px' }" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="{ x: '1500px' }" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
             <template #title="{ row }"><div class="title-cell"><span>{{ row.title || '未命名内容' }}</span><small>{{ row.platform_content_id }}</small></div></template>
             <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
+            <template #like_count="{ row }">{{ Number(row.like_count || 0).toLocaleString() }}</template>
+            <template #favorite_count="{ row }">{{ Number(row.favorite_count || 0).toLocaleString() }}</template>
+            <template #strategy_id="{ row }"><t-link v-if="row.strategy_id" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">#{{ row.strategy_id }}</t-link><span v-else>-</span></template>
+            <template #crawl_task_id="{ row }"><t-link v-if="row.crawl_task_id" @click="router.push(`/crawl-tasks?task_id=${row.crawl_task_id}`)">#{{ row.crawl_task_id }}</t-link><span v-else>-</span></template>
             <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
+            <template #created_at="{ row }">{{ dateLabel(row.created_at) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
@@ -284,15 +352,22 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
         </div>
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
-      <t-drawer v-model:visible="detailVisible" header="内容详情" size="520px" destroy-on-close :footer="false">
+      <t-drawer v-model:visible="detailVisible" :header="reviewMode ? '内容审核' : '内容详情'" size="520px" destroy-on-close :footer="reviewMode">
+        <div v-if="reviewMode" class="review-note"><t-textarea v-model="reviewNote" :rows="2" placeholder="审核备注（可选）" /></div>
         <t-descriptions v-if="detail" bordered :column="1">
           <t-descriptions-item label="标题">{{ detail.title || '-' }}</t-descriptions-item>
           <t-descriptions-item label="平台 / 内容 ID">{{ detail.platform }} / {{ detail.platform_content_id }}</t-descriptions-item>
           <t-descriptions-item label="作者">{{ detail.author_name || '-' }}</t-descriptions-item>
           <t-descriptions-item label="来源方式">{{ sourceTypeLabel(detail.source_type) }}</t-descriptions-item>
+          <t-descriptions-item label="点赞 / 收藏">{{ Number(detail.like_count || 0).toLocaleString() }} / {{ Number(detail.favorite_count || 0).toLocaleString() }}</t-descriptions-item>
+          <t-descriptions-item label="来源策略"><t-link v-if="detail.strategy_id" @click="router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)">策略 #{{ detail.strategy_id }}</t-link><span v-else>-</span></t-descriptions-item>
+          <t-descriptions-item label="来源任务"><t-link v-if="detail.crawl_task_id" @click="router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)">任务 #{{ detail.crawl_task_id }}</t-link><span v-else>-</span></t-descriptions-item>
+          <t-descriptions-item label="审核备注">{{ detail.audit_note || '-' }}</t-descriptions-item>
+          <t-descriptions-item label="失败原因">{{ detail.failure_reason || '-' }}</t-descriptions-item>
           <t-descriptions-item label="来源链接"><a v-if="detail.source_url" :href="detail.source_url" target="_blank" rel="noreferrer">{{ detail.source_url }}</a><span v-else>-</span></t-descriptions-item>
           <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
         </t-descriptions>
+        <template #footer v-if="reviewMode"><t-space><t-button theme="primary" @click="reviewAction('materialize')">转素材并下一条</t-button><t-button class="wt-secondary-button" variant="outline" @click="reviewAction('ignore')">忽略并下一条</t-button></t-space></template>
       </t-drawer>
       <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="760px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualResults.length && manualMode !== 'url' ? '加入内容池' : '开始执行' }" @confirm="confirmManual">
         <t-form label-width="88px">
@@ -321,5 +396,6 @@ function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN
 .title-cell span { color: var(--wt-text-primary); font-weight: 500; }
 .title-cell small { color: var(--wt-text-tertiary); font-size: 12px; }
 .content-pool-page :deep(.wt-resource-actions) { max-width: 360px; }
+.review-note { margin-bottom: 12px; }
 .manual-search-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 </style>

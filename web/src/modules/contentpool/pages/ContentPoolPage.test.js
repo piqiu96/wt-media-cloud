@@ -10,6 +10,13 @@ describe('content pool page', () => {
     expect(source).toContain('ResourceStatusBadge')
     expect(source).toContain('导入链接')
     expect(source).toContain('转素材')
+    expect(source).toContain('批量转素材')
+    expect(source).toContain('进入审核模式')
+    expect(source).toContain('转素材并下一条')
+    expect(source).toContain('忽略并下一条')
+    expect(source).toContain('client.batchMaterialize')
+    expect(source).toContain('strategy_id')
+    expect(source).toContain('crawl_task_id')
     expect(source).toContain('内容 ID')
     expect(source).toContain('关键词搜索')
     expect(source).toContain('result?.items')
@@ -41,7 +48,7 @@ describe('content pool page', () => {
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {
     expect(source).toContain("fixed: 'right'")
-    expect(source).toContain(":scroll=\"{ x: '1100px' }\"")
+    expect(source).toContain(":scroll=\"{ x: '1500px' }\"")
     expect(source).toContain('class="table-scroll-wrap"')
   })
 

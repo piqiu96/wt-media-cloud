@@ -91,7 +91,18 @@ func ListContent(_ context.Context, c *hertzapp.RequestContext) {
 		teamValue := identityservice.TeamID(value)
 		team = &teamValue
 	}
-	items, err := contentservice.List(actor, dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search")})
+	filter := dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search")}
+	for name, target := range map[string]**int64{"strategy_id": &filter.StrategyID, "crawl_task_id": &filter.CrawlTaskID} {
+		if raw := strings.TrimSpace(c.Query(name)); raw != "" {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || value <= 0 {
+				api.BadRequest(c, 10001, "来源参数无效")
+				return
+			}
+			*target = &value
+		}
+	}
+	items, err := contentservice.List(actor, filter)
 	if err != nil {
 		writeContentError(c, err)
 		return

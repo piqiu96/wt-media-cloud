@@ -184,16 +184,16 @@ In progress.
 
 **Steps:**
 
-- [ ] Add batch materialize API client.
-- [ ] Add metric and source columns.
-- [ ] Add strategy/task links.
-- [ ] Add processing status filter and stat-card filtering.
-- [ ] Add batch materialize, ignore, and restore actions.
-- [ ] Add detail drawer fields and audit note display.
-- [ ] Add review mode with next-item behavior.
-- [ ] Update focused page test.
-- [ ] Run the focused frontend test or a single build check.
-- [ ] Commit.
+- [x] Add batch materialize API client.
+- [x] Add metric and source columns.
+- [x] Add strategy/task links.
+- [x] Add processing status filter and stat-card filtering.
+- [x] Add batch materialize, ignore, and restore actions.
+- [x] Add detail drawer fields and audit note display.
+- [x] Add review mode with next-item behavior.
+- [x] Update focused page test.
+- [x] Run the focused frontend test or a single build check.
+- [x] Commit.
 
 **Acceptance:**
 
