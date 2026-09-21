@@ -241,14 +241,14 @@ In progress.
 
 **Steps:**
 
-- [ ] Show strategy and immutable snapshot in task detail.
-- [ ] Show automatic-material rule and thresholds.
-- [ ] Show per-item result table with processing state.
-- [ ] Add failed-item retry action.
-- [ ] Link result rows to content-pool detail.
-- [ ] Update focused page test.
-- [ ] Run the focused frontend test.
-- [ ] Commit.
+- [x] Show strategy and immutable snapshot in task detail.
+- [x] Show automatic-material rule and thresholds.
+- [x] Show per-item result table with processing state.
+- [x] Add failed-item retry action.
+- [x] Link result rows to content-pool detail.
+- [x] Update focused page test.
+- [x] Run the focused frontend test.
+- [x] Commit.
 
 **Acceptance:**
 
