@@ -2,10 +2,10 @@ package httpclient
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	hertzclient "github.com/cloudwego/hertz/pkg/app/client"
-	pkgconfig "github.com/wt-media/wt-media-cloud/pkg/config"
 )
 
 type resourceState struct {
@@ -15,46 +15,41 @@ type resourceState struct {
 
 var resources resourceState
 
-// Initialize publishes strongly typed Hertz clients derived from document filenames.
-func Initialize(documents []pkgconfig.Document, middlewares map[string][]hertzclient.Middleware) (func() error, error) {
+// Initialize publishes strongly typed Hertz clients by their configured names.
+func Initialize(configs []Config, middlewares map[string][]hertzclient.Middleware) (func() error, error) {
 	resources.mu.Lock()
 	defer resources.mu.Unlock()
 	if resources.clients != nil {
 		return nil, fmt.Errorf("http clients already initialized")
 	}
 
-	clients := make(map[string]*Client, len(documents))
-	closers := make([]func() error, 0, len(documents))
-	seen := make(map[string]struct{}, len(documents))
+	ordered := append([]Config(nil), configs...)
+	sort.Slice(ordered, func(left, right int) bool {
+		return ordered[left].Name < ordered[right].Name
+	})
+
+	clients := make(map[string]*Client, len(ordered))
+	closers := make([]func() error, 0, len(ordered))
+	seen := make(map[string]struct{}, len(ordered))
 	closeAll := func() {
 		for index := len(closers) - 1; index >= 0; index-- {
 			_ = closers[index]()
 		}
 	}
 
-	for _, document := range documents {
-		if _, duplicate := seen[document.Name]; duplicate {
+	for _, cfg := range ordered {
+		if _, duplicate := seen[cfg.Name]; duplicate {
 			closeAll()
-			return nil, fmt.Errorf("duplicate http client name %q", document.Name)
+			return nil, fmt.Errorf("duplicate http client name %q", cfg.Name)
 		}
-		if document.Format != pkgconfig.FormatTOML {
-			closeAll()
-			return nil, fmt.Errorf("http client %s must use TOML", document.Name)
-		}
-
-		var cfg Config
-		if err := document.Decode(&cfg); err != nil {
-			closeAll()
-			return nil, fmt.Errorf("decode http client %s: %w", document.Name, err)
-		}
-		instance, closer, err := New(cfg, middlewares[document.Name]...)
+		instance, closer, err := New(cfg, middlewares[cfg.Name]...)
 		if err != nil {
 			closeAll()
-			return nil, fmt.Errorf("http client %s: %w", document.Name, err)
+			return nil, fmt.Errorf("http client %s: %w", cfg.Name, err)
 		}
 
-		seen[document.Name] = struct{}{}
-		clients[document.Name] = instance
+		seen[cfg.Name] = struct{}{}
+		clients[cfg.Name] = instance
 		closers = append(closers, closer)
 	}
 

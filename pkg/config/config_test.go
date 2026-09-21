@@ -33,7 +33,7 @@ func TestLoadFileSupportsTOMLJSONAndYAML(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadFile() error = %v", err)
 			}
-			if document.Name != "item" || document.Path != path || document.Data["name"] == nil {
+			if document.Name != "item" || document.Path != path {
 				t.Fatalf("document=%+v", document)
 			}
 

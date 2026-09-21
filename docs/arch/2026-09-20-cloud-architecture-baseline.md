@@ -424,3 +424,31 @@ go test -race ./...
    - 最终发布前执行一次 `go test -race ./...`。
 
 以上三项属于后续发布或可观测性阶段，不再阻塞当前架构收敛。
+
+## 8. Config / Client 收敛决策（2026-09-21 补充）
+
+1. **实例名**
+   - HTTP client 与 database 配置文件内保留显式 `name`。
+   - 运行时以文件内容中的 `name` 为准。
+   - 文件名与 `name` 仅为人为约定，不做强制一致性校验。
+
+2. **配置加载**
+   - `pkg/config.File` 取代 `Document`，并移除弱类型 `Data`。
+   - Server 默认加载全部 HTTP client。
+   - Worker 按名称只加载 `douyin`。
+   - Scheduler 与 Migration 不初始化 HTTP client。
+   - Server 遇到没有语义 initializer 的 HTTP client 时启动失败，避免死配置。
+
+3. **HTTP endpoint**
+   - 删除 `base_url`。
+   - 使用 `scheme + host + port` 描述逻辑 endpoint。
+   - `addresses` 可选，支持多个 `ip:port` 或 `host:port`。
+   - 第一版负载均衡策略仅支持 Hertz weighted-random。
+   - 负载均衡发生在 Dial 层，逻辑 Host、HTTP Host Header 与 TLS SNI 保持不变。
+   - 语义 Client 通过 `httpclient.Client.Origin()` 获取逻辑 URL origin。
+
+4. **语义 Client 初始化**
+   - Agent 与 Douyin 统一签名：
+     `Initialize(name string, credentials config.CredentialsConfig) (func() error, error)`。
+   - Bootstrap 维护私有静态 `name -> initializer` 映射。
+   - 新增 client 只需新增配置、语义包和一行 initializer 映射。

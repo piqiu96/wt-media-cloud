@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
-	pkgconfig "github.com/wt-media/wt-media-cloud/pkg/config"
 )
 
 func TestDouyinSearchBuildsTypedRequest(t *testing.T) {
@@ -140,9 +140,9 @@ func TestDouyinInitializePublishesConfiguredClient(t *testing.T) {
 	}))
 	defer server.Close()
 
-	closeHTTPClient(t, initializeHTTPClient(t, "douyin", 1))
+	closeHTTPClient(t, initializeHTTPClient(t, "douyin", 1, server.URL))
 	_ = Close()
-	if err := Initialize(clientConfigForTest(server.URL), config.DouyinCredentialConfig{APIKey: "initialize-secret"}); err != nil {
+	if _, err := Initialize("douyin", config.CredentialsConfig{Douyin: config.DouyinCredentialConfig{APIKey: "initialize-secret"}}); err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 	t.Cleanup(func() {
@@ -190,12 +190,10 @@ func assertDouyinRequest(t *testing.T, r *http.Request, path, apiKey, cookie str
 	}
 }
 
-func clientConfigForTest(rawURL string) config.ClientConfig {
-	return config.ClientConfig{Name: "douyin", BaseURL: rawURL, Timeout: config.Duration{Duration: 5 * time.Second}}
-}
-
 func newTransport(attempts int) *httpclient.Client {
 	instance, closer, err := httpclient.New(httpclient.Config{
+		Name:       "douyin-test",
+		Endpoint:   endpointForTest("http://127.0.0.1:18080"),
 		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
 		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
 		Retry:      httpclient.RetryConfig{Attempts: attempts, Delay: httpclient.Duration{Duration: 0}, Policy: "fixed"},
@@ -207,16 +205,35 @@ func newTransport(attempts int) *httpclient.Client {
 	return instance
 }
 
-func initializeHTTPClient(t *testing.T, name string, attempts int) func() error {
+func initializeHTTPClient(t *testing.T, name string, attempts int, rawURL string) func() error {
 	t.Helper()
-	content := "timeout = \"5s\"\n[connection]\ndial_timeout = \"1s\"\n[retry]\nattempts = " + strconv.Itoa(attempts) + "\npolicy = \"fixed\"\n"
-	closer, err := httpclient.Initialize([]pkgconfig.Document{{Name: name, Format: pkgconfig.FormatTOML, Raw: []byte(content)}}, nil)
+	closer, err := httpclient.Initialize([]httpclient.Config{{
+		Name:       name,
+		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
+		Endpoint:   endpointForTest(rawURL),
+		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
+		Retry:      httpclient.RetryConfig{Attempts: attempts, Delay: httpclient.Duration{Duration: 0}, Policy: "fixed"},
+	}}, nil)
 	if err != nil {
 		t.Fatalf("initialize http client: %v", err)
 	}
 	return closer
 }
 
+func endpointForTest(rawURL string) httpclient.EndpointConfig {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		panic(err)
+	}
+	host := parsed.Hostname()
+	port := 80
+	if parsed.Port() != "" {
+		port, _ = strconv.Atoi(parsed.Port())
+	} else if parsed.Scheme == "https" {
+		port = 443
+	}
+	return httpclient.EndpointConfig{Scheme: parsed.Scheme, Host: host, Port: port}
+}
 func closeHTTPClient(t *testing.T, closer func() error) {
 	t.Helper()
 	t.Cleanup(func() {

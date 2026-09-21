@@ -1,5 +1,10 @@
-base_url = "http://127.0.0.1:8765"
+name = "agent"
 timeout = "7s"
+
+[endpoint]
+scheme = "http"
+host = "127.0.0.1"
+port = 8765
 
 [connection]
 dial_timeout = "2s"

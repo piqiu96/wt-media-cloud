@@ -4,7 +4,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,23 +95,7 @@ type RotationConfig struct {
 }
 
 type ClientsConfig struct {
-	HTTP []ClientConfig
-}
-
-type ClientConfig struct {
-	Name    string
-	BaseURL string
-	Timeout Duration
-}
-
-// HTTPClient returns one semantic client connection by filename-derived name.
-func (c Config) HTTPClient(name string) (ClientConfig, bool) {
-	for _, client := range c.Clients.HTTP {
-		if client.Name == name {
-			return client, true
-		}
-	}
-	return ClientConfig{}, false
+	HTTP []httpclient.Config
 }
 
 type CredentialsConfig struct {
@@ -308,22 +291,15 @@ func validateDatabases(databases []DatabaseConfig) error {
 	return nil
 }
 
-func validateHTTPClients(clients []ClientConfig) error {
+func validateHTTPClients(clients []httpclient.Config) error {
 	seen := make(map[string]struct{}, len(clients))
 	for _, client := range clients {
 		if _, duplicate := seen[client.Name]; duplicate {
 			return fmt.Errorf("duplicate http client name %q", client.Name)
 		}
 		seen[client.Name] = struct{}{}
-		if strings.TrimSpace(client.BaseURL) == "" {
-			return fmt.Errorf("http client %q base_url is required", client.Name)
-		}
-		parsed, err := url.Parse(strings.TrimSpace(client.BaseURL))
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return fmt.Errorf("http client %q base_url must be an absolute http or https URL", client.Name)
-		}
-		if client.Timeout.Duration <= 0 {
-			return fmt.Errorf("http client %q timeout must be greater than zero", client.Name)
+		if err := httpclient.Validate(client); err != nil {
+			return fmt.Errorf("http client %q: %w", client.Name, err)
 		}
 	}
 	for _, name := range []string{"agent", "douyin"} {
@@ -334,7 +310,7 @@ func validateHTTPClients(clients []ClientConfig) error {
 	return nil
 }
 
-func loadHTTPClients(directory string) ([]ClientConfig, error) {
+func loadHTTPClients(directory string) ([]httpclient.Config, error) {
 	documents, err := pkgconfig.LoadDir(directory)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("http clients directory %s does not exist", directory)
@@ -342,23 +318,19 @@ func loadHTTPClients(directory string) ([]ClientConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	clients := make([]ClientConfig, 0, len(documents))
+	clients := make([]httpclient.Config, 0, len(documents))
 	for _, document := range documents {
 		if document.Format != pkgconfig.FormatTOML {
 			return nil, fmt.Errorf("Cloud config must use TOML: %s", document.Path)
 		}
 		var transport httpclient.Config
-		if err := decodeDocument(document.Path, document, &transport); err != nil {
+		if err := decodeFile(document.Path, document, &transport); err != nil {
 			return nil, err
 		}
 		if err := httpclient.Validate(transport); err != nil {
 			return nil, fmt.Errorf("http client %s: %w", document.Name, err)
 		}
-		clients = append(clients, ClientConfig{
-			Name:    document.Name,
-			BaseURL: strings.TrimSpace(transport.BaseURL),
-			Timeout: Duration{Duration: transport.Timeout.Duration},
-		})
+		clients = append(clients, transport)
 	}
 	return clients, nil
 }
@@ -394,31 +366,31 @@ func loadDatabases(directory string) ([]DatabaseConfig, error) {
 }
 
 func requiredTOML(path string, dst any) error {
-	document, err := loadCloudDocument(path)
+	document, err := loadCloudFile(path)
 	if err != nil {
 		return err
 	}
-	if err := decodeDocument(path, document, dst); err != nil {
+	if err := decodeFile(path, document, dst); err != nil {
 		return err
 	}
 	return nil
 }
 
 func optionalTOML(path string, dst any) error {
-	document, err := loadCloudDocument(path)
+	document, err := loadCloudFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if err := decodeDocument(path, document, dst); err != nil {
+	if err := decodeFile(path, document, dst); err != nil {
 		return err
 	}
 	return nil
 }
 
-func decodeDocument(path string, document pkgconfig.Document, dst any) error {
+func decodeFile(path string, document pkgconfig.File, dst any) error {
 	err := document.Decode(dst)
 	if err == nil {
 		return nil
@@ -430,13 +402,13 @@ func decodeDocument(path string, document pkgconfig.Document, dst any) error {
 	return fmt.Errorf("decode config %s: %w", path, err)
 }
 
-func loadCloudDocument(path string) (pkgconfig.Document, error) {
+func loadCloudFile(path string) (pkgconfig.File, error) {
 	document, err := pkgconfig.LoadFile(path)
 	if err != nil {
-		return pkgconfig.Document{}, err
+		return pkgconfig.File{}, err
 	}
 	if document.Format != pkgconfig.FormatTOML {
-		return pkgconfig.Document{}, fmt.Errorf("Cloud config must use TOML: %s", path)
+		return pkgconfig.File{}, fmt.Errorf("Cloud config must use TOML: %s", path)
 	}
 	return document, nil
 }
@@ -444,8 +416,20 @@ func loadCloudDocument(path string) (pkgconfig.Document, error) {
 func clone(source Config) Config {
 	cloned := source
 	cloned.Databases = append([]DatabaseConfig(nil), source.Databases...)
-	cloned.Clients.HTTP = append([]ClientConfig(nil), source.Clients.HTTP...)
+	cloned.Clients.HTTP = cloneHTTPClients(source.Clients.HTTP)
 	cloned.Credentials.Douyin.Headers = cloneStringMap(source.Credentials.Douyin.Headers)
+	return cloned
+}
+
+func cloneHTTPClients(source []httpclient.Config) []httpclient.Config {
+	if source == nil {
+		return nil
+	}
+	cloned := make([]httpclient.Config, len(source))
+	copy(cloned, source)
+	for index := range cloned {
+		cloned[index].Endpoint.Addresses = append([]string(nil), source[index].Endpoint.Addresses...)
+	}
 	return cloned
 }
 

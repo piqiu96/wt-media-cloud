@@ -14,7 +14,14 @@ import (
 
 func TestNewConvertsConnectionAndRetryOptions(t *testing.T) {
 	cfg := decode(t, `
+name = "test"
 timeout = "4s"
+
+[endpoint]
+scheme = "http"
+host = "example.test"
+port = 8080
+
 
 [connection]
 dial_timeout = "1s"
@@ -61,7 +68,7 @@ func TestNewAppliesNamedMiddleware(t *testing.T) {
 			return err
 		}
 	}
-	instance, closer, err := New(Config{Timeout: Duration{time.Second}, Retry: RetryConfig{Attempts: 1}}, middleware)
+	instance, closer, err := New(Config{Name: "test", Timeout: Duration{time.Second}, Endpoint: testEndpoint(), Connection: ConnectionConfig{DialTimeout: Duration{time.Second}}, Retry: RetryConfig{Attempts: 1}}, middleware)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -85,12 +92,28 @@ func TestNewAppliesNamedMiddleware(t *testing.T) {
 }
 
 func TestNewRejectsInvalidSettings(t *testing.T) {
+	base := func(mutate func(*Config)) Config {
+		cfg := Config{
+			Name:       "test",
+			Timeout:    Duration{time.Second},
+			Endpoint:   testEndpoint(),
+			Connection: ConnectionConfig{DialTimeout: Duration{time.Second}},
+			Retry:      RetryConfig{Attempts: 1},
+		}
+		mutate(&cfg)
+		return cfg
+	}
 	tests := []Config{
-		{Timeout: Duration{}, Connection: ConnectionConfig{DialTimeout: Duration{time.Second}}, Retry: RetryConfig{Attempts: 1}},
-		{Timeout: Duration{time.Second}, Connection: ConnectionConfig{DialTimeout: Duration{time.Second}}, Retry: RetryConfig{Attempts: 0}},
-		{Timeout: Duration{time.Second}, Connection: ConnectionConfig{DialTimeout: Duration{time.Second}}, Retry: RetryConfig{Attempts: 1, Delay: Duration{-time.Second}}},
-		{Timeout: Duration{time.Second}, Connection: ConnectionConfig{DialTimeout: Duration{time.Second}}, Retry: RetryConfig{Attempts: 1, Policy: "random"}},
-		{Timeout: Duration{time.Second}, Connection: ConnectionConfig{DialTimeout: Duration{-time.Second}}, Retry: RetryConfig{Attempts: 1}},
+		base(func(cfg *Config) { cfg.Name = "" }),
+		base(func(cfg *Config) { cfg.Timeout = Duration{} }),
+		base(func(cfg *Config) { cfg.Retry.Attempts = 0 }),
+		base(func(cfg *Config) { cfg.Retry.Delay = Duration{-time.Second} }),
+		base(func(cfg *Config) { cfg.Retry.Policy = "random" }),
+		base(func(cfg *Config) { cfg.Endpoint.Scheme = "tcp" }),
+		base(func(cfg *Config) { cfg.Endpoint.Port = 0 }),
+		base(func(cfg *Config) { cfg.Endpoint.LoadBalance = "round_robin" }),
+		base(func(cfg *Config) { cfg.Endpoint.Addresses = []string{"127.0.0.1"} }),
+		base(func(cfg *Config) { cfg.Connection.DialTimeout = Duration{-time.Second} }),
 	}
 	for index, cfg := range tests {
 		if _, _, err := New(cfg); err == nil {
@@ -101,7 +124,7 @@ func TestNewRejectsInvalidSettings(t *testing.T) {
 
 func decode(t *testing.T, content string) Config {
 	t.Helper()
-	document := pkgconfig.Document{Name: "test", Format: pkgconfig.FormatTOML, Raw: []byte(content)}
+	document := pkgconfig.File{Name: "test", Format: pkgconfig.FormatTOML, Raw: []byte(content)}
 	var cfg Config
 	if err := document.Decode(&cfg); err != nil {
 		t.Fatalf("Decode() error = %v", err)
@@ -117,7 +140,9 @@ func TestDoAppliesWholeRequestTimeout(t *testing.T) {
 	defer server.Close()
 
 	instance, closer, err := New(Config{
+		Name:       "test",
 		Timeout:    Duration{5 * time.Millisecond},
+		Endpoint:   testEndpoint(),
 		Connection: ConnectionConfig{DialTimeout: Duration{time.Second}},
 		Retry:      RetryConfig{Attempts: 1},
 	})
@@ -135,4 +160,8 @@ func TestDoAppliesWholeRequestTimeout(t *testing.T) {
 	if err := instance.Do(context.Background(), req, resp); err == nil {
 		t.Fatal("Do() with an expired whole-request timeout succeeded")
 	}
+}
+
+func testEndpoint() EndpointConfig {
+	return EndpointConfig{Scheme: "http", Host: "127.0.0.1", Port: 18080}
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 
@@ -59,7 +58,7 @@ type ProxyMutationResult struct {
 }
 
 type Client struct {
-	baseURL   string
+	origin    string
 	token     string
 	transport *httpclient.Client
 }
@@ -71,19 +70,17 @@ type resourceState struct {
 
 var resources resourceState
 
-// Initialize validates transport configuration, builds the Agent client, and publishes it.
-func Initialize(connection config.ClientConfig, credential config.AgentCredentialConfig) error {
-	if err := validateConnection(connection); err != nil {
-		return err
-	}
-	client := NewWithClient(strings.TrimRight(connection.BaseURL, "/"), credential, httpclient.Get(connection.Name))
+// Initialize builds the Agent client from its named Hertz transport and publishes it.
+func Initialize(name string, credentials config.CredentialsConfig) (func() error, error) {
+	transport := httpclient.Get(name)
+	client := NewWithClient(transport.Origin(), credentials.Agent, transport)
 	resources.Lock()
 	defer resources.Unlock()
 	if resources.client != nil {
-		return errors.New("agent client already initialized")
+		return nil, errors.New("agent client already initialized")
 	}
 	resources.client = client
-	return nil
+	return Close, nil
 }
 
 // Get returns the initialized Agent client.
@@ -110,12 +107,12 @@ func Close() error {
 }
 
 // NewWithClient builds a testable Agent client over an initialized Hertz transport.
-func NewWithClient(baseURL string, credential config.AgentCredentialConfig, transport *httpclient.Client) *Client {
+func NewWithClient(origin string, credential config.AgentCredentialConfig, transport *httpclient.Client) *Client {
 	if transport == nil {
 		panic("agent: Hertz transport is required")
 	}
 	return &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
+		origin:    strings.TrimRight(origin, "/"),
 		token:     credential.AuthToken,
 		transport: transport,
 	}
@@ -153,7 +150,7 @@ func (c *Client) post(ctx context.Context, path string, input, output any) error
 	defer protocol.ReleaseRequest(request)
 	defer protocol.ReleaseResponse(response)
 	request.SetMethod("POST")
-	request.SetRequestURI(c.baseURL + path)
+	request.SetRequestURI(c.origin + path)
 	request.SetBodyRaw(body)
 	request.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
@@ -175,23 +172,6 @@ func (c *Client) post(ctx context.Context, path string, input, output any) error
 	}
 	if err := json.Unmarshal(envelope.Data, output); err != nil {
 		return fmt.Errorf("decode agent response data: %w", err)
-	}
-	return nil
-}
-
-func validateConnection(connection config.ClientConfig) error {
-	if strings.TrimSpace(connection.Name) == "" {
-		return errors.New("agent client name is required")
-	}
-	if strings.TrimSpace(connection.BaseURL) == "" {
-		return errors.New("agent client base_url is required")
-	}
-	parsed, err := url.Parse(strings.TrimSpace(connection.BaseURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return errors.New("agent client base_url must be an absolute http or https URL")
-	}
-	if connection.Timeout.Duration <= 0 {
-		return errors.New("agent client timeout must be greater than zero")
 	}
 	return nil
 }

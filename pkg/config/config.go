@@ -27,51 +27,46 @@ const (
 	FormatTOML Format = "toml"
 )
 
-// Document is one decoded configuration file and its source metadata.
-type Document struct {
+// File is one decoded configuration file and its source metadata.
+type File struct {
 	Name   string
 	Path   string
 	Format Format
 	Raw    []byte
-	Data   map[string]any
 }
 
 // LoadFile reads one regular YAML, JSON, or TOML file.
-func LoadFile(path string) (Document, error) {
+func LoadFile(path string) (File, error) {
 	format, err := formatForPath(path)
 	if err != nil {
-		return Document{}, err
+		return File{}, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return Document{}, fmt.Errorf("stat config %s: %w", path, err)
+		return File{}, fmt.Errorf("stat config %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return Document{}, fmt.Errorf("config %s is not a regular file", path)
+		return File{}, fmt.Errorf("config %s is not a regular file", path)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return Document{}, fmt.Errorf("read config %s: %w", path, err)
+		return File{}, fmt.Errorf("read config %s: %w", path, err)
 	}
-	document := Document{
+	return File{
 		Name:   documentName(filepath.Base(path)),
 		Path:   path,
 		Format: format,
 		Raw:    raw,
-	}
-	if err := document.decodeData(); err != nil {
-		return Document{}, fmt.Errorf("decode config %s: %w", path, err)
-	}
-	return document, nil
+	}, nil
 }
 
 // LoadDir reads supported files from one directory without descending into child directories.
-func LoadDir(path string) ([]Document, error) {
+func LoadDir(path string) ([]File, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config dir %s: %w", path, err)
 	}
-	documents := make([]Document, 0, len(entries))
+	documents := make([]File, 0, len(entries))
 	seen := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -81,17 +76,17 @@ func LoadDir(path string) ([]Document, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := appendDocument(&documents, seen, document); err != nil {
+		if err := appendFile(&documents, seen, document); err != nil {
 			return nil, err
 		}
 	}
-	sortDocuments(documents)
+	sortFiles(documents)
 	return documents, nil
 }
 
 // LoadDirRecursive reads supported files below path using deterministic slash-separated relative names.
-func LoadDirRecursive(path string) ([]Document, error) {
-	documents := make([]Document, 0)
+func LoadDirRecursive(path string) ([]File, error) {
+	documents := make([]File, 0)
 	seen := make(map[string]struct{})
 	err := filepath.WalkDir(path, func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -108,7 +103,7 @@ func LoadDirRecursive(path string) ([]Document, error) {
 		if err != nil {
 			return err
 		}
-		if err := appendDocument(&documents, seen, document); err != nil {
+		if err := appendFile(&documents, seen, document); err != nil {
 			return err
 		}
 		return nil
@@ -116,12 +111,12 @@ func LoadDirRecursive(path string) ([]Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan config dir %s: %w", path, err)
 	}
-	sortDocuments(documents)
+	sortFiles(documents)
 	return documents, nil
 }
 
 // Decode strictly decodes Raw into target using the document's original format.
-func (d Document) Decode(target any) error {
+func (d File) Decode(target any) error {
 	decoder := strictDecoder(d.Format, d.Raw)
 	if decoder == nil {
 		return fmt.Errorf("unsupported config format %q", d.Format)
@@ -129,42 +124,29 @@ func (d Document) Decode(target any) error {
 	return decoder(target)
 }
 
-func loadDirEntry(root, relativePath string) (Document, error) {
+func loadDirEntry(root, relativePath string) (File, error) {
 	path := filepath.Join(root, filepath.FromSlash(relativePath))
 	format, err := formatForPath(path)
 	if err != nil {
-		return Document{}, err
+		return File{}, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return Document{}, fmt.Errorf("inspect config %s: %w", path, err)
+		return File{}, fmt.Errorf("inspect config %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return Document{}, fmt.Errorf("config %s is not a regular file", path)
+		return File{}, fmt.Errorf("config %s is not a regular file", path)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return Document{}, fmt.Errorf("read config %s: %w", path, err)
+		return File{}, fmt.Errorf("read config %s: %w", path, err)
 	}
-	document := Document{
+	return File{
 		Name:   documentName(relativePath),
 		Path:   path,
 		Format: format,
 		Raw:    raw,
-	}
-	if err := document.decodeData(); err != nil {
-		return Document{}, fmt.Errorf("decode config %s: %w", path, err)
-	}
-	return document, nil
-}
-
-func (d *Document) decodeData() error {
-	var data map[string]any
-	if err := d.Decode(&data); err != nil {
-		return err
-	}
-	d.Data = data
-	return nil
+	}, nil
 }
 
 func strictDecoder(format Format, raw []byte) func(any) error {
@@ -224,7 +206,7 @@ func documentName(filename string) string {
 	return strings.TrimSuffix(filename, filepath.Ext(filename))
 }
 
-func appendDocument(documents *[]Document, seen map[string]struct{}, document Document) error {
+func appendFile(documents *[]File, seen map[string]struct{}, document File) error {
 	if _, exists := seen[document.Name]; exists {
 		return fmt.Errorf("duplicate config name %q", document.Name)
 	}
@@ -233,7 +215,7 @@ func appendDocument(documents *[]Document, seen map[string]struct{}, document Do
 	return nil
 }
 
-func sortDocuments(documents []Document) {
+func sortFiles(documents []File) {
 	sort.Slice(documents, func(left, right int) bool {
 		return documents[left].Name < documents[right].Name
 	})

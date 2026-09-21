@@ -37,7 +37,7 @@ type FetchByIDsRequest struct {
 }
 
 type Client struct {
-	baseURL   string
+	origin    string
 	apiKey    string
 	cookie    string
 	headers   map[string]string
@@ -51,19 +51,17 @@ type resourceState struct {
 
 var resources resourceState
 
-// Initialize validates transport configuration, builds the Douyin client, and publishes it.
-func Initialize(connection config.ClientConfig, credential config.DouyinCredentialConfig) error {
-	if err := validateConnection(connection); err != nil {
-		return err
-	}
-	client := NewWithClient(strings.TrimRight(connection.BaseURL, "/"), credential, httpclient.Get(connection.Name))
+// Initialize builds the Douyin client from its named Hertz transport and publishes it.
+func Initialize(name string, credentials config.CredentialsConfig) (func() error, error) {
+	transport := httpclient.Get(name)
+	client := NewWithClient(transport.Origin(), credentials.Douyin, transport)
 	resources.Lock()
 	defer resources.Unlock()
 	if resources.client != nil {
-		return errors.New("douyin client already initialized")
+		return nil, errors.New("douyin client already initialized")
 	}
 	resources.client = client
-	return nil
+	return Close, nil
 }
 
 // Get returns the initialized Douyin client.
@@ -90,7 +88,7 @@ func Close() error {
 }
 
 // NewWithClient builds a testable Douyin client over an initialized Hertz transport.
-func NewWithClient(baseURL string, credential config.DouyinCredentialConfig, transport *httpclient.Client) *Client {
+func NewWithClient(origin string, credential config.DouyinCredentialConfig, transport *httpclient.Client) *Client {
 	if transport == nil {
 		panic("douyin: Hertz transport is required")
 	}
@@ -101,7 +99,7 @@ func NewWithClient(baseURL string, credential config.DouyinCredentialConfig, tra
 		}
 	}
 	return &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
+		origin:    strings.TrimRight(origin, "/"),
 		apiKey:    credential.APIKey,
 		cookie:    credential.Cookie,
 		headers:   headers,
@@ -189,7 +187,7 @@ func (c *Client) postForm(ctx context.Context, path string, fields map[string]st
 	for key, value := range fields {
 		values.Set(key, value)
 	}
-	endpoint := c.baseURL + path + "?apiKey=" + url.QueryEscape(c.apiKey)
+	endpoint := c.origin + path + "?apiKey=" + url.QueryEscape(c.apiKey)
 
 	request := protocol.AcquireRequest()
 	response := protocol.AcquireResponse()
@@ -233,23 +231,6 @@ func successValue(value any) bool {
 	default:
 		return false
 	}
-}
-
-func validateConnection(connection config.ClientConfig) error {
-	if strings.TrimSpace(connection.Name) == "" {
-		return errors.New("douyin client name is required")
-	}
-	if strings.TrimSpace(connection.BaseURL) == "" {
-		return errors.New("douyin client base_url is required")
-	}
-	parsed, err := url.Parse(strings.TrimSpace(connection.BaseURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return errors.New("douyin client base_url must be an absolute http or https URL")
-	}
-	if connection.Timeout.Duration <= 0 {
-		return errors.New("douyin client timeout must be greater than zero")
-	}
-	return nil
 }
 
 func clamp(value, low, high int) int {

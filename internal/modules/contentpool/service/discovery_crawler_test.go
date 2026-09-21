@@ -77,6 +77,8 @@ func TestDouyinCrawlerBatchURLKeepsSuccessfulItemsWhenOneFails(t *testing.T) {
 
 func testDouyinClient(t *testing.T, server *httptest.Server) *douyinclient.Client {
 	transport, closer, err := httpclient.New(httpclient.Config{
+		Name:       "douyin-test",
+		Endpoint:   httpclient.EndpointConfig{Scheme: "http", Host: "127.0.0.1", Port: 18080},
 		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
 		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
 		Retry:      httpclient.RetryConfig{Attempts: 1, Policy: "fixed"},

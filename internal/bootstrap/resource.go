@@ -18,10 +18,14 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
-	pkgconfig "github.com/wt-media/wt-media-cloud/pkg/config"
 )
 
-const httpClientsConfigDirectory = "config/clients/http"
+type clientInitializer func(name string, credentials config.CredentialsConfig) (func() error, error)
+
+var clientInitializers = map[string]clientInitializer{
+	"agent":  agentclient.Initialize,
+	"douyin": douyinclient.Initialize,
+}
 
 type resourceStep struct {
 	name string
@@ -35,9 +39,7 @@ func serverResourcePlan() []resourceStep {
 		metricsResource(),
 		tracingResource(),
 		databaseResource(),
-		httpClientsResource("agent", "douyin"),
-		agentClientResource(),
-		douyinClientResource(),
+		clientsResource(),
 	}
 }
 
@@ -58,8 +60,7 @@ func workerResourcePlan() []resourceStep {
 		metricsResource(),
 		tracingResource(),
 		databaseResource(),
-		httpClientsResource("douyin"),
-		douyinClientResource(),
+		clientsResource("douyin"),
 	}
 }
 
@@ -177,41 +178,73 @@ func installHertzLoggers() {
 	hlog.SetSystemLogger(logger.Panic())
 }
 
-func httpClientsResource(names ...string) resourceStep {
+func clientsResource(names ...string) resourceStep {
 	return resourceStep{
-		name: "http-clients",
+		name: "clients",
 		open: func() (func() error, error) {
-			documents, err := loadHTTPClientDocuments(httpClientsConfigDirectory, names...)
+			cfg := config.Get()
+			selected, err := selectHTTPClientConfigs(cfg.Clients.HTTP, names...)
 			if err != nil {
 				return nil, err
 			}
-			middlewares := make(map[string][]client.Middleware, len(names))
-			for _, name := range names {
-				middlewares[name] = []client.Middleware{observe.External(name)}
+
+			middlewares := make(map[string][]client.Middleware, len(selected))
+			for _, clientConfig := range selected {
+				middlewares[clientConfig.Name] = []client.Middleware{observe.External(clientConfig.Name)}
 			}
-			closer, err := httpclient.Initialize(documents, middlewares)
+			transportCloser, err := httpclient.Initialize(selected, middlewares)
 			if err != nil {
 				return nil, err
 			}
-			return closer, nil
+
+			semanticClosers := make([]func() error, 0, len(selected))
+			closeSemanticClients := func() {
+				for index := len(semanticClosers) - 1; index >= 0; index-- {
+					_ = semanticClosers[index]()
+				}
+			}
+			for _, clientConfig := range selected {
+				initializer, exists := clientInitializers[clientConfig.Name]
+				if !exists {
+					closeSemanticClients()
+					_ = transportCloser()
+					return nil, fmt.Errorf("HTTP client %q has no semantic initializer", clientConfig.Name)
+				}
+				closer, err := initializer(clientConfig.Name, cfg.Credentials)
+				if err != nil {
+					closeSemanticClients()
+					_ = transportCloser()
+					return nil, err
+				}
+				semanticClosers = append(semanticClosers, closer)
+			}
+
+			return func() error {
+				closeSemanticClients()
+				return transportCloser()
+			}, nil
 		},
 	}
 }
 
-func loadHTTPClientDocuments(directory string, names ...string) ([]pkgconfig.Document, error) {
-	documents, err := pkgconfig.LoadDir(directory)
-	if err != nil {
-		return nil, fmt.Errorf("load HTTP client config: %w", err)
+func selectHTTPClientConfigs(configs []httpclient.Config, names ...string) ([]httpclient.Config, error) {
+	selected := append([]httpclient.Config(nil), configs...)
+	sort.Slice(selected, func(left, right int) bool {
+		return selected[left].Name < selected[right].Name
+	})
+	if len(names) == 0 {
+		return selected, nil
 	}
+
 	wanted := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		wanted[name] = struct{}{}
 	}
-	selected := make([]pkgconfig.Document, 0, len(names))
-	for _, document := range documents {
-		if _, exists := wanted[document.Name]; exists {
-			selected = append(selected, document)
-			delete(wanted, document.Name)
+	filtered := make([]httpclient.Config, 0, len(names))
+	for _, clientConfig := range selected {
+		if _, exists := wanted[clientConfig.Name]; exists {
+			filtered = append(filtered, clientConfig)
+			delete(wanted, clientConfig.Name)
 		}
 	}
 	if len(wanted) != 0 {
@@ -222,33 +255,5 @@ func loadHTTPClientDocuments(directory string, names ...string) ([]pkgconfig.Doc
 		sort.Strings(missing)
 		return nil, fmt.Errorf("HTTP client config not found: %s", strings.Join(missing, ", "))
 	}
-	return selected, nil
-}
-
-func agentClientResource() resourceStep {
-	return resourceStep{
-		name: "agent-client",
-		open: func() (func() error, error) {
-			cfg := config.Get()
-			connection, _ := cfg.HTTPClient("agent")
-			if err := agentclient.Initialize(connection, cfg.Credentials.Agent); err != nil {
-				return nil, err
-			}
-			return agentclient.Close, nil
-		},
-	}
-}
-
-func douyinClientResource() resourceStep {
-	return resourceStep{
-		name: "douyin-client",
-		open: func() (func() error, error) {
-			cfg := config.Get()
-			connection, _ := cfg.HTTPClient("douyin")
-			if err := douyinclient.Initialize(connection, cfg.Credentials.Douyin); err != nil {
-				return nil, err
-			}
-			return douyinclient.Close, nil
-		},
-	}
+	return filtered, nil
 }

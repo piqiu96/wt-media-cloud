@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	hertzclient "github.com/cloudwego/hertz/pkg/app/client"
@@ -15,8 +16,9 @@ import (
 
 // Config is the transport-only schema for one Hertz client instance.
 type Config struct {
-	BaseURL    string           `toml:"base_url"`
+	Name       string           `toml:"name"`
 	Timeout    Duration         `toml:"timeout"`
+	Endpoint   EndpointConfig   `toml:"endpoint"`
 	Connection ConnectionConfig `toml:"connection"`
 	Retry      RetryConfig      `toml:"retry"`
 }
@@ -57,8 +59,9 @@ type RetryConfig struct {
 
 // Client wraps Hertz Client with a whole-request timeout.
 type Client struct {
-	hertz   *hertzclient.Client
-	timeout time.Duration
+	hertz    *hertzclient.Client
+	timeout  time.Duration
+	endpoint EndpointConfig
 }
 
 // New builds one validated Hertz client and applies middleware in order.
@@ -78,6 +81,9 @@ func New(cfg Config, middlewares ...hertzclient.Middleware) (*Client, func() err
 		hertzclient.WithKeepAlive(cfg.Connection.KeepAlive),
 		hertzclient.WithRetryConfig(retryOptions(cfg.Retry)...),
 	}
+	if endpointDialer := newEndpointDialer(cfg.Endpoint); endpointDialer != nil {
+		options = append(options, hertzclient.WithDialer(endpointDialer))
+	}
 
 	raw, err := hertzclient.NewClient(options...)
 	if err != nil {
@@ -90,7 +96,7 @@ func New(cfg Config, middlewares ...hertzclient.Middleware) (*Client, func() err
 		raw.Use(middleware)
 	}
 
-	return &Client{hertz: raw, timeout: cfg.Timeout.Duration}, func() error {
+	return &Client{hertz: raw, timeout: cfg.Timeout.Duration, endpoint: cfg.Endpoint}, func() error {
 		raw.CloseIdleConnections()
 		return nil
 	}, nil
@@ -102,6 +108,11 @@ func (c *Client) Do(ctx context.Context, req *protocol.Request, resp *protocol.R
 		return c.hertz.Do(ctx, req, resp)
 	}
 	return c.hertz.DoTimeout(ctx, req, resp, c.timeout)
+}
+
+// Origin returns the configured logical URL origin.
+func (c *Client) Origin() string {
+	return c.endpoint.Origin()
 }
 
 // CloseIdleConnections releases pooled connections owned by this client.
@@ -124,6 +135,9 @@ func retryOptions(cfg RetryConfig) []retry.Option {
 
 // Validate reports whether one HTTP client configuration is complete and safe.
 func Validate(cfg Config) error {
+	if strings.TrimSpace(cfg.Name) == "" {
+		return errors.New("http client name is required")
+	}
 	if cfg.Timeout.Duration <= 0 {
 		return errors.New("http client timeout must be greater than zero")
 	}
@@ -135,6 +149,9 @@ func Validate(cfg Config) error {
 	}
 	if retryPolicyInvalid(cfg.Retry.Policy) {
 		return fmt.Errorf("invalid http client retry policy %q", cfg.Retry.Policy)
+	}
+	if err := cfg.Endpoint.validate(); err != nil {
+		return err
 	}
 	connection := cfg.Connection
 	if connection.DialTimeout.Duration < 0 || connection.ReadTimeout.Duration < 0 || connection.WriteTimeout.Duration < 0 ||

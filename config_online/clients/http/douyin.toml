@@ -1,5 +1,10 @@
-base_url = "https://api.itfaba.com"
+name = "douyin"
 timeout = "30s"
+
+[endpoint]
+scheme = "https"
+host = "api.itfaba.com"
+port = 443
 
 [connection]
 dial_timeout = "5s"

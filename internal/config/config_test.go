@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
 func TestLoadAlwaysUsesConfigDirectory(t *testing.T) {
@@ -137,8 +139,8 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromDir() error = %v", err)
 	}
-	douyin, ok := cfg.HTTPClient("douyin")
-	if !ok || douyin.BaseURL != "https://api.itfaba.com" {
+	douyin, ok := httpClientByName(cfg, "douyin")
+	if !ok || douyin.Endpoint.Origin() != "https://api.itfaba.com:443" {
 		t.Fatalf("Douyin client = %+v, found=%v", douyin, ok)
 	}
 	if got, want := cfg.Credentials.Douyin.APIKey, "douyin-key"; got != want {
@@ -148,7 +150,7 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 		t.Fatalf("Agent auth token = %q, want %q", got, want)
 	}
 
-	clientType := reflect.TypeOf(ClientConfig{})
+	clientType := reflect.TypeOf(httpclient.Config{})
 	for _, forbidden := range []string{"APIKey", "Cookie", "AuthToken", "Headers"} {
 		if _, found := clientType.FieldByName(forbidden); found {
 			t.Fatalf("ClientConfig unexpectedly contains credential field %q", forbidden)
@@ -217,7 +219,7 @@ func TestLoadFromDirRejectsUnknownTOMLFieldWithPath(t *testing.T) {
 func TestLoadFromDirRejectsInvalidDurationWithPath(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "clients/http/agent.toml", "base_url = \"http://127.0.0.1:8765\"\ntimeout = \"eventually\"\n\n[retry]\nattempts = 2\n")
+	writeConfigFile(t, dir, "clients/http/agent.toml", "name = \"agent\"\ntimeout = \"eventually\"\n\n[endpoint]\nscheme = \"http\"\nhost = \"127.0.0.1\"\nport = 8765\n\n[retry]\nattempts = 2\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil {
@@ -225,6 +227,23 @@ func TestLoadFromDirRejectsInvalidDurationWithPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), filepath.Join(dir, "clients", "http", "agent.toml")) || !strings.Contains(err.Error(), "eventually") {
 		t.Fatalf("LoadFromDir() error = %v, want file path and invalid duration", err)
+	}
+}
+
+func TestHTTPClientNameComesFromFileContent(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+	if err := os.Remove(filepath.Join(dir, "clients", "http", "agent.toml")); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, dir, "clients/http/alias.toml", "name = \"agent\"\ntimeout = \"7s\"\n\n[endpoint]\nscheme = \"http\"\nhost = \"127.0.0.1\"\nport = 8765\n\n[connection]\ndial_timeout = \"1s\"\n\n[retry]\nattempts = 2\n")
+
+	cfg, err := LoadFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDir() error = %v", err)
+	}
+	if client, ok := httpClientByName(cfg, "agent"); !ok || client.Endpoint.Host != "127.0.0.1" {
+		t.Fatalf("agent client = %+v, found=%v", client, ok)
 	}
 }
 
@@ -236,7 +255,7 @@ func TestDurationUsesTimeParseDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromDir() error = %v", err)
 	}
-	agent, _ := cfg.HTTPClient("agent")
+	agent, _ := httpClientByName(cfg, "agent")
 	if got, want := agent.Timeout.Duration, 7*time.Second; got != want {
 		t.Fatalf("Agent timeout = %s, want %s", got, want)
 	}
@@ -263,16 +282,25 @@ func writeValidConfig(t *testing.T, root string) {
 	for _, category := range []string{"app", "access", "job", "external", "audit", "panic"} {
 		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	}
-	writeHTTPClient(t, root, "agent", "http://127.0.0.1:8765", "7s")
-	writeHTTPClient(t, root, "douyin", "https://api.itfaba.com", "30s")
+	writeHTTPClient(t, root, "agent", "http", "127.0.0.1", 8765, "7s")
+	writeHTTPClient(t, root, "douyin", "https", "api.itfaba.com", 443, "30s")
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
 	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
 }
 
-func writeHTTPClient(t *testing.T, root, name, baseURL, timeout string) {
+func writeHTTPClient(t *testing.T, root, name, scheme, host string, port int, timeout string) {
 	t.Helper()
-	writeConfigFile(t, root, "clients/http/"+name+".toml", "base_url = "+strconv.Quote(baseURL)+"\ntimeout = "+strconv.Quote(timeout)+"\n\n[connection]\ndial_timeout = \"1s\"\n\n[retry]\nattempts = 2\ndelay = \"300ms\"\nmax_delay = \"2s\"\npolicy = \"fixed\"\n")
+	writeConfigFile(t, root, "clients/http/"+name+".toml", "name = "+strconv.Quote(name)+"\ntimeout = "+strconv.Quote(timeout)+"\n\n[endpoint]\nscheme = "+strconv.Quote(scheme)+"\nhost = "+strconv.Quote(host)+"\nport = "+strconv.Itoa(port)+"\n\n[connection]\ndial_timeout = \"1s\"\n\n[retry]\nattempts = 2\ndelay = \"300ms\"\nmax_delay = \"2s\"\npolicy = \"fixed\"\n")
+}
+
+func httpClientByName(cfg Config, name string) (httpclient.Config, bool) {
+	for _, client := range cfg.Clients.HTTP {
+		if client.Name == name {
+			return client, true
+		}
+	}
+	return httpclient.Config{}, false
 }
 
 func validAppTOML(name string) string {
