@@ -288,23 +288,46 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 	task.Stats = model.CrawlStats{Scanned: scanned, Found: len(result.Items), Failed: result.Failed}
 	if manual && (operation == "keyword" || operation == "author") {
 		task.Results = dedupeResultItems(result.Items)
+		for _, item := range task.Results {
+			item["processing_status"] = "unprocessed"
+		}
 		task.Stats.Found = len(task.Results)
 	} else {
 		sourceType := "strategy"
 		if operation == "url" {
 			sourceType = "link"
 		}
-		for _, item := range result.Items {
+		task.Results = make([]map[string]any, 0, len(result.Items))
+		for _, rawItem := range result.Items {
+			item := cloneMap(rawItem)
+			task.Results = append(task.Results, item)
 			team := task.TeamID
-			_, err := s.content.createSource(actorForTask(task), dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]), Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
-			if errors.Is(err, ErrDuplicate) {
+			taskID := task.ID
+			source, err := s.content.createSource(actorForTask(task), dto.SourceInput{
+				TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]),
+				Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]),
+				CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]),
+				AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]),
+				SourceType: sourceType, StrategyID: task.StrategyID, CrawlTaskID: &taskID,
+				LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]),
+				PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item),
+			})
+			switch {
+			case errors.Is(err, ErrDuplicate):
 				task.Stats.Duplicate++
-			} else if err != nil {
+				item["processing_status"] = "duplicate"
+			case err != nil:
 				task.Stats.Failed++
-			} else {
+				item["processing_status"] = "failed"
+				item["failure_reason"] = err.Error()
+			default:
 				task.Stats.Added++
+				task.Stats.Pending++
+				item["processing_status"] = "pending"
+				item["source_content_id"] = source.ID
 			}
 		}
+		task.Stats.Found = len(task.Results)
 	}
 	now := s.now()
 	task.FinishedAt, task.UpdatedAt = &now, now

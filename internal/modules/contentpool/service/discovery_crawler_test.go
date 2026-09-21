@@ -27,13 +27,13 @@ func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T
 		if got := r.PostForm.Get("keywords"); got != "王者荣耀" || r.PostForm.Get("count") != "20" || r.PostForm.Get("ck") != "server-cookie" {
 			t.Fatalf("unexpected form %v", r.PostForm)
 		}
-		_, _ = w.Write([]byte(`{"result":1,"data":{"datalist":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"}}}]}}`))
+		_, _ = w.Write([]byte(`{"result":1,"data":{"datalist":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"},"statistics":{"digg_count":12000,"collect_count":700}}}]}}`))
 	}))
 	defer server.Close()
 
 	crawler := NewDouyinCrawlerWithClient(testDouyinClient(t, server))
 	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "王者荣耀"}})
-	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" {
+	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" || result.Items[0]["like_count"] != int64(12000) || result.Items[0]["favorite_count"] != int64(700) {
 		t.Fatalf("unexpected result=%+v err=%v", result, err)
 	}
 }

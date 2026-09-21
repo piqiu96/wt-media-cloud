@@ -235,6 +235,7 @@ func normalizeDouyinItem(item map[string]any) map[string]any {
 	}
 	author, _ := item["author"].(map[string]any)
 	video, _ := item["video"].(map[string]any)
+	statistics, _ := item["statistics"].(map[string]any)
 	cover := firstNestedURL(video, "origin_cover")
 	if cover == "" {
 		cover = firstNestedURL(video, "cover")
@@ -243,7 +244,7 @@ func normalizeDouyinItem(item map[string]any) map[string]any {
 	if created := int64Value(item["create_time"]); created > 0 {
 		published = time.Unix(created, 0).UTC().Format(time.RFC3339)
 	}
-	return map[string]any{"platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": fmt.Sprint(author["uid"]), "author_name": fmt.Sprint(author["nickname"]), "published_at": published, "raw": item}
+	return map[string]any{"platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": fmt.Sprint(author["uid"]), "author_name": fmt.Sprint(author["nickname"]), "published_at": published, "like_count": int64Value(statistics["digg_count"]), "favorite_count": int64Value(statistics["collect_count"]), "raw": item}
 }
 func firstNestedURL(parent map[string]any, key string) string {
 	child, _ := parent[key].(map[string]any)

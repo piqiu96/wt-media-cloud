@@ -98,15 +98,15 @@ In progress.
 
 **Steps:**
 
-- [ ] Extend crawler result normalization to retain like and favorite counts.
-- [ ] Deduplicate results by platform content ID.
-- [ ] Create or link source contents with strategy/task IDs.
-- [ ] Record per-item source ID, material ID, status, and failure reason in `result_json`.
-- [ ] Process items independently.
-- [ ] Extend task stats with auto-materialized and pending counts.
-- [ ] Add tests for result projection, duplicates, and partial failure.
-- [ ] Run `go test ./internal/modules/contentpool/service -run 'TestDiscovery|TestCreateRun'`.
-- [ ] Commit.
+- [x] Extend crawler result normalization to retain like and favorite counts.
+- [x] Deduplicate results by platform content ID.
+- [x] Create or link source contents with strategy/task IDs.
+- [x] Record per-item source ID, material ID, status, and failure reason in `result_json`.
+- [x] Process items independently.
+- [x] Extend task stats with auto-materialized and pending counts.
+- [x] Add tests for result projection, duplicates, and partial failure.
+- [x] Run `go test ./internal/modules/contentpool/service -run 'TestDiscovery|TestCreateRun'`.
+- [x] Commit.
 
 **Acceptance:**
 
