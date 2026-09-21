@@ -12,6 +12,13 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('value="author" disabled')
     expect(source).toContain("row.strategy_type === 'author'")
     expect(source).toContain('立即执行')
+    expect(source).toContain('自动转素材')
+    expect(source).toContain('value="AND"')
+    expect(source).toContain('value="OR"')
+    expect(source).toContain('like_threshold')
+    expect(source).toContain('favorite_threshold')
+    expect(source).toContain('latestSummary')
+    expect(source).toContain('内容结果')
     expect(source).toContain('编辑')
   })
 

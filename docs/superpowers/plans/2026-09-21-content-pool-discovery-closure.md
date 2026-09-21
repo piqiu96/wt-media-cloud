@@ -213,15 +213,15 @@ In progress.
 
 **Steps:**
 
-- [ ] Add automatic material switch.
-- [ ] Add AND/OR selector.
-- [ ] Add like and favorite thresholds.
-- [ ] Show latest execution status and result summary.
-- [ ] Add links to task list and content-pool filter.
-- [ ] Keep author strategy disabled.
-- [ ] Update focused page test.
-- [ ] Run the focused frontend test.
-- [ ] Commit.
+- [x] Add automatic material switch.
+- [x] Add AND/OR selector.
+- [x] Add like and favorite thresholds.
+- [x] Show latest execution status and result summary.
+- [x] Add links to task list and content-pool filter.
+- [x] Keep author strategy disabled.
+- [x] Update focused page test.
+- [x] Run the focused frontend test.
+- [x] Commit.
 
 **Acceptance:**
 
