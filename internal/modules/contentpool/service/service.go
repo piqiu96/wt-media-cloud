@@ -37,7 +37,8 @@ type contentStore interface {
 	CreateSource(model.SourceContent, json.RawMessage) (model.SourceContent, error)
 	ListSources(dto.Filter) ([]model.SourceContent, error)
 	FindSource(int64) (model.SourceContent, bool, error)
-	UpdateStatus(int64, model.Status, string) (model.SourceContent, error)
+	UpdateStatus(int64, model.Status, string, string) (model.SourceContent, error)
+	RecordMaterialFailure(int64, string) (model.SourceContent, error)
 	Materialize(int64, identityservice.UserID, time.Time) (model.Material, error)
 }
 
@@ -77,7 +78,7 @@ func (s *contentService) createSource(actor identityservice.PublicUser, input dt
 		return model.SourceContent{}, ErrInvalidInput
 	}
 	now := s.now()
-	item, err := s.store.CreateSource(model.SourceContent{TeamID: *team, Platform: strings.TrimSpace(input.Platform), PlatformContentID: strings.TrimSpace(input.PlatformContentID), Title: input.Title, Description: input.Description, CoverURL: input.CoverURL, SourceURL: input.SourceURL, AuthorID: input.AuthorID, AuthorName: input.AuthorName, SourceType: input.SourceType, PublishedAt: input.PublishedAt, Status: model.StatusPending, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}, raw)
+	item, err := s.store.CreateSource(model.SourceContent{TeamID: *team, Platform: strings.TrimSpace(input.Platform), PlatformContentID: strings.TrimSpace(input.PlatformContentID), Title: input.Title, Description: input.Description, CoverURL: input.CoverURL, SourceURL: input.SourceURL, AuthorID: input.AuthorID, AuthorName: input.AuthorName, SourceType: input.SourceType, StrategyID: input.StrategyID, CrawlTaskID: input.CrawlTaskID, LikeCount: input.LikeCount, FavoriteCount: input.FavoriteCount, PublishedAt: input.PublishedAt, AuditNote: input.AuditNote, Status: model.StatusPending, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now}, raw)
 	if errors.Is(err, ErrDuplicate) {
 		return model.SourceContent{}, ErrDuplicate
 	}
@@ -104,7 +105,7 @@ func (s *contentService) get(actor identityservice.PublicUser, id int64) (model.
 	return item, true, nil
 }
 
-func (s *contentService) setStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string) (model.SourceContent, error) {
+func (s *contentService) setStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {
 	item, found, err := s.get(actor, id)
 	if err != nil {
 		return model.SourceContent{}, err
@@ -118,16 +119,16 @@ func (s *contentService) setStatus(actor identityservice.PublicUser, id int64, s
 	if item.Status == model.StatusMaterialCreated && status == model.StatusPending {
 		return model.SourceContent{}, ErrInvalidTransition
 	}
-	return s.store.UpdateStatus(id, status, reason)
+	return s.store.UpdateStatus(id, status, reason, auditNote)
 }
 
-func (s *contentService) batchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string) ([]model.SourceContent, error) {
+func (s *contentService) batchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) ([]model.SourceContent, error) {
 	if len(ids) == 0 || len(ids) > 500 {
 		return nil, ErrInvalidInput
 	}
 	updated := make([]model.SourceContent, 0, len(ids))
 	for _, id := range ids {
-		item, err := s.setStatus(actor, id, status, reason)
+		item, err := s.setStatus(actor, id, status, reason, auditNote)
 		if err != nil {
 			return updated, err
 		}
@@ -144,5 +145,10 @@ func (s *contentService) materialize(actor identityservice.PublicUser, id int64)
 	if !found {
 		return model.Material{}, ErrNotFound
 	}
-	return s.store.Materialize(id, actor.ID, s.now())
+	material, err := s.store.Materialize(id, actor.ID, s.now())
+	if err != nil {
+		_, _ = s.store.RecordMaterialFailure(id, err.Error())
+		return model.Material{}, err
+	}
+	return material, nil
 }

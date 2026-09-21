@@ -22,18 +22,23 @@ func (mysqlContentStore) CreateSource(v model.SourceContent, raw json.RawMessage
 }
 func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContent, error) {
 	return repository.ListSources(repository.Filter{
-		TeamID:     v.TeamID,
-		Platform:   v.Platform,
-		Status:     v.Status,
-		SourceType: v.SourceType,
-		Search:     v.Search,
+		TeamID:      v.TeamID,
+		Platform:    v.Platform,
+		Status:      v.Status,
+		SourceType:  v.SourceType,
+		Search:      v.Search,
+		StrategyID:  v.StrategyID,
+		CrawlTaskID: v.CrawlTaskID,
 	})
 }
 func (mysqlContentStore) FindSource(id int64) (model.SourceContent, bool, error) {
 	return repository.FindSource(id)
 }
-func (mysqlContentStore) UpdateStatus(id int64, status model.Status, reason string) (model.SourceContent, error) {
-	return repository.UpdateStatus(id, status, reason)
+func (mysqlContentStore) UpdateStatus(id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {
+	return repository.UpdateStatus(id, status, reason, auditNote)
+}
+func (mysqlContentStore) RecordMaterialFailure(id int64, reason string) (model.SourceContent, error) {
+	return repository.RecordMaterialFailure(id, reason)
 }
 func (mysqlContentStore) Materialize(id int64, userID identityservice.UserID, now time.Time) (model.Material, error) {
 	return repository.Materialize(id, int64(userID), now)

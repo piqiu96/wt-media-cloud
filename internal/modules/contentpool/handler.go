@@ -32,13 +32,15 @@ type sourceRequest struct {
 	RawJSON           json.RawMessage         `json:"raw_json"`
 }
 type statusRequest struct {
-	Status model.Status `json:"status"`
-	Reason string       `json:"reason"`
+	Status    model.Status `json:"status"`
+	Reason    string       `json:"reason"`
+	AuditNote string       `json:"audit_note"`
 }
 type batchStatusRequest struct {
-	IDs    []int64      `json:"ids"`
-	Status model.Status `json:"status"`
-	Reason string       `json:"reason"`
+	IDs       []int64      `json:"ids"`
+	Status    model.Status `json:"status"`
+	Reason    string       `json:"reason"`
+	AuditNote string       `json:"audit_note"`
 }
 type strategyRequest struct {
 	TeamID       *identityservice.TeamID `json:"team_id"`
@@ -150,7 +152,7 @@ func BatchUpdateContentStatus(_ context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &request) {
 		return
 	}
-	items, err := contentservice.BatchSetStatus(actor, request.IDs, request.Status, request.Reason)
+	items, err := contentservice.BatchSetStatus(actor, request.IDs, request.Status, request.Reason, request.AuditNote)
 	if err != nil {
 		writeContentError(c, err)
 		return
@@ -170,7 +172,7 @@ func UpdateContentStatus(_ context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &request) {
 		return
 	}
-	item, err := contentservice.SetStatus(actor, id, request.Status, request.Reason)
+	item, err := contentservice.SetStatus(actor, id, request.Status, request.Reason, request.AuditNote)
 	if err != nil {
 		writeContentError(c, err)
 		return

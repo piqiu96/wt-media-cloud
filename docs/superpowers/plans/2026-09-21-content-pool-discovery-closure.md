@@ -43,13 +43,13 @@ In progress.
 
 **Steps:**
 
-- [ ] Add a migration for source-content strategy/task IDs, counts, audit note, failure reason, and material ID.
-- [ ] Extend `SourceContent` and `SourceInput`.
-- [ ] Extend source-content insert, select, update, and materialize SQL.
-- [ ] Extend task snapshot/result scan and persistence as needed.
-- [ ] Add focused repository assertions for new source fields.
-- [ ] Run `go test ./internal/modules/contentpool/repository`.
-- [ ] Commit with reference to this plan.
+- [x] Add a migration for source-content strategy/task IDs, counts, audit note, failure reason, and material ID.
+- [x] Extend `SourceContent` and `SourceInput`.
+- [x] Extend source-content insert, select, update, and materialize SQL.
+- [x] Extend task snapshot/result scan and persistence as needed.
+- [x] Add focused repository assertions for new source fields.
+- [x] Run `go test ./internal/modules/contentpool/repository`.
+- [x] Commit with reference to this plan.
 
 **Acceptance:**
 

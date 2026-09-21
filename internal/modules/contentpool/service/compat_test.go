@@ -54,10 +54,10 @@ func (s *contentService) Get(actor identityservice.PublicUser, id int64) (model.
 	return s.get(actor, id)
 }
 func (s *contentService) SetStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string) (model.SourceContent, error) {
-	return s.setStatus(actor, id, status, reason)
+	return s.setStatus(actor, id, status, reason, "")
 }
 func (s *contentService) BatchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string) ([]model.SourceContent, error) {
-	return s.batchSetStatus(actor, ids, status, reason)
+	return s.batchSetStatus(actor, ids, status, reason, "")
 }
 func (s *contentService) Materialize(actor identityservice.PublicUser, id int64) (model.Material, error) {
 	return s.materialize(actor, id)

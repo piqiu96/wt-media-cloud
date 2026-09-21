@@ -18,11 +18,11 @@ func List(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceCo
 func Get(actor identityservice.PublicUser, id int64) (model.SourceContent, bool, error) {
 	return defaultContentService().get(actor, id)
 }
-func SetStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string) (model.SourceContent, error) {
-	return defaultContentService().setStatus(actor, id, status, reason)
+func SetStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {
+	return defaultContentService().setStatus(actor, id, status, reason, auditNote)
 }
-func BatchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string) ([]model.SourceContent, error) {
-	return defaultContentService().batchSetStatus(actor, ids, status, reason)
+func BatchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) ([]model.SourceContent, error) {
+	return defaultContentService().batchSetStatus(actor, ids, status, reason, auditNote)
 }
 func Materialize(actor identityservice.PublicUser, id int64) (model.Material, error) {
 	return defaultContentService().materialize(actor, id)

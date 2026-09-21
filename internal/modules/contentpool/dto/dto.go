@@ -20,16 +20,23 @@ type SourceInput struct {
 	AuthorID          string
 	AuthorName        string
 	SourceType        string
+	StrategyID        *int64
+	CrawlTaskID       *int64
+	LikeCount         int64
+	FavoriteCount     int64
 	PublishedAt       *time.Time
+	AuditNote         string
 	RawJSON           json.RawMessage
 }
 
 type Filter struct {
-	TeamID     *sharedidentity.TeamID
-	Platform   string
-	Status     model.Status
-	SourceType string
-	Search     string
+	TeamID      *sharedidentity.TeamID
+	Platform    string
+	Status      model.Status
+	SourceType  string
+	Search      string
+	StrategyID  *int64
+	CrawlTaskID *int64
 }
 
 type CrawlerRequest struct {

@@ -45,12 +45,22 @@ func (m *memoryStore) FindSource(id int64) (SourceContent, bool, error) {
 	return v, ok, nil
 }
 
-func (m *memoryStore) UpdateStatus(id int64, status Status, reason string) (SourceContent, error) {
+func (m *memoryStore) UpdateStatus(id int64, status Status, reason string, auditNote string) (SourceContent, error) {
 	v, ok := m.items[id]
 	if !ok {
 		return SourceContent{}, ErrNotFound
 	}
-	v.Status, v.IgnoredReason = status, reason
+	v.Status, v.IgnoredReason, v.AuditNote = status, reason, auditNote
+	m.items[id] = v
+	return v, nil
+}
+
+func (m *memoryStore) RecordMaterialFailure(id int64, reason string) (SourceContent, error) {
+	v, ok := m.items[id]
+	if !ok {
+		return SourceContent{}, ErrNotFound
+	}
+	v.FailureReason = reason
 	m.items[id] = v
 	return v, nil
 }
@@ -62,8 +72,11 @@ func (m *memoryStore) Materialize(id int64, creator identityservice.UserID, now 
 	}
 	m.materialize++
 	v.Status = StatusMaterialCreated
+	v.FailureReason = ""
+	materialID := int64(m.materialize)
+	v.MaterialID = &materialID
 	m.items[id] = v
-	return Material{ID: int64(m.materialize), TeamID: v.TeamID, SourceContentID: id, Title: v.Title, CreatedBy: creator, CreatedAt: now, UpdatedAt: now}, nil
+	return Material{ID: materialID, TeamID: v.TeamID, SourceContentID: id, Title: v.Title, CreatedBy: creator, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 func TestScopeIsTeamWideAndAdminCanSeeAll(t *testing.T) {

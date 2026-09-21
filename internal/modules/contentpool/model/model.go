@@ -27,9 +27,16 @@ type SourceContent struct {
 	AuthorID          string                `json:"author_id,omitempty"`
 	AuthorName        string                `json:"author_name,omitempty"`
 	SourceType        string                `json:"source_type"`
+	StrategyID        *int64                `json:"strategy_id,omitempty"`
+	CrawlTaskID       *int64                `json:"crawl_task_id,omitempty"`
+	LikeCount         int64                 `json:"like_count"`
+	FavoriteCount     int64                 `json:"favorite_count"`
 	PublishedAt       *time.Time            `json:"published_at,omitempty"`
 	Status            Status                `json:"status"`
 	IgnoredReason     string                `json:"ignored_reason,omitempty"`
+	AuditNote         string                `json:"audit_note,omitempty"`
+	FailureReason     string                `json:"failure_reason,omitempty"`
+	MaterialID        *int64                `json:"material_id,omitempty"`
 	CreatedBy         sharedidentity.UserID `json:"created_by"`
 	CreatedAt         time.Time             `json:"created_at"`
 	UpdatedAt         time.Time             `json:"updated_at"`
@@ -98,9 +105,11 @@ type CrawlTask struct {
 }
 
 type CrawlStats struct {
-	Scanned   int `json:"scanned"`
-	Found     int `json:"found"`
-	Added     int `json:"added"`
-	Duplicate int `json:"duplicate"`
-	Failed    int `json:"failed"`
+	Scanned          int `json:"scanned"`
+	Found            int `json:"found"`
+	Added            int `json:"added"`
+	Duplicate        int `json:"duplicate"`
+	Failed           int `json:"failed"`
+	AutoMaterialized int `json:"auto_materialized"`
+	Pending          int `json:"pending"`
 }
