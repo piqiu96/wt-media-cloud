@@ -17,7 +17,7 @@ import (
 
 const sourceColumns = `id, team_id, game_id, platform, platform_content_id, title, description, cover_url, source_url, author_id, author_sec_uid, author_uid, author_home_url, author_name, source_type, strategy_id, crawl_task_id, like_count, favorite_count, view_count, comment_count, share_count, published_at, status, ignored_reason, audit_note, failure_reason, material_id, created_by, created_at, updated_at`
 
-const sourceViewColumns = `s.id, s.team_id, s.game_id, s.platform, s.platform_content_id, s.title, s.description, s.cover_url, s.source_url, s.author_id, s.author_sec_uid, s.author_uid, s.author_home_url, s.author_name, s.source_type, s.strategy_id, s.crawl_task_id, s.like_count, s.favorite_count, s.view_count, s.comment_count, s.share_count, s.published_at, s.status, s.ignored_reason, s.audit_note, s.failure_reason, s.material_id, s.created_by, s.created_at, s.updated_at, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '') AS strategy_name, CASE WHEN t.id IS NULL THEN '' ELSE CONCAT(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '人工任务'), '_', DATE_FORMAT(t.created_at, '%Y%m%d%H%i%s')) END AS crawl_task_name`
+const sourceViewColumns = `s.id, s.team_id, s.game_id, s.platform, s.platform_content_id, s.title, s.description, s.cover_url, s.source_url, s.author_id, s.author_sec_uid, s.author_uid, s.author_home_url, s.author_name, s.source_type, s.strategy_id, s.crawl_task_id, s.like_count, s.favorite_count, s.view_count, s.comment_count, s.share_count, s.published_at, s.status, s.ignored_reason, s.audit_note, s.failure_reason, s.material_id, s.created_by, s.created_at, s.updated_at, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '') AS strategy_name, CASE WHEN t.id IS NULL THEN '' ELSE CONCAT(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '人工任务'), '_', DATE_FORMAT(t.created_at, '%Y%m%d%H%i%s')) END AS crawl_task_name, COALESCE(u.nickname, u.username, '') AS created_by_name`
 
 func CreateSource(v model.SourceContent, raw json.RawMessage) (model.SourceContent, error) {
 	return createSource(database.DB(), v, raw)
@@ -42,7 +42,7 @@ func ListSources(filter Filter) ([]model.SourceContentView, error) {
 	return listSources(database.DB(), filter)
 }
 func listSources(db *gorm.DB, filter Filter) ([]model.SourceContentView, error) {
-	query := `SELECT ` + sourceViewColumns + ` FROM source_contents s LEFT JOIN discovery_strategies st ON st.id = s.strategy_id LEFT JOIN crawl_tasks t ON t.id = s.crawl_task_id`
+	query := `SELECT ` + sourceViewColumns + ` FROM source_contents s LEFT JOIN discovery_strategies st ON st.id = s.strategy_id LEFT JOIN crawl_tasks t ON t.id = s.crawl_task_id LEFT JOIN users u ON u.id = s.created_by`
 	conditions, args := sourceViewConditions(filter)
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
@@ -68,7 +68,7 @@ func FindSource(id int64) (model.SourceContentView, bool, error) {
 	return findSource(database.DB(), id)
 }
 func findSource(db *gorm.DB, id int64) (model.SourceContentView, bool, error) {
-	item, err := scanSourceView(db.Raw(`SELECT `+sourceViewColumns+` FROM source_contents s LEFT JOIN discovery_strategies st ON st.id = s.strategy_id LEFT JOIN crawl_tasks t ON t.id = s.crawl_task_id WHERE s.id = ?`, id).Row())
+	item, err := scanSourceView(db.Raw(`SELECT `+sourceViewColumns+` FROM source_contents s LEFT JOIN discovery_strategies st ON st.id = s.strategy_id LEFT JOIN crawl_tasks t ON t.id = s.crawl_task_id LEFT JOIN users u ON u.id = s.created_by WHERE s.id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SourceContentView{}, false, nil
 	}
@@ -233,15 +233,15 @@ func scanSource(row scannable) (model.SourceContent, error) {
 }
 func scanSourceView(row scannable) (model.SourceContentView, error) {
 	var item model.SourceContentView
-	var strategyName, crawlTaskName sql.NullString
-	base, err := scanSourceWithExtras(row, &strategyName, &crawlTaskName)
+	var strategyName, crawlTaskName, createdByName sql.NullString
+	base, err := scanSourceWithExtras(row, &strategyName, &crawlTaskName, &createdByName)
 	if err != nil {
 		return item, err
 	}
-	item.SourceContent, item.StrategyName, item.CrawlTaskName = base, strategyName.String, crawlTaskName.String
+	item.SourceContent, item.StrategyName, item.CrawlTaskName, item.CreatedByName = base, strategyName.String, crawlTaskName.String, createdByName.String
 	return item, nil
 }
-func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTaskName *sql.NullString) (model.SourceContent, error) {
+func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTaskName *sql.NullString, createdByName *sql.NullString) (model.SourceContent, error) {
 	var item model.SourceContent
 	var team, creator int64
 	var likeCount, favoriteCount, viewCount, commentCount, shareCount int64
@@ -250,7 +250,7 @@ func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTask
 	var gameID sql.NullString
 	var description, cover, url, authorID, authorSecUID, authorUID, authorHomeURL, authorName, sourceType, reason, auditNote, failureReason sql.NullString
 	var published sql.NullTime
-	err := row.Scan(&item.ID, &team, &gameID, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorSecUID, &authorUID, &authorHomeURL, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &viewCount, &commentCount, &shareCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt, strategyName, crawlTaskName)
+	err := row.Scan(&item.ID, &team, &gameID, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorSecUID, &authorUID, &authorHomeURL, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &viewCount, &commentCount, &shareCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt, strategyName, crawlTaskName, createdByName)
 	if err != nil {
 		return item, err
 	}

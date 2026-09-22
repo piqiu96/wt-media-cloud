@@ -53,6 +53,7 @@ type SourceContentView struct {
 	SourceContent
 	StrategyName  string `json:"strategy_name,omitempty"`
 	CrawlTaskName string `json:"crawl_task_name,omitempty"`
+	CreatedByName string `json:"created_by_name,omitempty"`
 }
 
 type Material struct {

@@ -109,13 +109,13 @@ async function retry(row) {
 function sourceType(row) {
   if (row.task_type === 'discovery_task') return '策略'
   if (row.task_type === 'retry_failed_task') return '重试'
-  return row.snapshot?.operation === 'url' ? '导入' : '人工'
+  return row.snapshot?.operation === 'url' ? 'ID发现' : '关键词发现'
 }
 
 function sourceName(row) {
   if (row.task_type === 'discovery_task') return row.snapshot?.strategy_name || '策略'
   if (row.task_type === 'retry_failed_task') return row.snapshot?.strategy_name || '重试'
-  return row.snapshot?.operation === 'url' ? 'ID导入' : '手动发现'
+  return row.snapshot?.operation === 'url' ? 'ID发现' : '关键词发现'
 }
 
 function strategyName(row) {
@@ -304,7 +304,7 @@ function hasFailed(task) {
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
             </template>
             <template #strategy="{ row }">
-              <a v-if="isStrategyTask(row)" class="wt-primary-link" @click="openStrategy(row)">{{ sourceName(row) }}</a>
+              <a v-if="isStrategyTask(row)" class="task-source-link" @click="openStrategy(row)">{{ sourceName(row) }}</a>
               <span v-else>{{ sourceName(row) }}</span>
             </template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
@@ -328,7 +328,7 @@ function hasFailed(task) {
             <ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" />
           </div>
           <div class="detail-meta">
-            <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="wt-primary-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
+            <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="task-source-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
             <div><span>创建时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
             <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
@@ -454,4 +454,6 @@ function hasFailed(task) {
 .strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
 .strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
 .strategy-drawer__actions { margin-top: 4px; }
+.task-source-link { color: #7c3aed; cursor: pointer; font-weight: 500; }
+.task-source-link:hover { text-decoration: underline; }
 </style>
