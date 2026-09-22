@@ -395,6 +395,21 @@ func UpdateDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, item)
 }
+func DeleteDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := contentID(c, "id", "策略 ID 无效")
+	if !ok {
+		return
+	}
+	if err := contentservice.DeleteStrategy(actor, id); err != nil {
+		writeDiscoveryError(c, err)
+		return
+	}
+	api.Success(c, map[string]any{"deleted": true})
+}
 func RunDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {

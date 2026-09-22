@@ -20,6 +20,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/discovery-strategies", CreateDiscoveryStrategy)
 	h.POST("/api/v1/discovery-strategies/:id/status", UpdateDiscoveryStrategyStatus)
 	h.PUT("/api/v1/discovery-strategies/:id", UpdateDiscoveryStrategy)
+	h.DELETE("/api/v1/discovery-strategies/:id", DeleteDiscoveryStrategy)
 	h.POST("/api/v1/discovery-strategies/:id/run", RunDiscoveryStrategy)
 	h.GET("/api/v1/crawl-tasks", ListCrawlTasks)
 	h.GET("/api/v1/crawl-tasks/:id", GetCrawlTask)

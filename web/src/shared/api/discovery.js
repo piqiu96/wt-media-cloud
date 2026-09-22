@@ -7,6 +7,7 @@ export function createDiscoveryClient({ base = '/api/v1', fetch = globalThis.fet
     createStrategy(data) { return api.post('/discovery-strategies', data) },
     updateStrategy(id, data) { return api.put(`/discovery-strategies/${id}`, data) },
     setStrategyStatus(id, status) { return api.post(`/discovery-strategies/${id}/status`, { status }) },
+    deleteStrategy(id) { return api.delete(`/discovery-strategies/${id}`) },
     runStrategy(id) { return api.post(`/discovery-strategies/${id}/run`, {}) },
     listTasks(params) { return api.get('/crawl-tasks', params) },
     getTask(id) { return api.get(`/crawl-tasks/${id}`) },

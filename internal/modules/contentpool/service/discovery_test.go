@@ -49,6 +49,10 @@ func (m *discoveryMemory) UpdateStrategy(v DiscoveryStrategy) (DiscoveryStrategy
 	m.strategies[v.ID] = v
 	return v, nil
 }
+func (m *discoveryMemory) DeleteStrategy(id int64) error {
+	delete(m.strategies, id)
+	return nil
+}
 func (m *discoveryMemory) CreateCrawlTask(v CrawlTask) (CrawlTask, error) {
 	v.ID = m.next
 	m.next++
@@ -119,6 +123,36 @@ func TestDiscoveryRunQueuesThenWorkerExecutesCloudCrawler(t *testing.T) {
 	completed, _, _ := store.FindCrawlTask(run.ID)
 	if completed.TaskID == "" || completed.Status != CrawlSuccess {
 		t.Fatalf("completed=%+v", completed)
+	}
+}
+
+func TestDeleteStrategyScopesByTeamAndReportsMissing(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()))
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "待删", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteStrategy(actor, strategy.ID); err != nil {
+		t.Fatalf("DeleteStrategy() err=%v", err)
+	}
+	if _, ok, _ := store.FindStrategy(strategy.ID); ok {
+		t.Fatalf("strategy still present after delete")
+	}
+	if err := service.DeleteStrategy(actor, strategy.ID); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("missing strategy err=%v, want ErrStrategyNotFound", err)
+	}
+	other := identityservice.TeamID(8)
+	if _, err := service.CreateStrategy(identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &other}, DiscoveryStrategy{TeamID: other, Name: "越权", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range store.strategies {
+		if err := service.DeleteStrategy(actor, v.ID); !errors.Is(err, ErrDiscoveryForbidden) {
+			t.Fatalf("cross-team delete err=%v, want forbidden", err)
+		}
+		break
 	}
 }
 

@@ -52,6 +52,7 @@ type discoveryStore interface {
 	ListStrategies(*identityservice.TeamID) ([]model.DiscoveryStrategy, error)
 	FindStrategy(int64) (model.DiscoveryStrategy, bool, error)
 	UpdateStrategy(model.DiscoveryStrategy) (model.DiscoveryStrategy, error)
+	DeleteStrategy(int64) error
 	CreateCrawlTask(model.CrawlTask) (model.CrawlTask, error)
 	ListCrawlTasks(*identityservice.TeamID, *int64) ([]model.CrawlTask, error)
 	FindCrawlTask(int64) (model.CrawlTask, bool, error)
@@ -210,6 +211,20 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 	}
 	current.Name, current.StrategyType, current.Platform, current.Config, current.Schedule, current.Timezone, current.Status, current.UpdatedAt = strings.TrimSpace(input.Name), input.StrategyType, input.Platform, input.Config, input.Schedule, input.Timezone, input.Status, s.now()
 	return s.store.UpdateStrategy(current)
+}
+
+func (s *discoveryService) deleteStrategy(actor identityservice.PublicUser, id int64) error {
+	item, ok, err := s.store.FindStrategy(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrStrategyNotFound
+	}
+	if _, err = s.scope(actor, &item.TeamID); err != nil {
+		return err
+	}
+	return s.store.DeleteStrategy(id)
 }
 
 func (s *discoveryService) createRun(actor identityservice.PublicUser, strategyID int64, scheduleKey string) (model.CrawlTask, error) {

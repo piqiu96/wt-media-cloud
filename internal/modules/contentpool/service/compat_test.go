@@ -69,6 +69,9 @@ func (s *discoveryService) ListStrategies(actor identityservice.PublicUser) ([]m
 func (s *discoveryService) CreateStrategy(actor identityservice.PublicUser, input model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	return s.createStrategy(actor, input)
 }
+func (s *discoveryService) DeleteStrategy(actor identityservice.PublicUser, id int64) error {
+	return s.deleteStrategy(actor, id)
+}
 func (s *discoveryService) SetStrategyStatus(actor identityservice.PublicUser, id int64, status model.StrategyStatus) (model.DiscoveryStrategy, error) {
 	return s.setStrategyStatus(actor, id, status)
 }

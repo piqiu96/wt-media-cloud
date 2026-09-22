@@ -42,6 +42,9 @@ func SetStrategyStatus(actor identityservice.PublicUser, id int64, status model.
 func UpdateStrategy(actor identityservice.PublicUser, id int64, input model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	return defaultDiscoveryService().updateStrategy(actor, id, input)
 }
+func DeleteStrategy(actor identityservice.PublicUser, id int64) error {
+	return defaultDiscoveryService().deleteStrategy(actor, id)
+}
 func CreateRun(actor identityservice.PublicUser, strategyID int64) (model.CrawlTask, error) {
 	return defaultDiscoveryService().createRun(actor, strategyID, "")
 }

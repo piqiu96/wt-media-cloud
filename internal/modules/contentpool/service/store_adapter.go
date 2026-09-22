@@ -59,6 +59,9 @@ func (mysqlDiscoveryStore) FindStrategy(id int64) (model.DiscoveryStrategy, bool
 func (mysqlDiscoveryStore) UpdateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	return repository.UpdateStrategy(v)
 }
+func (mysqlDiscoveryStore) DeleteStrategy(id int64) error {
+	return repository.DeleteStrategy(id)
+}
 func (mysqlDiscoveryStore) CreateCrawlTask(v model.CrawlTask) (model.CrawlTask, error) {
 	return repository.CreateCrawlTask(v)
 }

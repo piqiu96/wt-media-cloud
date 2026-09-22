@@ -406,6 +406,11 @@ function sourceTypeLabel(value) { return ({ link: 'ID/链接搜索', search: '�
 function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 function authorLabel(row) { return row.author_name || row.author_uid || row.author_sec_uid || '-' }
+function truncateTitle(title, max = 120) {
+  const text = String(title || '')
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
 function openImageViewer(url) {
   if (!url) return
   imageViewerImages.value = [url]
@@ -459,8 +464,8 @@ function openImageViewer(url) {
                 </button>
                 <div v-else class="title-media"><span>暂无封面</span></div>
                 <div class="title-copy">
-                  <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer">{{ row.title || '未命名内容' }}</a>
-                  <span v-else>{{ row.title || '未命名内容' }}</span>
+                  <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
+                  <span v-else :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</span>
                   <small>{{ row.platform_content_id }}</small>
                 </div>
               </div>
@@ -594,8 +599,8 @@ function openImageViewer(url) {
               </button>
               <div v-else class="title-media"><span>暂无封面</span></div>
               <div class="title-copy">
-                <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer">{{ row.title || '未命名内容' }}</a>
-                <span v-else>{{ row.title || '未命名内容' }}</span>
+                <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
+                <span v-else :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</span>
                 <small>{{ row.platform_content_id }}</small>
               </div>
             </div>

@@ -83,6 +83,18 @@ func updateStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStra
 	}
 	return v, nil
 }
+func DeleteStrategy(id int64) error { return deleteStrategy(database.DB(), id) }
+func deleteStrategy(db *gorm.DB, id int64) error {
+	result := db.Exec(`DELETE FROM discovery_strategies WHERE id=?`, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errStrategyNotFound
+	}
+	return nil
+}
+
 func CreateCrawlTask(v model.CrawlTask) (model.CrawlTask, error) {
 	return createCrawlTask(database.DB(), v)
 }
