@@ -8,8 +8,8 @@ describe('content pool page', () => {
     expect(source).toContain('ResourcePageHeader')
     expect(source).toContain('ResourceStatGrid')
     expect(source).toContain('ResourceStatusBadge')
-    expect(source).toContain('获取数据')
-    expect(source).toContain('ID搜索')
+    expect(source).toContain('视频搜索')
+    expect(source).toContain('ID/链接搜索')
     expect(source).toContain('关键词搜索')
     expect(source).toContain('转素材')
     expect(source).toContain('批量转素材')
@@ -19,7 +19,7 @@ describe('content pool page', () => {
     expect(source).toContain('client.batchMaterialize')
     expect(source).toContain('strategy_id')
     expect(source).toContain('crawl_task_id')
-    expect(source).toContain('内容 ID')
+    expect(source).toContain('ID/链接')
     expect(source).toContain('result?.items')
     expect(source).toContain('discovery.importResults')
     expect(source).toContain('loadManualContext')
@@ -28,14 +28,14 @@ describe('content pool page', () => {
     expect(source).not.toContain('进入审核模式')
   })
 
-  it('consolidates manual acquisition and validates numeric content IDs', () => {
+  it('consolidates video search and fetches IDs or links synchronously', () => {
     expect(source).toContain("openManual('id')")
     expect(source).toContain("openManual('keyword')")
-    expect(source).toContain('function parseContentIDs()')
+    expect(source).toContain('function parseSearchTargets()')
     expect(source).toContain('new Set(')
-    expect(source).toContain('/^\\d+$/')
-    expect(source).toContain('discovery.importUrl')
-    expect(source).toContain('ID 搜索任务已创建，完成后内容会自动进入内容池')
+    expect(source).toContain("query: targets.join('\\n')")
+    expect(source).not.toContain('discovery.importUrl')
+    expect(source).not.toContain('ID 搜索任务已创建')
     expect(source).not.toContain("manualMode === 'url'")
   })
 
@@ -48,11 +48,25 @@ describe('content pool page', () => {
     expect(source).toContain('searchManual(true)')
   })
 
+  it('shows direct search results and keyword-only pagination', () => {
+    expect(source).toContain('v-if="manualResults.length"')
+    expect(source).toContain("manualMode === 'keyword' && manualSearched")
+    expect(source).not.toContain("manualMode === 'id' && manualPagination")
+  })
+
   it('renders synchronous search results without polling a crawl task', () => {
     expect(source).not.toContain('discovery.getTask')
     expect(source).not.toContain('waitForSearchTask')
     expect(source).not.toContain('setTimeout')
     expect(source).toContain('manualResults.value = Array.isArray(result?.items) ? result.items : []')
+  })
+
+  it('resolves and locks the assigned team for non-admin users', () => {
+    expect(source).toContain('const manualTeamLocked = ref(false)')
+    expect(source).toContain('const data = await users.listTeams()')
+    expect(source).toContain("manualTeamLocked.value = user?.role !== 'admin'")
+    expect(source).toContain(':disabled="manualTeamLocked"')
+    expect(source).toContain('team.name')
   })
 
   it('imports only the results selected by the user', () => {

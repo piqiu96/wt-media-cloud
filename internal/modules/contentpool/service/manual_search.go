@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
@@ -15,12 +16,23 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 )
 
-const maxImportResults = 100
+const (
+	maxImportResults  = 100
+	maxDirectSearch   = 100
+	directIDBatchSize = 10
+)
+
+type directSearchTargets struct {
+	ids  []string
+	urls []string
+}
 
 type manualSearchClient interface {
 	Configured() bool
 	Search(context.Context, douyinclient.SearchRequest) (map[string]any, error)
 	FindAuthor(context.Context, douyinclient.FindAuthorRequest) (map[string]any, error)
+	FetchByURL(context.Context, douyinclient.FetchByURLRequest) (map[string]any, error)
+	FetchByIDs(context.Context, douyinclient.FetchByIDsRequest) (map[string]any, error)
 }
 
 func douyinClient() manualSearchClient { return douyinclient.Get() }
@@ -28,11 +40,15 @@ func douyinClient() manualSearchClient { return douyinclient.Get() }
 func searchWithClient(ctx context.Context, input dto.SearchInput, client manualSearchClient) (dto.SearchResponse, error) {
 	input.Platform = strings.TrimSpace(input.Platform)
 	input.Keyword = strings.TrimSpace(input.Keyword)
-	if input.Platform != "douyin" || input.Keyword == "" || input.Offset < 0 {
+	input.Query = strings.TrimSpace(input.Query)
+	if input.Platform != "douyin" || (input.Query == "" && input.Keyword == "") || input.Offset < 0 {
 		return dto.SearchResponse{}, ErrDiscoveryInvalid
 	}
 	if client == nil || !client.Configured() {
 		return dto.SearchResponse{}, ErrCrawlerUnavailable
+	}
+	if input.Query != "" {
+		return searchDirectWithClient(ctx, input.Query, client)
 	}
 	input.Limit = normalizedSearchLimit(input.Limit)
 	payload, err := client.Search(ctx, douyinclient.SearchRequest{Keyword: input.Keyword, Count: input.Limit, Offset: input.Offset})
@@ -45,6 +61,112 @@ func searchWithClient(ctx context.Context, input dto.SearchInput, client manualS
 		NextOffset: intValue64(data["cursor"], data["next_page"]),
 		HasMore:    boolValue(data["has_more"]),
 	}, nil
+}
+
+func searchDirectWithClient(ctx context.Context, query string, client manualSearchClient) (dto.SearchResponse, error) {
+	targets, err := parseDirectSearchTargets(query)
+	if err != nil {
+		return dto.SearchResponse{}, err
+	}
+	items := make([]map[string]any, 0, len(targets.ids)+len(targets.urls))
+	for start := 0; start < len(targets.ids); start += directIDBatchSize {
+		end := start + directIDBatchSize
+		if end > len(targets.ids) {
+			end = len(targets.ids)
+		}
+		payload, err := client.FetchByIDs(ctx, douyinclient.FetchByIDsRequest{IDs: targets.ids[start:end]})
+		if err != nil {
+			return dto.SearchResponse{}, err
+		}
+		items = append(items, normalizeDouyinPayload(payload)...)
+	}
+	for _, source := range targets.urls {
+		payload, err := client.FetchByURL(ctx, douyinclient.FetchByURLRequest{URL: source})
+		if err != nil {
+			return dto.SearchResponse{}, err
+		}
+		data, _ := payload["data"].(map[string]any)
+		if detail, ok := data["aweme_detail"].(map[string]any); ok {
+			if item := normalizeDouyinItem(detail); item != nil {
+				items = append(items, item)
+				continue
+			}
+		}
+		items = append(items, normalizeDouyinPayload(payload)...)
+	}
+	return dto.SearchResponse{Items: typedSearchResults(items)}, nil
+}
+
+func parseDirectSearchTargets(query string) (directSearchTargets, error) {
+	targets := directSearchTargets{}
+	seenIDs := make(map[string]struct{})
+	seenURLs := make(map[string]struct{})
+	for _, token := range strings.FieldsFunc(query, func(r rune) bool {
+		return r == ',' || r == '，' || unicode.IsSpace(r)
+	}) {
+		if isDirectID(token) {
+			if _, exists := seenIDs[token]; exists {
+				continue
+			}
+			seenIDs[token] = struct{}{}
+			targets.ids = append(targets.ids, token)
+			continue
+		}
+		id, source, valid := directDouyinTarget(token)
+		if !valid {
+			return directSearchTargets{}, ErrDiscoveryInvalid
+		}
+		if id != "" {
+			if _, exists := seenIDs[id]; exists {
+				continue
+			}
+			seenIDs[id] = struct{}{}
+			targets.ids = append(targets.ids, id)
+			continue
+		}
+		if _, exists := seenURLs[source]; exists {
+			continue
+		}
+		seenURLs[source] = struct{}{}
+		targets.urls = append(targets.urls, source)
+	}
+	if len(targets.ids)+len(targets.urls) == 0 || len(targets.ids)+len(targets.urls) > maxDirectSearch {
+		return directSearchTargets{}, ErrDiscoveryInvalid
+	}
+	return targets, nil
+}
+
+func isDirectID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func directDouyinTarget(value string) (id string, source string, valid bool) {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil {
+		return "", "", false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	segments := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if host == "douyin.com" || host == "www.douyin.com" {
+		if len(segments) == 2 && segments[0] == "video" {
+			if segment, err := url.PathUnescape(segments[1]); err == nil && isDirectID(segment) {
+				return segment, "", true
+			}
+		}
+		return "", "", false
+	}
+	if host == "v.douyin.com" && strings.Trim(parsed.EscapedPath(), "/") != "" {
+		return "", value, true
+	}
+	return "", "", false
 }
 
 func findAuthorWithClient(ctx context.Context, input dto.AuthorSearchInput, _ manualSearchClient) (dto.SearchResponse, error) {

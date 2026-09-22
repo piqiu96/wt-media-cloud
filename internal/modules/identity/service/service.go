@@ -482,11 +482,11 @@ func (s *Service) CreateTeam(actorID UserID, name string) (OperationTeam, error)
 }
 
 func (s *Service) ListTeams(actorID UserID) ([]OperationTeam, error) {
-	actor, ok, err := s.store.FindUser(actorID)
+	_, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok || !isAdmin(actor) {
+	if !ok {
 		return nil, ErrForbidden
 	}
 	return s.store.ListTeams()

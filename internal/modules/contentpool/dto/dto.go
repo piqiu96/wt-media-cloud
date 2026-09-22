@@ -62,6 +62,7 @@ type CrawlerResult struct {
 type SearchInput struct {
 	Platform string
 	Keyword  string
+	Query    string
 	Limit    int
 	Offset   int
 }

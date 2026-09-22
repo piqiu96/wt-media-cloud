@@ -64,6 +64,7 @@ type manualSearchRequest struct {
 	TeamID    *identityservice.TeamID `json:"team_id"`
 	Platform  string                  `json:"platform"`
 	Keyword   string                  `json:"keyword"`
+	Query     string                  `json:"query"`
 	Author    string                  `json:"author"`
 	URL       string                  `json:"url"`
 	URLs      []string                `json:"urls"`
@@ -247,7 +248,7 @@ func SearchContent(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &request) {
 		return
 	}
-	result, err := contentservice.Search(ctx, dto.SearchInput{Platform: request.Platform, Keyword: request.Keyword, Limit: request.Limit, Offset: request.Offset})
+	result, err := contentservice.Search(ctx, dto.SearchInput{Platform: request.Platform, Keyword: request.Keyword, Query: request.Query, Limit: request.Limit, Offset: request.Offset})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return

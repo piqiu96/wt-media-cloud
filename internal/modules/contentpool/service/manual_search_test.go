@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
@@ -12,10 +13,14 @@ import (
 )
 
 type searchClientStub struct {
-	searchCalls int
-	authorCalls int
-	searchReq   douyinclient.SearchRequest
-	authorReq   douyinclient.FindAuthorRequest
+	searchCalls     int
+	authorCalls     int
+	fetchByURLCalls int
+	fetchByIDsCalls int
+	searchReq       douyinclient.SearchRequest
+	authorReq       douyinclient.FindAuthorRequest
+	fetchByURLReq   douyinclient.FetchByURLRequest
+	fetchByIDsReqs  []douyinclient.FetchByIDsRequest
 }
 
 func (*searchClientStub) Configured() bool { return true }
@@ -33,6 +38,34 @@ func (s *searchClientStub) Search(_ context.Context, request douyinclient.Search
 		}}},
 		"cursor": float64(30), "has_more": float64(1),
 	}}, nil
+}
+func (s *searchClientStub) FetchByURL(_ context.Context, request douyinclient.FetchByURLRequest) (map[string]any, error) {
+	s.fetchByURLCalls++
+	s.fetchByURLReq = request
+	return map[string]any{"data": map[string]any{"aweme_detail": map[string]any{
+		"aweme_id": "7681569320895352104", "desc": "链接结果",
+		"author": map[string]any{"uid": "author-uid", "sec_uid": "author-sec-uid", "nickname": "链接作者"},
+		"statistics": map[string]any{
+			"digg_count": 201, "collect_count": 202, "play_count": 203,
+			"comment_count": 204, "share_count": 205,
+		},
+	}}}, nil
+}
+func (s *searchClientStub) FetchByIDs(_ context.Context, request douyinclient.FetchByIDsRequest) (map[string]any, error) {
+	s.fetchByIDsCalls++
+	s.fetchByIDsReqs = append(s.fetchByIDsReqs, request)
+	values := make([]any, 0, len(request.IDs))
+	for _, id := range request.IDs {
+		values = append(values, map[string]any{"aweme_info": map[string]any{
+			"aweme_id": id, "desc": "视频 " + id,
+			"author": map[string]any{"uid": "author-uid", "sec_uid": "author-sec-uid", "nickname": "视频作者"},
+			"statistics": map[string]any{
+				"digg_count": 101, "collect_count": 102, "play_count": 103,
+				"comment_count": 104, "share_count": 105,
+			},
+		}})
+	}
+	return map[string]any{"data": values}, nil
 }
 func (s *searchClientStub) FindAuthor(_ context.Context, request douyinclient.FindAuthorRequest) (map[string]any, error) {
 	s.authorCalls++
@@ -68,6 +101,70 @@ func TestKeywordSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
 	}
 	if result.NextOffset != 30 || !result.HasMore {
 		t.Fatalf("search pagination=%+v", result)
+	}
+}
+
+func TestDirectSearchFetchesNumericIDWithoutKeywordTask(t *testing.T) {
+	client := &searchClientStub{}
+	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Query: "7681569320895352104"}, client)
+	if err != nil || client.searchCalls != 0 || client.fetchByIDsCalls != 1 || client.fetchByURLCalls != 0 {
+		t.Fatalf("result=%+v err=%v search=%d ids=%d urls=%d", result, err, client.searchCalls, client.fetchByIDsCalls, client.fetchByURLCalls)
+	}
+	if len(client.fetchByIDsReqs) != 1 || len(client.fetchByIDsReqs[0].IDs) != 1 || client.fetchByIDsReqs[0].IDs[0] != "7681569320895352104" {
+		t.Fatalf("fetch requests=%+v", client.fetchByIDsReqs)
+	}
+	if len(result.Items) != 1 || result.Items[0].PlatformContentID != "7681569320895352104" || result.Items[0].ViewCount != 103 {
+		t.Fatalf("result=%+v", result)
+	}
+	if result.NextOffset != 0 || result.HasMore {
+		t.Fatalf("direct search must not expose pagination: %+v", result)
+	}
+}
+
+func TestDirectSearchExtractsIDFromDouyinVideoURL(t *testing.T) {
+	client := &searchClientStub{}
+	_, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Query: "https://www.douyin.com/video/7681569320895352104?from=share"}, client)
+	if err != nil || client.fetchByURLCalls != 0 || client.fetchByIDsCalls != 1 || len(client.fetchByIDsReqs[0].IDs) != 1 || client.fetchByIDsReqs[0].IDs[0] != "7681569320895352104" {
+		t.Fatalf("err=%v requests=%+v urlCalls=%d", err, client.fetchByIDsReqs, client.fetchByURLCalls)
+	}
+}
+
+func TestDirectSearchUsesShortLinkFetch(t *testing.T) {
+	client := &searchClientStub{}
+	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Query: "https://v.douyin.com/demo/"}, client)
+	if err != nil || client.fetchByURLCalls != 1 || client.fetchByIDsCalls != 0 {
+		t.Fatalf("err=%v urlCalls=%d idCalls=%d", err, client.fetchByURLCalls, client.fetchByIDsCalls)
+	}
+	if client.fetchByURLReq.URL != "https://v.douyin.com/demo/" || len(result.Items) != 1 || result.Items[0].PlatformContentID != "7681569320895352104" {
+		t.Fatalf("request=%+v result=%+v", client.fetchByURLReq, result)
+	}
+}
+
+func TestDirectSearchDeduplicatesAndChunksIDs(t *testing.T) {
+	client := &searchClientStub{}
+	query := "7681569320895352100, 7681569320895352101\n7681569320895352102，7681569320895352103 7681569320895352104"
+	for id := 7681569320895352105; id <= 7681569320895352114; id++ {
+		query += " " + strconv.FormatInt(int64(id), 10)
+	}
+	query += " 7681569320895352100"
+	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Query: query}, client)
+	if err != nil || client.fetchByIDsCalls != 2 || len(result.Items) != 15 {
+		t.Fatalf("err=%v calls=%d items=%d", err, client.fetchByIDsCalls, len(result.Items))
+	}
+	if len(client.fetchByIDsReqs[0].IDs) != 10 || len(client.fetchByIDsReqs[1].IDs) != 5 {
+		t.Fatalf("batches=%+v", client.fetchByIDsReqs)
+	}
+}
+
+func TestDirectSearchRejectsInvalidTargets(t *testing.T) {
+	client := &searchClientStub{}
+	for _, query := range []string{"hello", "https://example.com/video/7681569320895352104", "https://www.douyin.com/not-video/1"} {
+		if _, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Query: query}, client); !errors.Is(err, ErrDiscoveryInvalid) {
+			t.Fatalf("query=%q err=%v", query, err)
+		}
+	}
+	if client.fetchByIDsCalls != 0 || client.fetchByURLCalls != 0 {
+		t.Fatalf("invalid input must not call external API: ids=%d urls=%d", client.fetchByIDsCalls, client.fetchByURLCalls)
 	}
 }
 

@@ -306,8 +306,18 @@ func TestOnlyAdminManagesTeamsAndReferencedTeamCannotBeDeleted(t *testing.T) {
 		TeamID: &team.ID, GameIDs: []string{"game-a"},
 	})
 
+	teams, err := service.ListTeams(operator.ID)
+	if err != nil || len(teams) != 1 || teams[0].ID != team.ID || teams[0].Name != "火影组" {
+		t.Fatalf("ListTeams(operator) = %#v, err = %v", teams, err)
+	}
 	if _, err := service.CreateTeam(operator.ID, "越权组"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("CreateTeam(operator) error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.RenameTeam(operator.ID, team.ID, "越权重命名"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("RenameTeam(operator) error = %v, want ErrForbidden", err)
+	}
+	if err := service.DeleteTeam(operator.ID, team.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("DeleteTeam(operator) error = %v, want ErrForbidden", err)
 	}
 	if err := service.DeleteTeam(admin.ID, team.ID); !errors.Is(err, ErrTeamInUse) {
 		t.Fatalf("DeleteTeam(referenced) error = %v, want ErrTeamInUse", err)

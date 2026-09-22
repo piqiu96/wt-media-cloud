@@ -49,6 +49,7 @@ const selectedResultKeys = ref([])
 const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
 const manualForm = ref({ platform: 'douyin', ids: '', keyword: '' })
 const manualTeamId = ref('')
+const manualTeamLocked = ref(false)
 const teams = ref([])
 const imageViewerVisible = ref(false)
 const imageViewerImages = ref([])
@@ -140,18 +141,16 @@ function openManual(mode) {
 }
 
 function manualTitle() {
-  return ({ id: 'ID搜索', keyword: '关键词搜索' })[manualMode.value]
+  return ({ id: 'ID/链接搜索', keyword: '关键词搜索' })[manualMode.value]
 }
 
 async function loadManualContext() {
   try {
     const user = await session.me()
-    if (user?.role === 'admin') {
-      const data = await users.listTeams()
-      teams.value = Array.isArray(data) ? data : []
-    } else {
-      manualTeamId.value = user?.team_id || ''
-    }
+    manualTeamLocked.value = user?.role !== 'admin'
+    manualTeamId.value = user?.role === 'admin' ? '' : (user?.team_id || '')
+    const data = await users.listTeams()
+    teams.value = Array.isArray(data) ? data : []
   } catch {
     teams.value = []
   }
@@ -167,10 +166,16 @@ function resetManualPagination() {
 
 async function searchManual(reset = false) {
   if (reset) resetManualPagination()
+  const form = manualForm.value
+  const isDirectSearch = manualMode.value === 'id'
+  const targets = isDirectSearch ? parseSearchTargets() : []
+  if (isDirectSearch && !targets.length) return
   manualLoading.value = true
   try {
-    const form = manualForm.value
-    const result = await discovery.search({
+    const result = await discovery.search(isDirectSearch ? {
+      platform: form.platform,
+      query: targets.join('\n'),
+    } : {
       platform: form.platform,
       keyword: form.keyword.trim(),
       limit: 20,
@@ -191,50 +196,36 @@ async function searchManual(reset = false) {
   }
 }
 
-function parseContentIDs() {
-  const ids = [...new Set(
+function parseSearchTargets() {
+  const targets = [...new Set(
     manualForm.value.ids
       .split(/\r?\n|,|，|\s+/)
       .map((value) => value.trim())
       .filter(Boolean)
   )]
-  if (!ids.length) {
-    MessagePlugin.warning('请输入至少一个内容 ID')
+  if (!targets.length) {
+    MessagePlugin.warning('请输入至少一个视频 ID 或链接')
     return []
   }
-  if (ids.some((id) => !/^\d+$/.test(id))) {
-    MessagePlugin.warning('内容 ID 只能包含数字')
+  const valid = targets.every((target) => (
+    /^\d+$/.test(target)
+    || /^https?:\/\/(www\.)?douyin\.com\/video\/\d+(?:\/.*)?$/.test(target)
+    || /^https?:\/\/v\.douyin\.com\/[^\s]+$/.test(target)
+  ))
+  if (!valid) {
+    MessagePlugin.warning('仅支持抖音视频 ID、视频链接或分享短链接')
     return []
   }
-  return ids
+  return targets
 }
 
 async function confirmManual() {
-  if (manualMode.value === 'id') {
-    const ids = parseContentIDs()
-    if (!ids.length) return
-    manualLoading.value = true
-    try {
-      await discovery.importUrl({
-        platform: manualForm.value.platform,
-        team_id: selectedTeamID(),
-        ...(ids.length > 1 ? { urls: ids } : { url: ids[0] }),
-      })
-      manualVisible.value = false
-      MessagePlugin.success('ID 搜索任务已创建，完成后内容会自动进入内容池')
-    } catch (e) {
-      error.value = e.message || 'ID 搜索任务创建失败'
-    } finally {
-      manualLoading.value = false
-    }
+  if (!manualResults.value.length) {
+    await searchManual(true)
     return
   }
   if (!selectedTeamID()) {
-      MessagePlugin.warning('请选择运营团队')
-      return
-    }
-    if (!manualResults.value.length) {
-    await searchManual(true)
+    MessagePlugin.warning('请选择运营团队')
     return
   }
   await confirmSelected()
@@ -411,7 +402,7 @@ function taskLabel(row) { return row.crawl_task_name || (row.crawl_task_id ? `�
 function platformLabel(value) { return ({ douyin: '抖音', bilibili: 'B站' })[value] || value || '-' }
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
 function statusTone(value) { return ({ pending: 'warning', material_created: 'success', ignored: 'neutral' })[value] || 'info' }
-function sourceTypeLabel(value) { return ({ link: 'ID搜索', search: '关键词搜索', author: '博主搜索', strategy: '挖掘策略' })[value] || value || '-' }
+function sourceTypeLabel(value) { return ({ link: 'ID/链接搜索', search: '关键词搜索', author: '博主搜索', strategy: '挖掘策略' })[value] || value || '-' }
 function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 function authorLabel(row) { return row.author_name || row.author_uid || row.author_sec_uid || '-' }
@@ -430,9 +421,9 @@ function openImageViewer(url) {
       <ResourcePageHeader :title="isLibrary ? '素材库' : '内容池'" :description="isLibrary ? '查看已从内容池沉淀的素材及其来源关系' : '统一管理人工发现与自动挖掘进入系统的外部内容'">
         <template #actions>
           <t-dropdown v-if="!isLibrary" trigger="click">
-            <t-button theme="primary">获取数据</t-button>
+            <t-button theme="primary">视频搜索</t-button>
             <t-dropdown-menu>
-              <t-dropdown-item @click="openManual('id')">ID搜索</t-dropdown-item>
+              <t-dropdown-item @click="openManual('id')">ID/链接搜索</t-dropdown-item>
               <t-dropdown-item @click="openManual('keyword')">关键词搜索</t-dropdown-item>
             </t-dropdown-menu>
           </t-dropdown>
@@ -454,7 +445,7 @@ function openImageViewer(url) {
           <t-space wrap>
             <label class="wt-filter-field"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID搜索" /><t-option value="search" label="关键词搜索" /><t-option value="author" label="博主搜索" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接搜索" /><t-option value="search" label="关键词搜索" /><t-option value="author" label="博主搜索" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
             <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button></div>
           </t-space>
@@ -587,15 +578,15 @@ function openImageViewer(url) {
           </div>
         </template>
       </t-drawer>
-      <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="960px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualMode === 'keyword' && manualResults.length ? '加入内容池' : '开始执行' }" @confirm="confirmManual">
+      <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="960px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualResults.length ? '加入内容池' : '搜索' }" @confirm="confirmManual">
         <t-form label-width="88px">
-          <t-form-item label="运营团队"><t-select v-model="manualTeamId" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
+          <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
-          <t-form-item v-if="manualMode === 'id'" label="内容 ID"><t-textarea v-model="manualForm.ids" :rows="4" placeholder="输入抖音内容 ID，支持多个（换行、逗号或空格分隔）" /></t-form-item>
+          <t-form-item v-if="manualMode === 'id'" label="ID/链接"><t-textarea v-model="manualForm.ids" :rows="4" placeholder="支持抖音视频 ID、视频链接或分享短链接，可输入多个（换行、逗号或空格分隔）" /></t-form-item>
           <t-form-item v-else label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
         </t-form>
-        <t-alert v-if="manualSearched && manualMode === 'keyword'" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
-        <t-table v-if="manualMode === 'keyword' && manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
+        <t-alert v-if="manualSearched" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
+        <t-table v-if="manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
           <template #title="{ row }">
             <div class="title-cell">
               <button v-if="row.cover_url" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
