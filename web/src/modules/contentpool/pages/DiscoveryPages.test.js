@@ -70,6 +70,8 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('任务名称')
     expect(source).toContain('任务来源')
     expect(source).toContain('触发方式')
+    expect(source).toContain("colKey: 'game'")
+    expect(source).toContain('gameName(row.snapshot?.game_id)')
     expect(source).toContain('发现结果')
     expect(source).toContain('执行时间')
     expect(source).toContain('taskName')

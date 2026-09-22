@@ -26,6 +26,7 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '任务名称', minWidth: 220 },
   { colKey: 'strategy', title: '任务来源', minWidth: 160 },
+  { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'trigger', title: '触发方式', width: 90 },
   { colKey: 'found', title: '发现结果', minWidth: 240 },
   { colKey: 'status', title: '状态', width: 100 },
@@ -307,6 +308,7 @@ function hasFailed(task) {
               <a v-if="isStrategyTask(row)" class="task-source-link" @click="openStrategy(row)">{{ sourceName(row) }}</a>
               <span v-else>{{ sourceName(row) }}</span>
             </template>
+            <template #game="{ row }">{{ gameName(row.snapshot?.game_id) }}</template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
             <template #found="{ row }">{{ foundSummary(row) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
@@ -329,6 +331,7 @@ function hasFailed(task) {
           </div>
           <div class="detail-meta">
             <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="task-source-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
+            <div><span>游戏</span><strong>{{ gameName(detail.snapshot?.game_id) }}</strong></div>
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
             <div><span>创建时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
             <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
