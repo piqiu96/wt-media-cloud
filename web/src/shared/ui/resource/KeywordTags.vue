@@ -58,9 +58,9 @@ function confirmBatch() {
   <div class="keyword-tags">
     <div class="keyword-tags__input">
       <t-input v-model="input" :placeholder="placeholder" @enter="addCurrent" @paste="onPaste" />
-      <t-button size="small" variant="outline" @click="addCurrent">添加</t-button>
-      <t-button size="small" variant="outline" @click="openBatch">批量导入</t-button>
-      <t-button v-if="tags.length" size="small" variant="text" theme="danger" @click="clearAll">清空全部</t-button>
+      <t-button theme="primary" @click="addCurrent">添加</t-button>
+      <t-button variant="outline" @click="openBatch">批量导入</t-button>
+      <t-button v-if="tags.length" variant="text" theme="danger" @click="clearAll">清空全部</t-button>
     </div>
     <div class="keyword-tags__list">
       <t-tag v-for="(tag, index) in tags" :key="tag" closable theme="primary" variant="light" @close="remove(index)">{{ tag }}</t-tag>
@@ -79,7 +79,7 @@ function confirmBatch() {
 
 <style scoped>
 .keyword-tags { display: flex; flex-direction: column; gap: 8px; }
-.keyword-tags__input { display: flex; gap: 8px; }
+.keyword-tags__input { display: flex; gap: 8px; align-items: center; }
 .keyword-tags__input .t-input { flex: 1; }
 .keyword-tags__list { display: flex; flex-wrap: wrap; gap: 8px; min-height: 30px; padding: 6px 0; }
 .keyword-tags__empty { color: var(--wt-text-tertiary); font-size: 12px; }

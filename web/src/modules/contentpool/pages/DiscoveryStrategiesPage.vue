@@ -397,53 +397,68 @@ function latestSummary(row) {
         </div>
       </ResourceCard>
 
-      <t-dialog v-model:visible="visible" :header="editingID ? '编辑挖掘策略' : '新增挖掘策略'" width="640px" :confirm-btn="{ loading: saving, theme: 'primary', content: '保存' }" @confirm="save">
-        <t-form label-width="96px">
-          <div class="form-section">基础信息</div>
-          <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
-          <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
-          <t-form-item label="平台" required-mark>
-            <t-select v-model="form.platform">
-              <t-option value="douyin" label="抖音" />
-              <t-option value="bilibili" label="B站（待接入）" disabled />
-            </t-select>
-          </t-form-item>
-          <t-form-item label="类型">
-            <t-radio-group v-model="form.strategy_type">
-              <t-radio value="keyword">关键词</t-radio>
-              <t-radio value="author" disabled>作者（维护中）</t-radio>
-            </t-radio-group>
-          </t-form-item>
+      <t-dialog v-model:visible="visible" :header="editingID ? '编辑挖掘策略' : '新增挖掘策略'" width="880px" :footer="false">
+        <div class="strategy-editor">
+          <div class="strategy-editor__form">
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">①</span>基础信息<small>配置策略基本属性和内容归属，用于管理和数据统计</small></div>
+              <t-form label-width="88px">
+                <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
+                <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
+                <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+                <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>
+              </t-form>
+            </div>
 
-          <div class="form-section">挖掘对象</div>
-          <t-form-item v-if="form.strategy_type === 'keyword'" :label="`关键词 · 已配置 ${(form.config.keywords || []).length} 个`">
-            <KeywordTags v-model="form.config.keywords" placeholder="输入关键词后按回车添加，支持批量粘贴" />
-          </t-form-item>
-          <t-form-item v-else :label="`作者 · 已配置 ${(form.config.authors || []).length} 个`">
-            <KeywordTags v-model="form.config.authors" placeholder="输入作者昵称或 ID 后按回车添加" />
-          </t-form-item>
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">②</span>挖掘对象<small>配置具体的挖掘关键词或作者</small></div>
+              <t-form label-width="88px">
+                <t-form-item v-if="form.strategy_type === 'keyword'" :label="`关键词 · ${(form.config.keywords || []).length}个`"><KeywordTags v-model="form.config.keywords" placeholder="输入关键词后按回车添加" /></t-form-item>
+                <t-form-item v-else :label="`作者 · ${(form.config.authors || []).length}个`"><KeywordTags v-model="form.config.authors" placeholder="输入作者昵称或 ID 后按回车添加" /></t-form-item>
+              </t-form>
+            </div>
 
-          <div class="form-section">执行计划</div>
-          <t-form-item label="执行周期">
-            <t-select v-model="form.schedule">
-              <t-option value="manual" label="手动执行" />
-              <t-option value="daily 09:00" label="每天 09:00" />
-              <t-option value="interval:60" label="每 60 分钟" />
-            </t-select>
-          </t-form-item>
-          <t-form-item label="状态"><t-switch v-model="form.status" :custom-value="['enabled', 'disabled']" /></t-form-item>
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">③</span>执行计划<small>设置策略的执行方式和时间</small></div>
+              <t-form label-width="88px">
+                <t-form-item label="执行方式" required-mark><t-radio-group v-model="scheduleMode"><t-radio value="manual">手动执行</t-radio><t-radio value="scheduled">定时执行</t-radio></t-radio-group></t-form-item>
+                <t-form-item v-if="scheduleMode === 'scheduled'" label="执行周期" required-mark><t-space><span class="strategy-schedule-prefix">每天</span><t-input v-model="scheduleTime" style="width:120px" placeholder="09:00" /></t-space></t-form-item>
+              </t-form>
+            </div>
 
-          <div class="form-section">转素材规则</div>
-          <t-form-item label="自动转素材"><t-switch v-model="form.config.auto_material" /></t-form-item>
-          <t-form-item v-if="form.config.auto_material" label="阈值规则">
-            <t-radio-group v-model="form.config.material_rule">
-              <t-radio value="AND">全部满足</t-radio>
-              <t-radio value="OR">任一满足</t-radio>
-            </t-radio-group>
-          </t-form-item>
-          <t-form-item v-if="form.config.auto_material" label="点赞阈值"><t-input-number v-model="form.config.like_threshold" :min="0" :step="1000" theme="column" placeholder="0 表示不参与" /></t-form-item>
-          <t-form-item v-if="form.config.auto_material" label="收藏阈值"><t-input-number v-model="form.config.favorite_threshold" :min="0" :step="100" theme="column" placeholder="0 表示不参与" /></t-form-item>
-        </t-form>
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">④</span>转素材规则<small>设置符合条件的内容自动转为素材</small></div>
+              <t-form label-width="88px">
+                <t-form-item label="自动转素材"><t-switch v-model="form.config.auto_material" /></t-form-item>
+                <template v-if="form.config.auto_material">
+                  <t-form-item label="判断条件" required-mark><t-radio-group v-model="form.config.material_rule"><t-radio value="AND">全部满足</t-radio><t-radio value="OR">任一满足</t-radio></t-radio-group></t-form-item>
+                  <t-form-item label="点赞数"><t-input-number v-model="form.config.like_threshold" :min="0" :step="1000" theme="column" placeholder="0 表示不参与" /></t-form-item>
+                  <t-form-item label="收藏数"><t-input-number v-model="form.config.favorite_threshold" :min="0" :step="100" theme="column" placeholder="0 表示不参与" /></t-form-item>
+                </template>
+              </t-form>
+            </div>
+
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">⑤</span>策略状态<small>关闭后将不会执行该策略</small></div>
+              <t-form label-width="88px"><t-form-item label="状态"><t-switch v-model="form.status" :custom-value="['enabled', 'disabled']" /></t-form-item></t-form>
+            </div>
+          </div>
+
+          <div class="strategy-editor__aside">
+            <div class="strategy-aside">
+              <div class="strategy-aside__title">配置说明</div>
+              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略，游戏仅用于内容分类和数据统计。</span></div>
+              <div class="strategy-aside__item"><strong>② 挖掘对象</strong><span>可配置关键词或作者，系统将根据配置对象发现相关内容。</span></div>
+              <div class="strategy-aside__item"><strong>③ 执行计划</strong><span>支持手动执行和定时执行，定时执行按设定时间自动运行。</span></div>
+              <div class="strategy-aside__item"><strong>④ 转素材规则</strong><span>开启后符合条件的内容将自动转入素材库，减少人工筛选成本。</span></div>
+              <div class="strategy-aside__tip">小提示：创建策略后，建议先手动执行一次，验证规则是否符合预期。</div>
+            </div>
+          </div>
+        </div>
+        <div class="strategy-editor__footer">
+          <t-button variant="outline" @click="visible = false">取消</t-button>
+          <t-button theme="primary" :loading="saving" @click="save">保存</t-button>
+        </div>
       </t-dialog>
 
       <t-dialog v-model:visible="keywordVisible" header="关键词配置" width="520px" :footer="false">
@@ -501,4 +516,19 @@ function latestSummary(row) {
 .author-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .author-side span { color: var(--wt-text-tertiary); font-size: 12px; }
 .author-side strong { color: var(--wt-text-primary); font-size: 14px; }
+.strategy-editor { display: grid; grid-template-columns: 1fr 260px; gap: 18px; }
+.strategy-editor__form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.strategy-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }
+.strategy-section__title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.strategy-section__title small { color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; }
+.strategy-no { color: var(--wt-primary); font-weight: 700; }
+.strategy-schedule-prefix { color: var(--wt-text-secondary); font-size: 14px; }
+.strategy-editor__aside { min-width: 0; }
+.strategy-aside { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-page); }
+.strategy-aside__title { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.strategy-aside__item { display: flex; flex-direction: column; gap: 3px; }
+.strategy-aside__item strong { color: var(--wt-text-primary); font-size: 13px; }
+.strategy-aside__item span { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
+.strategy-aside__tip { margin-top: 4px; padding: 10px; border-radius: 8px; background: var(--wt-info-bg); color: var(--wt-primary); font-size: 12px; line-height: 1.55; }
+.strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>
