@@ -78,11 +78,20 @@ async function retryFailed() {
   try {
     detail.value = await client.retryFailed(detail.value.id)
     await load()
-    MessagePlugin.success('失败项已重试')
+    MessagePlugin.success('重试任务已创建')
   } catch (e) {
     error.value = e.message || '失败项重试失败'
   } finally {
     retrying.value = false
+  }
+}
+
+async function openTask(id) {
+  try {
+    detail.value = await client.getTask(id)
+    visible.value = true
+  } catch (e) {
+    error.value = e.message || '任务详情加载失败'
   }
 }
 
@@ -120,11 +129,15 @@ function processingTone(value) {
 }
 
 function statusLabel(status) {
-  return ({ pending: '待执行', running: '执行中', success: '成功', failed: '失败' })[status] || status || '未知'
+  return ({ pending: '待执行', running: '执行中', success: '成功', partial_success: '部分成功', failed: '失败' })[status] || status || '未知'
 }
 
 function statusTone(status) {
   return status === 'success' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'info' : 'warning'
+}
+
+function taskTypeLabel(value) {
+  return ({ discovery_task: '策略挖掘', manual_discovery_task: '人工发现', retry_failed_task: '失败重试' })[value] || value || '未知'
 }
 
 function dateLabel(value) {
@@ -162,7 +175,10 @@ function dateLabel(value) {
           <t-descriptions bordered :column="1">
             <t-descriptions-item label="任务">{{ detail.id }} / {{ detail.task_id || '-' }}</t-descriptions-item>
             <t-descriptions-item label="策略快照">{{ strategyLabel(detail) }}</t-descriptions-item>
-            <t-descriptions-item label="平台 / 类型">{{ detail.platform }} / {{ detail.snapshot?.strategy_type || detail.task_type }}</t-descriptions-item>
+            <t-descriptions-item label="平台 / 类型">{{ detail.platform }} / {{ taskTypeLabel(detail.task_type) }}</t-descriptions-item>
+            <t-descriptions-item v-if="detail.parent_task_id" label="关联原任务">
+              <t-link @click="openTask(detail.parent_task_id)">#{{ detail.parent_task_id }}</t-link>
+            </t-descriptions-item>
             <t-descriptions-item label="执行周期">{{ detail.snapshot?.schedule || '-' }}</t-descriptions-item>
             <t-descriptions-item label="自动转素材">{{ materialRuleLabel(detail.snapshot) }}</t-descriptions-item>
             <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>

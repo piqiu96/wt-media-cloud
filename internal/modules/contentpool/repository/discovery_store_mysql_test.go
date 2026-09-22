@@ -20,10 +20,10 @@ func TestClaimPendingCrawlTaskLocksAndTransitionsExactlyOneTask(t *testing.T) {
 	defer db.Close()
 	now := time.Date(2026, 9, 16, 2, 0, 0, 0, time.UTC)
 	created := now.Add(-time.Minute)
-	columns := []string{"id", "team_id", "strategy_id", "schedule_key", "task_id", "task_type", "platform", "status", "snapshot_json", "stats_json", "result_json", "error_message", "started_at", "finished_at", "created_by", "created_at", "updated_at"}
+	columns := []string{"id", "team_id", "strategy_id", "parent_task_id", "schedule_key", "task_id", "task_type", "platform", "status", "snapshot_json", "stats_json", "result_json", "error_message", "started_at", "finished_at", "created_by", "created_at", "updated_at"}
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM crawl_tasks WHERE status = 'pending'.*FOR UPDATE SKIP LOCKED").
-		WillReturnRows(sqlmock.NewRows(columns).AddRow(9, 7, 3, "daily:2026-09-16:09:00", nil, "discovery_task", "douyin", "pending", []byte(`{"operation":"keyword","keyword":"demo"}`), []byte(`{}`), nil, nil, nil, nil, 2, created, created))
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(9, 7, 3, nil, "daily:2026-09-16:09:00", nil, "discovery_task", "douyin", "pending", []byte(`{"operation":"keyword","keyword":"demo"}`), []byte(`{}`), nil, nil, nil, nil, 2, created, created))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE crawl_tasks SET task_id=?,status='running',started_at=?,updated_at=? WHERE id=? AND status='pending'")).
 		WithArgs("crawl-9", now, now, int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -49,7 +49,7 @@ func TestClaimPendingCrawlTaskReturnsEmptyWithoutUpdate(t *testing.T) {
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM crawl_tasks WHERE status = 'pending'.*FOR UPDATE SKIP LOCKED").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "strategy_id", "schedule_key", "task_id", "task_type", "platform", "status", "snapshot_json", "stats_json", "result_json", "error_message", "started_at", "finished_at", "created_by", "created_at", "updated_at"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "strategy_id", "parent_task_id", "schedule_key", "task_id", "task_type", "platform", "status", "snapshot_json", "stats_json", "result_json", "error_message", "started_at", "finished_at", "created_by", "created_at", "updated_at"}))
 	mock.ExpectCommit()
 
 	_, found, err := claimPendingCrawlTask(testGORM(db), time.Now())

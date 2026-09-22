@@ -205,7 +205,7 @@ func TestRetryFailedOnlyProcessesFailedItems(t *testing.T) {
 	}
 	task := CrawlTask{
 		TeamID: team, TaskType: "discovery_task", Platform: "douyin", Status: CrawlFailed,
-		Snapshot: map[string]any{"auto_material": true, "material_rule": "AND", "like_threshold": 10000, "favorite_threshold": 500},
+		Snapshot: map[string]any{"operation": "keyword", "auto_material": true, "material_rule": "AND", "like_threshold": 10000, "favorite_threshold": 500},
 		Stats:    CrawlStats{Scanned: 2, Found: 2, Failed: 1, Pending: 1},
 		Results: []map[string]any{
 			{"platform_content_id": source.PlatformContentID, "source_content_id": source.ID, "processing_status": "material_failed", "failure_reason": "provider failed"},
@@ -216,15 +216,33 @@ func TestRetryFailedOnlyProcessesFailedItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.retryFailed(actor, task.ID)
+	retryTask, err := service.retryFailed(actor, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Status != CrawlSuccess || updated.Stats.Failed != 0 || updated.Stats.AutoMaterialized != 1 || updated.Stats.Pending != 1 {
-		t.Fatalf("unexpected retry result: %+v", updated)
+	if retryTask.Status != CrawlPending || retryTask.TaskType != "retry_failed_task" || retryTask.ParentTaskID == nil || *retryTask.ParentTaskID != task.ID {
+		t.Fatalf("unexpected retry task: %+v", retryTask)
 	}
-	if updated.Results[0]["processing_status"] != "auto_materialized" || updated.Results[1]["processing_status"] != "pending" {
-		t.Fatalf("only failed item should be retried: %+v", updated.Results)
+	if len(anyMapSlice(retryTask.Snapshot["retry_items"])) != 1 {
+		t.Fatalf("only failed item should be queued: %+v", retryTask.Snapshot)
+	}
+	original, _, _ := store.FindCrawlTask(task.ID)
+	if original.Status != CrawlFailed || original.Stats.Failed != 1 || len(original.Results) != 2 {
+		t.Fatalf("original task should remain immutable: %+v", original)
+	}
+	if _, err = service.RunNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	completed, _, _ := store.FindCrawlTask(retryTask.ID)
+	if completed.Status != CrawlSuccess || completed.Stats.Failed != 0 || completed.Stats.AutoMaterialized != 1 {
+		t.Fatalf("unexpected retry result: %+v", completed)
+	}
+	if len(completed.Results) != 1 || completed.Results[0]["processing_status"] != "auto_materialized" {
+		t.Fatalf("only failed item should be retried: %+v", completed.Results)
+	}
+	original, _, _ = store.FindCrawlTask(task.ID)
+	if original.Status != CrawlFailed || original.Stats.Failed != 1 || len(original.Results) != 2 {
+		t.Fatalf("original task should remain immutable after worker execution: %+v", original)
 	}
 	if source, _, _ := contentStore.FindSource(source.ID); source.Status != StatusMaterialCreated || source.MaterialID == nil {
 		t.Fatalf("failed source should be materialized: %+v", source)

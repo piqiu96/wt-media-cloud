@@ -25,12 +25,13 @@ type (
 )
 
 const (
-	StrategyEnabled  = model.StrategyEnabled
-	StrategyDisabled = model.StrategyDisabled
-	CrawlPending     = model.CrawlPending
-	CrawlRunning     = model.CrawlRunning
-	CrawlSuccess     = model.CrawlSuccess
-	CrawlFailed      = model.CrawlFailed
+	StrategyEnabled     = model.StrategyEnabled
+	StrategyDisabled    = model.StrategyDisabled
+	CrawlPending        = model.CrawlPending
+	CrawlRunning        = model.CrawlRunning
+	CrawlSuccess        = model.CrawlSuccess
+	CrawlPartialSuccess = model.CrawlPartialSuccess
+	CrawlFailed         = model.CrawlFailed
 )
 
 var (
@@ -269,6 +270,9 @@ func (s *discoveryService) runNext(ctx context.Context) (bool, error) {
 	if operation != "url" && operation != "keyword" && operation != "author" {
 		return true, s.failClaimedTask(task, ErrDiscoveryInvalid)
 	}
+	if task.TaskType == "retry_failed_task" {
+		return true, s.executeRetryClaimed(ctx, task, operation)
+	}
 	return true, s.executeClaimed(ctx, task, operation, task.Snapshot, task.TaskType == "manual_discovery_task")
 }
 
@@ -285,7 +289,7 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 	if scanned == 0 {
 		scanned = len(result.Items)
 	}
-	task.Stats = model.CrawlStats{Scanned: scanned, Found: len(result.Items), Failed: result.Failed}
+	task.Stats = model.CrawlStats{Scanned: scanned, Found: len(result.Items)}
 	if manual && (operation == "keyword" || operation == "author") {
 		task.Results = dedupeResultItems(result.Items)
 		for _, item := range task.Results {
@@ -313,13 +317,29 @@ func (s *discoveryService) executeClaimed(ctx context.Context, task model.CrawlT
 	}
 	now := s.now()
 	task.FinishedAt, task.UpdatedAt = &now, now
+	task.Status = crawlStatusFromStats(task.Stats, crawlErr)
 	if crawlErr != nil {
-		task.Status, task.Error = model.CrawlFailed, crawlErr.Error()
-	} else {
-		task.Status = model.CrawlSuccess
+		task.Error = crawlErr.Error()
 	}
 	_, err := s.store.UpdateCrawlTask(task)
 	return err
+}
+
+func crawlStatusFromStats(stats model.CrawlStats, crawlErr error) model.CrawlStatus {
+	processed := stats.Added + stats.Duplicate + stats.Pending + stats.AutoMaterialized
+	if crawlErr != nil {
+		if processed > 0 {
+			return model.CrawlPartialSuccess
+		}
+		return model.CrawlFailed
+	}
+	if stats.Failed > 0 {
+		if processed > 0 {
+			return model.CrawlPartialSuccess
+		}
+		return model.CrawlFailed
+	}
+	return model.CrawlSuccess
 }
 
 func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map[string]any, sourceType string) {
@@ -375,68 +395,92 @@ func (s *discoveryService) retryFailed(actor identityservice.PublicUser, id int6
 	if _, err = s.scope(actor, &task.TeamID); err != nil {
 		return model.CrawlTask{}, err
 	}
-	if task.Status != model.CrawlFailed {
+	if task.Status != model.CrawlFailed && task.Status != model.CrawlPartialSuccess {
 		return model.CrawlTask{}, ErrDiscoverySelection
 	}
-	results := make([]map[string]any, 0, len(task.Results))
+	retryItems := make([]map[string]any, 0)
 	for _, item := range task.Results {
 		status := fmt.Sprint(item["processing_status"])
-		if status != "failed" && status != "material_failed" {
-			results = append(results, item)
-			continue
+		if status == "failed" || status == "material_failed" {
+			retryItems = append(retryItems, cloneMap(item))
 		}
+	}
+	if len(retryItems) == 0 {
+		return model.CrawlTask{}, ErrDiscoverySelection
+	}
+	snapshot := cloneMap(task.Snapshot)
+	snapshot["retry_items"] = retryItems
+	now := s.now()
+	parentID := task.ID
+	return s.store.CreateCrawlTask(model.CrawlTask{
+		TeamID: task.TeamID, StrategyID: task.StrategyID, ParentTaskID: &parentID,
+		TaskType: "retry_failed_task", Platform: task.Platform, Status: model.CrawlPending,
+		Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func (s *discoveryService) executeRetryClaimed(ctx context.Context, task model.CrawlTask, operation string) error {
+	retryItems := anyMapSlice(task.Snapshot["retry_items"])
+	task.Stats = model.CrawlStats{Scanned: len(retryItems), Found: len(retryItems)}
+	task.Results = make([]map[string]any, 0, len(retryItems))
+	for _, input := range retryItems {
+		item := cloneMap(input)
 		sourceID := int64Value(item["source_content_id"])
-		if sourceID > 0 {
-			if status == "material_failed" {
-				source, found, sourceErr := s.content.get(actor, sourceID)
-				if sourceErr != nil || !found {
-					item["failure_reason"] = ErrNotFound.Error()
-					results = append(results, item)
-					continue
-				}
-				thresholdItem := map[string]any{"like_count": source.LikeCount, "favorite_count": source.FavoriteCount}
-				if !shouldAutoMaterialize(task.Snapshot, thresholdItem) {
-					item["processing_status"] = "pending"
-					delete(item, "failure_reason")
-					results = append(results, item)
-					continue
-				}
-				material, materialErr := s.content.materialize(actor, sourceID)
-				if materialErr != nil {
-					item["failure_reason"] = materialErr.Error()
-					results = append(results, item)
-					continue
-				}
-				item["processing_status"] = "auto_materialized"
-				item["material_id"] = material.ID
-				delete(item, "failure_reason")
+		if sourceID > 0 && fmt.Sprint(item["processing_status"]) == "material_failed" {
+			source, found, sourceErr := s.content.get(actorForTask(task), sourceID)
+			if sourceErr != nil || !found {
+				item["failure_reason"] = ErrNotFound.Error()
+				task.Results = append(task.Results, item)
+				task.Stats.Failed++
+				continue
 			}
-			results = append(results, item)
+			thresholdItem := map[string]any{"like_count": source.LikeCount, "favorite_count": source.FavoriteCount}
+			if !shouldAutoMaterialize(task.Snapshot, thresholdItem) {
+				item["processing_status"] = "pending"
+				delete(item, "failure_reason")
+				task.Results = append(task.Results, item)
+				task.Stats.Pending++
+				continue
+			}
+			material, materialErr := s.content.materialize(actorForTask(task), sourceID)
+			if materialErr != nil {
+				item["failure_reason"] = materialErr.Error()
+				task.Results = append(task.Results, item)
+				task.Stats.Failed++
+				continue
+			}
+			item["processing_status"] = "auto_materialized"
+			item["material_id"] = material.ID
+			delete(item, "failure_reason")
+			task.Results = append(task.Results, item)
+			task.Stats.AutoMaterialized++
 			continue
 		}
-		if s.crawler == nil {
-			results = append(results, item)
+		if sourceID > 0 {
+			task.Results = append(task.Results, item)
+			task.Stats.Failed++
 			continue
-		}
-		operation := fmt.Sprint(item["operation"])
-		if operation == "" {
-			operation = fmt.Sprint(task.Snapshot["operation"])
 		}
 		key := strings.TrimSpace(fmt.Sprint(item["failure_key"]))
 		if key == "" {
-			results = append(results, item)
+			item["failure_reason"] = "failure key is empty"
+			task.Results = append(task.Results, item)
+			task.Stats.Failed++
 			continue
 		}
 		config := map[string]any{"url": key}
 		if operation == "keyword" {
 			config = map[string]any{"keyword": key, "limit": intValue(task.Snapshot["limit"], 20)}
 		}
-		retryResult, retryErr := s.crawler.Discover(context.Background(), dto.CrawlerRequest{Platform: task.Platform, Operation: operation, Config: config})
+		retryResult, retryErr := s.crawler.Discover(ctx, dto.CrawlerRequest{Platform: task.Platform, Operation: operation, Config: config})
 		if retryErr != nil || len(retryResult.Items) == 0 {
 			if retryErr != nil {
 				item["failure_reason"] = retryErr.Error()
+			} else {
+				item["failure_reason"] = "retry returned no items"
 			}
-			results = append(results, item)
+			task.Results = append(task.Results, item)
+			task.Stats.Failed++
 			continue
 		}
 		sourceType := "strategy"
@@ -445,41 +489,16 @@ func (s *discoveryService) retryFailed(actor identityservice.PublicUser, id int6
 		}
 		for _, rawItem := range retryResult.Items {
 			retried := cloneMap(rawItem)
-			results = append(results, retried)
+			task.Results = append(task.Results, retried)
 			s.projectDiscoveredItem(&task, retried, sourceType)
 		}
 	}
-	task.Results = results
-	recalculateCrawlStats(&task)
-	task.UpdatedAt = s.now()
-	if task.Stats.Failed == 0 {
-		task.Status, task.Error = model.CrawlSuccess, ""
-		now := s.now()
-		task.FinishedAt = &now
-	}
-	return s.store.UpdateCrawlTask(task)
-}
-
-func recalculateCrawlStats(task *model.CrawlTask) {
-	stats := model.CrawlStats{Scanned: task.Stats.Scanned, Found: len(task.Results)}
-	for _, item := range task.Results {
-		switch fmt.Sprint(item["processing_status"]) {
-		case "pending", "material_failed":
-			stats.Added++
-			stats.Pending++
-			if fmt.Sprint(item["processing_status"]) == "material_failed" {
-				stats.Failed++
-			}
-		case "auto_materialized":
-			stats.Added++
-			stats.AutoMaterialized++
-		case "duplicate":
-			stats.Duplicate++
-		case "failed":
-			stats.Failed++
-		}
-	}
-	task.Stats = stats
+	task.Stats.Found = len(task.Results)
+	now := s.now()
+	task.Status = crawlStatusFromStats(task.Stats, nil)
+	task.FinishedAt, task.UpdatedAt = &now, now
+	_, err := s.store.UpdateCrawlTask(task)
+	return err
 }
 
 func shouldAutoMaterialize(snapshot map[string]any, item map[string]any) bool {
@@ -640,6 +659,22 @@ func parsePublishedAt(value any) *time.Time {
 	}
 	return &parsed
 }
+func anyMapSlice(value any) []map[string]any {
+	switch values := value.(type) {
+	case []map[string]any:
+		return values
+	case []any:
+		out := make([]map[string]any, 0, len(values))
+		for _, value := range values {
+			if item, ok := value.(map[string]any); ok {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 func anyStringSlice(value any) []string {
 	switch values := value.(type) {
 	case []string:

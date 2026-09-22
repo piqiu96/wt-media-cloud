@@ -89,7 +89,7 @@ func CreateCrawlTask(v model.CrawlTask) (model.CrawlTask, error) {
 func createCrawlTask(db *gorm.DB, v model.CrawlTask) (model.CrawlTask, error) {
 	snapshot, _ := json.Marshal(v.Snapshot)
 	stats, _ := json.Marshal(v.Stats)
-	result := db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,parent_task_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullableID(v.ParentTaskID), nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		return model.CrawlTask{}, result.Error
 	}
@@ -102,7 +102,7 @@ func ListCrawlTasks(team *sharedidentity.TeamID, strategyID *int64) ([]model.Cra
 	return listCrawlTasks(database.DB(), team, strategyID)
 }
 func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
-	query := `SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks`
+	query := `SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks`
 	conditions := []string{}
 	args := []any{}
 	if team != nil {
@@ -134,7 +134,7 @@ func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64)
 }
 func FindCrawlTask(id int64) (model.CrawlTask, bool, error) { return findCrawlTask(database.DB(), id) }
 func findCrawlTask(db *gorm.DB, id int64) (model.CrawlTask, bool, error) {
-	item, err := scanCrawlTask(db.Raw(`SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE id = ?`, id).Row())
+	item, err := scanCrawlTask(db.Raw(`SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.CrawlTask{}, false, nil
 	}
@@ -163,7 +163,7 @@ func claimPendingCrawlTask(db *gorm.DB, now time.Time) (model.CrawlTask, bool, e
 	var task model.CrawlTask
 	found := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		item, err := scanCrawlTask(tx.Raw(`SELECT id,team_id,strategy_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE status = 'pending' ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`).Row())
+		item, err := scanCrawlTask(tx.Raw(`SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE status = 'pending' ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`).Row())
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -208,12 +208,12 @@ func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 func scanCrawlTask(row scannable) (model.CrawlTask, error) {
 	var item model.CrawlTask
 	var team, creator int64
-	var strategyID sql.NullInt64
+	var strategyID, parentTaskID sql.NullInt64
 	var scheduleKey, taskID, errorMessage sql.NullString
 	var status string
 	var snapshot, stats, results []byte
 	var started, finished sql.NullTime
-	err := row.Scan(&item.ID, &team, &strategyID, &scheduleKey, &taskID, &item.TaskType, &item.Platform, &status, &snapshot, &stats, &results, &errorMessage, &started, &finished, &creator, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &team, &strategyID, &parentTaskID, &scheduleKey, &taskID, &item.TaskType, &item.Platform, &status, &snapshot, &stats, &results, &errorMessage, &started, &finished, &creator, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return item, err
 	}
@@ -223,6 +223,10 @@ func scanCrawlTask(row scannable) (model.CrawlTask, error) {
 	if strategyID.Valid {
 		value := strategyID.Int64
 		item.StrategyID = &value
+	}
+	if parentTaskID.Valid {
+		value := parentTaskID.Int64
+		item.ParentTaskID = &value
 	}
 	item.ScheduleKey, item.TaskID, item.Error = scheduleKey.String, taskID.String, errorMessage.String
 	_ = json.Unmarshal(snapshot, &item.Snapshot)

@@ -206,6 +206,25 @@ func TestRunDueUsesStrategyTimezone(t *testing.T) {
 	}
 }
 
+func TestCrawlStatusFromStatsClassifiesPartialSuccess(t *testing.T) {
+	tests := []struct {
+		name  string
+		stats CrawlStats
+		err   error
+		want  CrawlStatus
+	}{
+		{name: "success", stats: CrawlStats{Added: 1}, want: CrawlSuccess},
+		{name: "partial", stats: CrawlStats{Added: 1, Failed: 1}, want: CrawlPartialSuccess},
+		{name: "failed", stats: CrawlStats{Failed: 1}, want: CrawlFailed},
+		{name: "crawl error with processed items", stats: CrawlStats{Added: 1}, err: errors.New("provider failed"), want: CrawlPartialSuccess},
+	}
+	for _, test := range tests {
+		if got := crawlStatusFromStats(test.stats, test.err); got != test.want {
+			t.Fatalf("%s status = %s, want %s", test.name, got, test.want)
+		}
+	}
+}
+
 func TestWorkerClaimsPendingTaskOnlyOnce(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
