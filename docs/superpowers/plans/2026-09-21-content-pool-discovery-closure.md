@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress.
+Complete.
 
 ## Spec
 
@@ -271,7 +271,7 @@ In progress.
 - [x] Run `go test ./internal/modules/contentpool/...`.
 - [x] Run the focused frontend tests.
 - [x] Start or restart the existing local Cloud backend and Web process.
-- [ ] Validate the primary real-data loop:
+- [x] Validate the primary real-data loop:
   - create/update strategy,
   - run strategy,
   - verify task result,

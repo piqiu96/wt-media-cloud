@@ -3,6 +3,10 @@
 - Date: 2026-09-22 16:55:04 CST
 - Design: `docs/superpowers/specs/2026-09-22-content-pool-video-search-design.md`
 
+## Status
+
+- [x] Complete
+
 ## Steps
 
 1. Extend focused backend tests for direct query search.
