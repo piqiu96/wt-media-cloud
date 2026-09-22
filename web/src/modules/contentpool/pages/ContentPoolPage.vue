@@ -10,6 +10,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
@@ -47,7 +48,7 @@ const manualSearched = ref(false)
 const manualResults = ref([])
 const selectedResultKeys = ref([])
 const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
-const manualForm = ref({ platform: 'douyin', ids: '', keyword: '' })
+const manualForm = ref({ platform: 'douyin', ids: '', keyword: '', keywords: [] })
 const manualTeamId = ref('')
 const manualTeamLocked = ref(false)
 const teams = ref([])
@@ -87,11 +88,7 @@ const columns = [
   { colKey: 'title', title: '内容', minWidth: 340 },
   { colKey: 'platform', title: '平台', width: 110 },
   { colKey: 'author_name', title: '作者', width: 140 },
-  { colKey: 'like_count', title: '点赞', width: 100 },
-  { colKey: 'favorite_count', title: '收藏', width: 100 },
-  { colKey: 'view_count', title: '浏览', width: 100 },
-  { colKey: 'comment_count', title: '评论', width: 100 },
-  { colKey: 'share_count', title: '分享', width: 100 },
+  { colKey: 'interaction', title: '互动', width: 170 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
   { colKey: 'strategy_id', title: '来源策略', minWidth: 180 },
   { colKey: 'crawl_task_id', title: '来源任务', minWidth: 240 },
@@ -136,12 +133,12 @@ function openManual(mode) {
   manualResults.value = []
   selectedResultKeys.value = []
   resetManualPagination()
-  manualForm.value = { platform: 'douyin', ids: '', keyword: '' }
+  manualForm.value = { platform: 'douyin', ids: '', keyword: '', keywords: [] }
   manualVisible.value = true
 }
 
 function manualTitle() {
-  return ({ id: 'ID/链接搜索', keyword: '关键词搜索' })[manualMode.value]
+  return ({ id: 'ID/链接发现', keyword: '关键词发现' })[manualMode.value]
 }
 
 async function loadManualContext() {
@@ -172,12 +169,16 @@ async function searchManual(reset = false) {
   if (isDirectSearch && !targets.length) return
   manualLoading.value = true
   try {
+    if (!isDirectSearch && !(form.keywords || []).length) {
+      MessagePlugin.warning('请至少添加一个关键词')
+      return
+    }
     const result = await discovery.search(isDirectSearch ? {
       platform: form.platform,
       query: targets.join('\n'),
     } : {
       platform: form.platform,
-      keyword: form.keyword.trim(),
+      keyword: (form.keywords || []).join(' '),
       limit: 20,
       offset: manualPagination.value.nextOffset || 0,
     })
@@ -402,11 +403,15 @@ function taskLabel(row) { return row.crawl_task_name || (row.crawl_task_id ? `�
 function platformLabel(value) { return ({ douyin: '抖音', bilibili: 'B站' })[value] || value || '-' }
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
 function statusTone(value) { return ({ pending: 'warning', material_created: 'success', ignored: 'neutral' })[value] || 'info' }
-function sourceTypeLabel(value) { return ({ link: 'ID/链接搜索', search: '关键词搜索', author: '博主搜索', strategy: '挖掘策略' })[value] || value || '-' }
+function sourceTypeLabel(value) { return ({ link: 'ID/链接发现', search: '关键词发现', author: '博主发现', strategy: '挖掘策略' })[value] || value || '-' }
 function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 function authorLabel(row) { return row.author_name || row.author_uid || row.author_sec_uid || '-' }
-function truncateTitle(title, max = 120) {
+function interactionLabel(row) {
+  return `浏览 ${countLabel(row.view_count)} · 赞 ${countLabel(row.like_count)} · 藏 ${countLabel(row.favorite_count)}`
+}
+
+function truncateTitle(title, max = 80) {
   const text = String(title || '')
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
@@ -426,10 +431,10 @@ function openImageViewer(url) {
       <ResourcePageHeader :title="isLibrary ? '素材库' : '内容池'" :description="isLibrary ? '查看已从内容池沉淀的素材及其来源关系' : '统一管理人工发现与自动挖掘进入系统的外部内容'">
         <template #actions>
           <t-dropdown v-if="!isLibrary" trigger="click">
-            <t-button theme="primary">视频搜索</t-button>
+            <t-button theme="primary">发现内容</t-button>
             <t-dropdown-menu>
-              <t-dropdown-item @click="openManual('id')">ID/链接搜索</t-dropdown-item>
-              <t-dropdown-item @click="openManual('keyword')">关键词搜索</t-dropdown-item>
+              <t-dropdown-item @click="openManual('id')">ID/链接发现</t-dropdown-item>
+              <t-dropdown-item @click="openManual('keyword')">关键词发现</t-dropdown-item>
             </t-dropdown-menu>
           </t-dropdown>
           <t-button
@@ -450,7 +455,7 @@ function openImageViewer(url) {
           <t-space wrap>
             <label class="wt-filter-field"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接搜索" /><t-option value="search" label="关键词搜索" /><t-option value="author" label="博主搜索" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
             <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button></div>
           </t-space>
@@ -475,11 +480,7 @@ function openImageViewer(url) {
               <span v-else>{{ authorLabel(row) }}</span>
             </template>
             <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
-            <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
-            <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
-            <template #view_count="{ row }">{{ countLabel(row.view_count) }}</template>
-            <template #comment_count="{ row }">{{ countLabel(row.comment_count) }}</template>
-            <template #share_count="{ row }">{{ countLabel(row.share_count) }}</template>
+            <template #interaction="{ row }">{{ interactionLabel(row) }}</template>
             <template #strategy_id="{ row }"><t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link><span v-else>-</span></template>
             <template #crawl_task_id="{ row }"><t-link v-if="row.crawl_task_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?task_id=${row.crawl_task_id}`)">{{ taskLabel(row) }}</t-link><span v-else>-</span></template>
             <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
@@ -588,7 +589,7 @@ function openImageViewer(url) {
           <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
           <t-form-item v-if="manualMode === 'id'" label="ID/链接"><t-textarea v-model="manualForm.ids" :rows="4" placeholder="支持抖音视频 ID、视频链接或分享短链接，可输入多个（换行、逗号或空格分隔）" /></t-form-item>
-          <t-form-item v-else label="关键词"><t-input v-model="manualForm.keyword" placeholder="例如：王者荣耀 新英雄" /></t-form-item>
+          <t-form-item v-else label="关键词"><KeywordTags v-model="manualForm.keywords" placeholder="输入关键词后按回车添加，支持批量粘贴" /></t-form-item>
         </t-form>
         <t-alert v-if="manualSearched" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
         <t-table v-if="manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">

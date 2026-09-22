@@ -195,13 +195,20 @@ function exceptions(task) {
 }
 
 function rowAction(item) {
-  if (item.processing_status === 'auto_materialized') return { label: '查看素材', to: '/material-library' }
-  if (item.processing_status === 'pending') return { label: '审核', to: `/content-pool?crawl_task_id=${detail.value?.id}` }
-  if (item.processing_status === 'duplicate') return { label: '查看原内容', to: `/content-pool?crawl_task_id=${detail.value?.id}` }
+  const id = encodeURIComponent(item.platform_content_id || '')
+  if (item.processing_status === 'auto_materialized') {
+    return { label: '查看素材', to: item.material_id ? `/material-library?material_id=${item.material_id}` : '/material-library' }
+  }
+  if (item.processing_status === 'pending') {
+    return { label: '审核', to: `/content-pool?crawl_task_id=${detail.value?.id}${id ? `&search=${id}` : ''}` }
+  }
+  if (item.processing_status === 'duplicate') {
+    return { label: '查看原内容', to: id ? `/content-pool?search=${id}` : `/content-pool?crawl_task_id=${detail.value?.id}` }
+  }
   return null
 }
 
-function truncateTitle(title, max = 120) {
+function truncateTitle(title, max = 80) {
   const text = String(title || '')
   return text.length > max ? `${text.slice(0, max)}…` : text
 }

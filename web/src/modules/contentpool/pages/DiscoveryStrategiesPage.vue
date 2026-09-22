@@ -7,6 +7,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 
 const client = createDiscoveryClient()
 const route = useRoute()
@@ -17,7 +18,6 @@ const error = ref('')
 const visible = ref(false)
 const saving = ref(false)
 const editingID = ref(null)
-const keywordText = ref('')
 const form = ref(defaultForm())
 const keywordVisible = ref(false)
 const authorVisible = ref(false)
@@ -85,6 +85,7 @@ function defaultForm() {
     platform: 'douyin',
     config: {
       keywords: [],
+      authors: [],
       author: '',
       auto_material: false,
       material_rule: 'AND',
@@ -118,7 +119,6 @@ function resetFilters() {
 function openCreate() {
   editingID.value = null
   form.value = defaultForm()
-  keywordText.value = ''
   visible.value = true
 }
 
@@ -139,7 +139,8 @@ function fillForm(row) {
     timezone: row.timezone || 'Asia/Shanghai',
     status: row.status || 'disabled',
   }
-  keywordText.value = (config.keywords || []).join('\n')
+  if (!Array.isArray(form.value.config.keywords)) form.value.config.keywords = []
+  if (!Array.isArray(form.value.config.authors)) form.value.config.authors = []
 }
 
 function openEdit(row) {
@@ -173,9 +174,8 @@ async function save() {
       like_threshold: Number(form.value.config.like_threshold || 0),
       favorite_threshold: Number(form.value.config.favorite_threshold || 0),
     }
-    if (form.value.strategy_type === 'keyword') {
-      config.keywords = keywordText.value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean)
-    }
+    config.keywords = Array.isArray(config.keywords) ? config.keywords.map((item) => String(item).trim()).filter(Boolean) : []
+    config.authors = Array.isArray(config.authors) ? config.authors.map((item) => String(item).trim()).filter(Boolean) : []
     const payload = { ...form.value, config }
     if (editingID.value) await client.updateStrategy(editingID.value, payload)
     else await client.createStrategy(payload)
@@ -343,7 +343,7 @@ function latestSummary(row) {
           <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="{ x: '1260px' }" empty="暂无挖掘策略">
             <template #type="{ row }">{{ typeLabel(row.strategy_type) }}</template>
             <template #rule="{ row }">
-              <a class="wt-primary-link" @click="row.strategy_type === 'author' ? openAuthors(row) : openKeywords(row)">{{ ruleLabel(row) }}</a>
+              <a class="strategy-rule-link" @click="row.strategy_type === 'author' ? openAuthors(row) : openKeywords(row)">{{ ruleLabel(row) }}</a>
             </template>
             <template #schedule="{ row }">{{ scheduleLabel(row.schedule) }}</template>
             <template #material="{ row }">{{ materialLabel(row) }}</template>
@@ -380,10 +380,12 @@ function latestSummary(row) {
           </t-form-item>
 
           <div class="form-section">挖掘对象</div>
-          <t-form-item v-if="form.strategy_type === 'keyword'" :label="`关键词 · 已配置 ${keywordText.split(/[,\n]/).filter(Boolean).length} 个`">
-            <t-textarea v-model="keywordText" placeholder="每行一个关键词" />
+          <t-form-item v-if="form.strategy_type === 'keyword'" :label="`关键词 · 已配置 ${(form.config.keywords || []).length} 个`">
+            <KeywordTags v-model="form.config.keywords" placeholder="输入关键词后按回车添加，支持批量粘贴" />
           </t-form-item>
-          <t-form-item v-else label="作者"><t-input v-model="form.config.author" disabled placeholder="接口维护中，暂不可配置" /></t-form-item>
+          <t-form-item v-else :label="`作者 · 已配置 ${(form.config.authors || []).length} 个`">
+            <KeywordTags v-model="form.config.authors" placeholder="输入作者昵称或 ID 后按回车添加" />
+          </t-form-item>
 
           <div class="form-section">执行计划</div>
           <t-form-item label="执行周期">
@@ -442,6 +444,8 @@ function latestSummary(row) {
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
 .strategy-filter-card { padding: 14px 20px; }
 .filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.strategy-rule-link { color: #7c3aed; cursor: pointer; font-weight: 500; }
+.strategy-rule-link:hover { text-decoration: underline; }
 .form-section { margin: 6px 0 4px; padding-left: 96px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 600; }
 .config-dialog { display: flex; flex-direction: column; gap: 12px; }
 .config-meta { display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }

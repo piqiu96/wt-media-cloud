@@ -30,6 +30,8 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('favorite_threshold')
     expect(source).toContain('openKeywords')
     expect(source).toContain('openAuthors')
+    expect(source).toContain('KeywordTags')
+    expect(source).toContain('strategy-rule-link')
     expect(source).toContain('关键词配置')
     expect(source).toContain('作者配置')
   })
