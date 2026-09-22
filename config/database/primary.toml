@@ -1,8 +1,8 @@
+name = 'primary'
 charset = 'utf8mb4'
 database = 'wt_media_cloud'
 host = '127.0.0.1'
 location = 'Local'
-name = 'primary'
 parse_time = true
 password = 'root123'
 port = 3306
