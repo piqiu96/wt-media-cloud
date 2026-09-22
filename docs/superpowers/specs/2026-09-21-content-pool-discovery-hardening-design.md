@@ -1,7 +1,7 @@
 # Content Pool Discovery Hardening Design
 
 - Date: 2026-09-21
-- Status: Approved for P0 implementation
+- Status: Complete
 - Related plan: `docs/superpowers/plans/2026-09-21-content-pool-discovery-hardening.md`
 
 ## Background

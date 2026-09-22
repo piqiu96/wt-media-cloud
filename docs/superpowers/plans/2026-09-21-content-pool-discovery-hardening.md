@@ -2,7 +2,7 @@
 
 ## Status
 
-- [ ] In progress
+- [x] Complete
 
 ## Spec
 
@@ -18,51 +18,51 @@
 
 ## Task 1: Data contract and migration
 
-- [ ] Add `20260921_033_crawl_task_retry_lineage.sql`.
-- [ ] Add `crawl_tasks.parent_task_id`.
-- [ ] Add parent-task index and foreign key.
-- [ ] Extend the status check constraint with `partial_success`.
-- [ ] Extend `model.CrawlTask`.
-- [ ] Extend repository insert/select/update SQL.
+- [x] Add `20260921_033_crawl_task_retry_lineage.sql`.
+- [x] Add `crawl_tasks.parent_task_id`.
+- [x] Add parent-task index and foreign key.
+- [x] Extend the status check constraint with `partial_success`.
+- [x] Extend `model.CrawlTask`.
+- [x] Extend repository insert/select/update SQL.
 
 ## Task 2: Retry service semantics
 
-- [ ] Add `CrawlPartialSuccess`.
-- [ ] Retry only tasks containing failed result items.
-- [ ] Extract `failed` and `material_failed` items.
-- [ ] Create a pending `retry_failed_task`.
-- [ ] Copy the original immutable snapshot and store retry inputs.
-- [ ] Set `parent_task_id` on the retry task.
-- [ ] Leave the original task unchanged.
-- [ ] Update focused service tests.
+- [x] Add `CrawlPartialSuccess`.
+- [x] Retry only tasks containing failed result items.
+- [x] Extract `failed` and `material_failed` items.
+- [x] Create a pending `retry_failed_task`.
+- [x] Copy the original immutable snapshot and store retry inputs.
+- [x] Set `parent_task_id` on the retry task.
+- [x] Leave the original task unchanged.
+- [x] Update focused service tests.
 
 ## Task 3: Worker execution and status
 
-- [ ] Detect `retry_failed_task` in worker execution.
-- [ ] Process only retry inputs.
-- [ ] Reuse the unified materialize service.
-- [ ] Classify success, partial success, and failure.
-- [ ] Preserve AND/OR threshold behavior.
-- [ ] Update focused worker/service tests.
+- [x] Detect `retry_failed_task` in worker execution.
+- [x] Process only retry inputs.
+- [x] Reuse the unified materialize service.
+- [x] Classify success, partial success, and failure.
+- [x] Preserve AND/OR threshold behavior.
+- [x] Update focused worker/service tests.
 
 ## Task 4: Frontend P0
 
-- [ ] Display `partial_success`.
-- [ ] Display retry-task parent relationship.
-- [ ] Make retry action link to or open the new task.
-- [ ] Keep AND/OR controls unchanged.
-- [ ] Update focused page test.
+- [x] Display `partial_success`.
+- [x] Display retry-task parent relationship.
+- [x] Make retry action link to or open the new task.
+- [x] Keep AND/OR controls unchanged.
+- [x] Update focused page test.
 
 ## Task 5: Verification and handoff
 
-- [ ] Run focused Go tests.
-- [ ] Run focused frontend test.
-- [ ] Apply migration to the stable local database.
-- [ ] Restart backend and worker.
-- [ ] Execute a real failed-item retry.
-- [ ] Read back original task, retry task, source contents, and materials.
-- [ ] Record results in a handoff document.
-- [ ] Commit final state.
+- [x] Run focused Go tests.
+- [x] Run focused frontend test.
+- [x] Apply migration to the stable local database.
+- [x] Restart backend and worker.
+- [x] Execute a real failed-item retry.
+- [x] Read back original task, retry task, source contents, and materials.
+- [x] Record results in a handoff document.
+- [x] Commit final state.
 
 ## Acceptance
 
