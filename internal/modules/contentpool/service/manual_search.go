@@ -282,6 +282,7 @@ func (s *contentService) importResults(actor identityservice.PublicUser, input d
 		}
 		created, createErr := s.createSource(actor, dto.SourceInput{
 			TeamID:            team,
+			GameID:            input.GameID,
 			Platform:          input.Platform,
 			PlatformContentID: item.PlatformContentID,
 			Title:             item.Title,

@@ -11,6 +11,7 @@ import (
 
 type SourceInput struct {
 	TeamID            *sharedidentity.TeamID
+	GameID            *string
 	Platform          string
 	PlatformContentID string
 	Title             string
@@ -103,6 +104,7 @@ type SearchResponse struct {
 
 type ImportResultsRequest struct {
 	TeamID     *sharedidentity.TeamID `json:"team_id,omitempty"`
+	GameID     *string                `json:"game_id,omitempty"`
 	Platform   string                 `json:"platform"`
 	SourceType string                 `json:"source_type,omitempty"`
 	Items      []SearchResult         `json:"items"`

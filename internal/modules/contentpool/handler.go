@@ -19,6 +19,7 @@ import (
 
 type sourceRequest struct {
 	TeamID            *identityservice.TeamID `json:"team_id"`
+	GameID            *string                 `json:"game_id"`
 	Platform          string                  `json:"platform"`
 	PlatformContentID string                  `json:"platform_content_id"`
 	Title             string                  `json:"title"`
@@ -52,6 +53,7 @@ type batchStatusRequest struct {
 }
 type strategyRequest struct {
 	TeamID       *identityservice.TeamID `json:"team_id"`
+	GameID       *string                 `json:"game_id"`
 	Name         string                  `json:"name"`
 	StrategyType string                  `json:"strategy_type"`
 	Platform     string                  `json:"platform"`
@@ -156,7 +158,7 @@ func CreateContent(_ context.Context, c *hertzapp.RequestContext) {
 		}
 		published = &value
 	}
-	item, err := contentservice.CreateSource(actor, dto.SourceInput{TeamID: request.TeamID, Platform: request.Platform, PlatformContentID: request.PlatformContentID, Title: request.Title, Description: request.Description, CoverURL: request.CoverURL, SourceURL: request.SourceURL, AuthorID: request.AuthorID, AuthorSecUID: request.AuthorSecUID, AuthorUID: request.AuthorUID, AuthorHomeURL: request.AuthorHomeURL, AuthorName: request.AuthorName, SourceType: request.SourceType, LikeCount: request.LikeCount, FavoriteCount: request.FavoriteCount, ViewCount: request.ViewCount, CommentCount: request.CommentCount, ShareCount: request.ShareCount, PublishedAt: published, RawJSON: request.RawJSON})
+	item, err := contentservice.CreateSource(actor, dto.SourceInput{TeamID: request.TeamID, GameID: request.GameID, Platform: request.Platform, PlatformContentID: request.PlatformContentID, Title: request.Title, Description: request.Description, CoverURL: request.CoverURL, SourceURL: request.SourceURL, AuthorID: request.AuthorID, AuthorSecUID: request.AuthorSecUID, AuthorUID: request.AuthorUID, AuthorHomeURL: request.AuthorHomeURL, AuthorName: request.AuthorName, SourceType: request.SourceType, LikeCount: request.LikeCount, FavoriteCount: request.FavoriteCount, ViewCount: request.ViewCount, CommentCount: request.CommentCount, ShareCount: request.ShareCount, PublishedAt: published, RawJSON: request.RawJSON})
 	if err != nil {
 		writeContentError(c, err)
 		return
@@ -346,7 +348,7 @@ func CreateDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	} else if actor.TeamID != nil {
 		team = *actor.TeamID
 	}
-	item, err := contentservice.CreateStrategy(actor, model.DiscoveryStrategy{TeamID: team, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
+	item, err := contentservice.CreateStrategy(actor, model.DiscoveryStrategy{TeamID: team, GameID: request.GameID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return
@@ -388,7 +390,7 @@ func UpdateDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &request) {
 		return
 	}
-	item, err := contentservice.UpdateStrategy(actor, id, model.DiscoveryStrategy{Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
+	item, err := contentservice.UpdateStrategy(actor, id, model.DiscoveryStrategy{GameID: request.GameID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return

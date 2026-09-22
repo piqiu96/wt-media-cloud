@@ -15,16 +15,16 @@ import (
 	"gorm.io/gorm"
 )
 
-const sourceColumns = `id, team_id, platform, platform_content_id, title, description, cover_url, source_url, author_id, author_sec_uid, author_uid, author_home_url, author_name, source_type, strategy_id, crawl_task_id, like_count, favorite_count, view_count, comment_count, share_count, published_at, status, ignored_reason, audit_note, failure_reason, material_id, created_by, created_at, updated_at`
+const sourceColumns = `id, team_id, game_id, platform, platform_content_id, title, description, cover_url, source_url, author_id, author_sec_uid, author_uid, author_home_url, author_name, source_type, strategy_id, crawl_task_id, like_count, favorite_count, view_count, comment_count, share_count, published_at, status, ignored_reason, audit_note, failure_reason, material_id, created_by, created_at, updated_at`
 
-const sourceViewColumns = `s.id, s.team_id, s.platform, s.platform_content_id, s.title, s.description, s.cover_url, s.source_url, s.author_id, s.author_sec_uid, s.author_uid, s.author_home_url, s.author_name, s.source_type, s.strategy_id, s.crawl_task_id, s.like_count, s.favorite_count, s.view_count, s.comment_count, s.share_count, s.published_at, s.status, s.ignored_reason, s.audit_note, s.failure_reason, s.material_id, s.created_by, s.created_at, s.updated_at, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '') AS strategy_name, CASE WHEN t.id IS NULL THEN '' ELSE CONCAT(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '人工任务'), '_', DATE_FORMAT(t.created_at, '%Y%m%d%H%i%s')) END AS crawl_task_name`
+const sourceViewColumns = `s.id, s.team_id, s.game_id, s.platform, s.platform_content_id, s.title, s.description, s.cover_url, s.source_url, s.author_id, s.author_sec_uid, s.author_uid, s.author_home_url, s.author_name, s.source_type, s.strategy_id, s.crawl_task_id, s.like_count, s.favorite_count, s.view_count, s.comment_count, s.share_count, s.published_at, s.status, s.ignored_reason, s.audit_note, s.failure_reason, s.material_id, s.created_by, s.created_at, s.updated_at, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '') AS strategy_name, CASE WHEN t.id IS NULL THEN '' ELSE CONCAT(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '人工任务'), '_', DATE_FORMAT(t.created_at, '%Y%m%d%H%i%s')) END AS crawl_task_name`
 
 func CreateSource(v model.SourceContent, raw json.RawMessage) (model.SourceContent, error) {
 	return createSource(database.DB(), v, raw)
 }
 func createSource(db *gorm.DB, v model.SourceContent, raw json.RawMessage) (model.SourceContent, error) {
-	result := db.Exec(`INSERT INTO source_contents (team_id, platform, platform_content_id, title, description, cover_url, source_url, author_id, author_sec_uid, author_uid, author_home_url, author_name, source_type, strategy_id, crawl_task_id, like_count, favorite_count, view_count, comment_count, share_count, published_at, status, raw_json, audit_note, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?)`,
-		v.TeamID, v.Platform, v.PlatformContentID, v.Title, nullIfEmpty(v.Description), nullIfEmpty(v.CoverURL), nullIfEmpty(v.SourceURL), nullIfEmpty(v.AuthorID), nullIfEmpty(v.AuthorSecUID), nullIfEmpty(v.AuthorUID), nullIfEmpty(v.AuthorHomeURL), nullIfEmpty(v.AuthorName), v.SourceType, nullableID(v.StrategyID), nullableID(v.CrawlTaskID), v.LikeCount, v.FavoriteCount, v.ViewCount, v.CommentCount, v.ShareCount, v.PublishedAt, raw, nullIfEmpty(v.AuditNote), v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO source_contents (team_id, game_id, platform, platform_content_id, title, description, cover_url, source_url, author_id, author_sec_uid, author_uid, author_home_url, author_name, source_type, strategy_id, crawl_task_id, like_count, favorite_count, view_count, comment_count, share_count, published_at, status, raw_json, audit_note, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?)`,
+		v.TeamID, nullableStringPtr(v.GameID), v.Platform, v.PlatformContentID, v.Title, nullIfEmpty(v.Description), nullIfEmpty(v.CoverURL), nullIfEmpty(v.SourceURL), nullIfEmpty(v.AuthorID), nullIfEmpty(v.AuthorSecUID), nullIfEmpty(v.AuthorUID), nullIfEmpty(v.AuthorHomeURL), nullIfEmpty(v.AuthorName), v.SourceType, nullableID(v.StrategyID), nullableID(v.CrawlTaskID), v.LikeCount, v.FavoriteCount, v.ViewCount, v.CommentCount, v.ShareCount, v.PublishedAt, raw, nullIfEmpty(v.AuditNote), v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		var mysqlError *mysql.MySQLError
 		if errors.As(result.Error, &mysqlError) && mysqlError.Number == 1062 {
@@ -198,9 +198,10 @@ func scanSource(row scannable) (model.SourceContent, error) {
 	var likeCount, favoriteCount, viewCount, commentCount, shareCount int64
 	var status string
 	var strategyID, taskID, materialID sql.NullInt64
+	var gameID sql.NullString
 	var description, cover, url, authorID, authorSecUID, authorUID, authorHomeURL, authorName, sourceType, reason, auditNote, failureReason sql.NullString
 	var published sql.NullTime
-	err := row.Scan(&item.ID, &team, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorSecUID, &authorUID, &authorHomeURL, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &viewCount, &commentCount, &shareCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &team, &gameID, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorSecUID, &authorUID, &authorHomeURL, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &viewCount, &commentCount, &shareCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return item, err
 	}
@@ -220,6 +221,10 @@ func scanSource(row scannable) (model.SourceContent, error) {
 	if materialID.Valid {
 		value := materialID.Int64
 		item.MaterialID = &value
+	}
+	if gameID.Valid {
+		value := gameID.String
+		item.GameID = &value
 	}
 	if published.Valid {
 		item.PublishedAt = &published.Time
@@ -242,9 +247,10 @@ func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTask
 	var likeCount, favoriteCount, viewCount, commentCount, shareCount int64
 	var status string
 	var strategyID, taskID, materialID sql.NullInt64
+	var gameID sql.NullString
 	var description, cover, url, authorID, authorSecUID, authorUID, authorHomeURL, authorName, sourceType, reason, auditNote, failureReason sql.NullString
 	var published sql.NullTime
-	err := row.Scan(&item.ID, &team, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorSecUID, &authorUID, &authorHomeURL, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &viewCount, &commentCount, &shareCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt, strategyName, crawlTaskName)
+	err := row.Scan(&item.ID, &team, &gameID, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorSecUID, &authorUID, &authorHomeURL, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &viewCount, &commentCount, &shareCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt, strategyName, crawlTaskName)
 	if err != nil {
 		return item, err
 	}
@@ -265,6 +271,10 @@ func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTask
 		value := materialID.Int64
 		item.MaterialID = &value
 	}
+	if gameID.Valid {
+		value := gameID.String
+		item.GameID = &value
+	}
 	if published.Valid {
 		item.PublishedAt = &published.Time
 	}
@@ -273,6 +283,12 @@ func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTask
 
 func nullableID(value *int64) any {
 	if value == nil {
+		return nil
+	}
+	return *value
+}
+func nullableStringPtr(value *string) any {
+	if value == nil || strings.TrimSpace(*value) == "" {
 		return nil
 	}
 	return *value

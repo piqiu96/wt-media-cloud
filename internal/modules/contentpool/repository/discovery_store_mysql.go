@@ -20,7 +20,7 @@ func CreateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) 
 }
 func createStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	config, _ := json.Marshal(v.Config)
-	result := db.Exec(`INSERT INTO discovery_strategies (team_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO discovery_strategies (team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, nullableStringPtr(v.GameID), v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		var mysqlError *mysql.MySQLError
 		if errors.As(result.Error, &mysqlError) && mysqlError.Number == 1062 {
@@ -37,7 +37,7 @@ func ListStrategies(team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, err
 	return listStrategies(database.DB(), team)
 }
 func listStrategies(db *gorm.DB, team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
-	query := `SELECT id,team_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies`
+	query := `SELECT id,team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies`
 	args := []any{}
 	if team != nil {
 		query += " WHERE team_id = ?"
@@ -63,7 +63,7 @@ func FindStrategy(id int64) (model.DiscoveryStrategy, bool, error) {
 	return findStrategy(database.DB(), id)
 }
 func findStrategy(db *gorm.DB, id int64) (model.DiscoveryStrategy, bool, error) {
-	item, err := scanStrategy(db.Raw(`SELECT id,team_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies WHERE id = ?`, id).Row())
+	item, err := scanStrategy(db.Raw(`SELECT id,team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies WHERE id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DiscoveryStrategy{}, false, nil
 	}
@@ -74,7 +74,7 @@ func UpdateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) 
 }
 func updateStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	config, _ := json.Marshal(v.Config)
-	result := db.Exec(`UPDATE discovery_strategies SET name=?,strategy_type=?,platform=?,config_json=?,schedule=?,timezone=?,status=?,updated_at=? WHERE id=?`, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.UpdatedAt, v.ID)
+	result := db.Exec(`UPDATE discovery_strategies SET name=?,strategy_type=?,platform=?,config_json=?,schedule=?,timezone=?,status=?,game_id=?,updated_at=? WHERE id=?`, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, nullableStringPtr(v.GameID), v.UpdatedAt, v.ID)
 	if result.Error != nil {
 		return model.DiscoveryStrategy{}, result.Error
 	}
@@ -202,15 +202,20 @@ func claimPendingCrawlTask(db *gorm.DB, now time.Time) (model.CrawlTask, bool, e
 func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 	var item model.DiscoveryStrategy
 	var team, creator int64
+	var gameID sql.NullString
 	var status string
 	var raw []byte
-	err := row.Scan(&item.ID, &team, &item.Name, &item.StrategyType, &item.Platform, &raw, &item.Schedule, &item.Timezone, &status, &creator, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &team, &gameID, &item.Name, &item.StrategyType, &item.Platform, &raw, &item.Schedule, &item.Timezone, &status, &creator, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return item, err
 	}
 	item.TeamID = sharedidentity.TeamID(team)
 	item.CreatedBy = sharedidentity.UserID(creator)
 	item.Status = model.StrategyStatus(status)
+	if gameID.Valid {
+		value := gameID.String
+		item.GameID = &value
+	}
 	_ = json.Unmarshal(raw, &item.Config)
 	if item.Config == nil {
 		item.Config = map[string]any{}

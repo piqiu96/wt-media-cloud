@@ -13,6 +13,7 @@ const client = createDiscoveryClient()
 const route = useRoute()
 const rows = ref([])
 const tasks = ref([])
+const games = ref([])
 const loading = ref(false)
 const error = ref('')
 const visible = ref(false)
@@ -28,6 +29,7 @@ const filters = ref({ name: '', type: '', status: '' })
 
 const columns = [
   { colKey: 'name', title: '策略名称', minWidth: 180 },
+  { colKey: 'game', title: '游戏', width: 120 },
   { colKey: 'type', title: '类型', width: 90 },
   { colKey: 'rule', title: '挖掘规则', width: 130 },
   { colKey: 'schedule', title: '执行周期', width: 130 },
@@ -81,6 +83,7 @@ onMounted(async () => {
 function defaultForm() {
   return {
     name: '',
+    game_id: '',
     strategy_type: 'keyword',
     platform: 'douyin',
     config: {
@@ -102,9 +105,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [strategyRows, taskRows] = await Promise.all([client.listStrategies(), client.listTasks()])
+    const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(), client.listTasks(), client.listGames()])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
     tasks.value = Array.isArray(taskRows) ? taskRows : []
+    games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
     error.value = e.message || '策略加载失败'
   } finally {
@@ -126,6 +130,7 @@ function fillForm(row) {
   const config = row.config || {}
   form.value = {
     name: row.name,
+    game_id: row.game_id || '',
     strategy_type: row.strategy_type,
     platform: row.platform,
     config: {
@@ -174,6 +179,7 @@ async function save() {
       like_threshold: Number(form.value.config.like_threshold || 0),
       favorite_threshold: Number(form.value.config.favorite_threshold || 0),
     }
+    form.value.game_id = form.value.game_id || null
     config.keywords = Array.isArray(config.keywords) ? config.keywords.map((item) => String(item).trim()).filter(Boolean) : []
     config.authors = Array.isArray(config.authors) ? config.authors.map((item) => String(item).trim()).filter(Boolean) : []
     const payload = { ...form.value, config }
@@ -228,6 +234,11 @@ function remove(row) {
 
 function isRunning(row) {
   return runningSet.value.has(row.id)
+}
+
+function gameName(id) {
+  const game = games.value.find((item) => item.id === id)
+  return game?.name || '-'
 }
 
 function typeLabel(type) {
@@ -341,6 +352,7 @@ function latestSummary(row) {
       <ResourceCard class="strategy-card">
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="{ x: '1260px' }" empty="暂无挖掘策略">
+            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #type="{ row }">{{ typeLabel(row.strategy_type) }}</template>
             <template #rule="{ row }">
               <a class="strategy-rule-link" @click="row.strategy_type === 'author' ? openAuthors(row) : openKeywords(row)">{{ ruleLabel(row) }}</a>
@@ -366,6 +378,7 @@ function latestSummary(row) {
         <t-form label-width="96px">
           <div class="form-section">基础信息</div>
           <t-form-item label="策略名称"><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
+          <t-form-item label="所属游戏"><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
           <t-form-item label="平台">
             <t-select v-model="form.platform">
               <t-option value="douyin" label="抖音" />

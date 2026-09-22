@@ -51,7 +51,9 @@ const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
 const manualForm = ref({ platform: 'douyin', ids: '', keyword: '', keywords: [] })
 const manualTeamId = ref('')
 const manualTeamLocked = ref(false)
+const manualGameId = ref('')
 const teams = ref([])
+const games = ref([])
 const imageViewerVisible = ref(false)
 const imageViewerImages = ref([])
 const imageViewerIndex = ref(0)
@@ -87,6 +89,7 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 80 },
   { colKey: 'title', title: '内容', minWidth: 340 },
   { colKey: 'platform', title: '平台', width: 110 },
+  { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'author_name', title: '作者', width: 140 },
   { colKey: 'interaction', title: '互动', width: 170 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
@@ -148,9 +151,17 @@ async function loadManualContext() {
     manualTeamId.value = user?.role === 'admin' ? '' : (user?.team_id || '')
     const data = await users.listTeams()
     teams.value = Array.isArray(data) ? data : []
+    const gameData = await users.listGames()
+    games.value = Array.isArray(gameData) ? gameData : []
   } catch {
     teams.value = []
+    games.value = []
   }
+}
+
+function gameName(id) {
+  const game = games.value.find((item) => item.id === id)
+  return game?.name || '-'
 }
 
 function selectedTeamID() {
@@ -240,7 +251,7 @@ async function confirmSelected() {
   manualLoading.value = true
   try {
     const selected = manualResults.value.filter((item) => selectedResultKeys.value.includes(item.platform_content_id))
-    const result = await discovery.importResults({ platform: manualForm.value.platform, team_id: selectedTeamID(), source_type: 'search', items: selected })
+    const result = await discovery.importResults({ platform: manualForm.value.platform, team_id: selectedTeamID(), game_id: manualGameId.value || null, source_type: 'search', items: selected })
     manualVisible.value = false
     await load()
     MessagePlugin.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
@@ -475,6 +486,7 @@ function openImageViewer(url) {
                 </div>
               </div>
             </template>
+            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #author_name="{ row }">
               <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
               <span v-else>{{ authorLabel(row) }}</span>
@@ -587,6 +599,7 @@ function openImageViewer(url) {
       <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="960px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualResults.length ? '加入内容池' : '搜索' }" @confirm="confirmManual">
         <t-form label-width="88px">
           <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
+          <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
           <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
           <t-form-item v-if="manualMode === 'id'" label="ID/链接"><t-textarea v-model="manualForm.ids" :rows="4" placeholder="支持抖音视频 ID、视频链接或分享短链接，可输入多个（换行、逗号或空格分隔）" /></t-form-item>
           <t-form-item v-else label="关键词"><KeywordTags v-model="manualForm.keywords" placeholder="输入关键词后按回车添加，支持批量粘贴" /></t-form-item>

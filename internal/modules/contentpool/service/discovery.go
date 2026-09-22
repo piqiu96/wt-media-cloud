@@ -210,6 +210,7 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
 	current.Name, current.StrategyType, current.Platform, current.Config, current.Schedule, current.Timezone, current.Status, current.UpdatedAt = strings.TrimSpace(input.Name), input.StrategyType, input.Platform, input.Config, input.Schedule, input.Timezone, input.Status, s.now()
+	current.GameID = input.GameID
 	return s.store.UpdateStrategy(current)
 }
 
@@ -249,6 +250,7 @@ func (s *discoveryService) createRun(actor identityservice.PublicUser, strategyI
 	snapshot["platform"] = strategy.Platform
 	snapshot["schedule"] = strategy.Schedule
 	snapshot["operation"] = strategy.StrategyType
+	snapshot["game_id"] = strategy.GameID
 	return s.store.CreateCrawlTask(model.CrawlTask{TeamID: strategy.TeamID, StrategyID: &strategy.ID, ScheduleKey: scheduleKey, TaskType: "discovery_task", Platform: strategy.Platform, Status: model.CrawlPending, Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now})
 }
 
@@ -367,7 +369,7 @@ func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map
 		AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]),
 		SourceType: sourceType, StrategyID: task.StrategyID, CrawlTaskID: &taskID,
 		LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]),
-		PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item),
+		PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item), GameID: optionalString(task.Snapshot["game_id"]),
 	})
 	switch {
 	case errors.Is(err, ErrDuplicate):
@@ -516,6 +518,14 @@ func (s *discoveryService) executeRetryClaimed(ctx context.Context, task model.C
 	return err
 }
 
+func optionalString(value any) *string {
+	text := strings.TrimSpace(fmt.Sprint(value))
+	if text == "" || text == "<nil>" {
+		return nil
+	}
+	return &text
+}
+
 func shouldAutoMaterialize(snapshot map[string]any, item map[string]any) bool {
 	if !boolValue(snapshot["auto_material"]) {
 		return false
@@ -635,7 +645,7 @@ func (s *discoveryService) confirmResults(actor identityservice.PublicUser, id i
 		if promoted, _ := item["promoted"].(bool); promoted {
 			continue
 		}
-		_, createErr := s.content.createSource(actor, dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: contentID, Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]), PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
+		_, createErr := s.content.createSource(actor, dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: contentID, Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]), PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item), GameID: optionalString(task.Snapshot["game_id"])})
 		if errors.Is(createErr, ErrDuplicate) {
 			task.Stats.Duplicate++
 			item["promoted"] = true
