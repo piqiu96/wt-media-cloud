@@ -26,6 +26,8 @@ describe('content pool page', () => {
     expect(source).toContain('discover-mode')
     expect(source).not.toContain('筛选条件')
     expect(source).toContain('interaction')
+    expect(source).toContain("colKey: 'source'")
+    expect(source).toContain('updated_by_name')
     expect(source).toContain('interactionLabel')
     expect(source).toContain('result?.items')
     expect(source).toContain('discovery.importResults')

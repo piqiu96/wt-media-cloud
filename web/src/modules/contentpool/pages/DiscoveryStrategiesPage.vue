@@ -40,6 +40,8 @@ const columns = [
   { colKey: 'schedule', title: '执行周期', width: 130 },
   { colKey: 'material', title: '转素材规则', minWidth: 170 },
   { colKey: 'latest', title: '最近效果', minWidth: 200 },
+  { colKey: 'updated_at', title: '修改时间', width: 170 },
+  { colKey: 'updated_by_name', title: '修改人', width: 110 },
   { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
@@ -394,6 +396,7 @@ function latestSummary(row) {
             <template #schedule="{ row }">{{ scheduleLabel(row.schedule) }}</template>
             <template #material="{ row }">{{ materialLabel(row) }}</template>
             <template #latest="{ row }">{{ latestSummary(row) }}</template>
+            <template #updated_at="{ row }">{{ dateLabel(row.updated_at) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
             <template #op="{ row }">
               <t-space size="small">
@@ -401,8 +404,13 @@ function latestSummary(row) {
                 <t-button size="small" theme="primary" :disabled="row.status !== 'enabled' || isRunning(row) || row.strategy_type === 'author'" @click="run(row)">执行</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="$router.push(`/crawl-tasks?strategy_id=${row.id}`)">任务</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)" @click="openEdit(row)">编辑</t-button>
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCopy(row)">复制</t-button>
-                <t-button size="small" class="wt-secondary-button" variant="outline" theme="danger" :disabled="isRunning(row)" @click="remove(row)">删除</t-button>
+                <t-dropdown trigger="click">
+                  <t-button size="small" class="wt-secondary-button" variant="outline">更多</t-button>
+                  <t-dropdown-menu>
+                    <t-dropdown-item @click="openCopy(row)">复制</t-dropdown-item>
+                    <t-dropdown-item :disabled="isRunning(row)" @click="remove(row)">删除</t-dropdown-item>
+                  </t-dropdown-menu>
+                </t-dropdown>
               </t-space>
             </template>
           </t-table>

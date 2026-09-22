@@ -93,10 +93,11 @@ const columns = [
   { colKey: 'author_name', title: '作者', width: 140 },
   { colKey: 'interaction', title: '互动', width: 170 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
-  { colKey: 'strategy_id', title: '来源策略', minWidth: 180 },
-  { colKey: 'crawl_task_id', title: '来源任务', minWidth: 240 },
+  { colKey: 'source', title: '来源', minWidth: 260 },
   { colKey: 'published_at', title: '发布时间', width: 170 },
   { colKey: 'created_at', title: '发现时间', width: 170 },
+  { colKey: 'updated_at', title: '修改时间', width: 170 },
+  { colKey: 'updated_by_name', title: '修改人', width: 120 },
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
@@ -489,8 +490,14 @@ function openImageViewer(url) {
             </template>
             <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
             <template #interaction="{ row }">{{ interactionLabel(row) }}</template>
-            <template #strategy_id="{ row }"><t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link><span v-else>-</span></template>
-            <template #crawl_task_id="{ row }"><t-link v-if="row.crawl_task_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?task_id=${row.crawl_task_id}`)">{{ taskLabel(row) }}</t-link><span v-else>-</span></template>
+            <template #source="{ row }">
+              <div class="source-cell">
+                <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link>
+                <small v-if="row.crawl_task_id">{{ taskLabel(row) }}</small>
+                <span v-if="!row.strategy_id && !row.crawl_task_id">-</span>
+              </div>
+            </template>
+            <template #updated_at="{ row }">{{ dateLabel(row.updated_at) }}</template>
             <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
             <template #created_at="{ row }">{{ dateLabel(row.created_at) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
@@ -699,6 +706,8 @@ function openImageViewer(url) {
 .detail-primary { min-width: 0; }
 .detail-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .detail-title-row h3 { margin: 0; color: var(--wt-text-primary); font-size: 21px; font-weight: 650; line-height: 1.35; }
+.source-cell { display: flex; flex-direction: column; gap: 2px; }
+.source-cell small { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .detail-meta-grid div, .detail-metrics div { padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
 .detail-meta-grid span, .detail-metrics span { display: block; color: var(--wt-text-tertiary); font-size: 12px; }

@@ -101,7 +101,7 @@ func CreateCrawlTask(v model.CrawlTask) (model.CrawlTask, error) {
 func createCrawlTask(db *gorm.DB, v model.CrawlTask) (model.CrawlTask, error) {
 	snapshot, _ := json.Marshal(v.Snapshot)
 	stats, _ := json.Marshal(v.Stats)
-	result := db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,parent_task_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullableID(v.ParentTaskID), nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,parent_task_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullableID(v.ParentTaskID), nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		return model.CrawlTask{}, result.Error
 	}

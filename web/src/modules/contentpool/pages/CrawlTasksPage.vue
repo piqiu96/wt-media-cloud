@@ -31,6 +31,8 @@ const columns = [
   { colKey: 'found', title: '发现结果', minWidth: 240 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'executed_at', title: '执行时间', width: 170 },
+  { colKey: 'updated_at', title: '修改时间', width: 170 },
+  { colKey: 'updated_by_name', title: '修改人', width: 110 },
   { colKey: 'op', title: '操作', width: 140, fixed: 'right' },
 ]
 
@@ -313,6 +315,7 @@ function hasFailed(task) {
             <template #found="{ row }">{{ foundSummary(row) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
             <template #executed_at="{ row }">{{ dateLabel(row.created_at) }}</template>
+            <template #updated_at="{ row }">{{ dateLabel(row.updated_at) }}</template>
             <template #op="{ row }">
               <t-space size="small">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="open(row)">详情</t-button>

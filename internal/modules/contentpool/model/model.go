@@ -57,6 +57,7 @@ type SourceContentView struct {
 	StrategyName  string `json:"strategy_name,omitempty"`
 	CrawlTaskName string `json:"crawl_task_name,omitempty"`
 	CreatedByName string `json:"created_by_name,omitempty"`
+	UpdatedByName string `json:"updated_by_name,omitempty"`
 	AuditedByName string `json:"audited_by_name,omitempty"`
 }
 
