@@ -42,6 +42,12 @@ type SourceContent struct {
 	UpdatedAt         time.Time             `json:"updated_at"`
 }
 
+type SourceContentView struct {
+	SourceContent
+	StrategyName  string `json:"strategy_name,omitempty"`
+	CrawlTaskName string `json:"crawl_task_name,omitempty"`
+}
+
 type Material struct {
 	ID              int64                 `json:"id"`
 	TeamID          sharedidentity.TeamID `json:"team_id"`

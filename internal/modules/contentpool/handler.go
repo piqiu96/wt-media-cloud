@@ -92,7 +92,7 @@ func ListContent(_ context.Context, c *hertzapp.RequestContext) {
 		team = &teamValue
 	}
 	filter := dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search")}
-	for name, target := range map[string]**int64{"strategy_id": &filter.StrategyID, "crawl_task_id": &filter.CrawlTaskID} {
+	for name, target := range map[string]**int64{"strategy_id": &filter.StrategyID, "crawl_task_id": &filter.CrawlTaskID, "material_id": &filter.MaterialID} {
 		if raw := strings.TrimSpace(c.Query(name)); raw != "" {
 			value, err := strconv.ParseInt(raw, 10, 64)
 			if err != nil || value <= 0 {

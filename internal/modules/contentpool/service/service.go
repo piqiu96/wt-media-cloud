@@ -12,11 +12,12 @@ import (
 )
 
 type (
-	Status        = model.Status
-	SourceContent = model.SourceContent
-	Material      = model.Material
-	SourceInput   = dto.SourceInput
-	Filter        = dto.Filter
+	Status            = model.Status
+	SourceContent     = model.SourceContent
+	SourceContentView = model.SourceContentView
+	Material          = model.Material
+	SourceInput       = dto.SourceInput
+	Filter            = dto.Filter
 )
 
 const (
@@ -35,8 +36,8 @@ var (
 
 type contentStore interface {
 	CreateSource(model.SourceContent, json.RawMessage) (model.SourceContent, error)
-	ListSources(dto.Filter) ([]model.SourceContent, error)
-	FindSource(int64) (model.SourceContent, bool, error)
+	ListSources(dto.Filter) ([]model.SourceContentView, error)
+	FindSource(int64) (model.SourceContentView, bool, error)
 	UpdateStatus(int64, model.Status, string, string) (model.SourceContent, error)
 	RecordMaterialFailure(int64, string) (model.SourceContent, error)
 	Materialize(int64, identityservice.UserID, time.Time) (model.Material, error)
@@ -85,7 +86,7 @@ func (s *contentService) createSource(actor identityservice.PublicUser, input dt
 	return item, err
 }
 
-func (s *contentService) list(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceContent, error) {
+func (s *contentService) list(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceContentView, error) {
 	scope, err := s.scope(actor, filter.TeamID)
 	if err != nil {
 		return nil, err
@@ -94,13 +95,13 @@ func (s *contentService) list(actor identityservice.PublicUser, filter dto.Filte
 	return s.store.ListSources(filter)
 }
 
-func (s *contentService) get(actor identityservice.PublicUser, id int64) (model.SourceContent, bool, error) {
+func (s *contentService) get(actor identityservice.PublicUser, id int64) (model.SourceContentView, bool, error) {
 	item, found, err := s.store.FindSource(id)
 	if err != nil || !found {
 		return item, found, err
 	}
 	if _, err := s.scope(actor, &item.TeamID); err != nil {
-		return model.SourceContent{}, false, err
+		return model.SourceContentView{}, false, err
 	}
 	return item, true, nil
 }
@@ -156,7 +157,7 @@ func (s *contentService) batchMaterialize(actor identityservice.PublicUser, ids 
 			continue
 		}
 		result.Succeeded++
-		result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Success: true, Source: &source, Material: &material})
+		result.Items = append(result.Items, dto.BatchOperationItem{ID: id, Success: true, Source: &source.SourceContent, Material: &material})
 	}
 	return result
 }

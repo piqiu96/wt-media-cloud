@@ -12,10 +12,10 @@ import (
 func CreateSource(actor identityservice.PublicUser, input dto.SourceInput) (model.SourceContent, error) {
 	return defaultContentService().createSource(actor, input)
 }
-func List(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceContent, error) {
+func List(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceContentView, error) {
 	return defaultContentService().list(actor, filter)
 }
-func Get(actor identityservice.PublicUser, id int64) (model.SourceContent, bool, error) {
+func Get(actor identityservice.PublicUser, id int64) (model.SourceContentView, bool, error) {
 	return defaultContentService().get(actor, id)
 }
 func SetStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {

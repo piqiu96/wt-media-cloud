@@ -17,6 +17,8 @@ import (
 
 const sourceColumns = `id, team_id, platform, platform_content_id, title, description, cover_url, source_url, author_id, author_name, source_type, strategy_id, crawl_task_id, like_count, favorite_count, published_at, status, ignored_reason, audit_note, failure_reason, material_id, created_by, created_at, updated_at`
 
+const sourceViewColumns = `s.id, s.team_id, s.platform, s.platform_content_id, s.title, s.description, s.cover_url, s.source_url, s.author_id, s.author_name, s.source_type, s.strategy_id, s.crawl_task_id, s.like_count, s.favorite_count, s.published_at, s.status, s.ignored_reason, s.audit_note, s.failure_reason, s.material_id, s.created_by, s.created_at, s.updated_at, COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '') AS strategy_name, CASE WHEN t.id IS NULL THEN '' ELSE CONCAT(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), ''), st.name, '人工任务'), ' · ', DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i')) END AS crawl_task_name`
+
 func CreateSource(v model.SourceContent, raw json.RawMessage) (model.SourceContent, error) {
 	return createSource(database.DB(), v, raw)
 }
@@ -36,54 +38,24 @@ func createSource(db *gorm.DB, v model.SourceContent, raw json.RawMessage) (mode
 	return v, nil
 }
 
-func ListSources(filter Filter) ([]model.SourceContent, error) {
+func ListSources(filter Filter) ([]model.SourceContentView, error) {
 	return listSources(database.DB(), filter)
 }
-func listSources(db *gorm.DB, filter Filter) ([]model.SourceContent, error) {
-	query := `SELECT ` + sourceColumns + ` FROM source_contents`
-	conditions := []string{}
-	args := []any{}
-	if filter.TeamID != nil {
-		conditions = append(conditions, "team_id = ?")
-		args = append(args, *filter.TeamID)
-	}
-	if filter.Platform != "" {
-		conditions = append(conditions, "platform = ?")
-		args = append(args, filter.Platform)
-	}
-	if filter.Status != "" {
-		conditions = append(conditions, "status = ?")
-		args = append(args, filter.Status)
-	}
-	if filter.SourceType != "" {
-		conditions = append(conditions, "source_type = ?")
-		args = append(args, filter.SourceType)
-	}
-	if filter.StrategyID != nil {
-		conditions = append(conditions, "strategy_id = ?")
-		args = append(args, *filter.StrategyID)
-	}
-	if filter.CrawlTaskID != nil {
-		conditions = append(conditions, "crawl_task_id = ?")
-		args = append(args, *filter.CrawlTaskID)
-	}
-	if strings.TrimSpace(filter.Search) != "" {
-		like := "%" + strings.TrimSpace(filter.Search) + "%"
-		conditions = append(conditions, "(title LIKE ? OR platform_content_id LIKE ? OR author_name LIKE ? OR source_url LIKE ?)")
-		args = append(args, like, like, like, like)
-	}
+func listSources(db *gorm.DB, filter Filter) ([]model.SourceContentView, error) {
+	query := `SELECT ` + sourceViewColumns + ` FROM source_contents s LEFT JOIN discovery_strategies st ON st.id = s.strategy_id LEFT JOIN crawl_tasks t ON t.id = s.crawl_task_id`
+	conditions, args := sourceViewConditions(filter)
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY created_at DESC, id DESC LIMIT 500"
+	query += " ORDER BY s.created_at DESC, s.id DESC LIMIT 500"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []model.SourceContent{}
+	out := []model.SourceContentView{}
 	for rows.Next() {
-		item, err := scanSource(rows)
+		item, err := scanSourceView(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -92,13 +64,54 @@ func listSources(db *gorm.DB, filter Filter) ([]model.SourceContent, error) {
 	return out, rows.Err()
 }
 
-func FindSource(id int64) (model.SourceContent, bool, error) { return findSource(database.DB(), id) }
-func findSource(db *gorm.DB, id int64) (model.SourceContent, bool, error) {
-	item, err := scanSource(db.Raw(`SELECT `+sourceColumns+` FROM source_contents WHERE id = ?`, id).Row())
+func FindSource(id int64) (model.SourceContentView, bool, error) {
+	return findSource(database.DB(), id)
+}
+func findSource(db *gorm.DB, id int64) (model.SourceContentView, bool, error) {
+	item, err := scanSourceView(db.Raw(`SELECT `+sourceViewColumns+` FROM source_contents s LEFT JOIN discovery_strategies st ON st.id = s.strategy_id LEFT JOIN crawl_tasks t ON t.id = s.crawl_task_id WHERE s.id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
-		return model.SourceContent{}, false, nil
+		return model.SourceContentView{}, false, nil
 	}
 	return item, err == nil, err
+}
+
+func sourceViewConditions(filter Filter) ([]string, []any) {
+	conditions := []string{}
+	args := []any{}
+	if filter.TeamID != nil {
+		conditions = append(conditions, "s.team_id = ?")
+		args = append(args, *filter.TeamID)
+	}
+	if filter.Platform != "" {
+		conditions = append(conditions, "s.platform = ?")
+		args = append(args, filter.Platform)
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "s.status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.SourceType != "" {
+		conditions = append(conditions, "s.source_type = ?")
+		args = append(args, filter.SourceType)
+	}
+	if filter.StrategyID != nil {
+		conditions = append(conditions, "s.strategy_id = ?")
+		args = append(args, *filter.StrategyID)
+	}
+	if filter.CrawlTaskID != nil {
+		conditions = append(conditions, "s.crawl_task_id = ?")
+		args = append(args, *filter.CrawlTaskID)
+	}
+	if filter.MaterialID != nil {
+		conditions = append(conditions, "s.material_id = ?")
+		args = append(args, *filter.MaterialID)
+	}
+	if strings.TrimSpace(filter.Search) != "" {
+		like := "%" + strings.TrimSpace(filter.Search) + "%"
+		conditions = append(conditions, "(s.title LIKE ? OR s.platform_content_id LIKE ? OR s.author_name LIKE ? OR s.source_url LIKE ?)")
+		args = append(args, like, like, like, like)
+	}
+	return conditions, args
 }
 func UpdateStatus(id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {
 	return updateStatus(database.DB(), id, status, reason, auditNote)
@@ -118,7 +131,7 @@ func updateStatus(db *gorm.DB, id int64, status model.Status, reason string, aud
 	if !ok {
 		return model.SourceContent{}, errNotFound
 	}
-	return item, nil
+	return item.SourceContent, nil
 }
 func RecordMaterialFailure(id int64, reason string) (model.SourceContent, error) {
 	return recordMaterialFailure(database.DB(), id, reason)
@@ -138,7 +151,7 @@ func recordMaterialFailure(db *gorm.DB, id int64, reason string) (model.SourceCo
 	if !ok {
 		return model.SourceContent{}, errNotFound
 	}
-	return item, nil
+	return item.SourceContent, nil
 }
 func Materialize(id int64, creator int64, now time.Time) (model.Material, error) {
 	return materialize(database.DB(), id, creator, now)
@@ -213,6 +226,51 @@ func scanSource(row scannable) (model.SourceContent, error) {
 	}
 	return item, nil
 }
+func scanSourceView(row scannable) (model.SourceContentView, error) {
+	var item model.SourceContentView
+	var strategyName, crawlTaskName sql.NullString
+	base, err := scanSourceWithExtras(row, &strategyName, &crawlTaskName)
+	if err != nil {
+		return item, err
+	}
+	item.SourceContent, item.StrategyName, item.CrawlTaskName = base, strategyName.String, crawlTaskName.String
+	return item, nil
+}
+func scanSourceWithExtras(row scannable, strategyName *sql.NullString, crawlTaskName *sql.NullString) (model.SourceContent, error) {
+	var item model.SourceContent
+	var team, creator int64
+	var likeCount, favoriteCount int64
+	var status string
+	var strategyID, taskID, materialID sql.NullInt64
+	var description, cover, url, authorID, authorName, sourceType, reason, auditNote, failureReason sql.NullString
+	var published sql.NullTime
+	err := row.Scan(&item.ID, &team, &item.Platform, &item.PlatformContentID, &item.Title, &description, &cover, &url, &authorID, &authorName, &sourceType, &strategyID, &taskID, &likeCount, &favoriteCount, &published, &status, &reason, &auditNote, &failureReason, &materialID, &creator, &item.CreatedAt, &item.UpdatedAt, strategyName, crawlTaskName)
+	if err != nil {
+		return item, err
+	}
+	item.TeamID = sharedidentity.TeamID(team)
+	item.CreatedBy = sharedidentity.UserID(creator)
+	item.Status = model.Status(status)
+	item.Description, item.CoverURL, item.SourceURL, item.AuthorID, item.AuthorName, item.SourceType, item.IgnoredReason, item.AuditNote, item.FailureReason = description.String, cover.String, url.String, authorID.String, authorName.String, sourceType.String, reason.String, auditNote.String, failureReason.String
+	item.LikeCount, item.FavoriteCount = likeCount, favoriteCount
+	if strategyID.Valid {
+		value := strategyID.Int64
+		item.StrategyID = &value
+	}
+	if taskID.Valid {
+		value := taskID.Int64
+		item.CrawlTaskID = &value
+	}
+	if materialID.Valid {
+		value := materialID.Int64
+		item.MaterialID = &value
+	}
+	if published.Valid {
+		item.PublishedAt = &published.Time
+	}
+	return item, nil
+}
+
 func nullableID(value *int64) any {
 	if value == nil {
 		return nil

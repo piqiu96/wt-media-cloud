@@ -47,10 +47,10 @@ func (s *contentService) Scope(actor identityservice.PublicUser, team *identitys
 func (s *contentService) CreateSource(actor identityservice.PublicUser, input dto.SourceInput) (model.SourceContent, error) {
 	return s.createSource(actor, input)
 }
-func (s *contentService) List(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceContent, error) {
+func (s *contentService) List(actor identityservice.PublicUser, filter dto.Filter) ([]model.SourceContentView, error) {
 	return s.list(actor, filter)
 }
-func (s *contentService) Get(actor identityservice.PublicUser, id int64) (model.SourceContent, bool, error) {
+func (s *contentService) Get(actor identityservice.PublicUser, id int64) (model.SourceContentView, bool, error) {
 	return s.get(actor, id)
 }
 func (s *contentService) SetStatus(actor identityservice.PublicUser, id int64, status model.Status, reason string) (model.SourceContent, error) {

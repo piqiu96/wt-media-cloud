@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,20 +30,55 @@ func (m *memoryStore) CreateSource(v SourceContent, _ json.RawMessage) (SourceCo
 	return v, nil
 }
 
-func (m *memoryStore) ListSources(f Filter) ([]SourceContent, error) {
-	var out []SourceContent
+func (m *memoryStore) ListSources(f Filter) ([]SourceContentView, error) {
+	var out []SourceContentView
 	for _, item := range m.items {
 		if f.TeamID != nil && item.TeamID != *f.TeamID {
 			continue
 		}
-		out = append(out, item)
+		if f.Platform != "" && item.Platform != f.Platform {
+			continue
+		}
+		if f.Status != "" && item.Status != f.Status {
+			continue
+		}
+		if f.SourceType != "" && item.SourceType != f.SourceType {
+			continue
+		}
+		if f.StrategyID != nil && (item.StrategyID == nil || *item.StrategyID != *f.StrategyID) {
+			continue
+		}
+		if f.CrawlTaskID != nil && (item.CrawlTaskID == nil || *item.CrawlTaskID != *f.CrawlTaskID) {
+			continue
+		}
+		if f.MaterialID != nil && (item.MaterialID == nil || *item.MaterialID != *f.MaterialID) {
+			continue
+		}
+		view := SourceContentView{SourceContent: item}
+		if item.StrategyID != nil {
+			view.StrategyName = "Strategy " + fmt.Sprint(*item.StrategyID)
+		}
+		if item.CrawlTaskID != nil {
+			view.CrawlTaskName = "Task " + fmt.Sprint(*item.CrawlTaskID)
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }
 
-func (m *memoryStore) FindSource(id int64) (SourceContent, bool, error) {
+func (m *memoryStore) FindSource(id int64) (SourceContentView, bool, error) {
 	v, ok := m.items[id]
-	return v, ok, nil
+	if !ok {
+		return SourceContentView{}, false, nil
+	}
+	view := SourceContentView{SourceContent: v}
+	if v.StrategyID != nil {
+		view.StrategyName = "Strategy " + fmt.Sprint(*v.StrategyID)
+	}
+	if v.CrawlTaskID != nil {
+		view.CrawlTaskName = "Task " + fmt.Sprint(*v.CrawlTaskID)
+	}
+	return view, true, nil
 }
 
 func (m *memoryStore) UpdateStatus(id int64, status Status, reason string, auditNote string) (SourceContent, error) {

@@ -37,6 +37,7 @@ type Filter struct {
 	Search      string
 	StrategyID  *int64
 	CrawlTaskID *int64
+	MaterialID  *int64
 }
 
 type CrawlerRequest struct {

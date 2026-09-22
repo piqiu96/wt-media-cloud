@@ -20,7 +20,7 @@ func (mysqlContentStore) CreateSource(v model.SourceContent, raw json.RawMessage
 	}
 	return item, err
 }
-func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContent, error) {
+func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContentView, error) {
 	return repository.ListSources(repository.Filter{
 		TeamID:      v.TeamID,
 		Platform:    v.Platform,
@@ -29,9 +29,10 @@ func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContent, error
 		Search:      v.Search,
 		StrategyID:  v.StrategyID,
 		CrawlTaskID: v.CrawlTaskID,
+		MaterialID:  v.MaterialID,
 	})
 }
-func (mysqlContentStore) FindSource(id int64) (model.SourceContent, bool, error) {
+func (mysqlContentStore) FindSource(id int64) (model.SourceContentView, bool, error) {
 	return repository.FindSource(id)
 }
 func (mysqlContentStore) UpdateStatus(id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {

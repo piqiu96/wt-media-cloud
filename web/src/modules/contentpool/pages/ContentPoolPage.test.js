@@ -48,12 +48,34 @@ describe('content pool page', () => {
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {
     expect(source).toContain("fixed: 'right'")
-    expect(source).toContain(":scroll=\"{ x: '1500px' }\"")
+    expect(source).toContain(":scroll=\"{ x: '1760px' }\"")
     expect(source).toContain('class="table-scroll-wrap"')
   })
 
   it('supports the read-only material library projection without duplicating a page', () => {
     expect(source).toContain("route.path === '/material-library'")
     expect(source).toContain("status: isLibrary.value ? 'material_created'")
+    expect(source).toContain("material_id: materialFilter.value || undefined")
+  })
+
+  it('renders a large content decision workspace instead of a CRUD field table', () => {
+    expect(source).toContain('size="min(72vw, 1200px)"')
+    expect(source).toContain('class="detail-workspace"')
+    expect(source).toContain('class="detail-cover"')
+    expect(source).toContain('row.strategy_name')
+    expect(source).toContain('row.crawl_task_name')
+    expect(source).toContain('查看素材')
+    expect(source).toContain("router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)")
+    expect(source).toContain("router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)")
+  })
+
+  it('keeps review progress and failure state explicit', () => {
+    expect(source).toContain('reviewQueue')
+    expect(source).toContain('reviewIndex')
+    expect(source).toContain('当前 {{ reviewIndex + 1 }} / {{ reviewQueue.length }}')
+    expect(source).toContain('reviewError')
+    expect(source).toContain('reviewProcessing')
+    expect(source).toContain("reviewError.value = e.message || '审核操作失败，当前内容保持可处理状态'")
+    expect(source).toContain("reviewAction('skip')")
   })
 })
