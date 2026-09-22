@@ -20,6 +20,8 @@ const visible = ref(false)
 const saving = ref(false)
 const editingID = ref(null)
 const form = ref(defaultForm())
+const scheduleMode = ref('manual')
+const scheduleTime = ref('09:00')
 const keywordVisible = ref(false)
 const authorVisible = ref(false)
 const keywordTarget = ref(null)
@@ -83,7 +85,7 @@ onMounted(async () => {
 function defaultForm() {
   return {
     name: '',
-    game_id: '',
+    game_id: 'other',
     strategy_type: 'keyword',
     platform: 'douyin',
     config: {
@@ -123,6 +125,8 @@ function resetFilters() {
 function openCreate() {
   editingID.value = null
   form.value = defaultForm()
+  scheduleMode.value = 'manual'
+  scheduleTime.value = '09:00'
   visible.value = true
 }
 
@@ -146,6 +150,17 @@ function fillForm(row) {
   }
   if (!Array.isArray(form.value.config.keywords)) form.value.config.keywords = []
   if (!Array.isArray(form.value.config.authors)) form.value.config.authors = []
+  if (form.value.game_id === '') form.value.game_id = 'other'
+  const schedule = form.value.schedule || 'manual'
+  if (schedule === 'manual') {
+    scheduleMode.value = 'manual'
+  } else if (String(schedule).startsWith('daily ')) {
+    scheduleMode.value = 'scheduled'
+    scheduleTime.value = String(schedule).slice(6)
+  } else {
+    scheduleMode.value = 'scheduled'
+    scheduleTime.value = '09:00'
+  }
 }
 
 function openEdit(row) {
@@ -179,7 +194,8 @@ async function save() {
       like_threshold: Number(form.value.config.like_threshold || 0),
       favorite_threshold: Number(form.value.config.favorite_threshold || 0),
     }
-    form.value.game_id = form.value.game_id || null
+    form.value.game_id = form.value.game_id || 'other'
+    form.value.schedule = scheduleMode.value === 'manual' ? 'manual' : `daily ${scheduleTime.value}`
     config.keywords = Array.isArray(config.keywords) ? config.keywords.map((item) => String(item).trim()).filter(Boolean) : []
     config.authors = Array.isArray(config.authors) ? config.authors.map((item) => String(item).trim()).filter(Boolean) : []
     const payload = { ...form.value, config }

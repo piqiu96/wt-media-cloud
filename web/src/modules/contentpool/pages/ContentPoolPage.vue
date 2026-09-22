@@ -52,6 +52,8 @@ const manualForm = ref({ platform: 'douyin', ids: '', keyword: '', keywords: [] 
 const manualTeamId = ref('')
 const manualTeamLocked = ref(false)
 const manualGameId = ref('')
+const manualFilters = ref({ publish_time: '不限', count: 50, sort: '综合排序', tags: [] })
+const showAdvanced = ref(false)
 const teams = ref([])
 const games = ref([])
 const imageViewerVisible = ref(false)
@@ -137,6 +139,8 @@ function openManual(mode) {
   selectedResultKeys.value = []
   resetManualPagination()
   manualForm.value = { platform: 'douyin', ids: '', keyword: '', keywords: [] }
+  manualFilters.value = { publish_time: '不限', count: 50, sort: '综合排序', tags: [] }
+  showAdvanced.value = false
   manualVisible.value = true
 }
 
@@ -153,6 +157,7 @@ async function loadManualContext() {
     teams.value = Array.isArray(data) ? data : []
     const gameData = await users.listGames()
     games.value = Array.isArray(gameData) ? gameData : []
+    if (!manualGameId.value && games.value.length) manualGameId.value = (games.value.find((g) => g.id === 'other') || games.value[0]).id
   } catch {
     teams.value = []
     games.value = []
@@ -190,7 +195,7 @@ async function searchManual(reset = false) {
     } : {
       platform: form.platform,
       keyword: (form.keywords || []).join(' '),
-      limit: 20,
+      limit: Number(manualFilters.value.count) || 50,
       offset: manualPagination.value.nextOffset || 0,
     })
     manualResults.value = Array.isArray(result?.items) ? result.items : []
@@ -596,43 +601,90 @@ function openImageViewer(url) {
           </div>
         </template>
       </t-drawer>
-      <t-dialog v-model:visible="manualVisible" :header="manualTitle()" width="960px" :confirm-btn="{ loading: manualLoading, theme: 'primary', content: manualResults.length ? '加入内容池' : '搜索' }" @confirm="confirmManual">
-        <t-form label-width="88px">
-          <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-          <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
-          <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
-          <t-form-item v-if="manualMode === 'id'" label="ID/链接"><t-textarea v-model="manualForm.ids" :rows="4" placeholder="支持抖音视频 ID、视频链接或分享短链接，可输入多个（换行、逗号或空格分隔）" /></t-form-item>
-          <t-form-item v-else label="关键词"><KeywordTags v-model="manualForm.keywords" placeholder="输入关键词后按回车添加，支持批量粘贴" /></t-form-item>
-        </t-form>
-        <t-alert v-if="manualSearched" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，请选择后加入内容池`" style="margin: 12px 0" />
-        <t-table v-if="manualResults.length" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
-          <template #title="{ row }">
-            <div class="title-cell">
-              <button v-if="row.cover_url" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
-                <img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
-              </button>
-              <div v-else class="title-media"><span>暂无封面</span></div>
-              <div class="title-copy">
-                <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
-                <span v-else :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</span>
-                <small>{{ row.platform_content_id }}</small>
-              </div>
+      <t-dialog v-model:visible="manualVisible" header="发现内容" width="920px" :footer="false">
+        <div class="discover-dialog">
+          <div class="discover-modes">
+            <button type="button" class="discover-mode" :class="{ 'is-active': manualMode === 'id' }" @click="manualMode = 'id'">
+              <strong>ID/链接发现</strong><span>通过视频 ID 或链接发现内容</span>
+            </button>
+            <button type="button" class="discover-mode" :class="{ 'is-active': manualMode === 'keyword' }" @click="manualMode = 'keyword'">
+              <strong>关键词发现</strong><span>通过关键词搜索发现内容</span>
+            </button>
+          </div>
+
+          <div class="discover-section">
+            <div class="discover-section__title"><span class="discover-no">①</span>基础信息<small>选择平台和归属游戏，用于内容分类和数据统计</small></div>
+            <t-form label-width="80px">
+              <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
+              <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
+              <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+            </t-form>
+          </div>
+
+          <div class="discover-section">
+            <div class="discover-section__title"><span class="discover-no">②</span>{{ manualMode === 'id' ? '输入内容' : '关键词配置' }}<small>{{ manualMode === 'id' ? '支持抖音视频 ID、视频链接或分享短链接，可输入多个（换行、逗号或空格分隔）' : '添加关键词，支持批量粘贴，按回车自动生成标签' }}</small></div>
+            <div v-if="manualMode === 'id'">
+              <t-textarea v-model="manualForm.ids" :rows="4" :maxlength="500" placeholder="输入视频 ID 或链接，每行一个，支持多种格式：&#10;729384729384&#10;https://www.douyin.com/video/xxxxxxxxx&#10;https://v.douyin.com/xxxxxx/" />
+              <div class="discover-counter">{{ manualForm.ids.length }}/500</div>
             </div>
-          </template>
-          <template #author_name="{ row }">
-            <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
-            <span v-else>{{ authorLabel(row) }}</span>
-          </template>
-          <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
-          <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
-          <template #view_count="{ row }">{{ countLabel(row.view_count) }}</template>
-          <template #comment_count="{ row }">{{ countLabel(row.comment_count) }}</template>
-          <template #share_count="{ row }">{{ countLabel(row.share_count) }}</template>
-          <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
-        </t-table>
-        <div v-if="manualMode === 'keyword' && manualSearched" class="manual-search-actions">
-          <t-button variant="outline" :loading="manualLoading" @click="searchManual(true)">重新搜索</t-button>
-          <t-button variant="outline" :loading="manualLoading" :disabled="!manualPagination.hasMore" @click="searchManual()">下一页</t-button>
+            <KeywordTags v-else v-model="manualForm.keywords" :max="100" placeholder="输入关键词，按回车添加" />
+          </div>
+
+          <div class="discover-section">
+            <div class="discover-section__title"><span class="discover-no">③</span>筛选条件（可选）<small>设置更多条件，精准控制搜索结果</small></div>
+            <t-form label-width="80px">
+              <t-form-item label="发布时间"><t-select v-model="manualFilters.publish_time"><t-option value="不限" label="不限" /><t-option value="最近24小时" label="最近24小时" /><t-option value="最近7天" label="最近7天" /><t-option value="最近30天" label="最近30天" /></t-select></t-form-item>
+              <t-form-item label="内容数量"><t-select v-model="manualFilters.count"><t-option :value="50" label="50条" /><t-option :value="100" label="100条" /><t-option :value="200" label="200条" /></t-select></t-form-item>
+              <t-form-item v-if="manualMode === 'keyword'" label="排序方式"><t-radio-group v-model="manualFilters.sort"><t-radio value="综合排序">综合排序</t-radio><t-radio value="最新发布">最新发布</t-radio><t-radio value="点赞最多">点赞最多</t-radio></t-radio-group></t-form-item>
+              <t-form-item label="来源标签"><KeywordTags v-model="manualFilters.tags" placeholder="请选择或输入标签，按回车添加" /></t-form-item>
+            </t-form>
+          </div>
+
+          <div class="discover-section">
+            <button type="button" class="discover-section__title discover-collapse" @click="showAdvanced = !showAdvanced"><span class="discover-no">④</span>高级设置（可选）<small>展开更多设置</small><span class="discover-toggle">{{ showAdvanced ? '收起' : '展开' }}</span></button>
+            <div v-if="showAdvanced" class="discover-advanced">
+              <t-alert theme="info" message="高级设置暂未开放，可在筛选条件中完成基础过滤。" />
+            </div>
+          </div>
+
+          <t-alert v-if="manualSearched" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，已选 ${selectedResultKeys.length} 条，可加入内容池`" />
+          <div v-if="manualResults.length" class="discover-results">
+            <div class="discover-section__title">结果预览<small>仅所选内容会加入内容池</small></div>
+            <t-table v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
+              <template #title="{ row }">
+                <div class="title-cell">
+                  <button v-if="row.cover_url" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)"><img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" /></button>
+                  <div v-else class="title-media"><span>暂无封面</span></div>
+                  <div class="title-copy">
+                    <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
+                    <span v-else :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</span>
+                    <small>{{ row.platform_content_id }}</small>
+                  </div>
+                </div>
+              </template>
+              <template #author_name="{ row }">
+                <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
+                <span v-else>{{ authorLabel(row) }}</span>
+              </template>
+              <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
+              <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
+              <template #view_count="{ row }">{{ countLabel(row.view_count) }}</template>
+              <template #comment_count="{ row }">{{ countLabel(row.comment_count) }}</template>
+              <template #share_count="{ row }">{{ countLabel(row.share_count) }}</template>
+              <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
+            </t-table>
+            <div v-if="manualMode === 'keyword' && manualSearched" class="manual-search-actions">
+              <t-button variant="outline" :loading="manualLoading" @click="searchManual(true)">重新发现</t-button>
+              <t-button variant="outline" :loading="manualLoading" :disabled="!manualPagination.hasMore" @click="searchManual()">下一页</t-button>
+            </div>
+          </div>
+
+          <t-alert theme="info" message="小提示：发现的内容将在结果页中进行预览和筛选，确认后可一键加入内容池。" />
+
+          <div class="discover-footer">
+            <t-button variant="outline" @click="manualVisible = false">取消</t-button>
+            <t-button theme="primary" :loading="manualLoading" @click="confirmManual">{{ manualResults.length ? '加入内容池' : '开始发现' }}</t-button>
+          </div>
         </div>
       </t-dialog>
       <t-image-viewer
@@ -700,4 +752,21 @@ function openImageViewer(url) {
   .detail-primary-link { width: 100%; }
   .review-actions { flex-wrap: wrap; }
 }
+.discover-dialog { display: flex; flex-direction: column; gap: 14px; }
+.discover-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.discover-mode { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-page); text-align: left; cursor: pointer; }
+.discover-mode strong { color: var(--wt-text-primary); font-size: 14px; }
+.discover-mode span { color: var(--wt-text-tertiary); font-size: 12px; }
+.discover-mode.is-active { border-color: var(--wt-primary); background: var(--wt-info-bg); }
+.discover-mode.is-active strong { color: var(--wt-primary); }
+.discover-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }
+.discover-section__title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.discover-section__title small { color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; }
+.discover-no { color: var(--wt-primary); font-weight: 700; }
+.discover-counter { margin-top: 4px; text-align: right; color: var(--wt-text-tertiary); font-size: 12px; }
+.discover-collapse { width: 100%; border: none; background: transparent; cursor: pointer; }
+.discover-toggle { margin-left: auto; color: var(--wt-primary); font-size: 12px; font-weight: 400; }
+.discover-advanced { margin-top: 8px; }
+.discover-results { display: flex; flex-direction: column; gap: 10px; }
+.discover-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
 </style>
