@@ -156,6 +156,8 @@ func (s *discoveryService) createStrategy(actor identityservice.PublicUser, inpu
 	input.TeamID = *team
 	input.Name = strings.TrimSpace(input.Name)
 	input.CreatedBy = actor.ID
+	actorID := actor.ID
+	input.UpdatedBy = &actorID
 	input.CreatedAt = now
 	input.UpdatedAt = now
 	return s.store.CreateStrategy(input)
@@ -177,6 +179,8 @@ func (s *discoveryService) setStrategyStatus(actor identityservice.PublicUser, i
 	}
 	item.Status = status
 	item.UpdatedAt = s.now()
+	actorID := actor.ID
+	item.UpdatedBy = &actorID
 	return s.store.UpdateStrategy(item)
 }
 
@@ -211,6 +215,8 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 	}
 	current.Name, current.StrategyType, current.Platform, current.Config, current.Schedule, current.Timezone, current.Status, current.UpdatedAt = strings.TrimSpace(input.Name), input.StrategyType, input.Platform, input.Config, input.Schedule, input.Timezone, input.Status, s.now()
 	current.GameID = input.GameID
+	actorID := actor.ID
+	current.UpdatedBy = &actorID
 	return s.store.UpdateStrategy(current)
 }
 

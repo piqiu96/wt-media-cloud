@@ -538,6 +538,8 @@ function openImageViewer(url) {
                 <div><span>发现时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
                 <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
                 <div><span>操作人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
+                <div><span>审核时间</span><strong>{{ dateLabel(detail.audited_at) }}</strong></div>
+                <div><span>审核人</span><strong>{{ detail.audited_by_name || '-' }}</strong></div>
               </div>
               <div class="detail-metrics">
                 <div><span>点赞</span><strong>{{ countLabel(detail.like_count) }}</strong></div>

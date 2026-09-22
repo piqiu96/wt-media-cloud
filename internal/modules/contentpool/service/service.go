@@ -38,7 +38,7 @@ type contentStore interface {
 	CreateSource(model.SourceContent, json.RawMessage) (model.SourceContent, error)
 	ListSources(dto.Filter) ([]model.SourceContentView, error)
 	FindSource(int64) (model.SourceContentView, bool, error)
-	UpdateStatus(int64, model.Status, string, string) (model.SourceContent, error)
+	UpdateStatus(int64, model.Status, string, string, identityservice.UserID, time.Time) (model.SourceContent, error)
 	RecordMaterialFailure(int64, string) (model.SourceContent, error)
 	Materialize(int64, identityservice.UserID, time.Time) (model.Material, error)
 }
@@ -120,7 +120,7 @@ func (s *contentService) setStatus(actor identityservice.PublicUser, id int64, s
 	if item.Status == model.StatusMaterialCreated && status == model.StatusPending {
 		return model.SourceContent{}, ErrInvalidTransition
 	}
-	return s.store.UpdateStatus(id, status, reason, auditNote)
+	return s.store.UpdateStatus(id, status, reason, auditNote, actor.ID, s.now())
 }
 
 func (s *contentService) batchSetStatus(actor identityservice.PublicUser, ids []int64, status model.Status, reason string, auditNote string) (dto.BatchOperationResponse, error) {

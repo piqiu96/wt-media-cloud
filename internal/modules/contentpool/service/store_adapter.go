@@ -35,8 +35,8 @@ func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContentView, e
 func (mysqlContentStore) FindSource(id int64) (model.SourceContentView, bool, error) {
 	return repository.FindSource(id)
 }
-func (mysqlContentStore) UpdateStatus(id int64, status model.Status, reason string, auditNote string) (model.SourceContent, error) {
-	return repository.UpdateStatus(id, status, reason, auditNote)
+func (mysqlContentStore) UpdateStatus(id int64, status model.Status, reason string, auditNote string, actorID identityservice.UserID, now time.Time) (model.SourceContent, error) {
+	return repository.UpdateStatus(id, status, reason, auditNote, actorID, now)
 }
 func (mysqlContentStore) RecordMaterialFailure(id int64, reason string) (model.SourceContent, error) {
 	return repository.RecordMaterialFailure(id, reason)

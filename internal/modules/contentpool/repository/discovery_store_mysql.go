@@ -20,7 +20,7 @@ func CreateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) 
 }
 func createStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	config, _ := json.Marshal(v.Config)
-	result := db.Exec(`INSERT INTO discovery_strategies (team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, nullableStringPtr(v.GameID), v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO discovery_strategies (team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, nullableStringPtr(v.GameID), v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.CreatedBy, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		var mysqlError *mysql.MySQLError
 		if errors.As(result.Error, &mysqlError) && mysqlError.Number == 1062 {
@@ -74,7 +74,7 @@ func UpdateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) 
 }
 func updateStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	config, _ := json.Marshal(v.Config)
-	result := db.Exec(`UPDATE discovery_strategies SET name=?,strategy_type=?,platform=?,config_json=?,schedule=?,timezone=?,status=?,game_id=?,updated_at=? WHERE id=?`, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, nullableStringPtr(v.GameID), v.UpdatedAt, v.ID)
+	result := db.Exec(`UPDATE discovery_strategies SET name=?,strategy_type=?,platform=?,config_json=?,schedule=?,timezone=?,status=?,game_id=?,updated_by=?,updated_at=? WHERE id=?`, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, nullableStringPtr(v.GameID), nullableUserID(v.UpdatedBy), v.UpdatedAt, v.ID)
 	if result.Error != nil {
 		return model.DiscoveryStrategy{}, result.Error
 	}
@@ -101,7 +101,7 @@ func CreateCrawlTask(v model.CrawlTask) (model.CrawlTask, error) {
 func createCrawlTask(db *gorm.DB, v model.CrawlTask) (model.CrawlTask, error) {
 	snapshot, _ := json.Marshal(v.Snapshot)
 	stats, _ := json.Marshal(v.Stats)
-	result := db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,parent_task_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullableID(v.ParentTaskID), nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO crawl_tasks (team_id,strategy_id,parent_task_id,schedule_key,task_type,platform,status,snapshot_json,stats_json,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, v.StrategyID, nullableID(v.ParentTaskID), nullString(v.ScheduleKey), v.TaskType, v.Platform, v.Status, snapshot, stats, v.CreatedBy, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		return model.CrawlTask{}, result.Error
 	}

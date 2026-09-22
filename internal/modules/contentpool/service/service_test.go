@@ -85,7 +85,7 @@ func (m *memoryStore) FindSource(id int64) (SourceContentView, bool, error) {
 	return view, true, nil
 }
 
-func (m *memoryStore) UpdateStatus(id int64, status Status, reason string, auditNote string) (SourceContent, error) {
+func (m *memoryStore) UpdateStatus(id int64, status Status, reason string, auditNote string, actorID identityservice.UserID, now time.Time) (SourceContent, error) {
 	v, ok := m.items[id]
 	if !ok {
 		return SourceContent{}, ErrNotFound
