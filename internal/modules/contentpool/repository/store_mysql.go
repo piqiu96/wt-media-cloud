@@ -47,7 +47,7 @@ func listSources(db *gorm.DB, filter Filter) ([]model.SourceContentView, error) 
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY s.created_at DESC, s.id DESC LIMIT 500"
+	query += " ORDER BY s.id DESC LIMIT 500"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err

@@ -17,12 +17,15 @@ const detail = ref(null)
 const visible = ref(false)
 const retrying = ref(false)
 const activeTab = ref('overview')
+const games = ref([])
+const strategyDrawerVisible = ref(false)
+const strategyDrawer = ref(null)
 const filters = ref({ name: '', status: '' })
 
 const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '任务名称', minWidth: 220 },
-  { colKey: 'strategy', title: '来源策略', minWidth: 160 },
+  { colKey: 'strategy', title: '任务来源', minWidth: 160 },
   { colKey: 'trigger', title: '触发方式', width: 90 },
   { colKey: 'found', title: '发现结果', minWidth: 240 },
   { colKey: 'status', title: '状态', width: 100 },
@@ -66,6 +69,8 @@ async function load() {
     const strategyID = Number(route.query.strategy_id || 0)
     const data = await client.listTasks(strategyID > 0 ? { strategy_id: strategyID } : undefined)
     rows.value = Array.isArray(data) ? data : []
+    const gameRows = await client.listGames()
+    games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
     error.value = e.message || '任务加载失败'
   } finally {
@@ -101,12 +106,54 @@ async function retry(row) {
   }
 }
 
+function sourceType(row) {
+  if (row.task_type === 'discovery_task') return '策略'
+  if (row.task_type === 'retry_failed_task') return '重试'
+  return row.snapshot?.operation === 'url' ? '导入' : '人工'
+}
+
+function sourceName(row) {
+  if (row.task_type === 'discovery_task') return row.snapshot?.strategy_name || '策略'
+  if (row.task_type === 'retry_failed_task') return row.snapshot?.strategy_name || '重试'
+  return row.snapshot?.operation === 'url' ? 'ID导入' : '手动发现'
+}
+
 function strategyName(row) {
-  return row.snapshot?.strategy_name || (row.strategy_id ? `策略 #${row.strategy_id}` : '人工任务')
+  return sourceName(row)
+}
+
+function isStrategyTask(row) {
+  return row.task_type === 'discovery_task' && Boolean(row.strategy_id)
 }
 
 function taskName(row) {
-  return `${strategyName(row)}_${compactTime(row.created_at)}`
+  return `${sourceName(row)}_${compactTime(row.created_at)}`
+}
+
+function gameName(id) {
+  const game = games.value.find((item) => item.id === id)
+  return game?.name || id || '-'
+}
+
+function formatThreshold(value) {
+  const n = Number(value || 0)
+  if (n <= 0) return ''
+  if (n >= 10000) {
+    const w = n / 10000
+    return `${Number.isInteger(w) ? w : w.toFixed(1).replace(/\.0$/, '')}万`
+  }
+  return String(n)
+}
+
+function snapshotMaterialLabel(snapshot) {
+  if (!snapshot?.auto_material) return '关闭'
+  const like = Number(snapshot.like_threshold || 0)
+  const fav = Number(snapshot.favorite_threshold || 0)
+  const parts = []
+  if (like > 0) parts.push(`赞≥${formatThreshold(like)}`)
+  if (fav > 0) parts.push(`藏≥${formatThreshold(fav)}`)
+  const joiner = snapshot.material_rule === 'OR' ? ' 或 ' : ' 且 '
+  return parts.length ? parts.join(joiner) : '关闭'
 }
 
 function compactTime(value) {
@@ -127,7 +174,13 @@ function foundSummary(row) {
 }
 
 function openStrategy(row) {
-  if (row.strategy_id) router.push(`/discovery-strategies?strategy_id=${row.strategy_id}`)
+  strategyDrawer.value = row.snapshot || null
+  strategyDrawerVisible.value = true
+}
+
+function goStrategy() {
+  const id = strategyDrawer.value?.strategy_id
+  if (id) router.push(`/discovery-strategies?strategy_id=${id}`)
 }
 
 function statusLabel(status) {
@@ -251,8 +304,8 @@ function hasFailed(task) {
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
             </template>
             <template #strategy="{ row }">
-              <a v-if="row.strategy_id" class="wt-primary-link" @click="openStrategy(row)">{{ strategyName(row) }}</a>
-              <span v-else>{{ strategyName(row) }}</span>
+              <a v-if="isStrategyTask(row)" class="wt-primary-link" @click="openStrategy(row)">{{ sourceName(row) }}</a>
+              <span v-else>{{ sourceName(row) }}</span>
             </template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
             <template #found="{ row }">{{ foundSummary(row) }}</template>
@@ -275,9 +328,10 @@ function hasFailed(task) {
             <ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" />
           </div>
           <div class="detail-meta">
-            <div><span>来源策略</span><strong><a v-if="detail.strategy_id" class="wt-primary-link" @click="openStrategy(detail)">{{ strategyName(detail) }}</a><span v-else>-</span></strong></div>
+            <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="wt-primary-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
-            <div><span>执行时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
+            <div><span>创建时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
+            <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
             <div><span>耗时</span><strong>{{ duration(detail) }}</strong></div>
           </div>
 
@@ -342,6 +396,21 @@ function hasFailed(task) {
           </t-tabs>
         </div>
       </t-drawer>
+
+      <t-drawer v-model:visible="strategyDrawerVisible" header="策略详情" size="480px" :footer="false">
+        <div v-if="strategyDrawer" class="strategy-drawer">
+          <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(strategyDrawer.game_id) }}</strong></div>
+          <div class="strategy-drawer__field"><span>平台</span><strong>{{ strategyDrawer.platform || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>类型</span><strong>{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</strong></div>
+          <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ strategyDrawer.schedule || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>转素材规则</span><strong>{{ snapshotMaterialLabel(strategyDrawer) }}</strong></div>
+          <div class="strategy-drawer__actions">
+            <t-button theme="primary" block @click="goStrategy">查看策略</t-button>
+          </div>
+        </div>
+      </t-drawer>
     </div>
   </t-loading>
 </template>
@@ -380,4 +449,9 @@ function hasFailed(task) {
 .exception-body span { color: var(--wt-text-tertiary); font-size: 12px; }
 .exception-body p { margin: 0; color: var(--wt-text-primary); font-size: 13px; }
 .exception-empty { padding: 24px; text-align: center; color: var(--wt-text-tertiary); font-size: 13px; }
+.strategy-drawer { display: flex; flex-direction: column; gap: 12px; }
+.strategy-drawer__field { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
+.strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
+.strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
+.strategy-drawer__actions { margin-top: 4px; }
 </style>

@@ -387,7 +387,7 @@ function latestSummary(row) {
             <template #op="{ row }">
               <t-space size="small">
                 <t-button size="small" theme="primary" :disabled="row.status !== 'enabled' || isRunning(row) || row.strategy_type === 'author'" @click="run(row)">执行</t-button>
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="$router.push(`/crawl-tasks?strategy_id=${row.id}`)">记录</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="$router.push(`/crawl-tasks?strategy_id=${row.id}`)">任务</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)" @click="openEdit(row)">编辑</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCopy(row)">复制</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" theme="danger" :disabled="isRunning(row)" @click="remove(row)">删除</t-button>

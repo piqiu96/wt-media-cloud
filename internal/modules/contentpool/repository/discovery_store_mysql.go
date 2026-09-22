@@ -43,7 +43,7 @@ func listStrategies(db *gorm.DB, team *sharedidentity.TeamID) ([]model.Discovery
 		query += " WHERE team_id = ?"
 		args = append(args, *team)
 	}
-	query += " ORDER BY updated_at DESC,id DESC"
+	query += " ORDER BY id DESC"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64)
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY created_at DESC,id DESC LIMIT 500"
+	query += " ORDER BY id DESC LIMIT 500"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
