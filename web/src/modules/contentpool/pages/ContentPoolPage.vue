@@ -48,12 +48,10 @@ const manualSearched = ref(false)
 const manualResults = ref([])
 const selectedResultKeys = ref([])
 const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
-const manualForm = ref({ platform: 'douyin', ids: '', keyword: '', keywords: [] })
+const manualForm = ref({ platform: 'douyin', idList: [], keyword: '', keywords: [] })
 const manualTeamId = ref('')
 const manualTeamLocked = ref(false)
 const manualGameId = ref('')
-const manualFilters = ref({ publish_time: '不限', count: 50, sort: '综合排序', tags: [] })
-const showAdvanced = ref(false)
 const teams = ref([])
 const games = ref([])
 const imageViewerVisible = ref(false)
@@ -138,9 +136,7 @@ function openManual(mode) {
   manualResults.value = []
   selectedResultKeys.value = []
   resetManualPagination()
-  manualForm.value = { platform: 'douyin', ids: '', keyword: '', keywords: [] }
-  manualFilters.value = { publish_time: '不限', count: 50, sort: '综合排序', tags: [] }
-  showAdvanced.value = false
+  manualForm.value = { platform: 'douyin', idList: [], keyword: '', keywords: [] }
   manualVisible.value = true
 }
 
@@ -195,7 +191,7 @@ async function searchManual(reset = false) {
     } : {
       platform: form.platform,
       keyword: (form.keywords || []).join(' '),
-      limit: Number(manualFilters.value.count) || 50,
+      limit: 50,
       offset: manualPagination.value.nextOffset || 0,
     })
     manualResults.value = Array.isArray(result?.items) ? result.items : []
@@ -214,12 +210,7 @@ async function searchManual(reset = false) {
 }
 
 function parseSearchTargets() {
-  const targets = [...new Set(
-    manualForm.value.ids
-      .split(/\r?\n|,|，|\s+/)
-      .map((value) => value.trim())
-      .filter(Boolean)
-  )]
+  const targets = [...new Set((manualForm.value.idList || []).map((value) => String(value).trim()).filter(Boolean))]
   if (!targets.length) {
     MessagePlugin.warning('请输入至少一个视频 ID 或链接')
     return []
@@ -622,29 +613,9 @@ function openImageViewer(url) {
           </div>
 
           <div class="discover-section">
-            <div class="discover-section__title"><span class="discover-no">②</span>{{ manualMode === 'id' ? '输入内容' : '关键词配置' }}<small>{{ manualMode === 'id' ? '支持抖音视频 ID、视频链接或分享短链接，可输入多个（换行、逗号或空格分隔）' : '添加关键词，支持批量粘贴，按回车自动生成标签' }}</small></div>
-            <div v-if="manualMode === 'id'">
-              <t-textarea v-model="manualForm.ids" :rows="4" :maxlength="500" placeholder="输入视频 ID 或链接，每行一个，支持多种格式：&#10;729384729384&#10;https://www.douyin.com/video/xxxxxxxxx&#10;https://v.douyin.com/xxxxxx/" />
-              <div class="discover-counter">{{ manualForm.ids.length }}/500</div>
-            </div>
+            <div class="discover-section__title"><span class="discover-no">②</span>{{ manualMode === 'id' ? '输入内容' : '关键词配置' }}<small>{{ manualMode === 'id' ? '支持抖音视频 ID、视频链接或分享短链接，按回车生成标签，可批量粘贴' : '添加关键词，支持批量粘贴，按回车自动生成标签' }}</small></div>
+            <KeywordTags v-if="manualMode === 'id'" v-model="manualForm.idList" :max="100" placeholder="输入视频 ID 或链接，按回车添加" />
             <KeywordTags v-else v-model="manualForm.keywords" :max="100" placeholder="输入关键词，按回车添加" />
-          </div>
-
-          <div class="discover-section">
-            <div class="discover-section__title"><span class="discover-no">③</span>筛选条件（可选）<small>设置更多条件，精准控制搜索结果</small></div>
-            <t-form label-width="80px">
-              <t-form-item label="发布时间"><t-select v-model="manualFilters.publish_time"><t-option value="不限" label="不限" /><t-option value="最近24小时" label="最近24小时" /><t-option value="最近7天" label="最近7天" /><t-option value="最近30天" label="最近30天" /></t-select></t-form-item>
-              <t-form-item label="内容数量"><t-select v-model="manualFilters.count"><t-option :value="50" label="50条" /><t-option :value="100" label="100条" /><t-option :value="200" label="200条" /></t-select></t-form-item>
-              <t-form-item v-if="manualMode === 'keyword'" label="排序方式"><t-radio-group v-model="manualFilters.sort"><t-radio value="综合排序">综合排序</t-radio><t-radio value="最新发布">最新发布</t-radio><t-radio value="点赞最多">点赞最多</t-radio></t-radio-group></t-form-item>
-              <t-form-item label="来源标签"><KeywordTags v-model="manualFilters.tags" placeholder="请选择或输入标签，按回车添加" /></t-form-item>
-            </t-form>
-          </div>
-
-          <div class="discover-section">
-            <button type="button" class="discover-section__title discover-collapse" @click="showAdvanced = !showAdvanced"><span class="discover-no">④</span>高级设置（可选）<small>展开更多设置</small><span class="discover-toggle">{{ showAdvanced ? '收起' : '展开' }}</span></button>
-            <div v-if="showAdvanced" class="discover-advanced">
-              <t-alert theme="info" message="高级设置暂未开放，可在筛选条件中完成基础过滤。" />
-            </div>
           </div>
 
           <t-alert v-if="manualSearched" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，已选 ${selectedResultKeys.length} 条，可加入内容池`" />

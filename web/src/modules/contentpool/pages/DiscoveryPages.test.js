@@ -16,6 +16,8 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('今日执行')
     expect(source).toContain('自动素材')
     expect(source).toContain('搜索策略名称')
+    expect(source).toContain("colKey: 'id'")
+    expect(source).toContain('required-mark')
     expect(source).toContain('所属游戏')
     expect(source).toContain('listGames')
     expect(source).toContain('gameName')

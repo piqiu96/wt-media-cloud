@@ -20,6 +20,7 @@ const activeTab = ref('overview')
 const filters = ref({ name: '', status: '' })
 
 const columns = [
+  { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '任务名称', minWidth: 220 },
   { colKey: 'strategy', title: '来源策略', minWidth: 160 },
   { colKey: 'trigger', title: '触发方式', width: 90 },

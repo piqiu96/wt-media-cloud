@@ -30,6 +30,7 @@ const authorTarget = ref(null)
 const filters = ref({ name: '', type: '', status: '' })
 
 const columns = [
+  { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', minWidth: 180 },
   { colKey: 'game', title: '游戏', width: 120 },
   { colKey: 'type', title: '类型', width: 90 },
@@ -85,7 +86,7 @@ onMounted(async () => {
 function defaultForm() {
   return {
     name: '',
-    game_id: 'other',
+    game_id: '',
     strategy_type: 'keyword',
     platform: 'douyin',
     config: {
@@ -150,7 +151,6 @@ function fillForm(row) {
   }
   if (!Array.isArray(form.value.config.keywords)) form.value.config.keywords = []
   if (!Array.isArray(form.value.config.authors)) form.value.config.authors = []
-  if (form.value.game_id === '') form.value.game_id = 'other'
   const schedule = form.value.schedule || 'manual'
   if (schedule === 'manual') {
     scheduleMode.value = 'manual'
@@ -194,7 +194,14 @@ async function save() {
       like_threshold: Number(form.value.config.like_threshold || 0),
       favorite_threshold: Number(form.value.config.favorite_threshold || 0),
     }
-    form.value.game_id = form.value.game_id || 'other'
+    if (!String(form.value.game_id || '').trim()) {
+      MessagePlugin.warning('请选择所属游戏')
+      return
+    }
+    if (!String(form.value.platform || '').trim()) {
+      MessagePlugin.warning('请选择平台')
+      return
+    }
     form.value.schedule = scheduleMode.value === 'manual' ? 'manual' : `daily ${scheduleTime.value}`
     config.keywords = Array.isArray(config.keywords) ? config.keywords.map((item) => String(item).trim()).filter(Boolean) : []
     config.authors = Array.isArray(config.authors) ? config.authors.map((item) => String(item).trim()).filter(Boolean) : []
@@ -393,9 +400,9 @@ function latestSummary(row) {
       <t-dialog v-model:visible="visible" :header="editingID ? '编辑挖掘策略' : '新增挖掘策略'" width="640px" :confirm-btn="{ loading: saving, theme: 'primary', content: '保存' }" @confirm="save">
         <t-form label-width="96px">
           <div class="form-section">基础信息</div>
-          <t-form-item label="策略名称"><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
-          <t-form-item label="所属游戏"><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
-          <t-form-item label="平台">
+          <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
+          <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
+          <t-form-item label="平台" required-mark>
             <t-select v-model="form.platform">
               <t-option value="douyin" label="抖音" />
               <t-option value="bilibili" label="B站（待接入）" disabled />
