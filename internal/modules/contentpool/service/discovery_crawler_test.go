@@ -27,14 +27,27 @@ func TestDouyinCrawlerSearchUsesServerCredentialsAndNormalizesItems(t *testing.T
 		if got := r.PostForm.Get("keywords"); got != "王者荣耀" || r.PostForm.Get("count") != "20" || r.PostForm.Get("ck") != "server-cookie" {
 			t.Fatalf("unexpected form %v", r.PostForm)
 		}
-		_, _ = w.Write([]byte(`{"result":1,"data":{"datalist":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","nickname":"作者"},"statistics":{"digg_count":12000,"collect_count":700}}}]}}`))
+		_, _ = w.Write([]byte(`{"result":1,"data":{"datalist":[{"aweme_info":{"aweme_id":"a1","desc":"热点","author":{"uid":"u1","sec_uid":"sec-u1","nickname":"作者"},"statistics":{"digg_count":12000,"collect_count":700,"play_count":340000,"comment_count":560,"share_count":88}}}]}}`))
 	}))
 	defer server.Close()
 
 	crawler := NewDouyinCrawlerWithClient(testDouyinClient(t, server))
 	result, err := crawler.Discover(context.Background(), CrawlerRequest{Platform: "douyin", Operation: "keyword", Config: map[string]any{"keyword": "王者荣耀"}})
-	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" || result.Items[0]["like_count"] != int64(12000) || result.Items[0]["favorite_count"] != int64(700) {
+	if err != nil || len(result.Items) != 1 || result.Items[0]["platform_content_id"] != "a1" || result.Items[0]["author_name"] != "作者" || result.Items[0]["like_count"] != int64(12000) || result.Items[0]["favorite_count"] != int64(700) || result.Items[0]["view_count"] != int64(340000) || result.Items[0]["comment_count"] != int64(560) || result.Items[0]["share_count"] != int64(88) || result.Items[0]["author_sec_uid"] != "sec-u1" || result.Items[0]["author_uid"] != "u1" || result.Items[0]["author_home_url"] != "https://www.douyin.com/user/sec-u1?showSubTab=video&showTab=post" {
 		t.Fatalf("unexpected result=%+v err=%v", result, err)
+	}
+}
+
+func TestDouyinCrawlerRejectsInvalidAuthorHomepageAndUsesSecUID(t *testing.T) {
+	item := normalizeDouyinItem(map[string]any{
+		"aweme_id": "homepage-1", "desc": "homepage",
+		"author": map[string]any{
+			"uid": "u-home", "sec_uid": "sec-home", "nickname": "作者",
+			"homepage_url": "https://evil.example/user/sec-home",
+		},
+	})
+	if item["author_home_url"] != "https://www.douyin.com/user/sec-home?showSubTab=video&showTab=post" {
+		t.Fatalf("author_home_url = %v", item["author_home_url"])
 	}
 }
 

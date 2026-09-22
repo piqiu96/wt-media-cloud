@@ -25,12 +25,18 @@ type SourceContent struct {
 	CoverURL          string                `json:"cover_url,omitempty"`
 	SourceURL         string                `json:"source_url,omitempty"`
 	AuthorID          string                `json:"author_id,omitempty"`
+	AuthorSecUID      string                `json:"author_sec_uid,omitempty"`
+	AuthorUID         string                `json:"author_uid,omitempty"`
+	AuthorHomeURL     string                `json:"author_home_url,omitempty"`
 	AuthorName        string                `json:"author_name,omitempty"`
 	SourceType        string                `json:"source_type"`
 	StrategyID        *int64                `json:"strategy_id,omitempty"`
 	CrawlTaskID       *int64                `json:"crawl_task_id,omitempty"`
 	LikeCount         int64                 `json:"like_count"`
 	FavoriteCount     int64                 `json:"favorite_count"`
+	ViewCount         int64                 `json:"view_count"`
+	CommentCount      int64                 `json:"comment_count"`
+	ShareCount        int64                 `json:"share_count"`
 	PublishedAt       *time.Time            `json:"published_at,omitempty"`
 	Status            Status                `json:"status"`
 	IgnoredReason     string                `json:"ignored_reason,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -241,6 +242,15 @@ func normalizeDouyinItem(item map[string]any) map[string]any {
 	author, _ := item["author"].(map[string]any)
 	video, _ := item["video"].(map[string]any)
 	statistics, _ := item["statistics"].(map[string]any)
+	authorID := cleanString(author["uid"])
+	authorSecUID := cleanString(author["sec_uid"])
+	authorHomeURL := cleanString(author["homepage_url"])
+	if !validDouyinAuthorHomeURL(authorHomeURL) {
+		authorHomeURL = cleanString(author["share_url"])
+	}
+	if !validDouyinAuthorHomeURL(authorHomeURL) && authorSecUID != "" {
+		authorHomeURL = fmt.Sprintf("https://www.douyin.com/user/%s?showSubTab=video&showTab=post", authorSecUID)
+	}
 	cover := firstNestedURL(video, "origin_cover")
 	if cover == "" {
 		cover = firstNestedURL(video, "cover")
@@ -249,8 +259,19 @@ func normalizeDouyinItem(item map[string]any) map[string]any {
 	if created := int64Value(item["create_time"]); created > 0 {
 		published = time.Unix(created, 0).UTC().Format(time.RFC3339)
 	}
-	return map[string]any{"platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": fmt.Sprint(author["uid"]), "author_name": fmt.Sprint(author["nickname"]), "published_at": published, "like_count": int64Value(statistics["digg_count"]), "favorite_count": int64Value(statistics["collect_count"]), "raw": item}
+	return map[string]any{"platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": authorID, "author_sec_uid": authorSecUID, "author_uid": authorID, "author_home_url": authorHomeURL, "author_name": cleanString(author["nickname"]), "published_at": published, "like_count": int64Value(statistics["digg_count"]), "favorite_count": int64Value(statistics["collect_count"]), "view_count": int64Value(statistics["play_count"]), "comment_count": int64Value(statistics["comment_count"]), "share_count": int64Value(statistics["share_count"]), "raw": item}
 }
+func validDouyinAuthorHomeURL(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	if parsed.Host != "douyin.com" && parsed.Host != "www.douyin.com" {
+		return false
+	}
+	return strings.HasPrefix(parsed.Path, "/user/") && strings.TrimPrefix(parsed.Path, "/user/") != ""
+}
+
 func firstNestedURL(parent map[string]any, key string) string {
 	child, _ := parent[key].(map[string]any)
 	values, _ := child["url_list"].([]any)

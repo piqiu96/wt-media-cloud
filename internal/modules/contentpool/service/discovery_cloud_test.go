@@ -84,6 +84,13 @@ func TestWorkerProjectsTaskResultDetails(t *testing.T) {
 		"title":               "metrics result",
 		"like_count":          12000,
 		"favorite_count":      700,
+		"view_count":          340000,
+		"comment_count":       560,
+		"share_count":         88,
+		"author_id":           "author-uid",
+		"author_sec_uid":      "author-sec-uid",
+		"author_uid":          "author-uid",
+		"author_home_url":     "https://www.douyin.com/user/author-sec-uid?showSubTab=video&showTab=post",
 	}}
 
 	task, err := service.CreateRun(actor, strategy.ID)
@@ -98,8 +105,11 @@ func TestWorkerProjectsTaskResultDetails(t *testing.T) {
 	if source.StrategyID == nil || *source.StrategyID != strategy.ID || source.CrawlTaskID == nil || *source.CrawlTaskID != task.ID {
 		t.Fatalf("source strategy/task link missing: %+v", source)
 	}
-	if source.LikeCount != 12000 || source.FavoriteCount != 700 {
+	if source.LikeCount != 12000 || source.FavoriteCount != 700 || source.ViewCount != 340000 || source.CommentCount != 560 || source.ShareCount != 88 {
 		t.Fatalf("source metrics missing: %+v", source)
+	}
+	if source.AuthorID != "author-uid" || source.AuthorUID != "author-uid" || source.AuthorSecUID != "author-sec-uid" || source.AuthorHomeURL != "https://www.douyin.com/user/author-sec-uid?showSubTab=video&showTab=post" {
+		t.Fatalf("source author identity missing: %+v", source)
 	}
 	if len(task.Results) != 1 || task.Results[0]["processing_status"] != "pending" || task.Results[0]["source_content_id"] != source.ID {
 		t.Fatalf("task result details missing: %+v", task.Results)

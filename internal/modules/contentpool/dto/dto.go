@@ -18,12 +18,18 @@ type SourceInput struct {
 	CoverURL          string
 	SourceURL         string
 	AuthorID          string
+	AuthorSecUID      string
+	AuthorUID         string
+	AuthorHomeURL     string
 	AuthorName        string
 	SourceType        string
 	StrategyID        *int64
 	CrawlTaskID       *int64
 	LikeCount         int64
 	FavoriteCount     int64
+	ViewCount         int64
+	CommentCount      int64
+	ShareCount        int64
 	PublishedAt       *time.Time
 	AuditNote         string
 	RawJSON           json.RawMessage
@@ -68,14 +74,23 @@ type AuthorSearchInput struct {
 }
 
 type SearchResult struct {
-	PlatformContentID string     `json:"platform_content_id"`
-	Title             string     `json:"title"`
-	Description       string     `json:"description"`
-	CoverURL          string     `json:"cover_url"`
-	SourceURL         string     `json:"source_url"`
-	AuthorID          string     `json:"author_id"`
-	AuthorName        string     `json:"author_name"`
-	PublishedAt       *time.Time `json:"published_at,omitempty"`
+	PlatformContentID string          `json:"platform_content_id"`
+	Title             string          `json:"title"`
+	Description       string          `json:"description"`
+	CoverURL          string          `json:"cover_url"`
+	SourceURL         string          `json:"source_url"`
+	AuthorID          string          `json:"author_id"`
+	AuthorSecUID      string          `json:"author_sec_uid,omitempty"`
+	AuthorUID         string          `json:"author_uid,omitempty"`
+	AuthorHomeURL     string          `json:"author_home_url,omitempty"`
+	AuthorName        string          `json:"author_name"`
+	LikeCount         int64           `json:"like_count"`
+	FavoriteCount     int64           `json:"favorite_count"`
+	ViewCount         int64           `json:"view_count"`
+	CommentCount      int64           `json:"comment_count"`
+	ShareCount        int64           `json:"share_count"`
+	PublishedAt       *time.Time      `json:"published_at,omitempty"`
+	Raw               json.RawMessage `json:"raw,omitempty"`
 }
 
 type SearchResponse struct {

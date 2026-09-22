@@ -26,8 +26,16 @@ type sourceRequest struct {
 	CoverURL          string                  `json:"cover_url"`
 	SourceURL         string                  `json:"source_url"`
 	AuthorID          string                  `json:"author_id"`
+	AuthorSecUID      string                  `json:"author_sec_uid"`
+	AuthorUID         string                  `json:"author_uid"`
+	AuthorHomeURL     string                  `json:"author_home_url"`
 	AuthorName        string                  `json:"author_name"`
 	SourceType        string                  `json:"source_type"`
+	LikeCount         int64                   `json:"like_count"`
+	FavoriteCount     int64                   `json:"favorite_count"`
+	ViewCount         int64                   `json:"view_count"`
+	CommentCount      int64                   `json:"comment_count"`
+	ShareCount        int64                   `json:"share_count"`
 	PublishedAt       string                  `json:"published_at"`
 	RawJSON           json.RawMessage         `json:"raw_json"`
 }
@@ -147,7 +155,7 @@ func CreateContent(_ context.Context, c *hertzapp.RequestContext) {
 		}
 		published = &value
 	}
-	item, err := contentservice.CreateSource(actor, dto.SourceInput{TeamID: request.TeamID, Platform: request.Platform, PlatformContentID: request.PlatformContentID, Title: request.Title, Description: request.Description, CoverURL: request.CoverURL, SourceURL: request.SourceURL, AuthorID: request.AuthorID, AuthorName: request.AuthorName, SourceType: request.SourceType, PublishedAt: published, RawJSON: request.RawJSON})
+	item, err := contentservice.CreateSource(actor, dto.SourceInput{TeamID: request.TeamID, Platform: request.Platform, PlatformContentID: request.PlatformContentID, Title: request.Title, Description: request.Description, CoverURL: request.CoverURL, SourceURL: request.SourceURL, AuthorID: request.AuthorID, AuthorSecUID: request.AuthorSecUID, AuthorUID: request.AuthorUID, AuthorHomeURL: request.AuthorHomeURL, AuthorName: request.AuthorName, SourceType: request.SourceType, LikeCount: request.LikeCount, FavoriteCount: request.FavoriteCount, ViewCount: request.ViewCount, CommentCount: request.CommentCount, ShareCount: request.ShareCount, PublishedAt: published, RawJSON: request.RawJSON})
 	if err != nil {
 		writeContentError(c, err)
 		return

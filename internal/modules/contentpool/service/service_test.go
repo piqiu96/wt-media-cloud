@@ -12,13 +12,16 @@ import (
 
 type memoryStore struct {
 	items       map[int64]SourceContent
+	raws        map[int64]json.RawMessage
 	created     int
 	materialize int
 }
 
-func newMemoryStore() *memoryStore { return &memoryStore{items: map[int64]SourceContent{}} }
+func newMemoryStore() *memoryStore {
+	return &memoryStore{items: map[int64]SourceContent{}, raws: map[int64]json.RawMessage{}}
+}
 
-func (m *memoryStore) CreateSource(v SourceContent, _ json.RawMessage) (SourceContent, error) {
+func (m *memoryStore) CreateSource(v SourceContent, raw json.RawMessage) (SourceContent, error) {
 	for _, item := range m.items {
 		if item.TeamID == v.TeamID && item.Platform == v.Platform && item.PlatformContentID == v.PlatformContentID {
 			return SourceContent{}, ErrDuplicate
@@ -27,6 +30,7 @@ func (m *memoryStore) CreateSource(v SourceContent, _ json.RawMessage) (SourceCo
 	m.created++
 	v.ID = int64(m.created)
 	m.items[v.ID] = v
+	m.raws[v.ID] = raw
 	return v, nil
 }
 

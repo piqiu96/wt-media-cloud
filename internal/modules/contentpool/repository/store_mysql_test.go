@@ -17,7 +17,8 @@ func TestListSourceViewsProjectsNamesAndFiltersMaterial(t *testing.T) {
 	created := time.Date(2026, 9, 21, 14, 30, 0, 0, time.UTC)
 	columns := []string{
 		"id", "team_id", "platform", "platform_content_id", "title", "description", "cover_url", "source_url",
-		"author_id", "author_name", "source_type", "strategy_id", "crawl_task_id", "like_count", "favorite_count",
+		"author_id", "author_sec_uid", "author_uid", "author_home_url", "author_name", "source_type", "strategy_id", "crawl_task_id",
+		"like_count", "favorite_count", "view_count", "comment_count", "share_count",
 		"published_at", "status", "ignored_reason", "audit_note", "failure_reason", "material_id", "created_by",
 		"created_at", "updated_at", "strategy_name", "crawl_task_name",
 	}
@@ -25,9 +26,10 @@ func TestListSourceViewsProjectsNamesAndFiltersMaterial(t *testing.T) {
 		WithArgs(int64(17)).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(1), int64(10), "douyin", "aweme-1", "Delta safe route", nil, "https://cover", "https://source",
-			"author-id", "Author", "strategy", int64(3), int64(23), int64(12000), int64(700),
+			"author-id", "author-sec", "author-id", "https://www.douyin.com/user/author-sec?showSubTab=video&showTab=post", "Author", "strategy", int64(3), int64(23),
+			int64(12000), int64(700), int64(340000), int64(560), int64(88),
 			created, "material_created", nil, nil, nil, int64(17), int64(2), created, created,
-			"Delta hotspot", "Delta hotspot · 2026-09-21 14:30",
+			"Delta hotspot", "Delta hotspot_20260921143000",
 		))
 
 	materialID := int64(17)
@@ -39,7 +41,7 @@ func TestListSourceViewsProjectsNamesAndFiltersMaterial(t *testing.T) {
 		t.Fatalf("items length = %d, want 1", len(items))
 	}
 	item := items[0]
-	if item.StrategyName != "Delta hotspot" || item.CrawlTaskName != "Delta hotspot · 2026-09-21 14:30" {
+	if item.StrategyName != "Delta hotspot" || item.CrawlTaskName != "Delta hotspot_20260921143000" {
 		t.Fatalf("unexpected source view: %+v", item)
 	}
 	if item.MaterialID == nil || *item.MaterialID != 17 {
@@ -59,7 +61,8 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 	created := time.Date(2026, 9, 21, 14, 30, 0, 0, time.UTC)
 	columns := []string{
 		"id", "team_id", "platform", "platform_content_id", "title", "description", "cover_url", "source_url",
-		"author_id", "author_name", "source_type", "strategy_id", "crawl_task_id", "like_count", "favorite_count",
+		"author_id", "author_sec_uid", "author_uid", "author_home_url", "author_name", "source_type", "strategy_id", "crawl_task_id",
+		"like_count", "favorite_count", "view_count", "comment_count", "share_count",
 		"published_at", "status", "ignored_reason", "audit_note", "failure_reason", "material_id", "created_by",
 		"created_at", "updated_at", "strategy_name", "crawl_task_name",
 	}
@@ -67,9 +70,10 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows(columns).AddRow(
 			int64(9), int64(10), "douyin", "aweme-9", "Historical item", nil, nil, "https://source",
-			"author-id", "Author", "strategy", int64(3), int64(23), int64(1), int64(2),
+			"author-id", nil, nil, nil, "Author", "strategy", int64(3), int64(23),
+			int64(1), int64(2), int64(3), int64(4), int64(5),
 			created, "pending", nil, nil, nil, nil, int64(2), created, created,
-			"Current name", "Historical name · 2026-09-21 14:30",
+			"Current name", "Historical name_20260921143000",
 		))
 
 	item, found, err := findSource(testGORM(db), 9)
@@ -79,7 +83,7 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 	if !found {
 		t.Fatal("source view was not found")
 	}
-	if item.StrategyName != "Current name" || item.CrawlTaskName != "Historical name · 2026-09-21 14:30" {
+	if item.StrategyName != "Current name" || item.CrawlTaskName != "Historical name_20260921143000" {
 		t.Fatalf("unexpected source view: %+v", item)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

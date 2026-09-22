@@ -8,21 +8,35 @@ describe('content pool page', () => {
     expect(source).toContain('ResourcePageHeader')
     expect(source).toContain('ResourceStatGrid')
     expect(source).toContain('ResourceStatusBadge')
-    expect(source).toContain('导入链接')
+    expect(source).toContain('获取数据')
+    expect(source).toContain('ID搜索')
+    expect(source).toContain('关键词搜索')
     expect(source).toContain('转素材')
     expect(source).toContain('批量转素材')
-    expect(source).toContain('进入审核模式')
+    expect(source).toContain('审核模式')
     expect(source).toContain('转素材并下一条')
     expect(source).toContain('忽略并下一条')
     expect(source).toContain('client.batchMaterialize')
     expect(source).toContain('strategy_id')
     expect(source).toContain('crawl_task_id')
     expect(source).toContain('内容 ID')
-    expect(source).toContain('关键词搜索')
     expect(source).toContain('result?.items')
     expect(source).toContain('discovery.importResults')
     expect(source).toContain('loadManualContext')
     expect(source).toContain('team_id: selectedTeamID()')
+    expect(source).not.toContain('导入链接')
+    expect(source).not.toContain('进入审核模式')
+  })
+
+  it('consolidates manual acquisition and validates numeric content IDs', () => {
+    expect(source).toContain("openManual('id')")
+    expect(source).toContain("openManual('keyword')")
+    expect(source).toContain('function parseContentIDs()')
+    expect(source).toContain('new Set(')
+    expect(source).toContain('/^\\d+$/')
+    expect(source).toContain('discovery.importUrl')
+    expect(source).toContain('ID 搜索任务已创建，完成后内容会自动进入内容池')
+    expect(source).not.toContain("manualMode === 'url'")
   })
 
   it('hides unavailable Douyin author search and keeps keyword pagination', () => {
@@ -48,14 +62,14 @@ describe('content pool page', () => {
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {
     expect(source).toContain("fixed: 'right'")
-    expect(source).toContain(":scroll=\"{ x: '1760px' }\"")
+    expect(source).toContain(":scroll=\"{ x: '2060px' }\"")
     expect(source).toContain('class="table-scroll-wrap"')
   })
 
   it('supports the read-only material library projection without duplicating a page', () => {
     expect(source).toContain("route.path === '/material-library'")
     expect(source).toContain("status: isLibrary.value ? 'material_created'")
-    expect(source).toContain("material_id: materialFilter.value || undefined")
+    expect(source).toContain('material_id: materialFilter.value || undefined')
   })
 
   it('renders a large content decision workspace instead of a CRUD field table', () => {
@@ -69,7 +83,29 @@ describe('content pool page', () => {
     expect(source).toContain("router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)")
   })
 
-  it('keeps review progress and failure state explicit', () => {
+  it('opens platform pages and displays complete interaction and author data', () => {
+    expect(source).toContain('target="_blank"')
+    expect(source).toContain('rel="noopener noreferrer"')
+    expect(source).toContain('class="wt-primary-link"')
+    expect(source).toContain('author_home_url')
+    expect(source).toContain('author_sec_uid')
+    expect(source).toContain('author_uid')
+    expect(source).toContain('view_count')
+    expect(source).toContain('comment_count')
+    expect(source).toContain('share_count')
+  })
+
+  it('enlarges covers without intercepting title navigation', () => {
+    expect(source).toContain('t-image-viewer')
+    expect(source).toContain('function openImageViewer(url)')
+    expect(source).toContain('imageViewerVisible')
+    expect(source).toContain('imageViewerImages')
+    expect(source).toContain('cursor: zoom-in')
+    expect(source).toContain('@click.stop="openImageViewer(row.cover_url)"')
+    expect(source).toContain('@click.stop="openImageViewer(detail.cover_url)"')
+  })
+
+  it('keeps review progress, failure state, and explicit exit behavior explicit', () => {
     expect(source).toContain('reviewQueue')
     expect(source).toContain('reviewIndex')
     expect(source).toContain('当前 {{ reviewIndex + 1 }} / {{ reviewQueue.length }}')
@@ -77,5 +113,7 @@ describe('content pool page', () => {
     expect(source).toContain('reviewProcessing')
     expect(source).toContain("reviewError.value = e.message || '审核操作失败，当前内容保持可处理状态'")
     expect(source).toContain("reviewAction('skip')")
+    expect(source).toContain('function exitReviewMode(')
+    expect(source).toContain('取消审核')
   })
 })

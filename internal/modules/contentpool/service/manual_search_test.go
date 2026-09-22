@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -22,8 +23,15 @@ func (s *searchClientStub) Search(_ context.Context, request douyinclient.Search
 	s.searchCalls++
 	s.searchReq = request
 	return map[string]any{"data": map[string]any{
-		"datalist": []any{map[string]any{"aweme_info": map[string]any{"aweme_id": "keyword-1", "desc": "关键词结果"}}},
-		"cursor":   float64(30), "has_more": float64(1),
+		"datalist": []any{map[string]any{"aweme_info": map[string]any{
+			"aweme_id": "keyword-1", "desc": "关键词结果",
+			"author": map[string]any{"uid": "author-uid", "sec_uid": "author-sec-uid", "nickname": "关键词作者"},
+			"statistics": map[string]any{
+				"digg_count": 101, "collect_count": 102, "play_count": 103,
+				"comment_count": 104, "share_count": 105,
+			},
+		}}},
+		"cursor": float64(30), "has_more": float64(1),
 	}}, nil
 }
 func (s *searchClientStub) FindAuthor(_ context.Context, request douyinclient.FindAuthorRequest) (map[string]any, error) {
@@ -43,6 +51,20 @@ func TestKeywordSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
 	}
 	if client.searchReq.Keyword != "游戏" || client.searchReq.Count != 15 || client.searchReq.Offset != 10 {
 		t.Fatalf("search request=%+v", client.searchReq)
+	}
+	item := result.Items[0]
+	if item.AuthorID != "author-uid" || item.AuthorUID != "author-uid" || item.AuthorSecUID != "author-sec-uid" || item.AuthorName != "关键词作者" {
+		t.Fatalf("author identity missing: %+v", item)
+	}
+	if item.AuthorHomeURL != "https://www.douyin.com/user/author-sec-uid?showSubTab=video&showTab=post" {
+		t.Fatalf("author homepage missing: %+v", item)
+	}
+	if item.LikeCount != 101 || item.FavoriteCount != 102 || item.ViewCount != 103 || item.CommentCount != 104 || item.ShareCount != 105 {
+		t.Fatalf("interaction metrics missing: %+v", item)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(item.Raw, &raw); err != nil || raw["aweme_id"] != "keyword-1" {
+		t.Fatalf("raw platform payload missing: raw=%s err=%v", item.Raw, err)
 	}
 	if result.NextOffset != 30 || !result.HasMore {
 		t.Fatalf("search pagination=%+v", result)
@@ -85,5 +107,23 @@ func TestImportResultsUsesExistingContentPoolDeduplication(t *testing.T) {
 	result, err := service.importResults(actor, request)
 	if err != nil || result.Imported != 1 || result.Duplicate != 1 || len(store.items) != 1 {
 		t.Fatalf("result=%+v stored=%d err=%v", result, len(store.items), err)
+	}
+}
+
+func TestImportResultsPreservesRawPlatformPayload(t *testing.T) {
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	store := newMemoryStore()
+	service := newContentService(store)
+	raw := json.RawMessage(`{"aweme_id":"raw-1","desc":"raw result","statistics":{"play_count":999}}`)
+	_, err := service.importResults(actor, dto.ImportResultsRequest{Platform: "douyin", Items: []dto.SearchResult{{
+		PlatformContentID: "raw-1", Title: "raw result", SourceURL: "https://www.douyin.com/video/raw-1", Raw: raw,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := store.raws[1]
+	if !ok || string(stored) != string(raw) {
+		t.Fatalf("raw payload was not preserved: ok=%v raw=%s", ok, stored)
 	}
 }

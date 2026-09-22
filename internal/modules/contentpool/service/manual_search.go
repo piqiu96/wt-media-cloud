@@ -89,8 +89,19 @@ func typedSearchResults(items []map[string]any) []dto.SearchResult {
 			CoverURL:          cleanString(item["cover_url"]),
 			SourceURL:         cleanString(item["source_url"]),
 			AuthorID:          cleanString(item["author_id"]),
+			AuthorSecUID:      cleanString(item["author_sec_uid"]),
+			AuthorUID:         cleanString(item["author_uid"]),
+			AuthorHomeURL:     cleanString(item["author_home_url"]),
 			AuthorName:        cleanString(item["author_name"]),
+			LikeCount:         int64Value(item["like_count"]),
+			FavoriteCount:     int64Value(item["favorite_count"]),
+			ViewCount:         int64Value(item["view_count"]),
+			CommentCount:      int64Value(item["comment_count"]),
+			ShareCount:        int64Value(item["share_count"]),
 			PublishedAt:       published,
+		}
+		if raw := item["raw"]; raw != nil {
+			result.Raw = mustJSON(raw)
 		}
 		if result.PlatformContentID != "" && result.SourceURL != "" {
 			results = append(results, result)
@@ -143,7 +154,10 @@ func (s *contentService) importResults(actor identityservice.PublicUser, input d
 
 	response := dto.ImportResultsResponse{Items: make([]dto.ImportItemResult, 0, len(normalized))}
 	for _, item := range normalized {
-		raw, _ := json.Marshal(item)
+		raw := item.Raw
+		if len(raw) == 0 || !json.Valid(raw) {
+			raw, _ = json.Marshal(item)
+		}
 		created, createErr := s.createSource(actor, dto.SourceInput{
 			TeamID:            team,
 			Platform:          input.Platform,
@@ -153,8 +167,16 @@ func (s *contentService) importResults(actor identityservice.PublicUser, input d
 			CoverURL:          item.CoverURL,
 			SourceURL:         item.SourceURL,
 			AuthorID:          item.AuthorID,
+			AuthorSecUID:      item.AuthorSecUID,
+			AuthorUID:         item.AuthorUID,
+			AuthorHomeURL:     item.AuthorHomeURL,
 			AuthorName:        item.AuthorName,
 			SourceType:        input.SourceType,
+			LikeCount:         item.LikeCount,
+			FavoriteCount:     item.FavoriteCount,
+			ViewCount:         item.ViewCount,
+			CommentCount:      item.CommentCount,
+			ShareCount:        item.ShareCount,
 			PublishedAt:       item.PublishedAt,
 			RawJSON:           raw,
 		})
@@ -189,6 +211,9 @@ func normalizeImportedResult(item dto.SearchResult) (dto.SearchResult, bool) {
 	item.Description = limitedString(item.Description, 5000)
 	item.CoverURL = limitedString(item.CoverURL, 2048)
 	item.AuthorID = limitedString(item.AuthorID, 191)
+	item.AuthorSecUID = limitedString(item.AuthorSecUID, 255)
+	item.AuthorUID = limitedString(item.AuthorUID, 255)
+	item.AuthorHomeURL = limitedString(item.AuthorHomeURL, 2048)
 	item.AuthorName = limitedString(item.AuthorName, 255)
 	if item.PublishedAt != nil {
 		value := item.PublishedAt.UTC()

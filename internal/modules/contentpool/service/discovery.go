@@ -349,9 +349,9 @@ func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map
 		TeamID: &team, Platform: task.Platform, PlatformContentID: fmt.Sprint(item["platform_content_id"]),
 		Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]),
 		CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]),
-		AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]),
+		AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]),
 		SourceType: sourceType, StrategyID: task.StrategyID, CrawlTaskID: &taskID,
-		LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]),
+		LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]),
 		PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item),
 	})
 	switch {
@@ -620,7 +620,7 @@ func (s *discoveryService) confirmResults(actor identityservice.PublicUser, id i
 		if promoted, _ := item["promoted"].(bool); promoted {
 			continue
 		}
-		_, createErr := s.content.createSource(actor, dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: contentID, Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
+		_, createErr := s.content.createSource(actor, dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: contentID, Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]), PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item)})
 		if errors.Is(createErr, ErrDuplicate) {
 			task.Stats.Duplicate++
 			item["promoted"] = true
