@@ -37,10 +37,10 @@ func ListStrategies(team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, err
 	return listStrategies(database.DB(), team)
 }
 func listStrategies(db *gorm.DB, team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
-	query := `SELECT id,team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies`
+	query := `SELECT s.id,s.team_id,s.game_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by`
 	args := []any{}
 	if team != nil {
-		query += " WHERE team_id = ?"
+		query += " WHERE s.team_id = ?"
 		args = append(args, *team)
 	}
 	query += " ORDER BY id DESC"
@@ -63,7 +63,7 @@ func FindStrategy(id int64) (model.DiscoveryStrategy, bool, error) {
 	return findStrategy(database.DB(), id)
 }
 func findStrategy(db *gorm.DB, id int64) (model.DiscoveryStrategy, bool, error) {
-	item, err := scanStrategy(db.Raw(`SELECT id,team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,created_at,updated_at FROM discovery_strategies WHERE id = ?`, id).Row())
+	item, err := scanStrategy(db.Raw(`SELECT s.id,s.team_id,s.game_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by WHERE s.id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DiscoveryStrategy{}, false, nil
 	}
@@ -114,15 +114,15 @@ func ListCrawlTasks(team *sharedidentity.TeamID, strategyID *int64) ([]model.Cra
 	return listCrawlTasks(database.DB(), team, strategyID)
 }
 func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
-	query := `SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks`
+	query := `SELECT t.id,t.team_id,t.strategy_id,t.parent_task_id,t.schedule_key,t.task_id,t.task_type,t.platform,t.status,t.snapshot_json,t.stats_json,t.result_json,t.error_message,t.started_at,t.finished_at,t.created_by,t.updated_by,t.created_at,t.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM crawl_tasks t LEFT JOIN users cu ON cu.id=t.created_by LEFT JOIN users uu ON uu.id=t.updated_by`
 	conditions := []string{}
 	args := []any{}
 	if team != nil {
-		conditions = append(conditions, "team_id = ?")
+		conditions = append(conditions, "t.team_id = ?")
 		args = append(args, *team)
 	}
 	if strategyID != nil {
-		conditions = append(conditions, "strategy_id = ?")
+		conditions = append(conditions, "t.strategy_id = ?")
 		args = append(args, *strategyID)
 	}
 	if len(conditions) > 0 {
@@ -146,7 +146,7 @@ func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64)
 }
 func FindCrawlTask(id int64) (model.CrawlTask, bool, error) { return findCrawlTask(database.DB(), id) }
 func findCrawlTask(db *gorm.DB, id int64) (model.CrawlTask, bool, error) {
-	item, err := scanCrawlTask(db.Raw(`SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE id = ?`, id).Row())
+	item, err := scanCrawlTask(db.Raw(`SELECT t.id,t.team_id,t.strategy_id,t.parent_task_id,t.schedule_key,t.task_id,t.task_type,t.platform,t.status,t.snapshot_json,t.stats_json,t.result_json,t.error_message,t.started_at,t.finished_at,t.created_by,t.updated_by,t.created_at,t.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM crawl_tasks t LEFT JOIN users cu ON cu.id=t.created_by LEFT JOIN users uu ON uu.id=t.updated_by WHERE t.id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.CrawlTask{}, false, nil
 	}
@@ -175,7 +175,7 @@ func claimPendingCrawlTask(db *gorm.DB, now time.Time) (model.CrawlTask, bool, e
 	var task model.CrawlTask
 	found := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		item, err := scanCrawlTask(tx.Raw(`SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,created_at,updated_at FROM crawl_tasks WHERE status = 'pending' ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`).Row())
+		item, err := scanCrawlTask(tx.Raw(`SELECT id,team_id,strategy_id,parent_task_id,schedule_key,task_id,task_type,platform,status,snapshot_json,stats_json,result_json,error_message,started_at,finished_at,created_by,updated_by,created_at,updated_at,'' AS created_by_name,'' AS updated_by_name FROM crawl_tasks WHERE status = 'pending' ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`).Row())
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -202,16 +202,22 @@ func claimPendingCrawlTask(db *gorm.DB, now time.Time) (model.CrawlTask, bool, e
 func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 	var item model.DiscoveryStrategy
 	var team, creator int64
-	var gameID sql.NullString
+	var updatedBy sql.NullInt64
+	var gameID, createdByName, updatedByName sql.NullString
 	var status string
 	var raw []byte
-	err := row.Scan(&item.ID, &team, &gameID, &item.Name, &item.StrategyType, &item.Platform, &raw, &item.Schedule, &item.Timezone, &status, &creator, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &team, &gameID, &item.Name, &item.StrategyType, &item.Platform, &raw, &item.Schedule, &item.Timezone, &status, &creator, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &createdByName, &updatedByName)
 	if err != nil {
 		return item, err
 	}
 	item.TeamID = sharedidentity.TeamID(team)
 	item.CreatedBy = sharedidentity.UserID(creator)
 	item.Status = model.StrategyStatus(status)
+	item.CreatedByName, item.UpdatedByName = createdByName.String, updatedByName.String
+	if updatedBy.Valid {
+		value := sharedidentity.UserID(updatedBy.Int64)
+		item.UpdatedBy = &value
+	}
 	if gameID.Valid {
 		value := gameID.String
 		item.GameID = &value
@@ -225,18 +231,23 @@ func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 func scanCrawlTask(row scannable) (model.CrawlTask, error) {
 	var item model.CrawlTask
 	var team, creator int64
-	var strategyID, parentTaskID sql.NullInt64
-	var scheduleKey, taskID, errorMessage sql.NullString
+	var strategyID, parentTaskID, updatedBy sql.NullInt64
+	var scheduleKey, taskID, errorMessage, createdByName, updatedByName sql.NullString
 	var status string
 	var snapshot, stats, results []byte
 	var started, finished sql.NullTime
-	err := row.Scan(&item.ID, &team, &strategyID, &parentTaskID, &scheduleKey, &taskID, &item.TaskType, &item.Platform, &status, &snapshot, &stats, &results, &errorMessage, &started, &finished, &creator, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &team, &strategyID, &parentTaskID, &scheduleKey, &taskID, &item.TaskType, &item.Platform, &status, &snapshot, &stats, &results, &errorMessage, &started, &finished, &creator, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &createdByName, &updatedByName)
 	if err != nil {
 		return item, err
 	}
 	item.TeamID = sharedidentity.TeamID(team)
 	item.CreatedBy = sharedidentity.UserID(creator)
 	item.Status = model.CrawlStatus(status)
+	item.CreatedByName, item.UpdatedByName = createdByName.String, updatedByName.String
+	if updatedBy.Valid {
+		value := sharedidentity.UserID(updatedBy.Int64)
+		item.UpdatedBy = &value
+	}
 	if strategyID.Valid {
 		value := strategyID.Int64
 		item.StrategyID = &value

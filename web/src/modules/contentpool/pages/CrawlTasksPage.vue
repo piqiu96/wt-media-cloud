@@ -332,6 +332,8 @@ function hasFailed(task) {
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
             <div><span>创建时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
             <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
+            <div><span>创建人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
+            <div><span>修改人</span><strong>{{ detail.updated_by_name || '-' }}</strong></div>
             <div><span>耗时</span><strong>{{ duration(detail) }}</strong></div>
           </div>
 

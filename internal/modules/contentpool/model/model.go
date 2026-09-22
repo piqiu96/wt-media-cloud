@@ -79,20 +79,22 @@ const (
 )
 
 type DiscoveryStrategy struct {
-	ID           int64                  `json:"id"`
-	TeamID       sharedidentity.TeamID  `json:"team_id"`
-	GameID       *string                `json:"game_id,omitempty"`
-	Name         string                 `json:"name"`
-	StrategyType string                 `json:"strategy_type"`
-	Platform     string                 `json:"platform"`
-	Config       map[string]any         `json:"config"`
-	Schedule     string                 `json:"schedule"`
-	Timezone     string                 `json:"timezone"`
-	Status       StrategyStatus         `json:"status"`
-	CreatedBy    sharedidentity.UserID  `json:"created_by"`
-	UpdatedBy    *sharedidentity.UserID `json:"updated_by,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	ID            int64                  `json:"id"`
+	TeamID        sharedidentity.TeamID  `json:"team_id"`
+	GameID        *string                `json:"game_id,omitempty"`
+	Name          string                 `json:"name"`
+	StrategyType  string                 `json:"strategy_type"`
+	Platform      string                 `json:"platform"`
+	Config        map[string]any         `json:"config"`
+	Schedule      string                 `json:"schedule"`
+	Timezone      string                 `json:"timezone"`
+	Status        StrategyStatus         `json:"status"`
+	CreatedBy     sharedidentity.UserID  `json:"created_by"`
+	UpdatedBy     *sharedidentity.UserID `json:"updated_by,omitempty"`
+	CreatedByName string                 `json:"created_by_name,omitempty"`
+	UpdatedByName string                 `json:"updated_by_name,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 type CrawlStatus string
@@ -106,25 +108,27 @@ const (
 )
 
 type CrawlTask struct {
-	ID           int64                  `json:"id"`
-	TeamID       sharedidentity.TeamID  `json:"team_id"`
-	StrategyID   *int64                 `json:"strategy_id,omitempty"`
-	ParentTaskID *int64                 `json:"parent_task_id,omitempty"`
-	ScheduleKey  string                 `json:"schedule_key,omitempty"`
-	TaskID       string                 `json:"task_id,omitempty"`
-	TaskType     string                 `json:"task_type"`
-	Platform     string                 `json:"platform"`
-	Status       CrawlStatus            `json:"status"`
-	Snapshot     map[string]any         `json:"snapshot"`
-	Stats        CrawlStats             `json:"stats"`
-	Results      []map[string]any       `json:"results,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	StartedAt    *time.Time             `json:"started_at,omitempty"`
-	FinishedAt   *time.Time             `json:"finished_at,omitempty"`
-	CreatedBy    sharedidentity.UserID  `json:"created_by"`
-	UpdatedBy    *sharedidentity.UserID `json:"updated_by,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
+	ID            int64                  `json:"id"`
+	TeamID        sharedidentity.TeamID  `json:"team_id"`
+	StrategyID    *int64                 `json:"strategy_id,omitempty"`
+	ParentTaskID  *int64                 `json:"parent_task_id,omitempty"`
+	ScheduleKey   string                 `json:"schedule_key,omitempty"`
+	TaskID        string                 `json:"task_id,omitempty"`
+	TaskType      string                 `json:"task_type"`
+	Platform      string                 `json:"platform"`
+	Status        CrawlStatus            `json:"status"`
+	Snapshot      map[string]any         `json:"snapshot"`
+	Stats         CrawlStats             `json:"stats"`
+	Results       []map[string]any       `json:"results,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	StartedAt     *time.Time             `json:"started_at,omitempty"`
+	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
+	CreatedBy     sharedidentity.UserID  `json:"created_by"`
+	UpdatedBy     *sharedidentity.UserID `json:"updated_by,omitempty"`
+	CreatedByName string                 `json:"created_by_name,omitempty"`
+	UpdatedByName string                 `json:"updated_by_name,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 type CrawlStats struct {

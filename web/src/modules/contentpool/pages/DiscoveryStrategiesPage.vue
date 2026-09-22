@@ -22,6 +22,8 @@ const editingID = ref(null)
 const form = ref(defaultForm())
 const scheduleMode = ref('manual')
 const scheduleTime = ref('09:00')
+const detailVisible = ref(false)
+const detailRow = ref(null)
 const keywordVisible = ref(false)
 const authorVisible = ref(false)
 const keywordTarget = ref(null)
@@ -167,6 +169,15 @@ function openEdit(row) {
   editingID.value = row.id
   fillForm(row)
   visible.value = true
+}
+
+function openDetail(row) {
+  detailRow.value = row
+  detailVisible.value = true
+}
+
+function dateLabel(value) {
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 }
 
 function openCopy(row) {
@@ -386,6 +397,7 @@ function latestSummary(row) {
             <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
             <template #op="{ row }">
               <t-space size="small">
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
                 <t-button size="small" theme="primary" :disabled="row.status !== 'enabled' || isRunning(row) || row.strategy_type === 'author'" @click="run(row)">执行</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="$router.push(`/crawl-tasks?strategy_id=${row.id}`)">任务</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)" @click="openEdit(row)">编辑</t-button>
@@ -487,6 +499,23 @@ function latestSummary(row) {
           </div>
         </div>
       </t-dialog>
+
+      <t-drawer v-model:visible="detailVisible" header="策略详情" size="480px" :footer="false">
+        <div v-if="detailRow" class="strategy-drawer">
+          <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
+          <div class="strategy-drawer__field"><span>平台</span><strong>{{ detailRow.platform || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>类型</span><strong>{{ typeLabel(detailRow.strategy_type) }}</strong></div>
+          <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (detailRow.config?.keywords || []).join('、') || detailRow.config?.author || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>
+          <div class="strategy-drawer__field"><span>转素材规则</span><strong>{{ materialLabel(detailRow) }}</strong></div>
+          <div class="strategy-drawer__field"><span>状态</span><strong>{{ detailRow.status === 'enabled' ? '启用' : '停用' }}</strong></div>
+          <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ dateLabel(detailRow.created_at) }}</strong></div>
+          <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ dateLabel(detailRow.updated_at) }}</strong></div>
+          <div class="strategy-drawer__field"><span>创建人</span><strong>{{ detailRow.created_by_name || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>修改人</span><strong>{{ detailRow.updated_by_name || '-' }}</strong></div>
+        </div>
+      </t-drawer>
     </div>
   </t-loading>
 </template>
@@ -531,4 +560,8 @@ function latestSummary(row) {
 .strategy-aside__item span { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
 .strategy-aside__tip { margin-top: 4px; padding: 10px; border-radius: 8px; background: var(--wt-info-bg); color: var(--wt-primary); font-size: 12px; line-height: 1.55; }
 .strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.strategy-drawer { display: flex; flex-direction: column; gap: 10px; }
+.strategy-drawer__field { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
+.strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
+.strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
 </style>

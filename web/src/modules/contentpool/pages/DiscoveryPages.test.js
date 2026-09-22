@@ -48,6 +48,10 @@ describe('discovery strategy and task pages', () => {
 
   it('keeps strategy actions to five with run/edit/delete state control', () => {
     const source = read('DiscoveryStrategiesPage.vue')
+    expect(source).toContain('详情')
+    expect(source).toContain('openDetail')
+    expect(source).toContain('策略详情')
+    expect(source).toContain('created_by_name')
     expect(source).toContain('执行')
     expect(source).toContain('任务')
     expect(source).toContain('编辑')
