@@ -92,6 +92,32 @@ describe('content pool page', () => {
     expect(source).toContain('class="table-scroll-wrap"')
   })
 
+  // 标题有两种渲染分支：有 source_url 时是 <a>，否则是 <span>。
+  // 省略号规则若只写 span，有外链的行会整段自由折行，把行高从 56px 撑到 150px+。
+  it('clips the content title in both render branches without changing the link colour', () => {
+    const clipRule = source.match(/\.title-copy > a,\s*\n?\.title-copy > span \{[^}]*\}/)
+    expect(clipRule, 'title 省略号规则必须同时覆盖 <a> 与 <span>').not.toBeNull()
+    expect(clipRule[0]).toContain('text-overflow: ellipsis')
+    expect(clipRule[0]).toContain('white-space: nowrap')
+    expect(clipRule[0]).toContain('overflow: hidden')
+    // 颜色只在 span 分支上声明，避免覆盖 .wt-primary-link 的主题色
+    expect(clipRule[0]).not.toContain('color:')
+  })
+
+  // 封面是未经代理的上游 CDN 绝对地址：可能被 CSP 拦截、防盗链、404 或换域名。
+  // 这些都应退化到「暂无封面」，而不是留一个破图。
+  it('degrades a failed cover to the empty-cover placeholder instead of a broken image', () => {
+    expect(source).toContain('function markCoverFailed(')
+    expect(source).toContain('function coverAvailable(')
+    const guards = source.match(/v-if="coverAvailable\(/g) || []
+    const handlers = source.match(/@error="markCoverFailed\(/g) || []
+    expect(guards).toHaveLength(3)
+    expect(handlers).toHaveLength(3)
+    // 破图不再出现：所有封面按钮都由 coverAvailable 把关
+    expect(source).not.toContain('v-if="row.cover_url"')
+    expect(source).not.toContain('v-if="detail.cover_url"')
+  })
+
   it('supports the read-only material library projection without duplicating a page', () => {
     expect(source).toContain("route.path === '/material-library'")
     expect(source).toContain("status: isLibrary.value ? 'material_created'")

@@ -424,6 +424,20 @@ function truncateTitle(title, max = 80) {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
+// 封面兜底：封面是未经代理的上游 CDN 绝对地址，可能被 CSP 拦截、防盗链、
+// 404 或上游换域名。任何一种都不该在界面上留一个破图占位，
+// 而应退化到与「无封面」一致的「暂无封面」。
+const failedCovers = ref(new Set())
+function markCoverFailed(url) {
+  if (!url || failedCovers.value.has(url)) return
+  const next = new Set(failedCovers.value)
+  next.add(url)
+  failedCovers.value = next
+}
+function coverAvailable(url) {
+  return Boolean(url) && !failedCovers.value.has(url)
+}
+
 function openImageViewer(url) {
   if (!url) return
   imageViewerImages.value = [url]
@@ -472,8 +486,8 @@ function openImageViewer(url) {
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="{ x: '2060px' }" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
             <template #title="{ row }">
               <div class="title-cell">
-                <button v-if="row.cover_url" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
-                  <img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
+                  <img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" @error="markCoverFailed(row.cover_url)" />
                 </button>
                 <div v-else class="title-media"><span>暂无封面</span></div>
                 <div class="title-copy">
@@ -520,8 +534,8 @@ function openImageViewer(url) {
             <strong>当前 {{ reviewIndex + 1 }} / {{ reviewQueue.length }}</strong>
           </div>
           <section class="detail-hero">
-            <button v-if="detail.cover_url" type="button" class="detail-cover is-clickable" @click.stop="openImageViewer(detail.cover_url)">
-              <img :src="detail.cover_url" alt="" referrerpolicy="no-referrer" />
+            <button v-if="coverAvailable(detail.cover_url)" type="button" class="detail-cover is-clickable" @click.stop="openImageViewer(detail.cover_url)">
+              <img :src="detail.cover_url" alt="" referrerpolicy="no-referrer" @error="markCoverFailed(detail.cover_url)" />
             </button>
             <div v-else class="detail-cover"><span>暂无封面</span></div>
             <div class="detail-primary">
@@ -635,7 +649,7 @@ function openImageViewer(url) {
             <t-table v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
               <template #title="{ row }">
                 <div class="title-cell">
-                  <button v-if="row.cover_url" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)"><img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" /></button>
+                  <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)"><img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" @error="markCoverFailed(row.cover_url)" /></button>
                   <div v-else class="title-media"><span>暂无封面</span></div>
                   <div class="title-copy">
                     <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
@@ -691,7 +705,12 @@ function openImageViewer(url) {
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 .review-mode-button.is-active { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); }
 .content-pool-card.is-reviewing { border-color: rgba(37, 99, 235, 0.36); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10); }
-.title-copy span { overflow: hidden; color: var(--wt-text-primary); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+/* 标题有两种渲染分支：有 source_url 时是 <a class="wt-primary-link">，否则是 <span>。
+   省略号必须同时覆盖两者——只写 span 时，有外链的行会整段自由折行，
+   把行高从声明的 56px 撑到 150px 以上。颜色分开写，避免覆盖链接自身的主题色。 */
+.title-copy > a,
+.title-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-copy > span { color: var(--wt-text-primary); font-weight: 600; }
 .title-copy small { overflow: hidden; color: var(--wt-text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .content-pool-page :deep(.wt-resource-actions) { max-width: 360px; }
 .content-detail-drawer :deep(.t-drawer) { max-width: 1200px; }

@@ -5,10 +5,15 @@ import { createDesktopRouter } from "./router"
 import App from "./App.vue"
 import { canUseDesktop } from "../../utils.js"
 import { startDesktopLocalAgent } from "./features/local-agent/init.js"
+import { installWebviewErrorReporting } from "./webviewErrors.js"
 import "tdesign-vue-next/es/style/index.css"
 import "../../shared/styles/layout.css"
 import "../../styles/design-token.css"
 import "../../shared/styles/resource-module.css"
+
+// 尽早装上报，才能覆盖后续初始化与首屏渲染期间的报错。
+// 原先由 Rust 用 window.eval 注入，被 CSP 拦掉，从未生效。
+installWebviewErrorReporting()
 
 const app = createApp(App)
 const pinia = createPinia()
