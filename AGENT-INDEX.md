@@ -31,6 +31,7 @@
 | 改 Cloud Web 页面 | `web/src/apps/cloud/` 或 `web/src/modules/` |
 | 改 Desktop 使用的 Vue 业务页面 | `web/src/modules/` 或 `web/src/apps/desktop/`（**不在** `wt-media-desktop` 仓库） |
 | 改 Desktop Vue Runtime 适配 | `web/src/apps/desktop/runtime/`，必要时联动 `../wt-media-desktop` |
+| 改 Desktop 的 Cloud 地址 / Local Agent 端口来源 | `web/src/apps/desktop/features/local-agent/init.js`（经 `get_public_config`，**不得**落回环字面量），边界由 `web/src/localAgentBoundary.test.js` 常驻守护 |
 | 改外部 HTTP 调用 | `internal/infra/client/` |
 | 改 Cloud–Agent 契约服务端 | `internal/modules/cloudagent/` 与 `contracts/` |
 

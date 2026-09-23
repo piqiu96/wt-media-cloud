@@ -70,6 +70,8 @@
 |---|---|---|
 | `web/src/apps/cloud/` | Cloud Web 应用入口：`main.ts`、`router.ts`、`pages/` | 改 Cloud Web 专属页面 |
 | `web/src/apps/desktop/` | Desktop Vue 应用入口：`main.ts`、`router.ts`、`App.vue`、`features/`、`runtime/`（Runtime 适配）、`desktopRoleGuard.test.js` | 改 Desktop 专属页面、Desktop Runtime 适配、Webview 错误处理 |
+| `web/src/apps/desktop/features/local-agent/init.js` | Desktop 侧唯一知道「Cloud 地址与 Local Agent 端口从哪来」的地方：经 `invoke('get_public_config')` 取得，不落任何回环字面量 | 改 Desktop 的地址来源 |
+| `web/src/localAgentBoundary.test.js` | 把上面这条边界变成**常驻断言**（两个文件、三条规则，范围写明理由） | 改 Desktop–Agent 边界规则 |
 
 ### 共享业务模块（`web/src/modules/`）——按业务域
 
