@@ -1,5 +1,9 @@
 # WT Media Cloud AI Development Rules
 
+## 必须遵守
+Follow `AGENT-INDEX.md` for repository boundaries.
+
+
 ## 项目定位
 
 本项目：
@@ -20,11 +24,11 @@ Go + Hertz + Modular Monolith。
 
 只负责生命周期。
 
-## internal/runtime
+## internal/bootstrap
 
-保存运行资源。
+生产初始化唯一发起方，管理基础资源的初始化与回滚。
 
-禁止创建全局单例。
+基础资源通过各包公有只读 Getter 使用，禁止创建全局单例和 `internal/runtime`。
 
 ## internal/infra
 

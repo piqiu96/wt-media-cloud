@@ -1,5 +1,8 @@
 # WT Media Cloud AI Development Rules
 
+## 必须遵守
+Follow `AGENT-INDEX.md` for repository boundaries.
+
 ## 项目定位
 
 本项目使用 Go、CloudWeGo Hertz 和模块化单体架构。禁止提前拆分微服务，禁止未经决策引入 MQ、动态插件或工作流引擎。
