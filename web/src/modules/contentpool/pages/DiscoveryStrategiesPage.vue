@@ -48,7 +48,10 @@ const columns = [
   { colKey: 'rule', title: '挖掘规则', width: 130 },
   { colKey: 'schedule', title: '执行周期', width: 130 },
   { colKey: 'material', title: '转素材规则', width: 170 },
-  { colKey: 'latest', title: '最近效果', width: 200 },
+  // 竖排后列宽只由最宽的那一项决定：实测最宽是「待审核 9,999,999」，
+  // 99px（标签 36 + gap 6 + 数值 57），加 td 左右内边距 16px = 115px。
+  // 取 120px 留一点余量。
+  { colKey: 'latest', title: '最近效果', width: 120 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'updated_by_name', title: '修改人', width: 110 },
   { colKey: 'status', title: '状态', width: 90 },

@@ -37,7 +37,10 @@ const columns = [
   { colKey: 'strategy', title: '任务来源', width: 160 },
   { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'trigger', title: '触发方式', width: 90 },
-  { colKey: 'found', title: '发现结果', width: 240 },
+  // 竖排后列宽只由最宽的那一项决定：实测最宽是「自动素材 9,999,999」，
+  // 111px（标签 48 + gap 6 + 数值 57），加 td 左右内边距 16px = 127px。
+  // 取 130px 留一点余量。计数不可能到千万级，这个上界已经很宽松。
+  { colKey: 'found', title: '发现结果', width: 130 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'executed_at', title: '执行时间', width: 150 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },

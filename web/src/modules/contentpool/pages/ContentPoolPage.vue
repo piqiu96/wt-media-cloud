@@ -107,7 +107,10 @@ const columns = [
   { colKey: 'platform', title: '平台', width: 110 },
   { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'author_name', title: '作者', width: 140 },
-  { colKey: 'interaction', title: '互动', width: 170 },
+  // 竖排后列宽只由最宽的那一项决定：实测「浏览 9,999,999」在真实字体下
+  // 需要 87px（标签 24 + gap 6 + 数值 57），加 td 左右内边距 16px = 103px。
+  // 取 120px 是给数值到 9 位（含千分位）留余量，不是拍的。
+  { colKey: 'interaction', title: '互动', width: 120 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
   { colKey: 'source', title: '来源', width: 260 },
   { colKey: 'published_at', title: '发布时间', width: 150 },
