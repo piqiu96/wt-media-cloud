@@ -10,7 +10,9 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
+import { formatDateTime } from '../../../shared/utils/datetime.js'
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
@@ -60,14 +62,14 @@ const imageViewerIndex = ref(0)
 
 const resultColumns = [
   { colKey: 'row-select', type: 'multiple', width: 48 },
-  { colKey: 'title', title: '标题', minWidth: 280 },
+  { colKey: 'title', title: '标题', width: 280 },
   { colKey: 'author_name', title: '作者', width: 140 },
   { colKey: 'like_count', title: '点赞', width: 90 },
   { colKey: 'favorite_count', title: '收藏', width: 90 },
   { colKey: 'view_count', title: '浏览', width: 90 },
   { colKey: 'comment_count', title: '评论', width: 90 },
   { colKey: 'share_count', title: '分享', width: 90 },
-  { colKey: 'published_at', title: '发布时间', width: 170 },
+  { colKey: 'published_at', title: '发布时间', width: 150 },
 ]
 
 const pendingCount = computed(() => rows.value.filter((row) => row.status === 'pending').length)
@@ -84,23 +86,50 @@ const stats = computed(() => [
   { key: 'ignored', label: '已忽略', value: rows.value.filter((row) => row.status === 'ignored').length, tone: 'neutral' },
 ])
 
+// 每一列都必须声明 width，**不许只写 minWidth**。
+//
+// 实测（从实机截图按表头左边界间距反推，DPR=2）：TDesign 内层 <table> 没有宽度
+// （实测 styleWidth=null、minWidth:0px），表格宽度完全由列声明推导，取
+// col.width ?? col.minWidth。而 minWidth 在 WebKit 的 fixed 布局下**不产生确定列宽**，
+// 这类列于是变成「剩余空间列」，可用宽度不足时全部缺口由它们承担：
+// 「内容」列实测被压到 91.5px（声明 340）、「来源」压到 100px（声明 260），
+// 而所有声明 width 的列逐列精确（平台 110 / 游戏 110 / 作者 140 / 互动 170 / 来源方式 110）。
+// 91.5px 减去单元格内边距 32 只剩 59.5，放不下 88px 封面 + 12px 间距，
+// .title-copy（min-width:0，子元素 nowrap + overflow:hidden）归零 —— 标题与平台 ID 就这样没了。
+//
+// 注意 Chrome 认 minWidth（同一份产物在无头 Chrome 里量出来是 340），所以
+// 既有的 Chrome 模拟台对这种 bug 天然失明，别拿它当判据。静态测试才是闸门。
+// 同页 resultColumns 与另外两个列表页是同一条规则，改动时一并遵守。
 const columns = [
   { colKey: 'row-select', type: 'multiple', width: 48 },
   { colKey: 'id', title: 'ID', width: 80 },
-  { colKey: 'title', title: '内容', minWidth: 340 },
+  { colKey: 'title', title: '内容', width: 340 },
   { colKey: 'platform', title: '平台', width: 110 },
   { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'author_name', title: '作者', width: 140 },
   { colKey: 'interaction', title: '互动', width: 170 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
-  { colKey: 'source', title: '来源', minWidth: 260 },
-  { colKey: 'published_at', title: '发布时间', width: 170 },
-  { colKey: 'created_at', title: '发现时间', width: 170 },
-  { colKey: 'updated_at', title: '修改时间', width: 170 },
+  { colKey: 'source', title: '来源', width: 260 },
+  { colKey: 'published_at', title: '发布时间', width: 150 },
+  { colKey: 'created_at', title: '发现时间', width: 150 },
+  { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'updated_by_name', title: '修改人', width: 120 },
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
+
+// 表格横向滚动宽度由列宽推导，不再写死。
+//
+// 两个独立的理由，别混为一谈：
+// 1. 写死的 '2060px' 从未生效（TDesign 取列宽合计，实测滚动容器 scrollWidth=2378），
+//    是个「写了但不生效、且不随列宽变化」的漂移源。
+// 2. 现在每列都有确定的 width，合计才是真实地板。之前把 minWidth 也算进合计，
+//    而 fixed 布局根本不认那个下界（见 columns 上方的说明）。
+// 附带说明：这条推导**与「内容列是否被压」无关** —— 那是 minWidth 在 WebKit 下失效
+// 造成的，Chrome 里两侧读数都正常，所以这条推导改不改都看不出区别。
+const tableScroll = computed(() => ({
+  x: `${columns.reduce((sum, col) => sum + (col.width ?? col.minWidth ?? 0), 0)}px`,
+}))
 
 onMounted(() => {
   load()
@@ -412,11 +441,17 @@ function platformLabel(value) { return ({ douyin: '抖音', bilibili: 'B站' })[
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
 function statusTone(value) { return ({ pending: 'warning', material_created: 'success', ignored: 'neutral' })[value] || 'info' }
 function sourceTypeLabel(value) { return ({ link: 'ID/链接发现', search: '关键词发现', author: '博主发现', strategy: '挖掘策略' })[value] || value || '-' }
-function dateLabel(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 function authorLabel(row) { return row.author_name || row.author_uid || row.author_sec_uid || '-' }
+// 竖排一行一项，返回数组而不是拼好的字符串（渲染交给 MetricList）。
+// 拼成「浏览 N · 赞 N · 藏 N」时，宽度不够会在任意位置折断，
+// 数字和标签被拆散，读起来是一团。
 function interactionLabel(row) {
-  return `浏览 ${countLabel(row.view_count)} · 赞 ${countLabel(row.like_count)} · 藏 ${countLabel(row.favorite_count)}`
+  return [
+    { label: '浏览', value: countLabel(row.view_count) },
+    { label: '赞', value: countLabel(row.like_count) },
+    { label: '藏', value: countLabel(row.favorite_count) },
+  ]
 }
 
 function truncateTitle(title, max = 80) {
@@ -483,7 +518,7 @@ function openImageViewer(url) {
           </t-space>
         </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="{ x: '2060px' }" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
             <template #title="{ row }">
               <div class="title-cell">
                 <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
@@ -503,7 +538,7 @@ function openImageViewer(url) {
               <span v-else>{{ authorLabel(row) }}</span>
             </template>
             <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
-            <template #interaction="{ row }">{{ interactionLabel(row) }}</template>
+            <template #interaction="{ row }"><MetricList :items="interactionLabel(row)" /></template>
             <template #source="{ row }">
               <div class="source-cell">
                 <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link>
@@ -511,9 +546,9 @@ function openImageViewer(url) {
                 <span v-if="!row.strategy_id && !row.crawl_task_id">-</span>
               </div>
             </template>
-            <template #updated_at="{ row }">{{ dateLabel(row.updated_at) }}</template>
-            <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
-            <template #created_at="{ row }">{{ dateLabel(row.created_at) }}</template>
+            <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
+            <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
+            <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
@@ -555,11 +590,11 @@ function openImageViewer(url) {
                   </strong>
                 </div>
                 <div><span>平台</span><strong>{{ platformLabel(detail.platform) }}</strong></div>
-                <div><span>发布时间</span><strong>{{ dateLabel(detail.published_at) }}</strong></div>
-                <div><span>发现时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
-                <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
+                <div><span>发布时间</span><strong>{{ formatDateTime(detail.published_at) }}</strong></div>
+                <div><span>发现时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
+                <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
                 <div><span>操作人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
-                <div><span>审核时间</span><strong>{{ dateLabel(detail.audited_at) }}</strong></div>
+                <div><span>审核时间</span><strong>{{ formatDateTime(detail.audited_at) }}</strong></div>
                 <div><span>审核人</span><strong>{{ detail.audited_by_name || '-' }}</strong></div>
               </div>
               <div class="detail-metrics">
@@ -667,7 +702,7 @@ function openImageViewer(url) {
               <template #view_count="{ row }">{{ countLabel(row.view_count) }}</template>
               <template #comment_count="{ row }">{{ countLabel(row.comment_count) }}</template>
               <template #share_count="{ row }">{{ countLabel(row.share_count) }}</template>
-              <template #published_at="{ row }">{{ dateLabel(row.published_at) }}</template>
+              <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             </t-table>
             <div v-if="manualMode === 'keyword' && manualSearched" class="manual-search-actions">
               <t-button variant="outline" :loading="manualLoading" @click="searchManual(true)">重新发现</t-button>
@@ -700,7 +735,10 @@ function openImageViewer(url) {
 .title-media { padding: 0; cursor: default; }
 .title-media img { width: 100%; height: 100%; object-fit: cover; }
 .title-media.is-clickable { cursor: zoom-in; }
-.title-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+/* flex:1 让文字块确定性地吃掉封面之外的剩余宽度。
+   只写 min-width:0 时它靠 flex-basis 的隐式行为定宽，列的可用宽度一旦不足就先归零，
+   标题和平台 ID 会静默消失（minWidth-only 列被压时就是这么没的）。 */
+.title-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 .review-mode-button.is-active { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); }

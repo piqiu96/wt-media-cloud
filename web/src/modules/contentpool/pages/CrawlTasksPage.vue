@@ -6,6 +6,8 @@ import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import MetricList from '../../../shared/ui/resource/MetricList.vue'
+import { formatDateTime } from '../../../shared/utils/datetime.js'
 
 const client = createDiscoveryClient()
 const route = useRoute()
@@ -22,23 +24,35 @@ const strategyDrawerVisible = ref(false)
 const strategyDrawer = ref(null)
 const filters = ref({ name: '', status: '' })
 
+// 每一列都必须声明 width，**不许只写 minWidth**。
+//
+// 实测（用户实机截图按表头左边界间距反推）：本页三列只有 minWidth 的
+// 「任务名称」220→76、「任务来源」160→76.5、「发现结果」240→76.5，
+// 而所有声明 width 的列逐列精确（ID 69.5 / 游戏 110 / 触发方式 90 / 状态 100 /
+// 执行时间 170 / 修改时间 170 / 修改人 110）。任务名称被压成「m3a…」就是这么来的。
+// 机理与「Chrome 看不出问题」的原因见 ContentPoolPage.vue 里 columns 上方的完整说明。
 const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
-  { colKey: 'name', title: '任务名称', minWidth: 220 },
-  { colKey: 'strategy', title: '任务来源', minWidth: 160 },
+  { colKey: 'name', title: '任务名称', width: 220 },
+  { colKey: 'strategy', title: '任务来源', width: 160 },
   { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'trigger', title: '触发方式', width: 90 },
-  { colKey: 'found', title: '发现结果', minWidth: 240 },
+  { colKey: 'found', title: '发现结果', width: 240 },
   { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'executed_at', title: '执行时间', width: 170 },
-  { colKey: 'updated_at', title: '修改时间', width: 170 },
+  { colKey: 'executed_at', title: '执行时间', width: 150 },
+  { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'updated_by_name', title: '修改人', width: 110 },
   { colKey: 'op', title: '操作', width: 140, fixed: 'right' },
 ]
 
+// 横向滚动宽度由列宽推导，不写死（写死的 '1200px' 与列宽合计无关，是个漂移源）。
+const tableScroll = computed(() => ({
+  x: `${columns.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
+}))
+
 const resultColumns = [
   { colKey: 'cover', title: '封面', width: 72 },
-  { colKey: 'title', title: '标题', minWidth: 220 },
+  { colKey: 'title', title: '标题', width: 220 },
   { colKey: 'author_name', title: '作者', width: 120 },
   { colKey: 'like_count', title: '点赞', width: 90 },
   { colKey: 'favorite_count', title: '收藏', width: 90 },
@@ -159,11 +173,13 @@ function snapshotMaterialLabel(snapshot) {
   return parts.length ? parts.join(joiner) : '关闭'
 }
 
+// 任务名称里内嵌的时间戳，不带秒：20260923-143045 → 20260923-1430。
+// 秒对「这条任务是什么时候跑的」没有信息量，却让任务名称长出一截。
 function compactTime(value) {
   if (!value) return '--------'
   const d = new Date(value)
   const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
 }
 
 function triggerLabel(row) {
@@ -171,9 +187,17 @@ function triggerLabel(row) {
   return row.schedule_key ? '定时' : '手动'
 }
 
-function foundSummary(row) {
+// 竖排一行一项，返回数组而不是拼好的字符串（渲染交给 MetricList）。
+// 五项拼成一行时宽度不够会在任意位置折断，数字和标签被拆散。
+function foundStats(row) {
   const s = row.stats || {}
-  return `发现 ${s.found || 0} · 新增 ${s.added || 0} · 自动素材 ${s.auto_materialized || 0} · 待审核 ${s.pending || 0} · 失败 ${s.failed || 0}`
+  return [
+    { label: '发现', value: s.found || 0 },
+    { label: '新增', value: s.added || 0 },
+    { label: '自动素材', value: s.auto_materialized || 0 },
+    { label: '待审核', value: s.pending || 0 },
+    { label: '失败', value: s.failed || 0 },
+  ]
 }
 
 function openStrategy(row) {
@@ -200,10 +224,6 @@ function processingLabel(value) {
 
 function processingTone(value) {
   return ({ pending: 'warning', auto_materialized: 'success', material_failed: 'danger', duplicate: 'neutral', failed: 'danger' })[value] || 'info'
-}
-
-function dateLabel(value) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 }
 
 function timeHM(value) {
@@ -302,7 +322,7 @@ function hasFailed(task) {
 
       <ResourceCard class="task-card">
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="{ x: '1200px' }" empty="暂无挖掘任务">
+          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘任务">
             <template #name="{ row }">
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
             </template>
@@ -312,10 +332,10 @@ function hasFailed(task) {
             </template>
             <template #game="{ row }">{{ gameName(row.snapshot?.game_id) }}</template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
-            <template #found="{ row }">{{ foundSummary(row) }}</template>
+            <template #found="{ row }"><MetricList :items="foundStats(row)" /></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
-            <template #executed_at="{ row }">{{ dateLabel(row.created_at) }}</template>
-            <template #updated_at="{ row }">{{ dateLabel(row.updated_at) }}</template>
+            <template #executed_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
             <template #op="{ row }">
               <t-space size="small">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="open(row)">详情</t-button>
@@ -336,8 +356,8 @@ function hasFailed(task) {
             <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="task-source-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
             <div><span>游戏</span><strong>{{ gameName(detail.snapshot?.game_id) }}</strong></div>
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
-            <div><span>创建时间</span><strong>{{ dateLabel(detail.created_at) }}</strong></div>
-            <div><span>修改时间</span><strong>{{ dateLabel(detail.updated_at) }}</strong></div>
+            <div><span>创建时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
+            <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
             <div><span>创建人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
             <div><span>修改人</span><strong>{{ detail.updated_by_name || '-' }}</strong></div>
             <div><span>耗时</span><strong>{{ duration(detail) }}</strong></div>
@@ -394,7 +414,7 @@ function hasFailed(task) {
             <t-tab-panel value="errors" label="异常记录">
               <div v-if="exceptions(detail).length" class="exception-list">
                 <div v-for="(item, index) in exceptions(detail)" :key="index" class="exception-item">
-                  <div class="exception-head"><strong>{{ item.stage }}</strong><span>{{ dateLabel(item.time) }}</span></div>
+                  <div class="exception-head"><strong>{{ item.stage }}</strong><span>{{ formatDateTime(item.time) }}</span></div>
                   <div class="exception-body"><span>失败原因</span><p>{{ item.reason }}</p></div>
                   <div class="exception-body"><span>影响范围</span><p>{{ item.scope }}</p></div>
                 </div>

@@ -19,8 +19,8 @@ const menuItems = [
     { title: '挖掘策略', path: '/discovery-strategies', icon: 'setting' },
     { title: '挖掘任务', path: '/crawl-tasks', icon: 'time' },
   ] },
-  { value: 'production', title: '内容生产', icon: 'gallery', children: [
-    { title: '素材库', path: '/material-library', icon: 'gallery' },
+  { value: 'production', title: '内容生产', icon: 'browse-gallery', children: [
+    { title: '素材库', path: '/material-library', icon: 'browse-gallery' },
     { title: '我的素材', path: '/my-material', icon: 'file-icon' },
     { title: '合成任务', path: '/compose', icon: 'play-circle' },
     { title: '成片管理', path: '/finished-media', icon: 'video' },
@@ -40,11 +40,14 @@ const menuItems = [
   ] },
   { value: 'resource-management', title: '资源管理', icon: 'setting', children: [
     { title: '合成策略', path: '/compose-strategy', icon: 'setting' },
-    { title: '评论模板', path: '/comment-templates', icon: 'comment' },
+    // 图标名必须是精灵里真实存在的 symbol id，否则两端都渲染成空白。
+    // 原先的 'gallery' / 'comment' / 'organization' 都不存在（已核对精灵内 2352 个 id）：
+    // gallery → browse-gallery，organization → view-organization，comment 无同名图标 → chat-bubble。
+    { title: '评论模板', path: '/comment-templates', icon: 'chat-bubble' },
   ] },
   { value: 'system', title: '系统', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
-    { title: '运营分组', path: '/operation-teams', icon: 'organization' },
+    { title: '运营分组', path: '/operation-teams', icon: 'view-organization' },
     { title: '游戏管理', path: '/games', icon: 'gamepad' },
   ] },
 ]

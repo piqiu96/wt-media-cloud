@@ -16,7 +16,7 @@ describe('operation resource design primitives', () => {
   })
 
   it('provides token-backed presentation components for resource pages', () => {
-    for (const file of ['ResourcePageHeader.vue', 'ResourceCard.vue', 'ResourceStatGrid.vue', 'ResourceStatusBadge.vue']) {
+    for (const file of ['ResourcePageHeader.vue', 'ResourceCard.vue', 'ResourceStatGrid.vue', 'ResourceStatusBadge.vue', 'MetricList.vue']) {
       expect(existsSync(new URL(file, resourceRoot))).toBe(true)
     }
 
@@ -25,6 +25,13 @@ describe('operation resource design primitives', () => {
     expect(read('ResourceStatGrid.vue')).toContain("items: { type: Array, required: true }")
     expect(read('ResourceStatusBadge.vue')).toContain("tone: { type: String, default: 'neutral' }")
     expect(read('../../../styles/design-token.css')).toContain('--wt-primary: #2563EB')
+
+    // MetricList 竖排：容器是 column 方向，每项各占一行。
+    const metrics = read('MetricList.vue')
+    expect(metrics).toContain("items: { type: Array, default: () => [] }")
+    expect(metrics).toContain('v-for="item in items"')
+    expect(metrics).toMatch(/\.metric-list \{[^}]*flex-direction: column/)
+    expect(metrics).toMatch(/\.metric-list__item \{[^}]*white-space: nowrap/)
   })
 
   it('keeps resource filters wide and responsive while table operations remain pinned', () => {

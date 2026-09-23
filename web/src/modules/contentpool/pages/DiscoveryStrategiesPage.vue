@@ -7,7 +7,9 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
+import { formatDateTime } from '../../../shared/utils/datetime.js'
 
 const client = createDiscoveryClient()
 const route = useRoute()
@@ -31,20 +33,32 @@ const authorTarget = ref(null)
 
 const filters = ref({ name: '', type: '', status: '' })
 
+// 每一列都必须声明 width，**不许只写 minWidth**。
+//
+// 实测：TDesign 内层 <table> 没有宽度，表格宽度完全由列声明推导（取 col.width ?? col.minWidth），
+// 而 minWidth 在 WebKit 的 fixed 布局下不产生确定列宽 —— 这类列会变成「剩余空间列」，
+// 可用宽度不足时被压到远低于声明值（内容池实测：声明 340 被压成 91.5），
+// 而声明 width 的列逐列精确。Chrome 认 minWidth，所以那边的模拟台看不出问题。
+// 详见 ContentPoolPage.vue 里 columns 上方的完整说明。
 const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
-  { colKey: 'name', title: '策略名称', minWidth: 180 },
+  { colKey: 'name', title: '策略名称', width: 180 },
   { colKey: 'game', title: '游戏', width: 120 },
   { colKey: 'type', title: '类型', width: 90 },
   { colKey: 'rule', title: '挖掘规则', width: 130 },
   { colKey: 'schedule', title: '执行周期', width: 130 },
-  { colKey: 'material', title: '转素材规则', minWidth: 170 },
-  { colKey: 'latest', title: '最近效果', minWidth: 200 },
-  { colKey: 'updated_at', title: '修改时间', width: 170 },
+  { colKey: 'material', title: '转素材规则', width: 170 },
+  { colKey: 'latest', title: '最近效果', width: 200 },
+  { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'updated_by_name', title: '修改人', width: 110 },
   { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
+
+// 横向滚动宽度由列宽推导，不写死（写死的 '1260px' 与列宽合计无关，是个漂移源）。
+const tableScroll = computed(() => ({
+  x: `${columns.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
+}))
 
 const latestTasks = computed(() => {
   const grouped = new Map()
@@ -176,10 +190,6 @@ function openEdit(row) {
 function openDetail(row) {
   detailRow.value = row
   detailVisible.value = true
-}
-
-function dateLabel(value) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 }
 
 function openCopy(row) {
@@ -348,11 +358,18 @@ function scheduleLabel(schedule) {
   return schedule
 }
 
-function latestSummary(row) {
+// 竖排一行一项，返回数组而不是拼好的字符串（渲染交给 MetricList）。
+// 没有任务时返回空数组，模板据此显示占位符。
+function latestStats(row) {
   const task = latestTasks.value.get(row.id)
-  if (!task) return '-'
+  if (!task) return []
   const s = task.stats || {}
-  return `发现 ${s.found || 0} · 新增 ${s.added || 0} · 自动 ${s.auto_materialized || 0} · 待审核 ${s.pending || 0}`
+  return [
+    { label: '发现', value: s.found || 0 },
+    { label: '新增', value: s.added || 0 },
+    { label: '自动', value: s.auto_materialized || 0 },
+    { label: '待审核', value: s.pending || 0 },
+  ]
 }
 </script>
 
@@ -387,7 +404,7 @@ function latestSummary(row) {
 
       <ResourceCard class="strategy-card">
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="{ x: '1260px' }" empty="暂无挖掘策略">
+          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘策略">
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #type="{ row }">{{ typeLabel(row.strategy_type) }}</template>
             <template #rule="{ row }">
@@ -395,8 +412,11 @@ function latestSummary(row) {
             </template>
             <template #schedule="{ row }">{{ scheduleLabel(row.schedule) }}</template>
             <template #material="{ row }">{{ materialLabel(row) }}</template>
-            <template #latest="{ row }">{{ latestSummary(row) }}</template>
-            <template #updated_at="{ row }">{{ dateLabel(row.updated_at) }}</template>
+            <template #latest="{ row }">
+              <MetricList v-if="latestStats(row).length" :items="latestStats(row)" />
+              <span v-else>-</span>
+            </template>
+            <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
             <template #op="{ row }">
               <t-space size="small">
@@ -518,8 +538,8 @@ function latestSummary(row) {
           <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>
           <div class="strategy-drawer__field"><span>转素材规则</span><strong>{{ materialLabel(detailRow) }}</strong></div>
           <div class="strategy-drawer__field"><span>状态</span><strong>{{ detailRow.status === 'enabled' ? '启用' : '停用' }}</strong></div>
-          <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ dateLabel(detailRow.created_at) }}</strong></div>
-          <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ dateLabel(detailRow.updated_at) }}</strong></div>
+          <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
+          <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ formatDateTime(detailRow.updated_at) }}</strong></div>
           <div class="strategy-drawer__field"><span>创建人</span><strong>{{ detailRow.created_by_name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>修改人</span><strong>{{ detailRow.updated_by_name || '-' }}</strong></div>
         </div>

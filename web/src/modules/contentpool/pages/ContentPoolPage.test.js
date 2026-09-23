@@ -88,8 +88,38 @@ describe('content pool page', () => {
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {
     expect(source).toContain("fixed: 'right'")
-    expect(source).toContain(":scroll=\"{ x: '2060px' }\"")
     expect(source).toContain('class="table-scroll-wrap"')
+  })
+
+  // 横向滚动宽度必须由列宽推导，不能写死。
+  // 断言「推导」而不是某个字面量——字面量断言正是它漂移了还没人发现的原因。
+  //
+  // 注意别把这条测试的理由写成「写死值把内容列挤没了」：实测证伪。
+  // 写死的 2060 从未生效，TDesign 取列宽合计（滚动容器 scrollWidth 实测 2378），
+  // Chrome 里内容列恒 340、.title-copy 恒 224px，窗口 900→2560 都不变。
+  // 内容列被压是另一回事——是 WebKit 不认 minWidth（见下方列宽那条测试）。
+  it('derives the horizontal scroll width from the column widths', () => {
+    expect(source).not.toContain(':scroll="{ x:')
+    expect(source).toContain(':scroll="tableScroll"')
+    expect(source).toContain('const tableScroll = computed')
+    expect(source).toContain('col.width ?? col.minWidth ?? 0')
+
+    // 把 columns 里声明的宽度抄出来自己算一遍。
+    const start = source.indexOf('const columns = [')
+    const end = source.indexOf('const tableScroll = computed')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const block = source.slice(start, end)
+
+    const widths = [...block.matchAll(/\bwidth:\s*(\d+)/g)].map((m) => Number(m[1]))
+    const total = widths.reduce((a, b) => a + b, 0)
+
+    // 分母不为 0：一个都没抽到就说明这段断言是空转的。
+    expect(widths.length).toBeGreaterThan(10)
+    // 推导值必须**大于**原先写死的 2060，否则等于没修。
+    expect(total).toBeGreaterThan(2060)
+    // 现在每列都有 width，minWidth 不该再出现在声明里（写了也不生效，见下条测试）。
+    expect(block).not.toContain('minWidth:')
   })
 
   // 标题有两种渲染分支：有 source_url 时是 <a>，否则是 <span>。
