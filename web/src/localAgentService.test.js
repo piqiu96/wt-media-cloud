@@ -122,3 +122,53 @@ describe('local agent desktop service', () => {
     expect(invoke).toHaveBeenCalledWith('local_agent_refresh_runtime', expect.any(Object))
   })
 })
+
+describe('where Cloud is', () => {
+  // `init.js` caches the last known good answer at module scope, so these tests
+  // need a fresh module registry each time -- sharing one instance would make
+  // them depend on the order they run in.
+  async function freshCloudBaseUrl() {
+    vi.resetModules()
+    const init = await import('./apps/desktop/features/local-agent/init.js')
+    return init.cloudBaseUrl
+  }
+
+  it('asks the native side instead of assuming loopback', async () => {
+    const cloudBaseUrl = await freshCloudBaseUrl()
+    const invoke = vi.fn(async () => ({ cloud_base_url: 'https://cloud.example.test' }))
+
+    await expect(cloudBaseUrl({ invokeImpl: invoke })).resolves.toBe('https://cloud.example.test')
+    // The literal, not a constant imported from the module under test: this is
+    // the WebView-to-Rust contract, and pinning it here means renaming the
+    // command on one side alone fails the suite.
+    expect(invoke).toHaveBeenCalledWith('get_public_config')
+  })
+
+  it('answers with nothing rather than a loopback address when there is no answer yet', async () => {
+    const cloudBaseUrl = await freshCloudBaseUrl()
+    const invoke = vi.fn(async () => {
+      throw new Error('not running inside Desktop')
+    })
+
+    const url = await cloudBaseUrl({ invokeImpl: invoke })
+
+    // Empty, not a fallback address: an empty Cloud address reaches the
+    // existing "Cloud地址为空" error path, while a loopback guess reaches a
+    // different machine's idea of where Cloud is -- and is wrong in every
+    // packaged build, whose own origin is tauri.localhost.
+    expect(url).toBe('')
+    expect(url).not.toMatch(/127\.0\.0\.1/)
+  })
+
+  it('keeps the last known good address when the native side later fails', async () => {
+    const cloudBaseUrl = await freshCloudBaseUrl()
+    const ok = vi.fn(async () => ({ cloud_base_url: 'https://cloud.example.test' }))
+    await cloudBaseUrl({ invokeImpl: ok })
+
+    const broken = vi.fn(async () => {
+      throw new Error('window went away')
+    })
+
+    await expect(cloudBaseUrl({ invokeImpl: broken })).resolves.toBe('https://cloud.example.test')
+  })
+})

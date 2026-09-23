@@ -21,12 +21,37 @@ export async function startDesktopLocalAgent({ tauri = isTauri(), invokeImpl = i
   return true
 }
 
-function cloudBaseUrl() {
-  if (typeof window === "undefined") return "http://127.0.0.1:18080"
-  const origin = window.location?.origin || "http://127.0.0.1:18080"
-  // Packaged Desktop runs on http://tauri.localhost, which is NOT the Cloud
-  // API host; the local Cloud server is always the API base.
-  return origin.startsWith("http://127.0.0.1:18080") ? origin : "http://127.0.0.1:18080"
+// The command that answers "where is Cloud". One definition for the WebView
+// side; the Rust side spells it in `commands/public_config.rs`.
+export const PUBLIC_CONFIG_COMMAND = "get_public_config"
+
+// The last answer `get_public_config` managed to give.
+//
+// At module scope because the answer outlives one call: binding and runtime
+// refresh are pressed at different moments, and the second press must not lose
+// the address the first one learned.
+//
+// It starts empty, and stays empty if the native side never answers. Empty is
+// the honest failure value — the callers already report "Cloud地址为空" — and it
+// is never a loopback literal. That literal was the old behaviour: it is wrong
+// in every packaged build (their origin is `tauri.localhost`, not the Cloud API
+// host), and the whole point of asking the native side is that only it knows.
+let lastKnownCloudBaseUrl = ""
+
+export async function cloudBaseUrl({ invokeImpl = invoke } = {}) {
+  try {
+    const config = await invokeImpl(PUBLIC_CONFIG_COMMAND)
+    // A successful answer replaces the cache even when it is empty: the native
+    // side is authoritative, and "Cloud is not configured" is an answer rather
+    // than a failure to get one.
+    lastKnownCloudBaseUrl =
+      typeof config?.cloud_base_url === "string" ? config.cloud_base_url.trim() : ""
+  } catch {
+    // Keep the last known good address. Nothing is reported here on purpose:
+    // an empty address already surfaces to the user as the existing
+    // "Cloud地址为空" error, and a second message would say the same thing twice.
+  }
+  return lastKnownCloudBaseUrl
 }
 
 async function createDesktopStatusContext() {
@@ -80,10 +105,14 @@ export async function bindTrustedLocalAgent() {
     }
     throw error
   }
+  // Asked once, here, rather than at each call site: both paths below need it,
+  // and reading it twice would let the two disagree if the config changed
+  // between them.
+  const address = await cloudBaseUrl()
   const status = await service.status()
   if (status.node_id) {
     try {
-      await service.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
+      await service.refreshRuntime({ cloudBaseUrl: address })
       return createDesktopStatusPreview()
     } catch (error) {
       console.warn("刷新本机可信状态失败，将重新确认并绑定当前Desktop执行凭证", error)
@@ -92,7 +121,7 @@ export async function bindTrustedLocalAgent() {
   const ticket = await createRuntimeBindingClient().createBindingTicket()
   await service.bindSession({
     bindingTicket: ticket.binding_token,
-    cloudBaseUrl: cloudBaseUrl(),
+    cloudBaseUrl: address,
   })
   return createDesktopStatusPreview()
 }
