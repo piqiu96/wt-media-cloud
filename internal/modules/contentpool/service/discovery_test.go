@@ -363,3 +363,41 @@ func TestStrategyMaterialConfigValidationAndSnapshot(t *testing.T) {
 		t.Fatalf("historical task snapshot was changed: %+v", task.Snapshot)
 	}
 }
+
+// explodingCrawler fails loudly if the scheduling path ever tries to crawl.
+type explodingCrawler struct{}
+
+func (explodingCrawler) Discover(context.Context, CrawlerRequest) (CrawlerResult, error) {
+	panic("scheduling path must not crawl")
+}
+
+// The scheduling entry point must not build a crawler: cmd/discovery-scheduler's
+// resource plan assembles no clients, and douyinclient.Get() panics before
+// Initialize, so a crawler here takes the whole process down on the first tick.
+func TestSchedulerDiscoveryServiceCarriesNoCrawler(t *testing.T) {
+	if svc := defaultSchedulerDiscoveryService(); svc.crawler != nil {
+		t.Fatal("scheduling service must not build a crawler")
+	}
+}
+
+// runDue only reads the database and enqueues pending tasks, so it must not
+// touch the crawler even when one is attached.
+func TestRunDueNeverCrawls(t *testing.T) {
+	store := newDiscoveryMemory()
+	svc := NewDiscoveryService(store, NewService(newMemoryStore()), explodingCrawler{})
+	team := identityservice.TeamID(7)
+	strategy, err := svc.CreateStrategy(
+		identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team},
+		DiscoveryStrategy{TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.RunDue(time.Date(2026, 9, 16, 1, 0, 0, 0, time.UTC)); got != 1 {
+		t.Fatalf("expected one enqueued task, got %d", got)
+	}
+	tasks, _ := store.ListCrawlTasks(&team, &strategy.ID)
+	if len(tasks) != 1 || tasks[0].Status != CrawlPending || tasks[0].ScheduleKey == "" {
+		t.Fatalf("expected one pending task with a schedule key, tasks=%+v", tasks)
+	}
+}

@@ -79,6 +79,17 @@ func (mysqlDiscoveryStore) ClaimPendingCrawlTask(now time.Time) (model.CrawlTask
 }
 
 func defaultContentService() *contentService { return newContentService(mysqlContentStore{}) }
+
+// defaultDiscoveryService serves the server and worker processes: both assemble
+// the Douyin client in their resource plan.
 func defaultDiscoveryService() *discoveryService {
 	return newDiscoveryService(mysqlDiscoveryStore{}, defaultContentService(), newDouyinCrawler())
+}
+
+// defaultSchedulerDiscoveryService serves the scheduling path only. runDue reads
+// the database and enqueues pending tasks without ever crawling, so the service
+// must not carry a crawler: cmd/discovery-scheduler's resource plan deliberately
+// assembles no clients, and douyinclient.Get() panics before Initialize.
+func defaultSchedulerDiscoveryService() *discoveryService {
+	return newDiscoveryService(mysqlDiscoveryStore{}, defaultContentService(), nil)
 }

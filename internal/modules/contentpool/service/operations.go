@@ -55,7 +55,10 @@ func CreateManualRun(actor identityservice.PublicUser, platform, operation strin
 func CreateManualRunWithTeam(actor identityservice.PublicUser, requested *identityservice.TeamID, platform, operation string, config map[string]any) (model.CrawlTask, error) {
 	return defaultDiscoveryService().createManualRunWithTeam(actor, requested, platform, operation, config)
 }
-func RunDue(now time.Time) int                  { return defaultDiscoveryService().runDue(now) }
+
+// RunDue is the scheduling entry point: it enqueues due strategies without
+// crawling, so it must not build a crawler (see defaultSchedulerDiscoveryService).
+func RunDue(now time.Time) int                  { return defaultSchedulerDiscoveryService().runDue(now) }
 func RunNext(ctx context.Context) (bool, error) { return defaultDiscoveryService().runNext(ctx) }
 func ListCrawlTasks(actor identityservice.PublicUser, strategyID *int64) ([]model.CrawlTask, error) {
 	return defaultDiscoveryService().listCrawlTasks(actor, strategyID)
