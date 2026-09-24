@@ -71,7 +71,9 @@
 | `web/src/apps/cloud/` | Cloud Web 应用入口：`main.ts`、`router.ts`、`pages/` | 改 Cloud Web 专属页面 |
 | `web/src/apps/desktop/` | Desktop Vue 应用入口：`main.ts`、`router.ts`、`App.vue`、`features/`、`runtime/`（Runtime 适配）、`desktopRoleGuard.test.js` | 改 Desktop 专属页面、Desktop Runtime 适配、Webview 错误处理 |
 | `web/src/apps/desktop/features/local-agent/init.js` | Desktop 侧唯一知道「Cloud 地址与 Local Agent 端口从哪来」的地方：经 `invoke('get_public_config')` 取得，不落任何回环字面量 | 改 Desktop 的地址来源 |
-| `web/src/localAgentBoundary.test.js` | 把上面这条边界变成**常驻断言**（两个文件、三条规则，范围写明理由） | 改 Desktop–Agent 边界规则 |
+| `web/src/apps/desktop/features/local-settings/`、`local-logs/` | 「本机设置」页与日志查看器（CHG-058）。**页面逻辑在各自的纯 JS 模块里**（`local-settings-view.js` / `local-logs-view.js` / `service.js`），`.vue` 只负责渲染——本仓 vitest **不编译 `.vue`**，所以放页面里的逻辑没有单测、放页面里的错 import 只有构建能发现；`service.js` 的 `createMockInvoke()` 是 `invoke` 的替身（按 Rust 拼写应答），**不是第二套服务** | 改本机设置页、日志查看器或它们的命令调用 |
+| `web/src/localSettingsService.test.js`、`localSettingsView.test.js`、`localLogsView.test.js`、`localSettingsWiring.test.js` | 上面那两页的测试：命令名与**精确**参数对象、纯派生规则的边界、路由名 ↔ 免鉴权名单 ↔ 导航路径三处一致、以及「页面里 import 的名字真的被导出」 | 改页面、服务层或路由装配 |
+| `web/src/localAgentBoundary.test.js` | 把「Desktop 页面不直连 Agent 回环端口」变成**常驻断言**（`init.js`、`LocalLogsPage.vue` 加一份**写死的**模块清单；新模块要显式进清单） | 改 Desktop–Agent 边界规则 |
 
 ### 共享业务模块（`web/src/modules/`）——按业务域
 
