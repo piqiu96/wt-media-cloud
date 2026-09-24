@@ -51,7 +51,8 @@ Follow `AGENT-INDEX.md` for repository boundaries.
 - 所有外部 HTTP 协议实现位于 `internal/infra/client`，统一处理 timeout、retry、错误映射、日志、trace 和 metrics。
 - 业务代码禁止直接创建 `http.Client`，只能调用 `Search`、`FindAuthor`、`FetchByURL`、`CheckProxy` 等类型化方法。
 - Cloud 是业务事实中心，可以直接调用抖音等公开数据 API。
-- Desktop Agent 负责本地浏览器、Profile、账号登录态、本地文件和 FFmpeg 等本机能力。
+- Desktop / Local Agent 负责本地浏览器、Profile、账号登录态、本地文件落地、发布和互动等本机能力。
+- M4-M5 视频合成由 Cloud Compose Worker 调用受控 FFmpeg；Desktop、Local Agent 和 Cloud Agent 均不得执行该视频合成链路。
 - 需要本机环境的操作必须经过 Agent；纯服务端公开数据抓取不经过 Agent。
 
 ## 日志规则
