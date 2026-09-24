@@ -49,4 +49,36 @@ describe('Desktop Local Agent boundary', () => {
     expect(page).not.toMatch(/127\.0\.0\.1/)
     expect(page).not.toMatch(/\bfetch\(/)
   })
+
+  /**
+   * The same rule over the whole 本机设置 surface, module by module.
+   *
+   * The rewritten viewer reads two log trees and can open either one's folder;
+   * the settings page writes a file under the data root. Every one of those is a
+   * Rust command away, so there is no reason for a port or a `fetch` to appear
+   * anywhere in this set — and if one appeared, it would be in a module the
+   * page-scoped assertions above cannot see.
+   *
+   * The list is spelled out rather than globbed: a new file under these features
+   * is then a deliberate addition to this list, which is the moment to check it.
+   */
+  it('keeps the whole local-settings surface off the network', () => {
+    const modules = [
+      './apps/desktop/features/local-settings/LocalSettingsPage.vue',
+      './apps/desktop/features/local-settings/service.js',
+      './apps/desktop/features/local-settings/local-settings-view.js',
+      './apps/desktop/features/local-logs/local-logs-view.js',
+    ]
+
+    for (const path of modules) {
+      const text = read(path)
+      expect(text, path).not.toMatch(/127\.0\.0\.1/)
+      expect(text, path).not.toMatch(/\blocalhost\b/)
+      expect(text, path).not.toMatch(/\bfetch\(/)
+      // No second door to the network, either: a page that reached the Agent
+      // through XHR or a WebSocket would be the same CSP failure with a
+      // different spelling.
+      expect(text, path).not.toMatch(/XMLHttpRequest|new WebSocket/)
+    }
+  })
 })

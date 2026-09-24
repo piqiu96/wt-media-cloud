@@ -40,7 +40,7 @@ router.beforeEach(async (to, from, next) => {
   }
 
   // Desktop 本地页面不需要认证
-  if (to.name === "AgentStatus" || to.name === "LocalLogs") {
+  if (to.name === "AgentStatus" || to.name === "LocalLogs" || to.name === "LocalSettings") {
     next()
     return
   }

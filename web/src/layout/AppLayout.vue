@@ -56,6 +56,7 @@ const desktopItems = [
   { value: 'local-environment', title: '本地环境', icon: 'server', children: [
     { title: 'Agent 状态', path: '/agent', icon: 'server' },
     { title: '本地日志', path: '/logs', icon: 'file' },
+    { title: '本机设置', path: '/settings', icon: 'setting' },
   ] },
 ]
 
