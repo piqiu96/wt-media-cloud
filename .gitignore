@@ -1,6 +1,11 @@
 .cache/
 .DS_Store
-bin/
+# Go writes build output to `bin/`, but this repository also keeps its one
+# operational entry point there. `bin/*` rather than `bin/` is load-bearing:
+# git cannot re-include anything under an excluded *directory*, so the ignore
+# rule has to name the contents. CHG-20260926-067 T-04.
+bin/*
+!bin/*.sh
 dist/
 web/dist/
 web/dist-cloud/

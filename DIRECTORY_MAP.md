@@ -58,7 +58,8 @@
 | `migrations/` | 数据库迁移 |
 | `config/`、`config_online/` | 运行时配置与发布打包替换配置（YAML 只允许在这两处） |
 | `contracts/` | 跨工程契约：`cloud-api/`、`cloud-agent-api/`、`business-schemas/`、`business-enums/`、`cloud-error-codes/`、`task-schemas/` |
-| `scripts/` | 构建与运维脚本 |
+| `bin/` | 本地开发环境的进程启停与健康检查，唯一入口 `control.sh` |
+| `scripts/` | 开发与验收脚本；分类与落位规则见 `scripts/README.md` |
 
 ## 二、统一 Vue 前端（`web/`）
 

@@ -58,12 +58,14 @@ scripts/build.sh
 scripts/verify-health.sh
 ```
 
-For foreground process management:
+For local process management:
 
 ```text
-scripts/start.sh
-scripts/health.sh
-scripts/stop.sh
+bin/control.sh start
+bin/control.sh status
+bin/control.sh stop
 ```
+
+`bin/control.sh help` lists the remaining verbs.
 
 `WT_MEDIA_CLOUD_HTTP_ADDR` only selects the health-probe address used by scripts. The server listen address comes from `config/app.toml`; keep those values aligned in local development.

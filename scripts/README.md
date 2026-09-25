@@ -1,20 +1,67 @@
 # Cloud Scripts
 
-| Script | Purpose |
-|---|---|
-| `bootstrap.sh` | Download Go modules and install Web dependencies with `npm ci`. |
-| `test.sh` | Run Cloud Go tests and Cloud Web Vitest tests. |
-| `build.sh` | Build the Cloud server binary and Cloud Web Vite assets. |
-| `migrate.sh` | Apply migrations from `migrations/` using `config/database/primary.toml`. |
-| `start.sh` | Start the Cloud server in the background, wait for `/healthz`, and write a PID file. |
-| `health.sh` | Probe `/healthz` and `/api/v1/health`. |
-| `stop.sh` | Stop the process recorded by the PID file. |
-| `verify-health.sh` | Run tests, start the server temporarily, probe health, and stop it. |
+This directory is the script index for `wt-media-cloud`. It states the
+classification and the placement rule only — no per-file walkthrough, no runtime
+parameters.
 
-Runtime connection values come from `config/`. In particular, migration reads `config/database/primary.toml`, and the server listen address comes from `config/app.toml`.
+## Classification
 
-`WT_MEDIA_CLOUD_HTTP_ADDR` controls only the health-probe address used by scripts. Keep it aligned with `config/app.toml`. `WT_MEDIA_CLOUD_PID_FILE`, `WT_MEDIA_CLOUD_LOG_FILE`, `WT_MEDIA_CLOUD_BINARY_FILE`, and `WT_MEDIA_CLOUD_GOPATH` remain script-level operational overrides.
+| Purpose | What the category answers | Scripts (file names only) |
+| --- | --- | --- |
+| Operations | Bring Cloud up / confirm it is up / stop it | see [`../bin/control.sh`](../bin/control.sh) |
+| Development | Rebuild / regenerate / migrate after a change | `bootstrap.sh`, `build.sh`, `migrate.sh`, `test.sh` |
+| Verification | Prove something holds, or does not | `test.sh`, `verify-health.sh` |
+| Shared | Required by the scripts above; not an entry point itself | `local-env.sh` |
 
-`cmd/server` starts only the API Server (`serverResourcePlan()` has no scheduler or worker step). The Discovery Scheduler and Discovery Worker are separate CMD entrypoints, `cmd/discovery-scheduler` and `cmd/discovery-worker`, and start nothing else: the Scheduler only creates pending `crawl_tasks`; the Worker exclusively claims and executes them. Both take no flags and loop on the intervals in `config/scheduler/scheduler.toml` (`discovery_interval`, `worker_interval`). To run one due-strategy scan without waiting for the interval, call the admin-controlled `POST /api/v1/discovery-scheduler/run-due`.
+Multiple membership is a property, not a mistake: `test.sh` builds and asserts,
+so it is both; `verify-health.sh` is a verification script that happens to start
+and stop a throwaway server, so it spans Verification and Operations while the
+Operations entry point proper is [`../bin/control.sh`](../bin/control.sh);
+`local-env.sh` is sourced by that entry point and by `migrate.sh`, and is never
+invoked on its own.
 
-Starting `cmd/server` alone performs no discovery execution: pending `crawl_tasks` stay pending until a Worker process claims them.
+The Operations row is the one that moved: process start/stop and liveness live in
+`bin/`, not here.
+
+## Where a new script goes
+
+- A new **development** script → `scripts/dev/`.
+- A new **verification / acceptance** script → `scripts/verify/`.
+- **Start/stop and health checks always go to [`bin/`](../bin/)**; do not add them
+  under `scripts/`.
+- **Existing scripts do not move.** The flat files in this directory are the
+  historical landing spots and are left alone. `dev/` and `verify/` take scripts
+  written from here on — they are not a target shape to migrate the current files
+  into.
+
+Both subdirectories currently hold a single `.gitkeep` each.
+
+## What this file does not own
+
+Per-file facts are not here. Directory facts and the no-scan zones belong to
+[`../DIRECTORY_MAP.md`](../DIRECTORY_MAP.md); the server listen address and the
+other runtime connection values belong to `config/`; the probe address belongs to
+[`local-env.sh`](local-env.sh) and is described in [`../README.md`](../README.md).
+
+**Numeric runtime parameters — ports, addresses, credentials, timeout and
+retention defaults — have their single landing point in configuration files.**
+Neither this file nor [`../bin/control.sh`](../bin/control.sh) restates them:
+`bin/control.sh` dispatches verbs only.
+
+The script-level operational overrides stay script-level and are named here only:
+`WT_MEDIA_CLOUD_PID_FILE`, `WT_MEDIA_CLOUD_LOG_FILE`, `WT_MEDIA_CLOUD_BINARY_FILE`,
+`WT_MEDIA_CLOUD_GOPATH`, and `WT_MEDIA_CLOUD_HTTP_ADDR`.
+
+## Process entrypoints
+
+`cmd/server` starts only the API Server (`serverResourcePlan()` has no scheduler or
+worker step). The Discovery Scheduler and Discovery Worker are separate CMD
+entrypoints, `cmd/discovery-scheduler` and `cmd/discovery-worker`, and start
+nothing else: the Scheduler only creates pending `crawl_tasks`; the Worker
+exclusively claims and executes them. Both take no flags and loop on the intervals
+in `config/scheduler/scheduler.toml` (`discovery_interval`, `worker_interval`). To
+run one due-strategy scan without waiting for the interval, call the
+admin-controlled `POST /api/v1/discovery-scheduler/run-due`.
+
+Starting `cmd/server` alone performs no discovery execution: pending `crawl_tasks`
+stay pending until a Worker process claims them.
