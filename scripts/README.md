@@ -10,7 +10,7 @@ parameters.
 | --- | --- | --- |
 | Operations | Bring Cloud up / confirm it is up / stop it | see [`../bin/control.sh`](../bin/control.sh) |
 | Development | Rebuild / regenerate / migrate after a change | `bootstrap.sh`, `build.sh`, `migrate.sh`, `test.sh` |
-| Verification | Prove something holds, or does not | `test.sh`, `verify-health.sh` |
+| Verification | Prove something holds, or does not | `test.sh`, `verify-health.sh`, `verify/test-control.sh` |
 | Shared | Required by the scripts above; not an entry point itself | `local-env.sh` |
 
 Multiple membership is a property, not a mistake: `test.sh` builds and asserts,
@@ -34,7 +34,16 @@ The Operations row is the one that moved: process start/stop and liveness live i
   written from here on — they are not a target shape to migrate the current files
   into.
 
-Both subdirectories currently hold a single `.gitkeep` each.
+`scripts/verify/test-control.sh` is the first real file under either
+subdirectory; `scripts/dev/` still holds only its `.gitkeep`. It asserts the
+*entry* properties of [`../bin/control.sh`](../bin/control.sh) — tracked,
+executable in the git index and on disk, directly invocable, the four verbs
+listed, unknown verb refused with exit 2 — and starts nothing, so `test.sh`
+runs it after `go test` and `npm test`. Every line it prints is prefixed
+`[control]`: `scripts/verify_m3_acceptance.py` parses `test.sh`'s log for
+`^ok\s`, `^FAIL`, `Test Files N passed (N)` and `Tests N passed (N)`, and an
+unprefixed `ok`/`FAIL` from a shell check would be counted as a Go package
+result or a vitest summary.
 
 ## What this file does not own
 
