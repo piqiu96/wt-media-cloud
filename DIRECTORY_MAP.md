@@ -99,6 +99,7 @@
 
 以下目录为构建产物或依赖，除非诊断具体失败，禁止扫描或修改：
 
+- `.gitignore` 列出的全部路径，其中还包括 `dist`、`node_modules` 等
 - `web/dist-cloud/`、`web/dist-desktop/`（构建产物快照）
 - `web/node_modules/`、任何 `node_modules/`
 - `logs/`
