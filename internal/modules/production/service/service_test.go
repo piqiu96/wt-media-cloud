@@ -50,6 +50,24 @@ type memoryStore struct {
 	preparedTeam  sharedidentity.TeamID
 	preparedFor   int64
 	preparedCount int
+
+	// The worker's two writes, recorded in full rather than as a flag: what the
+	// service does with each is the part under test — one turns a refused write into
+	// a missing material, the other lets it pass — and the facts have to be shown to
+	// have travelled untouched to the store.
+	readyFacts  repository.VideoFacts
+	readyTeam   sharedidentity.TeamID
+	readyFor    int64
+	readyAt     time.Time
+	ready       bool
+	readyErr    error
+	failedMsg   string
+	failedTeam  sharedidentity.TeamID
+	failedFor   int64
+	failedAt    time.Time
+	failed      bool
+	failedErr   error
+	failedCount int
 }
 
 // stubNodes answers the one question this module asks the runtime-binding
@@ -130,6 +148,15 @@ func (s *memoryStore) MarkVideoPreparing(teamID sharedidentity.TeamID, materialI
 	s.preparedCount++
 	s.preparedTeam, s.preparedFor = teamID, materialID
 	return s.preparing, s.preparingErr
+}
+func (s *memoryStore) MarkVideoReady(teamID sharedidentity.TeamID, materialID int64, facts repository.VideoFacts, now time.Time) (bool, error) {
+	s.readyTeam, s.readyFor, s.readyFacts, s.readyAt = teamID, materialID, facts, now
+	return s.ready, s.readyErr
+}
+func (s *memoryStore) MarkVideoFailed(teamID sharedidentity.TeamID, materialID int64, message string, now time.Time) (bool, error) {
+	s.failedCount++
+	s.failedTeam, s.failedFor, s.failedMsg, s.failedAt = teamID, materialID, message, now
+	return s.failed, s.failedErr
 }
 func (s *memoryStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	s.created = input
@@ -574,5 +601,99 @@ func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) 
 	}
 	if task.ID != "transfer-1" {
 		t.Fatalf("task = %+v", task)
+	}
+}
+
+// verifiedVideoFacts is what a worker hands the service once its download has been
+// verified. It is built here rather than reused from the repository's tests, which
+// are a different package: this is the shape the service promises to pass on.
+func verifiedVideoFacts() repository.VideoFacts {
+	return repository.VideoFacts{
+		ObjectKey: "materials/42/8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90.mp4",
+		SizeBytes: 1048576,
+		SHA256:    "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90",
+		Media:     []byte(`{"container":"mp4"}`),
+	}
+}
+
+// The facts reach the store unchanged, and the write is scoped by the team from
+// the task row rather than by any actor — the worker has no session to read one
+// from. A service that dropped the team and wrote by material id alone would
+// prepare another team's material with this team's task.
+func TestMarkVideoReadyWritesTheFactsItWasGivenUnderTheTasksTeam(t *testing.T) {
+	store := &memoryStore{ready: true}
+	svc := testService(store)
+	now := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	facts := verifiedVideoFacts()
+
+	if err := svc.MarkVideoReady(sharedidentity.TeamID(7), 42, facts); err != nil {
+		t.Fatalf("MarkVideoReady() error = %v", err)
+	}
+	if store.readyTeam != sharedidentity.TeamID(7) || store.readyFor != 42 {
+		t.Fatalf("scope = team %d material %d, want team 7 material 42", store.readyTeam, store.readyFor)
+	}
+	if store.readyFacts.ObjectKey != facts.ObjectKey || store.readyFacts.SHA256 != facts.SHA256 || store.readyFacts.SizeBytes != facts.SizeBytes || string(store.readyFacts.Media) != string(facts.Media) {
+		t.Fatalf("facts = %+v, want them passed on unchanged", store.readyFacts)
+	}
+	if !store.readyAt.Equal(now) {
+		t.Fatalf("written at %v, want the service's clock %v", store.readyAt, now)
+	}
+}
+
+// A write that changed no row is the material being gone, and it is an error for
+// the worker: a task that reported success here would leave a download waiting on a
+// video nobody is preparing. The reading is `ErrNotFound` rather than a new
+// sentinel because that is what it is — the scope names no material.
+func TestMarkVideoReadyReportsAWriteThatChangedNoRowAsAMissingMaterial(t *testing.T) {
+	store := &memoryStore{ready: false}
+	svc := testService(store)
+
+	err := svc.MarkVideoReady(sharedidentity.TeamID(7), 42, verifiedVideoFacts())
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("MarkVideoReady() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMarkVideoReadyPassesOnAStoreFailure(t *testing.T) {
+	failure := errors.New("connection reset")
+	store := &memoryStore{ready: true, readyErr: failure}
+	svc := testService(store)
+
+	err := svc.MarkVideoReady(sharedidentity.TeamID(7), 42, verifiedVideoFacts())
+	if !errors.Is(err, failure) {
+		t.Fatalf("MarkVideoReady() error = %v, want the store's failure", err)
+	}
+}
+
+// A refused failure write is not an error, unlike a refused readiness one. The
+// statement refuses a material that is already `ready`, and that is the case the
+// refusal exists for: a retry failing after a slower earlier attempt succeeded. The
+// task still fails; the material keeps its video. A service that turned this into an
+// error would make the worker report a fault it cannot act on.
+func TestMarkVideoFailedLetsARefusedWritePass(t *testing.T) {
+	store := &memoryStore{failed: false}
+	svc := testService(store)
+	now := time.Date(2026, 9, 26, 11, 30, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+
+	if err := svc.MarkVideoFailed(sharedidentity.TeamID(7), 42, "source http status 404"); err != nil {
+		t.Fatalf("MarkVideoFailed() error = %v, want nil for a material that is already ready", err)
+	}
+	if store.failedTeam != sharedidentity.TeamID(7) || store.failedFor != 42 || store.failedMsg != "source http status 404" {
+		t.Fatalf("write = team %d material %d message %q", store.failedTeam, store.failedFor, store.failedMsg)
+	}
+	if !store.failedAt.Equal(now) {
+		t.Fatalf("written at %v, want the service's clock %v", store.failedAt, now)
+	}
+}
+
+func TestMarkVideoFailedPassesOnAStoreFailure(t *testing.T) {
+	failure := errors.New("connection reset")
+	store := &memoryStore{failed: true, failedErr: failure}
+	svc := testService(store)
+
+	if err := svc.MarkVideoFailed(sharedidentity.TeamID(7), 42, "boom"); !errors.Is(err, failure) {
+		t.Fatalf("MarkVideoFailed() error = %v, want the store's failure", err)
 	}
 }

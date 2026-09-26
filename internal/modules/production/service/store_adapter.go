@@ -41,6 +41,14 @@ func (mysqlStore) MarkVideoPreparing(teamID identityservice.TeamID, materialID i
 	return repository.MarkVideoPreparing(teamID, materialID, now)
 }
 
+func (mysqlStore) MarkVideoReady(teamID identityservice.TeamID, materialID int64, facts repository.VideoFacts, now time.Time) (bool, error) {
+	return repository.MarkVideoReady(teamID, materialID, facts, now)
+}
+
+func (mysqlStore) MarkVideoFailed(teamID identityservice.TeamID, materialID int64, message string, now time.Time) (bool, error) {
+	return repository.MarkVideoFailed(teamID, materialID, message, now)
+}
+
 // runtimeNodeResolver is the whole of this module's dependency on the
 // runtime-binding domain, and productionTransferCreator the whole of its
 // dependency on the transfer domain. Both are types rather than calls inside the

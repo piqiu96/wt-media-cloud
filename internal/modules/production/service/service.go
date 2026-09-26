@@ -59,6 +59,15 @@ type Store interface {
 	// The flag is part of the interface rather than an implementation detail
 	// because the caller's next step depends on it.
 	MarkVideoPreparing(identityservice.TeamID, int64, time.Time) (bool, error)
+
+	// MarkVideoReady writes the facts of a verified prepared source, and reports
+	// whether the scope matched a row at all.
+	MarkVideoReady(identityservice.TeamID, int64, repository.VideoFacts, time.Time) (bool, error)
+
+	// MarkVideoFailed records that a preparation produced no verified source. Its
+	// flag is false for a material that is already `ready`, which is a refusal the
+	// caller must not read as "the row was not there".
+	MarkVideoFailed(identityservice.TeamID, int64, string, time.Time) (bool, error)
 }
 
 // LocalNodeResolver answers which of the actor's machines should receive a file.
@@ -318,6 +327,45 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		return transferdto.Task{}, fmt.Errorf("queue user download for material %d: %w", material.ID, err)
 	}
 	return task, nil
+}
+
+// MarkVideoReady records the facts of a verified prepared source. It is the Cloud
+// worker's write rather than an HTTP use case: its scope comes from the task row
+// and not from an actor, and no route reaches it.
+//
+// A write that changed no row is reported as a missing material rather than as a
+// flag, because that is the only reading available. The statement carries no state
+// predicate — a preparation may finish from any state — and it writes a fresh
+// `updated_at` on every call, so a row it matched is always a row it changed. Zero
+// therefore means the scope matched nothing: the task names a material that is gone
+// or belongs to another team. Reporting that as a completed preparation would leave
+// a download waiting on a video nobody is preparing, so it is an error here.
+//
+// The MySQL connection does not set `CLIENT_FOUND_ROWS`, which is what makes
+// "changed" the right word: with it set, the same reading would still hold, and
+// without it a statement that set nothing new would report zero.
+func (s *Service) MarkVideoReady(teamID identityservice.TeamID, materialID int64, facts repository.VideoFacts) error {
+	written, err := s.store.MarkVideoReady(teamID, materialID, facts, s.now().UTC())
+	if err != nil {
+		return err
+	}
+	if !written {
+		return fmt.Errorf("%w: material %d in team %d", ErrNotFound, materialID, teamID)
+	}
+	return nil
+}
+
+// MarkVideoFailed records that a preparation produced no verified source.
+//
+// Unlike `MarkVideoReady`, a write that changed no row is not an error. The
+// statement refuses a material that is already `ready`, and a preparation failing
+// after a slower earlier attempt succeeded is exactly the case that refusal exists
+// for: the task still fails, and the material keeps the video it has. A material
+// that is not there at all reads the same way and needs no answer either — there is
+// no projection left to correct.
+func (s *Service) MarkVideoFailed(teamID identityservice.TeamID, materialID int64, message string) error {
+	_, err := s.store.MarkVideoFailed(teamID, materialID, message, s.now().UTC())
+	return err
 }
 
 // videoFacts is the three facts a local download needs out of a `ready` row.
