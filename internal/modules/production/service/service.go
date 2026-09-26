@@ -53,6 +53,12 @@ type Store interface {
 	ListActiveUsages(identityservice.UserID) ([]model.MaterialUsage, error)
 	FindUsageForUser(int64, identityservice.UserID) (model.MaterialUsage, bool, error)
 	RemoveUsageByID(int64, identityservice.UserID, time.Time) (bool, error)
+
+	// MarkVideoPreparing writes the material's readiness projection for the start
+	// of a preparation, and reports whether the row was in a state that allowed it.
+	// The flag is part of the interface rather than an implementation detail
+	// because the caller's next step depends on it.
+	MarkVideoPreparing(identityservice.TeamID, int64, time.Time) (bool, error)
 }
 
 // LocalNodeResolver answers which of the actor's machines should receive a file.
@@ -74,6 +80,11 @@ type LocalNodeResolver interface {
 // executor.
 type TransferCreator interface {
 	CreateUserDownload(transferservice.CreateUserDownloadInput) (transferdto.Task, error)
+
+	// EnsureMaterialSourcePrepare queues the Cloud task that produces the video a
+	// waiting download needs, and answers with the one already outstanding when
+	// there is one. The caller cannot tell the difference and must not need to.
+	EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error)
 }
 
 type Service struct {
@@ -193,14 +204,28 @@ func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) e
 	return nil
 }
 
-// CreateDownload queues one user download of a prepared material, for the actor's
-// own freshest Local Agent node.
+// CreateDownload queues the actor's download of one material, whether or not its
+// video is ready yet.
 //
-// The three refusals are ordered by what the user can do about them: a material
-// outside the actor's scope is not theirs to see (the 404/403 from `GetMaterial`),
-// a visible material with no prepared video is one they can wait for, and no
-// fresh node is one they can fix by opening the app on a machine. Answering 409
-// for the last two rather than 500 is the whole point of asking here.
+// The user clicks once, and what that click means depends on the material — but it
+// is one task either way. A prepared material gets a `user_download` the actor's
+// own machine can claim immediately. A material whose video is not ready gets the
+// same kind of task, held back by `dependency_task_id` until the Cloud
+// preparation it names writes the object key, the size and the hash it waits for.
+//
+// That is why nothing here is called a "cloud task": the two statuses the user is
+// looking at are two rows, and the coupling between them is that one column. The
+// machine's polling is then part of its own download rather than a second
+// mechanism — a claim on a waiting task answers "nothing to do" until the
+// preparation hands the facts over, and the same task becomes claimable without
+// the user clicking again.
+//
+// The refusals are ordered by what the user can do about them: a material outside
+// the actor's scope is not theirs to see (the 404/403 from `GetMaterial`), a
+// visible material with no prepared video and no source to prepare from is one
+// nothing can be done about, and no fresh node is one they can fix by opening the
+// app on a machine. Answering 409 for the last two rather than 500 is the whole
+// point of asking here.
 //
 // The download is **never** queued without a node. An executor claims on its own
 // credential, so a task with no assignee would be claimed by whichever device
@@ -210,15 +235,20 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 	if err != nil {
 		return transferdto.Task{}, err
 	}
-	if material.VideoStatus != model.VideoReady {
+	ready := material.VideoStatus == model.VideoReady
+	var objectKey, sha256 string
+	var size int64
+	switch {
+	case ready:
+		if objectKey, size, sha256, err = videoFacts(material); err != nil {
+			return transferdto.Task{}, err
+		}
+	case strings.TrimSpace(material.SourceURL) == "":
+		// Not ready *and* nothing to prepare from: the material's source address is
+		// gone, so waiting produces no file and the 409 is honest. Every other
+		// not-ready state is a wait rather than a refusal, which is why the
+		// condition is this narrow rather than `!ready`.
 		return transferdto.Task{}, ErrMaterialUnavailable
-	}
-	if material.SourceObjectKey == "" || material.VideoSizeBytes == nil || *material.VideoSizeBytes <= 0 || material.VideoSHA256 == "" {
-		// `ready` is the projection's promise that all four facts were written in
-		// the same step. A ready row missing one of them is this module's own
-		// inconsistency, so it is reported as a fault rather than as the 409 the
-		// user would read as "try again later".
-		return transferdto.Task{}, fmt.Errorf("material %d is ready but its video facts are incomplete", material.ID)
 	}
 	node, err := s.nodes.ResolveFreshLocalNode(actor.ID)
 	if err != nil {
@@ -227,16 +257,60 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		// The distinction is kept in the log, not in the response.
 		return transferdto.Task{}, ErrLocalNodeUnavailable
 	}
-	task, err := s.transfers.CreateUserDownload(transferservice.CreateUserDownloadInput{
+	input := transferservice.CreateUserDownloadInput{
 		TeamID:          material.TeamID,
 		AssetID:         material.ID,
 		AssetTitle:      material.Title,
-		SourceObjectKey: material.SourceObjectKey,
+		SourceObjectKey: objectKey,
 		RequestedBy:     actor.ID,
 		AssignedNodeID:  node.ID,
-		TotalBytes:      *material.VideoSizeBytes,
-		ExpectedSHA256:  material.VideoSHA256,
-	})
+		TotalBytes:      size,
+		ExpectedSHA256:  sha256,
+	}
+	if !ready {
+		// The preparation is a Cloud task keyed on the material rather than on this
+		// user: two operators clicking at once get one fetch, and the second click's
+		// wait attaches to the task the first one queued. `transfer`'s dedupe is what
+		// makes that true, so this call needs no guard here.
+		prepare, err := s.transfers.EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput{
+			TeamID:      material.TeamID,
+			AssetID:     material.ID,
+			AssetTitle:  material.Title,
+			RequestedBy: actor.ID,
+		})
+		if err != nil {
+			return transferdto.Task{}, fmt.Errorf("queue material source preparation for material %d: %w", material.ID, err)
+		}
+		input.DependencyTaskID = prepare.ID
+		// The task is the fact and the projection follows it, in that order: a
+		// `downloading` material with no task would show the user a queue position
+		// that does not exist. The statement is guarded so that this click cannot
+		// take a `ready` material back to `downloading`.
+		preparing, err := s.store.MarkVideoPreparing(material.TeamID, material.ID, s.now().UTC())
+		if err != nil {
+			return transferdto.Task{}, fmt.Errorf("mark material %d preparing: %w", material.ID, err)
+		}
+		if !preparing {
+			// The guard refused, so the material left `not_downloaded`/`failed`
+			// between the read at the top of this method and the statement above.
+			// There are two ways that happens and they need different tasks: another
+			// click is already preparing this material, in which case waiting for it
+			// is exactly the plan, or preparation finished and it is now `ready`, in
+			// which case a wait would hold a file back that can be fetched now. Only
+			// a fresh read tells the two apart, and guessing wrong on the second is
+			// the one that strands a download.
+			if material, err = s.GetMaterial(actor, materialID); err != nil {
+				return transferdto.Task{}, err
+			}
+			if material.VideoStatus == model.VideoReady {
+				input.DependencyTaskID = ""
+				if input.SourceObjectKey, input.TotalBytes, input.ExpectedSHA256, err = videoFacts(material); err != nil {
+					return transferdto.Task{}, err
+				}
+			}
+		}
+	}
+	task, err := s.transfers.CreateUserDownload(input)
 	if err != nil {
 		if errors.Is(err, transferservice.ErrInvalidInput) {
 			return transferdto.Task{}, ErrInvalidInput
@@ -244,6 +318,19 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		return transferdto.Task{}, fmt.Errorf("queue user download for material %d: %w", material.ID, err)
 	}
 	return task, nil
+}
+
+// videoFacts is the three facts a local download needs out of a `ready` row.
+//
+// `ready` is the projection's promise that the object key, the size and the hash
+// were all written in the same step. A ready row missing one of them is this
+// module's own inconsistency, so it is reported as a fault rather than as the 409
+// the user would read as "try again later".
+func videoFacts(material model.Material) (string, int64, string, error) {
+	if material.SourceObjectKey == "" || material.VideoSizeBytes == nil || *material.VideoSizeBytes <= 0 || material.VideoSHA256 == "" {
+		return "", 0, "", fmt.Errorf("material %d is ready but its video facts are incomplete", material.ID)
+	}
+	return material.SourceObjectKey, *material.VideoSizeBytes, material.VideoSHA256, nil
 }
 
 func canAccessMaterial(actor identityservice.PublicUser, material model.Material) bool {

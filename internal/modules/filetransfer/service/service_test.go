@@ -41,6 +41,7 @@ type memoryStore struct {
 	// point of the method is the input it *does not* take, and a double that
 	// shared `lastCreate` would let a caller-supplied dedupe key go unnoticed.
 	lastDownload repository.CreateUserDownloadInput
+	lastPrepare  repository.CreateMaterialSourcePrepareInput
 
 	candidate      Task
 	candidateFound bool
@@ -121,6 +122,23 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 		Purpose: model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
 		Status: model.StatusPending, RequestedBy: input.RequestedBy, AssignedNodeID: input.AssignedNodeID,
 		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
+		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (s *memoryStore) CreateMaterialSourcePrepareTask(input repository.CreateMaterialSourcePrepareInput, now time.Time) (Task, error) {
+	s.counts["createPrepare"]++
+	s.lastPrepare = input
+	if s.createErr != nil {
+		return Task{}, s.createErr
+	}
+	if s.createResult.ID != "" {
+		return s.createResult, nil
+	}
+	return Task{
+		ID: input.ID, TeamID: input.TeamID, AssetType: model.AssetMaterial, AssetID: input.AssetID,
+		AssetTitle: input.AssetTitle, Purpose: model.PurposeComposeInputPrepare,
+		ExecutionScope: model.ExecutionCloud, Status: model.StatusPending, RequestedBy: input.RequestedBy,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -1091,6 +1109,95 @@ func TestCreateUserDownloadRefusesAnIncompleteIdentity(t *testing.T) {
 		}
 		if store.counts["createDownload"] != 0 {
 			t.Fatalf("%s: a refused download still reached the store", testCase.name)
+		}
+	}
+}
+
+// A download that waits for a preparation has no facts of its own: the object key,
+// the size and the hash do not exist until the preparation produces them. The point
+// of this test is that the dependency survives the service layer at all — dropping
+// it here would leave a task whose facts are empty and which the store, correctly,
+// refuses to create, so the failure would look like a validation bug at the far end
+// of the call.
+func TestCreateUserDownloadCarriesThePreparationItWaitsFor(t *testing.T) {
+	store := newMemoryStore()
+	svc := testService(store, workingNode())
+
+	task, err := svc.CreateUserDownload(CreateUserDownloadInput{
+		TeamID:           7,
+		AssetID:          42,
+		AssetTitle:       "示例视频",
+		RequestedBy:      9,
+		AssignedNodeID:   "node-1",
+		DependencyTaskID: "transfer-prepare-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateUserDownload() error = %v", err)
+	}
+	if store.lastDownload.DependencyTaskID != "transfer-prepare-1" {
+		t.Fatalf("dependency = %q, want the preparation the caller named", store.lastDownload.DependencyTaskID)
+	}
+	if store.lastDownload.SourceObjectKey != "" || store.lastDownload.TotalBytes != 0 || store.lastDownload.ExpectedSHA256 != "" {
+		t.Fatalf("a waiting download must carry no facts of its own: %+v", store.lastDownload)
+	}
+	if task.Status != string(model.StatusPending) {
+		t.Fatalf("status = %s, want pending", task.Status)
+	}
+}
+
+// The preparation is a Cloud task on a material, and every one of those three is
+// fixed here rather than passed in: the caller could get any of them wrong, and two
+// of them wrong at once is a task no worker would ever claim.
+func TestEnsureMaterialSourcePrepareQueuesACloudPreparation(t *testing.T) {
+	store := newMemoryStore()
+	svc := testService(store, workingNode())
+
+	task, err := svc.EnsureMaterialSourcePrepare(EnsureMaterialSourcePrepareInput{
+		TeamID:      7,
+		AssetID:     42,
+		AssetTitle:  "  示例视频  ",
+		RequestedBy: 9,
+	})
+	if err != nil {
+		t.Fatalf("EnsureMaterialSourcePrepare() error = %v", err)
+	}
+	if store.counts["createPrepare"] != 1 || store.counts["create"] != 0 || store.counts["createDownload"] != 0 {
+		t.Fatalf("the preparation must not go through another create path: %v", store.counts)
+	}
+	input := store.lastPrepare
+	if input.TeamID != 7 || input.AssetID != 42 || input.RequestedBy != 9 {
+		t.Fatalf("prepare input = %+v", input)
+	}
+	if input.AssetTitle != "示例视频" {
+		t.Fatalf("title = %q, want the trimmed title", input.AssetTitle)
+	}
+	if input.MaxAttempts != 3 || input.ID == "" {
+		t.Fatalf("prepare input = %+v", input)
+	}
+	if task.Purpose != string(model.PurposeComposeInputPrepare) || task.ExecutionScope != string(model.ExecutionCloud) {
+		t.Fatalf("task purpose/scope = %s/%s, want a Cloud preparation", task.Purpose, task.ExecutionScope)
+	}
+	// There is deliberately no assertion that the task carries no node: a Cloud task
+	// is claimed by whichever worker polls first, and `CreateMaterialSourcePrepareInput`
+	// has no node field, so this path cannot name one to begin with. A test of it
+	// could not fail and is not written.
+}
+
+func TestEnsureMaterialSourcePrepareRefusesAnIncompleteIdentity(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		input EnsureMaterialSourcePrepareInput
+	}{
+		{"no team", EnsureMaterialSourcePrepareInput{AssetID: 42, RequestedBy: 9}},
+		{"no material", EnsureMaterialSourcePrepareInput{TeamID: 7, RequestedBy: 9}},
+		{"no user", EnsureMaterialSourcePrepareInput{TeamID: 7, AssetID: 42}},
+	} {
+		store := newMemoryStore()
+		if _, err := testService(store, workingNode()).EnsureMaterialSourcePrepare(testCase.input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("%s: error = %v, want ErrInvalidInput", testCase.name, err)
+		}
+		if store.counts["createPrepare"] != 0 {
+			t.Fatalf("%s: a refused preparation still reached the store", testCase.name)
 		}
 	}
 }

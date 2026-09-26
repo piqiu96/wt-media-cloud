@@ -110,7 +110,7 @@ func TestCreateTaskRefusesATaskWithoutTheFactsAnExecutorNeeds(t *testing.T) {
 // keeps expiring is retried forever.
 func TestClaimLocalTaskRefusesATaskThatWasAskedToStopOrHasNoAttemptsLeft(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
 		WithArgs("node-1", testNow.Add(2*time.Minute), testNow, testNow, testNow, "transfer-1", "node-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
@@ -127,7 +127,7 @@ func TestClaimLocalTaskRefusesATaskThatWasAskedToStopOrHasNoAttemptsLeft(t *test
 func TestClaimLocalTaskUsesAConditionalUpdate(t *testing.T) {
 	db, mock := newMockGORM(t)
 	leaseUntil := testNow.Add(2 * time.Minute)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
 		WithArgs("node-1", leaseUntil, testNow, testNow, testNow, "transfer-1", "node-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "running", "claimed_by_node_id": "node-1", "attempt_count": 1, "lease_expires_at": leaseUntil, "heartbeat_at": testNow, "started_at": testNow})
@@ -148,10 +148,10 @@ func TestClaimLocalTaskUsesAConditionalUpdate(t *testing.T) {
 func TestClaimCloudTaskPicksTheQueueHeadThenReassertsThePredicate(t *testing.T) {
 	db, mock := newMockGORM(t)
 	leaseUntil := testNow.Add(2 * time.Minute)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs(testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-1"))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
 		WithArgs("cloud-worker:host:1:uuid", leaseUntil, testNow, testNow, testNow, "transfer-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "running", "purpose": "compose_input_prepare", "execution_scope": "cloud", "claimed_by_node_id": "cloud-worker:host:1:uuid", "attempt_count": 1})
@@ -171,10 +171,10 @@ func TestClaimCloudTaskPicksTheQueueHeadThenReassertsThePredicate(t *testing.T) 
 // and the caller is told there was no task this round.
 func TestClaimCloudTaskReportsNoTaskWhenItLosesTheRace(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs(testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-1"))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
 		WithArgs("cloud-worker:host:1:uuid", testNow.Add(2*time.Minute), testNow, testNow, testNow, "transfer-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
@@ -191,7 +191,7 @@ func TestClaimCloudTaskReportsNoTaskWhenItLosesTheRace(t *testing.T) {
 // An empty queue is not an error either.
 func TestClaimCloudTaskReportsNoTaskForAnEmptyQueue(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs(testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
@@ -212,7 +212,7 @@ func TestClaimCloudTaskReportsNoTaskForAnEmptyQueue(t *testing.T) {
 // incremented `attempt_count` whenever minting failed.
 func TestNextLocalTaskReportsTheCandidateWithoutLeasingIt(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs("node-1", testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-9"))
 	expectTaskByID(mock, "transfer-9", testNow, map[string]any{"id": "transfer-9", "status": "pending", "execution_scope": "local_agent", "purpose": "user_download", "assigned_node_id": "node-1", "attempt_count": 0})
@@ -231,7 +231,7 @@ func TestNextLocalTaskReportsTheCandidateWithoutLeasingIt(t *testing.T) {
 // reports absence rather than an error.
 func TestNextLocalTaskReportsNothingForANodeWithNoWork(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs("node-1", testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
@@ -376,13 +376,18 @@ func TestReconcileCancelledTasksFinishesCancellationsTheirExecutorAbandoned(t *t
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'cancelled', finished_at = ?, lease_expires_at = NULL, error_code = 'cancelled_by_user', error_message = 'cancelled by user', updated_at = ? WHERE status = 'running' AND cancel_requested_at IS NOT NULL AND (lease_expires_at IS NULL OR lease_expires_at <= ?)")).
 		WithArgs(testNow, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 2))
+	// The downloads waiting on a cancelled preparation are released in the same
+	// pass. They are counted with the cancellations: both are rows this pass took
+	// out of a state nothing else could leave, and a count that omitted them would
+	// make a pass that only released waiters look like it did nothing.
+	expectDependentRelease(mock, testNow, 1)
 
 	reconciled, err := reconcileCancelledTasks(db, testNow)
 	if err != nil {
 		t.Fatalf("reconcileCancelledTasks() error = %v", err)
 	}
-	if reconciled != 2 {
-		t.Fatalf("reconciled = %d, want 2", reconciled)
+	if reconciled != 3 {
+		t.Fatalf("reconciled = %d, want 3 (2 cancellations and 1 released download)", reconciled)
 	}
 	assertExpectations(t, mock)
 }
@@ -395,13 +400,14 @@ func TestReconcileExhaustedTasksFailsTasksThatUsedEveryAttempt(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'failed', error_code = 'lease_expired', error_message = 'transfer lease expired without a reporting executor', finished_at = ?, lease_expires_at = NULL, updated_at = ? WHERE status = 'running' AND cancel_requested_at IS NULL AND attempt_count >= max_attempts AND (lease_expires_at IS NULL OR lease_expires_at <= ?)")).
 		WithArgs(testNow, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectDependentRelease(mock, testNow, 1)
 
 	reconciled, err := reconcileExhaustedTasks(db, testNow)
 	if err != nil {
 		t.Fatalf("reconcileExhaustedTasks() error = %v", err)
 	}
-	if reconciled != 1 {
-		t.Fatalf("reconciled = %d, want 1", reconciled)
+	if reconciled != 2 {
+		t.Fatalf("reconciled = %d, want 2 (1 exhausted task and 1 released download)", reconciled)
 	}
 	assertExpectations(t, mock)
 }
@@ -478,6 +484,194 @@ func TestTaskRowDefaultsCoverEveryColumnAndEveryColumnIsScanned(t *testing.T) {
 	}
 }
 
+// A download the user asked for while the video was still being prepared is a
+// queued request rather than a task with facts: its object key, size and hash do
+// not exist yet. The facts are the preparation's output, so the local task is
+// created without them and names the task that will produce them.
+//
+// The exception is safe for exactly one reason, and this test states it: a local
+// task with a dependency is not leasable, so no lease can promise a hash that has
+// not been written. Without that coupling the relaxation would be a hole — a
+// factless task would be claimed into a lease with nothing to download and
+// nothing to verify.
+func TestCreateTaskAllowsAWaitingDownloadButNeverALeasableFactlessOne(t *testing.T) {
+	db, mock := newMockGORM(t)
+	input := validCreateInput()
+	input.ID = "transfer-2"
+	input.DependencyTaskID = "prepare-1"
+	input.SourceObjectKey = ""
+	input.TotalBytes = 0
+	input.ExpectedSHA256 = ""
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, "user_download", "local_agent", int64(9), "node-1", "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"dependency_task_id": "prepare-1", "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
+
+	task, err := createTask(db, input, testNow)
+	if err != nil {
+		t.Fatalf("createTask() error = %v, want a waiting download to be creatable", err)
+	}
+	if task.DependencyTaskID != "prepare-1" {
+		t.Fatalf("task = %+v, want the preparation it waits for recorded", task)
+	}
+	assertExpectations(t, mock)
+
+	// The control: the same facts without a dependency are still refused, so the
+	// relaxation is scoped to the waiting case rather than to local tasks.
+	input.DependencyTaskID = ""
+	db, mock = newMockGORM(t)
+	if _, err := createTask(db, input, testNow); err == nil {
+		t.Fatal("a local transfer with no object, size or hash and no dependency must be refused")
+	}
+	assertExpectations(t, mock)
+}
+
+// The other side of the same rule: only the download may wait. A preparation that
+// depended on another task would be unclaimable (`leaseable` names the Cloud scope
+// precisely so that this cannot be reached by accident) and the queue would stop
+// moving with nothing in the log to say why — so it is refused where it is created.
+//
+// The mock is armed to *accept* the insert rather than to reject it. A refusal
+// asserted against an unarmed mock would pass for the wrong reason: sqlmock fails
+// an unexpected call, so the insert would "fail" and the guard could be deleted
+// without this test noticing.
+func TestCreateTaskRefusesAPreparationThatWaitsOnAnotherTask(t *testing.T) {
+	db, mock := newMockGORM(t)
+	input := validCreateInput()
+	input.ID = "prepare-1"
+	input.Purpose = model.PurposeComposeInputPrepare
+	input.ExecutionScope = model.ExecutionCloud
+	input.AssignedNodeID = ""
+	input.DependencyTaskID = "prepare-0"
+	input.SourceObjectKey = ""
+	input.TotalBytes = 0
+	input.ExpectedSHA256 = ""
+	// Armed for the row a guard-less run would insert, dependency and all, plus the
+	// read-back it would then do. Both are expected *not* to happen, and
+	// `ExpectationsWereMet` is what says so.
+	expectMaterialPrepareInsert(mock, "prepare-1", "dedupe-1", "prepare-0")
+	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"id": "prepare-1", "purpose": "compose_input_prepare", "execution_scope": "cloud"})
+
+	if _, err := createTask(db, input, testNow); err == nil {
+		t.Fatal("a Cloud preparation that waits on another task must be refused")
+	}
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Fatal("the preparation was inserted anyway: the guard is not what refused it")
+	}
+}
+
+func TestCreateMaterialSourcePrepareTaskIsKeyedOnTheMaterial(t *testing.T) {
+	input := CreateMaterialSourcePrepareInput{ID: "prepare-1", TeamID: identity.TeamID(7), AssetID: 42, AssetTitle: "示例视频", RequestedBy: identity.UserID(9), MaxAttempts: 3}
+	for _, testCase := range []struct {
+		name     string
+		finished int64
+		wantKey  string
+	}{
+		{name: "the first click", finished: 0, wantKey: materialSourcePrepareDedupeKey(42, 1)},
+		// A preparation that failed must not be reused: its row is history, and the
+		// retry is a new attempt rather than a resurrection of the failed one.
+		{name: "after a failed preparation", finished: 1, wantKey: materialSourcePrepareDedupeKey(42, 2)},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, mock := newMockGORM(t)
+			mock.ExpectBegin()
+			expectMaterialPrepareCount(mock, testCase.finished)
+			expectMaterialPrepareInsert(mock, "prepare-1", testCase.wantKey, nil)
+			expectTaskByDedupeKey(mock, testCase.wantKey, testNow, map[string]any{"id": "prepare-1", "purpose": "compose_input_prepare", "execution_scope": "cloud", "assigned_node_id": nil, "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
+			mock.ExpectCommit()
+
+			task, err := createMaterialSourcePrepareTask(db, input, testNow)
+			if err != nil {
+				t.Fatalf("createMaterialSourcePrepareTask() error = %v", err)
+			}
+			if task.Purpose != model.PurposeComposeInputPrepare || task.ExecutionScope != model.ExecutionCloud {
+				t.Fatalf("task = %+v, want a Cloud preparation", task)
+			}
+			assertExpectations(t, mock)
+		})
+	}
+}
+
+// The preparation is not a per-user object, so its key must not carry one: two
+// users clicking the same material while it is being fetched have to land on the
+// same task, or the same video is downloaded once per clicker.
+func TestMaterialSourcePrepareKeyIgnoresTheUser(t *testing.T) {
+	if materialSourcePrepareDedupeKey(42, 1) != materialSourcePrepareDedupeKey(42, 1) {
+		t.Fatal("the preparation key is not a function of its inputs")
+	}
+	if materialSourcePrepareDedupeKey(42, 1) == materialSourcePrepareDedupeKey(43, 1) {
+		t.Fatal("two materials share a preparation key")
+	}
+	if materialSourcePrepareDedupeKey(42, 1) == materialSourcePrepareDedupeKey(42, 2) {
+		t.Fatal("a retry after a failed preparation reuses the finished generation's key")
+	}
+	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(42, identity.UserID(9), "node-1", 1)} {
+		if len(key) != 64 {
+			t.Fatalf("dedupe key %q is %d characters, but the column is CHAR(64) and a longer key is truncated into a collision", key, len(key))
+		}
+	}
+}
+
+// The hand-over is the one moment a waiting download becomes real, and it is one
+// statement because the facts and the release are one transition: a row told its
+// facts but left waiting would never be claimed, and a row released without them
+// would be claimed into a lease with nothing to download.
+func TestHandOverDependenciesWritesTheFactsAndReleasesTheWaiters(t *testing.T) {
+	db, mock := newMockGORM(t)
+	facts := DependencyFacts{SourceObjectKey: "materials/42/aaaaaaaa.mp4", TotalBytes: 1024, ExpectedSHA256: strings.ToUpper(testSHA256)}
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET source_object_key = ?, total_bytes = ?, expected_sha256 = ?, dependency_task_id = NULL, updated_at = ? WHERE dependency_task_id = ? AND status = 'pending'")).
+		WithArgs("materials/42/aaaaaaaa.mp4", int64(1024), testSHA256, testNow, "prepare-1").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	released, err := handOverDependencies(db, "prepare-1", facts, testNow)
+	if err != nil {
+		t.Fatalf("handOverDependencies() error = %v", err)
+	}
+	if released != 2 {
+		t.Fatalf("released = %d, want 2", released)
+	}
+	assertExpectations(t, mock)
+}
+
+// A hand-over with no object, no size or a malformed hash would release waiters
+// into a lease they cannot honour, so it is refused before the statement runs.
+// Nothing is released, which is the safe direction: the preparation can be
+// retried, and the waiters are still waiting rather than broken.
+func TestHandOverDependenciesRefusesIncompleteFacts(t *testing.T) {
+	for name, facts := range map[string]DependencyFacts{
+		"no object":    {TotalBytes: 1024, ExpectedSHA256: testSHA256},
+		"no size":      {SourceObjectKey: "materials/42/aaaaaaaa.mp4", ExpectedSHA256: testSHA256},
+		"a zero size":  {SourceObjectKey: "materials/42/aaaaaaaa.mp4", TotalBytes: 0, ExpectedSHA256: testSHA256},
+		"no hash":      {SourceObjectKey: "materials/42/aaaaaaaa.mp4", TotalBytes: 1024},
+		"a short hash": {SourceObjectKey: "materials/42/aaaaaaaa.mp4", TotalBytes: 1024, ExpectedSHA256: testSHA256[:63]},
+	} {
+		db, mock := newMockGORM(t)
+		if _, err := handOverDependencies(db, "prepare-1", facts, testNow); err == nil {
+			t.Errorf("%s: handOverDependencies() accepted incomplete facts", name)
+		}
+		assertExpectations(t, mock)
+	}
+}
+
+// A preparation that ended without producing an object must end its waiters too.
+// They are not leasable, so nothing else would ever pick them up, and they would
+// sit pending in the download centre with a dependency that is already terminal.
+func TestFailDependentsEndsTheWaitersOfAFailedPreparation(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, lease_expires_at = NULL, updated_at = ? WHERE dependency_task_id = ? AND status = 'pending'")).
+		WithArgs("source_unavailable", "the source address could not be resolved", testNow, testNow, "prepare-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	failed, err := failDependents(db, "prepare-1", "source_unavailable", "the source address could not be resolved", testNow)
+	if err != nil {
+		t.Fatalf("failDependents() error = %v", err)
+	}
+	if failed != 1 {
+		t.Fatalf("failed = %d, want 1", failed)
+	}
+	assertExpectations(t, mock)
+}
+
 func validCreateInput() CreateTaskInput {
 	return CreateTaskInput{
 		ID:              "transfer-1",
@@ -495,6 +689,15 @@ func validCreateInput() CreateTaskInput {
 		ExpectedSHA256:  testSHA256,
 		MaxAttempts:     3,
 	}
+}
+
+// The release that both reconcilers run after their own statement. It is written
+// once because its text is pinned in three tests, and a divergence between the
+// two call sites is the failure this checks for.
+func expectDependentRelease(mock sqlmock.Sqlmock, now time.Time, rows int64) {
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks AS dependent JOIN file_transfer_tasks AS dependency ON dependency.id = dependent.dependency_task_id SET dependent.status = 'failed', dependent.error_code = 'dependency_failed', dependent.error_message = 'the preparation this download waited for did not finish', dependent.finished_at = ?, dependent.lease_expires_at = NULL, dependent.updated_at = ? WHERE dependent.status = 'pending' AND dependency.status IN ('failed', 'cancelled')")).
+		WithArgs(now, now).
+		WillReturnResult(sqlmock.NewResult(0, rows))
 }
 
 func expectTaskByID(mock sqlmock.Sqlmock, taskID string, now time.Time, overrides map[string]any) {
@@ -603,6 +806,11 @@ func validUserDownloadInput() CreateUserDownloadInput {
 const (
 	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')"
 	insertTaskSQL             = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
+	// The preparation count is the same shape as the download count minus the user:
+	// a preparation belongs to the material, so scoping it to a user would let one
+	// user's click start a second download of a video another user is already
+	// fetching.
+	countFinishedPreparationsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND status IN ('success', 'failed', 'cancelled')"
 )
 
 // expectUserDownloadCount arms the count that decides the generation, with the
@@ -619,6 +827,26 @@ func expectUserDownloadCount(mock sqlmock.Sqlmock, finished int64) {
 func expectUserDownloadInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
 		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func expectMaterialPrepareCount(mock sqlmock.Sqlmock, finished int64) {
+	mock.ExpectQuery(regexp.QuoteMeta(countFinishedPreparationsSQL)).
+		WithArgs("material", int64(42), "compose_input_prepare").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(finished))
+}
+
+// A preparation is created before anything is known about the object it will
+// fetch, so every fact the download side insists on is nil here and that is the
+// expectation rather than an omission: the size and hash are written by the
+// hand-over when the download happens.
+//
+// `dependency` is a parameter because it must be nil on every path that exists:
+// passing it lets a test arm the statement for the row a *removed* guard would
+// insert, so that the guard is what refuses rather than the mock.
+func expectMaterialPrepareInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string, dependency any) {
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, "compose_input_prepare", "cloud", int64(9), nil, dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 

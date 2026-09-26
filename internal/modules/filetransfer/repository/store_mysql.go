@@ -93,7 +93,17 @@ type CreateUserDownloadInput struct {
 	AssignedNodeID  string
 	TotalBytes      int64
 	ExpectedSHA256  string
-	MaxAttempts     int
+	// DependencyTaskID names the Cloud preparation task whose object this download
+	// will fetch, when there is one. With it set, the object key, size and hash may
+	// be left empty: the download is a queued request whose facts do not exist yet,
+	// and the task it names will write them and clear this field (see
+	// `HandOverDependencies`). Until then the task is not leasable, so nothing can
+	// promise a hash before there is one.
+	//
+	// It is empty for a download of an object that is already prepared, which is the
+	// ordinary case after the first download of a material.
+	DependencyTaskID string
+	MaxAttempts      int
 }
 
 func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
@@ -136,20 +146,21 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 		}
 		var err error
 		task, err = createTask(tx, CreateTaskInput{
-			ID:              input.ID,
-			TeamID:          input.TeamID,
-			AssetType:       model.AssetMaterial,
-			AssetID:         input.AssetID,
-			AssetTitle:      input.AssetTitle,
-			SourceObjectKey: input.SourceObjectKey,
-			Purpose:         model.PurposeUserDownload,
-			ExecutionScope:  model.ExecutionLocalAgent,
-			RequestedBy:     input.RequestedBy,
-			AssignedNodeID:  input.AssignedNodeID,
-			DedupeKey:       userDownloadDedupeKey(input.AssetID, input.RequestedBy, input.AssignedNodeID, finished+1),
-			TotalBytes:      input.TotalBytes,
-			ExpectedSHA256:  input.ExpectedSHA256,
-			MaxAttempts:     input.MaxAttempts,
+			ID:               input.ID,
+			TeamID:           input.TeamID,
+			AssetType:        model.AssetMaterial,
+			AssetID:          input.AssetID,
+			AssetTitle:       input.AssetTitle,
+			SourceObjectKey:  input.SourceObjectKey,
+			Purpose:          model.PurposeUserDownload,
+			ExecutionScope:   model.ExecutionLocalAgent,
+			RequestedBy:      input.RequestedBy,
+			AssignedNodeID:   input.AssignedNodeID,
+			DependencyTaskID: input.DependencyTaskID,
+			DedupeKey:        userDownloadDedupeKey(input.AssetID, input.RequestedBy, input.AssignedNodeID, finished+1),
+			TotalBytes:       input.TotalBytes,
+			ExpectedSHA256:   input.ExpectedSHA256,
+			MaxAttempts:      input.MaxAttempts,
 		}, now)
 		return err
 	})
@@ -176,6 +187,157 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 func userDownloadDedupeKey(assetID int64, userID identity.UserID, nodeID string, generation int64) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%d|%d|%s|%d", assetID, userID, strings.TrimSpace(nodeID), generation)))
 	return hex.EncodeToString(sum[:])
+}
+
+// CreateMaterialSourcePrepareInput is what queueing a Cloud preparation needs.
+// The object key, size and hash are absent by construction: producing them is
+// what the task is for.
+type CreateMaterialSourcePrepareInput struct {
+	ID          string
+	TeamID      identity.TeamID
+	AssetID     int64
+	AssetTitle  string
+	RequestedBy identity.UserID
+	MaxAttempts int
+}
+
+// CreateMaterialSourcePrepareTask queues the Cloud task that fetches a material's
+// source video into the object store.
+//
+// It is keyed on the **material**, not on the user who clicked, unlike a user
+// download. A download is a destination — two devices are two files, so the node
+// is part of its key — while a preparation is a property of the material: the
+// object is content-addressed and identical for everyone, so a second user
+// clicking while the first preparation is outstanding must attach to it rather
+// than start a second download of the same video. That is the "no unbounded
+// duplicate tasks for one business command" rule, and it is why this key carries
+// no user id.
+//
+// The generation is the count of *finished* preparations, exactly as on the user
+// download side: a click while one is outstanding counts the same generation and
+// collapses onto the same row, whereas a click after a preparation failed counts
+// one more and creates a new task — "prepare it again" is a different request
+// from "prepare it", and the failed row is history that must not be overwritten.
+// A preparation that is stuck `running` with an expired lease is reused as well,
+// and `leaseable` makes it claimable again, so a worker that died mid-download
+// needs no repair step.
+func CreateMaterialSourcePrepareTask(input CreateMaterialSourcePrepareInput, now time.Time) (model.Task, error) {
+	return createMaterialSourcePrepareTask(database.DB(), input, now)
+}
+
+func createMaterialSourcePrepareTask(db *gorm.DB, input CreateMaterialSourcePrepareInput, now time.Time) (model.Task, error) {
+	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
+		return model.Task{}, fmt.Errorf("invalid material source preparation input")
+	}
+	var task model.Task
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var finished int64
+		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeComposeInputPrepare).Row().Scan(&finished); err != nil {
+			return err
+		}
+		var err error
+		task, err = createTask(tx, CreateTaskInput{
+			ID:             input.ID,
+			TeamID:         input.TeamID,
+			AssetType:      model.AssetMaterial,
+			AssetID:        input.AssetID,
+			AssetTitle:     input.AssetTitle,
+			Purpose:        model.PurposeComposeInputPrepare,
+			ExecutionScope: model.ExecutionCloud,
+			RequestedBy:    input.RequestedBy,
+			DedupeKey:      materialSourcePrepareDedupeKey(input.AssetID, finished+1),
+			MaxAttempts:    input.MaxAttempts,
+		}, now)
+		return err
+	})
+	if err != nil {
+		return model.Task{}, err
+	}
+	return task, nil
+}
+
+func materialSourcePrepareDedupeKey(assetID int64, generation int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("material_source_prepare|%d|%d", assetID, generation)))
+	return hex.EncodeToString(sum[:])
+}
+
+// DependencyFacts are the verified facts a preparation hands to the downloads
+// waiting on it.
+type DependencyFacts struct {
+	SourceObjectKey string
+	TotalBytes      int64
+	ExpectedSHA256  string
+}
+
+// HandOverDependencies gives a finished preparation's facts to every download
+// waiting on it and releases them, in one statement.
+//
+// The facts and the release are one statement because they are one transition:
+// a row that was told its facts without being released would never be claimed,
+// and a row released without facts would be claimed into a lease with no object
+// to grant. Writing them together makes that unrepresentable rather than
+// unlikely, and `leaseable` refuses the row until the pointer is cleared.
+//
+// Every waiter is updated, not one: several users may have clicked the same
+// material while the single preparation for it ran, and all of their downloads
+// are satisfied by the same object.
+func HandOverDependencies(prepareTaskID string, facts DependencyFacts, now time.Time) (int64, error) {
+	return handOverDependencies(database.DB(), prepareTaskID, facts, now)
+}
+
+func handOverDependencies(db *gorm.DB, prepareTaskID string, facts DependencyFacts, now time.Time) (int64, error) {
+	if strings.TrimSpace(prepareTaskID) == "" || strings.TrimSpace(facts.SourceObjectKey) == "" || facts.TotalBytes <= 0 || !isSHA256(facts.ExpectedSHA256) {
+		return 0, fmt.Errorf("invalid dependency hand-over")
+	}
+	result := db.Exec(`UPDATE file_transfer_tasks SET source_object_key = ?, total_bytes = ?, expected_sha256 = ?, dependency_task_id = NULL, updated_at = ? WHERE dependency_task_id = ? AND status = 'pending'`, facts.SourceObjectKey, facts.TotalBytes, strings.ToLower(strings.TrimSpace(facts.ExpectedSHA256)), now, prepareTaskID)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// FailDependents ends every download waiting on a preparation that ended without
+// producing one.
+//
+// Without this the waiters would sit `pending` forever: their dependency is
+// terminal, so nothing will ever hand them facts, and they are not leasable, so
+// nothing will ever pick them up. They inherit the preparation's error rather
+// than a generic one because the cause is the same event, and the user's retry is
+// the same retry.
+func FailDependents(prepareTaskID, errorCode, errorMessage string, now time.Time) (int64, error) {
+	return failDependents(database.DB(), prepareTaskID, errorCode, errorMessage, now)
+}
+
+func failDependents(db *gorm.DB, prepareTaskID, errorCode, errorMessage string, now time.Time) (int64, error) {
+	if strings.TrimSpace(prepareTaskID) == "" || strings.TrimSpace(errorCode) == "" || len(errorCode) > 128 || len(errorMessage) > 500 {
+		return 0, fmt.Errorf("invalid dependency failure")
+	}
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, lease_expires_at = NULL, updated_at = ? WHERE dependency_task_id = ? AND status = 'pending'`, errorCode, errorMessage, now, now, prepareTaskID)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// failDependentsOfTerminalTasks is the safety net under the two targeted call
+// sites above.
+//
+// A preparation can also end somewhere that has no waiters in hand:
+// `reconcileCancelledTasks` finishes a cancellation the executor abandoned, and
+// `reconcileExhaustedTasks` fails a task whose attempts ran out — both are bulk
+// statements that never learn which tasks they moved. Without this, the downloads
+// waiting on those rows would be stuck in exactly the way `FailDependents`
+// exists to prevent, and the cause would be a path nobody was looking at.
+//
+// It is a join rather than a subquery on purpose: MySQL refuses a subquery that
+// selects from the table being updated, and the obvious correction — a derived
+// table — hides the same shape behind a materialisation.
+func failDependentsOfTerminalTasks(db *gorm.DB, now time.Time) (int64, error) {
+	result := db.Exec(`UPDATE file_transfer_tasks AS dependent JOIN file_transfer_tasks AS dependency ON dependency.id = dependent.dependency_task_id SET dependent.status = 'failed', dependent.error_code = 'dependency_failed', dependent.error_message = 'the preparation this download waited for did not finish', dependent.finished_at = ?, dependent.lease_expires_at = NULL, dependent.updated_at = ? WHERE dependent.status = 'pending' AND dependency.status IN ('failed', 'cancelled')`, now, now)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }
 
 // createTask writes the task as a durable instruction rather than a pointer into
@@ -292,7 +454,16 @@ func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 // `max_attempts` would only ever constrain an explicit user retry. The bound is why
 // `ReconcileExhaustedTasks` exists: a task that has used all its attempts and lost
 // its executor has no claimable owner left, and must be terminated by someone.
-const leaseable = `cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))`
+//
+// `(execution_scope = 'cloud' OR dependency_task_id IS NULL)`. A local task that is
+// still waiting for another task may not be claimed, because the facts its lease
+// would promise — the object to grant, the size and the hash to verify against —
+// are written *by* the task it waits for, and they are not known when the user
+// clicks. Leasing it earlier would mint a grant for an object that does not exist
+// yet. The clause names the Cloud scope rather than relying on prepare tasks never
+// carrying a dependency: a prepare task that did would be silently unclaimable, and
+// the symptom would be a queue head that never moves.
+const leaseable = `cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)`
 
 func ClaimLocalTask(taskID, nodeID string, now time.Time, lease time.Duration) (model.Task, bool, error) {
 	return claimLocalTask(database.DB(), taskID, nodeID, now, lease)
@@ -526,6 +697,9 @@ func retryTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy i
 // never make that transition, and since a task with a cancellation request is
 // not leasable, nothing else can either. This is the caller that ends it, and it
 // waits for the lease to expire first so a live executor's own report wins.
+//
+// The returned count is every row this pass took out of a state nothing else
+// could leave: the cancelled tasks, and the downloads released by them.
 func ReconcileCancelledTasks(now time.Time) (int64, error) {
 	return reconcileCancelledTasks(database.DB(), now)
 }
@@ -535,7 +709,11 @@ func reconcileCancelledTasks(db *gorm.DB, now time.Time) (int64, error) {
 	if result.Error != nil {
 		return 0, result.Error
 	}
-	return result.RowsAffected, nil
+	released, err := failDependentsOfTerminalTasks(db, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected + released, nil
 }
 
 // ReconcileExhaustedTasks fails running tasks that have used every attempt and
@@ -547,6 +725,9 @@ func reconcileCancelledTasks(db *gorm.DB, now time.Time) (int64, error) {
 // outcome is a failure, not a cancellation — nobody asked for it to stop, the
 // executor stopped reporting — so it is recorded as `failed` with its own error
 // code rather than being folded into the cancellation path.
+//
+// The returned count is every row this pass took out of a state nothing else
+// could leave: the exhausted tasks, and the downloads released by them.
 func ReconcileExhaustedTasks(now time.Time) (int64, error) {
 	return reconcileExhaustedTasks(database.DB(), now)
 }
@@ -556,7 +737,11 @@ func reconcileExhaustedTasks(db *gorm.DB, now time.Time) (int64, error) {
 	if result.Error != nil {
 		return 0, result.Error
 	}
-	return result.RowsAffected, nil
+	released, err := failDependentsOfTerminalTasks(db, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected + released, nil
 }
 
 // FailTask records a failed or cancelled terminal outcome only from the node
@@ -618,11 +803,23 @@ func validateCreateInput(input CreateTaskInput) error {
 	if input.ExecutionScope == model.ExecutionLocalAgent && strings.TrimSpace(input.AssignedNodeID) == "" {
 		return fmt.Errorf("local transfer requires assigned node")
 	}
-	// A local transfer downloads an already-verified object, so the lease can
-	// promise a hash to check against and a size to check completeness with. The
-	// Cloud prepare task is the one that *produces* those facts, so it may not
-	// have them yet: it learns the size and hash while downloading.
-	if input.Purpose == model.PurposeUserDownload {
+	// A Cloud preparation produces the object; a local transfer downloads one that
+	// is already verified. So the local side is the one that must have the object
+	// key, size and hash — with one exception, the download that waits for a
+	// preparation to produce them.
+	//
+	// That exception is safe because it is not a hole in the rule but the same rule
+	// stated later: a local task with a dependency is not leasable, so the lease
+	// that promises a hash cannot be minted before `HandOverDependencies` has
+	// written one. The check is skipped rather than weakened — a local task with no
+	// dependency still has to carry all three facts.
+	if input.Purpose == model.PurposeComposeInputPrepare && strings.TrimSpace(input.DependencyTaskID) != "" {
+		// A preparation is the producer of the dependency, never its consumer: one
+		// that waited on another task could not be claimed, and the queue would stop
+		// moving with nothing to show for it.
+		return fmt.Errorf("a Cloud preparation may not depend on another task")
+	}
+	if input.Purpose == model.PurposeUserDownload && strings.TrimSpace(input.DependencyTaskID) == "" {
 		if strings.TrimSpace(input.SourceObjectKey) == "" {
 			return fmt.Errorf("local transfer requires the object to download")
 		}

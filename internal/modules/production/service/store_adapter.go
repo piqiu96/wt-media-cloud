@@ -37,6 +37,10 @@ func (mysqlStore) RemoveUsageByID(usageID int64, userID identityservice.UserID, 
 	return repository.RemoveUsageByID(usageID, userID, now)
 }
 
+func (mysqlStore) MarkVideoPreparing(teamID identityservice.TeamID, materialID int64, now time.Time) (bool, error) {
+	return repository.MarkVideoPreparing(teamID, materialID, now)
+}
+
 // runtimeNodeResolver is the whole of this module's dependency on the
 // runtime-binding domain, and productionTransferCreator the whole of its
 // dependency on the transfer domain. Both are types rather than calls inside the
@@ -52,4 +56,8 @@ type productionTransferCreator struct{}
 
 func (productionTransferCreator) CreateUserDownload(input transferservice.CreateUserDownloadInput) (transferdto.Task, error) {
 	return transferservice.CreateUserDownload(input)
+}
+
+func (productionTransferCreator) EnsureMaterialSourcePrepare(input transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error) {
+	return transferservice.EnsureMaterialSourcePrepare(input)
 }

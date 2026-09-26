@@ -108,6 +108,7 @@ var (
 type Store interface {
 	CreateTask(repository.CreateTaskInput, time.Time) (model.Task, error)
 	CreateUserDownloadTask(repository.CreateUserDownloadInput, time.Time) (model.Task, error)
+	CreateMaterialSourcePrepareTask(repository.CreateMaterialSourcePrepareInput, time.Time) (model.Task, error)
 	GetTask(string) (model.Task, error)
 	ListTasks(repository.TaskFilter) ([]model.Task, error)
 	NextLocalTask(string, time.Time) (model.Task, bool, error)
@@ -288,16 +289,17 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		return dto.Task{}, ErrInvalidInput
 	}
 	task, err := s.store.CreateUserDownloadTask(repository.CreateUserDownloadInput{
-		ID:              id.NewID("transfer"),
-		TeamID:          input.TeamID,
-		AssetID:         input.AssetID,
-		AssetTitle:      input.AssetTitle,
-		SourceObjectKey: input.SourceObjectKey,
-		RequestedBy:     input.RequestedBy,
-		AssignedNodeID:  input.AssignedNodeID,
-		TotalBytes:      input.TotalBytes,
-		ExpectedSHA256:  input.ExpectedSHA256,
-		MaxAttempts:     s.maxTries,
+		ID:               id.NewID("transfer"),
+		TeamID:           input.TeamID,
+		AssetID:          input.AssetID,
+		AssetTitle:       input.AssetTitle,
+		SourceObjectKey:  input.SourceObjectKey,
+		RequestedBy:      input.RequestedBy,
+		AssignedNodeID:   input.AssignedNodeID,
+		TotalBytes:       input.TotalBytes,
+		ExpectedSHA256:   input.ExpectedSHA256,
+		DependencyTaskID: input.DependencyTaskID,
+		MaxAttempts:      s.maxTries,
 	}, s.now().UTC())
 	if err != nil {
 		return dto.Task{}, err
@@ -317,6 +319,50 @@ type CreateUserDownloadInput struct {
 	AssignedNodeID  string
 	TotalBytes      int64
 	ExpectedSHA256  string
+	// DependencyTaskID is the Cloud preparation this download waits for, when the
+	// video was not ready at the moment the user asked for it. With it set, the
+	// object key, size and hash above are empty — the preparation produces them —
+	// and the task is not claimable until it has.
+	DependencyTaskID string
+}
+
+// EnsureMaterialSourcePrepareInput is what queueing a preparation needs. It has no
+// user-facing knobs on purpose: the size, the hash, the object key and the
+// lifetime are all decided by the execution, not by the caller.
+type EnsureMaterialSourcePrepareInput struct {
+	TeamID      identityservice.TeamID
+	AssetID     int64
+	AssetTitle  string
+	RequestedBy identityservice.UserID
+}
+
+// EnsureMaterialSourcePrepare queues the Cloud task that fetches a material's
+// source video, reusing the outstanding one if there is one.
+//
+// "Reusing" is the store's dedupe, not a lookup performed here: two clicks in the
+// same moment both see no outstanding task and both insert, and the unique index
+// decides. A read-then-write in this function could not make that promise, and the
+// cost of being wrong is the same video fetched twice.
+//
+// The caller decides whether a preparation is needed at all — that is a fact about
+// the material (`video_status`), and this module may not read the production
+// tables.
+func (s *Service) EnsureMaterialSourcePrepare(input EnsureMaterialSourcePrepareInput) (dto.Task, error) {
+	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
+		return dto.Task{}, ErrInvalidInput
+	}
+	task, err := s.store.CreateMaterialSourcePrepareTask(repository.CreateMaterialSourcePrepareInput{
+		ID:          id.NewID("transfer"),
+		TeamID:      input.TeamID,
+		AssetID:     input.AssetID,
+		AssetTitle:  strings.TrimSpace(input.AssetTitle),
+		RequestedBy: input.RequestedBy,
+		MaxAttempts: s.maxTries,
+	}, s.now().UTC())
+	if err != nil {
+		return dto.Task{}, err
+	}
+	return taskBody(task), nil
 }
 
 // ListTasks returns the acting user's tasks, newest first.

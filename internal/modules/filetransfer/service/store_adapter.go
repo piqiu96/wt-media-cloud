@@ -19,6 +19,9 @@ func (mysqlStore) CreateTask(input repository.CreateTaskInput, now time.Time) (m
 func (mysqlStore) CreateUserDownloadTask(input repository.CreateUserDownloadInput, now time.Time) (model.Task, error) {
 	return repository.CreateUserDownloadTask(input, now)
 }
+func (mysqlStore) CreateMaterialSourcePrepareTask(input repository.CreateMaterialSourcePrepareInput, now time.Time) (model.Task, error) {
+	return repository.CreateMaterialSourcePrepareTask(input, now)
+}
 func (mysqlStore) GetTask(taskID string) (model.Task, error) { return repository.GetTask(taskID) }
 func (mysqlStore) ListTasks(filter repository.TaskFilter) ([]model.Task, error) {
 	return repository.ListTasks(filter)

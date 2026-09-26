@@ -215,6 +215,79 @@ func TestRemoveUsageByIDReportsWhetherTheRowWasStillActive(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+// The projection may only move forward. `ready` is the promise that the object
+// key, the size and the hash were written together, and a click that read the row
+// before a preparation finished arrives with a stale view of it — so the guard is
+// the only thing standing between "start preparing" and "forget that this video is
+// already on the object store and fetch it again".
+//
+// The two `WHERE` clauses are asserted as text because sqlmock cannot execute
+// them: a mock that matched the statement would match it just as well with the
+// status list dropped, which is the mutation this test exists to catch.
+func TestMarkVideoPreparingOnlyLeavesTheStatesAPreparationMayStartFrom(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(markVideoPreparingSQL)).
+		WithArgs(now, int64(42), int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(markVideoPreparingSQL)).
+		WithArgs(now, int64(42), int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	preparing, err := markVideoPreparing(db, 7, 42, now)
+	if err != nil {
+		t.Fatalf("markVideoPreparing() error = %v", err)
+	}
+	if !preparing {
+		t.Fatal("a row in not_downloaded must be reported as taken")
+	}
+	preparing, err = markVideoPreparing(db, 7, 42, now)
+	if err != nil {
+		t.Fatalf("markVideoPreparing() second call error = %v", err)
+	}
+	if preparing {
+		t.Fatal("a row the guard refused must not be reported as taken")
+	}
+	assertExpectations(t, mock)
+}
+
+// The guard is what a mock cannot execute, so it is asserted on the text — and
+// the fragments below are written out here rather than referred to through the
+// constant, because an assertion that shares its expectation with the code under
+// test cannot fail when that code changes. Dropping the status list, adding
+// `ready` to it or narrowing it to one state changes the statement and must break
+// this test.
+func TestMarkVideoPreparingStatementNamesBothStatesAPreparationMayStartFrom(t *testing.T) {
+	for _, fragment := range []string{
+		"video_status IN ('not_downloaded', 'failed')",
+		"video_status = 'downloading'",
+		"video_error = ''",
+		"id = ? AND team_id = ?",
+	} {
+		if !strings.Contains(markVideoPreparingSQL, fragment) {
+			t.Errorf("the statement no longer contains %q, so a `ready` material can be dragged back to `downloading`: %s", fragment, markVideoPreparingSQL)
+		}
+	}
+}
+
+func TestMarkVideoPreparingRefusesAnIncompleteScope(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
+	for _, testCase := range []struct {
+		name       string
+		teamID     identity.TeamID
+		materialID int64
+	}{
+		{"no team", 0, 42},
+		{"no material", 7, 0},
+	} {
+		if _, err := markVideoPreparing(db, testCase.teamID, testCase.materialID, now); err == nil {
+			t.Fatalf("%s: error = nil, want a refusal before any statement runs", testCase.name)
+		}
+	}
+	assertExpectations(t, mock)
+}
+
 func usageColumns() []string {
 	return []string{"id", "team_id", "material_id", "user_id", "status", "removed_at", "created_at", "updated_at"}
 }

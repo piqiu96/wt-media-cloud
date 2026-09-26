@@ -33,6 +33,23 @@ type memoryStore struct {
 	// the right ID and the wrong user would satisfy an ID-only assertion.
 	removed    int64
 	removedFor sharedidentity.UserID
+
+	// findCount counts the material lookups, and refind — when set — is what the
+	// store answers from the second one on. `CreateDownload` re-reads the material
+	// when its guarded projection write was refused, and that second row is the
+	// whole difference between "wait for the preparation already running" and "the
+	// video is ready after all"; a store answering the same row twice could not
+	// tell those two cases apart, so neither could a test of them.
+	findCount int
+	refind    *model.Material
+
+	// preparing defaults to false for the same reason the other doubles refuse by
+	// default: a test that expects the projection to have moved has to say so.
+	preparing     bool
+	preparingErr  error
+	preparedTeam  sharedidentity.TeamID
+	preparedFor   int64
+	preparedCount int
 }
 
 // stubNodes answers the one question this module asks the runtime-binding
@@ -64,6 +81,26 @@ type stubTransfers struct {
 	err   error
 	last  transferservice.CreateUserDownloadInput
 	count int
+
+	// The preparation is recorded separately: it is the other half of the click,
+	// and a double that folded it into `last` could not show that a direct download
+	// queued no preparation, or that a waiting one queued no facts of its own.
+	prepare      transferservice.EnsureMaterialSourcePrepareInput
+	prepareTask  transferdto.Task
+	prepareErr   error
+	prepareCount int
+}
+
+func (s *stubTransfers) EnsureMaterialSourcePrepare(input transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error) {
+	s.prepareCount++
+	s.prepare = input
+	if s.prepareErr != nil {
+		return transferdto.Task{}, s.prepareErr
+	}
+	if s.prepareTask.ID == "" {
+		return transferdto.Task{ID: "transfer-prepare-1", Status: "pending"}, nil
+	}
+	return s.prepareTask, nil
 }
 
 func (s *stubTransfers) CreateUserDownload(input transferservice.CreateUserDownloadInput) (transferdto.Task, error) {
@@ -83,7 +120,16 @@ func testService(store Store) *Service {
 }
 
 func (s *memoryStore) FindMaterial(int64) (model.Material, bool, error) {
+	s.findCount++
+	if s.refind != nil && s.findCount > 1 {
+		return *s.refind, s.found, nil
+	}
 	return s.material, s.found, nil
+}
+func (s *memoryStore) MarkVideoPreparing(teamID sharedidentity.TeamID, materialID int64, _ time.Time) (bool, error) {
+	s.preparedCount++
+	s.preparedTeam, s.preparedFor = teamID, materialID
+	return s.preparing, s.preparingErr
 }
 func (s *memoryStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	s.created = input
@@ -373,6 +419,12 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 		if testCase.transferErr == nil && transfers.count != 0 {
 			t.Fatalf("%s: refused download still queued %d task(s)", testCase.name, transfers.count)
 		}
+		// A refusal is a refusal of the whole click: no preparation may be left
+		// behind for a request the user was told did not happen, and the projection
+		// must not read `downloading` with nothing on its way.
+		if transfers.prepareCount != 0 || store.preparedCount != 0 {
+			t.Fatalf("%s: refused download still queued a preparation (%d) or moved the projection (%d)", testCase.name, transfers.prepareCount, store.preparedCount)
+		}
 	}
 }
 
@@ -397,5 +449,130 @@ func TestCreateDownloadDoesNotPresentAnIncompleteReadyRowAsUnavailable(t *testin
 	}
 	if transfers.count != 0 {
 		t.Fatal("an inconsistent row must not reach the transfer module")
+	}
+}
+
+func pendingMaterial(team service.TeamID, game string) model.Material {
+	material := readyMaterial(team, game)
+	material.VideoStatus = model.VideoNotDownloaded
+	material.SourceObjectKey = ""
+	material.VideoSizeBytes = nil
+	material.VideoSHA256 = ""
+	material.SourceURL = "https://example.invalid/video/42"
+	return material
+}
+
+// The one-click rule: a material with no prepared video is not refused, it is
+// queued — and what is queued is the *same kind* of task the prepared case gets,
+// held back by the preparation it names. The user sees one download either way.
+//
+// The facts asserted as empty are the point of `dependency_task_id`: a task that
+// carried a placeholder hash or a zero size would be a task an executor could
+// claim and then fail to verify against, which is worse than one it cannot claim.
+func TestCreateDownloadQueuesAWaitingTaskForAMaterialWithNoPreparedVideo(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: true}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+
+	task, err := svc.CreateDownload(scopedActor(team, game), 42)
+	if err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if transfers.prepareCount != 1 || transfers.count != 1 {
+		t.Fatalf("prepare calls = %d, download calls = %d; the click is one upload of each", transfers.prepareCount, transfers.count)
+	}
+	got := transfers.prepare
+	if got.TeamID != team || got.AssetID != 42 || got.RequestedBy != 9 || got.AssetTitle != "示例视频" {
+		t.Fatalf("prepare input = %+v", got)
+	}
+	// The preparation is keyed on the material, not on the user who happened to
+	// click: nothing about this request may reach the shared task.
+	if transfers.last.DependencyTaskID != "transfer-prepare-1" {
+		t.Fatalf("dependency = %q, want the preparation the transfer module answered with", transfers.last.DependencyTaskID)
+	}
+	if transfers.last.SourceObjectKey != "" || transfers.last.TotalBytes != 0 || transfers.last.ExpectedSHA256 != "" {
+		t.Fatalf("a waiting download must carry no facts of its own: %+v", transfers.last)
+	}
+	if transfers.last.AssignedNodeID != "node-7" {
+		t.Fatalf("a waiting download is still addressed to one machine: %+v", transfers.last)
+	}
+	if store.preparedCount != 1 || store.preparedTeam != team || store.preparedFor != 42 {
+		t.Fatalf("the projection must move with the task: count=%d team=%d material=%d", store.preparedCount, store.preparedTeam, store.preparedFor)
+	}
+	if task.ID != "transfer-1" {
+		t.Fatalf("task = %+v, want the transfer module's answer", task)
+	}
+}
+
+// A prepared material queues no preparation. Without this arm the waiting path
+// could be taken for every click and the tests above would still pass, having
+// only ever exercised one branch.
+func TestCreateDownloadQueuesNoPreparationForAPreparedMaterial(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	store := &memoryStore{found: true, material: readyMaterial(team, game), preparing: true}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+
+	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if transfers.prepareCount != 0 {
+		t.Fatalf("a prepared material queued %d preparation(s)", transfers.prepareCount)
+	}
+	if transfers.last.DependencyTaskID != "" {
+		t.Fatalf("dependency = %q, want none for a material that is already prepared", transfers.last.DependencyTaskID)
+	}
+	if store.preparedCount != 0 {
+		t.Fatalf("the projection of a ready material was moved %d time(s)", store.preparedCount)
+	}
+}
+
+// The guarded write can refuse, and the two reasons need different tasks. This is
+// the arm where guessing wrong strands a download: a video that became ready
+// between the read and the write must be fetched now, not held back behind a
+// preparation nobody needs any more.
+func TestCreateDownloadFetchesDirectlyWhenTheVideoBecameReadyMidRequest(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	fresh := readyMaterial(team, game)
+	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &fresh}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+
+	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if store.findCount != 2 {
+		t.Fatalf("material lookups = %d, want a re-read after the refused projection write", store.findCount)
+	}
+	if transfers.last.DependencyTaskID != "" {
+		t.Fatalf("dependency = %q, want none: the video is ready now", transfers.last.DependencyTaskID)
+	}
+	if transfers.last.SourceObjectKey != "materials/42/aaaaaaaa.mp4" || transfers.last.TotalBytes != 2048 || transfers.last.ExpectedSHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("the facts must come from the fresh row: %+v", transfers.last)
+	}
+}
+
+// The other reason the guarded write refuses: a preparation is already running
+// for this material, because another operator clicked first. That is the case the
+// wait was designed for, and it must still wait — not fall through to a direct
+// download with empty facts, which the transfer module would refuse.
+func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	stillPending := pendingMaterial(team, game)
+	stillPending.VideoStatus = model.VideoDownloading
+	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &stillPending}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+
+	task, err := svc.CreateDownload(scopedActor(team, game), 42)
+	if err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if transfers.last.DependencyTaskID != "transfer-prepare-1" {
+		t.Fatalf("dependency = %q, want the outstanding preparation", transfers.last.DependencyTaskID)
+	}
+	if task.ID != "transfer-1" {
+		t.Fatalf("task = %+v", task)
 	}
 }

@@ -237,6 +237,35 @@ func removeUsageByID(db *gorm.DB, usageID int64, userID identity.UserID, now tim
 	return result.RowsAffected == 1, nil
 }
 
+// MarkVideoPreparing moves the material's readiness projection to `downloading`,
+// and only out of the two states a preparation may legitimately start from.
+//
+// The guard is the whole point rather than a nicety: `ready` is the projection's
+// promise that the object key, the size and the hash were written together, and a
+// click that read the row before a preparation finished must not be able to take
+// that promise back. The caller is told which of the two happened through the
+// returned flag instead of being left to assume it won.
+//
+// The previous failure's message is cleared with the status, because it belongs to
+// an attempt that is no longer the current one and the new attempt's outcome is not
+// known yet; the task row keeps the old code and message for the record.
+func MarkVideoPreparing(teamID identity.TeamID, materialID int64, now time.Time) (bool, error) {
+	return markVideoPreparing(database.DB(), teamID, materialID, now)
+}
+
+const markVideoPreparingSQL = `UPDATE materials SET video_status = 'downloading', video_error = '', updated_at = ? WHERE id = ? AND team_id = ? AND video_status IN ('not_downloaded', 'failed')`
+
+func markVideoPreparing(db *gorm.DB, teamID identity.TeamID, materialID int64, now time.Time) (bool, error) {
+	if teamID <= 0 || materialID <= 0 {
+		return false, fmt.Errorf("invalid material preparation marker")
+	}
+	result := db.Exec(markVideoPreparingSQL, now, materialID, teamID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanUsage(row rowScanner, usage *model.MaterialUsage) error {
