@@ -252,3 +252,30 @@ func TestInitializeRefusesASecondCall(t *testing.T) {
 		t.Fatalf("second Initialize() error = %v, want errAlreadyInitialized", err)
 	}
 }
+
+// The package-level `PresignGet` exists so that no caller can choose how long an
+// address stays valid, which means the configured value has to be the one that
+// reaches the signer. A lifetime of zero would not be caught anywhere else: it
+// makes the call fail rather than mint a grant with the wrong expiry, so a
+// forgotten assignment shows up as a claim that cannot be served at all.
+func TestPackagePresignGetUsesTheConfiguredLifetime(t *testing.T) {
+	t.Cleanup(func() { _ = Close() })
+	_ = Close()
+	cfg := testStorageConfig("127.0.0.1:9000")
+	cfg.PresignTTL = config.Duration{Duration: 7 * time.Minute}
+	if err := Initialize(cfg, testCredential()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	before := time.Now()
+	grant, err := PresignGet(context.Background(), "materials/42/x.mp4")
+	if err != nil {
+		t.Fatalf("PresignGet() error = %v", err)
+	}
+	if !strings.Contains(grant.URL, "X-Amz-Expires=420") {
+		t.Fatalf("the signed lifetime is not the configured seven minutes: %s", grant.URL)
+	}
+	if grant.ExpiresAt.Before(before.Add(7*time.Minute)) || grant.ExpiresAt.After(time.Now().Add(7*time.Minute)) {
+		t.Fatalf("ExpiresAt = %s, want about seven minutes from now", grant.ExpiresAt)
+	}
+}

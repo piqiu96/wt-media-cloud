@@ -1,9 +1,11 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 )
@@ -13,6 +15,10 @@ var errAlreadyInitialized = errors.New("object storage already initialized")
 var resources struct {
 	sync.RWMutex
 	store Store
+	// grantTTL is the configured lifetime of a minted grant. It is kept here
+	// rather than passed by each caller so that how long an address stays valid
+	// is one operational decision, not one per call site.
+	grantTTL time.Duration
 }
 
 // Initialize publishes the process-wide object-storage store.
@@ -30,6 +36,7 @@ func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageC
 	}
 	if strings.TrimSpace(credential.AccessKey) == "" && strings.TrimSpace(credential.SecretKey) == "" {
 		resources.store = notConfiguredStore{}
+		resources.grantTTL = cfg.PresignTTL.Duration
 		return nil
 	}
 	store, err := newMinioStore(cfg, credential)
@@ -37,7 +44,23 @@ func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageC
 		return err
 	}
 	resources.store = store
+	resources.grantTTL = cfg.PresignTTL.Duration
 	return nil
+}
+
+// PresignGet mints a grant with the configured lifetime.
+//
+// The lifetime is not a parameter here, unlike on the interface. A caller that
+// chose one would be writing a second copy of a decision configuration already
+// makes, and the two would drift with nothing to catch it.
+func PresignGet(ctx context.Context, key string) (Grant, error) {
+	resources.RLock()
+	store, ttl := resources.store, resources.grantTTL
+	resources.RUnlock()
+	if store == nil {
+		panic("storage resources called before Initialize")
+	}
+	return store.PresignGet(ctx, key, ttl)
 }
 
 // Get returns the initialized store and fails fast before Bootstrap, in the same
@@ -66,6 +89,7 @@ func Configured() bool {
 func Close() error {
 	resources.Lock()
 	resources.store = nil
+	resources.grantTTL = 0
 	resources.Unlock()
 	return nil
 }

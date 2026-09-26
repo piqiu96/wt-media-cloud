@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/repository"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -56,11 +58,31 @@ func (runtimeNodeAuth) AuthenticateNodeCredential(credential string) (runtimeser
 	return runtimeservice.AuthenticateNodeCredential(credential)
 }
 
-// This module's dependency on the object store is not wired yet: the storage
-// package and its configuration arrive with the Cloud preparation worker, and
-// until then a claim has no grant to hand out and says so through
-// `ErrGrantUnavailable` rather than leasing a task it cannot serve.
+// objectStorageGrants is the whole of this module's dependency on the object
+// store: it mints the grant a lease carries, and it is a type rather than a call
+// inside the service so that the dependency is visible in one file and a test can
+// answer without a bucket.
 //
-// The zero value is `unavailableGrants`, so there is nothing to wire here yet —
-// naming the gap in one place is the point.
-var _ GrantIssuer = unavailableGrants{}
+// It adapts rather than implements: `GrantIssuer.PresignGet` takes no lifetime,
+// while `storage.Store.PresignGet` requires one. The store cannot simply be the
+// issuer, and that is the point — a caller inside this module must not be able to
+// choose how long an address stays valid, so the adapter supplies the configured
+// lifetime and the module has no way to name another.
+type objectStorageGrants struct{}
+
+func (objectStorageGrants) PresignGet(ctx context.Context, objectKey string) (DownloadGrant, error) {
+	grant, err := storage.PresignGet(ctx, objectKey)
+	if err != nil {
+		// `ErrNotConfigured` arrives here unchanged: a claim on a deployment with
+		// no object-storage credential is an internal fault, and the frozen error
+		// contract publishes no name for it. Nothing is leased, so the task keeps
+		// its attempts and stays claimable once the credential is supplied.
+		return DownloadGrant{}, err
+	}
+	return DownloadGrant{URL: grant.URL, ExpiresAt: grant.ExpiresAt}, nil
+}
+
+var (
+	_ GrantIssuer = unavailableGrants{}
+	_ GrantIssuer = objectStorageGrants{}
+)

@@ -16,6 +16,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
+	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
@@ -39,6 +40,7 @@ func serverResourcePlan() []resourceStep {
 		metricsResource(),
 		tracingResource(),
 		databaseResource(),
+		storageResource(),
 		clientsResource(),
 	}
 }
@@ -60,6 +62,7 @@ func workerResourcePlan() []resourceStep {
 		metricsResource(),
 		tracingResource(),
 		databaseResource(),
+		storageResource(),
 		clientsResource("douyin"),
 	}
 }
@@ -176,6 +179,27 @@ func databaseResource() resourceStep {
 func installHertzLoggers() {
 	hlog.SetLogger(logger.App())
 	hlog.SetSystemLogger(logger.Panic())
+}
+
+// storageResource publishes the object-storage store. It is in the server plan
+// because a claim mints the lease's download grant, and in the worker plan
+// because the preparation worker writes the object that grant points at; the
+// scheduler and the migration runner do neither.
+//
+// It does not fail when no credential is configured — that is the state every
+// tree in this repository is committed in — so this step is one that always
+// succeeds and either publishes a signing store or one that refuses.
+func storageResource() resourceStep {
+	return resourceStep{
+		name: "storage",
+		open: func() (func() error, error) {
+			cfg := config.Get()
+			if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
+				return nil, err
+			}
+			return storage.Close, nil
+		},
+	}
 }
 
 func clientsResource(names ...string) resourceStep {

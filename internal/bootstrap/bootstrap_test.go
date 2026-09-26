@@ -73,8 +73,40 @@ func TestInitializeServerRollsBackInReverseOrder(t *testing.T) {
 
 func TestInitializeWorkerInitializesOnlyDouyinHTTPClient(t *testing.T) {
 	names := resourceStepNames(workerResourcePlan())
-	want := []string{"config", "logger", "metrics", "tracing", "database", "clients"}
+	// `storage` was added to this list deliberately: the preparation worker writes
+	// the prepared source object, so it needs the store. `clients` is still
+	// pinned to douyin alone.
+	want := []string{"config", "logger", "metrics", "tracing", "database", "storage", "clients"}
 	assertOrder(t, names, want)
+}
+
+// The server plan had no assertion at all: the test above it builds its own
+// synthetic steps, so the real plan could lose a step and nothing would say so.
+// `storage` is the one that matters most — a claim mints the lease's download
+// grant, so a server without the store answers every claim with an internal
+// error, and the failure would look like the executor's.
+func TestInitializeServerPlanCarriesStorage(t *testing.T) {
+	names := resourceStepNames(serverResourcePlan())
+	want := []string{"config", "logger", "metrics", "tracing", "database", "storage", "clients"}
+	assertOrder(t, names, want)
+}
+
+// The two plans that must not need an object-storage credential. The migration
+// runner has to be able to migrate a database in an environment where no bucket
+// is reachable, and the scheduler does no object I/O — if either grew a storage
+// step, the failure would appear as a deployment that cannot start, and the cause
+// would be a resource nobody thought they depended on.
+func TestTheMigrationAndSchedulerPlansCarryNoStorage(t *testing.T) {
+	for name, plan := range map[string][]resourceStep{
+		"migration": migrationResourcePlan(),
+		"scheduler": schedulerResourcePlan(),
+	} {
+		for _, step := range plan {
+			if step.name == "storage" {
+				t.Errorf("the %s plan initializes object storage", name)
+			}
+		}
+	}
 }
 
 func TestSelectHTTPClientConfigsDefaultsToAllAndSupportsNames(t *testing.T) {

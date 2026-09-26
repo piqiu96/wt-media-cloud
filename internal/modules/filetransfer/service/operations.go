@@ -9,15 +9,12 @@ import (
 
 // newWiredService assembles the module's real dependencies, in one place.
 //
-// The grant issuer is deliberately not among them: the object store and its
-// configuration arrive with the Cloud preparation worker, and until then a claim
-// has no grant to hand out. It refuses through `ErrGrantUnavailable` rather than
-// leasing a task it cannot serve, which is the honest answer — an executor that
-// received a lease with a broken url could do nothing with it and no one could
-// tell why. Wiring the real issuer is the one line this function is shaped to
-// take.
+// The grant issuer is wired here rather than defaulted, so that a service built
+// by hand — a test's, or a future caller's — keeps the refusing zero value and
+// cannot lease a task it has no way to serve. Only this path, the one the
+// handlers use and Bootstrap has therefore prepared, mints real grants.
 func newWiredService() *Service {
-	return NewService(mysqlStore{}, runtimeNodeAuth{})
+	return NewService(mysqlStore{}, runtimeNodeAuth{}, WithGrantIssuer(objectStorageGrants{}))
 }
 
 func CreateTask(input CreateTaskInput) (dto.Task, error) {
