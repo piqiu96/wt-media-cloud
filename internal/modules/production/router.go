@@ -1,0 +1,10 @@
+// Package production exposes Cloud material-library HTTP endpoints.
+package production
+
+import "github.com/cloudwego/hertz/pkg/app/server"
+
+func RegisterRoutes(h *server.Hertz) {
+	h.GET("/api/v1/materials", ListMaterials)
+	h.GET("/api/v1/materials/:material_id", GetMaterial)
+	h.POST("/api/v1/materials/:material_id/usages", AddMaterialUsage)
+}

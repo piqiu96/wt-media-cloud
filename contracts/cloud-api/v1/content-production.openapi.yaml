@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.09.26.1
+  version: 2026.09.26.2
   description: Additive M4-A contract. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/materials:
@@ -52,27 +52,9 @@ paths:
       responses:
         '202': {description: A pending local-agent file transfer task.}
         '409': {description: No fresh bound Local Agent node is available.}
-  /api/v1/file-transfer-tasks:
-    get:
-      operationId: listFileTransferTasks
-      summary: List transfer tasks visible to the current user.
-      security: [{sessionCookie: []}]
-  /api/v1/file-transfer-tasks/{task_id}/cancel:
-    post:
-      operationId: cancelFileTransferTask
-      summary: Request cancellation; a running executor confirms terminal cancellation.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/TaskID'}]
-  /api/v1/file-transfer-tasks/{task_id}/retry:
-    post:
-      operationId: retryFileTransferTask
-      summary: Requeue an eligible failed transfer within its bounded attempt count.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/TaskID'}]
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:
     MaterialID: {in: path, name: material_id, required: true, schema: {type: integer, format: int64}}
     UsageID: {in: path, name: usage_id, required: true, schema: {type: integer, format: int64}}
-    TaskID: {in: path, name: task_id, required: true, schema: {type: string}}

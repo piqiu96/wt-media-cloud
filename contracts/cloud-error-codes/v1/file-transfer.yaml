@@ -1,0 +1,10 @@
+schema_version: 1
+revision: "2026.09.26.1"
+
+errors:
+  transfer_task_not_found: {http_status: 404}
+  transfer_task_forbidden: {http_status: 403}
+  transfer_task_conflict: {http_status: 409}
+  transfer_task_cancelled: {http_status: 409}
+  local_transfer_node_unavailable: {http_status: 409}
+  transfer_integrity_failed: {http_status: 422}

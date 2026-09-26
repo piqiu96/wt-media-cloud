@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.26.1"
+revision: "2026.09.26.2"
 
 schemas:
   Material:
@@ -36,26 +36,3 @@ schemas:
       removed_at: {type: string, format: date-time, nullable: true}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
-
-  FileTransferTask:
-    type: object
-    required: [id, asset_type, asset_id, purpose, execution_scope, status, total_bytes, completed_bytes, attempt_count, created_at, updated_at]
-    properties:
-      id: {type: string}
-      asset_type: {type: string, const: material}
-      asset_id: {type: integer, format: int64}
-      purpose: {type: string, enum: [compose_input_prepare, user_download]}
-      execution_scope: {type: string, enum: [cloud, local_agent]}
-      status: {type: string, enum: [pending, running, success, failed, cancelled]}
-      total_bytes: {type: integer, format: int64, minimum: 0}
-      completed_bytes: {type: integer, format: int64, minimum: 0}
-      bytes_per_second: {type: integer, format: int64, minimum: 0}
-      estimated_remaining_seconds: {type: integer, format: int64, minimum: 0, nullable: true}
-      attempt_count: {type: integer, minimum: 0}
-      max_attempts: {type: integer, minimum: 1}
-      checksum_sha256: {type: string, nullable: true}
-      error_code: {type: string, nullable: true}
-      error_message: {type: string, nullable: true}
-      created_at: {type: string, format: date-time}
-      updated_at: {type: string, format: date-time}
-    forbidden_properties: [local_path, download_url, storage_credential, node_credential]

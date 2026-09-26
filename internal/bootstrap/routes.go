@@ -15,6 +15,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
@@ -40,6 +41,7 @@ func registerRoutes(engine *server.Hertz) error {
 	mediaaccount.RegisterRoutes(engine)
 	proxy.RegisterRoutes(engine)
 	contentpool.RegisterRoutes(engine)
+	production.RegisterRoutes(engine)
 	return nil
 }
 

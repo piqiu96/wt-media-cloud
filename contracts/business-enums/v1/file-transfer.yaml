@@ -1,0 +1,7 @@
+schema_version: 1
+revision: "2026.09.26.1"
+
+asset_types: [material]
+purposes: [compose_input_prepare, user_download]
+execution_scopes: [cloud, local_agent]
+statuses: [pending, running, success, failed, cancelled]
