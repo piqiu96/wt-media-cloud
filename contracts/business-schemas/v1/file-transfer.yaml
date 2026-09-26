@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.26.1"
+revision: "2026.09.26.2"
 
 schemas:
   FileTransferTask:
@@ -19,6 +19,12 @@ schemas:
       attempt_count: {type: integer, minimum: 0}
       max_attempts: {type: integer, minimum: 1}
       checksum_sha256: {type: string, nullable: true}
+      file_name:
+        type: string
+        nullable: true
+        description: >-
+          The final file name the executor reported, with no directory component. It is the name the
+          executor actually wrote, reported rather than derived a second time by the UI.
       error_code: {type: string, nullable: true}
       error_message: {type: string, nullable: true}
       created_at: {type: string, format: date-time}

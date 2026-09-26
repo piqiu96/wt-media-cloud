@@ -1,26 +1,42 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud File Transfer API
-  version: 2026.09.26.1
-  description: Executor-neutral transfer task API. Asset domains may create tasks but do not own the transfer lifecycle.
+  version: 2026.09.26.2
+  description: >-
+    Executor-neutral transfer task API. Asset domains may create tasks but do not own the transfer
+    lifecycle. Every response uses the Cloud errcode/message/data/logid envelope, and every task body is a
+    `FileTransferTask` record from `business-schemas/v1/file-transfer.yaml` — never a local path, a signed
+    URL, or a storage credential.
 paths:
   /api/v1/file-transfer-tasks:
     get:
       operationId: listFileTransferTasks
       summary: List transfer tasks visible to the current user.
       security: [{sessionCookie: []}]
+      responses:
+        '200': {description: The current user's `FileTransferTask` records, newest first. The list is always scoped to the requesting user; no query parameter widens it.}
   /api/v1/file-transfer-tasks/{task_id}/cancel:
     post:
       operationId: cancelFileTransferTask
       summary: Request cancellation; a running executor confirms terminal cancellation.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: 'The refreshed `FileTransferTask`: `cancelled` when it had no executor, otherwise `running` with a recorded cancellation request that the executor turns terminal.'}
+        '403': {description: 'Task belongs to another user (`transfer_task_forbidden`).'}
+        '404': {description: 'Task does not exist (`transfer_task_not_found`).'}
+        '409': {description: 'Task is already terminal (`transfer_task_conflict`).'}
   /api/v1/file-transfer-tasks/{task_id}/retry:
     post:
       operationId: retryFileTransferTask
       summary: Requeue an eligible failed transfer within its bounded attempt count.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: 'The refreshed `FileTransferTask`, requeued as `pending`.'}
+        '403': {description: 'Task belongs to another user (`transfer_task_forbidden`).'}
+        '404': {description: 'Task does not exist (`transfer_task_not_found`).'}
+        '409': {description: 'Task is not retryable: not `failed`, or already at its attempt limit (`transfer_task_conflict`).'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

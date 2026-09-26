@@ -1,8 +1,12 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent File Transfer API
-  version: 2026.09.26.1
-  description: Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud preparation is never exposed to an Agent.
+  version: 2026.09.26.2
+  description: >-
+    Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud
+    preparation is never exposed to an Agent. A lease carries a short-lived single-object download grant
+    and never a durable storage credential, and no response body in this contract may be persisted by
+    Cloud or by an Agent.
 paths:
   /api/v1/cloud-agent/file-transfer-tasks/claim:
     post:
@@ -10,7 +14,11 @@ paths:
       security: [{nodeBearer: []}]
       summary: Atomically lease one pending transfer assigned to the authenticated local node.
       responses:
-        '200': {description: Lease with a short-lived single-object download grant, or an explicit no-task result.}
+        '200':
+          description: >-
+            A lease with a short-lived single-object download grant, or an explicit no-task result. The
+            lease is the only place a signed download URL appears; it is never stored.
+          content: {application/json: {schema: {$ref: '#/components/schemas/ClaimResult'}}}
         '401': {description: Node credential or bound user session is invalid.}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/heartbeat:
     post:
@@ -21,7 +29,7 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Heartbeat'}}}
       responses:
-        '200': {description: Lease remains valid.}
+        '200': {description: 'Lease remains valid. The response carries no task body; a renewed lease is implicit in the request succeeding.'}
         '409': {description: Task is cancelled, terminal, or not leased by this node.}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/progress:
     post:
@@ -31,6 +39,9 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Progress'}}}
+      responses:
+        '200': {description: 'Progress recorded. The response carries no task body. Progress does not renew the lease; only heartbeat does.'}
+        '409': {description: Task is cancelled, terminal, expired, or not leased by this node.}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/complete:
     post:
       operationId: completeLocalFileTransferTask
@@ -40,9 +51,11 @@ paths:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Completion'}}}
       responses:
-        '200': {description: Terminal result recorded after integrity validation.}
+        '200':
+          description: 'Terminal result recorded after integrity validation. The body echoes what Cloud recorded, so an executor can confirm the outcome it produced.'
+          content: {application/json: {schema: {$ref: '#/components/schemas/TransferTerminal'}}}
         '409': {description: Terminal, cancelled, or wrong-node task.}
-        '422': {description: Reported success lacks the expected size or SHA-256.}
+        '422': {description: 'Reported success lacks the expected size or SHA-256 of the leased task (error name `transfer_integrity_failed`).'}
 components:
   securitySchemes:
     nodeBearer: {type: http, scheme: bearer}
@@ -68,6 +81,15 @@ components:
         status: {type: string, enum: [success, failed, cancelled]}
         completed_bytes: {type: integer, format: int64, minimum: 0}
         sha256: {type: string, pattern: '^[A-Fa-f0-9]{64}$'}
+        file_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[^/\\]+$'
+          description: >-
+            The final file name the executor wrote, with no directory component. Cloud records it so the UI
+            displays the name the executor actually used instead of deriving a second one that could drift.
+            A path separator is rejected by the pattern above.
         error_code: {type: string, maxLength: 128}
         error_message: {type: string, maxLength: 500}
       allOf:
@@ -75,4 +97,56 @@ components:
           then: {required: [completed_bytes, sha256]}
         - if: {properties: {status: {enum: [failed, cancelled]}}}
           then: {required: [error_code]}
+      additionalProperties: false
+    LocalLease:
+      type: object
+      required: [task_id, asset_type, asset_id, title, total_bytes, expected_sha256, lease_seconds, download_url, download_url_expires_at]
+      properties:
+        task_id: {type: string}
+        asset_type: {type: string, const: material}
+        asset_id: {type: integer, format: int64}
+        title:
+          type: string
+          description: >-
+            The material title, verbatim. The executor derives its target file name from this and sanitizes
+            it for its own filesystem, because the reserved names and separators differ per operating system
+            and only the executor knows which one it runs on.
+        total_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The expected download size. It is fixed when the task is created, because the Progress body carries no total.
+        expected_sha256:
+          type: string
+          pattern: '^[A-Fa-f0-9]{64}$'
+          description: >-
+            Required, not optional: Cloud only creates a local transfer for a material whose source object is
+            already verified, so the executor always has something to check its bytes against.
+        max_attempts: {type: integer, minimum: 1}
+        attempt_count: {type: integer, minimum: 0}
+        lease_seconds: {type: integer, minimum: 1}
+        download_url:
+          type: string
+          format: uri
+          description: A short-lived single-object GET grant. Never persisted by Cloud or by an Agent, and never logged.
+        download_url_expires_at: {type: string, format: date-time}
+      additionalProperties: false
+    ClaimResult:
+      type: object
+      required: [task]
+      properties:
+        task:
+          description: The leased task, or null when no eligible task is pending for this node.
+          oneOf:
+            - {$ref: '#/components/schemas/LocalLease'}
+            - {type: 'null'}
+      additionalProperties: false
+    TransferTerminal:
+      type: object
+      required: [task_id, status, completed_bytes]
+      properties:
+        task_id: {type: string}
+        status: {type: string, enum: [success, failed, cancelled]}
+        completed_bytes: {type: integer, format: int64, minimum: 0}
+        file_name: {type: string, maxLength: 255}
       additionalProperties: false
