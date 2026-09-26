@@ -10,6 +10,7 @@ Cloud-owned contracts used by Local/Cloud Agent processes when communicating wit
 - `v1/registration-heartbeat.openapi.yaml`: Agent registration and heartbeat endpoints for M1-C2.
 - `v1/task-lease.openapi.yaml`: M1-C3 noop task creation, claim, and lease endpoints.
 - `v1/task-report.openapi.yaml`: M1-C4 task status report endpoint.
+- `v1/file-transfer.openapi.yaml`: M4-A Local Agent lease, heartbeat, progress, completion, and cancellation-observation endpoints for `user_download` transfer tasks.
 
 ## Not Active Yet
 

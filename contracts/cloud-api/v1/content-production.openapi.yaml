@@ -1,0 +1,78 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cloud Content Production API
+  version: 2026.09.26.1
+  description: Additive M4-A contract. Every response uses the Cloud errcode/message/data/logid envelope.
+paths:
+  /api/v1/materials:
+    get:
+      operationId: listMaterials
+      summary: List materials visible in the current user's team and game scope.
+      security: [{sessionCookie: []}]
+      responses:
+        '200': {description: Visible materials and their video preparation projection.}
+  /api/v1/materials/{material_id}:
+    get:
+      operationId: getMaterial
+      summary: Read one visible material.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/MaterialID'}]
+      responses:
+        '200': {description: Visible material.}
+        '403': {description: Material is outside the actor's scope.}
+        '404': {description: Material does not exist.}
+  /api/v1/materials/{material_id}/usages:
+    post:
+      operationId: addMaterialUsage
+      summary: Idempotently create or restore the current user's material usage.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/MaterialID'}]
+      responses:
+        '200': {description: Existing active usage returned.}
+        '201': {description: New or restored active usage returned.}
+  /api/v1/my-materials:
+    get:
+      operationId: listMyMaterialUsages
+      summary: List the current user's active material usages.
+      security: [{sessionCookie: []}]
+  /api/v1/material-usages/{usage_id}:
+    delete:
+      operationId: removeMaterialUsage
+      summary: Soft-remove the current user's active material usage.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/UsageID'}]
+      responses:
+        '204': {description: Usage removed without deleting material or history.}
+  /api/v1/materials/{material_id}/downloads:
+    post:
+      operationId: createMaterialDownload
+      summary: Create one current-session Local Agent user-download transfer task.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/MaterialID'}]
+      responses:
+        '202': {description: A pending local-agent file transfer task.}
+        '409': {description: No fresh bound Local Agent node is available.}
+  /api/v1/file-transfer-tasks:
+    get:
+      operationId: listFileTransferTasks
+      summary: List transfer tasks visible to the current user.
+      security: [{sessionCookie: []}]
+  /api/v1/file-transfer-tasks/{task_id}/cancel:
+    post:
+      operationId: cancelFileTransferTask
+      summary: Request cancellation; a running executor confirms terminal cancellation.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+  /api/v1/file-transfer-tasks/{task_id}/retry:
+    post:
+      operationId: retryFileTransferTask
+      summary: Requeue an eligible failed transfer within its bounded attempt count.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  parameters:
+    MaterialID: {in: path, name: material_id, required: true, schema: {type: integer, format: int64}}
+    UsageID: {in: path, name: usage_id, required: true, schema: {type: integer, format: int64}}
+    TaskID: {in: path, name: task_id, required: true, schema: {type: string}}

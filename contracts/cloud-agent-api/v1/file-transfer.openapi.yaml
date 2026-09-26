@@ -1,0 +1,78 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cloud-Agent File Transfer API
+  version: 2026.09.26.1
+  description: Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud preparation is never exposed to an Agent.
+paths:
+  /api/v1/cloud-agent/file-transfer-tasks/claim:
+    post:
+      operationId: claimLocalFileTransferTask
+      security: [{nodeBearer: []}]
+      summary: Atomically lease one pending transfer assigned to the authenticated local node.
+      responses:
+        '200': {description: Lease with a short-lived single-object download grant, or an explicit no-task result.}
+        '401': {description: Node credential or bound user session is invalid.}
+  /api/v1/cloud-agent/file-transfer-tasks/{task_id}/heartbeat:
+    post:
+      operationId: heartbeatLocalFileTransferTask
+      security: [{nodeBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/Heartbeat'}}}
+      responses:
+        '200': {description: Lease remains valid.}
+        '409': {description: Task is cancelled, terminal, or not leased by this node.}
+  /api/v1/cloud-agent/file-transfer-tasks/{task_id}/progress:
+    post:
+      operationId: reportLocalFileTransferProgress
+      security: [{nodeBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/Progress'}}}
+  /api/v1/cloud-agent/file-transfer-tasks/{task_id}/complete:
+    post:
+      operationId: completeLocalFileTransferTask
+      security: [{nodeBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/Completion'}}}
+      responses:
+        '200': {description: Terminal result recorded after integrity validation.}
+        '409': {description: Terminal, cancelled, or wrong-node task.}
+        '422': {description: Reported success lacks the expected size or SHA-256.}
+components:
+  securitySchemes:
+    nodeBearer: {type: http, scheme: bearer}
+  parameters:
+    TaskID: {in: path, name: task_id, required: true, schema: {type: string}}
+  schemas:
+    Heartbeat:
+      type: object
+      required: [completed_bytes]
+      properties: {completed_bytes: {type: integer, format: int64, minimum: 0}}
+      additionalProperties: false
+    Progress:
+      type: object
+      required: [completed_bytes, bytes_per_second]
+      properties:
+        completed_bytes: {type: integer, format: int64, minimum: 0}
+        bytes_per_second: {type: integer, format: int64, minimum: 0}
+      additionalProperties: false
+    Completion:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [success, failed, cancelled]}
+        completed_bytes: {type: integer, format: int64, minimum: 0}
+        sha256: {type: string, pattern: '^[A-Fa-f0-9]{64}$'}
+        error_code: {type: string, maxLength: 128}
+        error_message: {type: string, maxLength: 500}
+      allOf:
+        - if: {properties: {status: {const: success}}}
+          then: {required: [completed_bytes, sha256]}
+        - if: {properties: {status: {enum: [failed, cancelled]}}}
+          then: {required: [error_code]}
+      additionalProperties: false

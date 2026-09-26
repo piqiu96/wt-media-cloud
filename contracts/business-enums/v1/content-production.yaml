@@ -1,0 +1,8 @@
+schema_version: 1
+revision: "2026.09.26.1"
+
+video_statuses: [not_downloaded, downloading, ready, failed]
+transfer_asset_types: [material]
+transfer_purposes: [compose_input_prepare, user_download]
+transfer_execution_scopes: [cloud, local_agent]
+transfer_statuses: [pending, running, success, failed, cancelled]
