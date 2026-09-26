@@ -48,6 +48,7 @@ type Store interface {
 	SaveNode(AgentNode) error
 	FindNodeByCredentialHash(hash string) (AgentNode, bool, error)
 	CheckLocalTrust(userID identityservice.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error)
+	FindFreshLocalNode(userID identityservice.UserID, at time.Time, freshness time.Duration) (AgentNode, bool, error)
 	ValidateRuntimeProfiles(userID identityservice.UserID, mainUserID string, profileIDs []string) (bool, error)
 	ApplyRuntimeReport(node AgentNode, report RuntimeReport, at time.Time) error
 }
@@ -188,23 +189,73 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 // AuthenticateNode verifies the bearer node credential and the bound active
 // user session for other Cloud security modules. It never exposes the hash.
 func (s *Service) AuthenticateNode(nodeID, credential string) (AgentNode, error) {
-	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(credential) == "" {
+	if strings.TrimSpace(nodeID) == "" {
+		return AgentNode{}, ErrNodeCredentialInvalid
+	}
+	node, err := s.authenticateCredential(credential)
+	if err != nil {
+		return AgentNode{}, err
+	}
+	if node.ID != nodeID {
+		return AgentNode{}, ErrNodeCredentialInvalid
+	}
+	return node, nil
+}
+
+// AuthenticateNodeCredential identifies a node by its credential alone.
+//
+// It exists because a route can offer nothing else. The frozen
+// `POST /api/v1/cloud-agent/file-transfer-tasks/claim` has no path parameter and
+// no request body — a polling executor has no task to name and nothing to send —
+// so the node id a caller would otherwise pass is not available to be checked,
+// and `node.ID == nodeID` would have nothing to compare against. The credential
+// itself is what the bearer token carries, and it is the only thing that has to be
+// verified.
+//
+// What is *not* relaxed: the credential's hash is the lookup key (so a caller
+// cannot name a node it has no secret for), and the bound session still has to be
+// active. A replaced node is still refused, because its credential was superseded
+// by a later registration.
+func (s *Service) AuthenticateNodeCredential(credential string) (AgentNode, error) {
+	return s.authenticateCredential(credential)
+}
+
+func (s *Service) authenticateCredential(credential string) (AgentNode, error) {
+	if strings.TrimSpace(credential) == "" {
 		return AgentNode{}, ErrNodeCredentialInvalid
 	}
 	node, ok, err := s.store.FindNodeByCredentialHash(secretHash(credential))
 	if err != nil {
 		return AgentNode{}, err
 	}
-	if !ok || node.ID != nodeID || node.Mode != "local" || node.Status == AgentStatusReplaced {
+	if !ok || node.Mode != "local" || node.Status == AgentStatusReplaced {
 		return AgentNode{}, ErrNodeCredentialInvalid
 	}
-	now := s.now()
-	active, err := s.store.IsSessionActive(node.SessionID, node.UserID, now)
+	active, err := s.store.IsSessionActive(node.SessionID, node.UserID, s.now())
 	if err != nil {
 		return AgentNode{}, err
 	}
 	if !active {
 		return AgentNode{}, ErrBoundSessionInvalid
+	}
+	return node, nil
+}
+
+// ResolveFreshLocalNode answers "which of this user's devices should receive a
+// download" without the caller naming one, and reports
+// `ErrLocalTrustUnavailable` when there is none — the same error a named node's
+// failed trust check produces, because from the caller's side the outcome is
+// identical: there is no usable node for this user right now.
+func (s *Service) ResolveFreshLocalNode(userID identityservice.UserID) (AgentNode, error) {
+	if userID <= 0 {
+		return AgentNode{}, ErrInvalidInput
+	}
+	node, found, err := s.store.FindFreshLocalNode(userID, s.now(), s.freshness)
+	if err != nil {
+		return AgentNode{}, err
+	}
+	if !found {
+		return AgentNode{}, ErrLocalTrustUnavailable
 	}
 	return node, nil
 }

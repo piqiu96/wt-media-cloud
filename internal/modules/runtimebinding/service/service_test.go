@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -72,6 +73,37 @@ func (s *memoryStore) CheckLocalTrust(userID identityservice.UserID, nodeID stri
 		}
 	}
 	return false, nil
+}
+
+// The double has to model the query's *filter and its order*, not just its shape:
+// a fake that returned whichever node it iterated first would make a service test
+// of "the newest device wins" pass without the ordering being implemented
+// anywhere. The SQL itself is pinned separately, by text, in the repository's
+// sqlmock tests — the two can still disagree, which is why both exist.
+func (s *memoryStore) FindFreshLocalNode(userID identityservice.UserID, at time.Time, freshness time.Duration) (AgentNode, bool, error) {
+	candidates := make([]AgentNode, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		if node.UserID != userID || node.Mode != "local" || node.Status != cloudagentservice.AgentStatusOnline {
+			continue
+		}
+		if node.LastHeartbeatAt.Before(at.Add(-freshness)) {
+			continue
+		}
+		if !s.activeSessions[runtimeKey(node.SessionID, userID)] {
+			continue
+		}
+		candidates = append(candidates, node)
+	}
+	if len(candidates) == 0 {
+		return AgentNode{}, false, nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].LastHeartbeatAt.Equal(candidates[j].LastHeartbeatAt) {
+			return candidates[i].LastHeartbeatAt.After(candidates[j].LastHeartbeatAt)
+		}
+		return candidates[i].ID < candidates[j].ID
+	})
+	return candidates[0], true, nil
 }
 
 func (s *memoryStore) ValidateRuntimeProfiles(userID identityservice.UserID, mainUserID string, profileIDs []string) (bool, error) {
@@ -229,6 +261,105 @@ func TestRuntimeReportValidatesMainIdentityAndLeavesUnknownProfilesToDiff(t *tes
 	}
 	if len(store.appliedReport.BitProfileIDs) != 3 {
 		t.Fatalf("applied profile ids = %+v, want 3 ids preserved for runtime projection", store.appliedReport.BitProfileIDs)
+	}
+}
+
+func liveNode(id, sessionID string, userID identityservice.UserID, heartbeat time.Time) AgentNode {
+	return AgentNode{ID: id, Mode: "local", Status: cloudagentservice.AgentStatusOnline, UserID: userID, SessionID: sessionID, LastHeartbeatAt: heartbeat}
+}
+
+// The claim route offers no node id, so the credential has to be enough on its
+// own. The second arm is what keeps that from becoming "any valid credential
+// identifies any node": when a caller *does* name a node, the name is still
+// checked.
+func TestAuthenticateNodeCredentialIdentifiesANodeWithoutAnID(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := newMemoryStore()
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	store.nodes[secretHash("node-secret")] = liveNode("node-1", "session-1", identityservice.UserID(1), now)
+	service := testService(store, &now)
+
+	node, err := service.AuthenticateNodeCredential("node-secret")
+	if err != nil {
+		t.Fatalf("AuthenticateNodeCredential() error = %v", err)
+	}
+	if node.ID != "node-1" || node.UserID != identityservice.UserID(1) {
+		t.Fatalf("node = %+v", node)
+	}
+	if _, err := service.AuthenticateNode("node-2", "node-secret"); !errors.Is(err, ErrNodeCredentialInvalid) {
+		t.Fatalf("AuthenticateNode() with a wrong id error = %v", err)
+	}
+	if _, err := service.AuthenticateNodeCredential(""); !errors.Is(err, ErrNodeCredentialInvalid) {
+		t.Fatalf("AuthenticateNodeCredential() with no credential error = %v", err)
+	}
+}
+
+// What the credential route does not relax: a replaced node's credential was
+// superseded by a later registration and must not be usable, and the bound session
+// still has to be live.
+func TestAuthenticateNodeCredentialStillRefusesAReplacedNodeAndADeadSession(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := newMemoryStore()
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	replaced := liveNode("node-1", "session-1", identityservice.UserID(1), now)
+	replaced.Status = AgentStatusReplaced
+	store.nodes[secretHash("replaced-secret")] = replaced
+	store.nodes[secretHash("node-secret")] = liveNode("node-2", "session-1", identityservice.UserID(1), now)
+	service := testService(store, &now)
+
+	if _, err := service.AuthenticateNodeCredential("replaced-secret"); !errors.Is(err, ErrNodeCredentialInvalid) {
+		t.Fatalf("replaced node error = %v", err)
+	}
+	store.activeSessions[runtimeKey("session-1", 1)] = false
+	if _, err := service.AuthenticateNodeCredential("node-secret"); !errors.Is(err, ErrBoundSessionInvalid) {
+		t.Fatalf("dead session error = %v", err)
+	}
+}
+
+// The session route knows the user but not the device, so the choice among that
+// user's live devices has to be made here. The newest heartbeat wins, because a
+// user who has just opened a second machine means to use it.
+func TestResolveFreshLocalNodePicksTheNewestLiveDevice(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := newMemoryStore()
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	// Both heartbeats are strictly in the past and both are inside the freshness
+	// window, so "newest" and "fresh enough" cannot cover for each other: a service
+	// that dropped the freshness bound would still pick node-b here, but one that
+	// passed a zero freshness would admit neither.
+	store.nodes[secretHash("older")] = liveNode("node-a", "session-1", identityservice.UserID(1), now.Add(-60*time.Second))
+	store.nodes[secretHash("newer")] = liveNode("node-b", "session-1", identityservice.UserID(1), now.Add(-30*time.Second))
+	service := testService(store, &now)
+
+	node, err := service.ResolveFreshLocalNode(identityservice.UserID(1))
+	if err != nil {
+		t.Fatalf("ResolveFreshLocalNode() error = %v", err)
+	}
+	if node.ID != "node-b" {
+		t.Fatalf("node = %+v, want the newest heartbeat", node)
+	}
+}
+
+// "No node" and "a node that failed its trust check" are the same answer to the
+// caller — there is nothing to download to right now — so they share one error.
+// A stale heartbeat is the ordinary way this happens: the Agent is closed.
+func TestResolveFreshLocalNodeReportsNoUsableNode(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := newMemoryStore()
+	store.activeSessions[runtimeKey("session-1", 1)] = true
+	service := testService(store, &now)
+
+	if _, err := service.ResolveFreshLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
+		t.Fatalf("no node at all error = %v", err)
+	}
+	store.nodes[secretHash("stale")] = liveNode("node-a", "session-1", identityservice.UserID(1), now.Add(-2*time.Minute))
+	if _, err := service.ResolveFreshLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
+		t.Fatalf("stale node error = %v", err)
+	}
+	// Another user's live node is not this user's node.
+	store.nodes[secretHash("other")] = liveNode("node-b", "session-1", identityservice.UserID(2), now)
+	if _, err := service.ResolveFreshLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
+		t.Fatalf("another user's node error = %v", err)
 	}
 }
 

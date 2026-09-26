@@ -135,6 +135,50 @@ func ValidateRuntimeProfiles(userID sharedidentity.UserID, mainUserID string, pr
 	return validateRuntimeProfiles(database.DB(), userID, mainUserID, profileIDs)
 }
 
+// FindFreshLocalNode resolves the local node a session can use without naming it,
+// because a session route knows who is asking but not which device they are on.
+//
+// The trust conditions are `checkLocalTrust`'s, with `n.user_id = ?` where that
+// one has `n.id = ?`: a live session, a fresh heartbeat, an online node, and the
+// BitBrowser main account agreeing with the bound one. They are the same
+// conditions on purpose — "the user has a usable node" and "this node is usable
+// for this user" must not be able to disagree — so they are worth reading side by
+// side, and any change to one is a change to the other.
+//
+// A user may have several live devices, so the choice has to be deterministic:
+// newest heartbeat first, and `n.id` breaks the tie, because two nodes reporting
+// in the same second would otherwise resolve differently on consecutive calls and
+// the transfer would be assigned to a node that the next click did not pick.
+func FindFreshLocalNode(userID sharedidentity.UserID, at time.Time, freshness time.Duration) (model.AgentNode, bool, error) {
+	return findFreshLocalNode(database.DB(), userID, at, freshness)
+}
+
+func findFreshLocalNode(db *gorm.DB, userID sharedidentity.UserID, at time.Time, freshness time.Duration) (model.AgentNode, bool, error) {
+	if userID <= 0 || freshness <= 0 {
+		return model.AgentNode{}, false, nil
+	}
+	var node model.AgentNode
+	err := db.Raw(`SELECT n.id, n.agent_id, n.device_id, n.user_id, n.session_id, n.mode, n.agent_version,
+		n.contract_major_version, n.contract_revision, n.credential_hash, n.status, n.registered_at, n.last_heartbeat_at
+		FROM local_agent_nodes n
+		JOIN users u ON u.id = n.user_id
+		JOIN user_sessions s ON s.id = n.session_id
+		WHERE n.user_id = ? AND n.mode = 'local' AND n.status = 'online'
+		  AND n.last_heartbeat_at >= ? AND s.invalidated_at IS NULL AND u.status = 'enabled'
+		  AND u.bit_main_user_id IS NOT NULL AND n.bitbrowser_status = 'normal'
+		  AND n.reported_main_user_id = u.bit_main_user_id
+		ORDER BY n.last_heartbeat_at DESC, n.id ASC LIMIT 1`, userID, at.Add(-freshness)).
+		Row().Scan(&node.ID, &node.AgentID, &node.DeviceID, &node.UserID, &node.SessionID, &node.Mode, &node.AgentVersion,
+		&node.ContractMajorVersion, &node.ContractRevision, &node.CredentialHash, &node.Status, &node.RegisteredAt, &node.LastHeartbeatAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.AgentNode{}, false, nil
+	}
+	if err != nil {
+		return model.AgentNode{}, false, err
+	}
+	return node, true, nil
+}
+
 func validateRuntimeProfiles(db *gorm.DB, userID sharedidentity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	var boundMain sql.NullString
 	err := db.Raw(`SELECT bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`, userID).Row().Scan(&boundMain)

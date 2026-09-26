@@ -25,3 +25,11 @@ func ReportRuntime(nodeID, credential string, report dto.RuntimeReport) error {
 func AuthenticateNode(nodeID, credential string) (model.AgentNode, error) {
 	return newService(mysqlStore{}).AuthenticateNode(nodeID, credential)
 }
+
+func AuthenticateNodeCredential(credential string) (model.AgentNode, error) {
+	return newService(mysqlStore{}).AuthenticateNodeCredential(credential)
+}
+
+func ResolveFreshLocalNode(userID service.UserID) (model.AgentNode, error) {
+	return newService(mysqlStore{}).ResolveFreshLocalNode(userID)
+}
