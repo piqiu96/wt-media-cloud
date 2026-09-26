@@ -263,7 +263,7 @@ func TestReportProgressRejectsCancelledOrUnclaimedTask(t *testing.T) {
 
 // A completion has to agree with what the task declared. Both expectations are
 // asserted in the predicate, so bytes that were never verified cannot be
-// recorded as a success even if a handler's own check is bypassed.
+// recorded as a success even if the service's own check is bypassed.
 func TestCompleteTaskRequiresRunningClaimAndIntegrity(t *testing.T) {
 	db, mock := newMockGORM(t)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)")).

@@ -340,9 +340,9 @@ func CompleteTask(input CompletionInput, now time.Time) (bool, error) {
 // The completion has to agree with what the task declared, so both expectations
 // are asserted in the predicate rather than trusted from the caller: the byte
 // count must match `total_bytes` when one is known, and the hash must match
-// `expected_sha256` when one was recorded. The handler refuses a mismatch with
+// `expected_sha256` when one was recorded. The service refuses a mismatch with
 // the frozen `transfer_integrity_failed` first; this predicate is the same rule
-// stated where the row can enforce it, so a race that slipped past the handler
+// stated where the row can enforce it, so a race that slipped past the service
 // still cannot mark unverified bytes as a success.
 func completeTask(db *gorm.DB, input CompletionInput, now time.Time) (bool, error) {
 	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.NodeID) == "" || input.Bytes < 0 || len(strings.TrimSpace(input.SHA256)) != 64 {

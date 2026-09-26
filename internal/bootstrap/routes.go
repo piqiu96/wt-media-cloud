@@ -12,6 +12,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
+	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
@@ -33,6 +34,18 @@ func registerRoutes(engine *server.Hertz) error {
 	if err := bootstrapIdentity(cfg.App.InitialAdmin.Username, cfg.App.InitialAdmin.Password); err != nil {
 		return err
 	}
+	registerModuleRoutes(engine)
+	return nil
+}
+
+// registerModuleRoutes installs every module's HTTP surface, and nothing else.
+//
+// It is split out of `registerRoutes` so that the module list is reachable from a
+// test: `registerRoutes` itself reads the configuration and bootstraps an admin
+// account, so anything asserted through it would be asserting against a database.
+// The list is the whole content of this function, and a module missing from it
+// serves 404 on every route it owns without any other symptom.
+func registerModuleRoutes(engine *server.Hertz) {
 	cloudagent.RegisterRoutes(engine)
 	identity.RegisterRoutes(engine)
 	runtimebinding.RegisterRoutes(engine)
@@ -42,7 +55,7 @@ func registerRoutes(engine *server.Hertz) error {
 	proxy.RegisterRoutes(engine)
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
-	return nil
+	filetransfer.RegisterRoutes(engine)
 }
 
 func bootstrapIdentity(username, password string) error {
