@@ -175,35 +175,39 @@ func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 	return tasks, rows.Err()
 }
 
+// leaseable is the single statement of "this task can be leased right now". It is
+// a shared const rather than a phrase repeated per query because it is a rule, not
+// an implementation detail: three claims and the candidate read below all have to
+// agree on it, and a predicate that drifts in one of them produces a task that one
+// path leases and another refuses to continue — the exact stuck-`running` state the
+// two clauses below exist to prevent.
+//
+// `cancel_requested_at IS NULL`. Without it, cancelling a running task and then
+// losing its executor (the node dies, the lease expires) makes the task claimable
+// again — and every predicate the new owner would use to report progress,
+// heartbeat, or complete also requires `cancel_requested_at IS NULL`. So the new
+// owner could take the lease and then be refused by all three, and the task would
+// stay `running` forever with nothing able to finish it. A task that has been asked
+// to stop is not leasable at all; the reconcilers move it to its terminal state.
+//
+// `attempt_count < max_attempts`. `attempt_count` is incremented by a claim, so
+// without the bound a task whose lease keeps expiring is retried forever and
+// `max_attempts` would only ever constrain an explicit user retry. The bound is why
+// `ReconcileExhaustedTasks` exists: a task that has used all its attempts and lost
+// its executor has no claimable owner left, and must be terminated by someone.
+const leaseable = `cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))`
+
 func ClaimLocalTask(taskID, nodeID string, now time.Time, lease time.Duration) (model.Task, bool, error) {
 	return claimLocalTask(database.DB(), taskID, nodeID, now, lease)
 }
 
 // claimLocalTask leases one task the caller named, to the node it was assigned.
-//
-// Two predicates here are load-bearing rather than defensive:
-//
-// `cancel_requested_at IS NULL`. Without it, cancelling a running task and then
-// losing its executor (the node dies, the lease expires) makes the task
-// claimable again — and every predicate the new owner would use to report
-// progress, heartbeat, or complete also requires `cancel_requested_at IS NULL`.
-// So the new owner could take the lease and then be refused by all three, and
-// the task would stay `running` forever with nothing able to finish it. A task
-// that has been asked to stop is not leasable at all; the reconcilers move it to
-// its terminal state.
-//
-// `attempt_count < max_attempts`. `attempt_count` is incremented by this
-// statement, so without the bound a task whose lease keeps expiring is retried
-// forever and `max_attempts` would only ever constrain an explicit user retry.
-// The bound is why `ReconcileExhaustedTasks` exists: a task that has used all
-// its attempts and lost its executor has no claimable owner left, and must be
-// terminated by someone.
 func claimLocalTask(db *gorm.DB, taskID, nodeID string, now time.Time, lease time.Duration) (model.Task, bool, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(nodeID) == "" || lease <= 0 {
 		return model.Task{}, false, fmt.Errorf("invalid local transfer claim")
 	}
 	leaseUntil := now.Add(lease)
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))`, nodeID, leaseUntil, now, now, now, taskID, nodeID, now)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND `+leaseable, nodeID, leaseUntil, now, now, now, taskID, nodeID, now)
 	if result.Error != nil {
 		return model.Task{}, false, result.Error
 	}
@@ -212,6 +216,45 @@ func claimLocalTask(db *gorm.DB, taskID, nodeID string, now time.Time, lease tim
 	}
 	task, err := getTask(db, taskID)
 	return task, err == nil, err
+}
+
+// NextLocalTask reports the oldest task waiting for one local node, without
+// leasing it.
+//
+// It exists because a lease carries a download grant. Minting the grant after the
+// lease would leave a task recorded as `running` with no executor holding anything
+// whenever minting failed — and with `attempt_count` already incremented, so a
+// storage outage would spend the user's retry budget and strand the row until the
+// lease expired. Reading the candidate first costs one query, and one wasted
+// presign when the claim below loses its race (a local HMAC computation), and in
+// exchange a storage failure touches nothing at all.
+//
+// The caller must still lease through `ClaimLocalTask`, which re-asserts this same
+// predicate: this function only says what is *probably* available.
+func NextLocalTask(nodeID string, now time.Time) (model.Task, bool, error) {
+	return nextLocalTask(database.DB(), nodeID, now)
+}
+
+func nextLocalTask(db *gorm.DB, nodeID string, now time.Time) (model.Task, bool, error) {
+	if strings.TrimSpace(nodeID) == "" {
+		return model.Task{}, false, fmt.Errorf("invalid local transfer lookup")
+	}
+	// The order is `created_at, id` rather than `created_at` alone: two tasks
+	// created in the same microsecond would otherwise be picked in an arbitrary
+	// order, and a node polling this could be handed a different one each time.
+	var taskID string
+	err := db.Raw(`SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND `+leaseable+` ORDER BY created_at ASC, id ASC LIMIT 1`, nodeID, now).Row().Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Task{}, false, nil
+	}
+	if err != nil {
+		return model.Task{}, false, err
+	}
+	task, err := getTask(db, taskID)
+	if err != nil {
+		return model.Task{}, false, err
+	}
+	return task, true, nil
 }
 
 // ClaimCloudTask leases the oldest Cloud-scope task that is waiting or whose
@@ -235,7 +278,7 @@ func claimCloudTask(db *gorm.DB, workerID string, now time.Time, lease time.Dura
 		return model.Task{}, false, fmt.Errorf("invalid cloud transfer claim")
 	}
 	var taskID string
-	err := db.Raw(`SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1`, now).Row().Scan(&taskID)
+	err := db.Raw(`SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND `+leaseable+` ORDER BY created_at ASC, id ASC LIMIT 1`, now).Row().Scan(&taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Task{}, false, nil
 	}
@@ -243,7 +286,7 @@ func claimCloudTask(db *gorm.DB, workerID string, now time.Time, lease time.Dura
 		return model.Task{}, false, err
 	}
 	leaseUntil := now.Add(lease)
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?))`, workerID, leaseUntil, now, now, now, taskID, now)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND `+leaseable, workerID, leaseUntil, now, now, now, taskID, now)
 	if result.Error != nil {
 		return model.Task{}, false, result.Error
 	}

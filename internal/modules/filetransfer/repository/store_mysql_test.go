@@ -205,6 +205,46 @@ func TestClaimCloudTaskReportsNoTaskForAnEmptyQueue(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+// The candidate read is what lets Cloud mint a download grant before it leases
+// anything, so it must not lease: no `UPDATE` is expected here at all, and
+// `assertExpectations` fails the test if one happens. That is the whole point —
+// a version of this that leased first would leave a task `running` with an
+// incremented `attempt_count` whenever minting failed.
+func TestNextLocalTaskReportsTheCandidateWithoutLeasingIt(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+		WithArgs("node-1", testNow).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-9"))
+	expectTaskByID(mock, "transfer-9", testNow, map[string]any{"id": "transfer-9", "status": "pending", "execution_scope": "local_agent", "purpose": "user_download", "assigned_node_id": "node-1", "attempt_count": 0})
+
+	task, found, err := nextLocalTask(db, "node-1", testNow)
+	if err != nil {
+		t.Fatalf("nextLocalTask() error = %v", err)
+	}
+	if !found || task.ID != "transfer-9" || task.Status != model.StatusPending || task.AttemptCount != 0 {
+		t.Fatalf("found=%v task=%+v", found, task)
+	}
+	assertExpectations(t, mock)
+}
+
+// A node with nothing waiting is the ordinary case for a polling executor, so it
+// reports absence rather than an error.
+func TestNextLocalTaskReportsNothingForANodeWithNoWork(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) ORDER BY created_at ASC, id ASC LIMIT 1")).
+		WithArgs("node-1", testNow).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	task, found, err := nextLocalTask(db, "node-1", testNow)
+	if err != nil {
+		t.Fatalf("nextLocalTask() error = %v", err)
+	}
+	if found || task.ID != "" {
+		t.Fatalf("found=%v task=%+v, want nothing", found, task)
+	}
+	assertExpectations(t, mock)
+}
+
 func TestReportProgressRejectsCancelledOrUnclaimedTask(t *testing.T) {
 	db, mock := newMockGORM(t)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, speed_bytes_per_sec = ?, eta_seconds = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?) AND transferred_bytes <= ?")).
