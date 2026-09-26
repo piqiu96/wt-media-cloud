@@ -14,6 +14,9 @@ type mysqlStore struct{}
 func (mysqlStore) CreateTask(input repository.CreateTaskInput, now time.Time) (model.Task, error) {
 	return repository.CreateTask(input, now)
 }
+func (mysqlStore) CreateUserDownloadTask(input repository.CreateUserDownloadInput, now time.Time) (model.Task, error) {
+	return repository.CreateUserDownloadTask(input, now)
+}
 func (mysqlStore) GetTask(taskID string) (model.Task, error) { return repository.GetTask(taskID) }
 func (mysqlStore) ListTasks(filter repository.TaskFilter) ([]model.Task, error) {
 	return repository.ListTasks(filter)

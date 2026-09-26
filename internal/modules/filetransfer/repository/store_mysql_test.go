@@ -584,3 +584,136 @@ func taskRowValues(now time.Time, overrides map[string]any) []driver.Value {
 func taskRow(now time.Time, overrides map[string]any) *sqlmock.Rows {
 	return sqlmock.NewRows(taskColumns()).AddRow(taskRowValues(now, overrides)...)
 }
+
+func validUserDownloadInput() CreateUserDownloadInput {
+	return CreateUserDownloadInput{
+		ID:              "transfer-1",
+		TeamID:          identity.TeamID(7),
+		AssetID:         42,
+		AssetTitle:      "示例视频",
+		SourceObjectKey: "materials/42/aaaaaaaa.mp4",
+		RequestedBy:     identity.UserID(9),
+		AssignedNodeID:  "node-1",
+		TotalBytes:      100,
+		ExpectedSHA256:  testSHA256,
+		MaxAttempts:     3,
+	}
+}
+
+const (
+	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')"
+	insertTaskSQL             = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
+)
+
+// expectUserDownloadCount arms the count that decides the generation, with the
+// scope it must be asked for. The filter is part of the expectation, not a
+// detail: a count that forgot `purpose` would include the Cloud preparation
+// tasks for the same material, and one that forgot the user would let another
+// user's downloads advance this one's generation.
+func expectUserDownloadCount(mock sqlmock.Sqlmock, finished int64) {
+	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
+		WithArgs("material", int64(42), "user_download", int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(finished))
+}
+
+func expectUserDownloadInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string) {
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+// The generation is the whole idempotency rule, and it counts a different thing
+// from "tasks in flight": a click while the first download is outstanding must
+// land on the same key, and a click after it finished must not.
+//
+// The two arms below are the two directions of that, and they are the reason the
+// count is a COUNT of terminal rows rather than of all rows. Counting all rows
+// would make the second arm a new task while the first was still running, and
+// counting only `success` would let a failed download's key be reused — landing
+// the retry on a row whose executor state is already gone.
+func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing.T) {
+	// The keys are literals, not calls to the helper under test: an expectation
+	// computed by the same function that computes the argument would agree with
+	// itself no matter which generation the code picked. They also freeze the
+	// digest's input format, so changing the tuple or its separator is a visible
+	// edit rather than a silent re-key of every future download.
+	for _, testCase := range []struct {
+		name     string
+		finished int64
+		wantKey  string
+	}{
+		{
+			name:     "nothing finished yet",
+			finished: 0,
+			wantKey:  "a7aacdc43fe78897d2da66126f170aaa5288ec7620030a97c60a98425925fe98",
+		},
+		{
+			name:     "one download already finished",
+			finished: 1,
+			wantKey:  "3cdcb3725f7968c8173b5efe71aaaa5493663d14516e9f9a9d55abd351306220",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, mock := newMockGORM(t)
+			mock.ExpectBegin()
+			expectUserDownloadCount(mock, testCase.finished)
+			expectUserDownloadInsert(mock, "transfer-1", testCase.wantKey)
+			expectTaskByDedupeKey(mock, testCase.wantKey, testNow, nil)
+			mock.ExpectCommit()
+
+			if _, err := createUserDownloadTask(db, validUserDownloadInput(), testNow); err != nil {
+				t.Fatalf("createUserDownloadTask() error = %v", err)
+			}
+			assertExpectations(t, mock)
+		})
+	}
+}
+
+// The key has to be a function of the tuple and nothing else. A clock or a random
+// value in it would make two clicks that should collapse into one produce two
+// tasks — the failure the unique index exists to prevent — and it would do so
+// only under timing, so no other test here would see it.
+func TestUserDownloadDedupeKeyIsAFunctionOfTheTupleAlone(t *testing.T) {
+	base := userDownloadDedupeKey(42, identity.UserID(9), "node-1", 1)
+	if base != userDownloadDedupeKey(42, identity.UserID(9), "node-1", 1) {
+		t.Fatal("the same tuple must produce the same key, or a repeat click creates a second task")
+	}
+	if len(base) != 64 {
+		t.Fatalf("key length = %d, want 64 for the CHAR(64) column", len(base))
+	}
+	for _, other := range []string{
+		userDownloadDedupeKey(43, identity.UserID(9), "node-1", 1),
+		userDownloadDedupeKey(42, identity.UserID(10), "node-1", 1),
+		userDownloadDedupeKey(42, identity.UserID(9), "node-2", 1),
+		userDownloadDedupeKey(42, identity.UserID(9), "node-1", 2),
+	} {
+		if other == base {
+			t.Fatalf("the tuple is not discriminating: %s collides with %s", other, base)
+		}
+	}
+}
+
+// A download without a node has nowhere to go, and a task row with an empty
+// assignee would be claimed by the first node that asked. The refusal is
+// asserted rather than assumed because the check lives in `validateCreateInput`,
+// which this path reaches only through `createTask`.
+func TestCreateUserDownloadTaskRefusesAnIncompleteIdentity(t *testing.T) {
+	for name, mutate := range map[string]func(*CreateUserDownloadInput){
+		"no team":     func(input *CreateUserDownloadInput) { input.TeamID = 0 },
+		"no material": func(input *CreateUserDownloadInput) { input.AssetID = 0 },
+		"no user":     func(input *CreateUserDownloadInput) { input.RequestedBy = 0 },
+	} {
+		input := validUserDownloadInput()
+		mutate(&input)
+		db, mock := newMockGORM(t)
+
+		// The message is asserted, not just "an error came back". With nothing
+		// armed, an un-mocked statement also returns an error, so a nil-check alone
+		// would stay green with the validation deleted — it would be reading the
+		// mock's complaint and calling it the refusal.
+		if _, err := createUserDownloadTask(db, input, testNow); err == nil || err.Error() != "invalid user download input" {
+			t.Fatalf("%s: error = %v, want the refusal that precedes the transaction", name, err)
+		}
+		assertExpectations(t, mock)
+	}
+}

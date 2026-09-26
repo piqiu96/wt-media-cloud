@@ -37,6 +37,11 @@ type memoryStore struct {
 	createResult Task
 	createErr    error
 
+	// The user-download path is recorded separately from the generic create: the
+	// point of the method is the input it *does not* take, and a double that
+	// shared `lastCreate` would let a caller-supplied dedupe key go unnoticed.
+	lastDownload repository.CreateUserDownloadInput
+
 	candidate      Task
 	candidateFound bool
 	nextErr        error
@@ -97,6 +102,25 @@ func (s *memoryStore) CreateTask(input repository.CreateTaskInput, now time.Time
 		AssetTitle: input.AssetTitle, SourceObjectKey: input.SourceObjectKey, Purpose: input.Purpose,
 		ExecutionScope: input.ExecutionScope, Status: model.StatusPending, RequestedBy: input.RequestedBy,
 		AssignedNodeID: input.AssignedNodeID, TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
+		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownloadInput, now time.Time) (Task, error) {
+	s.counts["createDownload"]++
+	s.lastDownload = input
+	if s.createErr != nil {
+		return Task{}, s.createErr
+	}
+	if s.createResult.ID != "" {
+		return s.createResult, nil
+	}
+	return Task{
+		ID: input.ID, TeamID: input.TeamID, AssetType: model.AssetMaterial, AssetID: input.AssetID,
+		AssetTitle: input.AssetTitle, SourceObjectKey: input.SourceObjectKey,
+		Purpose: model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
+		Status: model.StatusPending, RequestedBy: input.RequestedBy, AssignedNodeID: input.AssignedNodeID,
+		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -1003,5 +1027,70 @@ func TestAnEmptyCredentialIsRefusedWithoutAsking(t *testing.T) {
 	}
 	if nodes.calls != 0 {
 		t.Fatalf("authenticator asked %d times, want none for a blank credential", nodes.calls)
+	}
+}
+
+// The service's job here is narrow and worth pinning: it fills the purpose and
+// the scope the caller is not allowed to choose, and it takes no dedupe key.
+// The idempotency decision belongs to the repository, which can count and insert
+// in one transaction; a service that let a caller pass a key would move that
+// decision to whatever called it.
+func TestCreateUserDownloadFixesThePurposeTheScopeAndTheAttemptBound(t *testing.T) {
+	store := newMemoryStore()
+	svc := testService(store, workingNode())
+
+	task, err := svc.CreateUserDownload(CreateUserDownloadInput{
+		TeamID:          7,
+		AssetID:         42,
+		AssetTitle:      "示例视频",
+		SourceObjectKey: "materials/42/abc.mp4",
+		RequestedBy:     9,
+		AssignedNodeID:  "node-1",
+		TotalBytes:      1024,
+		ExpectedSHA256:  strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatalf("CreateUserDownload() error = %v", err)
+	}
+	if store.counts["createDownload"] != 1 || store.counts["create"] != 0 {
+		t.Fatalf("the download path must not go through the generic create: %v", store.counts)
+	}
+	input := store.lastDownload
+	if input.TeamID != 7 || input.AssetID != 42 || input.RequestedBy != 9 || input.AssignedNodeID != "node-1" {
+		t.Fatalf("download input = %+v", input)
+	}
+	if input.TotalBytes != 1024 || input.ExpectedSHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("the completeness facts must travel with the task: %+v", input)
+	}
+	if input.MaxAttempts != 3 {
+		t.Fatalf("attempt bound = %d, want the schema default 3", input.MaxAttempts)
+	}
+	// The wire body, not the row: the two are built by different functions and only
+	// one of them is on this path, so the strings the client will read are asserted
+	// as strings.
+	if task.Purpose != string(model.PurposeUserDownload) || task.ExecutionScope != string(model.ExecutionLocalAgent) {
+		t.Fatalf("task purpose/scope = %s/%s", task.Purpose, task.ExecutionScope)
+	}
+	if task.AssetType != string(model.AssetMaterial) || task.ID == "" || task.Status != string(model.StatusPending) {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+func TestCreateUserDownloadRefusesAnIncompleteIdentity(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		input CreateUserDownloadInput
+	}{
+		{"no team", CreateUserDownloadInput{AssetID: 42, RequestedBy: 9, AssignedNodeID: "node-1"}},
+		{"no material", CreateUserDownloadInput{TeamID: 7, RequestedBy: 9, AssignedNodeID: "node-1"}},
+		{"no user", CreateUserDownloadInput{TeamID: 7, AssetID: 42, AssignedNodeID: "node-1"}},
+	} {
+		store := newMemoryStore()
+		if _, err := testService(store, workingNode()).CreateUserDownload(testCase.input); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("%s: error = %v, want ErrInvalidInput", testCase.name, err)
+		}
+		if store.counts["createDownload"] != 0 {
+			t.Fatalf("%s: a refused download still reached the store", testCase.name)
+		}
 	}
 }

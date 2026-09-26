@@ -2,7 +2,9 @@
 package repository
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -77,8 +79,103 @@ type FailureInput struct {
 	ErrorMessage string
 }
 
+// CreateUserDownloadInput is everything a user download needs that the caller
+// can know. It is deliberately not a `CreateTaskInput`: the dedupe key and the
+// purpose/scope pair are this function's to decide, and a caller that supplied
+// them could supply them inconsistently.
+type CreateUserDownloadInput struct {
+	ID              string
+	TeamID          identity.TeamID
+	AssetID         int64
+	AssetTitle      string
+	SourceObjectKey string
+	RequestedBy     identity.UserID
+	AssignedNodeID  string
+	TotalBytes      int64
+	ExpectedSHA256  string
+	MaxAttempts     int
+}
+
 func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
 	return createTask(database.DB(), input, now)
+}
+
+// CreateUserDownloadTask queues one user download, deciding for itself whether
+// this click is a repeat of one already outstanding.
+//
+// The idempotency key carries a generation, and the generation is how many
+// downloads of this material this user has already **finished**. Two clicks while
+// the first transfer is still outstanding count the same generation, compute the
+// same key, and the unique index collapses them into one task — which is what a
+// double click means. A click after that transfer reached a terminal state counts
+// one more and creates a new task, because "download it again" is a different
+// request from "download it", and the first task's row is history that the second
+// one must not overwrite.
+//
+// The count and the insert share a transaction. Read outside it, two clicks could
+// count the same generation and still race to two different keys; inside it, the
+// loser's insert collides and `createTask` reads back the survivor.
+//
+// A status filter that meant "outstanding" instead of "finished" would be wrong
+// in the direction that is hard to see: a cancelled transfer would let the next
+// click resurrect the same key, and the row it lands on already carries the
+// cancelled executor's state.
+func CreateUserDownloadTask(input CreateUserDownloadInput, now time.Time) (model.Task, error) {
+	return createUserDownloadTask(database.DB(), input, now)
+}
+
+func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time.Time) (model.Task, error) {
+	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
+		return model.Task{}, fmt.Errorf("invalid user download input")
+	}
+	var task model.Task
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var finished int64
+		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy).Row().Scan(&finished); err != nil {
+			return err
+		}
+		var err error
+		task, err = createTask(tx, CreateTaskInput{
+			ID:              input.ID,
+			TeamID:          input.TeamID,
+			AssetType:       model.AssetMaterial,
+			AssetID:         input.AssetID,
+			AssetTitle:      input.AssetTitle,
+			SourceObjectKey: input.SourceObjectKey,
+			Purpose:         model.PurposeUserDownload,
+			ExecutionScope:  model.ExecutionLocalAgent,
+			RequestedBy:     input.RequestedBy,
+			AssignedNodeID:  input.AssignedNodeID,
+			DedupeKey:       userDownloadDedupeKey(input.AssetID, input.RequestedBy, input.AssignedNodeID, finished+1),
+			TotalBytes:      input.TotalBytes,
+			ExpectedSHA256:  input.ExpectedSHA256,
+			MaxAttempts:     input.MaxAttempts,
+		}, now)
+		return err
+	})
+	if err != nil {
+		return model.Task{}, err
+	}
+	return task, nil
+}
+
+// userDownloadDedupeKey binds a download to the user, the material, **the node**
+// and the generation.
+//
+// The node is in the key because the task is assigned to one: two devices are two
+// destinations, and collapsing them would send a file the user asked for on the
+// laptop only to the desktop. The generation is a counter rather than a timestamp
+// so that the key is a pure function of durable state — a clock or a random value
+// here would make the duplicate-click case depend on timing.
+//
+// It is hashed because `dedupe_key` is `CHAR(64)`: the readable form is longer
+// than that as soon as a node id is a uuid, and MySQL would answer a silent
+// truncation with a collision between two different downloads. The generation is
+// part of the digest, so the key is still exactly as discriminating as the tuple
+// — it is just no longer readable in a row dump.
+func userDownloadDedupeKey(assetID int64, userID identity.UserID, nodeID string, generation int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%d|%d|%s|%d", assetID, userID, strings.TrimSpace(nodeID), generation)))
+	return hex.EncodeToString(sum[:])
 }
 
 // createTask writes the task as a durable instruction rather than a pointer into

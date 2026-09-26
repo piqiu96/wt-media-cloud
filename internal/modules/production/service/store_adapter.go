@@ -3,9 +3,12 @@ package service
 import (
 	"time"
 
+	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
+	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
+	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 type mysqlStore struct{}
@@ -32,4 +35,21 @@ func (mysqlStore) FindUsageForUser(usageID int64, userID identityservice.UserID)
 
 func (mysqlStore) RemoveUsageByID(usageID int64, userID identityservice.UserID, now time.Time) (bool, error) {
 	return repository.RemoveUsageByID(usageID, userID, now)
+}
+
+// runtimeNodeResolver is the whole of this module's dependency on the
+// runtime-binding domain, and productionTransferCreator the whole of its
+// dependency on the transfer domain. Both are types rather than calls inside the
+// service so that a test answers them without a node table or a task table, and
+// so that the two module boundaries this module crosses are visible in one file.
+type runtimeNodeResolver struct{}
+
+func (runtimeNodeResolver) ResolveFreshLocalNode(userID identityservice.UserID) (runtimeservice.AgentNode, error) {
+	return runtimeservice.ResolveFreshLocalNode(userID)
+}
+
+type productionTransferCreator struct{}
+
+func (productionTransferCreator) CreateUserDownload(input transferservice.CreateUserDownloadInput) (transferdto.Task, error) {
+	return transferservice.CreateUserDownload(input)
 }

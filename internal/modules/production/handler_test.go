@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,6 +26,7 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 		{consts.MethodGet, "/api/v1/materials"},
 		{consts.MethodGet, "/api/v1/materials/42"},
 		{consts.MethodPost, "/api/v1/materials/42/usages"},
+		{consts.MethodPost, "/api/v1/materials/42/downloads"},
 		{consts.MethodGet, "/api/v1/my-materials"},
 		{consts.MethodDelete, "/api/v1/material-usages/5"},
 	} {
@@ -70,6 +72,71 @@ func TestWriteProductionErrorKeepsTheTwoMissingResourcesApart(t *testing.T) {
 		}
 		if body.ErrCode != testCase.errcode {
 			t.Fatalf("%s: errcode = %d, want %d", testCase.name, body.ErrCode, testCase.errcode)
+		}
+	}
+}
+
+// The two 409s on the download route are a different pair to tell apart: both
+// mean "not now", and a client reading only the frozen contract — which publishes
+// names and statuses and no numeric errcodes — has exactly one field to branch on.
+// So this asserts that field.
+//
+// A status-only assertion would pass with the two names swapped, and an errcode
+// assertion would pass with either name; only the name distinguishes them.
+func TestTheTwoDownloadConflictsCarryTheirFrozenNames(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		err     error
+		errcode int
+		want    string
+	}{
+		{"no prepared video", productionservice.ErrMaterialUnavailable, 15005, "material_unavailable"},
+		{"no local node", productionservice.ErrLocalNodeUnavailable, 15105, "local_transfer_node_unavailable"},
+	} {
+		engine := server.New()
+		engine.POST("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+			writeProductionError(c, testCase.err)
+		})
+		result := ut.PerformRequest(engine.Engine, consts.MethodPost, "/probe", nil)
+
+		if got := result.Result().StatusCode(); got != consts.StatusConflict {
+			t.Fatalf("%s: status = %d, want 409", testCase.name, got)
+		}
+		var body struct {
+			ErrCode int `json:"errcode"`
+			Error   *struct {
+				Type string `json:"type"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(result.Result().Body(), &body); err != nil {
+			t.Fatalf("%s: decode response: %v", testCase.name, err)
+		}
+		if body.ErrCode != testCase.errcode {
+			t.Fatalf("%s: errcode = %d, want %d", testCase.name, body.ErrCode, testCase.errcode)
+		}
+		if body.Error == nil || body.Error.Type != testCase.want {
+			t.Fatalf("%s: error.type = %+v, want %q", testCase.name, body.Error, testCase.want)
+		}
+	}
+}
+
+// The names above are copies of what `contracts/cloud-error-codes/` publishes, and
+// a copy nothing checks is a copy that drifts. This reads the frozen files and
+// asserts each name is declared there as a 409, so a contract revision that
+// renames one fails here rather than in a client.
+func TestTheDownloadConflictNamesAreTheFrozenOnes(t *testing.T) {
+	for file, names := range map[string][]string{
+		"content-production.yaml": {"material_unavailable"},
+		"file-transfer.yaml":      {"local_transfer_node_unavailable"},
+	} {
+		content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-error-codes", "v1", file))
+		if err != nil {
+			t.Fatalf("read frozen error codes: %v", err)
+		}
+		for _, name := range names {
+			if !strings.Contains(string(content), name+": {http_status: 409}") {
+				t.Errorf("%s does not declare %s as a 409", file, name)
+			}
 		}
 	}
 }

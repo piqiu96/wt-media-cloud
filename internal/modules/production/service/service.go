@@ -3,12 +3,16 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
+	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
+	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 var (
@@ -28,6 +32,18 @@ var (
 	// of the row, one of the material behind it — and the frozen error names
 	// distinguish them.
 	ErrUsageForbidden = errors.New("material usage operation is forbidden")
+
+	// ErrMaterialUnavailable is "the material is visible to you but has no
+	// prepared video yet", which is a 409 and not a 404: the material exists and
+	// the answer will change on its own once preparation finishes.
+	ErrMaterialUnavailable = errors.New("material has no prepared video")
+
+	// ErrLocalNodeUnavailable is "there is no fresh Local Agent on this account to
+	// download to". It is a separate sentinel from the runtime-binding module's
+	// `ErrLocalTrustUnavailable` so that the handler maps a production decision
+	// rather than a foreign error, and so the two modules stay free to disagree
+	// about what that condition is called.
+	ErrLocalNodeUnavailable = errors.New("no fresh local agent node is available")
 )
 
 type Store interface {
@@ -39,12 +55,37 @@ type Store interface {
 	RemoveUsageByID(int64, identityservice.UserID, time.Time) (bool, error)
 }
 
-type Service struct {
-	store Store
-	now   func() time.Time
+// LocalNodeResolver answers which of the actor's machines should receive a file.
+//
+// A consumer-side interface, one method wide, implemented in store_adapter.go —
+// the shape profileguard and filetransfer already use. `production` is allowed to
+// depend on the runtime-binding domain in this direction; declaring the question
+// here rather than calling the module directly keeps the dependency to one call
+// site and lets a test answer it without a node table.
+type LocalNodeResolver interface {
+	ResolveFreshLocalNode(identityservice.UserID) (runtimeservice.AgentNode, error)
 }
 
-func NewService(store Store) *Service { return &Service{store: store, now: time.Now} }
+// TransferCreator queues the task a Local Agent will later claim.
+//
+// The direction matters and is asserted by a test in the other module: the
+// transfer module may not import `production`, so the material facts a download
+// needs are copied into the task here, at creation, rather than read back by the
+// executor.
+type TransferCreator interface {
+	CreateUserDownload(transferservice.CreateUserDownloadInput) (transferdto.Task, error)
+}
+
+type Service struct {
+	store     Store
+	nodes     LocalNodeResolver
+	transfers TransferCreator
+	now       func() time.Time
+}
+
+func NewService(store Store, nodes LocalNodeResolver, transfers TransferCreator) *Service {
+	return &Service{store: store, nodes: nodes, transfers: transfers, now: time.Now}
+}
 
 func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64) (model.Material, error) {
 	if materialID <= 0 {
@@ -150,6 +191,59 @@ func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) e
 		return ErrUsageNotFound
 	}
 	return nil
+}
+
+// CreateDownload queues one user download of a prepared material, for the actor's
+// own freshest Local Agent node.
+//
+// The three refusals are ordered by what the user can do about them: a material
+// outside the actor's scope is not theirs to see (the 404/403 from `GetMaterial`),
+// a visible material with no prepared video is one they can wait for, and no
+// fresh node is one they can fix by opening the app on a machine. Answering 409
+// for the last two rather than 500 is the whole point of asking here.
+//
+// The download is **never** queued without a node. An executor claims on its own
+// credential, so a task with no assignee would be claimed by whichever device
+// polled first — a file the user asked for on one machine landing on another.
+func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
+	material, err := s.GetMaterial(actor, materialID)
+	if err != nil {
+		return transferdto.Task{}, err
+	}
+	if material.VideoStatus != model.VideoReady {
+		return transferdto.Task{}, ErrMaterialUnavailable
+	}
+	if material.SourceObjectKey == "" || material.VideoSizeBytes == nil || *material.VideoSizeBytes <= 0 || material.VideoSHA256 == "" {
+		// `ready` is the projection's promise that all four facts were written in
+		// the same step. A ready row missing one of them is this module's own
+		// inconsistency, so it is reported as a fault rather than as the 409 the
+		// user would read as "try again later".
+		return transferdto.Task{}, fmt.Errorf("material %d is ready but its video facts are incomplete", material.ID)
+	}
+	node, err := s.nodes.ResolveFreshLocalNode(actor.ID)
+	if err != nil {
+		// Everything the resolver refuses means the same thing here, including a
+		// store failure: from this route's side there is no node to download to.
+		// The distinction is kept in the log, not in the response.
+		return transferdto.Task{}, ErrLocalNodeUnavailable
+	}
+	task, err := s.transfers.CreateUserDownload(transferservice.CreateUserDownloadInput{
+		TeamID:          material.TeamID,
+		AssetID:         material.ID,
+		AssetTitle:      material.Title,
+		SourceObjectKey: material.SourceObjectKey,
+		RequestedBy:     actor.ID,
+		AssignedNodeID:  node.ID,
+		TotalBytes:      *material.VideoSizeBytes,
+		ExpectedSHA256:  material.VideoSHA256,
+	})
+	if err != nil {
+		if errors.Is(err, transferservice.ErrInvalidInput) {
+			return transferdto.Task{}, ErrInvalidInput
+		}
+		return transferdto.Task{}, fmt.Errorf("queue user download for material %d: %w", material.ID, err)
+	}
+	return task, nil
 }
 
 func canAccessMaterial(actor identityservice.PublicUser, material model.Material) bool {

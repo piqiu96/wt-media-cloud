@@ -24,6 +24,10 @@ func CreateTask(input CreateTaskInput) (dto.Task, error) {
 	return newWiredService().CreateTask(input)
 }
 
+func CreateUserDownload(input CreateUserDownloadInput) (dto.Task, error) {
+	return newWiredService().CreateUserDownload(input)
+}
+
 func ListTasks(actor identityservice.PublicUser) ([]dto.Task, error) {
 	return newWiredService().ListTasks(actor)
 }

@@ -82,6 +82,27 @@ func AddMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
 	writeUsageAdded(c, usage, created)
 }
 
+// CreateMaterialDownload queues a download of a prepared material to the actor's
+// own Local Agent, and answers 202 because nothing has been downloaded yet: the
+// task is pending until a node claims it, and the client's next honest source of
+// progress is `GET /api/v1/file-transfer-tasks`.
+func CreateMaterialDownload(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := materialID(c)
+	if !ok {
+		return
+	}
+	task, err := productionservice.CreateDownload(actor, id)
+	if err != nil {
+		writeProductionError(c, err)
+		return
+	}
+	api.Accepted(c, task)
+}
+
 // writeUsageAdded answers 201 for a new or restored relation and 200 for a click
 // on one that was already active. The bodies are identical, which is exactly why
 // the service has to report the difference: the frontend's `parseResponse`
@@ -138,6 +159,10 @@ func writeProductionError(c *hertzapp.RequestContext, err error) {
 		api.Forbidden(c, 15002, "没有权限访问该素材")
 	case errors.Is(err, productionservice.ErrUsageForbidden):
 		api.ForbiddenNamed(c, 15007, "没有权限操作该素材关系", "material_usage_forbidden")
+	case errors.Is(err, productionservice.ErrMaterialUnavailable):
+		api.ConflictNamed(c, 15005, "素材视频尚未准备好", "material_unavailable")
+	case errors.Is(err, productionservice.ErrLocalNodeUnavailable):
+		api.ConflictNamed(c, 15105, "本机没有可用的下载节点", "local_transfer_node_unavailable")
 	case errors.Is(err, productionservice.ErrUsageNotFound):
 		api.NotFound(c, 15006, "我的素材中不存在该记录")
 	case errors.Is(err, productionservice.ErrNotFound):

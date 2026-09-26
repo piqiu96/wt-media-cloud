@@ -107,6 +107,7 @@ var (
 // it.
 type Store interface {
 	CreateTask(repository.CreateTaskInput, time.Time) (model.Task, error)
+	CreateUserDownloadTask(repository.CreateUserDownloadInput, time.Time) (model.Task, error)
 	GetTask(string) (model.Task, error)
 	ListTasks(repository.TaskFilter) ([]model.Task, error)
 	NextLocalTask(string, time.Time) (model.Task, bool, error)
@@ -274,6 +275,48 @@ func (s *Service) CreateTask(input CreateTaskInput) (dto.Task, error) {
 		return dto.Task{}, err
 	}
 	return taskBody(task), nil
+}
+
+// CreateUserDownload queues a user download, and answers with the task that now
+// exists — which for a repeated click is the one already outstanding.
+//
+// The idempotency decision is the repository's, because it needs the count and
+// the insert in one transaction; what belongs here is the fact that this method
+// takes no dedupe key and no generation. A caller cannot ask for a duplicate.
+func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, error) {
+	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
+		return dto.Task{}, ErrInvalidInput
+	}
+	task, err := s.store.CreateUserDownloadTask(repository.CreateUserDownloadInput{
+		ID:              id.NewID("transfer"),
+		TeamID:          input.TeamID,
+		AssetID:         input.AssetID,
+		AssetTitle:      input.AssetTitle,
+		SourceObjectKey: input.SourceObjectKey,
+		RequestedBy:     input.RequestedBy,
+		AssignedNodeID:  input.AssignedNodeID,
+		TotalBytes:      input.TotalBytes,
+		ExpectedSHA256:  input.ExpectedSHA256,
+		MaxAttempts:     s.maxTries,
+	}, s.now().UTC())
+	if err != nil {
+		return dto.Task{}, err
+	}
+	return taskBody(task), nil
+}
+
+// CreateUserDownloadInput carries the material facts a download needs and no
+// identity of its own: who is downloading and which machine it goes to are
+// fields, so a caller cannot omit them and have a task created for somebody.
+type CreateUserDownloadInput struct {
+	TeamID          identityservice.TeamID
+	AssetID         int64
+	AssetTitle      string
+	SourceObjectKey string
+	RequestedBy     identityservice.UserID
+	AssignedNodeID  string
+	TotalBytes      int64
+	ExpectedSHA256  string
 }
 
 // ListTasks returns the acting user's tasks, newest first.
