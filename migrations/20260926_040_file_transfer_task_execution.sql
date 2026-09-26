@@ -1,0 +1,29 @@
+-- M4-A transfer execution. Migration 039 created `file_transfer_tasks`; this one
+-- adds the two columns the executor and the integrity check need.
+--
+-- A separate migration rather than an edit to 039, because 039 is already
+-- committed and the runner identifies migrations by version string: a database
+-- that applied the committed 039 would skip an amended one silently, and its
+-- schema would diverge from a fresh database with no error to show for it. 039
+-- is unapplied in the local development database (measured: `schema_migrations`
+-- stops at `20260922_038`), so the pair applies in order and both reach the same
+-- shape either way.
+--
+-- Two columns, each answering a question the frozen contracts ask:
+--
+--   cancel_requested_at — the two-phase cancellation. A running transfer is not
+--     made terminal by the requester, because an executor may be mid-write; the
+--     request is recorded here instead, and the progress/heartbeat/complete
+--     predicates already carry `cancel_requested_at IS NULL`, so the executor's
+--     next call is refused and it writes the terminal `cancelled` itself.
+--
+--   expected_sha256 — the integrity expectation `POST .../complete` is checked
+--     against before a success is recorded. It rides on the task row rather than
+--     being read from `materials`, because the `filetransfer` module is forbidden
+--     from importing `production` (see filetransfer/architecture_test.go), so the
+--     check must be answerable from the task alone.
+--
+-- No local path, signed URL, or storage credential is added: the Agent contract
+-- carries a short-lived per-task grant, never a durable one.
+ALTER TABLE file_transfer_tasks ADD COLUMN cancel_requested_at DATETIME(6) NULL AFTER finished_at;
+ALTER TABLE file_transfer_tasks ADD COLUMN expected_sha256 CHAR(64) NULL AFTER cancel_requested_at;
