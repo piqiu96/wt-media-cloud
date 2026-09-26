@@ -1,0 +1,36 @@
+-- M4-A transfer execution, part two: the facts a task must carry to be
+-- self-contained for an executor that runs later, on another machine.
+--
+-- Separate from 040 for the same reason 040 is separate from 039: 040 is already
+-- committed, and the runner identifies migrations by version string, so a
+-- database that applied the committed 040 would skip an amended one silently.
+--
+-- The `filetransfer` module may not import `production` (see
+-- filetransfer/architecture_test.go), so nothing it needs at lease time can be
+-- read from `materials` when the lease is issued. Each column is therefore a
+-- copy of one material fact taken at creation, which is also what makes the task
+-- a durable instruction rather than a pointer that changes under the executor:
+--
+--   asset_title — the material title, verbatim. The executor derives its target
+--     file name from it and sanitizes that name for its own filesystem, because
+--     reserved names and separators differ per operating system and only the
+--     executor knows which one it runs on. The title is snapshotted rather than
+--     looked up at lease time so a later rename cannot change the name of a
+--     download already promised to the user.
+--
+--   source_object_key — the object to grant access to. It is an object key, not
+--     a path and not a URL: the grant is presigned per lease and never stored.
+--     §4 forbids persisting local paths, durable storage credentials and full
+--     signed URLs, and none of those three is this.
+--
+--   file_name — the name the executor reported on completion, so the UI shows
+--     the name that was actually written instead of deriving a second one from
+--     the same inputs and drifting from it.
+--
+-- Nullable throughout, because each is filled in as the lifecycle advances: a
+-- pending task has not been named by an executor yet, and a Cloud-scope task
+-- never has a local file name at all. `file_name` therefore sits after 040's
+-- `expected_sha256`, which it depends on only for column order.
+ALTER TABLE file_transfer_tasks ADD COLUMN asset_title VARCHAR(255) NULL AFTER asset_id;
+ALTER TABLE file_transfer_tasks ADD COLUMN source_object_key VARCHAR(512) NULL AFTER asset_title;
+ALTER TABLE file_transfer_tasks ADD COLUMN file_name VARCHAR(255) NULL AFTER expected_sha256;
