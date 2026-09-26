@@ -21,12 +21,19 @@ var (
 	// different copy in the UI. It is a separate sentinel rather than a wrapper
 	// around ErrNotFound precisely so the handler can keep them apart.
 	ErrUsageNotFound = errors.New("material usage not found")
+
+	// ErrUsageForbidden is a "My Materials" row the actor may not act on, as
+	// opposed to a material the actor may not see. Both are 403 and both are
+	// about the same relation, but they are refusals of different things — one
+	// of the row, one of the material behind it — and the frozen error names
+	// distinguish them.
+	ErrUsageForbidden = errors.New("material usage operation is forbidden")
 )
 
 type Store interface {
 	FindMaterial(int64) (model.Material, bool, error)
 	ListMaterials(repository.MaterialFilter) ([]model.Material, error)
-	CreateOrRestoreUsage(repository.CreateUsageInput, time.Time) (model.MaterialUsage, error)
+	CreateOrRestoreUsage(repository.CreateUsageInput, time.Time) (model.MaterialUsage, bool, error)
 	ListActiveUsages(identityservice.UserID) ([]model.MaterialUsage, error)
 	FindUsageForUser(int64, identityservice.UserID) (model.MaterialUsage, bool, error)
 	RemoveUsageByID(int64, identityservice.UserID, time.Time) (bool, error)
@@ -56,16 +63,24 @@ func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64
 	return material, nil
 }
 
-func (s *Service) AddUsage(actor identityservice.PublicUser, materialID int64) (model.MaterialUsage, error) {
+// AddUsage adds the material to the actor's library and reports whether that
+// changed anything.
+//
+// A repeat click is not a failure and is not a creation either. The two are
+// distinguished because the frozen contract publishes both 200 and 201 for this
+// route, and the difference is only knowable here: the row that comes back looks
+// identical either way, so a caller that had to infer it from the body would be
+// guessing.
+func (s *Service) AddUsage(actor identityservice.PublicUser, materialID int64) (model.MaterialUsage, bool, error) {
 	material, err := s.GetMaterial(actor, materialID)
 	if err != nil {
-		return model.MaterialUsage{}, err
+		return model.MaterialUsage{}, false, err
 	}
-	usage, err := s.store.CreateOrRestoreUsage(repository.CreateUsageInput{TeamID: material.TeamID, MaterialID: material.ID, UserID: actor.ID}, s.now().UTC())
+	usage, created, err := s.store.CreateOrRestoreUsage(repository.CreateUsageInput{TeamID: material.TeamID, MaterialID: material.ID, UserID: actor.ID}, s.now().UTC())
 	if err != nil {
-		return model.MaterialUsage{}, err
+		return model.MaterialUsage{}, false, err
 	}
-	return usage, nil
+	return usage, created, nil
 }
 
 func (s *Service) ListMaterials(actor identityservice.PublicUser, search string) ([]model.Material, error) {
@@ -122,7 +137,7 @@ func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) e
 		return err
 	}
 	if material.TeamID != usage.TeamID {
-		return ErrForbidden
+		return ErrUsageForbidden
 	}
 	removed, err := s.store.RemoveUsageByID(usageID, actor.ID, s.now().UTC())
 	if err != nil {

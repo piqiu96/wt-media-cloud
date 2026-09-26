@@ -74,9 +74,26 @@ func AddMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	usage, err := productionservice.AddUsage(actor, id)
+	usage, created, err := productionservice.AddUsage(actor, id)
 	if err != nil {
 		writeProductionError(c, err)
+		return
+	}
+	writeUsageAdded(c, usage, created)
+}
+
+// writeUsageAdded answers 201 for a new or restored relation and 200 for a click
+// on one that was already active. The bodies are identical, which is exactly why
+// the service has to report the difference: the frontend's `parseResponse`
+// returns `data` either way, so nothing downstream can recover the distinction
+// from the response.
+//
+// Split out from the handler so the mapping is reachable from a test: getting
+// past `actor(c)` needs a live session row, but the decision itself needs only
+// the flag.
+func writeUsageAdded(c *hertzapp.RequestContext, usage any, created bool) {
+	if !created {
+		api.Success(c, usage)
 		return
 	}
 	api.Created(c, usage)
@@ -119,6 +136,8 @@ func writeProductionError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, productionservice.ErrForbidden):
 		api.Forbidden(c, 15002, "没有权限访问该素材")
+	case errors.Is(err, productionservice.ErrUsageForbidden):
+		api.ForbiddenNamed(c, 15007, "没有权限操作该素材关系", "material_usage_forbidden")
 	case errors.Is(err, productionservice.ErrUsageNotFound):
 		api.NotFound(c, 15006, "我的素材中不存在该记录")
 	case errors.Is(err, productionservice.ErrNotFound):

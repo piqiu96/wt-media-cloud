@@ -18,6 +18,11 @@ type memoryStore struct {
 	filter   repository.MaterialFilter
 	usages   []model.MaterialUsage
 
+	// createdUsage is what the store reports back about the upsert. It defaults
+	// to false — "the relation was already there" — so a test that expects a
+	// creation has to say so, rather than getting a 201 by omission.
+	createdUsage bool
+
 	// removed records the usage the service asked to soft-remove, and removedFor
 	// the user it scoped that to. Both are kept because the scoping is the part
 	// that stops one user removing another user's row: a store call that received
@@ -29,9 +34,9 @@ type memoryStore struct {
 func (s *memoryStore) FindMaterial(int64) (model.Material, bool, error) {
 	return s.material, s.found, nil
 }
-func (s *memoryStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, error) {
+func (s *memoryStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	s.created = input
-	return model.MaterialUsage{ID: 1, TeamID: input.TeamID, MaterialID: input.MaterialID, UserID: input.UserID, Status: model.MaterialUsageActive, CreatedAt: now, UpdatedAt: now}, nil
+	return model.MaterialUsage{ID: 1, TeamID: input.TeamID, MaterialID: input.MaterialID, UserID: input.UserID, Status: model.MaterialUsageActive, CreatedAt: now, UpdatedAt: now}, s.createdUsage, nil
 }
 func (s *memoryStore) ListMaterials(filter repository.MaterialFilter) ([]model.Material, error) {
 	s.filter = filter
@@ -59,7 +64,7 @@ func TestAddUsageRejectsMaterialOutsideActorGameScope(t *testing.T) {
 	game := "game-b"
 	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
 	svc := NewService(store)
-	_, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	_, _, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("AddUsage() error = %v, want ErrForbidden", err)
 	}
@@ -71,16 +76,41 @@ func TestAddUsageRejectsMaterialOutsideActorGameScope(t *testing.T) {
 func TestAddUsageCreatesTheSoleMaterialUsageForScopedActor(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-a"
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, createdUsage: true}
 	svc := NewService(store)
 	now := time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
-	usage, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	usage, created, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
 	if err != nil {
 		t.Fatalf("AddUsage() error = %v", err)
 	}
 	if usage.ID != 1 || store.created.TeamID != team || store.created.MaterialID != 42 || store.created.UserID != 9 {
 		t.Fatalf("usage=%+v created=%+v", usage, store.created)
+	}
+	if !created {
+		t.Fatal("the store reported a new relation and AddUsage answered with an existing one")
+	}
+}
+
+// The flag has to survive the service, not just the repository: it is the whole
+// reason the route can answer 200 sometimes and 201 other times, and a service
+// that dropped it would answer 201 to every click while every store test stayed
+// green.
+func TestAddUsageReportsAnAlreadyActiveRelationAsNotCreated(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+	svc := NewService(store)
+
+	usage, created, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	if err != nil {
+		t.Fatalf("AddUsage() error = %v", err)
+	}
+	if created {
+		t.Fatal("a relation that was already active must not report as created")
+	}
+	if usage.ID != 1 {
+		t.Fatalf("the existing relation is still the answer, got %+v", usage)
 	}
 }
 

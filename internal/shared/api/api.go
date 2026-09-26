@@ -115,10 +115,12 @@ func UnprocessableEntity(c *hertzapp.RequestContext, errcode int, message, error
 
 // ConflictNamed writes HTTP 409 carrying the frozen error name.
 //
-// Two distinct 409s reach this API — "the material has no prepared source yet"
-// and "there is no fresh Local Agent node" — and a caller holding only the
-// frozen name list cannot tell them apart by errcode. The name travels in
-// `error.type`.
+// Several distinct 409s reach this API — "the material has no prepared source
+// yet", "there is no fresh Local Agent node", "this transfer is already
+// terminal" — and they are not a closed set. A caller holding only the frozen
+// name list cannot tell any two of them apart by errcode, so the name travels
+// in `error.type`. The list of callers is deliberately not repeated here: it
+// would be a second place to keep in step with them.
 func ConflictNamed(c *hertzapp.RequestContext, errcode int, message, errorType string) {
 	FailureNamed(c, consts.StatusConflict, errcode, message, errorType)
 }
@@ -162,6 +164,15 @@ func Unauthorized(c *hertzapp.RequestContext, errcode int, message string) {
 // Forbidden writes HTTP 403.
 func Forbidden(c *hertzapp.RequestContext, errcode int, message string) {
 	Failure(c, consts.StatusForbidden, errcode, message, nil)
+}
+
+// ForbiddenNamed writes HTTP 403 carrying the frozen error name.
+//
+// The same reason as `ConflictNamed`: the frozen error contracts publish names
+// and statuses and no numeric errcodes, so two 403s that mean different things
+// are only distinguishable through `error.type`.
+func ForbiddenNamed(c *hertzapp.RequestContext, errcode int, message, errorType string) {
+	FailureNamed(c, consts.StatusForbidden, errcode, message, errorType)
 }
 
 // NotFound writes HTTP 404.

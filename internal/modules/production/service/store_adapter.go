@@ -18,7 +18,7 @@ func (mysqlStore) ListMaterials(filter repository.MaterialFilter) ([]model.Mater
 	return repository.ListMaterials(filter)
 }
 
-func (mysqlStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, error) {
+func (mysqlStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	return repository.CreateOrRestoreUsage(input, now)
 }
 

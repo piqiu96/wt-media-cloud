@@ -9,7 +9,7 @@ func GetMaterial(actor identityservice.PublicUser, materialID int64) (model.Mate
 	return NewService(mysqlStore{}).GetMaterial(actor, materialID)
 }
 
-func AddUsage(actor identityservice.PublicUser, materialID int64) (model.MaterialUsage, error) {
+func AddUsage(actor identityservice.PublicUser, materialID int64) (model.MaterialUsage, bool, error) {
 	return NewService(mysqlStore{}).AddUsage(actor, materialID)
 }
 

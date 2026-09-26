@@ -2,6 +2,7 @@ package repository
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,21 +15,100 @@ func TestCreateOrRestoreUsageKeepsOneActiveRelation(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 9, 26, 8, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO material_usages (team_id, material_id, user_id, status, created_at, updated_at) VALUES (?,?,?,'active',?,?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), status = IF(status = 'removed', 'active', status), removed_at = IF(status = 'removed', NULL, removed_at), updated_at = VALUES(updated_at)")).
+	mock.ExpectExec(regexp.QuoteMeta(upsertUsageSQL)).
 		WithArgs(int64(7), int64(42), int64(9), now, now).
 		WillReturnResult(sqlmock.NewResult(11, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE id = LAST_INSERT_ID()")).
 		WillReturnRows(sqlmock.NewRows(usageColumns()).AddRow(int64(11), int64(7), int64(42), int64(9), "active", nil, now, now))
 	mock.ExpectCommit()
 
-	usage, err := createOrRestoreUsage(db, CreateUsageInput{TeamID: identity.TeamID(7), MaterialID: 42, UserID: identity.UserID(9)}, now)
+	usage, created, err := createOrRestoreUsage(db, CreateUsageInput{TeamID: identity.TeamID(7), MaterialID: 42, UserID: identity.UserID(9)}, now)
 	if err != nil {
 		t.Fatalf("createOrRestoreUsage() error = %v", err)
 	}
 	if usage.ID != 11 || usage.Status != model.MaterialUsageActive || usage.MaterialID != 42 || usage.UserID != 9 {
 		t.Fatalf("usage = %+v", usage)
 	}
+	if !created {
+		t.Fatal("an insert touches a row and must report as created")
+	}
 	assertExpectations(t, mock)
+}
+
+// The statement, in one place so the three cases below cannot drift apart from
+// each other. It is quoted into a sqlmock expectation, so a change here is a
+// change to what the code under test is required to send.
+const upsertUsageSQL = "INSERT INTO material_usages (team_id, material_id, user_id, status, created_at, updated_at) VALUES (?,?,?,'active',?,?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), removed_at = IF(status = 'removed', NULL, removed_at), updated_at = IF(status = 'removed', VALUES(updated_at), updated_at), status = IF(status = 'removed', 'active', status)"
+
+// `created` is read out of `RowsAffected`, and these are the three values MySQL
+// can report for this statement. It is the field the route turns into 200 or 201,
+// so the arm that matters is the middle one: an already-active relation must
+// report zero changed rows, which is only true while `updated_at` is conditional.
+//
+// The two non-zero arms are here to keep the zero arm from being satisfiable by
+// a comparison that is simply wrong — a `!= 1` would pass the zero case for the
+// wrong reason and fail the restore.
+func TestCreateOrRestoreUsageReportsWhetherTheRelationWasCreated(t *testing.T) {
+	now := time.Date(2026, 9, 26, 8, 0, 0, 0, time.UTC)
+	for _, testCase := range []struct {
+		name       string
+		affected   int64
+		lastID     int64
+		wantCreate bool
+	}{
+		{"insert", 1, 11, true},
+		{"restore", 2, 11, true},
+		{"already active", 0, 0, false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, mock := newMockGORM(t)
+			mock.ExpectBegin()
+			mock.ExpectExec(regexp.QuoteMeta(upsertUsageSQL)).
+				WithArgs(int64(7), int64(42), int64(9), now, now).
+				WillReturnResult(sqlmock.NewResult(testCase.lastID, testCase.affected))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE id = LAST_INSERT_ID()")).
+				WillReturnRows(sqlmock.NewRows(usageColumns()).AddRow(int64(11), int64(7), int64(42), int64(9), "active", nil, now, now))
+			mock.ExpectCommit()
+
+			if _, created, err := createOrRestoreUsage(db, CreateUsageInput{TeamID: identity.TeamID(7), MaterialID: 42, UserID: identity.UserID(9)}, now); err != nil {
+				t.Fatalf("createOrRestoreUsage() error = %v", err)
+			} else if created != testCase.wantCreate {
+				t.Fatalf("created = %t for RowsAffected = %d, want %t", created, testCase.affected, testCase.wantCreate)
+			}
+			assertExpectations(t, mock)
+		})
+	}
+}
+
+// The three clauses the statement cannot express as a single condition are
+// asserted on the text, because no mock can execute them: sqlmock matches the
+// statement and returns whatever it is told, so a wrong `ON DUPLICATE KEY UPDATE`
+// body is invisible to every test above.
+//
+// MySQL evaluates those assignments left to right and a later one sees the value
+// an earlier one wrote, which is why the order is part of the requirement rather
+// than a style choice.
+func TestCreateOrRestoreUsageStatementReadsStatusBeforeItRewritesIt(t *testing.T) {
+	restoreClause := "status = IF(status = 'removed', 'active', status)"
+	restoreIndex := strings.Index(upsertUsageSQL, restoreClause)
+	if restoreIndex < 0 {
+		t.Fatalf("the statement no longer restores a removed relation: %s", upsertUsageSQL)
+	}
+	for _, reader := range []string{
+		"removed_at = IF(status = 'removed', NULL, removed_at)",
+		"updated_at = IF(status = 'removed', VALUES(updated_at), updated_at)",
+	} {
+		index := strings.Index(upsertUsageSQL, reader)
+		if index < 0 {
+			t.Fatalf("the statement no longer guards %q: %s", reader, upsertUsageSQL)
+		}
+		if index > restoreIndex {
+			t.Errorf("%q is evaluated after `status` has already been set to 'active', so its IF can never see 'removed'", reader)
+		}
+	}
+	if strings.Contains(upsertUsageSQL, "updated_at = VALUES(updated_at)") {
+		t.Error("an unconditional updated_at makes every click look like a change, so a repeat click would answer 201 forever")
+	}
 }
 
 func TestRemoveUsageDoesNotPhysicallyDeleteHistory(t *testing.T) {

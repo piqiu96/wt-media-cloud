@@ -98,3 +98,27 @@ func TestRemoveUsageRouteAnswersThroughTheEmpty204Helper(t *testing.T) {
 		t.Error("a 200 data:null envelope is not the 204 this route's contract declares")
 	}
 }
+
+// The one route in this module that answers two success statuses, asserted on
+// real responses. The frozen contract publishes both, and the frontend cannot
+// tell them apart from the body — so if this mapping collapsed, a repeat click
+// would answer 201 forever and no other test in either repository would notice.
+func TestWriteUsageAddedKeepsTheTwoSuccessStatusesApart(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		created bool
+		want    int
+	}{
+		{"already active", false, consts.StatusOK},
+		{"created or restored", true, consts.StatusCreated},
+	} {
+		engine := server.New()
+		engine.POST("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+			writeUsageAdded(c, map[string]int64{"id": 11}, testCase.created)
+		})
+		result := ut.PerformRequest(engine.Engine, consts.MethodPost, "/probe", nil)
+		if result.Result().StatusCode() != testCase.want {
+			t.Fatalf("%s: status = %d body=%s, want %d", testCase.name, result.Result().StatusCode(), result.Result().Body(), testCase.want)
+		}
+	}
+}

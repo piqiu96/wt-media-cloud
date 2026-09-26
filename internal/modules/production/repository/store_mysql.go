@@ -125,22 +125,44 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 
 // CreateOrRestoreUsage atomically creates the sole usage row or restores its
 // historical row. The unique key prevents concurrent clicks from creating two.
-func CreateOrRestoreUsage(input CreateUsageInput, now time.Time) (model.MaterialUsage, error) {
+//
+// The `created` answer is what tells a caller whether it should say 201 or 200,
+// and it is read out of the statement rather than out of the row: an insert
+// touches one row, a restore changes one, and a click on an already-active
+// relation changes nothing at all. See the statement for why "changes nothing"
+// is a real outcome here and not a coincidence.
+func CreateOrRestoreUsage(input CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	return createOrRestoreUsage(database.DB(), input, now)
 }
 
-func createOrRestoreUsage(db *gorm.DB, input CreateUsageInput, now time.Time) (model.MaterialUsage, error) {
+func createOrRestoreUsage(db *gorm.DB, input CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	if input.TeamID <= 0 || input.MaterialID <= 0 || input.UserID <= 0 {
-		return model.MaterialUsage{}, fmt.Errorf("invalid material usage input")
+		return model.MaterialUsage{}, false, fmt.Errorf("invalid material usage input")
 	}
 	var usage model.MaterialUsage
+	created := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`INSERT INTO material_usages (team_id, material_id, user_id, status, created_at, updated_at) VALUES (?,?,?,'active',?,?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), status = IF(status = 'removed', 'active', status), removed_at = IF(status = 'removed', NULL, removed_at), updated_at = VALUES(updated_at)`, input.TeamID, input.MaterialID, input.UserID, now, now).Error; err != nil {
-			return err
+		// Every assignment that reads `status` is written **before** the assignment
+		// that sets it, because MySQL evaluates these left to right and a later one
+		// sees the new value. Reading `status` after it had been set to 'active'
+		// would make both `IF(status = 'removed', ...)` branches take the
+		// already-restored path: a restored row would keep its stale `removed_at`,
+		// and no row would ever look unchanged.
+		//
+		// `updated_at` is conditional for the same reason it exists: if it were
+		// `VALUES(updated_at)` then every click would count as a change,
+		// `RowsAffected` would be 2 even when the relation was already active, and
+		// a repeat click would answer 201 forever. `id = LAST_INSERT_ID(id)` is
+		// how the read below finds the row in all three cases, including the one
+		// that touched nothing.
+		result := tx.Exec(`INSERT INTO material_usages (team_id, material_id, user_id, status, created_at, updated_at) VALUES (?,?,?,'active',?,?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), removed_at = IF(status = 'removed', NULL, removed_at), updated_at = IF(status = 'removed', VALUES(updated_at), updated_at), status = IF(status = 'removed', 'active', status)`, input.TeamID, input.MaterialID, input.UserID, now, now)
+		if result.Error != nil {
+			return result.Error
 		}
+		created = result.RowsAffected != 0
 		return scanUsage(tx.Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE id = LAST_INSERT_ID()`).Row(), &usage)
 	})
-	return usage, err
+	return usage, created, err
 }
 
 // RemoveUsage preserves the historical usage row and its downstream task
