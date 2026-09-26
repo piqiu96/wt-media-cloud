@@ -26,6 +26,15 @@ func materialID(c *hertzapp.RequestContext) (int64, bool) {
 	return value, true
 }
 
+func usageID(c *hertzapp.RequestContext) (int64, bool) {
+	value, err := strconv.ParseInt(c.Param("usage_id"), 10, 64)
+	if err != nil || value <= 0 {
+		api.BadRequest(c, 15004, "我的素材关系 ID 无效")
+		return 0, false
+	}
+	return value, true
+}
+
 func ListMaterials(_ context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
@@ -73,10 +82,45 @@ func AddMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
 	api.Created(c, usage)
 }
 
+func ListMyMaterials(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	items, err := productionservice.ListMyMaterials(actor)
+	if err != nil {
+		writeProductionError(c, err)
+		return
+	}
+	api.Success(c, items)
+}
+
+func RemoveMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := usageID(c)
+	if !ok {
+		return
+	}
+	if err := productionservice.RemoveUsage(actor, id); err != nil {
+		writeProductionError(c, err)
+		return
+	}
+	// A real 204 with no body, not the 200 `api.NoContent` envelope: this is the
+	// one route whose frozen contract says 204, and the frontend's
+	// `parseResponse` unwraps a 200 `data:null` into a returned value, so the two
+	// are observably different to its caller.
+	api.NoContentEmpty(c)
+}
+
 func writeProductionError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, productionservice.ErrForbidden):
 		api.Forbidden(c, 15002, "没有权限访问该素材")
+	case errors.Is(err, productionservice.ErrUsageNotFound):
+		api.NotFound(c, 15006, "我的素材中不存在该记录")
 	case errors.Is(err, productionservice.ErrNotFound):
 		api.NotFound(c, 15003, "素材不存在")
 	case errors.Is(err, productionservice.ErrInvalidInput):

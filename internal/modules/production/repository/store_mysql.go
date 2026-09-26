@@ -160,6 +160,61 @@ func removeUsage(db *gorm.DB, teamID identity.TeamID, materialID int64, userID i
 	return result.RowsAffected == 1, nil
 }
 
+func ListActiveUsages(userID identity.UserID) ([]model.MaterialUsage, error) {
+	return listActiveUsages(database.DB(), userID)
+}
+
+func listActiveUsages(db *gorm.DB, userID identity.UserID) ([]model.MaterialUsage, error) {
+	if userID <= 0 {
+		return nil, fmt.Errorf("invalid material usage user")
+	}
+	rows, err := db.Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC`, userID).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]model.MaterialUsage, 0)
+	for rows.Next() {
+		var usage model.MaterialUsage
+		if err := scanUsage(rows, &usage); err != nil {
+			return nil, err
+		}
+		items = append(items, usage)
+	}
+	return items, rows.Err()
+}
+
+func FindUsageForUser(usageID int64, userID identity.UserID) (model.MaterialUsage, bool, error) {
+	return findUsageForUser(database.DB(), usageID, userID)
+}
+
+func findUsageForUser(db *gorm.DB, usageID int64, userID identity.UserID) (model.MaterialUsage, bool, error) {
+	if usageID <= 0 || userID <= 0 {
+		return model.MaterialUsage{}, false, fmt.Errorf("invalid material usage lookup")
+	}
+	var usage model.MaterialUsage
+	err := scanUsage(db.Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE id = ? AND user_id = ?`, usageID, userID).Row(), &usage)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.MaterialUsage{}, false, nil
+	}
+	return usage, err == nil, err
+}
+
+func RemoveUsageByID(usageID int64, userID identity.UserID, now time.Time) (bool, error) {
+	return removeUsageByID(database.DB(), usageID, userID, now)
+}
+
+func removeUsageByID(db *gorm.DB, usageID int64, userID identity.UserID, now time.Time) (bool, error) {
+	if usageID <= 0 || userID <= 0 {
+		return false, fmt.Errorf("invalid material usage removal")
+	}
+	result := db.Exec(`UPDATE material_usages SET status = 'removed', removed_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'active'`, now, now, usageID, userID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanUsage(row rowScanner, usage *model.MaterialUsage) error {

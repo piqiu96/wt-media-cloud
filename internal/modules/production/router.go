@@ -7,4 +7,6 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/materials", ListMaterials)
 	h.GET("/api/v1/materials/:material_id", GetMaterial)
 	h.POST("/api/v1/materials/:material_id/usages", AddMaterialUsage)
+	h.GET("/api/v1/my-materials", ListMyMaterials)
+	h.DELETE("/api/v1/material-usages/:usage_id", RemoveMaterialUsage)
 }

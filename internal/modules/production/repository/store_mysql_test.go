@@ -65,6 +65,76 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+// The list a user sees is scoped by `user_id` in the query, not by filtering in
+// Go. Both halves matter: an unscoped SELECT would return other users' rows and
+// rely on the service to drop them, and a missing `status = 'active'` would show
+// materials the user has already removed.
+func TestListActiveUsagesScopesTheQueryToTheUserAndTheActiveStatus(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC")).
+		WithArgs(int64(9)).
+		WillReturnRows(sqlmock.NewRows(usageColumns()).AddRow(int64(11), int64(7), int64(42), int64(9), "active", nil, now, now))
+
+	usages, err := listActiveUsages(db, identity.UserID(9))
+	if err != nil {
+		t.Fatalf("listActiveUsages() error = %v", err)
+	}
+	if len(usages) != 1 || usages[0].ID != 11 || usages[0].MaterialID != 42 {
+		t.Fatalf("usages = %+v", usages)
+	}
+	assertExpectations(t, mock)
+}
+
+// A row that exists but belongs to someone else must read as absent rather than
+// as an error: the caller answers 404 for it, and a caller that cannot tell
+// "not yours" from "the database is down" would answer 500.
+func TestFindUsageForUserDoesNotDistinguishSomeoneElsesRowFromNoRow(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE id = ? AND user_id = ?")).
+		WithArgs(int64(5), int64(9)).
+		WillReturnRows(sqlmock.NewRows(usageColumns()))
+
+	usage, found, err := findUsageForUser(db, 5, identity.UserID(9))
+	if err != nil {
+		t.Fatalf("findUsageForUser() error = %v", err)
+	}
+	if found {
+		t.Fatalf("found = true for usage = %+v", usage)
+	}
+	assertExpectations(t, mock)
+}
+
+// Removal is addressed by usage id and scoped to the user, and the conditional
+// `status = 'active'` is what makes a second removal report zero rows instead of
+// silently rewriting `removed_at`. The zero-row result is the caller's signal.
+func TestRemoveUsageByIDReportsWhetherTheRowWasStillActive(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE material_usages SET status = 'removed', removed_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'active'")).
+		WithArgs(now, now, int64(5), int64(9)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE material_usages SET status = 'removed', removed_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'active'")).
+		WithArgs(now, now, int64(5), int64(9)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	removed, err := removeUsageByID(db, 5, identity.UserID(9), now)
+	if err != nil {
+		t.Fatalf("removeUsageByID() error = %v", err)
+	}
+	if !removed {
+		t.Fatal("an active row must report as removed")
+	}
+	removed, err = removeUsageByID(db, 5, identity.UserID(9), now)
+	if err != nil {
+		t.Fatalf("removeUsageByID() second call error = %v", err)
+	}
+	if removed {
+		t.Fatal("an already-removed row must report as not removed")
+	}
+	assertExpectations(t, mock)
+}
+
 func usageColumns() []string {
 	return []string{"id", "team_id", "material_id", "user_id", "status", "removed_at", "created_at", "updated_at"}
 }

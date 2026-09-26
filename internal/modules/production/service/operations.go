@@ -16,3 +16,11 @@ func AddUsage(actor identityservice.PublicUser, materialID int64) (model.Materia
 func ListMaterials(actor identityservice.PublicUser, search string) ([]model.Material, error) {
 	return NewService(mysqlStore{}).ListMaterials(actor, search)
 }
+
+func ListMyMaterials(actor identityservice.PublicUser) ([]model.MaterialUsage, error) {
+	return NewService(mysqlStore{}).ListMyMaterials(actor)
+}
+
+func RemoveUsage(actor identityservice.PublicUser, usageID int64) error {
+	return NewService(mysqlStore{}).RemoveUsage(actor, usageID)
+}
