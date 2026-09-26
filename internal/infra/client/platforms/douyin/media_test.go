@@ -145,3 +145,65 @@ func TestMediaAddressRefusesAnAddressItCannotFetch(t *testing.T) {
 		})
 	}
 }
+
+// The envelope is asserted rather than searched: `postForm` decodes the response
+// into the caller's map with no shape of its own, so this is the only place that
+// says where a detail response keeps its item. A test that accepted
+// `data.aweme_detail` too would make this package unable to tell which endpoint
+// answered it, which is what `FindAuthor`'s different envelope exists to signal.
+func TestDetailItemReadsTheItemOutOfADetailResponse(t *testing.T) {
+	item, err := DetailItem(map[string]any{"data": payloadWith(signedAddress)})
+	if err != nil {
+		t.Fatalf("DetailItem() error = %v", err)
+	}
+	address, err := MediaAddress(item)
+	if err != nil {
+		t.Fatalf("MediaAddress() on the item error = %v", err)
+	}
+	if address != signedAddress {
+		t.Fatalf("address = %q, want %q", address, signedAddress)
+	}
+}
+
+// The envelope another endpoint answers with is not caught here, and this is the
+// test that says so: `DetailItem` returns `data` without inspecting it, so a
+// response from `FindAuthor` comes back as an item that has no video in it. The
+// refusal happens one step later, in `MediaAddress`.
+//
+// It is asserted rather than assumed because the alternative — teaching
+// `DetailItem` to recognise `aweme_detail` — would make this package unable to
+// tell which endpoint answered it, and the difference is exactly what that
+// nesting carries.
+func TestDetailItemHandsTheWrongEnvelopeOnToBeRefusedByTheAddress(t *testing.T) {
+	item, err := DetailItem(map[string]any{"data": map[string]any{"aweme_detail": payloadWith(signedAddress)}})
+	if err != nil {
+		t.Fatalf("DetailItem() error = %v, want the non-object refusal only", err)
+	}
+	address, err := MediaAddress(item)
+	if !errors.Is(err, ErrNoMediaAddress) {
+		t.Fatalf("MediaAddress() = %q, %v, want ErrNoMediaAddress", address, err)
+	}
+}
+
+func TestDetailItemRefusesAResponseWithNoItem(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		payload map[string]any
+	}{
+		{"no payload", nil},
+		{"an empty payload", map[string]any{}},
+		{"a refusal carrying no data", map[string]any{"code": 40001, "msg": "invalid request"}},
+		{"data that is not an object", map[string]any{"data": "no video"}},
+		{"data that is null", map[string]any{"data": nil}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			item, err := DetailItem(testCase.payload)
+			if !errors.Is(err, ErrNoDetailItem) {
+				t.Fatalf("DetailItem() = %v, %v, want ErrNoDetailItem", item, err)
+			}
+			if item != nil {
+				t.Fatalf("item = %v, want none alongside the refusal", item)
+			}
+		})
+	}
+}

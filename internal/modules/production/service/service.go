@@ -368,6 +368,49 @@ func (s *Service) MarkVideoFailed(teamID identityservice.TeamID, materialID int6
 	return err
 }
 
+// PreparationSource names the platform content a material's video has to be
+// re-resolved from at execution time.
+//
+// The worker must not read the address out of `materials.source_snapshot`: that
+// column holds the provider's raw payload, whose play address is a signed URL and
+// is expired by the time anything downloads it. What is stable is the platform and
+// the provider's own content id, so those are what this carries, and the fetch
+// happens fresh on every attempt.
+//
+// The scope is the team from the task row rather than an actor, because the worker
+// has no session. A material in another team reads as missing: the worker is not
+// being refused on anyone's behalf, it is being told the task does not name a
+// material this team has, and `ErrNotFound` is the same answer it would get for an
+// id that never existed.
+type PreparationSource struct {
+	TeamID     identityservice.TeamID
+	MaterialID int64
+	Platform   string
+	ContentID  int64
+}
+
+func (s *Service) PreparationSource(teamID identityservice.TeamID, materialID int64) (PreparationSource, error) {
+	if teamID <= 0 || materialID <= 0 {
+		return PreparationSource{}, ErrInvalidInput
+	}
+	material, found, err := s.store.FindMaterial(materialID)
+	if err != nil {
+		return PreparationSource{}, err
+	}
+	if !found || material.TeamID != teamID {
+		return PreparationSource{}, fmt.Errorf("%w: material %d in team %d", ErrNotFound, materialID, teamID)
+	}
+	if strings.TrimSpace(material.Platform) == "" || material.SourceContentID <= 0 {
+		return PreparationSource{}, fmt.Errorf("material %d names no platform source to re-resolve", materialID)
+	}
+	return PreparationSource{
+		TeamID:     material.TeamID,
+		MaterialID: material.ID,
+		Platform:   strings.TrimSpace(material.Platform),
+		ContentID:  material.SourceContentID,
+	}, nil
+}
+
 // videoFacts is the three facts a local download needs out of a `ready` row.
 //
 // `ready` is the projection's promise that the object key, the size and the hash

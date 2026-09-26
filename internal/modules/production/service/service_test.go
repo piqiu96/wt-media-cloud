@@ -697,3 +697,97 @@ func TestMarkVideoFailedPassesOnAStoreFailure(t *testing.T) {
 		t.Fatalf("MarkVideoFailed() error = %v, want the store's failure", err)
 	}
 }
+
+// The worker resolves the source from the platform and the provider's own content
+// id, both of which are stable, rather than from the address snapshot, which is a
+// signed URL and is expired by the time anything downloads it.
+func TestPreparationSourceCarriesThePlatformContentTheWorkerResolvesFrom(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	material := pendingMaterial(team, game)
+	material.Platform = "douyin"
+	material.SourceContentID = 7123456789012345678
+	store := &memoryStore{found: true, material: material}
+
+	source, err := testService(store).PreparationSource(team, 42)
+	if err != nil {
+		t.Fatalf("PreparationSource() error = %v", err)
+	}
+	if source.Platform != "douyin" || source.ContentID != 7123456789012345678 {
+		t.Fatalf("source = %+v, want the platform and the provider's content id", source)
+	}
+	if source.TeamID != team || source.MaterialID != 42 {
+		t.Fatalf("source scope = team %d material %d, want team 7 material 42", source.TeamID, source.MaterialID)
+	}
+}
+
+// A material in another team reads as missing rather than as forbidden. The worker
+// is not acting on anyone's behalf and has nothing to be refused *as*; what it is
+// being told is that its task does not name a material this team has, which is the
+// same answer an id that never existed gets. A distinct "forbidden" here would
+// invite a caller to try a different team.
+func TestPreparationSourceRefusesAMaterialOutsideTheTasksTeam(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	material := pendingMaterial(team, game)
+	material.Platform = "douyin"
+	material.SourceContentID = 7123456789012345678
+	store := &memoryStore{found: true, material: material}
+
+	_, err := testService(store).PreparationSource(service.TeamID(8), 42)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("PreparationSource() error = %v, want ErrNotFound", err)
+	}
+	if errors.Is(err, ErrForbidden) {
+		t.Fatal("another team's material must not be reported as forbidden to a caller with no actor")
+	}
+}
+
+// A material with no platform or no content id cannot be re-resolved, and the
+// answer says that rather than "not found": the material is there, and the reason a
+// preparation cannot run is a property of the row. The worker's failure message is
+// the only place an operator sees why, so the two are kept apart.
+func TestPreparationSourceRefusesAMaterialWithNothingToResolveFrom(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	for _, testCase := range []struct {
+		name     string
+		platform string
+		content  int64
+	}{
+		{"no platform", "", 7123456789012345678},
+		{"no content id", "douyin", 0},
+		{"neither", "  ", 0},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			material := pendingMaterial(team, game)
+			material.Platform = testCase.platform
+			material.SourceContentID = testCase.content
+			store := &memoryStore{found: true, material: material}
+
+			_, err := testService(store).PreparationSource(team, 42)
+			if err == nil {
+				t.Fatal("error = nil, want a refusal naming what the material lacks")
+			}
+			if errors.Is(err, ErrNotFound) {
+				t.Fatalf("error = %v, want a reason about the row rather than a missing material", err)
+			}
+			if !strings.Contains(err.Error(), "no platform source") {
+				t.Fatalf("error = %v, want it to name what is missing", err)
+			}
+		})
+	}
+}
+
+func TestPreparationSourceRefusesAnIncompleteScope(t *testing.T) {
+	store := &memoryStore{found: true, material: pendingMaterial(service.TeamID(7), "game-a")}
+	for _, testCase := range []struct {
+		name       string
+		teamID     service.TeamID
+		materialID int64
+	}{
+		{"no team", 0, 42},
+		{"no material", 7, 0},
+	} {
+		if _, err := testService(store).PreparationSource(testCase.teamID, testCase.materialID); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("PreparationSource %s error = %v, want ErrInvalidInput", testCase.name, err)
+		}
+	}
+}

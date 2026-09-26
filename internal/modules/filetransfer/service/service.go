@@ -149,10 +149,15 @@ type GrantIssuer interface {
 }
 
 const (
-	// defaultLease is how long a lease lasts unless overridden, and the executor
+	// DefaultLease is how long a lease lasts unless overridden, and the executor
 	// is told it in `lease_seconds`. It heartbeats at a third of it, so three
 	// consecutive failures are absorbed before the lease lapses.
-	defaultLease = 120 * time.Second
+	//
+	// Exported because the Cloud worker claims through the repository rather than
+	// through this service, and a lease is one decision shared by both executors:
+	// a second copy of the number would make the retry timing depend on which of
+	// them ran the task, with nothing to notice when the two drifted apart.
+	DefaultLease = 120 * time.Second
 
 	// defaultMaxAttempts mirrors the column default in
 	// `migrations/20260926_039_content_production_m4_a.sql`. The insert writes the
@@ -195,7 +200,7 @@ func NewService(store Store, nodes NodeAuthenticator, opts ...Option) *Service {
 		nodes:    nodes,
 		grants:   unavailableGrants{},
 		now:      time.Now,
-		lease:    defaultLease,
+		lease:    DefaultLease,
 		maxTries: defaultMaxAttempts,
 		listMax:  defaultListLimit,
 	}

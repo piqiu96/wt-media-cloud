@@ -13,6 +13,39 @@ import (
 // other means fetching it broke.
 var ErrNoMediaAddress = errors.New("douyin payload carries no playable address")
 
+// ErrNoDetailItem is what a caller gets when a detail response carries no video
+// item to read.
+//
+// It is separate from `ErrNoMediaAddress` because the two are different answers
+// about different things: this one says the response's shape was not what the
+// endpoint returns, and reading further into it would be guessing. The provider
+// answers a request it refuses with a success-shaped envelope and no item, so
+// without this the refusal would surface as "there is no video here" — which is
+// also what a real video with no play address looks like.
+var ErrNoDetailItem = errors.New("douyin detail response carries no video item")
+
+// DetailItem reads the video item out of a detail response.
+//
+// `FetchByURL` answers with the item under `data`, which is the envelope
+// `contentpool/service/discovery_crawler.go` already reads for the same endpoint.
+// That is the shape this accepts and the only one: `FindAuthor` nests its answer
+// under `data.aweme_detail` instead, so a fallback to that shape would be this
+// package guessing which endpoint answered it. A response whose `data` is not an
+// object is refused rather than searched.
+//
+// The item is handed to `MediaAddress` unchanged, and it is not inspected here: a
+// response from another endpoint therefore comes back as an item with no video in
+// it, and is refused one step later by `MediaAddress`. That is deliberate. Telling
+// the envelopes apart would mean this function deciding which endpoint answered,
+// and the nesting in the response is the only thing that says so.
+func DetailItem(payload map[string]any) (map[string]any, error) {
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		return nil, ErrNoDetailItem
+	}
+	return data, nil
+}
+
 // MediaAddress reads the address of a video's playable source out of a payload the
 // Douyin data API returned.
 //
