@@ -17,3 +17,9 @@ logs/
 /server
 .env.local
 .pytest_cache/
+# The object-storage key pair is supplied by whoever runs the acceptance and is
+# never committed. The `.example` templates beside these paths are committed and
+# carry no values; see `config/README.md` for why this credential differs from
+# the tracked `credentials/agent.toml` and `credentials/douyin.toml`.
+config/credentials/object_storage.toml
+config_online/credentials/object_storage.toml

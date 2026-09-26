@@ -1,0 +1,6 @@
+bucket = 'REPLACE_WITH_BUCKET'
+endpoint = 'data.bucket.oss.longyanyue.cn'
+prefix = ''
+presign_ttl = '15m'
+region = ''
+use_ssl = true

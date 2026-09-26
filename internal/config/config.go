@@ -33,6 +33,7 @@ type Config struct {
 	Clients     ClientsConfig
 	Credentials CredentialsConfig
 	Scheduler   SchedulerConfig
+	Storage     StorageConfig
 }
 
 type AppConfig struct {
@@ -99,8 +100,35 @@ type ClientsConfig struct {
 }
 
 type CredentialsConfig struct {
-	Agent  AgentCredentialConfig
-	Douyin DouyinCredentialConfig
+	Agent         AgentCredentialConfig
+	Douyin        DouyinCredentialConfig
+	ObjectStorage ObjectStorageCredentialConfig
+}
+
+// ObjectStorageConfig names the bucket every prepared source object lives in.
+type ObjectStorageConfig struct {
+	Endpoint   string   `toml:"endpoint"`
+	Bucket     string   `toml:"bucket"`
+	Region     string   `toml:"region"`
+	Prefix     string   `toml:"prefix"`
+	UseSSL     bool     `toml:"use_ssl"`
+	PresignTTL Duration `toml:"presign_ttl"`
+}
+
+// ObjectStorageCredentialConfig is deliberately optional in both directions.
+//
+// The repository ships no value for it, so `go test ./...` and a release build
+// start without object-storage secrets and answer `ErrNotConfigured` until they
+// are supplied. See `config/README.md` for where the file is expected and why it
+// is not tracked.
+type ObjectStorageCredentialConfig struct {
+	AccessKey string `toml:"access_key"`
+	SecretKey string `toml:"secret_key"`
+}
+
+// StorageConfig groups the storage backends the worker writes prepared sources to.
+type StorageConfig struct {
+	ObjectStorage ObjectStorageConfig
 }
 
 type AgentCredentialConfig struct {
@@ -206,6 +234,17 @@ func LoadFromDir(root string) (Config, error) {
 	if err := requiredTOML(filepath.Join(root, "scheduler", "scheduler.toml"), &cfg.Scheduler); err != nil {
 		return Config{}, err
 	}
+	if err := requiredTOML(filepath.Join(root, "storage", "object_storage.toml"), &cfg.Storage.ObjectStorage); err != nil {
+		return Config{}, err
+	}
+	// Optional, unlike the two above it: the endpoint and bucket are facts about
+	// where objects go, while the credential is a secret the deployment supplies.
+	// Requiring the file would make every checkout that has no secret fail to load
+	// its configuration, which is the failure mode the value-less tree exists to
+	// avoid.
+	if err := optionalTOML(filepath.Join(root, "credentials", "object_storage.toml"), &cfg.Credentials.ObjectStorage); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -256,6 +295,36 @@ func (c Config) Validate() error {
 	}
 	if c.Scheduler.WorkerBatchSize <= 0 {
 		return errors.New("scheduler.worker_batch_size must be greater than zero")
+	}
+	if err := validateObjectStorage(c.Storage.ObjectStorage, c.Credentials.ObjectStorage); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateObjectStorage checks where objects go, and only that the credential
+// pair is whole.
+//
+// It does **not** require the credential to be present. A tree with no secret is
+// a legitimate state — the repository ships one — and the storage package reports
+// `ErrNotConfigured` for it rather than refusing to start. Half a pair is a
+// different thing: that is a file someone edited and did not finish, and it would
+// otherwise surface as an authentication failure at the first request instead of
+// at startup, which is much harder to read.
+func validateObjectStorage(storage ObjectStorageConfig, credentials ObjectStorageCredentialConfig) error {
+	if strings.TrimSpace(storage.Endpoint) == "" {
+		return errors.New("storage.object_storage.endpoint is required")
+	}
+	if strings.TrimSpace(storage.Bucket) == "" {
+		return errors.New("storage.object_storage.bucket is required")
+	}
+	if storage.PresignTTL.Duration <= 0 {
+		return errors.New("storage.object_storage.presign_ttl must be greater than zero")
+	}
+	accessKey := strings.TrimSpace(credentials.AccessKey)
+	secretKey := strings.TrimSpace(credentials.SecretKey)
+	if (accessKey == "") != (secretKey == "") {
+		return errors.New("credentials.object_storage access_key and secret_key must be configured together")
 	}
 	return nil
 }
