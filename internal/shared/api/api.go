@@ -75,6 +75,54 @@ func NoContent(c *hertzapp.RequestContext) {
 	})
 }
 
+// Accepted writes HTTP 202 with the unified response format.
+//
+// 202 rather than 201 for a queued transfer: the request created a durable task,
+// but nothing has been transferred yet. A 201 would read as "the download
+// exists", which is the one thing this API must not imply before an executor has
+// produced bytes.
+func Accepted(c *hertzapp.RequestContext, data interface{}) {
+	logID := resolveLogID(c)
+	c.JSON(consts.StatusAccepted, ApiResponse{
+		ErrCode: 0,
+		Message: "success",
+		Data:    data,
+		LogID:   logID,
+	})
+}
+
+// NoContentEmpty writes HTTP 204 with no body.
+//
+// Deliberately not `NoContent`, which answers 200 with a `data:null` envelope:
+// the frontend's `parseResponse` turns that envelope into a returned value, so
+// the two are observably different to a caller. Only the one frozen contract that
+// says 204 uses this (`DELETE /api/v1/material-usages/{usage_id}`); every other
+// "nothing to return" endpoint keeps `NoContent` at 200, because changing them
+// would silently rewrite twelve unrelated contracts.
+func NoContentEmpty(c *hertzapp.RequestContext) {
+	c.SetStatusCode(consts.StatusNoContent)
+}
+
+// UnprocessableEntity writes HTTP 422 with the given frozen error name.
+//
+// The name is required rather than optional: 422 is reserved here for integrity
+// failures, and the caller distinguishing them needs the name the contract
+// publishes, not a numeric errcode that `contracts/cloud-error-codes/` never
+// declares.
+func UnprocessableEntity(c *hertzapp.RequestContext, errcode int, message, errorType string) {
+	FailureNamed(c, consts.StatusUnprocessableEntity, errcode, message, errorType)
+}
+
+// ConflictNamed writes HTTP 409 carrying the frozen error name.
+//
+// Two distinct 409s reach this API — "the material has no prepared source yet"
+// and "there is no fresh Local Agent node" — and a caller holding only the
+// frozen name list cannot tell them apart by errcode. The name travels in
+// `error.type`.
+func ConflictNamed(c *hertzapp.RequestContext, errcode int, message, errorType string) {
+	FailureNamed(c, consts.StatusConflict, errcode, message, errorType)
+}
+
 // ---- Failure Helpers ----
 
 // Failure writes a structured error response with the given HTTP status and errcode.
@@ -87,6 +135,18 @@ func Failure(c *hertzapp.RequestContext, httpStatus, errcode int, message string
 		LogID:   logID,
 		Error:   apiErr,
 	})
+}
+
+// FailureNamed writes a structured error response whose `error.type` carries the
+// frozen error name from `contracts/cloud-error-codes/`.
+//
+// It exists because the frozen error contracts publish names and HTTP statuses
+// only — no numeric errcode — so a client that wants to branch on *which* failure
+// it got has exactly this field to read. `Failure` leaves `error` nil, which
+// means "no machine-readable discriminator"; this is the variant for the cases
+// where there is one.
+func FailureNamed(c *hertzapp.RequestContext, httpStatus, errcode int, message, errorType string) {
+	Failure(c, httpStatus, errcode, message, &ApiError{Type: errorType})
 }
 
 // BadRequest writes HTTP 400.
