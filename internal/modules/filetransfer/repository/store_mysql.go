@@ -696,6 +696,17 @@ func cancelTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy 
 // again with the executor state cleared, because a previous executor's lease,
 // heartbeat and byte counts describe bytes that are no longer known to be on
 // disk.
+//
+// A task still pointing at its preparation is refused, because requeueing it
+// would write back the state it is already in. `leaseable` admits a local task
+// only while `dependency_task_id IS NULL`, and the pointer is cleared by the
+// hand-over alone, so a failed task that still has one is waiting on a
+// preparation that ended without producing anything: the row would be `pending`,
+// un-leasable, and never handed over or failed again, since the dependency is
+// terminal too. The user's click would land on the database and change nothing
+// they could see. Retrying a download whose preparation delivered is unaffected —
+// the pointer is NULL by then — and the remedy for the refused rows is a new
+// download, which queues a new preparation.
 func RetryTask(taskID string, teamID identity.TeamID, requestedBy identity.UserID, now time.Time) (model.Task, bool, error) {
 	return retryTask(database.DB(), taskID, teamID, requestedBy, now)
 }
@@ -704,7 +715,7 @@ func retryTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy i
 	if strings.TrimSpace(taskID) == "" || teamID <= 0 || requestedBy <= 0 {
 		return model.Task{}, false, fmt.Errorf("invalid transfer retry")
 	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND attempt_count < max_attempts`, now, taskID, teamID, requestedBy)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND dependency_task_id IS NULL AND attempt_count < max_attempts`, now, taskID, teamID, requestedBy)
 	if result.Error != nil {
 		return model.Task{}, false, result.Error
 	}

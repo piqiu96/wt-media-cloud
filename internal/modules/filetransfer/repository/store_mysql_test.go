@@ -385,7 +385,7 @@ func TestCancelTaskMarksPendingTerminalAndRequestsRunningCancellation(t *testing
 // through repeated retries.
 func TestRetryTaskRequeuesAFailedTaskWithinItsAttemptBound(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND attempt_count < max_attempts")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND dependency_task_id IS NULL AND attempt_count < max_attempts")).
 		WithArgs(testNow, "transfer-1", int64(7), int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "pending", "attempt_count": 1})
@@ -404,7 +404,7 @@ func TestRetryTaskRequeuesAFailedTaskWithinItsAttemptBound(t *testing.T) {
 // retryable — an unmatched row, not a permission the caller can forget to check.
 func TestRetryTaskReportsNoRequeueWhenStatusOrBoundRefuses(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND attempt_count < max_attempts")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND dependency_task_id IS NULL AND attempt_count < max_attempts")).
 		WithArgs(testNow, "transfer-1", int64(7), int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 

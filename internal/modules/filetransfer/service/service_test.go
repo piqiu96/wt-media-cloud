@@ -574,6 +574,49 @@ func TestRetryTaskScopesTheUpdateToTheActorsTeam(t *testing.T) {
 	}
 }
 
+// A failed download whose preparation never delivered cannot be retried, and
+// saying so is the whole point of the guard.
+//
+// Requeueing it would write a row that is `pending` with its `dependency_task_id`
+// still set — the state it was just in. `leaseable` refuses a local task whose
+// dependency is set, and the dependency is terminal, so nothing will ever hand it
+// facts or fail it again: the retry would land on the database and change nothing
+// the user could observe, which is what "I pressed retry and nothing happened"
+// was. The remedy for these rows is a new download, which builds a new
+// preparation, so the answer here is a conflict rather than a silent no-op.
+func TestRetryTaskRefusesADownloadWhosePreparationNeverDelivered(t *testing.T) {
+	task := taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7))
+	task.DependencyTaskID = "prepare-1"
+	store := newMemoryStore(task)
+	store.retryOK = true
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1"); !errors.Is(err, ErrTaskConflict) {
+		t.Fatalf("RetryTask() error = %v, want conflict", err)
+	}
+	if store.count("retry") != 0 {
+		t.Fatalf("retry called %d times, want none while the dependency pointer is set", store.count("retry"))
+	}
+}
+
+// The other half of the same guard: once the preparation has handed the facts
+// over, the pointer is gone and the retry is the ordinary one — the download that
+// failed on its own account, after it had something to download.
+func TestRetryTaskStillRequeuesADownloadWhoseFactsArrived(t *testing.T) {
+	task := taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7))
+	store := newMemoryStore(task)
+	store.retryOK = true
+	store.retryResult = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1"); err != nil {
+		t.Fatalf("RetryTask() error = %v", err)
+	}
+	if store.count("retry") != 1 {
+		t.Fatalf("retry called %d times, want the requeue", store.count("retry"))
+	}
+}
+
 func TestRetryTaskRequiresAFailedTaskWithinItsBound(t *testing.T) {
 	exhausted := taskFixture("exhausted", model.StatusFailed, 9, teamOf(7))
 	exhausted.AttemptCount = exhausted.MaxAttempts
