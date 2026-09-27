@@ -1,38 +1,66 @@
 schema_version: 1
-revision: "2026.09.26.2"
+revision: "2026.09.27.1"
+
+# 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
+#
+# 原先这份文件是按 `change.md` §3.1 的散文写的（「对象存储引用、文件大小、Hash、媒体
+# 摘要及最后错误」），而实现按数据库列名写（`video_size_bytes`、`video_sha256`、
+# `video_prepared_at`）—— 同一批事实被起了两套名字，且**没有任何测试把两边钉在一起**，
+# 于是漂移一直没有声音。CHG-20260924-061 T-05 开工前逐字段核对时发现。
+#
+# 方向是**回写基线**而不是回退实现：实现已提交、已有测试，且 `video_*` 与库列同名
+# （改名会让同一件事在栈里多一层翻译）；本文件因此改为描述线上形态，并在
+# `internal/modules/production/wire_test.go` 补上那份缺失的量具 —— 根因是缺量具，不是缺一次校对。
+#
+# 两处前端必须知道的区别：
+# 1. **body 里没有 `null`**：可选属性在未知时是**整个键不出现**（Go 的 `omitempty`），
+#    不是 `null`。所以行里读出来是 `undefined`；`row.author_name || '-'` 一样的写法，
+#    但「这个键在不在」的判断不一样。别把 `nullable` 写成真。
+# 2. `object_key` **不在 body 里**（见下方 `forbidden_properties`）：存储引用只存不返回。
+#    原先本文件把它列为一条属性，而实现一直是 `json:"-"`。浏览器拿着一个内部对象引用
+#    做不了任何事，却会把存储布局（前缀、内容寻址的键形）变成一个新的对外面。
 
 schemas:
   Material:
     type: object
-    required: [id, team_id, source_content_id, title, source_url, video_status, created_at, updated_at]
+    description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。
+    required: [id, team_id, source_content_id, title, source_url, platform, video_status, created_at, updated_at]
     properties:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
-      game_id: {type: string, nullable: true}
       source_content_id: {type: integer, format: int64}
       title: {type: string}
       source_url: {type: string, format: uri}
       platform: {type: string}
-      author_name: {type: string, nullable: true}
-      published_at: {type: string, format: date-time, nullable: true}
       video_status: {type: string, enum: [not_downloaded, downloading, ready, failed]}
-      object_key: {type: string, nullable: true, description: Internal Cloud object reference; never a signed URL.}
-      file_size_bytes: {type: integer, format: int64, nullable: true}
-      sha256: {type: string, nullable: true}
-      media_summary: {type: object, nullable: true}
-      last_error: {type: string, nullable: true}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
-    forbidden_properties: [local_path, download_url, storage_credential]
+      game_id: {type: string, description: 素材未归游戏时该键不出现。}
+      author_name: {type: string, description: 为空时该键不出现。}
+      published_at: {type: string, format: date-time, description: 来源没有发布时间时该键不出现。}
+      video_size_bytes: {type: integer, format: int64, description: 准备通过校验前该键不出现。}
+      video_sha256: {type: string, description: 准备通过校验前该键不出现。}
+      media_summary: {type: object, description: 准备通过校验前该键不出现；形状由媒体探针决定，不是对外契约。}
+      last_error: {type: string, description: 最近一次准备没有错误时该键不出现。}
+      video_prepared_at: {type: string, format: date-time, description: 尚未有一次通过校验的准备时该键不出现。}
+    forbidden_properties: [object_key, local_path, download_url, storage_credential]
 
   MaterialUsage:
     type: object
-    required: [id, material_id, user_id, status, created_at, updated_at]
+    description: 「我的素材」里的一条关系；移出保留同一行，只把状态改写，故历史可追溯、可恢复。
+    required: [id, team_id, material_id, user_id, status, created_at, updated_at]
     properties:
       id: {type: integer, format: int64}
+      team_id: {type: integer, format: int64}
       material_id: {type: integer, format: int64}
       user_id: {type: integer, format: int64}
       status: {type: string, enum: [active, removed]}
-      removed_at: {type: string, format: date-time, nullable: true}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
+      removed_at: {type: string, format: date-time, description: 关系仍是 active 时该键不出现。}
+      material:
+        type: object
+        description: >-
+          这条关系指向的素材，随列表一并返回，键集即上方 `Material`。没有它，「我的素材」
+          列表每行都要再发一次请求才能显示标题与视频状态 —— 代价付在页面上。
+          这里不重复列它的 17 个属性：同一批键写两遍就是第二个落点，改了这处忘了那处不会有任何症状。
