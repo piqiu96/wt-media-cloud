@@ -701,11 +701,19 @@ func TestMarkVideoFailedPassesOnAStoreFailure(t *testing.T) {
 // The worker resolves the source from the platform and the provider's own content
 // id, both of which are stable, rather than from the address snapshot, which is a
 // signed URL and is expired by the time anything downloads it.
+//
+// The provider's id and this row's own `source_contents` id are two different
+// numbers, and the fixture keeps them different on purpose. A fixture that set
+// only one of them could not tell which one the worker is about to ask the
+// provider for -- which is exactly how the two came to be confused: the worker
+// asked for the local row id and every provider answered "no such video".
 func TestPreparationSourceCarriesThePlatformContentTheWorkerResolvesFrom(t *testing.T) {
 	team, game := service.TeamID(7), "game-a"
 	material := pendingMaterial(team, game)
 	material.Platform = "douyin"
-	material.SourceContentID = 7123456789012345678
+	// The local `source_contents` row id, which is *not* an id the provider knows.
+	material.SourceContentID = 42
+	material.PlatformContentID = "7123456789012345678"
 	store := &memoryStore{found: true, material: material}
 
 	source, err := testService(store).PreparationSource(team, 42)
@@ -714,6 +722,9 @@ func TestPreparationSourceCarriesThePlatformContentTheWorkerResolvesFrom(t *test
 	}
 	if source.Platform != "douyin" || source.ContentID != 7123456789012345678 {
 		t.Fatalf("source = %+v, want the platform and the provider's content id", source)
+	}
+	if source.ContentID == material.SourceContentID {
+		t.Fatal("the provider's content id was taken from the local row id")
 	}
 	if source.TeamID != team || source.MaterialID != 42 {
 		t.Fatalf("source scope = team %d material %d, want team 7 material 42", source.TeamID, source.MaterialID)
@@ -748,18 +759,22 @@ func TestPreparationSourceRefusesAMaterialOutsideTheTasksTeam(t *testing.T) {
 func TestPreparationSourceRefusesAMaterialWithNothingToResolveFrom(t *testing.T) {
 	team, game := service.TeamID(7), "game-a"
 	for _, testCase := range []struct {
-		name     string
-		platform string
-		content  int64
+		name      string
+		platform  string
+		contentID string
 	}{
-		{"no platform", "", 7123456789012345678},
-		{"no content id", "douyin", 0},
-		{"neither", "  ", 0},
+		{"no platform", "", "7123456789012345678"},
+		{"no content id", "douyin", ""},
+		{"blank content id", "douyin", "   "},
+		{"neither", "  ", ""},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			material := pendingMaterial(team, game)
 			material.Platform = testCase.platform
-			material.SourceContentID = testCase.content
+			material.PlatformContentID = testCase.contentID
+			// The local row id is present throughout, so a refusal can only come
+			// from the platform's own id being absent: the two are not substitutes.
+			material.SourceContentID = 42
 			store := &memoryStore{found: true, material: material}
 
 			_, err := testService(store).PreparationSource(team, 42)
@@ -773,6 +788,30 @@ func TestPreparationSourceRefusesAMaterialWithNothingToResolveFrom(t *testing.T)
 				t.Fatalf("error = %v, want it to name what is missing", err)
 			}
 		})
+	}
+}
+
+// A platform content id that is not a number cannot be asked for by id, and the
+// worker sends the id rather than the short link. Refusing here names the row;
+// sending it anyway would spend a provider call to be told the video does not
+// exist, which reads the same as a video that really is gone.
+func TestPreparationSourceRefusesAPlatformContentIdThatIsNotAnId(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	material := pendingMaterial(team, game)
+	material.Platform = "douyin"
+	material.SourceContentID = 42
+	material.PlatformContentID = "https://www.douyin.com/video/7123456789012345678"
+	store := &memoryStore{found: true, material: material}
+
+	_, err := testService(store).PreparationSource(team, 42)
+	if err == nil {
+		t.Fatal("error = nil, want a refusal naming the unusable content id")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want a reason about the row rather than a missing material", err)
+	}
+	if !strings.Contains(err.Error(), "no platform source") {
+		t.Fatalf("error = %v, want it to name what is missing", err)
 	}
 }
 

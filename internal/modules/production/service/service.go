@@ -4,6 +4,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -400,14 +401,22 @@ func (s *Service) PreparationSource(teamID identityservice.TeamID, materialID in
 	if !found || material.TeamID != teamID {
 		return PreparationSource{}, fmt.Errorf("%w: material %d in team %d", ErrNotFound, materialID, teamID)
 	}
-	if strings.TrimSpace(material.Platform) == "" || material.SourceContentID <= 0 {
+	// The id the worker sends is the provider's own, not this row's
+	// `source_contents.id`. The provider has never heard of the latter, and asked
+	// for it answers that the video does not exist -- which reads exactly like a
+	// video that really is gone, so the mistake is silent until a real run.
+	// `SourceContentID` is what the projection joins on; it is not an identity the
+	// platform knows, and the two are separate columns for that reason.
+	platform := strings.TrimSpace(material.Platform)
+	contentID, parseErr := strconv.ParseInt(strings.TrimSpace(material.PlatformContentID), 10, 64)
+	if platform == "" || parseErr != nil || contentID <= 0 {
 		return PreparationSource{}, fmt.Errorf("material %d names no platform source to re-resolve", materialID)
 	}
 	return PreparationSource{
 		TeamID:     material.TeamID,
 		MaterialID: material.ID,
-		Platform:   strings.TrimSpace(material.Platform),
-		ContentID:  material.SourceContentID,
+		Platform:   platform,
+		ContentID:  contentID,
 	}, nil
 }
 

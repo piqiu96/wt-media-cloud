@@ -30,7 +30,13 @@ type Material struct {
 	TeamID          identity.TeamID `json:"team_id"`
 	GameID          *string         `json:"game_id,omitempty"`
 	SourceContentID int64           `json:"source_content_id"`
-	Title           string          `json:"title"`
+	// PlatformContentID is the provider's own id for this video, carried so the
+	// worker can ask the provider for the source by the id it knows. It is not
+	// SourceContentID: that is this database's row id in `source_contents`, and a
+	// provider asked for it answers that no such video exists. Hidden from JSON
+	// because it is worker plumbing, not part of the material the UI reads.
+	PlatformContentID string `json:"-"`
+	Title             string `json:"title"`
 	SourceURL       string          `json:"source_url"`
 	Platform        string          `json:"platform"`
 	AuthorName      string          `json:"author_name,omitempty"`
