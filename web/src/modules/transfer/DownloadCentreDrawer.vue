@@ -9,7 +9,7 @@ import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { isDesktop } from '../../utils.js'
-import { openSavedFile } from './desktopBridge.js'
+import { openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
 import { hasLiveTask, isTerminal } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
@@ -25,11 +25,53 @@ const error = ref('')
 // running 任务后它仍然报 running（终态只能由执行器写），所以「正在取消」推不出来，
 // 只能记。刷新出终态后这条记录就不再有意义，由 taskState 的终态分支盖住。
 const cancelRequested = ref([])
+// 「这些文件现在在哪儿」，按文件名索引（见 `desktopBridge.savedFileStates`）。
+// 空表 ＝ 没查过：浏览器读不到本机、Desktop 还没扫完 —— 界面此时一个字都不说，
+// 不能把「我读不到」写成「文件不在」。
+const presence = ref({})
 
 const POLL_INTERVAL_MS = 2000
 let timer = null
 
-const rows = computed(() => transferRows(tasks.value, { cancelRequested: cancelRequested.value }))
+const rows = computed(() => transferRows(tasks.value, {
+  cancelRequested: cancelRequested.value,
+  presence: presence.value,
+}))
+
+/**
+ * 要问的名字集合，以及它的**字符串**指纹。
+ *
+ * 指纹存在的理由是轮询：任务列表每 2 秒换一个数组，`computed` 每次都重算并返回一个新
+ * 数组，若直接 `watch` 那个数组，扫描就会跟着 tick 跑 —— 每 2 秒一次跨进程列目录，
+ * 而文件几乎从不变。拼成字符串后 `watch` 比的是值：名字集合没变就一次都不问。
+ */
+const fileNames = computed(() => [...new Set(
+  tasks.value.map((task) => task.file_name).filter((name) => typeof name === 'string' && name.trim())
+)].sort())
+const namesKey = computed(() => fileNames.value.join('\n'))
+
+// 现在这张 presence 表是**为哪个名字集合**量出来的。相同就不再问第二遍 —— 这是
+// 「按批、不跟着 tick 走」具体落在哪一行。
+let measuredKey = null
+
+function ensurePresence() {
+  const key = namesKey.value
+  if (key === measuredKey) return
+  measuredKey = key
+  if (!key) {
+    presence.value = {}
+    return
+  }
+  savedFileStates(fileNames.value).then(
+    (table) => { presence.value = table },
+    () => {
+      // 问不到就退回「没查过」—— 它不做任何断言，界面上与本功能之前**完全一样**，
+      // 所以这里不该弹提示（一个后台的状态读取失败不值得打断运营）。下一次打开或
+      // 名字集合变化时会再问一次。
+      presence.value = {}
+    },
+  )
+}
 
 // 轮询只在「面板开着」且「还有非终态任务」时进行。
 //
@@ -62,11 +104,25 @@ async function load() {
   } finally {
     ensurePolling()
   }
+  // 名字集合变了才去问本机（见 `ensurePresence`）。放在 `finally` 之后：读任务失败时
+  // 上一轮的名单还在，那正是已经查过的那些名字，不必重问。
+  ensurePresence()
 }
 
 watch(visible, (open) => {
-  if (open) load()
-  else stopPolling()
+  if (!open) {
+    stopPolling()
+    return
+  }
+  // 重新打开要重扫一次：面板关着的这段时间里文件可能被搬走、被删，也可能换了保存位置。
+  // 清掉指纹就够了 —— `load()` 结尾的 `ensurePresence()` 会补上这一次。
+  measuredKey = null
+  load()
+})
+
+// 面板开着的时候新出现一条已下载的任务（刚点完下载），它的文件要立刻被扫到。
+watch(namesKey, () => {
+  if (visible.value) ensurePresence()
 })
 
 onBeforeUnmount(stopPolling)
@@ -151,6 +207,20 @@ async function open(task) {
           </div>
 
           <p v-if="row.errorText" class="transfer-item__error">{{ row.errorText }}</p>
+
+          <!--
+            文件在**别的**保存位置里 —— 这正是「改了保存路径后就找不到文件了」那一类：
+            文件没丢，只是不在新目录里。「打开文件」照旧可用（Rust 侧会在所有已知位置里
+            找），所以这句话要说出它在哪儿，而不是让人以为得重新下一份。
+          -->
+          <p v-if="row.presence === 'present_elsewhere'" class="transfer-item__where">
+            文件还在原来的保存位置：{{ row.fileFact.directory }}
+          </p>
+          <!-- 查过、所有已知位置都没有。这一句只在**成功**的行上说：别的行本来就没落盘。 -->
+          <p v-else-if="row.presence === 'absent' && row.task.status === 'success'" class="transfer-item__where">
+            文件已不在本机已知的保存位置，可以重新下载
+          </p>
+
           <p class="transfer-item__time">发起于 {{ row.createdText }}</p>
 
           <div class="transfer-item__actions">
@@ -182,6 +252,8 @@ async function open(task) {
 /* 各项用 gap 分开而不是「·」串起来：宽度不够时「·」会在任意位置折断，标签和数字被拆散。 */
 .transfer-item__meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: var(--wt-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .transfer-item__error { margin: 8px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
+/* 目录可能很长，换行而不是截断：截掉的恰好是「在哪个盘的哪个文件夹」这件事。 */
+.transfer-item__where { margin: 8px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.5; word-break: break-all; }
 .transfer-item__time { margin: 6px 0 0; color: var(--wt-text-tertiary); font-size: 12px; }
 .transfer-item__actions { display: flex; gap: 8px; margin-top: 12px; }
 </style>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetry, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetry, fileFact, filePresence, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -175,6 +175,71 @@ describe('row actions', () => {
     expect(canRedownload(task({ status: 'cancelled', asset_type: 'compose_input' }))).toBe(false)
     expect(canRedownload(task({ status: 'cancelled', asset_id: 0 }))).toBe(false)
     expect(canRedownload(null)).toBe(false)
+  })
+})
+
+/**
+ * 「这个文件现在在哪儿」是**量出来的**。
+ *
+ * 走查报的第二条是「改了保存位置之后找不到文件了」，而那时的根因是没有任何地方记着
+ * 「这个文件当时写到了哪个目录」——于是「在旧目录里」与「被删了」落进同一条分支。这一块
+ * 把那两件事分开了，而分开的前提是**区分的依据来自扫描**，不是来自推断。
+ */
+describe('where a downloaded file is', () => {
+  const scanned = (entries) => Object.fromEntries(
+    entries.map((entry) => [entry.name, entry])
+  )
+
+  it('reads the scan by the name the executor reported', () => {
+    const presence = scanned([
+      { name: '演示素材-42.mp4', presence: 'present_current', directory: '/新位置', bytes: 230 },
+    ])
+
+    expect(fileFact(task({ file_name: '演示素材-42.mp4' }), presence)).toEqual({
+      name: '演示素材-42.mp4', presence: 'present_current', directory: '/新位置', bytes: 230,
+    })
+    // 名字不裁剪也不模糊匹配：磁盘上的名字是执行器写下去的那一个，差一个空格就是另一个
+    // 文件（`file_name_of` 只拒绝路径分隔符）。
+    expect(fileFact(task({ file_name: '演示素材-42.mp4 ' }), presence)).toBeNull()
+  })
+
+  /**
+   * 「没查过」与「查过、不在」是两件事，这是整块的意义所在。
+   *
+   * 缺键是没查过（浏览器查不了本机文件，Desktop 也要扫过才知道）；`absent` 是一条实实在
+   * 在的扫描结果。把前者渲染成后者，就会把一个好在旧目录里的文件说成「可能已被删除」，
+   * 而运营会据此重新下一份 230 MB。
+   */
+  it('keeps "nobody looked" apart from "looked and it is gone"', () => {
+    expect(filePresence(task({ file_name: 'a.mp4' }), {})).toBe('unknown')
+    expect(filePresence(task({ file_name: 'a.mp4' }), { 'a.mp4': null })).toBe('unknown')
+    expect(filePresence(task({ file_name: 'a.mp4' }), scanned([{ name: 'a.mp4', presence: 'absent' }]))).toBe('absent')
+    // 没有文件名的任务（执行器没报）不属于任何一种：它连被找的对象都没有。
+    expect(filePresence(task({ file_name: undefined }), scanned([{ name: 'a.mp4', presence: 'absent' }]))).toBe('unknown')
+    expect(fileFact(task({ file_name: undefined }), scanned([{ name: 'a.mp4', presence: 'absent' }]))).toBeNull()
+  })
+
+  it('recognises a file that is still in an older save directory', () => {
+    const presence = scanned([
+      { name: 'a.mp4', presence: 'present_elsewhere', directory: '/旧位置', bytes: 12 },
+    ])
+
+    expect(filePresence(task({ file_name: 'a.mp4' }), presence)).toBe('present_elsewhere')
+    // 在旧目录里的文件仍然打开得了：`local_open_saved_file` 会在所有已知位置里找。
+    expect(canOpenFile(task({ status: 'success', file_name: 'a.mp4' }), 'present_elsewhere')).toBe(true)
+    // 也不推荐重新下载 —— 文件就在那儿，重新下一份是浪费。
+    expect(canRedownload(task({ status: 'success', file_name: 'a.mp4' }), 'present_elsewhere')).toBe(false)
+  })
+
+  // 「打开文件」在实测不在时收回：那时它点下去必然是一句「可能已被移动或删除」。
+  it('withdraws the open action only once the file is measured gone', () => {
+    const success = task({ status: 'success', file_name: 'a.mp4' })
+
+    expect(canOpenFile(success)).toBe(true)
+    expect(canOpenFile(success, 'unknown')).toBe(true)
+    expect(canOpenFile(success, 'present_current')).toBe(true)
+    expect(canOpenFile(success, 'absent')).toBe(false)
+    expect(canRedownload(success, 'absent')).toBe(true)
   })
 })
 

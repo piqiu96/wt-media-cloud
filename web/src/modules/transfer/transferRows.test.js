@@ -77,4 +77,47 @@ describe('transfer rows', () => {
     expect(transferRows(null)).toEqual([])
     expect(transferRows(undefined)).toEqual([])
   })
+
+  /**
+   * 扫描结果按**名字**索引，穿到每一行上。
+   *
+   * 这是走查第二条的落点：已完成的行要能说出「文件在旧目录里」而不是只会说「可能已被
+   * 移动或删除」。名字索引而不是任务索引，因为磁盘上只有一个文件，而名字可能对应多条
+   * 任务（重试、重新下载各一条）。
+   */
+  it('gives each row the file fact its own name was scanned as', () => {
+    const presence = {
+      'a.mp4': { name: 'a.mp4', presence: 'present_elsewhere', directory: '旧位置', bytes: 12 },
+      'b.mp4': { name: 'b.mp4', presence: 'absent', directory: '', bytes: null },
+    }
+    const rows = transferRows([
+      task({ id: 'x', status: 'success', file_name: 'a.mp4' }),
+      task({ id: 'y', status: 'success', file_name: 'b.mp4' }),
+      task({ id: 'z', status: 'success', file_name: 'c.mp4' }),
+    ], { presence })
+
+    expect(rows[0].presence).toBe('present_elsewhere')
+    expect(rows[0].fileFact.directory).toBe('旧位置')
+    expect(rows[0].canOpen).toBe(true)
+    expect(rows[0].canRedownload).toBe(false)
+
+    expect(rows[1].presence).toBe('absent')
+    // 实测不在：打开文件没了，重新下载来了 —— 这一格就是第二条报障的修法。
+    expect(rows[1].canOpen).toBe(false)
+    expect(rows[1].canRedownload).toBe(true)
+
+    // 名单里没有的名字是「没查过」，不是「不在」。
+    expect(rows[2].presence).toBe('unknown')
+    expect(rows[2].fileFact).toBeNull()
+    expect(rows[2].canOpen).toBe(true)
+    expect(rows[2].canRedownload).toBe(false)
+  })
+
+  // 不传扫描结果时每一行都是「没查过」：界面上不该凭空出现「文件已不在」。
+  it('asserts nothing about files when nobody scanned', () => {
+    const row = transferRow(task({ status: 'success', file_name: 'a.mp4' }))
+    expect(row.presence).toBe('unknown')
+    expect(row.fileFact).toBeNull()
+    expect(row.canRedownload).toBe(false)
+  })
 })

@@ -7,6 +7,8 @@ import {
   LOG_SOURCES,
   LOCAL_SETTINGS_COMMANDS,
   normalizeLogTail,
+  normalizeMigrationPlan,
+  normalizeMigrationReport,
   normalizeSettingsView,
 } from './apps/desktop/features/local-settings/service.js'
 
@@ -24,6 +26,7 @@ describe('local settings command names', () => {
     expect(LOCAL_SETTINGS_COMMANDS).toEqual({
       getSettings: 'local_settings_get',
       setSettings: 'local_settings_set',
+      pushSaveDirectory: 'local_push_save_directory',
       storageUsage: 'local_storage_usage',
       logFiles: 'local_log_files',
       logTail: 'local_log_tail',
@@ -31,6 +34,9 @@ describe('local settings command names', () => {
       logCleanup: 'local_log_cleanup',
       diagnosticExport: 'local_diagnostic_export',
       openPlace: 'local_open_place',
+      migrationPlan: 'local_save_dir_migration_plan',
+      moveSavedFiles: 'local_move_saved_files',
+      deleteSavedFiles: 'local_delete_saved_files',
     })
   })
 
@@ -207,6 +213,74 @@ describe('local settings service invoke arguments', () => {
 
     expect(invoke).toHaveBeenCalledWith('local_log_cleanup', { source: 'agent' })
   })
+
+  /**
+   * The migration commands take a list of **names**, and nothing else.
+   *
+   * That is the whole boundary of this feature: no directory, no path. A service
+   * that grew a `directory` argument would be handing the WebView the ability to
+   * name a location, which is the one thing the Rust side refuses to accept.
+   */
+  it('sends the migration commands a list of names and nothing else', async () => {
+    const invoke = vi.fn(async () => ({}))
+    const service = createLocalSettingsService({ invoke })
+
+    await service.migrationPlan(['a.mp4', 'b.mp4'])
+    await service.moveSavedFiles(['a.mp4'])
+    await service.deleteSavedFiles(['b.mp4'])
+
+    expect(invoke).toHaveBeenCalledWith('local_save_dir_migration_plan', { names: ['a.mp4', 'b.mp4'] })
+    expect(invoke).toHaveBeenCalledWith('local_move_saved_files', { names: ['a.mp4'] })
+    expect(invoke).toHaveBeenCalledWith('local_delete_saved_files', { names: ['b.mp4'] })
+    // The whole argument object, not just the key it was expected to carry.
+    for (const call of invoke.mock.calls) {
+      expect(Object.keys(call[1])).toEqual(['names'])
+    }
+  })
+
+  /**
+   * Pushing the location carries nothing; it is not another `set`.
+   *
+   * And what comes back is the **Agent's own report**, not the directory the
+   * command was given — the command takes no directory at all, so a page that
+   * echoed one would be reporting its own input as the result. The three fields
+   * are the Agent's answer, normalized.
+   */
+  it('pushes the stored location with no arguments and reads the Agent back', async () => {
+    const invoke = vi.fn(async () => ({
+      save_dir: '/saved/files',
+      writable: true,
+      free_bytes: 4096,
+    }))
+    const service = createLocalSettingsService({ invoke })
+
+    await expect(service.pushSaveDir()).resolves.toEqual({
+      saveDir: '/saved/files',
+      writable: true,
+      freeBytes: 4096,
+    })
+    // The whole call, so a second argument (a path the page would have had to know)
+    // cannot appear without this failing.
+    expect(invoke.mock.calls[0]).toEqual(['local_push_save_directory'])
+  })
+
+  /**
+   * An Agent that has not stored it, or cannot write there, is not a success.
+   *
+   * `writable` is `true` only when the Agent said so — a missing field must not
+   * read as 「可写」, which is the same rule as `null` never becoming `0`.
+   */
+  it('does not read an absent writable flag as a writable directory', async () => {
+    const service = createLocalSettingsService({
+      invoke: vi.fn(async () => ({ save_dir: null })),
+    })
+
+    await expect(service.pushSaveDir()).resolves.toEqual({
+      saveDir: null,
+      writable: false,
+      freeBytes: 0,
+    })
+  })
 })
 
 /**
@@ -250,6 +324,83 @@ describe('local settings normalization', () => {
       linesShown: 12,
       truncated: true,
       lines: [{ level: null, continues: true, text: 'and so on' }],
+    })
+  })
+
+  /**
+   * A size that was not read stays `null`, and here that is load-bearing.
+   *
+   * `needed_bytes` is a sum. If an unmeasured size became `0` on the way in, the
+   * space check would compare a total that quietly left a file out against the
+   * free space, and could pass on a disk that cannot hold the move.
+   */
+  it('keeps an unreadable file size absent instead of calling it zero', () => {
+    const plan = normalizeMigrationPlan({
+      to: '/new',
+      free_bytes: 100,
+      needed_bytes: 50,
+      movable: [
+        { name: 'a.mp4', directory: '/old', bytes: 50 },
+        { name: 'b.mp4', directory: '/old', bytes: null },
+        { name: 'c.mp4', directory: '/old' },
+      ],
+      already_there: [],
+      missing: [],
+      unreadable: [],
+    })
+
+    expect(plan.movable.map((file) => file.bytes)).toEqual([50, null, null])
+    expect(plan.freeBytes).toBe(100)
+    expect(plan.neededBytes).toBe(50)
+  })
+
+  it('carries the plan under the page spellings', () => {
+    const plan = normalizeMigrationPlan({
+      to: '/new',
+      free_bytes: 1,
+      needed_bytes: 2,
+      movable: [{ name: 'a.mp4', directory: '/old', bytes: 2 }],
+      already_there: [{ name: 'b.mp4', directory: '/new', bytes: 3 }],
+      missing: [{ name: 'c.mp4' }],
+      unreadable: [{ directory: '/gone', reason: 'Permission denied (os error 13)' }],
+    })
+
+    expect(Object.keys(plan).sort()).toEqual([
+      'alreadyThere', 'freeBytes', 'missing', 'movable', 'neededBytes', 'to', 'unreadable',
+    ])
+    expect(plan.alreadyThere[0].name).toBe('b.mp4')
+    expect(plan.unreadable[0]).toEqual({ directory: '/gone', reason: 'Permission denied (os error 13)' })
+    // A missing file has no directory and no size, and neither is invented.
+    expect(plan.missing[0]).toEqual({ name: 'c.mp4', directory: '', bytes: null })
+  })
+
+  /**
+   * A failure names the file, not a path.
+   *
+   * `normalizeCleanupReport` carries `path` because a cleanup walks one known
+   * directory. A migration does not: the file may have come from any of the
+   * known locations, so a path would be a second, ambiguous answer to 「which
+   * file」 — and the person picked it by name.
+   */
+  it('identifies a failed file by name, and does not invent a path', () => {
+    const report = normalizeMigrationReport({
+      directory: '/new',
+      moved: ['a.mp4'],
+      deleted: [],
+      missing: ['z.mp4'],
+      kept: [{ name: 'b.mp4', reason: 'target_exists' }],
+      failures: [{ name: 'c.mp4', reason: 'EXDEV and the copy failed' }],
+    })
+
+    expect(report.moved).toEqual(['a.mp4'])
+    expect(report.missing).toEqual(['z.mp4'])
+    expect(report.kept[0]).toEqual({ name: 'b.mp4', reason: 'target_exists' })
+    expect(report.failures[0]).toEqual({ name: 'c.mp4', reason: 'EXDEV and the copy failed' })
+    expect(report.failures[0]).not.toHaveProperty('path')
+    // An answer that never arrived must not read as 「nothing happened」 either —
+    // every list is present and empty.
+    expect(normalizeMigrationReport(null)).toEqual({
+      directory: '', moved: [], deleted: [], missing: [], kept: [], failures: [],
     })
   })
 

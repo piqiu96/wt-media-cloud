@@ -36,4 +36,38 @@ describe('download centre drawer', () => {
   it('refreshes the list after creating the task', () => {
     expect(source).toMatch(/async function redownload\(task\) \{(.|\n)*?await load\(\)/)
   })
+
+  /**
+   * 「文件现在在哪儿」必须真的接进来 —— 算对了不接线，界面上和不存在的区别是零。
+   *
+   * `transferRows` 的 `presence` 缺省是空表，漏传不会报错，只会让每一行都悄悄退回
+   * 「没查过」，于是一整块功能静默失效。
+   */
+  it('feeds the file scan into the rows and reads it back in the template', () => {
+    expect(source).toContain('presence: presence.value,')
+    expect(source).toContain("row.presence === 'present_elsewhere'")
+    // 在旧位置里的文件要说清在哪儿 —— 只说「不在当前目录」等于把人推去重新下一份。
+    expect(source).toContain('row.fileFact.directory')
+    expect(source).toContain("row.presence === 'absent'")
+  })
+
+  /**
+   * 扫描**按批**，且只按名字集合的指纹触发，不跟着 2 秒 tick 走。
+   *
+   * 这个面板每 2 秒拉一次任务。若扫描挂在任务列表上，就变成每 2 秒一次跨进程列目录，
+   * 而文件几乎从不变 —— 那是白烧本机 IO，还会让「读本机」变成常态噪声。
+   */
+  it('scans once per name set instead of once per poll', () => {
+    expect(source).toContain('if (key === measuredKey) return')
+    expect(source).toContain('const namesKey = computed(()')
+    // 拼成字符串的指纹是这条的关键：数组每次都变，字符串不变。
+    expect(source).toContain('fileNames.value.join(')
+    // 重新打开要重扫（面板关着时文件可能被搬走／删掉／换了目录）。
+    expect(source).toMatch(/if \(!open\) \{(.|\n)*?measuredKey = null/)
+  })
+
+  // 扫描失败退回「没查过」，不是「不在」：后台读本机失败不弹提示，也绝不断言文件没了。
+  it('falls back to asserting nothing when the scan cannot answer', () => {
+    expect(source).toMatch(/\(\) => \{(.|\n)*?presence\.value = \{\}/)
+  })
 })

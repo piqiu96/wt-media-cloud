@@ -85,9 +85,55 @@ export function taskState(task, { tasks = [], cancelRequested = false } = {}) {
   return { key: task?.status || 'pending', label: STATUS_LABELS[task?.status] || task?.status || '-', tone: STATUS_TONES[task?.status] || 'neutral' }
 }
 
-/** 打开文件只在 Desktop 有意义：文件落在运营这台机器上，浏览器打不开它。 */
-export function canOpenFile(task) {
-  return task?.status === 'success' && !!task?.file_name
+/**
+ * 一个已下载的文件现在在哪儿。
+ *
+ * 这是**量出来的**，不是推出来的：名单和目录都由 Desktop 的 Rust 侧在已知的保存位置里
+ * 逐一列目录得到（`local_saved_file_states`）。`unknown` 是「没人查过」——浏览器根本
+ * 查不了本机文件，Desktop 也要扫过才知道——它和「查过、不在」是两件事，混起来就会把
+ * 「没查」渲染成「文件没了」。
+ */
+export const FILE_PRESENCE = Object.freeze({
+  /** 在当前选定的保存位置里。 */
+  current: 'present_current',
+  /** 不在当前保存位置，但在一个已知的历史保存位置里（改过目录的文件就是这个）。 */
+  elsewhere: 'present_elsewhere',
+  /** 查过了，所有已知位置都没有它。 */
+  absent: 'absent',
+  /** 没查过。 */
+  unknown: 'unknown',
+})
+
+/**
+ * 这个任务的**文件名**在扫描结果里的那一条，没有就是 `null`。
+ *
+ * 按名字查而不是按任务查：一个名字可能对应多条任务（重试、重新下载），而磁盘上只有一个
+ * 文件 —— 名字是执行器写下去的那一个，也是唯一能定位它的东西。
+ */
+export function fileFact(task, presence = {}) {
+  const name = task?.file_name
+  if (!name) return null
+  // 缺键与 `null` 都是「没查过」；「查过、不在」在扫描结果里是一条实实在在的记录
+  // （`presence: absent`），不是缺键。这个区别是这一整块的意义所在。
+  return presence?.[name] ?? null
+}
+
+/** 上面那一条的 `presence`，没查过就是 `unknown`。 */
+export function filePresence(task, presence = {}) {
+  return fileFact(task, presence)?.presence ?? FILE_PRESENCE.unknown
+}
+
+/**
+ * 打开文件只在 Desktop 有意义：文件落在运营这台机器上，浏览器打不开它。
+ *
+ * `presence` 默认 `unknown`：没查过就不作断言，按钮照旧给出来（单参调用与 Cloud Web
+ * 的行保持今天的行为）。只有**实测不在**时才收回这个按钮——那时它点下去必然是一句
+ * 「可能已被移动或删除」，而一个必然失败的按钮不该出现在那里。文件在旧目录里仍然给：
+ * `local_open_saved_file` 会在所有已知的保存位置里找它。
+ */
+export function canOpenFile(task, presence = FILE_PRESENCE.unknown) {
+  if (task?.status !== 'success' || !task?.file_name) return false
+  return presence !== FILE_PRESENCE.absent
 }
 
 /**
@@ -125,10 +171,10 @@ export function canRetry(task) {
  * 只有实测不在（`absent`：文件被搬走或被删）时才推荐重新下载；文件还在时该出现的
  * 动作是「打开文件」。
  */
-export function canRedownload(task, presence = 'unknown') {
+export function canRedownload(task, presence = FILE_PRESENCE.unknown) {
   if (task?.asset_type !== 'material' || !task?.asset_id) return false
   if (task?.status === 'failed' || task?.status === 'cancelled') return true
-  return task?.status === 'success' && presence === 'absent'
+  return task?.status === 'success' && presence === FILE_PRESENCE.absent
 }
 
 export function canCancel(task) {

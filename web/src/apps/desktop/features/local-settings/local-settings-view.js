@@ -143,6 +143,246 @@ export function describeDiagnostic(report) {
 }
 
 /**
+ * What the push note says, from the **Agent's own answer** rather than from the
+ * fact that the command returned.
+ *
+ * The answer is a read-back: the Agent reports the directory *it* has, which can
+ * differ from what Desktop just stored — the Agent may have been down when the
+ * choice was made, or its own store changed elsewhere. Saying 「已推送」 off a
+ * successful return would report the request instead of the result, and the only
+ * directory a download will actually use is the Agent's.
+ */
+export function describePush(facts) {
+  if (!facts.saveDir) {
+    return {
+      theme: "warning",
+      text: "本机执行服务没有记下这个位置。它下次启动时仍会读到这个位置，可以稍后再试一次。",
+    };
+  }
+  if (!facts.writable) {
+    return {
+      theme: "warning",
+      text: `本机执行服务现在会写到 ${facts.saveDir}，但它报告这个位置目前写不进去。素材会下载失败，直到它可写为止。`,
+    };
+  }
+  return {
+    theme: "info",
+    text: `本机执行服务现在会写到 ${facts.saveDir}（可用 ${formatBytes(facts.freeBytes)}）。`,
+  };
+}
+
+/**
+ * Saving a new location does not move anything by itself, so the page asks what
+ * moving the old files would involve and puts the answer in front of the person.
+ * These are that dialog's rules.
+ *
+ * ## Nothing is selected to begin with
+ *
+ * The default for every file is 保留. Moving and deleting both act on files the
+ * person did not create through this page, and a dialog whose default is 「搬运」
+ * turns one button press into a bulk file operation nobody asked for. The cost of
+ * the safe default is a few clicks; the cost of the other one is somebody's
+ * files. 「存储在别处的文件」 is exactly the kind of thing that is cheaper to
+ * re-download than to recover.
+ */
+export const FILE_CHOICES = Object.freeze({
+  move: "move",
+  delete: "delete",
+  keep: "keep",
+});
+
+const CHOICE_LABELS = Object.freeze({
+  move: "搬运",
+  delete: "删除",
+  keep: "保留",
+});
+
+export function choiceLabel(choice) {
+  return CHOICE_LABELS[choice] ?? CHOICE_LABELS.keep;
+}
+
+/**
+ * What each state a scanned file can be in is called.
+ *
+ * `tone` is `ResourceStatusBadge`'s, and 「已在当前位置」 is `success` rather than
+ * `neutral` on purpose: it is the one state that needs nothing done to it, and a
+ * neutral badge next to two warnings reads as a third problem.
+ */
+const FILE_STATUS = Object.freeze({
+  movable: { label: "待搬运", tone: "warning" },
+  already_there: { label: "已在当前位置", tone: "success" },
+  missing: { label: "已不存在", tone: "neutral" },
+});
+
+/** What a `kept` reason token means. The Rust side sends tokens, not prose. */
+const KEPT_REASON_LABELS = Object.freeze({
+  same_directory: "已经在目标位置",
+  target_exists: "目标位置已有同名文件",
+  not_a_regular_file: "不是常规文件",
+  symlink: "是符号链接",
+});
+
+export function keptReasonLabel(reason) {
+  return KEPT_REASON_LABELS[reason] ?? reason ?? "";
+}
+
+/** The files a plan found nowhere, when at least one directory could not be listed. */
+function missingStatusLabel(plan) {
+  // 「已不存在」 is a claim about the file; it needs every known location to have
+  // been read. With one directory unreadable the honest sentence is the weaker
+  // one, because the file may be sitting in the directory nobody could open —
+  // and a person told 「已删除」 re-downloads 230 MB they still have.
+  return plan.unreadable.length ? { label: "未找到", tone: "neutral" } : FILE_STATUS.missing;
+}
+
+/**
+ * The dialog's rows: every file the plan mentions, with the state it is in and
+ * the choice that currently applies to it.
+ *
+ * Only 待搬运 rows carry a choice. A file already in the chosen directory has
+ * nothing to decide, and a file that is not there cannot be acted on — giving
+ * either of them buttons would be offering an action whose only outcome is a
+ * report saying it did nothing.
+ */
+export function migrationRows(plan, choices = {}) {
+  const missing = missingStatusLabel(plan);
+  const rows = [
+    ...plan.movable.map((file) => ({ file, status: "movable", selectable: true })),
+    ...plan.alreadyThere.map((file) => ({ file, status: "already_there", selectable: false })),
+    ...plan.missing.map((file) => ({ file, status: "missing", selectable: false, display: missing })),
+  ];
+
+  return rows.map(({ file, status, selectable, display }) => {
+    const state = display ?? FILE_STATUS[status];
+    return {
+      name: file.name,
+      directory: file.directory,
+      // A size that was not read is 未知, never 「0 B」 (AC-06) — see `formatBytes`.
+      bytesText: formatBytes(file.bytes),
+      status,
+      statusLabel: state.label,
+      statusTone: state.tone,
+      selectable,
+      choice: selectable ? choices[file.name] ?? FILE_CHOICES.keep : FILE_CHOICES.keep,
+    };
+  });
+}
+
+/** The names marked for one action, in the order the rows are shown. */
+export function chosenNames(rows, action) {
+  return rows.filter((row) => row.selectable && row.choice === action).map((row) => row.name);
+}
+
+/**
+ * What the dialog says before anything is touched: where the files would go, how
+ * much that needs, and how much room there is.
+ *
+ * The sizes are a **lower bound** whenever one of them could not be read — which
+ * is why the sentence says 「至少」. A total that quietly left out the unmeasured
+ * file would be a number that gets a space check past a full disk.
+ */
+export function describeMigrationPlan(plan) {
+  // The plan's own total, not one added up here: the side that walked the
+  // directories counted once, and a second sum in the renderer is a second
+  // definition of 「需要多少空间」 that can disagree with the one on the wire.
+  const needed = plan.neededBytes;
+  const unmeasured = plan.movable.filter((file) => !Number.isFinite(file.bytes)).length;
+  const atLeast = unmeasured > 0 ? "至少 " : "";
+  const shortfall = needed > plan.freeBytes;
+
+  const lines = [
+    `目标位置：${plan.to}`,
+    `待搬运 ${plan.movable.length} 个文件，需要${atLeast}${formatBytes(needed)}；目标位置可用的空间：${formatBytes(plan.freeBytes)}`,
+  ];
+  if (plan.alreadyThere.length) {
+    lines.push(`已在目标位置：${plan.alreadyThere.length} 个文件`);
+  }
+  if (plan.missing.length) {
+    lines.push(
+      plan.unreadable.length
+        ? `在查得到的目录里没找到：${plan.missing.map((file) => file.name).join("、")}`
+        : `已不在任何已知的保存位置：${plan.missing.map((file) => file.name).join("、")}`
+    );
+  }
+  if (unmeasured > 0) {
+    lines.push(`有 ${unmeasured} 个文件读不到体积，上面的需要量不含它们`);
+  }
+  // Named, and named loudly: this is the state that makes every 「没找到」 below it
+  // less than a fact.
+  if (plan.unreadable.length) {
+    lines.push(
+      `有 ${plan.unreadable.length} 个已知位置读不了，那里的文件没有查过：` +
+        plan.unreadable.map((item) => `${item.directory}（${item.reason}）`).join("；")
+    );
+  }
+
+  return {
+    // A shortfall is information, not a refusal: the files still have to be moved
+    // off a disk that is being replaced, and the person may be about to free the
+    // space or to unplug something. The list below stays usable either way.
+    theme: shortfall || plan.unreadable.length ? "warning" : "info",
+    text: plan.movable.length
+      ? `要把 ${plan.movable.length} 个文件搬到 ${plan.to}`
+      : "没有需要搬运的文件",
+    detail: lines.join("\n"),
+    shortfall,
+  };
+}
+
+/**
+ * What one move or delete says happened.
+ *
+ * The order matters for the same reason it does in `describeCleanup`: an action
+ * that failed *and* did nothing is not an action that had nothing to do, and the
+ * two are indistinguishable from the done-count alone.
+ */
+export function describeMigration(report, action = FILE_CHOICES.move) {
+  const removing = action === FILE_CHOICES.delete;
+  const verb = removing ? "删除" : "搬运";
+  const done = removing ? report.deleted : report.moved;
+  const failures = report.failures.length;
+  const lines = [];
+
+  if (report.kept.length) {
+    lines.push(
+      `保留了 ${report.kept.length} 项：` +
+        report.kept.map((item) => `${item.name}（${keptReasonLabel(item.reason)}）`).join("、")
+    );
+  }
+  if (report.missing.length) {
+    lines.push(`名单里有 ${report.missing.length} 个文件没找到：${report.missing.join("、")}`);
+  }
+  if (failures) {
+    lines.push(report.failures.map((failure) => `${failure.name}：${failure.reason}`).join("\n"));
+  }
+  const detail = lines.join("\n");
+
+  if (failures && done.length === 0) {
+    return { theme: "error", text: `${verb}没有完成：${failures} 项失败，没有文件被${verb}`, detail };
+  }
+  if (failures) {
+    return {
+      theme: "warning",
+      text: `${verb}部分完成：${done.length} 个文件已${verb}，${failures} 项失败`,
+      detail,
+    };
+  }
+  if (done.length === 0) {
+    return { theme: "info", text: `没有文件需要${verb}`, detail };
+  }
+  return {
+    theme: "success",
+    // The destination is named for a move and not for a delete: a deletion has no
+    // destination, and naming the chosen directory next to it would read as 「these
+    // were deleted from there」, which is not what the report says.
+    text: removing
+      ? `已删除 ${done.length} 个文件`
+      : `已搬到 ${report.directory}：${done.length} 个文件`,
+    detail,
+  };
+}
+
+/**
  * The whole page's view state.
  *
  * `settings` and `usage` are separate answers from separate commands, and either

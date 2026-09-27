@@ -25,6 +25,7 @@
 export const LOCAL_SETTINGS_COMMANDS = Object.freeze({
   getSettings: "local_settings_get",
   setSettings: "local_settings_set",
+  pushSaveDirectory: "local_push_save_directory",
   storageUsage: "local_storage_usage",
   logFiles: "local_log_files",
   logTail: "local_log_tail",
@@ -32,6 +33,9 @@ export const LOCAL_SETTINGS_COMMANDS = Object.freeze({
   logCleanup: "local_log_cleanup",
   diagnosticExport: "local_diagnostic_export",
   openPlace: "local_open_place",
+  migrationPlan: "local_save_dir_migration_plan",
+  moveSavedFiles: "local_move_saved_files",
+  deleteSavedFiles: "local_delete_saved_files",
 });
 
 /** The two components whose logs this page can show, in the order it shows them. */
@@ -57,6 +61,21 @@ function asCount(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+/**
+ * A count that stays `null` when it was not measured.
+ *
+ * `asCount` above is right for a count that is a count; a *size* is different —
+ * a missing one must not become `0`, because `0` is a measurement and the two are
+ * summed into 「需要多少空间」 (see `formatBytes` in `local-settings-view.js`).
+ */
+function asNullableCount(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 /** The operator's settings as the page reads them. */
 export function normalizeSettingsView(value) {
   const source = asObject(value);
@@ -65,6 +84,24 @@ export function normalizeSettingsView(value) {
     // normalizer so the page cannot render an empty box that looks filled in.
     saveDir: source.save_dir ?? null,
     file: String(source.file ?? ""),
+  };
+}
+
+/**
+ * What the Agent says about the save location, **read back from the Agent**.
+ *
+ * `saveDir` is the Agent's own answer rather than an echo of what Desktop just
+ * stored, and the two can disagree: the Agent may have been down when the choice
+ * was made. What a download depends on is 「Agent 现在会往哪里写」, so that is
+ * what this carries — and `writable` says whether a task could write there right
+ * now, which is a different question from whether the directory exists.
+ */
+export function normalizeSaveDirectoryFacts(value) {
+  const source = asObject(value);
+  return {
+    saveDir: source.save_dir ?? null,
+    writable: source.writable === true,
+    freeBytes: asCount(source.free_bytes),
   };
 }
 
@@ -183,6 +220,73 @@ export function normalizeDiagnosticReport(value) {
   };
 }
 
+/**
+ * One saved file as the migration plan counts it.
+ *
+ * `bytes` is `null` when the size could not be read — and it is *not* turned into
+ * `0` here either (AC-06): the plan's `needed_bytes` is a sum, and a missing size
+ * silently worth nothing is how a space check passes on a disk that is full.
+ */
+export function normalizeSavedFile(value) {
+  const source = asObject(value);
+  return {
+    name: String(source.name ?? ""),
+    directory: String(source.directory ?? ""),
+    bytes: asNullableCount(source.bytes),
+  };
+}
+
+/** A known save directory that could not be listed, and why. */
+export function normalizeUnreadableDir(value) {
+  const source = asObject(value);
+  return {
+    directory: String(source.directory ?? ""),
+    reason: String(source.reason ?? ""),
+  };
+}
+
+/**
+ * What moving the saved files would do, before anything is touched.
+ *
+ * `movable` / `already_there` / `missing` carry a record per name rather than a
+ * bare name because the dialog has to show a size beside each one (「逐个列出名字
+ * 与体积」); a second command for that would re-run the same directory walk and
+ * could answer about a different moment.
+ */
+export function normalizeMigrationPlan(value) {
+  const source = asObject(value);
+  return {
+    to: String(source.to ?? ""),
+    freeBytes: asCount(source.free_bytes),
+    neededBytes: asCount(source.needed_bytes),
+    movable: asArray(source.movable).map(normalizeSavedFile),
+    alreadyThere: asArray(source.already_there).map(normalizeSavedFile),
+    missing: asArray(source.missing).map(normalizeSavedFile),
+    unreadable: asArray(source.unreadable).map(normalizeUnreadableDir),
+  };
+}
+
+/** What one move or delete did. Both commands answer in this one shape. */
+export function normalizeMigrationReport(value) {
+  const source = asObject(value);
+  return {
+    directory: String(source.directory ?? ""),
+    moved: asArray(source.moved).map(String),
+    deleted: asArray(source.deleted).map(String),
+    missing: asArray(source.missing).map(String),
+    kept: asArray(source.kept).map((entry) => {
+      const kept = asObject(entry);
+      return { name: String(kept.name ?? ""), reason: String(kept.reason ?? "") };
+    }),
+    failures: asArray(source.failures).map((entry) => {
+      const failure = asObject(entry);
+      // The name, not a path: the whole point of this command family is that no
+      // path crosses it, and a failure names the file the person picked.
+      return { name: String(failure.name ?? ""), reason: String(failure.reason ?? "") };
+    }),
+  };
+}
+
 // Real Tauri invoke-based service.
 // Falls back to mock when Tauri is unavailable (Vite dev mode).
 //
@@ -213,6 +317,36 @@ export function createLocalSettingsService({ invoke } = {}) {
         await call(LOCAL_SETTINGS_COMMANDS.setSettings, {
           saveDir: path === null || path === undefined ? null : String(path),
         })
+      );
+    },
+    /**
+     * Tell the Agent where downloads should go from now on.
+     *
+     * Storing the choice (`setSaveDir`) only writes this app's own settings file;
+     * the machine that actually writes the files learns the directory from this
+     * push, and it is a **separate** command because it can fail on its own (the
+     * Agent may not be running). The page treats that failure as non-fatal: the
+     * next agent start pushes the same value again.
+     */
+    async pushSaveDir() {
+      return normalizeSaveDirectoryFacts(await call(LOCAL_SETTINGS_COMMANDS.pushSaveDirectory));
+    },
+    /** What moving the named files to the chosen directory would involve. */
+    async migrationPlan(names) {
+      return normalizeMigrationPlan(
+        await call(LOCAL_SETTINGS_COMMANDS.migrationPlan, { names })
+      );
+    },
+    /** Move the named files into the chosen directory. Nothing else is touched. */
+    async moveSavedFiles(names) {
+      return normalizeMigrationReport(
+        await call(LOCAL_SETTINGS_COMMANDS.moveSavedFiles, { names })
+      );
+    },
+    /** Delete the named files. Regular files only, and only the named ones. */
+    async deleteSavedFiles(names) {
+      return normalizeMigrationReport(
+        await call(LOCAL_SETTINGS_COMMANDS.deleteSavedFiles, { names })
       );
     },
     async storageUsage() {
@@ -265,6 +399,19 @@ export function createLocalSettingsService({ invoke } = {}) {
 export function createMockInvoke() {
   let saveDir = null;
   const file = "/mock/WTMedia/Desktop/settings.toml";
+  // The pretend download history, and one older save directory holding two of
+  // them. `old: false` is a file already in the chosen directory; `bytes: null`
+  // is one whose size could not be read.
+  const oldDir = "/mock/Movies/WTMedia-old";
+  const saved = [
+    { name: "演示素材-42.mp4", old: true, bytes: 230 * 1024 * 1024 },
+    { name: "演示素材-43.mp4", old: true, bytes: null },
+    { name: "成片-7.mp4", old: false, bytes: 48 * 1024 * 1024 },
+  ];
+  // One known directory this stand-in cannot list. It is here on purpose: with
+  // every directory readable the page never draws the branch that says 「有位置
+  // 没查成」, and that branch is the difference between 「已不存在」 and 「未找到」.
+  const unreadable = [{ directory: "/mock/Movies/WTMedia-perm", reason: "Permission denied (os error 13)" }];
   const trees = [
     {
       source: "desktop",
@@ -304,6 +451,20 @@ export function createMockInvoke() {
       case LOCAL_SETTINGS_COMMANDS.setSettings:
         saveDir = args.saveDir ?? null;
         return clone({ save_dir: saveDir, file });
+      case LOCAL_SETTINGS_COMMANDS.pushSaveDirectory:
+        // Refuses while nothing is chosen, exactly as the Rust side does — a mock
+        // that answered 「记下了」 for a push that carried nothing would let the
+        // page report success for a location the Agent does not have.
+        if (!saveDir) {
+          throw new Error("还没有选择下载保存位置");
+        }
+        return clone({ save_dir: saveDir, writable: true, free_bytes: 512 * 1024 * 1024 * 1024 });
+      case LOCAL_SETTINGS_COMMANDS.migrationPlan:
+        return clone(mockPlan(saved, args.names, saveDir, oldDir, unreadable));
+      case LOCAL_SETTINGS_COMMANDS.moveSavedFiles:
+        return clone(mockMigrate(saved, args.names, saveDir, "move"));
+      case LOCAL_SETTINGS_COMMANDS.deleteSavedFiles:
+        return clone(mockMigrate(saved, args.names, saveDir, "delete"));
       case LOCAL_SETTINGS_COMMANDS.storageUsage:
         return clone({
           available_bytes: 512 * 1024 * 1024 * 1024,
@@ -360,6 +521,70 @@ export function createMockInvoke() {
         // in the app.
         throw new Error(`mock invoke got an unknown command: ${command}`);
     }
+  };
+}
+
+/**
+ * The stand-in's migration plan, in the Rust side's spelling.
+ *
+ * `needed_bytes` sums only the sizes that were read; a file with an unreadable
+ * size contributes nothing and the page shows it as 未知 rather than as 0 B —
+ * the sum is then a lower bound, which is why the dialog says 「至少」.
+ */
+function mockPlan(saved, names, saveDir, oldDir, unreadable) {
+  const asked = Array.isArray(names) ? names : [];
+  const at = (entry) => (entry.old ? oldDir : saveDir ?? "/mock/Movies/WTMedia");
+  const found = saved.filter((entry) => asked.includes(entry.name));
+  const movable = found.filter((entry) => entry.old);
+  return {
+    to: saveDir ?? "/mock/Movies/WTMedia",
+    free_bytes: 512 * 1024 * 1024 * 1024,
+    needed_bytes: movable.reduce((sum, entry) => sum + (entry.bytes ?? 0), 0),
+    movable: movable.map((entry) => ({ name: entry.name, directory: at(entry), bytes: entry.bytes })),
+    already_there: found
+      .filter((entry) => !entry.old)
+      .map((entry) => ({ name: entry.name, directory: at(entry), bytes: entry.bytes })),
+    // Asked about and not on this pretend disk: 「未找到」, not an error.
+    missing: asked
+      .filter((name) => !saved.some((entry) => entry.name === name))
+      .map((name) => ({ name, directory: "", bytes: null })),
+    unreadable,
+  };
+}
+
+/** The stand-in's move/delete, which really does change what a later call sees. */
+function mockMigrate(saved, names, saveDir, action) {
+  const asked = new Set(Array.isArray(names) ? names : []);
+  const moved = [];
+  const deleted = [];
+  const kept = [];
+  for (const entry of saved) {
+    if (!asked.has(entry.name)) continue;
+    if (action === "delete") {
+      deleted.push(entry.name);
+      entry.removed = true;
+      continue;
+    }
+    if (!entry.old) {
+      // Already where it was asked to go: kept, and not counted as moved. The
+      // same distinction the Rust side draws.
+      kept.push({ name: entry.name, reason: "same_directory" });
+      continue;
+    }
+    entry.old = false;
+    moved.push(entry.name);
+  }
+  const missing = [...asked].filter((name) => !saved.some((entry) => entry.name === name));
+  const survivors = saved.filter((entry) => !entry.removed);
+  saved.length = 0;
+  saved.push(...survivors);
+  return {
+    directory: saveDir ?? "/mock/Movies/WTMedia",
+    moved,
+    deleted,
+    missing,
+    kept,
+    failures: [],
   };
 }
 

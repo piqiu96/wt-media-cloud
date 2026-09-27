@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  FILE_CHOICES,
+  choiceLabel,
+  chosenNames,
   createLocalSettingsPage,
   describeCleanup,
   describeDiagnostic,
+  describeMigration,
+  describeMigrationPlan,
+  describePush,
   formatBytes,
   formatModified,
+  keptReasonLabel,
   logKindLabel,
+  migrationRows,
 } from './apps/desktop/features/local-settings/local-settings-view.js'
 
 describe('byte formatting', () => {
@@ -323,5 +331,313 @@ describe('settings page state', () => {
     expect(page.fileText).toBe('')
     expect(page.logTrees).toEqual([])
     expect(page.availableText).toBe('')
+  })
+})
+
+/**
+ * The 搬运 dialog.
+ *
+ * This is the only place the page touches files the person did not just create,
+ * so the rules live here — in a plain module a test can import — rather than in
+ * the `.vue` file. What is asserted below is mostly about *not* offering things:
+ * not offering an action on a file that is already in place, not calling a file
+ * gone when a directory could not be read, and not starting with anything
+ * selected.
+ */
+/**
+ * The note under the save-location field after a push.
+ *
+ * It is written from the **Agent's answer**, and the three branches are three
+ * different states of the machine — which is why they are three sentences rather
+ * than one with the directory substituted in.
+ */
+describe('push reporting', () => {
+  it('reports the directory the Agent will actually use, with its free space', () => {
+    const said = describePush({ saveDir: '/new', writable: true, freeBytes: 1024 ** 3 })
+
+    expect(said.theme).toBe('info')
+    expect(said.text).toContain('/new')
+    // The Agent's own number, formatted here — not a bare byte count.
+    expect(said.text).toContain('1.0 GB')
+  })
+
+  // Stored but unusable is a warning, not a success: the next download will fail
+  // and the person should hear it from this page rather than from a failed task.
+  it('warns when the Agent has the directory but cannot write there', () => {
+    const said = describePush({ saveDir: '/new', writable: false, freeBytes: 10 })
+
+    expect(said.theme).toBe('warning')
+    expect(said.text).toContain('/new')
+    expect(said.text).toContain('写不进去')
+  })
+
+  /**
+   * An Agent that reports no directory at all after a push is not 「已推送」.
+   *
+   * This is the branch the first draft of this page got wrong: it rendered the
+   * command's return value with `String(...)`, so this case showed
+   * 「[object Object]」 and every case looked like a success. The answer is a
+   * read-back, so 「没有记下」 is a real outcome and needs its own sentence.
+   */
+  it('does not call it pushed when the Agent reports no directory', () => {
+    const said = describePush({ saveDir: null, writable: false, freeBytes: 0 })
+
+    expect(said.theme).toBe('warning')
+    expect(said.text).toContain('没有记下')
+    expect(said.text).not.toContain('null')
+  })
+})
+
+describe('migration dialog rows', () => {
+  function plan(overrides = {}) {
+    return {
+      to: '/new',
+      freeBytes: 1_000_000,
+      neededBytes: 500,
+      movable: [{ name: 'a.mp4', directory: '/old', bytes: 500 }],
+      alreadyThere: [{ name: 'b.mp4', directory: '/new', bytes: 300 }],
+      missing: [{ name: 'c.mp4', directory: '', bytes: null }],
+      unreadable: [],
+      ...overrides,
+    }
+  }
+
+  // The order is the priority: what needs deciding first, then what is already
+  // fine, then what is not there.
+  it('lists the files that need a decision before the ones that do not', () => {
+    expect(migrationRows(plan()).map((row) => row.status)).toEqual([
+      'movable', 'already_there', 'missing',
+    ])
+  })
+
+  /**
+   * **Nothing starts selected.** The default for every file is 保留.
+   *
+   * Moving and deleting act on the person's own files, and a dialog that opened
+   * with 「搬运」 already chosen turns one press of the confirm button into a bulk
+   * file operation nobody asked for. The cost of the safe default is a few
+   * clicks; the cost of the other one is somebody's files.
+   */
+  it('starts every file at 保留, with nothing to carry out', () => {
+    const rows = migrationRows(plan())
+
+    expect(rows.map((row) => row.choice)).toEqual(['keep', 'keep', 'keep'])
+    expect(chosenNames(rows, FILE_CHOICES.move)).toEqual([])
+    expect(chosenNames(rows, FILE_CHOICES.delete)).toEqual([])
+    // And the words the buttons show come from one place.
+    expect(rows.map((row) => choiceLabel(row.choice))).toEqual(['保留', '保留', '保留'])
+  })
+
+  it('carries a decision through to the name it was made about', () => {
+    const rows = migrationRows(plan(), { 'a.mp4': FILE_CHOICES.move })
+
+    expect(chosenNames(rows, FILE_CHOICES.move)).toEqual(['a.mp4'])
+    expect(chosenNames(rows, FILE_CHOICES.delete)).toEqual([])
+  })
+
+  // A file already in the chosen directory has nothing to decide, and a file that
+  // is not there cannot be acted on. Offering either one buttons gets an action
+  // whose only possible outcome is a report saying nothing happened.
+  it('offers no buttons on a row that has nothing to decide', () => {
+    const rows = migrationRows(plan(), { 'a.mp4': FILE_CHOICES.move, 'b.mp4': FILE_CHOICES.delete })
+
+    expect(rows.map((row) => row.selectable)).toEqual([true, false, false])
+    // Even a caller that marked them is not obeyed.
+    expect(chosenNames(rows, FILE_CHOICES.delete)).toEqual([])
+    expect(chosenNames(rows, FILE_CHOICES.move)).toEqual(['a.mp4'])
+  })
+
+  it('shows a size that was not read as 未知 rather than as zero', () => {
+    const rows = migrationRows(plan())
+
+    expect(rows[0].bytesText).toBe('500 B')
+    expect(rows[2].bytesText).toBe('未知')
+  })
+
+  /**
+   * 「未找到」 and 「已不存在」 are different claims, and only one of them is
+   * available after a directory could not be read.
+   *
+   * A file may be sitting in the directory nobody could open. Telling a person it
+   * no longer exists is how they re-download 230 MB they still have.
+   */
+  it('will not call a file gone while a known directory went unread', () => {
+    const whole = migrationRows(plan())
+    expect(whole[2].statusLabel).toBe('已不存在')
+
+    const partial = migrationRows(plan({
+      unreadable: [{ directory: '/locked', reason: 'Permission denied (os error 13)' }],
+    }))
+    expect(partial[2].statusLabel).toBe('未找到')
+    // The rows that *were* measured keep their own labels either way.
+    expect(partial[0].statusLabel).toBe('待搬运')
+    expect(partial[1].statusLabel).toBe('已在当前位置')
+  })
+
+  it('names a kept file by the reason the Rust side recorded', () => {
+    expect(keptReasonLabel('target_exists')).toBe('目标位置已有同名文件')
+    expect(keptReasonLabel('same_directory')).toBe('已经在目标位置')
+    // An unrecognised token is passed through rather than replaced: a reason
+    // nobody translated is still more use than a blank.
+    expect(keptReasonLabel('something_new')).toBe('something_new')
+  })
+})
+
+describe('migration plan summary', () => {
+  function plan(overrides = {}) {
+    return {
+      to: '/new',
+      freeBytes: 1_000_000,
+      neededBytes: 500,
+      movable: [{ name: 'a.mp4', directory: '/old', bytes: 500 }],
+      alreadyThere: [],
+      missing: [],
+      unreadable: [],
+      ...overrides,
+    }
+  }
+
+  it('says where the files would go and how much room they need', () => {
+    const said = describeMigrationPlan(plan())
+
+    expect(said.theme).toBe('info')
+    expect(said.text).toContain('/new')
+    expect(said.detail).toContain('1 个文件')
+    expect(said.detail).toContain('500 B')
+    expect(said.shortfall).toBe(false)
+  })
+
+  // A shortfall is information, not a refusal — the dialog stays usable, because
+  // the person may be about to free the space or to move the files somewhere else.
+  it('flags a target without room without refusing the move', () => {
+    const said = describeMigrationPlan(plan({ freeBytes: 100, neededBytes: 500 }))
+
+    expect(said.shortfall).toBe(true)
+    expect(said.theme).toBe('warning')
+    expect(said.text).toContain('1 个文件')
+  })
+
+  // The total is a lower bound once a size is missing, and it says so: a number
+  // that quietly left out the unmeasured file is a space check that passes on a
+  // disk that is full.
+  it('calls the total a lower bound when a size could not be read', () => {
+    const said = describeMigrationPlan(plan({
+      movable: [
+        { name: 'a.mp4', directory: '/old', bytes: 500 },
+        { name: 'b.mp4', directory: '/old', bytes: null },
+      ],
+    }))
+
+    expect(said.detail).toContain('至少')
+    expect(said.detail).toContain('1 个文件读不到体积')
+  })
+
+  /**
+   * A directory that could not be listed is named, with its reason.
+   *
+   * Almost every other sentence in this dialog is a claim about a file. This one
+   * is the caveat that makes 「未找到」 less than a fact, so it has to be visible
+   * rather than folded into a count.
+   */
+  it('names the directories it could not read, and why', () => {
+    const said = describeMigrationPlan(plan({
+      missing: [{ name: 'c.mp4', directory: '', bytes: null }],
+      unreadable: [{ directory: '/locked', reason: 'Permission denied (os error 13)' }],
+    }))
+
+    expect(said.detail).toContain('/locked')
+    expect(said.detail).toContain('Permission denied (os error 13)')
+    expect(said.detail).toContain('在查得到的目录里没找到')
+    expect(said.theme).toBe('warning')
+  })
+
+  it('says there is nothing to move when there is nothing to move', () => {
+    const said = describeMigrationPlan(plan({ movable: [], neededBytes: 0 }))
+
+    expect(said.text).toBe('没有需要搬运的文件')
+  })
+})
+
+describe('migration reporting', () => {
+  function report(overrides = {}) {
+    return {
+      directory: '/new',
+      moved: [],
+      deleted: [],
+      missing: [],
+      kept: [],
+      failures: [],
+      ...overrides,
+    }
+  }
+
+  it('reports a completed move as success, naming where the files went', () => {
+    const said = describeMigration(report({ moved: ['a.mp4', 'b.mp4'] }), FILE_CHOICES.move)
+
+    expect(said.theme).toBe('success')
+    expect(said.text).toContain('/new')
+    expect(said.text).toContain('2 个文件')
+  })
+
+  // A deletion has no destination. Naming the chosen directory beside it would
+  // read as 「these were deleted from there」, which is not what the report says.
+  it('does not name a destination for a deletion', () => {
+    const said = describeMigration(report({ deleted: ['a.mp4'] }), FILE_CHOICES.delete)
+
+    expect(said.theme).toBe('success')
+    expect(said.text).toContain('已删除')
+    expect(said.text).not.toContain('/new')
+  })
+
+  /**
+   * A move that failed *and* moved nothing is not a move that had nothing to do.
+   *
+   * The two are indistinguishable from the count alone — which is why the same
+   * shape as `describeCleanup` is used here rather than a single sentence with
+   * the number in it.
+   */
+  it('does not report a wholly failed move as an empty one', () => {
+    const said = describeMigration(report({ failures: [{ name: 'a.mp4', reason: 'read-only' }] }), FILE_CHOICES.move)
+
+    expect(said.theme).toBe('error')
+    expect(said.text).toContain('没有完成')
+    expect(said.text).not.toContain('没有文件需要')
+    expect(said.detail).toContain('a.mp4')
+    expect(said.detail).toContain('read-only')
+  })
+
+  it('reports a partial move as a warning with the failures listed', () => {
+    const said = describeMigration(report({
+      moved: ['a.mp4'],
+      failures: [{ name: 'b.mp4', reason: 'read-only' }],
+    }), FILE_CHOICES.move)
+
+    expect(said.theme).toBe('warning')
+    expect(said.text).toContain('部分完成')
+    expect(said.detail).toContain('b.mp4')
+  })
+
+  // Kept files are not failures, and they come with their reason — a file left
+  // behind because the target already had that name is the one case a person
+  // needs to know about before they assume the move did nothing.
+  it('names what was kept, with the reason, without calling it a failure', () => {
+    const said = describeMigration(report({
+      moved: ['a.mp4'],
+      kept: [{ name: 'b.mp4', reason: 'target_exists' }],
+      missing: ['z.mp4'],
+    }), FILE_CHOICES.move)
+
+    expect(said.theme).toBe('success')
+    expect(said.detail).toContain('b.mp4')
+    expect(said.detail).toContain('目标位置已有同名文件')
+    expect(said.detail).toContain('z.mp4')
+  })
+
+  it('reports nothing to do as information rather than as success', () => {
+    const said = describeMigration(report({ kept: [{ name: 'a.mp4', reason: 'same_directory' }] }))
+
+    expect(said.theme).toBe('info')
+    expect(said.text).toBe('没有文件需要搬运')
+    expect(said.detail).toContain('已经在目标位置')
   })
 })
