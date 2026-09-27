@@ -56,8 +56,8 @@ func (mysqlStore) MarkVideoFailed(teamID identityservice.TeamID, materialID int6
 // so that the two module boundaries this module crosses are visible in one file.
 type runtimeNodeResolver struct{}
 
-func (runtimeNodeResolver) ResolveFreshLocalNode(userID identityservice.UserID) (runtimeservice.AgentNode, error) {
-	return runtimeservice.ResolveFreshLocalNode(userID)
+func (runtimeNodeResolver) ResolveTrustedLocalNode(userID identityservice.UserID) (runtimeservice.AgentNode, error) {
+	return runtimeservice.ResolveTrustedLocalNode(userID)
 }
 
 type productionTransferCreator struct{}

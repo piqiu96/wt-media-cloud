@@ -30,6 +30,6 @@ func AuthenticateNodeCredential(credential string) (model.AgentNode, error) {
 	return newService(mysqlStore{}).AuthenticateNodeCredential(credential)
 }
 
-func ResolveFreshLocalNode(userID service.UserID) (model.AgentNode, error) {
-	return newService(mysqlStore{}).ResolveFreshLocalNode(userID)
+func ResolveTrustedLocalNode(userID service.UserID) (model.AgentNode, error) {
+	return newService(mysqlStore{}).ResolveTrustedLocalNode(userID)
 }

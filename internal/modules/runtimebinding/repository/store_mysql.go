@@ -135,26 +135,37 @@ func ValidateRuntimeProfiles(userID sharedidentity.UserID, mainUserID string, pr
 	return validateRuntimeProfiles(database.DB(), userID, mainUserID, profileIDs)
 }
 
-// FindFreshLocalNode resolves the local node a session can use without naming it,
-// because a session route knows who is asking but not which device they are on.
+// FindTrustedLocalNode resolves the local node a session can use without naming
+// it, because a session route knows who is asking but not which device they are
+// on.
 //
-// The trust conditions are `checkLocalTrust`'s, with `n.user_id = ?` where that
-// one has `n.id = ?`: a live session, a fresh heartbeat, an online node, and the
-// BitBrowser main account agreeing with the bound one. They are the same
-// conditions on purpose — "the user has a usable node" and "this node is usable
-// for this user" must not be able to disagree — so they are worth reading side by
-// side, and any change to one is a change to the other.
+// The conditions are `checkLocalTrust`'s, with `n.user_id = ?` where that one has
+// `n.id = ?`, **minus the heartbeat bound** — and that one difference is on
+// purpose, so the pair is worth reading side by side. A named-node trust check
+// answers "may this machine act for this user *now*" and is asked by the flows
+// that are about to drive a browser on it. This one answers "which machine should
+// receive a download the user just queued", and a queue entry does not need a
+// recent report: the Local Agent claims it on its own schedule, under its own node
+// credential, and the row is visible and cancellable meanwhile. Requiring a fresh
+// heartbeat here couples a click to a report the operator has to produce by hand
+// from the Agent page, which refuses downloads from a machine that is plainly
+// bound and plainly running — and a machine that is genuinely gone shows up as a
+// task waiting for its node, which is the state the operator can act on.
 //
-// A user may have several live devices, so the choice has to be deterministic:
+// Everything else is the same: a live session, an online node, an enabled user
+// with a bound BitBrowser main account, and a node reporting that same main
+// account. A change to any of those belongs in both functions.
+//
+// A user may have several bound devices, so the choice has to be deterministic:
 // newest heartbeat first, and `n.id` breaks the tie, because two nodes reporting
 // in the same second would otherwise resolve differently on consecutive calls and
 // the transfer would be assigned to a node that the next click did not pick.
-func FindFreshLocalNode(userID sharedidentity.UserID, at time.Time, freshness time.Duration) (model.AgentNode, bool, error) {
-	return findFreshLocalNode(database.DB(), userID, at, freshness)
+func FindTrustedLocalNode(userID sharedidentity.UserID) (model.AgentNode, bool, error) {
+	return findTrustedLocalNode(database.DB(), userID)
 }
 
-func findFreshLocalNode(db *gorm.DB, userID sharedidentity.UserID, at time.Time, freshness time.Duration) (model.AgentNode, bool, error) {
-	if userID <= 0 || freshness <= 0 {
+func findTrustedLocalNode(db *gorm.DB, userID sharedidentity.UserID) (model.AgentNode, bool, error) {
+	if userID <= 0 {
 		return model.AgentNode{}, false, nil
 	}
 	var node model.AgentNode
@@ -164,10 +175,10 @@ func findFreshLocalNode(db *gorm.DB, userID sharedidentity.UserID, at time.Time,
 		JOIN users u ON u.id = n.user_id
 		JOIN user_sessions s ON s.id = n.session_id
 		WHERE n.user_id = ? AND n.mode = 'local' AND n.status = 'online'
-		  AND n.last_heartbeat_at >= ? AND s.invalidated_at IS NULL AND u.status = 'enabled'
+		  AND s.invalidated_at IS NULL AND u.status = 'enabled'
 		  AND u.bit_main_user_id IS NOT NULL AND n.bitbrowser_status = 'normal'
 		  AND n.reported_main_user_id = u.bit_main_user_id
-		ORDER BY n.last_heartbeat_at DESC, n.id ASC LIMIT 1`, userID, at.Add(-freshness)).
+		ORDER BY n.last_heartbeat_at DESC, n.id ASC LIMIT 1`, userID).
 		Row().Scan(&node.ID, &node.AgentID, &node.DeviceID, &node.UserID, &node.SessionID, &node.Mode, &node.AgentVersion,
 		&node.ContractMajorVersion, &node.ContractRevision, &node.CredentialHash, &node.Status, &node.RegisteredAt, &node.LastHeartbeatAt)
 	if errors.Is(err, sql.ErrNoRows) {

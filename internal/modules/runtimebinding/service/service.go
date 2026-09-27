@@ -48,7 +48,7 @@ type Store interface {
 	SaveNode(AgentNode) error
 	FindNodeByCredentialHash(hash string) (AgentNode, bool, error)
 	CheckLocalTrust(userID identityservice.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error)
-	FindFreshLocalNode(userID identityservice.UserID, at time.Time, freshness time.Duration) (AgentNode, bool, error)
+	FindTrustedLocalNode(userID identityservice.UserID) (AgentNode, bool, error)
 	ValidateRuntimeProfiles(userID identityservice.UserID, mainUserID string, profileIDs []string) (bool, error)
 	ApplyRuntimeReport(node AgentNode, report RuntimeReport, at time.Time) error
 }
@@ -241,16 +241,21 @@ func (s *Service) authenticateCredential(credential string) (AgentNode, error) {
 	return node, nil
 }
 
-// ResolveFreshLocalNode answers "which of this user's devices should receive a
+// ResolveTrustedLocalNode answers "which of this user's devices should receive a
 // download" without the caller naming one, and reports
 // `ErrLocalTrustUnavailable` when there is none — the same error a named node's
 // failed trust check produces, because from the caller's side the outcome is
-// identical: there is no usable node for this user right now.
-func (s *Service) ResolveFreshLocalNode(userID identityservice.UserID) (AgentNode, error) {
+// identical: there is no bound node for this user right now.
+//
+// Note what it does *not* ask: how recently that node reported. Queueing a
+// download is not the same act as driving the operator's browser from this
+// process, and only the latter needs a heartbeat the operator just produced by
+// hand. See `repository.FindTrustedLocalNode` for the full argument.
+func (s *Service) ResolveTrustedLocalNode(userID identityservice.UserID) (AgentNode, error) {
 	if userID <= 0 {
 		return AgentNode{}, ErrInvalidInput
 	}
-	node, found, err := s.store.FindFreshLocalNode(userID, s.now(), s.freshness)
+	node, found, err := s.store.FindTrustedLocalNode(userID)
 	if err != nil {
 		return AgentNode{}, err
 	}

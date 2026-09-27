@@ -80,7 +80,7 @@ type stubNodes struct {
 	ask  []sharedidentity.UserID
 }
 
-func (s *stubNodes) ResolveFreshLocalNode(userID sharedidentity.UserID) (runtimeservice.AgentNode, error) {
+func (s *stubNodes) ResolveTrustedLocalNode(userID sharedidentity.UserID) (runtimeservice.AgentNode, error) {
 	s.ask = append(s.ask, userID)
 	if s.err != nil {
 		return runtimeservice.AgentNode{}, s.err

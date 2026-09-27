@@ -80,13 +80,15 @@ func (s *memoryStore) CheckLocalTrust(userID identityservice.UserID, nodeID stri
 // of "the newest device wins" pass without the ordering being implemented
 // anywhere. The SQL itself is pinned separately, by text, in the repository's
 // sqlmock tests — the two can still disagree, which is why both exist.
-func (s *memoryStore) FindFreshLocalNode(userID identityservice.UserID, at time.Time, freshness time.Duration) (AgentNode, bool, error) {
+//
+// There is deliberately no heartbeat filter here, because there is none in the
+// query this stands in for; a double that kept one would make the service tests
+// pass while the real resolver refused a bound machine that had not reported
+// recently. Its absence is what makes those tests able to fail.
+func (s *memoryStore) FindTrustedLocalNode(userID identityservice.UserID) (AgentNode, bool, error) {
 	candidates := make([]AgentNode, 0, len(s.nodes))
 	for _, node := range s.nodes {
 		if node.UserID != userID || node.Mode != "local" || node.Status != cloudagentservice.AgentStatusOnline {
-			continue
-		}
-		if node.LastHeartbeatAt.Before(at.Add(-freshness)) {
 			continue
 		}
 		if !s.activeSessions[runtimeKey(node.SessionID, userID)] {
@@ -317,49 +319,62 @@ func TestAuthenticateNodeCredentialStillRefusesAReplacedNodeAndADeadSession(t *t
 }
 
 // The session route knows the user but not the device, so the choice among that
-// user's live devices has to be made here. The newest heartbeat wins, because a
+// user's bound devices has to be made here. The newest heartbeat wins, because a
 // user who has just opened a second machine means to use it.
-func TestResolveFreshLocalNodePicksTheNewestLiveDevice(t *testing.T) {
+//
+// Both heartbeats are hours old on purpose. Queueing a download must not depend on
+// how recently the machine reported — the operator cannot make the Agent report
+// without going to another page and pressing a button — so this arm is red for any
+// implementation that still bounds the heartbeat, whichever bound it picks.
+func TestResolveTrustedLocalNodePicksTheNewestBoundDeviceDespiteStaleHeartbeats(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
-	// Both heartbeats are strictly in the past and both are inside the freshness
-	// window, so "newest" and "fresh enough" cannot cover for each other: a service
-	// that dropped the freshness bound would still pick node-b here, but one that
-	// passed a zero freshness would admit neither.
-	store.nodes[secretHash("older")] = liveNode("node-a", "session-1", identityservice.UserID(1), now.Add(-60*time.Second))
-	store.nodes[secretHash("newer")] = liveNode("node-b", "session-1", identityservice.UserID(1), now.Add(-30*time.Second))
+	store.nodes[secretHash("older")] = liveNode("node-a", "session-1", identityservice.UserID(1), now.Add(-3*time.Hour))
+	store.nodes[secretHash("newer")] = liveNode("node-b", "session-1", identityservice.UserID(1), now.Add(-2*time.Hour))
 	service := testService(store, &now)
 
-	node, err := service.ResolveFreshLocalNode(identityservice.UserID(1))
+	node, err := service.ResolveTrustedLocalNode(identityservice.UserID(1))
 	if err != nil {
-		t.Fatalf("ResolveFreshLocalNode() error = %v", err)
+		t.Fatalf("ResolveTrustedLocalNode() error = %v", err)
 	}
 	if node.ID != "node-b" {
 		t.Fatalf("node = %+v, want the newest heartbeat", node)
 	}
 }
 
-// "No node" and "a node that failed its trust check" are the same answer to the
-// caller — there is nothing to download to right now — so they share one error.
-// A stale heartbeat is the ordinary way this happens: the Agent is closed.
-func TestResolveFreshLocalNodeReportsNoUsableNode(t *testing.T) {
+// "No bound node" and "a node that failed its trust check" are the same answer to
+// the caller — there is nothing to download to right now — so they share one error.
+// What no longer produces that error is a node that is simply idle: its heartbeat
+// is not part of the question, and the other conditions still are.
+func TestResolveTrustedLocalNodeReportsNoBoundNode(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
 	service := testService(store, &now)
 
-	if _, err := service.ResolveFreshLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
+	if _, err := service.ResolveTrustedLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
 		t.Fatalf("no node at all error = %v", err)
 	}
-	store.nodes[secretHash("stale")] = liveNode("node-a", "session-1", identityservice.UserID(1), now.Add(-2*time.Minute))
-	if _, err := service.ResolveFreshLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
-		t.Fatalf("stale node error = %v", err)
+	// A node whose session is no longer active is not usable however it reported.
+	store.nodes[secretHash("stale")] = liveNode("node-a", "session-2", identityservice.UserID(1), now.Add(-2*time.Minute))
+	if _, err := service.ResolveTrustedLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
+		t.Fatalf("inactive session error = %v", err)
 	}
 	// Another user's live node is not this user's node.
 	store.nodes[secretHash("other")] = liveNode("node-b", "session-1", identityservice.UserID(2), now)
-	if _, err := service.ResolveFreshLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
+	if _, err := service.ResolveTrustedLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
 		t.Fatalf("another user's node error = %v", err)
+	}
+	// The first user's own node, on an active session, is found — stale heartbeat
+	// and all. This is the arm the old bound made red.
+	store.nodes[secretHash("bound")] = liveNode("node-c", "session-1", identityservice.UserID(1), now.Add(-2*time.Hour))
+	node, err := service.ResolveTrustedLocalNode(identityservice.UserID(1))
+	if err != nil {
+		t.Fatalf("stale but bound node error = %v", err)
+	}
+	if node.ID != "node-c" {
+		t.Fatalf("node = %+v, want the user's own bound node", node)
 	}
 }
 

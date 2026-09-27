@@ -27,8 +27,8 @@ func (mysqlStore) FindNodeByCredentialHash(hash string) (model.AgentNode, bool, 
 func (mysqlStore) CheckLocalTrust(userID sharedidentity.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
 	return repository.CheckLocalTrust(userID, nodeID, at, freshness)
 }
-func (mysqlStore) FindFreshLocalNode(userID sharedidentity.UserID, at time.Time, freshness time.Duration) (model.AgentNode, bool, error) {
-	return repository.FindFreshLocalNode(userID, at, freshness)
+func (mysqlStore) FindTrustedLocalNode(userID sharedidentity.UserID) (model.AgentNode, bool, error) {
+	return repository.FindTrustedLocalNode(userID)
 }
 func (mysqlStore) ValidateRuntimeProfiles(userID sharedidentity.UserID, mainUserID string, profileIDs []string) (bool, error) {
 	return repository.ValidateRuntimeProfiles(userID, mainUserID, profileIDs)

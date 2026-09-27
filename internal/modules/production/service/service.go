@@ -79,7 +79,7 @@ type Store interface {
 // here rather than calling the module directly keeps the dependency to one call
 // site and lets a test answer it without a node table.
 type LocalNodeResolver interface {
-	ResolveFreshLocalNode(identityservice.UserID) (runtimeservice.AgentNode, error)
+	ResolveTrustedLocalNode(identityservice.UserID) (runtimeservice.AgentNode, error)
 }
 
 // TransferCreator queues the task a Local Agent will later claim.
@@ -260,7 +260,7 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		// condition is this narrow rather than `!ready`.
 		return transferdto.Task{}, ErrMaterialUnavailable
 	}
-	node, err := s.nodes.ResolveFreshLocalNode(actor.ID)
+	node, err := s.nodes.ResolveTrustedLocalNode(actor.ID)
 	if err != nil {
 		// Everything the resolver refuses means the same thing here, including a
 		// store failure: from this route's side there is no node to download to.
