@@ -331,6 +331,23 @@ func TestListTasksAsksTheRepositoryForTheActingUser(t *testing.T) {
 	}
 }
 
+// The download centre names a row with the asset's title. It is the only name a task
+// has until an executor reports `file_name`, and it is written onto the row at
+// creation rather than looked up on read, so a later rename cannot change what the
+// operator was told they were downloading.
+func TestListTasksCarriesTheAssetTitleTheTaskWasCreatedWith(t *testing.T) {
+	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if items[0].AssetTitle != "演示素材" {
+		t.Fatalf("asset_title = %q, want the title the task was created with", items[0].AssetTitle)
+	}
+}
+
 // An empty optional field is null on the wire, not an empty string: the frozen
 // schema makes all four nullable, and `"file_name": ""` would claim the transfer
 // produced a file whose name is empty.

@@ -1,14 +1,21 @@
 schema_version: 1
-revision: "2026.09.26.2"
+revision: "2026.09.27.1"
 
 schemas:
   FileTransferTask:
     type: object
-    required: [id, asset_type, asset_id, purpose, execution_scope, status, total_bytes, completed_bytes, attempt_count, created_at, updated_at]
+    required: [id, asset_type, asset_id, asset_title, purpose, execution_scope, status, total_bytes, completed_bytes, attempt_count, created_at, updated_at]
     properties:
       id: {type: string}
       asset_type: {type: string, const: material}
       asset_id: {type: integer, format: int64}
+      asset_title:
+        type: string
+        description: >-
+          The title of the asset at the moment the task was created. Required rather than optional because a
+          task row is otherwise unnameable: the id alone tells the download centre nothing about what it is
+          downloading, and `file_name` only arrives once an executor has finished. Held on the row rather than
+          looked up on read, because a task outlives the rename of what it points at.
       purpose: {type: string, enum: [compose_input_prepare, user_download]}
       execution_scope: {type: string, enum: [cloud, local_agent]}
       status: {type: string, enum: [pending, running, success, failed, cancelled]}

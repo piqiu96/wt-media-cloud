@@ -25,10 +25,15 @@ import "time"
 // Nothing here is an address. `local_path`, `download_url`, `storage_credential`
 // and `node_credential` are `forbidden_properties` in the contract: a signed URL
 // appears only in a lease, is never persisted, and never reaches this body.
+//
+// `asset_title` was added for the download centre, which otherwise had only an id to
+// name a row with: `file_name` is the executor's report and does not exist until the
+// transfer finishes, and a list of `#42` is not something an operator can act on.
 type Task struct {
 	ID                        string    `json:"id"`
 	AssetType                 string    `json:"asset_type"`
 	AssetID                   int64     `json:"asset_id"`
+	AssetTitle                string    `json:"asset_title"`
 	Purpose                   string    `json:"purpose"`
 	ExecutionScope            string    `json:"execution_scope"`
 	Status                    string    `json:"status"`

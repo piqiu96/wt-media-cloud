@@ -748,6 +748,7 @@ func taskBody(task model.Task) dto.Task {
 		ID:                        task.ID,
 		AssetType:                 string(task.AssetType),
 		AssetID:                   task.AssetID,
+		AssetTitle:                task.AssetTitle,
 		Purpose:                   string(task.Purpose),
 		ExecutionScope:            string(task.ExecutionScope),
 		Status:                    string(task.Status),

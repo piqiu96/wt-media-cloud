@@ -95,6 +95,12 @@ func TestTaskMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 	}
 	sort.Strings(want)
 
+	// The denominator, measured here. A property quietly dropped from the schema would
+	// otherwise keep this comparison green while shrinking what the frontend is promised.
+	if len(want) != 19 || len(schema.Required) != 12 {
+		t.Fatalf("contract declares %d properties / %d required, want the measured 19 / 12", len(want), len(schema.Required))
+	}
+
 	if got := marshalledKeys(t, Task{}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Task keys = %v, want %v", got, want)
 	}
