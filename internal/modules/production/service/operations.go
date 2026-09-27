@@ -50,6 +50,10 @@ func MarkVideoFailed(teamID identityservice.TeamID, materialID int64, message st
 	return newWiredService().MarkVideoFailed(teamID, materialID, message)
 }
 
+func MarkVideoNotPrepared(teamID identityservice.TeamID, materialID int64) error {
+	return newWiredService().MarkVideoNotPrepared(teamID, materialID)
+}
+
 // ResolvePreparationSource is named with a verb rather than after the method it
 // wraps, because the type it returns already holds that name and Go has one
 // namespace for both.

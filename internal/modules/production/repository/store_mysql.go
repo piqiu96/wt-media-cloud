@@ -321,6 +321,39 @@ func markVideoReady(db *gorm.DB, teamID identity.TeamID, materialID int64, facts
 	return result.RowsAffected == 1, nil
 }
 
+// MarkVideoNotPrepared takes the readiness projection back to `not_downloaded`
+// when the preparation it was waiting on was cancelled.
+//
+// The predicate is the whole function. `downloading` is the only state that claims
+// a preparation is in flight, and the only state this write is about: `ready` must
+// never be taken back — the object the row names is fetchable, and a cancellation
+// that arrives late would otherwise leave a prepared material reading as though
+// nothing had been done — while `not_downloaded` and `failed` already say what
+// this write would. Both of those readings are `false`, which is why the caller is
+// told the count instead of an error: a cancellation that finds nothing to take
+// back has not failed.
+//
+// `video_error` is cleared with the status, as `MarkVideoPreparing` clears it on
+// the way in: the row leaves `downloading` with every field that describes a
+// preparation attempt reset, so a message from an attempt that is over cannot
+// outlive the state it was written for.
+func MarkVideoNotPrepared(teamID identity.TeamID, materialID int64, now time.Time) (bool, error) {
+	return markVideoNotPrepared(database.DB(), teamID, materialID, now)
+}
+
+const markVideoNotPreparedSQL = `UPDATE materials SET video_status = 'not_downloaded', video_error = '', updated_at = ? WHERE id = ? AND team_id = ? AND video_status = 'downloading'`
+
+func markVideoNotPrepared(db *gorm.DB, teamID identity.TeamID, materialID int64, now time.Time) (bool, error) {
+	if teamID <= 0 || materialID <= 0 {
+		return false, fmt.Errorf("invalid material unprepared marker")
+	}
+	result := db.Exec(markVideoNotPreparedSQL, now, materialID, teamID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 // MarkVideoFailed records that a preparation did not produce a verified source.
 //
 // The update refuses a material that is already `ready`, and that predicate is the

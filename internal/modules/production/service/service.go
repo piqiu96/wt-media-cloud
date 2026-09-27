@@ -69,6 +69,12 @@ type Store interface {
 	// flag is false for a material that is already `ready`, which is a refusal the
 	// caller must not read as "the row was not there".
 	MarkVideoFailed(identityservice.TeamID, int64, string, time.Time) (bool, error)
+
+	// MarkVideoNotPrepared takes the `downloading` projection back when the
+	// preparation it was waiting on was cancelled. Its flag is false for a material
+	// that is not `downloading`, which here is the ordinary outcome rather than a
+	// refusal: there is nothing to take back.
+	MarkVideoNotPrepared(identityservice.TeamID, int64, time.Time) (bool, error)
 }
 
 // LocalNodeResolver answers which of the actor's machines should receive a file.
@@ -366,6 +372,22 @@ func (s *Service) MarkVideoReady(teamID identityservice.TeamID, materialID int64
 // no projection left to correct.
 func (s *Service) MarkVideoFailed(teamID identityservice.TeamID, materialID int64, message string) error {
 	_, err := s.store.MarkVideoFailed(teamID, materialID, message, s.now().UTC())
+	return err
+}
+
+// MarkVideoNotPrepared takes back the `downloading` projection a cancelled
+// preparation left behind.
+//
+// It is the third of the worker's writes and the one that closes a state nothing
+// else could leave: the material says a preparation is in flight, the task that
+// would have delivered one is terminal and un-leasable, and no retry will pick it
+// up. The user's own remedy is another click, and that click cannot use the
+// projection at all — `MarkVideoPreparing` refuses `downloading` — so the row would
+// read 「准备中」 for a preparation that ended. See `repository.MarkVideoNotPrepared`
+// for why the predicate makes that safe for a material that did get prepared, and
+// why a write that matched nothing is not an error.
+func (s *Service) MarkVideoNotPrepared(teamID identityservice.TeamID, materialID int64) error {
+	_, err := s.store.MarkVideoNotPrepared(teamID, materialID, s.now().UTC())
 	return err
 }
 

@@ -299,6 +299,60 @@ func TestMarkVideoPreparingRefusesAnIncompleteScope(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+// The cancellation's write is the mirror image of the preparation marker above: it
+// may only leave `downloading`, so a material that was prepared keeps the video it
+// has, and a material that was never preparing is not touched at all.
+//
+// As above, the guard is asserted as text because sqlmock cannot execute a `WHERE`:
+// a mock matches this statement just as well with the predicate dropped, and the
+// dropped predicate is the mutation that would let a late cancellation take `ready`
+// back to `not_downloaded` while the object the row named is still in the bucket.
+func TestMarkVideoNotPreparedOnlyLeavesTheStateACancelledPreparationLeft(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(markVideoNotPreparedSQL)).
+		WithArgs(now, int64(42), int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(markVideoNotPreparedSQL)).
+		WithArgs(now, int64(42), int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	taken, err := markVideoNotPrepared(db, 7, 42, now)
+	if err != nil {
+		t.Fatalf("markVideoNotPrepared() error = %v", err)
+	}
+	if !taken {
+		t.Fatal("a row in downloading must be reported as taken back")
+	}
+	// The second call stands for a material that is `ready`, `failed` or
+	// `not_downloaded`: the predicate refuses all three, and — unlike the worker's
+	// other writes — that is not an error, because there was nothing to take back.
+	taken, err = markVideoNotPrepared(db, 7, 42, now)
+	if err != nil {
+		t.Fatalf("markVideoNotPrepared() second call error = %v", err)
+	}
+	if taken {
+		t.Fatal("a row the guard refused must not be reported as taken back")
+	}
+	assertExpectations(t, mock)
+}
+
+// Written out rather than referred to through the constant, for the reason the
+// preparation marker's version of this test gives: an assertion that shares its
+// expectation with the code under test cannot fail when that code changes.
+func TestMarkVideoNotPreparedStatementNamesTheOneStateItMayLeave(t *testing.T) {
+	for _, fragment := range []string{
+		"video_status = 'not_downloaded'",
+		"video_status = 'downloading'",
+		"video_error = ''",
+		"id = ? AND team_id = ?",
+	} {
+		if !strings.Contains(markVideoNotPreparedSQL, fragment) {
+			t.Errorf("the statement no longer contains %q, so a cancellation can take back a projection it does not own: %s", fragment, markVideoNotPreparedSQL)
+		}
+	}
+}
+
 // testDigest is 64 characters of hexadecimal, which is what the column and the
 // video's own bytes both require. It is spelled out rather than produced by
 // hashing something, so that no test here depends on what the digest is a digest

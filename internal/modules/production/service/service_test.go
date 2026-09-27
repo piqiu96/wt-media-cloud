@@ -68,6 +68,16 @@ type memoryStore struct {
 	failed      bool
 	failedErr   error
 	failedCount int
+
+	// The cancellation's write, recorded the same way. Its flag is not a refusal:
+	// the repository's predicate makes "nothing to take back" the ordinary reading,
+	// so a double that defaulted either way would have to be told what it meant.
+	notPreparedTeam  sharedidentity.TeamID
+	notPreparedFor   int64
+	notPreparedAt    time.Time
+	notPrepared      bool
+	notPreparedErr   error
+	notPreparedCount int
 }
 
 // stubNodes answers the one question this module asks the runtime-binding
@@ -158,6 +168,12 @@ func (s *memoryStore) MarkVideoFailed(teamID sharedidentity.TeamID, materialID i
 	s.failedTeam, s.failedFor, s.failedMsg, s.failedAt = teamID, materialID, message, now
 	return s.failed, s.failedErr
 }
+func (s *memoryStore) MarkVideoNotPrepared(teamID sharedidentity.TeamID, materialID int64, now time.Time) (bool, error) {
+	s.notPreparedCount++
+	s.notPreparedTeam, s.notPreparedFor, s.notPreparedAt = teamID, materialID, now
+	return s.notPrepared, s.notPreparedErr
+}
+
 func (s *memoryStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	s.created = input
 	return model.MaterialUsage{ID: 1, TeamID: input.TeamID, MaterialID: input.MaterialID, UserID: input.UserID, Status: model.MaterialUsageActive, CreatedAt: now, UpdatedAt: now}, s.createdUsage, nil

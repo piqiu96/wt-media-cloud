@@ -108,6 +108,10 @@ type MaterialProjection interface {
 	ResolvePreparationSource(teamID identity.TeamID, materialID int64) (productionservice.PreparationSource, error)
 	MarkVideoReady(teamID identity.TeamID, materialID int64, facts producerepo.VideoFacts) error
 	MarkVideoFailed(teamID identity.TeamID, materialID int64, message string) error
+	// MarkVideoNotPrepared is the cancellation's counterpart to `MarkVideoFailed`,
+	// and it is not a failure write: the material goes back to saying it is not
+	// downloaded, not to saying a preparation failed.
+	MarkVideoNotPrepared(teamID identity.TeamID, materialID int64) error
 }
 
 // TransferQueue is the whole of this worker's dependency on the transfer module:
@@ -582,14 +586,42 @@ func (p *Preparer) settleLostLease(task transfermodel.Task, cause error) {
 		ErrorMessage: message,
 	}, p.now())
 	if err != nil {
+		// The row's state is not known, so the material is left alone: a task that is
+		// still running under a retry can still deliver, and taking the projection back
+		// under it would tell the user their material is unprepared while a preparation
+		// is on its way. This is the one path where the material is not corrected, and
+		// it is recorded rather than passed over.
 		p.record(task, "lease lost", err.Error())
 		return
+	}
+	if status == transfermodel.StatusCancelled {
+		p.takeBackMaterial(task)
 	}
 	if !written {
 		p.record(task, "lease lost", "the task is no longer running under this worker")
 		return
 	}
 	p.record(task, string(status), code)
+}
+
+// takeBackMaterial returns a cancelled preparation's material to `not_downloaded`.
+//
+// It runs on the cancellation arm of a lost lease, and nothing else corrects this:
+// the material's projection says a preparation is in flight, the task that meant is
+// cancelled, and a cancelled row is never leasable — so no later attempt will
+// deliver one and no later write will notice. Left alone, the operator reads
+// 「准备中」 for a preparation that ended, and the click that would restart it does
+// not read the projection either (`MarkVideoPreparing` refuses `downloading`), so
+// the row describes a state nobody is in.
+//
+// Not gated on the terminal write landing: a cancellation request makes the row
+// un-leasable, so a write that found it out of this worker's hands found it
+// terminal. A failure here is recorded rather than returned, because the task row
+// is already correct and the material is the half the user can see.
+func (p *Preparer) takeBackMaterial(task transfermodel.Task) {
+	if err := p.Materials.MarkVideoNotPrepared(task.TeamID, task.AssetID); err != nil {
+		p.record(task, "material write failed", err.Error())
+	}
 }
 
 func (p *Preparer) record(task transfermodel.Task, outcome, detail string) {
@@ -737,6 +769,10 @@ func (productionProjection) MarkVideoReady(teamID identity.TeamID, materialID in
 
 func (productionProjection) MarkVideoFailed(teamID identity.TeamID, materialID int64, message string) error {
 	return productionservice.MarkVideoFailed(teamID, materialID, message)
+}
+
+func (productionProjection) MarkVideoNotPrepared(teamID identity.TeamID, materialID int64) error {
+	return productionservice.MarkVideoNotPrepared(teamID, materialID)
 }
 
 // transferQueue calls the transfer module's Cloud-executor repository functions

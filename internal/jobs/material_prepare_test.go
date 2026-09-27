@@ -101,6 +101,9 @@ type fakeMaterials struct {
 
 	failed    []string
 	failedErr error
+
+	notPrepared    []int64
+	notPreparedErr error
 }
 
 func (f *fakeMaterials) ResolvePreparationSource(teamID identity.TeamID, materialID int64) (productionservice.PreparationSource, error) {
@@ -130,6 +133,12 @@ func (f *fakeMaterials) MarkVideoFailed(teamID identity.TeamID, materialID int64
 	f.events.add("failed")
 	f.failed = append(f.failed, message)
 	return f.failedErr
+}
+
+func (f *fakeMaterials) MarkVideoNotPrepared(teamID identity.TeamID, materialID int64) error {
+	f.events.add("not_prepared")
+	f.notPrepared = append(f.notPrepared, materialID)
+	return f.notPreparedErr
 }
 
 type fakeTransfers struct {
@@ -966,15 +975,24 @@ func TestPrepareRenewsTheLeaseWhileTheBodyArrives(t *testing.T) {
 }
 
 // A renewal that is refused is the cancellation and lost-lease signal. Mid-download
-// it means nothing was ever handed over, so the material is not written about at all
+// it means nothing was ever handed over, so the material is never told it is ready
 // — and the waiters are released, because a `pending` download pointing at a
 // terminal task is unclaimable forever.
+//
+// The two rows differ in what the material's projection says afterwards, and the
+// difference is the cancellation. A task whose lease lapsed was never written about
+// and is about to be retried, so the material stays as it was. A task the user
+// cancelled will not be retried — its projection still says a preparation is in
+// flight, and nothing else will ever take that back, because the row is terminal
+// and un-leasable. That is the state that used to leave a material reading
+// 「准备中」 for good, so the projection goes back to `not_downloaded` here.
 func TestPrepareStopsWhenTheLeaseIsNoLongerHeld(t *testing.T) {
 	for _, testCase := range []struct {
-		name    string
-		current transfermodel.Task
-		status  transfermodel.Status
-		code    string
+		name            string
+		current         transfermodel.Task
+		status          transfermodel.Status
+		code            string
+		wantNotPrepared bool
 	}{
 		{
 			name:    "the lease lapsed and a retry took the task",
@@ -983,10 +1001,11 @@ func TestPrepareStopsWhenTheLeaseIsNoLongerHeld(t *testing.T) {
 			code:    codeLeaseLost,
 		},
 		{
-			name:    "the user cancelled while the bytes were arriving",
-			current: transfermodel.Task{ID: testTaskID, CancelRequestedAt: &testNow},
-			status:  transfermodel.StatusCancelled,
-			code:    codeCancelled,
+			name:            "the user cancelled while the bytes were arriving",
+			current:         transfermodel.Task{ID: testTaskID, CancelRequestedAt: &testNow},
+			status:          transfermodel.StatusCancelled,
+			code:            codeCancelled,
+			wantNotPrepared: true,
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1009,9 +1028,14 @@ func TestPrepareStopsWhenTheLeaseIsNoLongerHeld(t *testing.T) {
 			if got := h.transfers.failInputs[0]; got.Status != testCase.status || got.ErrorCode != testCase.code {
 				t.Errorf("terminal write = (%q, %q), want (%q, %q)", got.Status, got.ErrorCode, testCase.status, testCase.code)
 			}
-			// Nothing was verified, so the material was told nothing at all.
+			// Nothing was verified, so the material is never told it is ready.
 			if len(h.materials.failed) != 0 || len(h.materials.readyFacts) != 0 {
 				t.Errorf("the material was written about, but no bytes were verified: failed=%v ready=%d", h.materials.failed, len(h.materials.readyFacts))
+			}
+			if got := len(h.materials.notPrepared); (got > 0) != testCase.wantNotPrepared {
+				t.Errorf("MarkVideoNotPrepared called %d times, want %v", got, testCase.wantNotPrepared)
+			} else if testCase.wantNotPrepared && h.materials.notPrepared[0] != testMaterial {
+				t.Errorf("took material %d back, want %d", h.materials.notPrepared[0], testMaterial)
 			}
 		})
 	}
