@@ -313,20 +313,71 @@ func TestFailTaskOnlyAllowsTheClaimedExecutorToWriteTerminalFailure(t *testing.T
 	assertExpectations(t, mock)
 }
 
+// The two phases are two statements, so the pending arm is one statement and
+// the running arm is the pending statement matching nothing followed by the
+// request. Each phase writes every field of its own transition, which is what
+// keeps the outcome independent of the order MySQL evaluates a SET list in.
+//
+// This test pins the statements. What MySQL does with them is not observable
+// through sqlmock, so the pending arm's terminal fields are verified against a
+// real MySQL in the CHG-061 evidence rather than here.
 func TestCancelTaskMarksPendingTerminalAndRequestsRunningCancellation(t *testing.T) {
-	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END, cancel_requested_at = CASE WHEN status = 'running' THEN ? ELSE cancel_requested_at END, finished_at = CASE WHEN status = 'pending' THEN ? ELSE finished_at END, lease_expires_at = CASE WHEN status = 'pending' THEN NULL ELSE lease_expires_at END, error_code = CASE WHEN status = 'pending' THEN 'cancelled_by_user' ELSE error_code END, error_message = CASE WHEN status = 'pending' THEN 'cancelled by user' ELSE error_message END, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status IN ('pending', 'running')")).
-		WithArgs(testNow, testNow, testNow, "transfer-1", int64(7), int64(9)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	const pendingStatement = "UPDATE file_transfer_tasks SET status = 'cancelled', finished_at = ?, lease_expires_at = NULL, error_code = 'cancelled_by_user', error_message = 'cancelled by user', updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'pending'"
+	const runningStatement = "UPDATE file_transfer_tasks SET cancel_requested_at = ?, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'running'"
 
-	cancelled, err := cancelTask(db, "transfer-1", identity.TeamID(7), identity.UserID(9), testNow)
-	if err != nil {
-		t.Fatalf("cancelTask() error = %v", err)
-	}
-	if !cancelled {
-		t.Fatal("pending task should cancel or running task should record a cancellation request")
-	}
-	assertExpectations(t, mock)
+	t.Run("pending has no executor, so it is cancelled outright", func(t *testing.T) {
+		db, mock := newMockGORM(t)
+		mock.ExpectExec(regexp.QuoteMeta(pendingStatement)).
+			WithArgs(testNow, testNow, "transfer-1", int64(7), int64(9)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		cancelled, err := cancelTask(db, "transfer-1", identity.TeamID(7), identity.UserID(9), testNow)
+		if err != nil {
+			t.Fatalf("cancelTask() error = %v", err)
+		}
+		if !cancelled {
+			t.Fatal("a pending task has nobody to ask, so the requester writes the terminal state")
+		}
+		assertExpectations(t, mock)
+	})
+
+	t.Run("running keeps its executor and only records the request", func(t *testing.T) {
+		db, mock := newMockGORM(t)
+		mock.ExpectExec(regexp.QuoteMeta(pendingStatement)).
+			WithArgs(testNow, testNow, "transfer-1", int64(7), int64(9)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta(runningStatement)).
+			WithArgs(testNow, testNow, "transfer-1", int64(7), int64(9)).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		cancelled, err := cancelTask(db, "transfer-1", identity.TeamID(7), identity.UserID(9), testNow)
+		if err != nil {
+			t.Fatalf("cancelTask() error = %v", err)
+		}
+		if !cancelled {
+			t.Fatal("a running task must record the cancellation request for its executor")
+		}
+		assertExpectations(t, mock)
+	})
+
+	t.Run("a row that is neither pending nor running matches neither statement", func(t *testing.T) {
+		db, mock := newMockGORM(t)
+		mock.ExpectExec(regexp.QuoteMeta(pendingStatement)).
+			WithArgs(testNow, testNow, "transfer-1", int64(7), int64(9)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(regexp.QuoteMeta(runningStatement)).
+			WithArgs(testNow, testNow, "transfer-1", int64(7), int64(9)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+
+		cancelled, err := cancelTask(db, "transfer-1", identity.TeamID(7), identity.UserID(9), testNow)
+		if err != nil {
+			t.Fatalf("cancelTask() error = %v", err)
+		}
+		if cancelled {
+			t.Fatal("a terminal or unowned row is simply unmatched, not cancelled")
+		}
+		assertExpectations(t, mock)
+	})
 }
 
 // Retrying does not reset the attempt count. It is the count of attempts this

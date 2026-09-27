@@ -628,8 +628,8 @@ func CancelTask(taskID string, teamID identity.TeamID, requestedBy identity.User
 	return cancelTask(database.DB(), taskID, teamID, requestedBy, now)
 }
 
-// cancelTask encodes a two-phase cancellation, and the CASE arms are the two
-// phases:
+// cancelTask encodes a two-phase cancellation, and one statement per phase
+// encodes them:
 //
 //   - `pending` has no executor, so there is nobody to ask: the row becomes
 //     `cancelled` outright and the terminal fields are written here.
@@ -640,24 +640,51 @@ func CancelTask(taskID string, teamID identity.TeamID, requestedBy identity.User
 //     so the claimant's next call fails and the claimant itself writes the
 //     terminal `cancelled` through `failTask`.
 //
+// The two phases are two statements rather than one statement carrying a
+// `CASE WHEN status = 'pending'` per column, because MySQL evaluates a SET list
+// from left to right and a later assignment reads the value an earlier one just
+// wrote. With `status` assigned first, every following CASE tested the *new*
+// status, fell through to its ELSE, and left the pending arm's terminal fields
+// unwritten: the row read `cancelled` with `finished_at` NULL, `error_code`
+// NULL and its lease still set. The missing `error_code` is the visible half --
+// `dto.Task` exposes it and not `finished_at`, so the download centre had no way
+// to say why the row ended, and a cancelled row could not be told apart from one
+// cancelled with a reason. The rest is terminal-state integrity: every other
+// route into `cancelled`, `ReconcileCancelledTasks` included, writes a finish
+// time, and only this one left a cancelled row reading as never finished while
+// holding a lease. Nothing in the suite can see any of it, because every test
+// here asserts statement text through sqlmock rather than what MySQL does with
+// the statement. Each phase below writes every field of its own transition, so
+// neither depends on the order its assignments happen to be evaluated in.
+//
 // That split is deliberate, and it is why the terminal write for a running task
 // is absent here: the executor owns the transition out of `running`, and moving
 // it to the requester would mark a task cancelled while it was still being
 // written to disk. If the executor never comes back to claim that transition,
-// `ReconcileCancelledTasks` finishes it.
+// `ReconcileCancelledTasks` finishes it — writing the same terminal fields this
+// function writes for a pending row.
 //
 // Scope is asserted in the WHERE clause rather than checked separately, so a
 // wrong team or a different user's id is simply an unmatched row — there is no
-// permission check a caller could forget to run.
+// permission check a caller could forget to run. A row that is already terminal
+// matches neither statement, which reports the same thing a caller's own state
+// check would have.
 func cancelTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy identity.UserID, now time.Time) (bool, error) {
 	if strings.TrimSpace(taskID) == "" || teamID <= 0 || requestedBy <= 0 {
 		return false, fmt.Errorf("invalid transfer cancellation")
 	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END, cancel_requested_at = CASE WHEN status = 'running' THEN ? ELSE cancel_requested_at END, finished_at = CASE WHEN status = 'pending' THEN ? ELSE finished_at END, lease_expires_at = CASE WHEN status = 'pending' THEN NULL ELSE lease_expires_at END, error_code = CASE WHEN status = 'pending' THEN 'cancelled_by_user' ELSE error_code END, error_message = CASE WHEN status = 'pending' THEN 'cancelled by user' ELSE error_message END, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status IN ('pending', 'running')`, now, now, now, taskID, teamID, requestedBy)
-	if result.Error != nil {
-		return false, result.Error
+	pending := db.Exec(`UPDATE file_transfer_tasks SET status = 'cancelled', finished_at = ?, lease_expires_at = NULL, error_code = 'cancelled_by_user', error_message = 'cancelled by user', updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'pending'`, now, now, taskID, teamID, requestedBy)
+	if pending.Error != nil {
+		return false, pending.Error
 	}
-	return result.RowsAffected == 1, nil
+	if pending.RowsAffected == 1 {
+		return true, nil
+	}
+	running := db.Exec(`UPDATE file_transfer_tasks SET cancel_requested_at = ?, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'running'`, now, now, taskID, teamID, requestedBy)
+	if running.Error != nil {
+		return false, running.Error
+	}
+	return running.RowsAffected == 1, nil
 }
 
 // RetryTask requeues a failed transfer for the user who asked for it, within its
