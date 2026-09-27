@@ -118,6 +118,7 @@ type Store interface {
 	CompleteTask(repository.CompletionInput, time.Time) (bool, error)
 	FailTask(repository.FailureInput, time.Time) (bool, error)
 	CancelTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (bool, error)
+	FailDependents(string, string, string, time.Time) (int64, error)
 	RetryTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (model.Task, bool, error)
 }
 
@@ -415,8 +416,44 @@ func (s *Service) CancelTask(actor identityservice.PublicUser, taskID string) (d
 		// outcome is the same as having seen it terminal a moment earlier.
 		return dto.Task{}, ErrTaskConflict
 	}
+	if task.Purpose == model.PurposeComposeInputPrepare {
+		// A cancelled preparation ends the downloads waiting on it. They are
+		// `pending` with `dependency_task_id` set, which makes them un-leasable, and
+		// the only two ways out of that state are a hand-over — which a cancelled
+		// preparation cannot produce — and a failure, which nothing else here writes.
+		// Left alone they wait for a preparation that is over, and the download centre
+		// shows them no action at all, because a pending row is cancellable and
+		// nothing else.
+		//
+		// Both cancellation phases are covered by doing it after the write rather than
+		// inside one of them. A running preparation's executor releases the waiters
+		// itself when it notices the request, and `failDependents` matches only rows
+		// still `pending` with this pointer, so that second release matches nothing —
+		// and if the executor never comes back, this one has already done it.
+		//
+		// The failure is returned rather than swallowed: the cancellation landed, but
+		// the waiters are still stuck, and a caller told "cancelled" would have no
+		// reason to look again. `CreateDownload` reports a failed projection write the
+		// same way, for the same reason — the module may not claim a state it could
+		// not leave consistent.
+		if _, err := s.store.FailDependents(task.ID, codeCancelledByUser, cancelledPreparationMessage, s.now().UTC()); err != nil {
+			return dto.Task{}, err
+		}
+	}
 	return s.refreshedTask(task.ID)
 }
+
+const (
+	// codeCancelledByUser is the code the cancellation paths write, and the one a
+	// released waiter inherits so that both rows name the same cause.
+	codeCancelledByUser = "cancelled_by_user"
+
+	// cancelledPreparationMessage is what a released waiter's row reads. It is
+	// phrased like the sweep's release for a preparation that failed, because from
+	// the waiter's side the two are the same event: the thing it was waiting for
+	// ended without producing a file.
+	cancelledPreparationMessage = "the preparation this download waited for was cancelled"
+)
 
 // RetryTask requeues a failed task within its attempt bound, and answers with
 // the requeued body.

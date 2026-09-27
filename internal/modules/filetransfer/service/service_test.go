@@ -47,14 +47,15 @@ type memoryStore struct {
 	candidateFound bool
 	nextErr        error
 
-	claimOK     bool
-	heartbeatOK bool
-	progressOK  bool
-	completeOK  bool
-	failOK      bool
-	cancelOK    bool
-	retryOK     bool
-	retryResult Task
+	claimOK           bool
+	heartbeatOK       bool
+	progressOK        bool
+	completeOK        bool
+	failOK            bool
+	cancelOK          bool
+	retryOK           bool
+	retryResult       Task
+	failDependentsErr error
 
 	listFilter repository.TaskFilter
 	lastCreate repository.CreateTaskInput
@@ -70,6 +71,11 @@ type memoryStore struct {
 		taskID string
 		team   identityservice.TeamID
 		user   identityservice.UserID
+	}
+	lastDependents struct {
+		prepareID string
+		code      string
+		message   string
 	}
 	lastClaim struct {
 		taskID string
@@ -232,6 +238,19 @@ func (s *memoryStore) CancelTask(taskID string, teamID identityservice.TeamID, r
 	return s.cancelOK, nil
 }
 
+// FailDependents records what it was asked to release. It returns no error unless
+// a test supplies one: unlike the operations above, its result is a row count the
+// service does not branch on, so the interesting readings are the arguments —
+// which preparation, and under what code.
+func (s *memoryStore) FailDependents(prepareTaskID, errorCode, errorMessage string, _ time.Time) (int64, error) {
+	s.counts["failDependents"]++
+	s.lastDependents.prepareID, s.lastDependents.code, s.lastDependents.message = prepareTaskID, errorCode, errorMessage
+	if s.failDependentsErr != nil {
+		return 0, s.failDependentsErr
+	}
+	return 0, nil
+}
+
 func (s *memoryStore) RetryTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, _ time.Time) (Task, bool, error) {
 	s.counts["retry"]++
 	s.lastRetry.taskID, s.lastRetry.team, s.lastRetry.user = taskID, teamID, requestedBy
@@ -308,6 +327,18 @@ func taskFixture(id string, status model.Status, user identityservice.UserID, te
 		AssignedNodeID: nodeID, ClaimedByNodeID: claimedBy, TotalBytes: 1000, ExpectedSHA256: strings.Repeat("a", 64),
 		MaxAttempts: 3, CreatedAt: now, UpdatedAt: now,
 	}
+}
+
+// prepareFixture is a material's source preparation rather than a download: the
+// same row shape with the purpose and scope the worker claims it under, and no
+// assignee, because a Cloud task is leased by any worker rather than bound to the
+// node a download was queued for.
+func prepareFixture(id string, status model.Status, user identityservice.UserID, team identityservice.TeamID) Task {
+	task := taskFixture(id, status, user, team)
+	task.Purpose = model.PurposeComposeInputPrepare
+	task.ExecutionScope = model.ExecutionCloud
+	task.AssignedNodeID = ""
+	return task
 }
 
 // ---- the session surface ----
@@ -448,6 +479,74 @@ func TestCancelTaskRefusesATaskThatIsAlreadyTerminal(t *testing.T) {
 		if store.count("cancel") != 0 {
 			t.Fatalf("%s: cancel called %d times, want none", status, store.count("cancel"))
 		}
+	}
+}
+
+// Cancelling a preparation has to end the downloads waiting on it, because
+// nothing else will.
+//
+// A waiter points at the preparation through `dependency_task_id` and is not
+// leasable while it does, so it is satisfied by a hand-over and ended by a
+// failure — and a cancelled preparation does neither. It is terminal, so no
+// hand-over is coming; the cancellation write stops at the preparation's own row,
+// so no failure is recorded either. Every waiter would sit `pending` for good,
+// pointing at a task that is over: not leasable, so no node picks it up, and not
+// terminal, so the download centre offers it no action at all. The reconciliation
+// sweep is the safety net written for exactly this, and it is a job this build has
+// not registered.
+func TestCancellingAPreparationReleasesTheDownloadsWaitingOnIt(t *testing.T) {
+	store := newMemoryStore(prepareFixture("prepare-1", model.StatusPending, 9, teamOf(7)))
+	store.cancelOK = true
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "prepare-1"); err != nil {
+		t.Fatalf("CancelTask() error = %v", err)
+	}
+	if store.count("failDependents") != 1 {
+		t.Fatalf("failDependents called %d times, want the waiters released", store.count("failDependents"))
+	}
+	if store.lastDependents.prepareID != "prepare-1" {
+		t.Fatalf("released the dependents of %q, want the cancelled preparation", store.lastDependents.prepareID)
+	}
+	// The waiters inherit the cancellation's own code, so the two rows read the
+	// same cause; a generic code here would put "failed" on a download the user
+	// themselves stopped.
+	if store.lastDependents.code != "cancelled_by_user" {
+		t.Fatalf("code = %q, want the code the cancelled row carries", store.lastDependents.code)
+	}
+}
+
+// The release is scoped to preparations, and a download has no waiters.
+//
+// This is what keeps the call above from becoming a statement that means "the
+// task I just cancelled". Cancelling a download is the ordinary case, and a
+// blanket release would be the sort of write that matches no rows today and
+// something else tomorrow.
+func TestCancellingADownloadLeavesDependentsAlone(t *testing.T) {
+	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
+	store.cancelOK = true
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "transfer-1"); err != nil {
+		t.Fatalf("CancelTask() error = %v", err)
+	}
+	if store.count("failDependents") != 0 {
+		t.Fatalf("failDependents called %d times, want none for a download", store.count("failDependents"))
+	}
+}
+
+// The two writes are separate statements and only the first one is the request.
+// A release that does not land leaves the waiters exactly as stuck as not calling
+// it at all, so it is reported rather than swallowed — the same choice
+// `CreateDownload` makes when the projection write fails after the task exists.
+func TestCancellingAPreparationReportsAFailedWaiterRelease(t *testing.T) {
+	store := newMemoryStore(prepareFixture("prepare-1", model.StatusPending, 9, teamOf(7)))
+	store.cancelOK = true
+	store.failDependentsErr = errors.New("the dependent release did not land")
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "prepare-1"); !errors.Is(err, store.failDependentsErr) {
+		t.Fatalf("CancelTask() error = %v, want the release failure", err)
 	}
 }
 

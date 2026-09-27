@@ -47,6 +47,9 @@ func (mysqlStore) FailTask(input repository.FailureInput, now time.Time) (bool, 
 func (mysqlStore) CancelTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, now time.Time) (bool, error) {
 	return repository.CancelTask(taskID, teamID, requestedBy, now)
 }
+func (mysqlStore) FailDependents(prepareTaskID, errorCode, errorMessage string, now time.Time) (int64, error) {
+	return repository.FailDependents(prepareTaskID, errorCode, errorMessage, now)
+}
 func (mysqlStore) RetryTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, now time.Time) (model.Task, bool, error) {
 	return repository.RetryTask(taskID, teamID, requestedBy, now)
 }
