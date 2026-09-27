@@ -1,6 +1,6 @@
-bucket = 'REPLACE_WITH_BUCKET'
-endpoint = 'data.bucket.oss.longyanyue.cn'
+bucket = 'data'
+endpoint = 's3.oss.longyanyue.cn'
 prefix = ''
 presign_ttl = '15m'
-region = ''
+region = 'garage'
 use_ssl = true
