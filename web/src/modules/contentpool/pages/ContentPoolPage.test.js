@@ -148,10 +148,19 @@ describe('content pool page', () => {
     expect(source).not.toContain('v-if="detail.cover_url"')
   })
 
-  it('supports the read-only material library projection without duplicating a page', () => {
-    expect(source).toContain("route.path === '/material-library'")
-    expect(source).toContain("status: isLibrary.value ? 'material_created'")
-    expect(source).toContain('material_id: materialFilter.value || undefined')
+  // 这里原先有一条「素材库只读投影」的用例，钉的是 `/material-library` 由内容池页按
+  // `route.path` 自己渲染成投影的三条字面量。**故意删除**：那个地址现在由
+  // `modules/materials/pages/MaterialLibraryPage.vue` 承担（两张路由表都已改指），
+  // 它钉的是一个不再发生的渲染。
+  //
+  // 它守的行为契约没有消失，只是搬到了实现它的地方：
+  // `MaterialLibraryPage.test.js` 钉 `?material_id=` 深链落到单条接口。
+  // 内容池自己那条「已转素材」的状态仍在，跳转也仍在 —— 下面这条把它钉住。
+  it('still links a materialised content row into the material library', () => {
+    expect(source).toContain('function viewMaterial(')
+    expect(source).toMatch(/router\.push\(\{ path: '\/material-library', query: \{ material_id:/)
+    // 「已转素材」仍是内容池自己的状态，列定义与徽章都还认它。
+    expect(source).toContain("material_created: '已转素材'")
   })
 
   it('renders a large content decision workspace instead of a CRUD field table', () => {
