@@ -134,6 +134,27 @@
 
 .wt-resource-page .wt-danger-button { color: var(--wt-danger); }
 
+/* 「点下载会先准备视频」这类跟在动作下面的补充说明。它比正文小一号、颜色更淡，
+   但必须**可见**：这句话要说的是「按钮为什么不是灰的」，藏进 hover 提示里就等于没说。
+
+   纵向排在按钮下面，而不是横着贴在右边：操作列的宽度是固定的（窄的只有 280px），
+   横向再塞一句十来个字的话会把同一行里的按钮挤到变形。纵向的话这一列只需要容纳
+   「最宽的那个按钮」和「这句话」，两者取大者。 */
+.wt-row-action {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.wt-row-hint {
+  color: var(--wt-text-tertiary);
+  font-size: 12px;
+  line-height: 1.3;
+  /* 不设 nowrap：列宽是固定的，一句话在窄列里换行是正常的退化，溢出到隔壁单元格不是。
+     中文在任意字之间断行本来就读得通。 */
+}
+
 .wt-resource-page .wt-resource-table .t-table__header th {
   height: 44px;
   color: var(--wt-text-tertiary);

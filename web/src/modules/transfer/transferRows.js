@@ -8,7 +8,7 @@
 // 2. 一张行表能被单测钉住。模板字符串不能。
 import { formatByteRate, formatBytes, formatEta } from '../../shared/utils/units.js'
 import { formatDateTime } from '../../shared/utils/datetime.js'
-import { canCancel, canOpenFile, canRetry, isTerminal, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetry, isTerminal, progressOf, taskState } from './downloadFacts.js'
 import { taskErrorLabel } from './downloadErrors.js'
 
 /** 「已传 / 总长」。总长未知时只说已传了多少，绝不写 `0 / 0`。 */
@@ -45,6 +45,7 @@ export function transferRow(task, { tasks = [], cancelRequested = false } = {}) 
     canCancel: canCancel(task) && !cancelRequested,
     canRetry: canRetry(task),
     canOpen: canOpenFile(task),
+    canRedownload: canRedownload(task),
   }
 }
 

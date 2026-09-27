@@ -46,12 +46,14 @@ describe('material library page', () => {
     expect(source).toContain('downloadCentre.open()')
   })
 
-  // 只有 ready 的素材有对象键可下，其余点下去必然是 409 —— 按钮就该是灰的，
-  // 而不是让运营点一次、收一个错误、再点一次。
-  it('disables the download action until the video is ready', () => {
-    // 本页只有行内那一处；详情抽屉里那颗在共用的 MaterialDetailDrawer.vue 上，同一个守卫。
-    const guarded = source.match(/:disabled="!canDownload\(/g) || []
-    expect(guarded).toHaveLength(1)
+  // 下载按钮不看 `video_status`：服务端接受未准备与失败，点了会先准备。判据随
+  // `canDownload` 一起拿掉了，所以这里钉的是它的**缺席**——一个灰按钮会把「要多走一步」
+  // 说成「这条路不通」，而运营据此去别处找绑定，正是走查里报的那一条。
+  it('offers the download action on every row and says what it will do', () => {
+    expect(source).not.toMatch(/:disabled="!canDownload\(/)
+    expect(source).not.toContain('canDownload')
+    // 本页行内一处；详情抽屉里那颗在共用的 MaterialDetailDrawer.vue 上，同一句话。
+    expect(source.match(/downloadHint\(row\)/g)).toHaveLength(2)
   })
 
   it('adds to my materials through the one idempotent command', () => {

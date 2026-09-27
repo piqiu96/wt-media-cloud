@@ -90,8 +90,45 @@ export function canOpenFile(task) {
   return task?.status === 'success' && !!task?.file_name
 }
 
+/**
+ * 这一行的失败能不能断言「它在等的那条准备没有交付」。
+ *
+ * 只有两个码可以这么断言：
+ * - `dependency_failed` 只由 `failDependentsOfTerminalTasks` 写，那条 SQL 的 WHERE
+ *   要求被改的行自己有 `dependency_task_id`；
+ * - `cancelled_by_user` 落在一条 **`failed`** 行上时只可能来自 `FailDependents` ——
+ *   用户直接取消一条下载，终态写的是 `cancelled`，而这一格的前提是 `failed`。
+ *
+ * 其余码客户端分不出来：一条本机下载丢了租约也是 `lease_lost`，而那种行的重试是成立
+ * 的（它的 `dependency_task_id` 为空，服务端会放行）。分不出来时**留下按钮**，让服务端
+ * 用它自己的理由拒绝 —— 藏掉一个成立的动作，比多显示一个会被拒绝的动作更糟。
+ *
+ * 也就是说这里排除的只是「服务端必然拒绝」的那一类，不是「我猜它不行」的那一类。
+ */
+const WAITER_RELEASE_CODES = ['dependency_failed', 'cancelled_by_user']
+
 export function canRetry(task) {
-  return task?.status === 'failed' && Number(task.attempt_count || 0) < Number(task.max_attempts || 0)
+  return task?.status === 'failed'
+    && Number(task.attempt_count || 0) < Number(task.max_attempts || 0)
+    && !WAITER_RELEASE_CODES.includes(task?.error_code)
+}
+
+/**
+ * 「重新下载」：终态行重新发起一次下载，走的是和第一次点击**完全相同**的那个入口。
+ *
+ * 失败与已取消的行无条件给：这正是走查里报的第三条 ——「已取消的无法再次点击下载」。
+ * 这两态的行今天一个动作都没有（`canRetry` 只认 failed，`canOpenFile` 只认 success，
+ * `canCancel` 只认非终态），运营看着一条卡住的行无从下手。
+ *
+ * 成功的行另说：文件在不在**不是这里能断言的**。`presence` 默认 `unknown` —— 浏览器
+ * 根本查不了本机文件，Desktop 也要先扫过才知道 —— 而 `unknown` 不等于「不在」。
+ * 只有实测不在（`absent`：文件被搬走或被删）时才推荐重新下载；文件还在时该出现的
+ * 动作是「打开文件」。
+ */
+export function canRedownload(task, presence = 'unknown') {
+  if (task?.asset_type !== 'material' || !task?.asset_id) return false
+  if (task?.status === 'failed' || task?.status === 'cancelled') return true
+  return task?.status === 'success' && presence === 'absent'
 }
 
 export function canCancel(task) {

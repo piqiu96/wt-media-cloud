@@ -2,14 +2,21 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
+// 「重新下载」走的是**发起下载那个入口**（`POST /materials/{id}/downloads`），不是
+// transfer 自己的路由 —— 所以它挂在素材的 client 上。把它塞进 `fileTransfer.js` 会
+// 让那个模块开始持有素材路由，而它存在的理由恰恰是「任务是执行器中立的」。同一棵树
+// 里的素材页面就是这么调的（`await client.createDownload(row.id)`），这里不发明第二种。
+import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { isDesktop } from '../../utils.js'
 import { openSavedFile } from './desktopBridge.js'
+import { createDownloadFailureMessage } from './downloadErrors.js'
 import { hasLiveTask, isTerminal } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
 import { transferRows } from './transferRows.js'
 
 const client = createFileTransferClient()
+const materials = createMaterialsClient()
 const { visible, close } = useDownloadCentre()
 const tasks = ref([])
 const loading = ref(false)
@@ -87,6 +94,23 @@ async function retry(task) {
   }
 }
 
+/**
+ * 终态行重新发起下载。
+ *
+ * 这是**新建一条任务**，不是重试：服务端去重键的 generation 把终态算作已结束，所以
+ * 重新点击会得到一条新行，而 `retryTask` 改的是原来那条（且要求它没在等准备）。
+ * 两者不是一个动作，所以 UI 上也是两个按钮。
+ */
+async function redownload(task) {
+  try {
+    await materials.createDownload(task.asset_id)
+    // 新任务要出现在这张列表里 —— 不刷新的话画面停在旧行上，看起来像没反应。
+    await load()
+  } catch (e) {
+    MessagePlugin.error(createDownloadFailureMessage(e))
+  }
+}
+
 async function open(task) {
   try {
     await openSavedFile(task.file_name)
@@ -132,6 +156,9 @@ async function open(task) {
           <div class="transfer-item__actions">
             <t-button v-if="row.canCancel" size="small" class="wt-secondary-button" variant="outline" @click="cancel(row.task)">取消</t-button>
             <t-button v-if="row.canRetry" size="small" theme="primary" @click="retry(row.task)">重试</t-button>
+            <!-- 终态行的出路。已取消行原先一个动作都没有，「已取消的无法再次点击下载」
+                 就是这么来的；失败行里那些在等准备的（重试必然被服务端拒绝）也只有这一条能走。 -->
+            <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
             <!--
               打开文件是桌面端专属：文件落在运营这台机器上（Agent 写的），浏览器打不开它。
               守卫写在按钮上而不是点下去再报错 —— 一个点了必然失败的按钮不该出现在那里。

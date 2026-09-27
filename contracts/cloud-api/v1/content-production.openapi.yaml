@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.09.26.2
+  version: 2026.09.27.1
   description: Additive M4-A contract. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/materials:
@@ -51,7 +51,11 @@ paths:
       parameters: [{$ref: '#/components/parameters/MaterialID'}]
       responses:
         '202': {description: A pending local-agent file transfer task.}
-        '409': {description: No fresh bound Local Agent node is available.}
+        # The refusal is the binding, not the heartbeat. A bound node whose machine is
+        # asleep yields a queueing task instead: reachability is answered when a lease is
+        # claimed, not guessed at click time. (It read "No fresh bound Local Agent node"
+        # before 2026.09.27, which is what the Desktop bind/refresh button used to reset.)
+        '409': {description: No bound Local Agent node is available.}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

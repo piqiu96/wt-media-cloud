@@ -7,7 +7,7 @@
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
-import { canDownload, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
+import { downloadHint, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
 
 defineProps({
   visible: { type: Boolean, default: false },
@@ -45,7 +45,10 @@ defineEmits(['update:visible', 'add', 'download'])
         <p v-if="material.last_error" class="material-detail__error">最近一次准备失败：{{ material.last_error }}</p>
         <div class="material-detail__actions">
           <t-button class="wt-secondary-button" variant="outline" @click="$emit('add', material)">加入我的素材</t-button>
-          <t-button theme="primary" :disabled="!canDownload(material)" @click="$emit('download', material)">下载到本机</t-button>
+          <div class="wt-row-action">
+            <t-button theme="primary" @click="$emit('download', material)">下载到本机</t-button>
+            <small v-if="downloadHint(material)" class="wt-row-hint">{{ downloadHint(material) }}</small>
+          </div>
         </div>
       </div>
     </t-loading>
@@ -58,5 +61,7 @@ defineEmits(['update:visible', 'add', 'download'])
 .material-detail dt { color: var(--wt-text-tertiary); font-size: 12px; }
 .material-detail dd { margin: 4px 0 0; color: var(--wt-text-primary); font-size: 14px; overflow-wrap: anywhere; }
 .material-detail__error { margin: 16px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
-.material-detail__actions { display: flex; gap: 8px; margin-top: 20px; }
+/* `align-items: center`：下载那颗按钮下面可能挂着一句提示，于是它比旁边那颗高。
+   不居中就会让「加入我的素材」被拉成两行高，看起来像是另一类动作。 */
+.material-detail__actions { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
 </style>

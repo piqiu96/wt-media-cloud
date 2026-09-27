@@ -10,7 +10,7 @@ import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { formatBytes } from '../../../shared/utils/units.js'
-import { VIDEO_STATUSES, canDownload, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
+import { VIDEO_STATUSES, downloadHint, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
@@ -218,8 +218,13 @@ onMounted(() => {
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="addToMine(row)">加入我的素材</t-button>
-                <!-- 只有 ready 的素材有对象键可下；其余状态点了必然是 409，所以按钮就该是灰的。 -->
-                <t-button size="small" theme="primary" :disabled="!canDownload(row)" @click="download(row)">下载到本机</t-button>
+                <!-- 按钮不因视频没准备好而变灰：服务端接受未准备与失败，点了会先准备。
+                     一句提示贴在按钮**下面**而不是右面：这一列只有 280px，横向再塞一句话
+                     会把按钮挤变形，而提示本身在窄列里换行也无所谓。 -->
+                <div class="wt-row-action">
+                  <t-button size="small" theme="primary" @click="download(row)">下载到本机</t-button>
+                  <small v-if="downloadHint(row)" class="wt-row-hint">{{ downloadHint(row) }}</small>
+                </div>
               </t-space>
             </template>
           </t-table>

@@ -9,7 +9,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { formatBytes } from '../../../shared/utils/units.js'
-import { VIDEO_STATUSES, canDownload, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
+import { VIDEO_STATUSES, downloadHint, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
@@ -203,7 +203,10 @@ onMounted(() => {
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
-                <t-button size="small" theme="primary" :disabled="!canDownload(row)" @click="download(row)">下载到本机</t-button>
+                <div class="wt-row-action">
+                  <t-button size="small" theme="primary" @click="download(row)">下载到本机</t-button>
+                  <small v-if="downloadHint(row)" class="wt-row-hint">{{ downloadHint(row) }}</small>
+                </div>
                 <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="remove(row)">移出</t-button>
               </t-space>
             </template>

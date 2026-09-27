@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRetry, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
-import { createDownloadFailureMessage, taskErrorLabel } from './downloadErrors.js'
+import { canCancel, canOpenFile, canRedownload, canRetry, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
+  asset_type: 'material',
   asset_id: 42,
   asset_title: '演示素材',
   execution_scope: 'local_agent',
@@ -120,26 +120,63 @@ describe('row actions', () => {
     expect(canOpenFile(task({ status: 'success', file_name: null }))).toBe(false)
     expect(canOpenFile(task({ status: 'failed', file_name: 'x.mp4' }))).toBe(false)
   })
+
+  /**
+   * 重试的排除项只放**服务端必然拒绝**的那一类。
+   *
+   * `retryTask` 的 WHERE 要求 `dependency_task_id IS NULL`：一条在等准备的下载失败后，
+   * 指针还在，重试改不动它，租约里也没有对象键／大小／hash 可发 —— 那条行的 `attempt_count`
+   * 会一直是 0，用户看到的是「点了没反应」。
+   */
+  it('hides retry only for failures that a retry could never move', () => {
+    expect(canRetry(task({ status: 'failed', attempt_count: 1, max_attempts: 3, error_code: 'download_integrity_failed' }))).toBe(true)
+    expect(canRetry(task({ status: 'failed', error_code: 'dependency_failed' }))).toBe(false)
+    expect(canRetry(task({ status: 'failed', error_code: 'cancelled_by_user' }))).toBe(false)
+    // `lease_lost` 分不出来：一条本机下载自己丢了租约也是这个码，而那种行重试是成立的
+    // （依赖为空）。留着按钮，让服务端用自己的理由拒绝 —— 藏掉一个成立的动作更糟。
+    expect(canRetry(task({ status: 'failed', attempt_count: 1, max_attempts: 3, error_code: 'lease_lost' }))).toBe(true)
+    expect(canRetry(task({ status: 'cancelled', error_code: 'dependency_failed' }))).toBe(false)
+  })
+
+  /**
+   * 「重新下载」是走查里报的第三条：「已取消的无法再次点击下载」。
+   *
+   * 已取消行今天零动作（`canRetry` 只认 failed、`canOpenFile` 只认 success、
+   * `canCancel` 只认非终态）—— 一条卡住的行看上去无路可走。
+   */
+  it('gives every terminal material row a way back to a download', () => {
+    expect(canRedownload(task({ status: 'cancelled' }))).toBe(true)
+    expect(canRedownload(task({ status: 'failed' }))).toBe(true)
+    // 未终结的行不该有它：此时该出现的是「取消」，而重新点一次只会撞上去重键。
+    expect(canRedownload(task({ status: 'running' }))).toBe(false)
+    expect(canRedownload(task({ status: 'pending' }))).toBe(false)
+  })
+
+  /**
+   * 成功行是唯一需要**实测**才能推荐重新下载的一态。
+   *
+   * `presence` 默认 `unknown`：浏览器查不了本机文件，Desktop 也要先扫过才知道。
+   * 未知不等于不在 —— 文件好好地在那儿，却因为「没查过」而给人一个重新下载的按钮，
+   * 那是拿猜当事实。文件实测不在（被搬走／被删）时它才是那个该出现的动作。
+   */
+  it('recommends a re-download of a success only once the file is measured gone', () => {
+    expect(canRedownload(task({ status: 'success' }))).toBe(false)
+    expect(canRedownload(task({ status: 'success' }), 'unknown')).toBe(false)
+    expect(canRedownload(task({ status: 'success' }), 'present_current')).toBe(false)
+    expect(canRedownload(task({ status: 'success' }), 'present_elsewhere')).toBe(false)
+    expect(canRedownload(task({ status: 'success' }), 'absent')).toBe(true)
+    // 成功行的原动作是「打开文件」，不是因为多了这个按钮就少一个。
+    expect(canOpenFile(task({ status: 'success', file_name: 'x.mp4' }))).toBe(true)
+  })
+
+  // 不是素材的任务（`compose_input_prepare` 这类中间产物）没有「重新下载」这个动作：
+  // 素材页面那个入口只吃素材 id，拿一个别的 id 去调是错的。
+  it('offers a re-download only for material tasks', () => {
+    expect(canRedownload(task({ status: 'cancelled', asset_type: 'compose_input' }))).toBe(false)
+    expect(canRedownload(task({ status: 'cancelled', asset_id: 0 }))).toBe(false)
+    expect(canRedownload(null)).toBe(false)
+  })
 })
 
-describe('failure wording', () => {
-  it('explains the two refusals a click can produce', () => {
-    expect(createDownloadFailureMessage({ type: 'material_unavailable' })).toContain('尚未准备好')
-    expect(createDownloadFailureMessage({ type: 'local_transfer_node_unavailable' })).toContain('下载节点')
-  })
-
-  // 认不出来就把服务端的话原样交出去。换成「操作失败」等于把唯一的诊断信息扔掉。
-  it('passes an unrecognised refusal through instead of flattening it', () => {
-    expect(createDownloadFailureMessage({ type: 'something_new', message: '服务端说得很具体' })).toBe('服务端说得很具体')
-    expect(createDownloadFailureMessage({})).toBe('发起下载失败')
-  })
-
-  it('explains a task error code, and shows an unknown one rather than blank', () => {
-    expect(taskErrorLabel('download_integrity_failed')).toContain('完整性')
-    expect(taskErrorLabel('download_disk_insufficient')).toContain('磁盘')
-    expect(taskErrorLabel('cancelled_by_user')).toContain('取消')
-    // 没见过的码是最需要被看到的：空白会让人以为「没出错」。
-    expect(taskErrorLabel('brand_new_code')).toBe('brand_new_code')
-    expect(taskErrorLabel('')).toBe('')
-  })
-})
+// 文案用例全在 `downloadErrors.test.js`：这个文件钉的是「事实」，措辞跟着词表走，
+// 两处各写一份必然分叉。

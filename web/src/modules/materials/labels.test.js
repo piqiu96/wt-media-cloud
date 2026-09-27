@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { VIDEO_STATUSES, canDownload, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
+import { VIDEO_STATUSES, downloadHint, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
 
 describe('material labels', () => {
   // 四种状态全覆盖：漏掉一种就是页面上出现空白徽章，而空白看起来像「没问题」。
@@ -19,12 +19,25 @@ describe('material labels', () => {
     expect(videoStatusLabel('')).toBe('-')
   })
 
-  it('treats only a ready material as downloadable', () => {
-    expect(canDownload({ video_status: 'ready' })).toBe(true)
-    for (const status of ['not_downloaded', 'downloading', 'failed']) {
-      expect(canDownload({ video_status: status }), status).toBe(false)
+  // 下载按钮不再看 `video_status`：`CreateDownload` 接受未准备与失败，点了会先建云端
+  // 准备再把本机任务挂上去。所以这里要断言的是「点下去会发生什么」被说出来了，而不是
+  // 「能不能点」——一个灰按钮会让运营以为这条路是断的，而它只是要多走一步准备。
+  it('says what clicking download will do instead of whether it may be clicked', () => {
+    expect(downloadHint({ video_status: 'not_downloaded' })).toBe('点下载会先准备视频')
+    expect(downloadHint({ video_status: 'failed' })).toBe('点下载会重新准备')
+    // 已经可下载、正在准备、以及状态不认识时都没有额外的话要说：状态徽章已经写在那儿了，
+    // 再补一句只是噪声。
+    for (const status of ['ready', 'downloading', 'mystery']) {
+      expect(downloadHint({ video_status: status }), status).toBe('')
     }
-    expect(canDownload(null)).toBe(false)
+    expect(downloadHint(null)).toBe('')
+  })
+
+  // 门控被拿掉了，而不只是被绕过：`canDownload` 留在模块里，下一个页面就会再用它把按钮
+  // 变灰一次，而那份代码看起来完全合理。
+  it('no longer exports a readiness gate at all', async () => {
+    const labels = await import('./labels.js')
+    expect(labels.canDownload).toBeUndefined()
   })
 
   // 素材带了 game_id 而游戏表里没有它时，显示 id 而不是「-」：
