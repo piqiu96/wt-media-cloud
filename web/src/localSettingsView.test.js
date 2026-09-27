@@ -10,6 +10,7 @@ import {
   describeMigration,
   describeMigrationPlan,
   describePush,
+  describeSearchDirectory,
   formatBytes,
   formatModified,
   keptReasonLabel,
@@ -385,6 +386,68 @@ describe('push reporting', () => {
     expect(said.theme).toBe('warning')
     expect(said.text).toContain('没有记下')
     expect(said.text).not.toContain('null')
+  })
+})
+
+/**
+ * Naming a directory for searching, and the two things that must be said with it.
+ *
+ * The search space is bounded, so an add can evict — and an evicted directory
+ * stops being searched, which puts its files back to answering 「已不存在」. That
+ * has to be a warning with the name in it, not a success the eye slides off. And
+ * every branch has to say where **new** files go, because the whole risk of this
+ * entry is being read as 「以后的下载也放这儿」.
+ */
+describe('search directory reporting', () => {
+  it('says the directory was added, how many are searched, and that downloads did not move', () => {
+    const said = describeSearchDirectory({
+      picked: '/old/files',
+      added: true,
+      dropped: null,
+      searched: 3,
+    })
+
+    expect(said.theme).toBe('success')
+    expect(said.text).toContain('/old/files')
+    expect(said.text).toContain('3 个位置')
+    expect(said.detail).toContain('以后的下载仍保存到当前保存位置')
+  })
+
+  /**
+   * A directory that is already searched is **not** reported as a change.
+   *
+   * The sentence matters as much as the branch: 「加进去了」 for a call that
+   * changed nothing sends a person looking for an effect they will not find.
+   */
+  it('does not report a change when the directory was already searched', () => {
+    const said = describeSearchDirectory({
+      picked: '/old/files',
+      added: false,
+      dropped: null,
+      searched: 1,
+    })
+
+    expect(said.theme).toBe('info')
+    expect(said.text).toContain('已经在查找范围里了')
+    expect(said.text).not.toContain('已加入')
+    expect(said.detail).toContain('以后的下载仍保存到当前保存位置')
+  })
+
+  it('warns, and names the directory it displaced', () => {
+    const said = describeSearchDirectory({
+      picked: '/old/files',
+      added: true,
+      dropped: '/gone/files',
+      searched: 8,
+    })
+
+    expect(said.theme).toBe('warning')
+    expect(said.text).toContain('/old/files')
+    expect(said.text).toContain('/gone/files')
+    // The consequence, not just the fact: what stops working is 「打开文件」.
+    expect(said.detail).toContain('/gone/files')
+    expect(said.detail).toContain('已不存在')
+    expect(said.detail).toContain('以后的下载仍保存到当前保存位置')
   })
 })
 

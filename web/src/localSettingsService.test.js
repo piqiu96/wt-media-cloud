@@ -9,6 +9,7 @@ import {
   normalizeLogTail,
   normalizeMigrationPlan,
   normalizeMigrationReport,
+  normalizeSearchDirectoryView,
   normalizeSettingsView,
 } from './apps/desktop/features/local-settings/service.js'
 
@@ -37,6 +38,7 @@ describe('local settings command names', () => {
       migrationPlan: 'local_save_dir_migration_plan',
       moveSavedFiles: 'local_move_saved_files',
       deleteSavedFiles: 'local_delete_saved_files',
+      addSearchDirectory: 'local_pick_search_directory',
     })
   })
 
@@ -281,6 +283,46 @@ describe('local settings service invoke arguments', () => {
       freeBytes: 0,
     })
   })
+
+  /**
+   * Naming a search directory carries nothing, and **cancelling is not an
+   * answer**.
+   *
+   * The dialog is opened on the Rust side, so this command takes no argument at
+   * all — the page never learns the directory by sending it, only by being told
+   * what was picked. And a cancelled dialog comes back as `null`: a service that
+   * normalized it into `{picked: '', added: false, …}` would hand the page an
+   * answer to render, and the page would say 「已经在查找范围里了」 about a directory
+   * nobody named. Both halves are the whole call, so an argument appearing here
+   * fails this test.
+   */
+  it('opens the search-directory picker with no arguments and reads the answer back', async () => {
+    const invoke = vi.fn(async () => ({
+      picked: '/old/files',
+      added: true,
+      dropped: '/gone',
+      searched: 3,
+    }))
+    const service = createLocalSettingsService({ invoke })
+
+    await expect(service.pickSearchDirectory()).resolves.toEqual({
+      picked: '/old/files',
+      added: true,
+      dropped: '/gone',
+      searched: 3,
+    })
+    expect(invoke.mock.calls[0]).toEqual(['local_pick_search_directory'])
+  })
+
+  it('answers a cancelled picker with nothing rather than with an empty answer', async () => {
+    for (const cancelled of [null, undefined]) {
+      const service = createLocalSettingsService({
+        invoke: vi.fn(async () => cancelled),
+      })
+
+      await expect(service.pickSearchDirectory()).resolves.toBeNull()
+    }
+  })
 })
 
 /**
@@ -404,6 +446,36 @@ describe('local settings normalization', () => {
     })
   })
 
+  /**
+   * The three facts the search-directory answer carries, and the one it must not
+   * invent.
+   *
+   * `dropped` is `null` when nothing was evicted — not `''`, which is a path and
+   * would render as a directory with no name; and `added` is `true` only when the
+   * Rust side said so, because 「已经在里面了」 read as 「加进去了」 is a person
+   * looking for a change that did not happen.
+   */
+  it('keeps the search-directory answer in the page spellings, and null as null', () => {
+    expect(
+      normalizeSearchDirectoryView({
+        picked: '/old/files',
+        added: true,
+        dropped: null,
+        searched: 2,
+      })
+    ).toEqual({ picked: '/old/files', added: true, dropped: null, searched: 2 })
+
+    expect(normalizeSearchDirectoryView({ picked: '/old/files' })).toEqual({
+      picked: '/old/files',
+      added: false,
+      dropped: null,
+      searched: 0,
+    })
+    // An answer that never arrived must not read as 「加进去了」.
+    expect(normalizeSearchDirectoryView(undefined).added).toBe(false)
+    expect(normalizeSearchDirectoryView(undefined).picked).toBe('')
+  })
+
   it('does not invent a level for a line that has none', () => {
     const tail = normalizeLogTail({
       source: 'desktop',
@@ -486,6 +558,34 @@ describe('local settings mock bridge', () => {
     expect((await service.getSettings()).saveDir).toBeNull()
     expect((await service.setSaveDir('/Users/mock/Movies')).saveDir).toBe('/Users/mock/Movies')
     expect((await service.setSaveDir(null)).saveDir).toBeNull()
+  })
+
+  /**
+   * The stand-in's picker answers with a **directory**, and its second answer is
+   * a different one.
+   *
+   * A mock that always cancelled would leave the page's success and no-change
+   * branches undrawable in a preview, which is the one thing a preview exists to
+   * check; one that always added would make 「已经在查找范围里了」 unreachable. So
+   * both answers are asserted, from one service, plus the count that has to move
+   * with the chosen directory — the Rust side counts the union of the choice and
+   * the history, and a mock counting only the history would print one location
+   * too few.
+   */
+  it('names a search directory once, then reports the second attempt as no change', async () => {
+    const service = createLocalSettingsService()
+
+    const first = await service.pickSearchDirectory()
+    const second = await service.pickSearchDirectory()
+
+    expect(first.picked).toMatch(/^\/mock\//)
+    expect(first.added).toBe(true)
+    expect(first.dropped).toBeNull()
+    expect(first.searched).toBe(1)
+    expect(second).toEqual({ ...first, added: false })
+
+    await service.setSaveDir('/Users/mock/Movies')
+    expect((await service.pickSearchDirectory()).searched).toBe(2)
   })
 
   /**

@@ -36,6 +36,7 @@ export const LOCAL_SETTINGS_COMMANDS = Object.freeze({
   migrationPlan: "local_save_dir_migration_plan",
   moveSavedFiles: "local_move_saved_files",
   deleteSavedFiles: "local_delete_saved_files",
+  addSearchDirectory: "local_pick_search_directory",
 });
 
 /** The two components whose logs this page can show, in the order it shows them. */
@@ -287,6 +288,25 @@ export function normalizeMigrationReport(value) {
   };
 }
 
+/**
+ * What naming a directory for searching did.
+ *
+ * `dropped` stays `null` rather than becoming an empty string when nothing was
+ * evicted: 「没有挤掉任何一个」 and 「答案里没有这一项」 are different, and only the
+ * first is a fact the Rust side knows. `searched` is **that** process's count —
+ * the page is never sent the list it would have to count itself, which is what
+ * keeps 「共查找 N 个位置」 from being a number this side invented.
+ */
+export function normalizeSearchDirectoryView(value) {
+  const source = asObject(value);
+  return {
+    picked: String(source.picked ?? ""),
+    added: source.added === true,
+    dropped: source.dropped ?? null,
+    searched: asCount(source.searched),
+  };
+}
+
 // Real Tauri invoke-based service.
 // Falls back to mock when Tauri is unavailable (Vite dev mode).
 //
@@ -330,6 +350,21 @@ export function createLocalSettingsService({ invoke } = {}) {
      */
     async pushSaveDir() {
       return normalizeSaveDirectoryFacts(await call(LOCAL_SETTINGS_COMMANDS.pushSaveDirectory));
+    },
+    /**
+     * Name a directory to search **without** moving where new downloads go.
+     *
+     * The picker is opened on the Rust side, so this is the only call in the
+     * service that can answer with **nothing**: a cancelled dialog arrives as
+     * `null`, and that is not an answer. It is kept distinct from an answer all
+     * the way up — rendering 「已加入」 for it would report a change that did not
+     * happen, and rendering 「已经在里面了」 would invent a directory nobody named.
+     */
+    async pickSearchDirectory() {
+      const answer = await call(LOCAL_SETTINGS_COMMANDS.addSearchDirectory);
+      return answer === null || answer === undefined
+        ? null
+        : normalizeSearchDirectoryView(answer);
     },
     /** What moving the named files to the chosen directory would involve. */
     async migrationPlan(names) {
@@ -385,6 +420,14 @@ export function createLocalSettingsService({ invoke } = {}) {
 }
 
 /**
+ * How many directories the search space holds, mirroring the Rust side's
+ * `MAX_KNOWN_SAVE_DIRS`. The mock keeps the same bound so that a preview can
+ * reach the 「挤掉了一个」 answer; the number itself is the Rust side's, and this
+ * is a copy of it rather than a second definition of the rule.
+ */
+const MAX_SEARCH_DIRS = 8;
+
+/**
  * The dev-mode stand-in for the Rust bridge.
  *
  * Every answer is self-evidently a mock — the directories and file names are
@@ -399,6 +442,12 @@ export function createLocalSettingsService({ invoke } = {}) {
 export function createMockInvoke() {
   let saveDir = null;
   const file = "/mock/WTMedia/Desktop/settings.toml";
+  // The pretend search history, newest first and bounded like the Rust side's
+  // (`MAX_KNOWN_SAVE_DIRS`), so a preview draws the eviction branch the app would
+  // rather than growing a list the app caps. It starts empty so that all three
+  // answers the page has to render — added / already there / evicted — are
+  // reachable by pressing the button more than once.
+  let searches = [];
   // The pretend download history, and one older save directory holding two of
   // them. `old: false` is a file already in the chosen directory; `bytes: null`
   // is one whose size could not be read.
@@ -451,6 +500,25 @@ export function createMockInvoke() {
       case LOCAL_SETTINGS_COMMANDS.setSettings:
         saveDir = args.saveDir ?? null;
         return clone({ save_dir: saveDir, file });
+      case LOCAL_SETTINGS_COMMANDS.addSearchDirectory: {
+        // A folder dialog cannot be answered from a browser, so the stand-in
+        // names the one directory its pretend machine used to use instead of
+        // answering `null`: a mock that always cancelled would make both of the
+        // page's other branches undrawable, which is the one thing a preview
+        // exists to check. Its effect on *visibility* is not modelled — the plan
+        // below lists that directory's files already, because on a real machine
+        // it is in the history by the time this picker is needed at all.
+        const picked = oldDir;
+        const searched = () =>
+          saveDir ? [saveDir, ...searches.filter((dir) => dir !== saveDir)] : [...searches];
+        if (searched().includes(picked)) {
+          return clone({ picked, added: false, dropped: null, searched: searched().length });
+        }
+        const grown = [picked, ...searches];
+        const dropped = grown.length > MAX_SEARCH_DIRS ? grown[MAX_SEARCH_DIRS] : null;
+        searches = grown.slice(0, MAX_SEARCH_DIRS);
+        return clone({ picked, added: true, dropped, searched: searched().length });
+      }
       case LOCAL_SETTINGS_COMMANDS.pushSaveDirectory:
         // Refuses while nothing is chosen, exactly as the Rust side does — a mock
         // that answered 「记下了」 for a push that carried nothing would let the

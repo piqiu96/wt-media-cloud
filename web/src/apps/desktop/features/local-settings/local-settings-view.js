@@ -172,6 +172,47 @@ export function describePush(facts) {
 }
 
 /**
+ * What naming a directory for searching did.
+ *
+ * Three answers, and which one is said is the whole of this function:
+ * 「加进去了」, 「本来就在查找范围里」, and 「加进去了，但有一个被挤掉」. The third is the one
+ * that matters. The search space is bounded, so one directory in is one
+ * directory out — and a directory that fell out stops being searched, which puts
+ * the files in it back to answering 「已不存在」, the same sentence as files that
+ * were deleted. That is not something to learn by noticing fewer files, so the
+ * dropped name is said out loud, in the warning tone that a person has to
+ * actually read.
+ *
+ * Every branch ends by saying where **new** files go, because that is the one
+ * thing this entry must not have changed: 「这个目录也作为查找位置」 is not 「以后的
+ * 下载也放这儿」, and the two are one misread apart.
+ */
+export function describeSearchDirectory(view) {
+  const where = "以后的下载仍保存到当前保存位置。";
+  if (!view.added) {
+    return {
+      theme: "info",
+      text: `${view.picked} 已经在查找范围里了，这次没有改动。`,
+      detail: `现在共查找 ${view.searched} 个位置。${where}`,
+    };
+  }
+  if (view.dropped) {
+    return {
+      theme: "warning",
+      text: `已加入查找位置：${view.picked}。查找位置有上限，${view.dropped} 已被挤掉。`,
+      detail:
+        `现在共查找 ${view.searched} 个位置。${view.dropped} 里的文件从此不再被查找，` +
+        `「打开文件」会报告已不存在。${where}`,
+    };
+  }
+  return {
+    theme: "success",
+    text: `已加入查找位置：${view.picked}，现在共查找 ${view.searched} 个位置。`,
+    detail: where,
+  };
+}
+
+/**
  * Saving a new location does not move anything by itself, so the page asks what
  * moving the old files would involve and puts the answer in front of the person.
  * These are that dialog's rules.

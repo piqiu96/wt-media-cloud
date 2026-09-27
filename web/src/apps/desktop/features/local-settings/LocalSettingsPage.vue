@@ -19,6 +19,7 @@ import {
   describeMigration,
   describeMigrationPlan,
   describePush,
+  describeSearchDirectory,
   formatBytes,
   migrationRows,
 } from "./local-settings-view.js"
@@ -178,6 +179,29 @@ async function clearSaveDir() {
   }
 }
 
+/**
+ * Name a directory to look in, **without** touching where downloads go.
+ *
+ * This is the way back for a machine whose older files are invisible: a v1
+ * settings file knew one directory and only the last of them, so the material
+ * downloaded before a change sits in a directory nothing searches and answers
+ * 「已不存在」 — the same sentence as a file that was deleted.
+ *
+ * `run` answers `null` for a cancelled dialog and for a failure alike, and the
+ * two must not render the same thing. A failure has already set `failure`, which
+ * is what the person needs to read; a cancelled dialog is not an outcome at all,
+ * and a person who opened the picker and changed their mind has asked for
+ * nothing — so this renders nothing, rather than a sentence about a directory
+ * nobody chose.
+ */
+async function addSearchDirectory() {
+  const answer = await run("search-dir", () => service.pickSearchDirectory())
+  if (!answer) {
+    return
+  }
+  outcome.value = describeSearchDirectory(answer)
+}
+
 async function openPlace(place) {
   await run(`open-${place}`, () => service.openPlace(place))
 }
@@ -306,6 +330,19 @@ onMounted(reload)
           >
             清除
           </t-button>
+          <!--
+            这个按钮**不改**保存位置，只把选中的目录加进「查找位置」：换过下载目录的人，
+            早先下好的文件还在老目录里，而旧版设置文件只记得最后一个目录——那些文件于是
+            谁也不找，回答和「已经删掉」一模一样。选一次就重新找得到。
+          -->
+          <t-button
+            theme="default"
+            :loading="busy === 'search-dir'"
+            :disabled="!!busy"
+            @click="addSearchDirectory"
+          >
+            添加查找位置
+          </t-button>
           <t-button
             theme="default"
             :loading="busy === 'open-data'"
@@ -344,6 +381,13 @@ onMounted(reload)
         -->
         <p class="hint">
           换位置不会自动搬运已经下载的文件。它们仍在原来的位置，需要时用「搬运已下载的文件」逐个处理。
+        </p>
+        <!--
+          这一条和上一条说的不是一回事：上一条是「换位置不搬文件」，这一条是「加查找位置
+          不换位置」。两句都可能被同一句「换个目录」读串，所以两句都写出来。
+        -->
+        <p class="hint">
+          添加查找位置只影响「去哪儿找」：那个目录里的旧文件会重新被找到，「打开文件」也能打开它们。以后的下载仍然保存到上面的位置。
         </p>
         <t-alert
           v-if="pushNote"
