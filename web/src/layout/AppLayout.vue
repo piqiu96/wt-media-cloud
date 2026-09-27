@@ -3,9 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isDesktop } from '../utils.js'
 import { createSessionClient } from '../shared/api/session.js'
+import DownloadCentreDrawer from '../modules/transfer/DownloadCentreDrawer.vue'
+import { useDownloadCentre } from '../modules/transfer/downloadCentre.js'
 
 const route = useRoute()
 const router = useRouter()
+const downloadCentre = useDownloadCentre()
 const collapsed = ref(false)
 const SIDEBAR_EXPANDED_GROUPS_KEY = 'wt-media:sidebar-expanded-groups'
 const expandedGroups = ref(readExpandedGroups())
@@ -185,7 +188,16 @@ async function logout() {
             <t-breadcrumb-item v-for="item in breadcrumbItems" :key="item">{{ item }}</t-breadcrumb-item>
           </t-breadcrumb>
         </div>
-        <div style="display:flex; gap:8px">
+        <div style="display:flex; gap:8px; align-items:center">
+          <!--
+            下载中心挂在顶栏而不是素材库里：一条下载可以来自素材库、我的素材或日后的
+            成片导出，它不属于其中任何一页。面板本身只有一份（modules/transfer），
+            页面用 `useDownloadCentre().open()` 把它叫出来。
+          -->
+          <t-button variant="text" @click="downloadCentre.open">
+            <t-icon name="download" />
+            下载中心
+          </t-button>
           <t-button variant="text" @click="logout">退出</t-button>
         </div>
       </t-header>
@@ -193,6 +205,8 @@ async function logout() {
       <t-content class="content-area">
         <router-view />
       </t-content>
+
+      <DownloadCentreDrawer />
     </t-layout>
   </t-layout>
 </template>
