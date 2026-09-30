@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core'
 // 一个可以被诱导的动作，而名字是在已知保存位置里按名匹配出来的。
 export const TRANSFER_COMMANDS = Object.freeze({
   openSavedFile: 'local_open_saved_file',
+  revealSavedFile: 'local_reveal_saved_file',
   savedFileStates: 'local_saved_file_states',
 })
 
@@ -28,6 +29,22 @@ export async function openSavedFile(name, { invokeImpl = invoke } = {}) {
   if (!isDesktopRuntime()) throw new Error('打开文件只能在桌面客户端执行')
   if (!name) throw new Error('这个任务没有报告文件名，无法定位文件')
   return invokeImpl(TRANSFER_COMMANDS.openSavedFile, { name })
+}
+
+/**
+ * 在文件管理器里打开一个已下载文件**所在的目录**。
+ *
+ * 与「打开文件」同一形状、同一条规矩（名字，不是路径），差别在交给系统的东西：
+ * `local_open_saved_file` 把文件本身交给默认程序（视频会开始播），这一条把它的所在目录
+ * 交给文件管理器 —— 运营要的是「这份东西在我机器的哪个文件夹里」。
+ *
+ * 目录不由前端拼：名字送过去，Rust 侧在所有已知的保存位置里找到它，再把那一份的父目录
+ * 打开。返回值就是打开的那个目录。
+ */
+export async function revealSavedFile(name, { invokeImpl = invoke } = {}) {
+  if (!isDesktopRuntime()) throw new Error('打开目录只能在桌面客户端执行')
+  if (!name) throw new Error('这个任务没有报告文件名，无法定位文件')
+  return invokeImpl(TRANSFER_COMMANDS.revealSavedFile, { name })
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetry, fileFact, filePresence, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetry, downloadedFileName, fileFact, filePresence, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -240,6 +240,63 @@ describe('where a downloaded file is', () => {
     expect(canOpenFile(success, 'present_current')).toBe(true)
     expect(canOpenFile(success, 'absent')).toBe(false)
     expect(canRedownload(success, 'absent')).toBe(true)
+  })
+})
+
+/**
+ * 一个素材在本机的那一份叫什么名字 —— 详情抽屉问「下载目录」之前要先有名字问。
+ *
+ * 这一块钉的是**筛掉什么**：任务表里同一个素材会有好几条（失败重试、云端准备、上一次
+ * 换目录前的成功），而磁盘上只有执行器最后写下去的那一份。
+ */
+describe('the local copy of one material', () => {
+  const download = (over = {}) => task({ purpose: 'user_download', status: 'success', file_name: '演示素材-42.mp4', ...over })
+
+  it('names the file this machine downloaded', () => {
+    expect(downloadedFileName([download()], 42)).toBe('演示素材-42.mp4')
+  })
+
+  it('takes the newest one in the order the server returned them', () => {
+    // 服务端按 `created_at DESC, id DESC` 返回（`ListTasks`），这里不重排：一条更早的成功
+    // 只是「这个素材以前也下过一次」，文件在哪儿由最新的那条说了算。
+    const tasks = [download({ id: 't-2', file_name: '第二次.mp4' }), download({ id: 't-1', file_name: '第一次.mp4' })]
+    expect(downloadedFileName(tasks, 42)).toBe('第二次.mp4')
+  })
+
+  // 一条更晚的失败/取消不能让更早的那次成功消失：磁盘上的文件不因为重下失败而没了。
+  it('looks past later attempts that ended without a file', () => {
+    const tasks = [
+      download({ id: 't-3', status: 'failed', file_name: undefined }),
+      download({ id: 't-2', status: 'cancelled', file_name: undefined }),
+      download({ id: 't-1', file_name: '第一次.mp4' }),
+    ]
+    expect(downloadedFileName(tasks, 42)).toBe('第一次.mp4')
+  })
+
+  it('ignores everything that is not this material, this machine and this action', () => {
+    expect(downloadedFileName([download({ asset_id: 7 })], 42)).toBeNull()
+    expect(downloadedFileName([download({ execution_scope: 'cloud' })], 42)).toBeNull()
+    // 合成准备的落点是另一个功能的产物（本 CHG 不含合成）：「下载目录」要说的是运营自己
+    // 点过「下载」的那一份。
+    expect(downloadedFileName([download({ purpose: 'compose_input_prepare' })], 42)).toBeNull()
+    expect(downloadedFileName([download({ status: 'running' })], 42)).toBeNull()
+    expect(downloadedFileName([download({ status: 'failed' })], 42)).toBeNull()
+  })
+
+  it('has no answer when the executor never reported a name', () => {
+    expect(downloadedFileName([download({ file_name: undefined })], 42)).toBeNull()
+    // 全空白不是名字：送进 Rust 只会换来一句「不是一个文件名」。
+    expect(downloadedFileName([download({ file_name: '   ' })], 42)).toBeNull()
+    expect(downloadedFileName([], 42)).toBeNull()
+    expect(downloadedFileName(null, 42)).toBeNull()
+    expect(downloadedFileName([download()], null)).toBeNull()
+  })
+
+  // 素材 id 从页面来（可能是字符串），任务里是整数：比之前各自转成数，别让 `Number()` 的
+  // 结果自己决定成败。
+  it('matches the id by value, not by how it is spelled', () => {
+    expect(downloadedFileName([download()], '42')).toBe('演示素材-42.mp4')
+    expect(downloadedFileName([download()], '42abc')).toBeNull()
   })
 })
 

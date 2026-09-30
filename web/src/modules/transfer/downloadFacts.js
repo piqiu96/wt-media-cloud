@@ -105,6 +105,34 @@ export const FILE_PRESENCE = Object.freeze({
 })
 
 /**
+ * 这个素材在本机的那一份叫什么名字，没有就是 `null`。
+ *
+ * 详情抽屉要问「这个文件的目录在哪」之前，先得有名字送去问 —— 而名字只能从任务表里来，
+ * 磁盘上没有「哪些文件是这个 App 下的」这件事（`migrationCandidates.js` 同一段理由）。
+ *
+ * 只有**这台机器、这个动作、成功过、报了名字**的那一条算：`execution_scope` 是本机
+ * 而不是云端、`purpose` 是运营自己点的「下载」（合成准备的落点是另一个功能的产物）、
+ * `status` 是 `success`（跑着的和失败的行上没有文件）。顺序用服务端给的顺序（`ListTasks`
+ * 是 `created_at DESC, id DESC`），第一条匹配的就是最近那一次 —— 一条更晚的失败不能让
+ * 更早的那次成功消失：磁盘上的文件不因为重下失败而没了。
+ */
+export function downloadedFileName(tasks, assetId) {
+  const wanted = Number(assetId)
+  if (!Number.isFinite(wanted)) return null
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (task?.asset_type !== 'material') continue
+    if (Number(task?.asset_id) !== wanted) continue
+    if (task?.execution_scope !== 'local_agent') continue
+    if (task?.purpose !== 'user_download') continue
+    if (task?.status !== 'success') continue
+    const name = typeof task?.file_name === 'string' ? task.file_name : ''
+    if (!name.trim()) continue
+    return name
+  }
+  return null
+}
+
+/**
  * 这个任务的**文件名**在扫描结果里的那一条，没有就是 `null`。
  *
  * 按名字查而不是按任务查：一个名字可能对应多条任务（重试、重新下载），而磁盘上只有一个

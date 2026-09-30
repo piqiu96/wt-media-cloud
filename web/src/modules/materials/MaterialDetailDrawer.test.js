@@ -264,3 +264,63 @@ describe('material detail drawer', () => {
     expect(footer).toContain("material.video_status === 'ready'")
   })
 })
+
+/**
+ * 已下载的素材要能说清「原文件在我这台机器的哪个文件夹里」，并能打开那个文件夹
+ * （2026-09-30 用户裁定「需要有展示下载目录的地方同时能打开目录快速找到原视频」，
+ * 并指定「放在文件信息一栏里」）。
+ *
+ * 这一块钉住的是**值从哪来**：文件名是执行器报的那一个（从这张用户的下载任务表里
+ * 挑），目录是 Desktop 量出来的（`local_saved_file_states`）—— 两者都不是前端拼的，
+ * 也不是拿文件状态（`video_status` 说的是云端那份源文件）冒充的。
+ */
+describe('the local copy of a downloaded material', () => {
+  it('takes the file name from the download tasks and the directory from this machine', () => {
+    expect(source).toContain("import { createFileTransferClient } from '../../shared/api/fileTransfer.js'")
+    expect(source).toContain("import { downloadedFileName } from '../transfer/downloadFacts.js'")
+    expect(source).toContain("import { revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'")
+    expect(source).toContain('downloadedFileName(tasks')
+    expect(source).toContain('savedFileStates([name])')
+    // 名字从扫描结果那一条上读回来（`savedFileStates` 的表里带着 `name`），不另存一份。
+    expect(source).toContain('revealSavedFile(localFile.value.name')
+  })
+
+  it('puts the download directory in the 文件信息 card, with a way to open it', () => {
+    const card = sliceBetween(template, 'class="detail-card__title">\n            文件信息', '<h4 class="detail-card__title">来源信息')
+    expect(card).toContain('下载目录')
+    expect(card).toContain('localFile.directory')
+    expect(card).toContain('打开目录')
+  })
+
+  // 下载归「我的素材」（§2）：素材库上下文打开的详情不该出现本机文件的那一行，
+  // 那一页连「下载」入口都没有。
+  it('asks this machine only in the 我的素材 context', () => {
+    // 锚在**这个** watcher 自己的依赖数组上：详情里另有一个同开头的 watcher（云端视频
+    // 地址），按前缀切会切到那一个，断言就在别的代码上通过了。
+    const watcher = sliceBetween(source, 'watch(() => [props.visible, props.material?.id, props.mode]', '\n})')
+    expect(watcher).toContain("mode !== 'mine'")
+  })
+
+  /**
+   * 读不到本机时整行不出现 —— 浏览器读不到本机文件，Desktop 也要扫过才知道。
+   *
+   * 与下载中心同一条约定（`desktopBridge.savedFileStates` 在浏览器里返回空表）：
+   * 把「我读不到」写成「文件不在」，运营会据此重新下一份几百兆。
+   */
+  it('says nothing at all when this machine has nothing measured', () => {
+    // 一整行连标签一起钉：条件与元素分开断言时，条件写在别处也能通过。
+    expect(template).toContain('<div v-if="localFile?.directory" class="detail-local-file">')
+    const block = sliceBetween(template, 'class="detail-local-file"', '</section>')
+    expect(block).not.toContain('未下载')
+    expect(block).not.toContain('本地文件')
+  })
+
+  // 这一行说的是磁盘上那一份，与云端那份源文件的就绪状态无关：拿 `video_status`
+  // 当条件是错的 —— 它会在一块「文件就在这儿」的素材上说「未就绪」，也会在一块
+  // 云端就绪但本机从没下过的素材上画一个不存在的目录。
+  it('does not read the local copy off the file state', () => {
+    const block = sliceBetween(template, 'class="detail-local-file"', '</section>')
+    expect(block).not.toContain('video_status')
+    expect(source).toContain('downloadedFileName(tasks, id)')
+  })
+})

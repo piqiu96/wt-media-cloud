@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { TRANSFER_COMMANDS, isDesktopRuntime, openSavedFile, savedFileStates } from './desktopBridge.js'
+import { TRANSFER_COMMANDS, isDesktopRuntime, openSavedFile, revealSavedFile, savedFileStates } from './desktopBridge.js'
 
 // 桌面运行时在测试里是**造出来的**：`environment: 'node'` 下根本没有 `window`，
 // 于是 `isDesktopRuntime()` 天然为假 —— 这本身也要钉（见下），否则「浏览器里不该发请求」
@@ -23,6 +23,7 @@ describe('desktop bridge', () => {
   it('pins the command names the Desktop repository registers', () => {
     expect(TRANSFER_COMMANDS).toEqual({
       openSavedFile: 'local_open_saved_file',
+      revealSavedFile: 'local_reveal_saved_file',
       savedFileStates: 'local_saved_file_states',
     })
   })
@@ -48,6 +49,30 @@ describe('opening a saved file', () => {
     await expect(openSavedFile('a.mp4', { invokeImpl })).rejects.toThrow('桌面客户端')
     pretendDesktop()
     await expect(openSavedFile('', { invokeImpl })).rejects.toThrow('没有报告文件名')
+    expect(invokeImpl).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 打开一个已下载文件**所在的目录**。
+ *
+ * 与「打开文件」同一形状（都是动作，所以浏览器里必须明说做不到，也必须收名字不收路径），
+ * 差别只在那半句：交给文件管理器的是那一份的**所在目录**，不是文件本身 —— 交给播放器
+ * 打开视频是另一颗按钮的事。
+ */
+describe('revealing the directory a saved file is in', () => {
+  it('sends the name the executor reported', async () => {
+    pretendDesktop()
+    const invokeImpl = vi.fn().mockResolvedValue('/Volumes/Movies/WTMedia')
+    await revealSavedFile('演示素材-42.mp4', { invokeImpl })
+    expect(invokeImpl).toHaveBeenCalledWith('local_reveal_saved_file', { name: '演示素材-42.mp4' })
+  })
+
+  it('refuses in a browser and refuses without a name', async () => {
+    const invokeImpl = vi.fn()
+    await expect(revealSavedFile('a.mp4', { invokeImpl })).rejects.toThrow('桌面客户端')
+    pretendDesktop()
+    await expect(revealSavedFile('', { invokeImpl })).rejects.toThrow('没有报告文件名')
     expect(invokeImpl).not.toHaveBeenCalled()
   })
 })

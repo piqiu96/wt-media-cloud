@@ -2,7 +2,11 @@
 // 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
 // 其余在这里；云端视频地址不随素材 body 返回，就绪时才向详情链接接口要一次。
 import { ref, watch } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { createMaterialsClient } from '../../shared/api/materials.js'
+import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
+import { downloadedFileName } from '../transfer/downloadFacts.js'
+import { revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
@@ -34,7 +38,11 @@ const props = defineProps({
 defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give-up', 'restore', 'compose'])
 
 const client = createMaterialsClient()
+const transfer = createFileTransferClient()
 const videoUrl = ref('')
+// 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
+// `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
+const localFile = ref(null)
 
 // 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
 function countLabel(value) { return Number(value || 0).toLocaleString() }
@@ -50,6 +58,43 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
     // 拿不到地址只少一个链接，不打断详情本身。
   }
 })
+
+/**
+ * 这个素材在本机的那一份在哪个文件夹里。
+ *
+ * 两步，都不由前端拼：文件名从这张用户的下载任务表里挑（执行器报的那一个），目录由
+ * Desktop 在所有已知保存位置里量出来。**「已下载」的判据在本机事实里，不在
+ * `video_status` 上** —— 文件状态说的是云端那份源文件，一块本机从没下过的就绪素材
+ * 也有它，而一份下好但云端还没就绪的文件照样躺在磁盘上。
+ */
+watch(() => [props.visible, props.material?.id, props.mode], async ([open, id, mode]) => {
+  localFile.value = null
+  if (!open || !id || mode !== 'mine') return
+  try {
+    const tasks = await transfer.listTasks()
+    const name = downloadedFileName(tasks, id)
+    if (!name) return
+    localFile.value = (await savedFileStates([name]))[name] ?? null
+  } catch {
+    // 读不到本机（浏览器、Agent 没起来）只少这一行：界面此时与没有这项功能时一样，
+    // 不弹提示，也不把「读不到」写成「文件不在」。
+  }
+})
+
+/**
+ * 在文件管理器里打开那个文件夹。
+ *
+ * 发给 Rust 的是**名字**：目录由它在已知保存位置里找出来，前端从头到尾不知道路径。
+ */
+async function openDirectory() {
+  try {
+    await revealSavedFile(localFile.value.name)
+  } catch (e) {
+    // Tauri 的 invoke 拒绝时给的是字符串而不是 Error，两条路都要接住，
+    // 否则界面上会出现一个空的错误提示。
+    MessagePlugin.error(e?.message || String(e))
+  }
+}
 </script>
 
 <template>
@@ -126,6 +171,17 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
               <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
             </dd></div>
           </dl>
+          <!-- 本机那一份在哪个文件夹里。这一行说的是磁盘上的文件，与上面那条云端地址
+               是两份东西：路径可能很长，所以不塞进四列网格，整行铺开、换行不截断。
+               量不到（浏览器读不了本机、Desktop 还没扫到）时整行不出现 —— 与下载中心
+               同一条约定：读不到本机不等于文件不在。 -->
+          <div v-if="localFile?.directory" class="detail-local-file">
+            <div class="detail-local-file__where">
+              <span class="detail-local-file__label">下载目录</span>
+              <span class="detail-local-file__path">{{ localFile.directory }}</span>
+            </div>
+            <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDirectory">打开目录</t-button>
+          </div>
         </section>
         <p v-if="material.last_error" class="detail-error">最近一次准备失败：{{ material.last_error }}</p>
 
@@ -220,6 +276,12 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 .detail-metrics__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
 .detail-metrics__item span { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-error { margin: 12px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
+/* 整行铺开而不是塞进四列网格：目录可能很长，截断掉的恰好是「在哪个盘的哪个文件夹」。
+   与上面那行网格用一条虚线分开，同 `.detail-usage` 的做法。 */
+.detail-local-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--wt-border); }
+.detail-local-file__where { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.detail-local-file__label { flex: 0 0 auto; color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-local-file__path { color: var(--wt-text-primary); font-size: 13px; line-height: 1.5; word-break: break-all; }
 /* 页脚只放业务动作、靠右收：关闭走抽屉右上角的 ×（规范 §6.3），不再占页脚一格。 */
 .material-detail__actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
