@@ -13,7 +13,7 @@ import { openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
 import { hasLiveTask, isTerminal } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
-import { transferRows } from './transferRows.js'
+import { splitTransferRows, transferRows } from './transferRows.js'
 
 const client = createFileTransferClient()
 const materials = createMaterialsClient()
@@ -37,6 +37,13 @@ const rows = computed(() => transferRows(tasks.value, {
   cancelRequested: cancelRequested.value,
   presence: presence.value,
 }))
+
+// 两栏：非终态「正在下载」，终态「最近完成」（CHG-20260930-069）。
+const groupedRows = computed(() => splitTransferRows(rows.value))
+const activeRows = computed(() => groupedRows.value.active)
+const recentRows = computed(() => groupedRows.value.recent)
+const activeTab = ref('active')
+const visibleRows = computed(() => (activeTab.value === 'active' ? activeRows.value : recentRows.value))
 
 /**
  * 要问的名字集合，以及它的**字符串**指纹。
@@ -117,7 +124,11 @@ watch(visible, (open) => {
   // 重新打开要重扫一次：面板关着的这段时间里文件可能被搬走、被删，也可能换了保存位置。
   // 清掉指纹就够了 —— `load()` 结尾的 `ensurePresence()` 会补上这一次。
   measuredKey = null
-  load()
+  // 没有在跑的任务但有历史时直接落在「最近完成」，免得先看一屏空列表。
+  activeTab.value = 'active'
+  load().then(() => {
+    if (!hasLiveTask(tasks.value) && recentRows.value.length) activeTab.value = 'recent'
+  })
 })
 
 // 面板开着的时候新出现一条已下载的任务（刚点完下载），它的文件要立刻被扫到。
@@ -179,19 +190,24 @@ async function open(task) {
 </script>
 
 <template>
-  <t-drawer v-model:visible="visible" class="download-centre-drawer" header="下载中心" size="min(46vw, 640px)" destroy-on-close @close="close">
+  <t-drawer v-model:visible="visible" class="download-centre-drawer" header="下载中心" size="min(46vw, 640px)" :footer="false" destroy-on-close @close="close">
     <t-loading :loading="loading" :show-overlay="true">
       <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:12px" @close="error=''" />
-      <p v-if="!rows.length" class="transfer-empty">还没有下载任务。</p>
-      <ul class="transfer-list">
-        <li v-for="row in rows" :key="row.task.id" class="transfer-item">
+      <t-tabs v-model="activeTab" class="transfer-tabs">
+        <t-tab-panel value="active" :label="`正在下载 (${activeRows.length})`" />
+        <t-tab-panel value="recent" :label="`最近完成 (${recentRows.length})`" />
+      </t-tabs>
+      <p v-if="!visibleRows.length" class="transfer-empty">{{ activeTab === 'active' ? '暂无正在下载的任务' : '最近没有完成的任务' }}</p>
+      <ul v-else class="transfer-list">
+        <li v-for="row in visibleRows" :key="row.task.id" class="transfer-item">
           <div class="transfer-item__head">
             <span class="transfer-item__title" :title="row.task.asset_title">{{ row.task.asset_title || `素材 #${row.task.asset_id}` }}</span>
             <ResourceStatusBadge :tone="row.state.tone" :label="row.state.label" />
           </div>
 
-          <div class="transfer-item__progress">
-            <t-progress v-if="row.showBar" theme="line" :percentage="row.progress.percent" :label="false" />
+          <div v-if="row.showBar || row.pendingText" class="transfer-item__progress">
+            <t-progress v-if="row.showBar" class="transfer-item__progress-bar" theme="line" :percentage="row.progress.percent" :label="false" />
+            <span v-if="row.showBar" class="transfer-item__percent">{{ row.progress.percent }}%</span>
             <!--
               分母未知时不画进度条：一条 0% 的条看起来是「卡住了」，而它可能正在正常传输。
               「准备中」是这一刻唯一诚实的话。
@@ -221,19 +237,20 @@ async function open(task) {
             文件已不在本机已知的保存位置，可以重新下载
           </p>
 
-          <p class="transfer-item__time">发起于 {{ row.createdText }}</p>
-
-          <div class="transfer-item__actions">
-            <t-button v-if="row.canCancel" size="small" class="wt-secondary-button" variant="outline" @click="cancel(row.task)">取消</t-button>
-            <t-button v-if="row.canRetry" size="small" theme="primary" @click="retry(row.task)">重试</t-button>
-            <!-- 终态行的出路。已取消行原先一个动作都没有，「已取消的无法再次点击下载」
-                 就是这么来的；失败行里那些在等准备的（重试必然被服务端拒绝）也只有这一条能走。 -->
-            <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
-            <!--
-              打开文件是桌面端专属：文件落在运营这台机器上（Agent 写的），浏览器打不开它。
-              守卫写在按钮上而不是点下去再报错 —— 一个点了必然失败的按钮不该出现在那里。
-            -->
-            <t-button v-if="row.canOpen && isDesktop()" size="small" class="wt-secondary-button" variant="outline" @click="open(row.task)">打开文件</t-button>
+          <div class="transfer-item__footer">
+            <p class="transfer-item__time">发起于 {{ row.createdText }}</p>
+            <div class="transfer-item__actions">
+              <t-button v-if="row.canCancel" size="small" class="wt-secondary-button" variant="outline" @click="cancel(row.task)">取消</t-button>
+              <t-button v-if="row.canRetry" size="small" theme="primary" @click="retry(row.task)">重试</t-button>
+              <!-- 终态行的出路。已取消行原先一个动作都没有，「已取消的无法再次点击下载」
+                   就是这么来的；失败行里那些在等准备的（重试必然被服务端拒绝）也只有这一条能走。 -->
+              <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
+              <!--
+                打开文件是桌面端专属：文件落在运营这台机器上（Agent 写的），浏览器打不开它。
+                守卫写在按钮上而不是点下去再报错 —— 一个点了必然失败的按钮不该出现在那里。
+              -->
+              <t-button v-if="row.canOpen && isDesktop()" size="small" class="wt-secondary-button" variant="outline" @click="open(row.task)">打开文件</t-button>
+            </div>
           </div>
         </li>
       </ul>
@@ -242,18 +259,29 @@ async function open(task) {
 </template>
 
 <style scoped>
-.transfer-empty { margin: 0; color: var(--wt-text-tertiary); font-size: 14px; }
-.transfer-list { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
-.transfer-item { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-card); }
+.transfer-empty { margin: 0; padding: 28px 8px; color: var(--wt-text-tertiary); font-size: 14px; text-align: center; }
+.transfer-tabs { margin-bottom: 8px; }
+.transfer-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.transfer-item { padding: 12px 14px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-card); box-shadow: var(--wt-shadow-card); }
 .transfer-item__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.transfer-item__title { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.transfer-item__progress { display: flex; align-items: center; min-height: 22px; margin-top: 10px; }
+.transfer-item__title { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.45; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.transfer-item__progress { display: flex; align-items: center; gap: 10px; min-height: 18px; margin-top: 8px; }
+.transfer-item__progress-bar { flex: 1 1 auto; min-width: 0; }
+.transfer-item__percent { flex: 0 0 36px; color: var(--wt-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
 .transfer-item__pending { color: var(--wt-text-tertiary); font-size: 13px; }
 /* 各项用 gap 分开而不是「·」串起来：宽度不够时「·」会在任意位置折断，标签和数字被拆散。 */
-.transfer-item__meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: var(--wt-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
-.transfer-item__error { margin: 8px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
+.transfer-item__meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; color: var(--wt-text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.transfer-item__error { margin: 6px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
 /* 目录可能很长，换行而不是截断：截掉的恰好是「在哪个盘的哪个文件夹」这件事。 */
-.transfer-item__where { margin: 8px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.5; word-break: break-all; }
-.transfer-item__time { margin: 6px 0 0; color: var(--wt-text-tertiary); font-size: 12px; }
-.transfer-item__actions { display: flex; gap: 8px; margin-top: 12px; }
+.transfer-item__where { margin: 6px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.5; word-break: break-all; }
+.transfer-item__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--wt-border); }
+.transfer-item__time { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; white-space: nowrap; }
+.transfer-item__actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.download-centre-drawer :deep(.t-drawer__body) { padding: 16px; }
+@media (max-width: 620px) {
+  .transfer-item { padding: 12px; }
+  .transfer-item__footer { align-items: flex-start; flex-direction: column; }
+  .transfer-item__actions { justify-content: flex-start; }
+  .download-centre-drawer :deep(.t-drawer__body) { padding: 14px; }
+}
 </style>

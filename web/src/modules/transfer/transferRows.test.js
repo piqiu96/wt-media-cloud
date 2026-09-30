@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { transferRow, transferRows } from './transferRows.js'
+import { splitTransferRows, transferRow, transferRows } from './transferRows.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -119,5 +119,36 @@ describe('transfer rows', () => {
     expect(row.presence).toBe('unknown')
     expect(row.fileFact).toBeNull()
     expect(row.canRedownload).toBe(false)
+  })
+})
+
+// 下载中心的两栏（CHG-20260930-069）：非终态进「正在下载」，终态进「最近完成」。
+// 分组依据任务事实（isTerminal），不依据行的显示状态；一行恰好属于一栏，
+// 两栏计数之和等于行数。
+describe('splitTransferRows', () => {
+  it('puts pending and running under active, and only terminal rows under recent', () => {
+    const rows = transferRows([
+      task({ id: 'p', status: 'pending' }),
+      task({ id: 'r', status: 'running' }),
+      task({ id: 's', status: 'success', file_name: 'a.mp4' }),
+      task({ id: 'f', status: 'failed', error_code: 'lease_lost' }),
+      task({ id: 'c', status: 'cancelled' }),
+    ])
+    const { active, recent } = splitTransferRows(rows)
+    expect(active.map((row) => row.task.id)).toEqual(['p', 'r'])
+    expect(recent.map((row) => row.task.id)).toEqual(['s', 'f', 'c'])
+    expect(active.length + recent.length).toBe(rows.length)
+  })
+
+  it('keeps the original order inside each group', () => {
+    const rows = transferRows([
+      task({ id: 'r1', status: 'running' }),
+      task({ id: 's1', status: 'success' }),
+      task({ id: 'p1', status: 'pending' }),
+      task({ id: 'f1', status: 'failed' }),
+    ])
+    const { active, recent } = splitTransferRows(rows)
+    expect(active.map((row) => row.task.id)).toEqual(['r1', 'p1'])
+    expect(recent.map((row) => row.task.id)).toEqual(['s1', 'f1'])
   })
 })

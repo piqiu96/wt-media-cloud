@@ -71,3 +71,24 @@ describe('download centre drawer', () => {
     expect(source).toMatch(/\(\) => \{(.|\n)*?presence\.value = \{\}/)
   })
 })
+
+// 两栏（CHG-20260930-069）：未完成与最近终态分开，计数来自任务事实。
+describe('download centre drawer tabs', () => {
+  it('renders the two switchable tabs with live counts', () => {
+    expect(source).toContain('<t-tabs')
+    expect(source).toContain('value="active"')
+    expect(source).toContain('value="recent"')
+    expect(source).toContain('activeRows.length')
+    expect(source).toContain('recentRows.length')
+  })
+
+  it('splits the rows through the shared pure function, not its own filter', () => {
+    expect(source).toContain('splitTransferRows(')
+  })
+
+  // 每一栏各自的空态：正在下载为空不等于没有任务，最近完成为空也不等于都在跑。
+  it('gives each tab its own empty text', () => {
+    expect(source).toContain('暂无正在下载的任务')
+    expect(source).toContain('最近没有完成的任务')
+  })
+})

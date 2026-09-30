@@ -71,3 +71,13 @@ export function transferRows(tasks, { cancelRequested = [], presence = {} } = {}
 export function liveCount(tasks) {
   return (Array.isArray(tasks) ? tasks : []).filter((task) => !isTerminal(task)).length
 }
+
+// 下载中心的两栏（CHG-20260930-069）：非终态是「正在下载」，终态是「最近完成」。
+// 依据任务事实（isTerminal），一行恰好属于一栏。
+export function splitTransferRows(rows) {
+  const list = Array.isArray(rows) ? rows : []
+  return {
+    active: list.filter((row) => !isTerminal(row.task)),
+    recent: list.filter((row) => isTerminal(row.task)),
+  }
+}
