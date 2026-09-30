@@ -57,7 +57,7 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
           </div>
         </div>
         <dl>
-          <div><dt>素材 ID</dt><dd>#{{ material.id }}</dd></div>
+          <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
           <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
           <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
           <div><dt>作者</dt><dd>
@@ -80,11 +80,11 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
         </dl>
         <!-- 走查反馈（CHG-20260930-069）：来源行采集时的内容池统计以独立区块展现。
              它们是采集时刻的快照，不是素材自己的属性，混进上面的 dl 会把「入库时间」
-             和「72313 个赞」读成同一类事实。 -->
+             和「72313 个赞」读成同一类事实。抖音接口不给 play_count（恒为 0，全部来源
+             行核对过），区块只展示拿得到数的四项，不为一个永远的 0 留位置。 -->
         <section class="material-detail__stats">
           <h4>来源内容池统计</h4>
           <div class="material-detail__stats-grid">
-            <div><span>播放</span><strong>{{ countLabel(material.view_count) }}</strong></div>
             <div><span>点赞</span><strong>{{ countLabel(material.like_count) }}</strong></div>
             <div><span>收藏</span><strong>{{ countLabel(material.favorite_count) }}</strong></div>
             <div><span>评论</span><strong>{{ countLabel(material.comment_count) }}</strong></div>

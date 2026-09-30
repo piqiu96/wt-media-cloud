@@ -203,7 +203,7 @@ onMounted(() => {
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无素材">
             <template #cover="{ row }"><MaterialCover :url="row.cover_url" /></template>
-            <template #id="{ row }">#{{ row.id }}</template>
+            <template #id="{ row }">{{ row.id }}</template>
             <template #title="{ row }">
               <!-- 走查反馈：标题就是去来源平台的入口（与内容池页同一形状），蓝色可点；
                    没有落地页的素材退回普通文本，链接形状留给真的能点的东西。 -->

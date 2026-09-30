@@ -71,6 +71,9 @@ describe('my materials page', () => {
     expect(idAt).toBeGreaterThan(-1)
     expect(coverAt).toBeGreaterThan(-1)
     expect(idAt, '素材 ID 列必须在封面列之前').toBeLessThan(coverAt)
+    // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
+    expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
+    expect(source).not.toContain('#{{ row.id }}')
     expect(source).toContain('MaterialCover')
     expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
     expect(source).toContain('class="wt-primary-link')
