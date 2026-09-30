@@ -71,17 +71,26 @@ describe('material detail drawer', () => {
     expect(source).toContain("$emit('download', material)\">{{ downloadActionLabel(material.video_status) }}")
   })
 
-  // 走查四轮（2026-09-30 用户带设计图）：正文按「概览 / 文件信息 / 来源信息」分标签，
-  // 而不是把十几行 dl 平铺——平铺的结局是「入库时间」和「72313 个赞」读成同一类事实。
-  it('organises the body into 概览 / 文件信息 / 来源信息 tabs', () => {
-    expect(template).toContain('<t-tabs')
-    expect(template).toContain('<t-tab-panel')
-    for (const label of ['概览', '文件信息', '来源信息']) {
-      expect(template, `缺少 ${label} 标签`).toContain(`label="${label}"`)
-    }
-    // 基本信息留在概览；文件事实与来源事实各自归位。
-    expect(template).toContain('基本信息')
-    expect(template).toContain('来源内容池统计')
+  /**
+   * 走查六轮（2026-09-30 用户走查）：「详情里对应的 TAB 切换取消，直接平铺在一页，
+   * 当前内容较少」。
+   *
+   * 走查四轮分标签的理由是「每一屏只回答一个问题」，但当时正文只有十几行——分标签把
+   * 十来个字段摊成三屏，每一屏都要先点一次。分屏的门槛是**信息真的填满多屏**，不是
+   * 「信息可以分成三类」；今天的素材详情属于前者未达。卡片边界（.detail-card）留着，
+   * 它解决的是「哪几行是同一件事」，与分不分屏无关。
+   */
+  it('lays the sections out flat instead of behind tabs', () => {
+    expect(template).not.toContain('<t-tabs')
+    expect(template).not.toContain('<t-tab-panel')
+    // 标签状态一起消失：留一个没人读的 ref 就是留一段会腐坏的死代码。
+    expect(source).not.toContain('activeTab')
+    // 平铺后仍是五张卡，顺序即设计图的顺序。
+    // 取卡片标题的**标记**而不是裸词：这几个词在上面的模板注释里也出现过，
+    // 裸词匹配会量到注释的位置（实测「基本信息」在注释里 752、在卡里 2232，
+    // 直接判反）。
+    const titles = [...template.matchAll(/class="detail-card__title">\s*([一-龥]+)/g)].map((m) => m[1])
+    expect(titles).toEqual(['使用情况', '基本信息', '文件信息', '来源信息', '来源内容池统计'])
   })
 
   /**
@@ -105,29 +114,28 @@ describe('material detail drawer', () => {
     expect(style).toContain('.detail-source-line {')
   })
 
-  // 设计图把「使用情况：成片数、发布数、最近时间、重复风险」放在概览的最上面，
-  // 基本信息在它下面。两者都是卡片。
-  it('opens the 概览 tab with the usage card, then 基本信息', () => {
-    const overview = sliceBetween(template, 'value="overview"', 'value="file"')
-    expect(overview).toContain('使用情况')
-    expect(overview).toContain('usageFacts(material)')
-    expect(overview.indexOf('使用情况')).toBeLessThan(overview.indexOf('基本信息'))
+  // 设计图把「使用情况：成片数、发布数、最近时间、重复风险」放在最上面，
+  // 基本信息在它下面。两者都是卡片，平铺后顺序不变。
+  it('opens the body with the usage card, then 基本信息', () => {
+    const body = sliceBetween(template, 'detail-workspace', '<template #footer>')
+    expect(body).toContain('usageFacts(material)')
+    expect(body.indexOf('class="detail-card__title">使用情况'))
+      .toBeLessThan(body.indexOf('class="detail-card__title">基本信息'))
   })
 
   // 互动数据是来源行采集时的快照，跟着「来源」走：设计图把它画在来源信息里，
-  // 而不是继续留在概览。
-  it('keeps the source content-pool statistics inside the 来源信息 tab', () => {
-    const sourceTab = sliceBetween(template, 'value="source"', '</t-tabs>')
-    expect(sourceTab).toContain('来源内容池统计')
-    expect(sourceTab).toContain('material.like_count')
-    const overview = sliceBetween(template, 'value="overview"', 'value="file"')
-    expect(overview).not.toContain('来源内容池统计')
+  // 走查六轮平铺后它仍是紧接来源信息的那一张。
+  it('keeps the source content-pool statistics right after the 来源信息 card', () => {
+    const body = sliceBetween(template, 'detail-workspace', '<template #footer>')
+    expect(body).toContain('material.like_count')
+    expect(body.indexOf('class="detail-card__title">来源内容池统计'))
+      .toBeGreaterThan(body.indexOf('class="detail-card__title">来源信息</h4>'))
   })
 
   // 规范 §7.2：两个状态维度并排，不能为了页面简单把「已暂停 + 可下载」压成一个词。
   // 顶部就说清「这条素材还能不能选」和「它的文件好了没有」。
   it('heads the drawer with both status dimensions', () => {
-    const hero = sliceBetween(template, 'detail-hero', 'detail-tabs')
+    const hero = sliceBetween(template, 'detail-hero', 'detail-card')
     expect(hero).toContain('v-if="material.status"')
     expect(hero).toContain('materialStatusLabel(material.status)')
     expect(hero).toContain('videoStatusLabel(material.video_status)')
@@ -187,5 +195,38 @@ describe('material detail drawer', () => {
     expect(source).toContain('gameName(games, material.game_id)')
     expect(template).toContain('已加入我的素材')
     expect(source).toContain("mine: { type: Boolean, default: false }")
+  })
+
+  /**
+   * 走查六轮（2026-09-30 用户走查）：「素材关联内容的标题点击可以去落地页」。
+   *
+   * 列表里标题早就是蓝色外链（走查四轮），详情里的标题却一直是一段死文本 —— 同一个
+   * 对象在两个页面上有两种可点性，是这次反馈里最难自己发现的一处不一致：两个文件各自
+   * 看都自洽，只有把两处并排才看得出来。
+   */
+  it('links the hero title to the source landing page', () => {
+    const hero = sliceBetween(template, 'detail-hero', 'detail-card')
+    expect(hero).toContain('<a v-if="material.source_url"')
+    expect(hero).toContain(':href="material.source_url"')
+    expect(hero).toContain("material.title || '未命名素材'")
+    // 没有落地页的素材退回普通文本：链接形状留给真的能点的东西。
+    expect(hero).toContain('<span v-else>')
+  })
+
+  // 走查六轮：「作者信息也需要有，同时作者也是可以点击跳转」。作者本来就在副行与
+  // 来源信息里，缺的是**可点性**——一处蓝色链接比一句「作者是谁」多一次跳转。
+  it('makes the author in the hero clickable too', () => {
+    const hero = sliceBetween(template, 'detail-hero', 'detail-card')
+    expect(hero).toContain('material.author_home_url')
+    expect(hero).toContain('material.author_name')
+  })
+
+  // 走查六轮：「游戏是独立行」。副行只留来源识别信息（平台 · 作者）；游戏在列表里
+  // 有自己的列、在正文里有自己的一行，再在副行里说第三遍就是同一屏重复同一个值。
+  it('keeps 游戏 out of the hero source line', () => {
+    const hero = sliceBetween(template, 'detail-hero', 'detail-card')
+    const line = sliceBetween(hero, 'detail-source-line', '</p>')
+    expect(line).not.toContain('gameName')
+    expect(line).toContain('material.platform')
   })
 })

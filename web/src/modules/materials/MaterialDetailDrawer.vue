@@ -5,13 +5,15 @@
 // 地址都在这里（CHG-20260930-069）。云端地址不随素材 body 返回，就绪时才向详情
 // 链接接口要一次。
 //
-// 走查四轮（2026-09-30）：正文按「概览 / 文件信息 / 来源信息」分标签。此前十几个字段
-// 平铺在同一张 dl 里，结果是「入库时间」和「72313 个赞」读成同一类事实、文件事实与
-// 来源事实混在一起 —— 分标签让每一屏只回答一个问题。
+// 走查四轮（2026-09-30）：正文曾按「概览 / 文件信息 / 来源信息」分标签，理由是让每一屏
+// 只回答一个问题。
 //
-// 走查五轮：标签里的每一段信息再各自成为一张有边界的卡（.detail-card），照内容池详情的
-// 框来做；顶部合成 hero（封面 + 标题 + 来源副行 + 两个状态维度）。互动数据从概览挪到
-// 来源信息——它是来源行的快照，跟着来源走。
+// 走查五轮：每一段信息各自成为一张有边界的卡（.detail-card），照内容池详情的框来做；
+// 顶部合成 hero（封面 + 标题 + 来源副行 + 两个状态维度）。互动数据从概览挪到来源信息
+// ——它是来源行的快照，跟着来源走。
+//
+// 走查六轮：标签去掉，五张卡平铺成一页。分屏的门槛是信息真的填满多屏，而这十几行没有；
+// 卡片边界留着，它回答的是「哪几行是同一件事」，与分不分屏是两回事。
 import { ref, watch } from 'vue'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -45,16 +47,13 @@ defineEmits(['update:visible', 'add', 'download', 'go-mine'])
 
 const client = createMaterialsClient()
 const videoUrl = ref('')
-const activeTab = ref('overview')
 
 // 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 
-// 顶部副行（游戏 · 平台 · 作者）在模板里由 filter(Boolean).join 拼出：缺哪项就少哪项，
-// 不留孤零零的分隔符。它不值得一个 ref —— 每次 render 重算一遍比缓存一份更不容易腐坏。
+// 云端视频地址只在就绪时才去要：未就绪的素材没有地址，一次必然 409 的请求不该发出去。
 watch(() => [props.visible, props.material?.id, props.material?.video_status], async ([open, id, status]) => {
   videoUrl.value = ''
-  activeTab.value = 'overview'
   if (!open || !id || status !== 'ready') return
   try {
     const data = await client.getVideoUrl(id)
@@ -76,13 +75,26 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
   >
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="material" class="detail-workspace">
-        <!-- 顶部一次说清「这是什么」：封面、标题、来源副行、两个状态维度。
-             副行按设计图是「游戏 · 平台 · 作者」，缺哪项少哪项。 -->
+        <!-- 顶部一次说清「这是什么」：封面、标题、来源副行、两个状态维度。 -->
         <section class="detail-hero">
           <MaterialCover class="detail-cover" :url="material.cover_url" />
           <div class="detail-primary">
-            <h3>{{ material.title || '未命名素材' }}</h3>
-            <p class="detail-source-line">{{ [gameName(games, material.game_id), material.platform, material.author_name].filter(Boolean).join(' · ') }}</p>
+            <!-- 走查六轮：标题在列表里早就是去来源平台的入口（走查四轮），详情里却一直是
+                 一段死文本。同一个对象在两处有两种可点性，是最难自己发现的那类不一致。
+                 没有落地页的素材退回普通文本：链接形状留给真的能点的东西。 -->
+            <h3>
+              <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">{{ material.title || '未命名素材' }}</a>
+              <span v-else>{{ material.title || '未命名素材' }}</span>
+            </h3>
+            <!-- 副行只留来源识别信息：平台 · 作者。**游戏不并进来**（走查六轮用户裁定
+                 「游戏是独立行」）—— 它在列表里有一列、在下面的「基本信息」里有一行，
+                 副行里再说一遍就是同一屏重复同一个值。作者有主页时就是一个入口。 -->
+            <p class="detail-source-line">
+              <template v-if="material.platform">{{ material.platform }}</template>
+              <template v-if="material.platform && (material.author_name || material.author_home_url)"> · </template>
+              <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
+              <template v-else>{{ material.author_name }}</template>
+            </p>
             <div class="detail-badges">
               <!-- 规范 §7.2：两个状态维度并排，不合并。素材状态服务端还没返回，
                    读不到就不画 —— 画一个默认的「可用」等于替服务端做了判断。 -->
@@ -94,82 +106,79 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
           </div>
         </section>
 
-        <t-tabs v-model="activeTab" class="detail-tabs">
-          <t-tab-panel value="overview" label="概览">
-            <!-- 使用情况的数据服务端尚未返回（change.md §3），这里先立设计图里的
-                 五格骨架：数据打通后直接填，不用再动布局。 -->
-            <section class="detail-card">
-              <h4 class="detail-card__title">使用情况</h4>
-              <div class="detail-usage">
-                <div v-for="fact in usageFacts(material)" :key="fact.key" class="detail-usage__item">
-                  <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
-                  <strong v-else>{{ fact.value }}</strong>
-                  <span class="detail-usage__label">{{ fact.label }}</span>
-                </div>
-              </div>
-            </section>
+        <!-- 走查六轮（2026-09-30 用户走查）：「详情里对应的 TAB 切换取消，直接平铺在一页，
+             当前内容较少」。走查四轮分标签的理由是「每一屏只回答一个问题」，但当时正文只有
+             十几行 —— 分标签把十来个字段摊成三屏，每一屏都先要点一次。分屏的门槛是信息
+             真的填满多屏，不是「信息可以分成三类」。卡片边界留着：它回答的是「哪几行是
+             同一件事」，与分不分屏是两回事。 -->
+        <!-- 使用情况的数据服务端尚未返回（change.md §3），这里先立设计图里的五格骨架：
+             数据打通后直接填，不用再动布局。 -->
+        <section class="detail-card">
+          <h4 class="detail-card__title">使用情况</h4>
+          <div class="detail-usage">
+            <div v-for="fact in usageFacts(material)" :key="fact.key" class="detail-usage__item">
+              <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
+              <strong v-else>{{ fact.value }}</strong>
+              <span class="detail-usage__label">{{ fact.label }}</span>
+            </div>
+          </div>
+        </section>
 
-            <section class="detail-card">
-              <h4 class="detail-card__title">基本信息</h4>
-              <dl class="detail-card__grid detail-card__grid--3">
-                <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
-                <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
-                <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
-              </dl>
-            </section>
-          </t-tab-panel>
+        <section class="detail-card">
+          <h4 class="detail-card__title">基本信息</h4>
+          <dl class="detail-card__grid detail-card__grid--3">
+            <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
+            <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
+            <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
+          </dl>
+        </section>
 
-          <t-tab-panel value="file" label="文件信息">
-            <!-- 文件状态从字段挪进了卡片标题：它说的是这一整块信息成不成，不是其中一行。 -->
-            <section class="detail-card">
-              <h4 class="detail-card__title">
-                文件信息
-                <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
-              </h4>
-              <dl class="detail-card__grid detail-card__grid--4">
-                <div><dt>文件大小</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>
-                <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
-                <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
-                <div><dt>云端视频</dt><dd>
-                  <a v-if="videoUrl" class="wt-primary-link" :href="videoUrl" target="_blank" rel="noopener noreferrer">打开云端视频</a>
-                  <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
-                </dd></div>
-              </dl>
-            </section>
-            <p v-if="material.last_error" class="detail-error">最近一次准备失败：{{ material.last_error }}</p>
-          </t-tab-panel>
+        <!-- 文件状态从字段挪进了卡片标题：它说的是这一整块信息成不成，不是其中一行。 -->
+        <section class="detail-card">
+          <h4 class="detail-card__title">
+            文件信息
+            <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+          </h4>
+          <dl class="detail-card__grid detail-card__grid--4">
+            <div><dt>文件大小</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>
+            <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
+            <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
+            <div><dt>云端视频</dt><dd>
+              <a v-if="videoUrl" class="wt-primary-link" :href="videoUrl" target="_blank" rel="noopener noreferrer">打开云端视频</a>
+              <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
+            </dd></div>
+          </dl>
+        </section>
+        <p v-if="material.last_error" class="detail-error">最近一次准备失败：{{ material.last_error }}</p>
 
-          <t-tab-panel value="source" label="来源信息">
-            <section class="detail-card">
-              <h4 class="detail-card__title">来源信息</h4>
-              <dl class="detail-card__grid detail-card__grid--4">
-                <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
-                <div><dt>作者</dt><dd>
-                  <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
-                  <template v-else>{{ material.author_name || '-' }}</template>
-                </dd></div>
-                <div><dt>发布时间</dt><dd>{{ formatDateTime(material.published_at) }}</dd></div>
-                <div><dt>平台原视频</dt><dd>
-                  <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原视频页面</a>
-                  <template v-else>-</template>
-                </dd></div>
-              </dl>
-            </section>
+        <section class="detail-card">
+          <h4 class="detail-card__title">来源信息</h4>
+          <dl class="detail-card__grid detail-card__grid--4">
+            <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
+            <div><dt>作者</dt><dd>
+              <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
+              <template v-else>{{ material.author_name || '-' }}</template>
+            </dd></div>
+            <div><dt>发布时间</dt><dd>{{ formatDateTime(material.published_at) }}</dd></div>
+            <div><dt>平台原视频</dt><dd>
+              <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原视频页面</a>
+              <template v-else>-</template>
+            </dd></div>
+          </dl>
+        </section>
 
-            <!-- 互动数据是来源行采集时的快照，跟着「来源」走：走查五轮按设计图从概览
-                 挪到这里。混进基本信息会把「入库时间」和「72313 个赞」读成同一类事实。
-                 抖音接口不给 play_count（恒为 0，全部来源行核对过），只展示拿得到数的四项。 -->
-            <section class="detail-card">
-              <h4 class="detail-card__title">来源内容池统计</h4>
-              <div class="detail-metrics">
-                <div class="detail-metrics__item"><strong>{{ countLabel(material.like_count) }}</strong><span>点赞</span></div>
-                <div class="detail-metrics__item"><strong>{{ countLabel(material.favorite_count) }}</strong><span>收藏</span></div>
-                <div class="detail-metrics__item"><strong>{{ countLabel(material.comment_count) }}</strong><span>评论</span></div>
-                <div class="detail-metrics__item"><strong>{{ countLabel(material.share_count) }}</strong><span>分享</span></div>
-              </div>
-            </section>
-          </t-tab-panel>
-        </t-tabs>
+        <!-- 互动数据是来源行采集时的快照，跟着「来源」走：走查五轮按设计图从概览挪到
+             这里。混进基本信息会把「入库时间」和「72313 个赞」读成同一类事实。
+             抖音接口不给 play_count（恒为 0，全部来源行核对过），只展示拿得到数的四项。 -->
+        <section class="detail-card">
+          <h4 class="detail-card__title">来源内容池统计</h4>
+          <div class="detail-metrics">
+            <div class="detail-metrics__item"><strong>{{ countLabel(material.like_count) }}</strong><span>点赞</span></div>
+            <div class="detail-metrics__item"><strong>{{ countLabel(material.favorite_count) }}</strong><span>收藏</span></div>
+            <div class="detail-metrics__item"><strong>{{ countLabel(material.comment_count) }}</strong><span>评论</span></div>
+            <div class="detail-metrics__item"><strong>{{ countLabel(material.share_count) }}</strong><span>分享</span></div>
+          </div>
+        </section>
       </div>
     </t-loading>
 
@@ -204,9 +213,9 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 /* 副行是识别信息，不是重点：一行、次要色、放不下就省略。 */
 .detail-source-line { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .detail-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.detail-tabs { margin-top: 16px; }
+/* 卡片间距由 .detail-workspace 的 gap 统一给（平铺后五张卡都是它的直接子元素）：
+   再写一条 `.detail-card + .detail-card` 就会在这一层叠出第二份间距。 */
 .detail-card { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
-.detail-card + .detail-card { margin-top: 12px; }
 /* 标题与状态徽章同行：文件状态说的是这一整块成不成，不是其中一行。 */
 .detail-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--wt-text-primary); font-size: 15px; font-weight: 650; }
 .detail-card__grid { display: grid; gap: 12px 16px; margin: 0; }
