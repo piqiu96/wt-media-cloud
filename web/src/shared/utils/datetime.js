@@ -16,3 +16,19 @@ export function formatDateTime(value) {
     minute: '2-digit',
   })
 }
+
+/**
+ * 只要日期、不要时刻，给那些「精确到分钟」是噪声的格子用（素材库的「最近发布」）。
+ *
+ * 它与 formatDateTime 并存同样是列宽决定的：带上时刻后这一格会比它右边的「入库时间」
+ * 还宽，而它说的是一个比入库时间次要得多的事实。两个函数，不是一个带开关的函数——
+ * 开关的默认值会在两个调用点之间漂移。
+ */
+export function formatDate(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  })
+}

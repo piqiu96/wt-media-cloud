@@ -1,3 +1,5 @@
+import { formatDate } from '../../shared/utils/datetime.js'
+
 // 素材的状态与展示文案。
 //
 // 四种视频状态直接来自冻结的 `video_status` enum（contracts/business-schemas/v1/
@@ -50,4 +52,99 @@ export function gameName(games, id) {
 /** 摘要在表里放不下整串，但也不该断成两行：截到 16 位再加省略号。 */
 export function shortDigest(value) {
   return value ? `${value.slice(0, 16)}…` : '-'
+}
+
+// ── 素材状态（第二个状态维度）─────────────────────────────────────────────
+//
+// 文件状态回答「源视频准备好了没有」，素材状态回答「这条素材还提供给运营选用吗」。
+// 规范 §7.2 明令两者不得合并：同一个素材可以同时是「已暂停 + 可下载」，把两个维度
+// 压成一个混合状态，最先丢掉的就是「暂停了但文件还在」这种运营真正要做判断的情形。
+// 三个取值来自规范 §16.2 的素材生命周期（用词说明：「已下架」不是「已退役」）。
+//
+// 读取协议是 `material.status`。**服务端还没有这个字段**（契约里没有它，第五章
+// 「素材状态和生命周期」尚未落地 —— change.md §3 明确不做）。2026-09-30 走查五轮用户
+// 裁定：先把样式与协议定下来，数据打通后再同步过来。所以这里先声明可读的取值，
+// 读不到就显示 `—`，**不退回默认状态** —— 一条读不到状态的素材不等于「可用」，
+// 而「可用」正是这三个取值里唯一能触发「加入我的素材」的那一个。
+export const MATERIAL_STATUSES = ['available', 'paused', 'delisted']
+
+const MATERIAL_STATUS_LABELS = {
+  available: '可用',
+  paused: '已暂停',
+  delisted: '已下架',
+}
+
+const MATERIAL_STATUS_TONES = {
+  available: 'success',
+  paused: 'warning',
+  delisted: 'neutral',
+}
+
+export function materialStatusLabel(value) {
+  return MATERIAL_STATUS_LABELS[value] || value || '-'
+}
+
+export function materialStatusTone(value) {
+  return MATERIAL_STATUS_TONES[value] || 'neutral'
+}
+
+// ── 使用情况 ──────────────────────────────────────────────────────────────
+//
+// 列表的「使用情况」列与详情的「使用情况」卡读的同一份协议，形状是 `material.usage`：
+//
+//   clip_count         已生产成片数
+//   published_count    已发布数
+//   last_produced_at   最近生产时间（ISO）
+//   last_published_at  最近发布时间（ISO）
+//   duplicate_risk     normal | suspected    重复风险
+//
+// 与素材状态同理：服务端尚未返回 `usage`。这里先把键名与展示形状定死，是为了让后端
+// 照着这套键填 —— 键名对不上就是一次静默的空格子，没有东西会报错。
+export const USAGE_FIELDS = ['clip_count', 'published_count', 'last_produced_at', 'last_published_at', 'duplicate_risk']
+
+export const DUPLICATE_RISKS = ['normal', 'suspected']
+
+const DUPLICATE_RISK_LABELS = { normal: '正常', suspected: '疑似重复' }
+
+const DUPLICATE_RISK_TONES = { normal: 'success', suspected: 'danger' }
+
+export function duplicateRiskLabel(value) {
+  return DUPLICATE_RISK_LABELS[value] || value || '-'
+}
+
+export function duplicateRiskTone(value) {
+  return DUPLICATE_RISK_TONES[value] || 'neutral'
+}
+
+// 0 是数据，缺省不是：0 说的是「一条成片都没生产」，缺省说的是「这个字段还没来」。
+// 两者画成同一个样子，运营就分不清「没做过」和「还没统计」。
+function usageCount(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  return Number(value).toLocaleString()
+}
+
+/** 列表那一格的两行。读不到 usage 时立的是骨架（`-`），不是猜测值。 */
+export function usageLines(material) {
+  const usage = material?.usage || {}
+  return {
+    counts: `成片 ${usageCount(usage.clip_count)} · 发布 ${usageCount(usage.published_count)}`,
+    recent: `最近发布 ${formatDate(usage.last_published_at)}`,
+  }
+}
+
+/** 详情「使用情况」卡的五个事实，顺序即设计图的顺序。`tone` 只挂在重复风险上。 */
+export function usageFacts(material) {
+  const usage = material?.usage || {}
+  return [
+    { key: 'clip_count', label: '已生产成片', value: usageCount(usage.clip_count) },
+    { key: 'published_count', label: '已发布', value: usageCount(usage.published_count) },
+    { key: 'last_produced_at', label: '最近生产', value: formatDate(usage.last_produced_at) },
+    { key: 'last_published_at', label: '最近发布', value: formatDate(usage.last_published_at) },
+    {
+      key: 'duplicate_risk',
+      label: '重复风险',
+      value: duplicateRiskLabel(usage.duplicate_risk),
+      tone: duplicateRiskTone(usage.duplicate_risk),
+    },
+  ]
 }

@@ -496,7 +496,10 @@ function formatTime(t) {
     </t-dialog>
 
     <!-- 详情抽屉 -->
-    <t-drawer v-model:visible="detailVisible" header="代理详情" :size="'480px'" destroy-on-close>
+    <!-- :footer="false" 是必须的，不是样式洁癖：TDesign 的 drawer footer 默认 true，
+         不关就会在底部渲染一对「取消 / 确认」。详情抽屉里那对按钮没有任何含义
+         （规范 §6.3），页面上唯一真实动作「提取新地址并检测」留在正文里。 -->
+    <t-drawer v-model:visible="detailVisible" header="代理详情" :size="'480px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailProxy" :column="1" bordered size="small">
         <t-descriptions-item label="ID">{{ detailProxy.id }}</t-descriptions-item>
         <t-descriptions-item label="地址">{{ detailProxy.host }}:{{ detailProxy.port }}</t-descriptions-item>

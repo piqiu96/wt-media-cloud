@@ -8,13 +8,26 @@
 // 走查四轮（2026-09-30）：正文按「概览 / 文件信息 / 来源信息」分标签。此前十几个字段
 // 平铺在同一张 dl 里，结果是「入库时间」和「72313 个赞」读成同一类事实、文件事实与
 // 来源事实混在一起 —— 分标签让每一屏只回答一个问题。
+//
+// 走查五轮：标签里的每一段信息再各自成为一张有边界的卡（.detail-card），照内容池详情的
+// 框来做；顶部合成 hero（封面 + 标题 + 来源副行 + 两个状态维度）。互动数据从概览挪到
+// 来源信息——它是来源行的快照，跟着来源走。
 import { ref, watch } from 'vue'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
-import { downloadActionLabel, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
+import {
+  downloadActionLabel,
+  gameName,
+  materialStatusLabel,
+  materialStatusTone,
+  shortDigest,
+  usageFacts,
+  videoStatusLabel,
+  videoStatusTone,
+} from './labels.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -57,57 +70,63 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
     :visible="visible"
     class="material-detail-drawer"
     header="素材详情"
-    size="min(52vw, 720px)"
+    size="min(62vw, 880px)"
     destroy-on-close
     @update:visible="$emit('update:visible', $event)"
   >
     <t-loading :loading="loading" :show-overlay="true">
-      <div v-if="material" class="material-detail">
-        <div class="material-detail__head">
-          <MaterialCover class="material-detail__cover" :url="material.cover_url" />
-          <div class="material-detail__heading">
+      <div v-if="material" class="detail-workspace">
+        <!-- 顶部一次说清「这是什么」：封面、标题、来源副行、两个状态维度。
+             副行按设计图是「游戏 · 平台 · 作者」，缺哪项少哪项。 -->
+        <section class="detail-hero">
+          <MaterialCover class="detail-cover" :url="material.cover_url" />
+          <div class="detail-primary">
             <h3>{{ material.title || '未命名素材' }}</h3>
-            <!-- 副行先说清「这是什么」：游戏 · 平台 · 作者。正文负责解释细节。 -->
-            <p class="material-detail__source-line">{{ [gameName(games, material.game_id), material.platform, material.author_name].filter(Boolean).join(' · ') }}</p>
-            <div class="material-detail__badges">
+            <p class="detail-source-line">{{ [gameName(games, material.game_id), material.platform, material.author_name].filter(Boolean).join(' · ') }}</p>
+            <div class="detail-badges">
+              <!-- 规范 §7.2：两个状态维度并排，不合并。素材状态服务端还没返回，
+                   读不到就不画 —— 画一个默认的「可用」等于替服务端做了判断。 -->
+              <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
               <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
               <!-- 使用状态维度：加入状态与文件状态是两件事，可以同时是「已加入 + 准备失败」。 -->
               <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
             </div>
           </div>
-        </div>
+        </section>
 
-        <t-tabs v-model="activeTab" class="material-detail__tabs">
+        <t-tabs v-model="activeTab" class="detail-tabs">
           <t-tab-panel value="overview" label="概览">
-            <section class="material-detail__section">
-              <h4>基本信息</h4>
-              <dl>
+            <!-- 使用情况的数据服务端尚未返回（change.md §3），这里先立设计图里的
+                 五格骨架：数据打通后直接填，不用再动布局。 -->
+            <section class="detail-card">
+              <h4 class="detail-card__title">使用情况</h4>
+              <div class="detail-usage">
+                <div v-for="fact in usageFacts(material)" :key="fact.key" class="detail-usage__item">
+                  <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
+                  <strong v-else>{{ fact.value }}</strong>
+                  <span class="detail-usage__label">{{ fact.label }}</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="detail-card">
+              <h4 class="detail-card__title">基本信息</h4>
+              <dl class="detail-card__grid detail-card__grid--3">
                 <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
                 <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
-                <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
-                <div><dt>发布时间</dt><dd>{{ formatDateTime(material.published_at) }}</dd></div>
                 <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
               </dl>
-            </section>
-            <!-- 走查反馈（CHG-20260930-069）：来源行采集时的内容池统计以独立区块展现。
-                 它们是采集时刻的快照，不是素材自己的属性，混进上面的 dl 会把「入库时间」
-                 和「72313 个赞」读成同一类事实。抖音接口不给 play_count（恒为 0，全部来源
-                 行核对过），区块只展示拿得到数的四项，不为一个永远的 0 留位置。 -->
-            <section class="material-detail__stats">
-              <h4>来源内容池统计</h4>
-              <div class="material-detail__stats-grid">
-                <div><span>点赞</span><strong>{{ countLabel(material.like_count) }}</strong></div>
-                <div><span>收藏</span><strong>{{ countLabel(material.favorite_count) }}</strong></div>
-                <div><span>评论</span><strong>{{ countLabel(material.comment_count) }}</strong></div>
-                <div><span>分享</span><strong>{{ countLabel(material.share_count) }}</strong></div>
-              </div>
             </section>
           </t-tab-panel>
 
           <t-tab-panel value="file" label="文件信息">
-            <section class="material-detail__section">
-              <dl>
-                <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" /></dd></div>
+            <!-- 文件状态从字段挪进了卡片标题：它说的是这一整块信息成不成，不是其中一行。 -->
+            <section class="detail-card">
+              <h4 class="detail-card__title">
+                文件信息
+                <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+              </h4>
+              <dl class="detail-card__grid detail-card__grid--4">
                 <div><dt>文件大小</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>
                 <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
                 <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
@@ -117,12 +136,13 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
                 </dd></div>
               </dl>
             </section>
-            <p v-if="material.last_error" class="material-detail__error">最近一次准备失败：{{ material.last_error }}</p>
+            <p v-if="material.last_error" class="detail-error">最近一次准备失败：{{ material.last_error }}</p>
           </t-tab-panel>
 
           <t-tab-panel value="source" label="来源信息">
-            <section class="material-detail__section">
-              <dl>
+            <section class="detail-card">
+              <h4 class="detail-card__title">来源信息</h4>
+              <dl class="detail-card__grid detail-card__grid--4">
                 <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
                 <div><dt>作者</dt><dd>
                   <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
@@ -135,46 +155,82 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
                 </dd></div>
               </dl>
             </section>
+
+            <!-- 互动数据是来源行采集时的快照，跟着「来源」走：走查五轮按设计图从概览
+                 挪到这里。混进基本信息会把「入库时间」和「72313 个赞」读成同一类事实。
+                 抖音接口不给 play_count（恒为 0，全部来源行核对过），只展示拿得到数的四项。 -->
+            <section class="detail-card">
+              <h4 class="detail-card__title">来源内容池统计</h4>
+              <div class="detail-metrics">
+                <div class="detail-metrics__item"><strong>{{ countLabel(material.like_count) }}</strong><span>点赞</span></div>
+                <div class="detail-metrics__item"><strong>{{ countLabel(material.favorite_count) }}</strong><span>收藏</span></div>
+                <div class="detail-metrics__item"><strong>{{ countLabel(material.comment_count) }}</strong><span>评论</span></div>
+                <div class="detail-metrics__item"><strong>{{ countLabel(material.share_count) }}</strong><span>分享</span></div>
+              </div>
+            </section>
           </t-tab-panel>
         </t-tabs>
+      </div>
+    </t-loading>
 
-        <!-- 规范 §6.3：详情不出现无意义的「确认 / 取消」，关闭走统一的关闭动作；
-             当前状态允许的业务动作保留在它旁边。 -->
-        <div class="material-detail__actions">
-          <t-button class="wt-secondary-button" variant="outline" @click="$emit('update:visible', false)">关闭</t-button>
+    <!-- 走查五轮：动作条接管 footer 插槽，做两件事。
+         1）消掉 TDesign 的默认页脚。Drawer 的 footer 属性默认是 true，不给插槽就渲染
+            getDefaultFooter() 的「取消 / 确认」——规范 §6.3 明令详情不该有它。全站另
+            8 个抽屉都显式关掉了（`:footer="false"` 或给自己的 #footer），只有本抽屉漏了。
+         2）让它钉在抽屉底部。原先它在正文末尾，切标签时正文高度一变，按钮就跟着上下跳。
+         上下文只给一颗主操作（§2.3），「关闭」是导航动作、不算业务动作，随它留在同一行。 -->
+    <template #footer>
+      <div v-if="material" class="material-detail__actions">
+        <t-button class="wt-secondary-button" variant="outline" @click="$emit('update:visible', false)">关闭</t-button>
+        <div class="material-detail__primary">
           <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
           <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
           <t-button v-if="mode === 'mine'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
         </div>
       </div>
-    </t-loading>
+    </template>
   </t-drawer>
 </template>
 
 <style scoped>
-.material-detail__head { display: flex; gap: 14px; align-items: flex-start; }
-.material-detail__cover { width: 120px; height: 78px; }
-.material-detail__heading { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.material-detail h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
+/* 走查五轮（2026-09-30 用户走查）：「详情里的展示框效果远不如预期」，用户给的参照是
+   内容池详情的框。于是每一段信息都是一张有边界的卡（.detail-card），不再是十几行
+   dt/dd 平铺下来的长条——平铺的结局是「入库时间」和「72313 个赞」读成同一类事实。 */
+.detail-workspace { display: flex; flex-direction: column; gap: 14px; }
+.detail-hero { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: flex-start; }
+.detail-cover { width: 160px; height: 100px; border-radius: 10px; }
+.detail-primary { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.detail-primary h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
 /* 副行是识别信息，不是重点：一行、次要色、放不下就省略。 */
-.material-detail__source-line { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.material-detail__badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.material-detail__tabs { margin-top: 18px; }
-.material-detail__section { padding-top: 4px; }
-.material-detail__section h4 { margin: 0 0 10px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; }
-.material-detail dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 0; }
-.material-detail dt { color: var(--wt-text-tertiary); font-size: 12px; }
-.material-detail dd { margin: 4px 0 0; color: var(--wt-text-primary); font-size: 14px; overflow-wrap: anywhere; }
-.material-detail__error { margin: 16px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
-/* 单一主操作（交互对齐 §2.3）：上下文给哪颗就渲染哪颗，没有并排的第二个业务动作。
-   「关闭」是导航动作，不算业务动作。 */
-.material-detail__actions { display: flex; align-items: center; gap: 8px; margin-top: 24px; }
-.material-detail__stats { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 8px; background: var(--wt-bg-page); }
-.material-detail__stats h4 { margin: 0 0 10px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; }
-.material-detail__stats-grid { display: flex; flex-wrap: wrap; gap: 8px 28px; }
-.material-detail__stats-grid div { display: flex; align-items: baseline; gap: 6px; }
-.material-detail__stats-grid span { color: var(--wt-text-tertiary); font-size: 12px; }
-.material-detail__stats-grid strong { color: var(--wt-text-primary); font-size: 14px; }
+.detail-source-line { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.detail-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.detail-tabs { margin-top: 16px; }
+.detail-card { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
+.detail-card + .detail-card { margin-top: 12px; }
+/* 标题与状态徽章同行：文件状态说的是这一整块成不成，不是其中一行。 */
+.detail-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--wt-text-primary); font-size: 15px; font-weight: 650; }
+.detail-card__grid { display: grid; gap: 12px 16px; margin: 0; }
+.detail-card__grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.detail-card__grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.detail-card__grid dt { color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-card__grid dd { margin: 5px 0 0; color: var(--wt-text-primary); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.detail-usage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.detail-usage__item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.detail-usage__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
+/* 标签挂类名而不是 `.detail-usage__item > span`：重复风险那格的第一行是
+   ResourceStatusBadge，它的根元素也是 span，且会带上父组件的 scoped 属性——
+   用后代选择器写会把徽章一起染成次要色，绿色「正常」变成灰的。 */
+.detail-usage__label { color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.detail-metrics__item { display: flex; flex-direction: column; gap: 6px; }
+.detail-metrics__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
+.detail-metrics__item span { color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-error { margin: 12px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
+/* 设计图：页脚左边「关闭」、右边上下文主操作。单一主操作（交互对齐 §2.3）说的是
+   同一时刻只有一颗业务动作，不是「所有按钮都挤右边」——「关闭」是导航动作，
+   把它与主操作分开是让两者一眼可辨。页脚自带内边距，这里不再补 margin。 */
+.material-detail__actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.material-detail__primary { display: flex; gap: 8px; }
 /* 抽屉里的链接此前借用 ContentPoolPage 的类名却没有那份样式；这里补上同一份定义，
    「打开作者主页／原视频／云端视频」与标题链接才是同一个蓝色。 */
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }

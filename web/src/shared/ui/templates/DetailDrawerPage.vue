@@ -12,12 +12,16 @@ const emit = defineEmits(["close"])
 </script>
 
 <template>
+  <!-- :footer="false" 必须显式写：TDesign 的 drawer footer 默认 true，不关就会在底部
+       渲染一对「取消 / 确认」，而详情抽屉里那对按钮没有含义（规范 §6.3）。
+       采用本模板的页面若要自己的页脚，自行加 `<template #footer>`。 -->
   <t-drawer
     :visible="visible"
     :header="title"
     :size="'640px'"
     @close="emit('close')"
     destroy-on-close
+    :footer="false"
   >
     <t-tabs default-value="basic" :style="{ marginTop: '-16px' }">
       <t-tab-panel value="basic" label="基本信息">

@@ -10,7 +10,7 @@ import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
-import { VIDEO_STATUSES, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
+import { VIDEO_STATUSES, gameName, materialStatusLabel, materialStatusTone, usageLines, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 
@@ -42,11 +42,21 @@ const mineIds = ref(new Set())
 // 走查四轮：封面、标题、来源平台合成一个「素材」格（设计图：封面+标题合并，减少列数）；
 // 素材 ID 仍是第一业务列（规范 §5.1，用户裁定保留）。作者、链接与体积仍在详情抽屉里。
 // 游戏不并进副行：它有自己的一列，同一格里再说一遍就是重复。
+// 走查五轮：两个状态维度并排（规范 §7.2）。「文件状态」说的是源视频准备好了没有，
+// 「素材状态」说的是这条素材还提供给运营选用吗 —— 可以同时是「已暂停 + 可下载」。
+// 使用情况紧接其后，读的是 labels.js 里那份 `material.usage` 协议。
+//
+// 素材状态与使用情况的**数据服务端还没有**（change.md §3 明确不做，用户 2026-09-30
+// 裁定先落样式与协议）。两列此刻渲染占位：状态是 `—`，使用情况立的是骨架。
+// 这里没有兜底默认值 —— `row.status || 'available'` 那种写法看起来像容错，
+// 实际是把一条读不到状态的素材静默画成「可用」。
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90 },
-  { colKey: 'material', title: '素材', width: 380 },
+  { colKey: 'material', title: '素材', width: 360 },
   { colKey: 'game', title: '游戏', width: 100 },
+  { colKey: 'material_status', title: '素材状态', width: 100 },
   { colKey: 'video_status', title: '文件状态', width: 100 },
+  { colKey: 'usage', title: '使用情况', width: 170 },
   { colKey: 'created_at', title: '入库时间', width: 105 },
   { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
@@ -123,6 +133,23 @@ async function loadMine() {
 
 function isMine(row) {
   return Boolean(row?.id) && mineIds.value.has(row.id)
+}
+
+/**
+ * 规范 §16.2 / 设计图要点④：暂停与下架**禁止新增领取**（历史关系与结果继续保留，
+ * 所以「已加入」的行仍然给「去我的素材」——禁止的是新增，不是导航）。
+ *
+ * 这里放行未知状态，和上面那列**不是**同一条规则：徽章读不到状态就画 `—`，因为画一个
+ * 「可用」是替服务端宣布了一个它没说的事实；而这里放行的是一个「还没读到状态时的
+ * 按钮」，点下去由服务端兜着。
+ *
+ * 说明白当前的真实状态：`status` 字段不存在，所以这个分支**今天恒为真、不改变任何
+ * 行为**，它只是把规则先写下来。也别指望服务端此刻会兜——`POST /materials/{id}/usages`
+ * 在 store_mysql.go 里是一次无状态校验的 upsert，它现在拦不住一条已下架的素材。
+ * 服务端那一半要等第五章把 `status` 落下来，两处一起才算这条规则成立。
+ */
+function canAdd(row) {
+  return !row.status || row.status === 'available'
 }
 
 function goToMyMaterials() {
@@ -266,7 +293,20 @@ onMounted(() => {
               </div>
             </template>
             <template #game="{ row }">{{ gameName(games, row.game_id) }}</template>
+            <!-- 服务端还没返回 status，所以此刻整列都是 `—`。有值就按有值渲染，
+                 没值就承认没值：这两条分支不能合成一条带默认值的。 -->
+            <template #material_status="{ row }">
+              <ResourceStatusBadge v-if="row.status" :tone="materialStatusTone(row.status)" :label="materialStatusLabel(row.status)" />
+              <template v-else>—</template>
+            </template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
+            <!-- 设计图里这一格是两行：成片/发布 计数，与最近发布时间。 -->
+            <template #usage="{ row }">
+              <div class="usage-cell">
+                <span class="usage-cell__counts">{{ usageLines(row).counts }}</span>
+                <span class="usage-cell__recent">{{ usageLines(row).recent }}</span>
+              </div>
+            </template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
               <!-- 走查三轮（交互对齐 §2.3/§5.5）：详情 | 单一主操作，素材库的主操作是
@@ -275,8 +315,11 @@ onMounted(() => {
                    「我的素材」里的素材再给一颗「加入我的素材」，是一次必然空转的点击。 -->
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button v-if="!isMine(row)" size="small" theme="primary" @click="addToMine(row)">加入我的素材</t-button>
-                <t-button v-else size="small" theme="primary" @click="goToMyMaterials()">去我的素材</t-button>
+                <t-button v-if="canAdd(row) && !isMine(row)" size="small" theme="primary" @click="addToMine(row)">加入我的素材</t-button>
+                <t-button v-else-if="isMine(row)" size="small" theme="primary" @click="goToMyMaterials()">去我的素材</t-button>
+                <!-- 暂停/下架且未领取：没有可做的主操作。设计图在这里画「—」，
+                     而不是把一颗点了会被服务端拒绝的按钮留在那里。 -->
+                <template v-else>—</template>
               </t-space>
             </template>
           </t-table>
@@ -307,6 +350,11 @@ onMounted(() => {
 .material-cell__cover { width: 56px; height: 36px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .material-cell__source { color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* 使用情况两行：计数是主行，最近发布是副行。两行都不折行——折了行高就跟着数据变，
+   一张表里每行不一样高，扫描成本立刻上去。 */
+.usage-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.usage-cell__counts { color: var(--wt-text-primary); font-size: 13px; white-space: nowrap; }
+.usage-cell__recent { color: var(--wt-text-tertiary); font-size: 12px; white-space: nowrap; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
 .material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }

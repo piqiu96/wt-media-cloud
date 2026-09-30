@@ -14,7 +14,10 @@ function sliceBetween(text, start, end) {
 // 「素材库不提供下载」这条规则管的是**行操作**，不是整页：加入成功的即时反馈里
 // 可以给一步「立即下载」（走查四轮，2026-09-30 用户裁定）。所以这条断言量的是
 // 行操作那一块，而不是整份源码。
-const opBlock = sliceBetween(source, '#op=', '</template>')
+// 切的终点是 `</t-space>` 而不是第一个 `</template>`：走查五轮给这一格加了
+// `<template v-else>—</template>`，按 `</template>` 切会把动作条从「—」处剪断，
+// 量到的就不再是行操作那一块了。
+const opBlock = sliceBetween(source, '#op=', '</t-space>')
 
 describe('material library page', () => {
   /**
@@ -127,8 +130,8 @@ describe('material library page', () => {
     expect(opBlock).not.toContain('>查看</t-button>')
     expect(opBlock).toContain('@click="addToMine(row)">加入我的素材</t-button>')
     expect(opBlock).toContain('@click="goToMyMaterials()">去我的素材</t-button>')
-    expect(source).toMatch(/v-if="!isMine\(row\)"[\s\S]{0,200}?addToMine\(row\)/)
-    expect(source).toMatch(/v-else[\s\S]{0,200}?goToMyMaterials\(\)/)
+    expect(source).toMatch(/canAdd\(row\) && !isMine\(row\)[\s\S]{0,200}?addToMine\(row\)/)
+    expect(source).toMatch(/v-else-if="isMine\(row\)"[\s\S]{0,200}?goToMyMaterials\(\)/)
     // 跳转目标就是「我的素材」页，两个端同名（cloud / desktop router 都是 MyMaterial）。
     expect(source).toContain("{ name: 'MyMaterial' }")
   })
@@ -167,6 +170,62 @@ describe('material library page', () => {
     expect(source).toContain('@go-mine="goToMyMaterials"')
     expect(source).toContain(':mine="isMine(detail)"')
     expect(source).not.toContain('material-detail-drawer')
+  })
+
+  // 走查五轮（2026-09-30 用户走查 + 设计图）：列表要同时给出两个状态维度。
+  // 「文件状态」说的是源视频准备好了没有，「素材状态」说的是这条素材还提供给运营选用吗，
+  // 规范 §7.2 明令两者不得合并——同一个素材可以同时是「已暂停 + 可下载」。
+  it('puts the material status column next to the file status column', () => {
+    expect(source).toContain("{ colKey: 'material_status', title: '素材状态'")
+    expect(source.indexOf("{ colKey: 'material_status'")).toBeLessThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(source).toContain('materialStatusLabel(row.status)')
+    expect(source).toContain('materialStatusTone(row.status)')
+  })
+
+  // 设计图里「使用情况」在素材状态与文件状态之后、入库时间之前，两行：
+  // 成片/发布 计数，与最近发布时间。
+  it('puts the usage column between the file status and 入库时间', () => {
+    expect(source).toContain("{ colKey: 'usage', title: '使用情况'")
+    const usageAt = source.indexOf("{ colKey: 'usage'")
+    expect(usageAt).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(usageAt).toBeLessThan(source.indexOf("{ colKey: 'created_at'"))
+    expect(source).toContain('usageLines(row)')
+  })
+
+  /**
+   * 服务端还没有 `status` / `usage` 这两个字段（第五章「素材状态和生命周期」未落，
+   * change.md §3 明确不做）。用户 2026-09-30 裁定：先把样式与协议立起来，数据打通后
+   * 再同步过来。所以这两列此刻渲染的是**占位**，不是编造的状态。
+   *
+   * 「编造」的具体形状就是 `row.status || 'available'` 这类兜底——它看起来像容错，
+   * 实际是把一条读不到状态的素材静默画成「可用」，而「可用」正是能触发「加入我的素材」
+   * 的那一个取值。
+   */
+  it('renders placeholders instead of guessing a state the server never sent', () => {
+    // 断言只量这一格：整份源码里 `row.status || 'available'` 会出现在**讲解这条规则的
+    // 注释里**，拿整份源码做否证会把说明当证据，读数是注释的函数。
+    const cell = sliceBetween(source, '#material_status="{ row }"', '</template>')
+    expect(cell).toContain('v-if="row.status"')
+    expect(cell).toContain('v-else>—')
+    expect(cell, '读不到状态就得是 —，不是被兜底成某个取值').not.toContain('available')
+  })
+
+  /**
+   * 规范 §16.2 / 设计图要点④：暂停与下架**禁止新增领取**。
+   *
+   * 这是设计图里最后一条没落地的操作规则：已暂停的行原本照样挂着一颗「加入我的素材」，
+   * 点下去会被服务端拒绝 —— 一颗必然失败的按钮比没有按钮更糟，它花掉一次点击和一次
+   * 错误提示来解释一件页面上本来就能看清的事。
+   *
+   * 禁止的是**新增**，不是导航：已加入的行无论什么状态都还能去「我的素材」——
+   * §16.2 那句「历史关系和结果继续保留」说的正是这个。
+   */
+  it('refuses a new add on a paused or delisted material but keeps the navigation', () => {
+    expect(source).toContain('function canAdd(row)')
+    expect(source).toMatch(/canAdd\(row\)[\s\S]{0,140}?row\.status === 'available'/)
+    expect(source).toMatch(/v-else-if="isMine\(row\)"/)
+    // 没有可做主操作时画「—」，而不是留一颗必然被拒绝的按钮。
+    expect(opBlock).toContain('<template v-else>—</template>')
   })
 
   // 走查三轮（交互对齐 §2.3/§5.3/§5.5）：行操作收敛为「详情 | 单一主操作」；
