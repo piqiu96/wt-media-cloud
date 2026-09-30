@@ -13,7 +13,6 @@ const loading = ref(true)
 const error = ref("")
 const taskNotice = ref("")
 const failedCheckProxy = ref(null)
-const queuedTaskId = ref("")
 const selectedRowKeys = ref([])
 const batchChecking = ref(false)
 const batchCheckResult = ref("")
@@ -290,8 +289,7 @@ async function queueBackgroundCheck() {
   if (!failedCheckProxy.value) return
   try {
     const task = await proxyClient.backgroundCheck(failedCheckProxy.value.id)
-    queuedTaskId.value = task.task_id || ""
-    taskNotice.value = `已创建后台检测任务（${task.task_id || "待执行"}）。`
+    taskNotice.value = `已创建后台检测任务（${task.task_id || "待执行"}），可稍后刷新代理列表查看结果。`
     failedCheckProxy.value = null
   } catch (e) {
     error.value = e.message
@@ -354,7 +352,6 @@ function formatTime(t) {
     </t-alert>
     <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
 		<t-alert v-if="batchCheckResult" :message="batchCheckResult" theme="info" style="margin-bottom:16px" closable @close="batchCheckResult=''" />
-    <t-button v-if="queuedTaskId" size="small" variant="outline" style="margin:-8px 0 16px" @click="$router.push(`/execute-tasks?task_id=${encodeURIComponent(queuedTaskId)}`)">查看任务进度</t-button>
 
     <ResourceCard class="proxy-resource-card">
     <!-- 搜索/过滤栏 -->

@@ -89,7 +89,10 @@ describe('the 本机设置 route', () => {
       .map((route) => route.components?.default ?? route.component)
       .filter((loader) => typeof loader === 'function')
 
-    expect(loaders.length).toBeGreaterThan(20)
+    // Exact rather than a floor: a floor catches only a table that has been emptied,
+    // not one that lost a route, and the walk below would then cover one page fewer
+    // without saying so.
+    expect(loaders.length, 'desktop routes carrying a loader (measured 20)').toBe(20)
 
     const projectRoot = new URL('../', import.meta.url)
     let checked = 0

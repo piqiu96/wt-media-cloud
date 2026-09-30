@@ -37,7 +37,7 @@ describe('application navigation', () => {
     expect(source).toContain('const downloadCentre = useDownloadCentre()')
     expect(source).toContain('@click="downloadCentre.open"')
     expect(source).toContain('<DownloadCentreDrawer />')
-    // 图标名必须在精灵里存在，否则两端都渲染成空白（见上面 resource-management 那条注释）。
+    // 图标名必须在精灵里存在，否则两端都渲染成空白。
     // `t-icon-download` 已核对于 web/public/tdesign-icons/0.4.3/index.js。
     expect(source).toContain('<t-icon name="download" />')
   })
