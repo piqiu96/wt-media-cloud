@@ -182,4 +182,25 @@ describe('my materials page', () => {
       expect(source, `不该再有 ${gone} 列`).not.toContain(gone)
     }
   })
+
+  /**
+   * 「文件状态」列 = 下载状态优先 + video_status 兜底（用户 2026-09-30 裁定：
+   * 排队到传输都算下载中；准备失败和本地下载失败都属于下载失败）。
+   *
+   * 下载状态是**这条关系**的（后端按「最新一条 user_download 任务」派生），不是素材的：
+   * 同一行素材对两个下载过不同次的人要显示不同状态，所以它随 usage 走、落在行对象上，
+   * 与 `usage_status` 同列同格。
+   */
+  it('derives the 文件状态 cell from the relation download status first, then video_status', () => {
+    expect(source).toContain('download_status: usage.download_status || \'\'')
+    expect(source).toContain('downloadStatusLabel(row.download_status)')
+    expect(source).toContain('downloadStatusTone(row.download_status)')
+    const fallback = source.slice(source.indexOf('function fileStatus(row)'), source.indexOf('function ', source.indexOf('function fileStatus(row)') + 1))
+    expect(fallback).toContain("if (row.download_status)")
+    expect(fallback).toContain("row.video_status === 'failed'")
+    expect(fallback).toContain("label: '下载失败'")
+    expect(fallback).toContain('videoStatusLabel(row.video_status)')
+    // 下载状态与素材云侧状态不合并：video_status 那四档仍在筛选下拉里原样使用。
+    expect(source).toContain('row.video_status !== statusFilter.value')
+  })
 })

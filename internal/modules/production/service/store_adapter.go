@@ -78,6 +78,10 @@ func (productionTransferCreator) EnsureMaterialSourcePrepare(input transferservi
 	return transferservice.EnsureMaterialSourcePrepare(input)
 }
 
+func (productionTransferCreator) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	return transferservice.LatestUserDownloadStatuses(userID, materialIDs)
+}
+
 // productionObjectLinker is this module's whole dependency on the storage
 // boundary; the composition itself lives in `infra/storage`.
 type productionObjectLinker struct{}

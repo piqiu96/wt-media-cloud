@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.30.3"
+revision: "2026.10.01.1"
 
 # 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
 #
@@ -86,6 +86,13 @@ schemas:
       material_id: {type: integer, format: int64}
       user_id: {type: integer, format: int64}
       status: {type: string, enum: [active, removed]}
+      download_status:
+        type: string
+        enum: [downloading, downloaded, failed]
+        description: >-
+          该用户在这条素材上的下载生命周期，按「最新一条 user_download 任务」派生
+          （pending/running→downloading；success→downloaded；failed/cancelled→failed），
+          与素材云侧 `video_status` 正交。从未下载过时该键不出现。
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
       removed_at: {type: string, format: date-time, description: 关系仍是 active 时该键不出现。}

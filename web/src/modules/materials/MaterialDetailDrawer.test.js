@@ -115,9 +115,12 @@ describe('material detail drawer', () => {
   })
 
   // 第一段的四件事：两个状态各一颗徽章、加入时间、下一步。
+  // 文件状态徽章是「下载状态优先、video_status 兜底」的组合（与我的素材页同语义），
+  // 单测钉在组合函数上（下方「derives the file state」组）。
   it('states the file state, the usage state, the join time and the next step', () => {
     const card = sliceBetween(template, 'class="detail-card__title">当前进度 / 使用情况', '<h4 class="detail-card__title">')
-    expect(card).toContain('videoStatusLabel(material.video_status)')
+    expect(card).toContain('fileStatus.tone')
+    expect(card).toContain('fileStatus.label')
     expect(card).toContain('usageStatusLabel(material.usage_status)')
     expect(card).toContain('formatDateTime(material.added_at)')
     expect(card).toContain('nextStepHint(material)')
@@ -146,7 +149,8 @@ describe('material detail drawer', () => {
     const hero = sliceBetween(template, 'detail-hero', 'detail-card')
     expect(hero).toContain('v-if="material.status"')
     expect(hero).toContain('materialStatusLabel(material.status)')
-    expect(hero).toContain('videoStatusLabel(material.video_status)')
+    expect(hero).toContain('fileStatus.tone')
+    expect(hero).toContain('fileStatus.label')
     expect(hero).toContain('已加入我的素材')
   })
 
@@ -327,6 +331,40 @@ describe('the local copy of a downloaded material', () => {
     // 判据在**取事实的那一段**里：这条 watch 体里一次都不提文件状态。整份源码不能这样断言
     // ——文件状态在别处有正当用处（云端视频地址那条 watch 就按它分支）。
     const watcher = sliceBetween(source, 'watch(() => [props.visible, props.material?.id, props.mode]', '\n})')
+    expect(watcher).not.toContain('video_status')
+  })
+})
+
+/**
+ * 详情抽屉的「文件状态」徽章与我的素材页同语义：下载生命周期优先，素材云侧
+ * `video_status` 兜底。下载生命周期在 mine 上下文里从它**已拉的**这张用户任务表就地
+ * 派生，不为此加接口。
+ */
+describe('the drawer file state derives from the user download lifecycle', () => {
+  it('derives the download lifecycle from the newest user_download task', () => {
+    // 徽章词表从 labels.js 取（import 是换行多名的，逐名断言）。
+    const labelsImport = sliceBetween(source, "import {\n", "} from './labels.js'")
+    expect(labelsImport).toContain('downloadStatusLabel')
+    expect(labelsImport).toContain('downloadStatusTone')
+    // 只看本机 + 这个动作（与 downloadedFileName 同一套过滤），三档映射。
+    expect(source).toContain("task?.execution_scope !== 'local_agent'")
+    expect(source).toContain("task?.purpose !== 'user_download'")
+    expect(source).toContain("return 'downloading'")
+    expect(source).toContain("return 'downloaded'")
+    expect(source).toContain("return 'failed'")
+  })
+
+  it('prioritises the download status and falls back to video_status, failed included', () => {
+    const block = sliceBetween(source, 'const fileStatus = computed(() => {', '})')
+    expect(block).toContain('downloadStatusLabel(downloadStatus.value)')
+    expect(block).toContain("props.material?.video_status === 'failed'")
+    expect(block).toContain("label: '下载失败'")
+    expect(block).toContain('videoStatusLabel(props.material?.video_status)')
+  })
+
+  it('fills the derived status in the mine-context watcher, without reading video_status there', () => {
+    const watcher = sliceBetween(source, 'watch(() => [props.visible, props.material?.id, props.mode]', '\n})')
+    expect(watcher).toContain('deriveDownloadStatus(tasks, id)')
     expect(watcher).not.toContain('video_status')
   })
 })

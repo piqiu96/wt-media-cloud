@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(new URL('./DownloadCentreDrawer.vue', import.meta.url), 'utf8')
 
+/** 取出两段定界文本之间的内容；找不到就抛，别让断言在空串上静默通过。 */
+function sliceBetween(text, start, end) {
+  const from = text.indexOf(start)
+  const to = text.indexOf(end, from + start.length)
+  if (from === -1 || to === -1) throw new Error(`找不到切片：${start} … ${end}`)
+  return text.slice(from, to)
+}
+
 /**
  * 这个面板的按钮是由 `transferRow` 算出来的布尔量控制的，所以「算得对」和「接得上」是
  * 两件事。前者由 `downloadFacts.test.js`／`transferRows.test.js` 钉住；这里钉后者 ——
@@ -69,6 +77,29 @@ describe('download centre drawer', () => {
   // 扫描失败退回「没查过」，不是「不在」：后台读本机失败不弹提示，也绝不断言文件没了。
   it('falls back to asserting nothing when the scan cannot answer', () => {
     expect(source).toMatch(/\(\) => \{(.|\n)*?presence\.value = \{\}/)
+  })
+})
+
+/**
+ * 一次点击在库里是两行（云端准备 compose_input_prepare + 本机下载 user_download），
+ * 下载中心只显示本机那一条 —— 展示层合并，DB 不动。
+ *
+ * 关键顺序：`transferRows` 之前不能滤 —— `taskState → needsCloudPreparation` 要看到
+ * 兄弟云任务才知道「等待云端准备」，所以过滤必须在 `transferRows` **之后**。
+ */
+describe('download centre shows one row per click', () => {
+  it('filters the rows to user_download, after the shared row derivation', () => {
+    expect(source).toContain("}).filter((row) => row.task.purpose === 'user_download')")
+    // 状态推导仍喂全量列表：transferRows 的实参是 tasks.value 本身，过滤是链在后面的
+    // 一步 —— 在它之前滤掉云行，needsCloudPreparation 就看不见兄弟云任务了。
+    const block = sliceBetween(source, 'const rows = computed', 'const liveDownloads')
+    expect(block).toContain('transferRows(tasks.value, {')
+    expect(block.indexOf('transferRows(tasks.value')).toBeLessThan(block.indexOf(".filter((row)"))
+  })
+
+  it('gates the polling on user_download rows alone', () => {
+    expect(source).toContain("const liveDownloads = computed(() => tasks.value.filter((task) => task.purpose === 'user_download'))")
+    expect(source).toContain('hasLiveTask(liveDownloads.value)')
   })
 })
 

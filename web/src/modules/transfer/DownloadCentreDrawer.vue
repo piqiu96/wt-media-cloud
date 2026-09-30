@@ -33,10 +33,19 @@ const presence = ref({})
 const POLL_INTERVAL_MS = 2000
 let timer = null
 
+// 一次点击在库里是两行（云端准备 `compose_input_prepare` + 本机下载 `user_download`，
+// 同一毫秒同建），下载中心只显示**本机那一条**，用状态区分阶段。
+//
+// 状态推导仍喂**全量**列表：`taskState → needsCloudPreparation` 要看到兄弟云任务才知道
+// 「等待云端准备」，所以在 `transferRows` 之后才滤 —— 在它之前滤会把那条徽标退化成
+// 「排队中」。DB 两行不动，这里只是展示层合并。
 const rows = computed(() => transferRows(tasks.value, {
   cancelRequested: cancelRequested.value,
   presence: presence.value,
-}))
+}).filter((row) => row.task.purpose === 'user_download'))
+
+// 轮询闸门也只认 user_download：云准备行是本机行的影子，随本机行一起终态。
+const liveDownloads = computed(() => tasks.value.filter((task) => task.purpose === 'user_download'))
 
 // 两栏：非终态「正在下载」，终态「最近完成」（CHG-20260930-069）。
 const groupedRows = computed(() => splitTransferRows(rows.value))
@@ -94,7 +103,7 @@ function stopPolling() {
 }
 
 function ensurePolling() {
-  if (!visible.value || !hasLiveTask(tasks.value)) {
+  if (!visible.value || !hasLiveTask(liveDownloads.value)) {
     stopPolling()
     return
   }
@@ -127,7 +136,7 @@ watch(visible, (open) => {
   // 没有在跑的任务但有历史时直接落在「最近完成」，免得先看一屏空列表。
   activeTab.value = 'active'
   load().then(() => {
-    if (!hasLiveTask(tasks.value) && recentRows.value.length) activeTab.value = 'recent'
+    if (!hasLiveTask(liveDownloads.value) && recentRows.value.length) activeTab.value = 'recent'
   })
 })
 

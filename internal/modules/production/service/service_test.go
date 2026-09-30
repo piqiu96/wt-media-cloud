@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +126,13 @@ type stubTransfers struct {
 	prepareTask  transferdto.Task
 	prepareErr   error
 	prepareCount int
+
+	// downloadStatuses is what LatestUserDownloadStatuses answers, keyed by
+	// material_id. A nil map is the honest "no one has ever downloaded anything"
+	// default, which keeps every older test meaningfully green.
+	downloadStatuses map[int64]string
+	// lastStatusQuery records the material_ids handed to LatestUserDownloadStatuses.
+	lastStatusQuery []int64
 }
 
 func (s *stubTransfers) EnsureMaterialSourcePrepare(input transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error) {
@@ -149,6 +157,11 @@ func (s *stubTransfers) CreateUserDownload(input transferservice.CreateUserDownl
 		return transferdto.Task{ID: "transfer-1", Status: "pending"}, nil
 	}
 	return s.task, nil
+}
+
+func (s *stubTransfers) LatestUserDownloadStatuses(userID service.UserID, materialIDs []int64) (map[int64]string, error) {
+	s.lastStatusQuery = append([]int64(nil), materialIDs...)
+	return s.downloadStatuses, nil
 }
 
 func testService(store Store) *Service {
@@ -313,6 +326,65 @@ func TestListMyMaterialsReturnsOnlyUsagesWithCurrentlyVisibleMaterials(t *testin
 	}
 	if len(items) != 1 || items[0].Material == nil || items[0].Material.ID != 42 {
 		t.Fatalf("items = %+v", items)
+	}
+}
+
+// The download lifecycle is one user's view of one material, derived from the
+// newest user_download task. pending/running and failed/cancelled each collapse
+// into one bucket (the user's rulings: "排队到传输都算下载中", "准备失败和本地
+// 下载失败都属于下载失败"); any other value — or none — leaves the field empty
+// so the UI falls back to video_status.
+func TestDownloadStatusOfMapsRawTaskStatusesToTheUserFacingBuckets(t *testing.T) {
+	for raw, want := range map[string]string{
+		"pending":   "downloading",
+		"running":   "downloading",
+		"success":   "downloaded",
+		"failed":    "failed",
+		"cancelled": "failed",
+		"":          "",
+		"mystery":   "",
+	} {
+		if got := downloadStatusOf(raw); got != want {
+			t.Fatalf("downloadStatusOf(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// ListMyMaterials asks for the newest user_download status per visible material
+// in one batch and writes the derived state onto each usage, leaving the
+// material's own cloud-side video_status untouched.
+func TestListMyMaterialsFillsTheDerivedDownloadStatusPerUsage(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	material42 := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady}
+	material30 := model.Material{ID: 30, TeamID: team, GameID: &game, VideoStatus: model.VideoReady}
+	store := &memoryStore{
+		found:    true,
+		material: material42,
+		// the second FindMaterial call answers the second usage's material.
+		refind: &material30,
+		usages: []model.MaterialUsage{
+			{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive},
+			{ID: 6, TeamID: team, MaterialID: 30, UserID: 9, Status: model.MaterialUsageActive},
+		},
+	}
+	transfers := &stubTransfers{downloadStatuses: map[int64]string{42: "success", 30: "pending"}}
+	svc := NewService(store, &stubNodes{}, transfers, &stubLinks{})
+	items, err := svc.ListMyMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}})
+	if err != nil {
+		t.Fatalf("ListMyMaterials() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	if items[0].DownloadStatus != "downloaded" || items[1].DownloadStatus != "downloading" {
+		t.Fatalf("DownloadStatus = %q / %q, want downloaded / downloading", items[0].DownloadStatus, items[1].DownloadStatus)
+	}
+	if items[0].Material.VideoStatus != model.VideoReady || items[1].Material.VideoStatus != model.VideoReady {
+		t.Fatalf("material video_status was mutated, want it untouched")
+	}
+	if !slices.Equal(transfers.lastStatusQuery, []int64{42, 30}) {
+		t.Fatalf("LatestUserDownloadStatuses was asked for %v, want [42 30]", transfers.lastStatusQuery)
 	}
 }
 

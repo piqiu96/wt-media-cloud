@@ -57,8 +57,10 @@ type memoryStore struct {
 	retryResult       Task
 	failDependentsErr error
 
-	listFilter repository.TaskFilter
-	lastCreate repository.CreateTaskInput
+	listFilter   repository.TaskFilter
+	lastStatusID identityservice.UserID
+	statusResult map[int64]string
+	lastCreate   repository.CreateTaskInput
 	lastProg   repository.ProgressInput
 	lastDone   repository.CompletionInput
 	lastFail   repository.FailureInput
@@ -166,6 +168,12 @@ func (s *memoryStore) ListTasks(filter repository.TaskFilter) ([]Task, error) {
 		ordered = append(ordered, task)
 	}
 	return ordered, nil
+}
+
+func (s *memoryStore) LatestUserDownloadStatuses(userID identityservice.UserID, _ []int64) (map[int64]string, error) {
+	s.counts["status"]++
+	s.lastStatusID = userID
+	return s.statusResult, nil
 }
 
 func (s *memoryStore) NextLocalTask(_ string, _ time.Time) (Task, bool, error) {
@@ -411,6 +419,27 @@ func TestListTasksRefusesAnActorWithNoIdentity(t *testing.T) {
 	}
 	if store.count("list") != 0 {
 		t.Fatalf("list called %d times, want none for a request with no actor", store.count("list"))
+	}
+}
+
+// The derived download lifecycle is a pass-through to the store, scoped to the
+// given user: the module does not decide what the raw statuses mean (the
+// production module maps them), it only refuses an identity-less caller.
+func TestLatestUserDownloadStatusesPassesTheUserThroughAndRefusesNobody(t *testing.T) {
+	store := newMemoryStore()
+	store.statusResult = map[int64]string{42: "success"}
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	got, err := service.LatestUserDownloadStatuses(identityservice.UserID(9), []int64{42})
+	if err != nil {
+		t.Fatalf("LatestUserDownloadStatuses() error = %v", err)
+	}
+	if got[42] != "success" || store.lastStatusID != identityservice.UserID(9) {
+		t.Fatalf("got = %v (asked as %v), want the store's raw answer for user 9", got, store.lastStatusID)
+	}
+
+	if _, err := service.LatestUserDownloadStatuses(0, []int64{42}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("LatestUserDownloadStatuses(0) error = %v, want ErrInvalidInput", err)
 	}
 }
 

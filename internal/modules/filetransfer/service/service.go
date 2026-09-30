@@ -111,6 +111,7 @@ type Store interface {
 	CreateMaterialSourcePrepareTask(repository.CreateMaterialSourcePrepareInput, time.Time) (model.Task, error)
 	GetTask(string) (model.Task, error)
 	ListTasks(repository.TaskFilter) ([]model.Task, error)
+	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
 	NextLocalTask(string, time.Time) (model.Task, bool, error)
 	ClaimLocalTask(string, string, time.Time, time.Duration) (model.Task, bool, error)
 	HeartbeatTask(string, string, time.Time, time.Duration) (bool, error)
@@ -395,6 +396,16 @@ func (s *Service) ListTasks(actor identityservice.PublicUser) ([]dto.Task, error
 		items = append(items, taskBody(task))
 	}
 	return items, nil
+}
+
+// LatestUserDownloadStatuses answers each material's newest user_download status
+// for one user, as a raw task status keyed by asset_id. The production module
+// maps that to a display state; this module stays out of what a badge means.
+func (s *Service) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	if userID <= 0 {
+		return nil, ErrInvalidInput
+	}
+	return s.store.LatestUserDownloadStatuses(userID, materialIDs)
 }
 
 // CancelTask asks for a transfer to stop and answers with the refreshed task.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
+	transfermodel "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
@@ -106,6 +107,11 @@ type TransferCreator interface {
 	// waiting download needs, and answers with the one already outstanding when
 	// there is one. The caller cannot tell the difference and must not need to.
 	EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error)
+
+	// LatestUserDownloadStatuses answers each material's newest user_download
+	// status for one user, raw (see the transfer service). "My Materials" derives
+	// its download lifecycle from it; the transfer module stays out of badges.
+	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
 }
 
 // ObjectLinker composes the stable public address of a stored object; a
@@ -227,7 +233,44 @@ func (s *Service) ListMyMaterials(actor identityservice.PublicUser) ([]model.Mat
 		usage.Material = &material
 		visible = append(visible, usage)
 	}
+	// The download lifecycle is per user, not per material: the same row renders
+	// differently for two users who downloaded it at different times. One batch
+	// query covers the whole visible list instead of a task poll per row.
+	statuses, err := s.transfers.LatestUserDownloadStatuses(actor.ID, materialIDsOf(visible))
+	if err != nil {
+		return nil, err
+	}
+	for i := range visible {
+		visible[i].DownloadStatus = downloadStatusOf(statuses[visible[i].MaterialID])
+	}
 	return visible, nil
+}
+
+// downloadStatusOf maps a raw user_download task status to the user-facing
+// download lifecycle. pending and running are one bucket on purpose (the user
+// ruled "排队到传输都算下载中"), and failed/cancelled are one bucket too
+// ("准备失败和本地下载失败都属于下载失败"). Any other value — or no value at
+// all — leaves the field empty and the UI falls back to the material's
+// video_status.
+func downloadStatusOf(raw string) string {
+	switch transfermodel.Status(raw) {
+	case transfermodel.StatusPending, transfermodel.StatusRunning:
+		return "downloading"
+	case transfermodel.StatusSuccess:
+		return "downloaded"
+	case transfermodel.StatusFailed, transfermodel.StatusCancelled:
+		return "failed"
+	default:
+		return ""
+	}
+}
+
+func materialIDsOf(usages []model.MaterialUsage) []int64 {
+	ids := make([]int64, 0, len(usages))
+	for _, usage := range usages {
+		ids = append(ids, usage.MaterialID)
+	}
+	return ids
 }
 
 func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) error {

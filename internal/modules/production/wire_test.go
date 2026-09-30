@@ -202,17 +202,22 @@ func TestMaterialUsageBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 		t.Fatal("contract has no MaterialUsage schema")
 	}
 	want := schemaPropertyNames(schema.Properties)
-	if len(want) != 9 {
-		t.Fatalf("MaterialUsage declares %d properties, want the measured 9: %v", len(want), want)
+	if len(want) != 10 {
+		t.Fatalf("MaterialUsage declares %d properties, want the measured 10: %v", len(want), want)
 	}
 
 	removed := activeUsage()
 	removed.Status = model.MaterialUsageRemoved
 	removedAt := removed.UpdatedAt
 	removed.RemovedAt = &removedAt
+	// download_status is derived and optional: the removed row carries one so the
+	// union below proves the marshalled set reaches the whole declared schema.
+	removed.DownloadStatus = "downloaded"
 
-	// Two optional properties (`material` and `removed_at`), so the active row and the
-	// removed row together have to account for the whole declared set — and only for it.
+	// Three optional properties (`material`, `removed_at`, `download_status`), so
+	// the active row and the removed row together have to account for the whole
+	// declared set — and only for it. A never-downloaded active row stays at the
+	// required set plus the embedded material, which the second assertion pins.
 	active := marshalledKeys(t, activeUsage())
 	withRemovals := marshalledKeys(t, removed)
 	if got := union(active, withRemovals); !reflect.DeepEqual(got, want) {

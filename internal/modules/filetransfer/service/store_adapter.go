@@ -26,6 +26,9 @@ func (mysqlStore) GetTask(taskID string) (model.Task, error) { return repository
 func (mysqlStore) ListTasks(filter repository.TaskFilter) ([]model.Task, error) {
 	return repository.ListTasks(filter)
 }
+func (mysqlStore) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	return repository.LatestUserDownloadStatuses(userID, materialIDs)
+}
 func (mysqlStore) NextLocalTask(nodeID string, now time.Time) (model.Task, bool, error) {
 	return repository.NextLocalTask(nodeID, now)
 }

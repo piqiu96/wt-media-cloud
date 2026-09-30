@@ -88,8 +88,14 @@ type MaterialUsage struct {
 	MaterialID int64               `json:"material_id"`
 	UserID     identity.UserID     `json:"user_id"`
 	Status     MaterialUsageStatus `json:"status"`
-	RemovedAt  *time.Time          `json:"removed_at,omitempty"`
-	CreatedAt  time.Time           `json:"created_at"`
-	UpdatedAt  time.Time           `json:"updated_at"`
-	Material   *Material           `json:"material,omitempty"`
+	// DownloadStatus is the *user's* download lifecycle on this material, derived
+	// from the newest user_download task ("" = never downloaded), as opposed to
+	// the material's cloud-side video_status which lives on `Material`. It is not
+	// a stored column; ListMyMaterials fills it per actor. omitempty keeps rows
+	// without any download byte-identical to the pre-feature response.
+	DownloadStatus string              `json:"download_status,omitempty"`
+	RemovedAt      *time.Time          `json:"removed_at,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	Material       *Material           `json:"material,omitempty"`
 }

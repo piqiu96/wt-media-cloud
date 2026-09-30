@@ -437,6 +437,57 @@ func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 	return tasks, rows.Err()
 }
 
+// LatestUserDownloadStatuses answers, for each material, the status of this
+// user's *latest* user_download task on it. It is the derived "download
+// lifecycle" fact behind My Materials — the production module calls it after
+// listing usages, never to scan the whole task table.
+//
+// The return value is the raw task status keyed by asset_id, so the mapping to a
+// display state stays a production-domain decision and this store is not asked
+// to learn what a badge means. `compose_input_prepare` rows are deliberately
+// excluded: cloud preparation surfaces through `materials.video_status`, not
+// through a per-user download state.
+func LatestUserDownloadStatuses(userID identity.UserID, materialIDs []int64) (map[int64]string, error) {
+	return latestUserDownloadStatuses(database.DB(), userID, materialIDs)
+}
+
+func latestUserDownloadStatuses(db *gorm.DB, userID identity.UserID, materialIDs []int64) (map[int64]string, error) {
+	statuses := make(map[int64]string, len(materialIDs))
+	if len(materialIDs) == 0 {
+		return statuses, nil
+	}
+	// created_at alone is not a total order (see listTasks), so id breaks the
+	// tie; the first row reached for an asset_id is its latest task.
+	query := "SELECT asset_id, status FROM file_transfer_tasks" +
+		" WHERE requested_by = ? AND asset_type = ? AND purpose = ? AND asset_id IN (" +
+		placeholders(len(materialIDs)) + ")" +
+		" ORDER BY created_at DESC, id DESC"
+	args := make([]any, 0, 2+len(materialIDs))
+	args = append(args, userID, model.AssetMaterial, model.PurposeUserDownload)
+	for _, id := range materialIDs {
+		args = append(args, id)
+	}
+	rows, err := db.Raw(query, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := make(map[int64]struct{}, len(materialIDs))
+	for rows.Next() {
+		var assetID int64
+		var status string
+		if err := rows.Scan(&assetID, &status); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[assetID]; ok {
+			continue
+		}
+		seen[assetID] = struct{}{}
+		statuses[assetID] = status
+	}
+	return statuses, rows.Err()
+}
+
 // leaseable is the single statement of "this task can be leased right now". It is
 // a shared const rather than a phrase repeated per query because it is a rule, not
 // an implementation detail: three claims and the candidate read below all have to

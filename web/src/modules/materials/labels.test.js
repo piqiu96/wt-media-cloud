@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DOWNLOAD_STATUSES,
   DUPLICATE_RISKS,
   MATERIAL_STATUSES,
   USAGE_FIELDS,
   USAGE_STATUSES,
   VIDEO_STATUSES,
   downloadActionLabel,
+  downloadStatusLabel,
+  downloadStatusTone,
   duplicateRiskLabel,
   duplicateRiskTone,
   gameName,
@@ -37,6 +40,27 @@ describe('material labels', () => {
   it('passes through a status it does not know instead of hiding it', () => {
     expect(videoStatusLabel('mystery')).toBe('mystery')
     expect(videoStatusLabel('')).toBe('-')
+  })
+
+  // 下载状态是**按用户派生**的第四组状态（MaterialUsage.download_status），三档不多不少，
+  // 与冻结的 video_status 分开：那个 enum 里没有这些值，页面上出现它们就是替服务端发明。
+  it('names and tones the three download-lifecycle statuses without touching video_status', () => {
+    expect(DOWNLOAD_STATUSES).toEqual(['downloading', 'downloaded', 'failed'])
+    for (const status of DOWNLOAD_STATUSES) {
+      expect(downloadStatusLabel(status), status).not.toBe(status)
+      expect(downloadStatusLabel(status), status).not.toBe('-')
+      expect(downloadStatusTone(status), status).toBeTruthy()
+    }
+    expect(downloadStatusLabel('downloading')).toBe('下载中')
+    expect(downloadStatusLabel('downloaded')).toBe('已下载')
+    expect(downloadStatusLabel('failed')).toBe('下载失败')
+    expect(downloadStatusTone('downloading')).toBe('info')
+    expect(downloadStatusTone('downloaded')).toBe('success')
+    expect(downloadStatusTone('failed')).toBe('danger')
+    // 空串是「从未下载过」的缺省，不是第四档 —— 此时由页面回落 video_status。
+    expect(downloadStatusLabel('')).toBe('-')
+    // 不并入冻结数组：VIDEO_STATUSES 仍是那四个云侧取值。
+    expect(VIDEO_STATUSES).toEqual(['not_downloaded', 'downloading', 'ready', 'failed'])
   })
 
   // 拿掉了而不只是绕过：留在模块里，下一个页面就会再挂它一次。

@@ -1,7 +1,7 @@
 <script setup>
 // 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
 // 其余在这里；云端视频地址不随素材 body 返回，就绪时才向详情链接接口要一次。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
@@ -13,6 +13,8 @@ import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
 import {
   downloadActionLabel,
+  downloadStatusLabel,
+  downloadStatusTone,
   gameName,
   materialStatusLabel,
   materialStatusTone,
@@ -43,6 +45,46 @@ const videoUrl = ref('')
 // 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
 // `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
 const localFile = ref(null)
+// 这个运营在这条素材上的下载生命周期（downloading/downloaded/failed；空串=没下过）。
+// 详情从它已拉的这张用户任务表里就地派生，不为此加接口。
+const downloadStatus = ref('')
+
+/**
+ * 从这条用户的下载任务表里挑该素材**最新一次** user_download 的状态。
+ *
+ * `ListTasks` 是 created_at DESC, id DESC，第一条匹配即最新；与下载中心同一套过滤
+ * （只看本机 + 这个动作），并映射成素材页同款三档。
+ */
+function deriveDownloadStatus(tasks, assetId) {
+  const wanted = Number(assetId)
+  if (!Number.isFinite(wanted)) return ''
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (task?.asset_type !== 'material') continue
+    if (Number(task?.asset_id) !== wanted) continue
+    if (task?.execution_scope !== 'local_agent') continue
+    if (task?.purpose !== 'user_download') continue
+    if (task?.status === 'pending' || task?.status === 'running') return 'downloading'
+    if (task?.status === 'success') return 'downloaded'
+    if (task?.status === 'failed' || task?.status === 'cancelled') return 'failed'
+    return ''
+  }
+  return ''
+}
+
+/**
+ * 文件状态：下载状态优先（有记录时），素材云侧 `video_status` 兜底。兜底里
+ * `failed`（云准备失败）也画「下载失败」——用户裁定「准备失败和本地下载失败都
+ * 属于下载失败，不需要分那么细」。与我的素材页同语义。
+ */
+const fileStatus = computed(() => {
+  if (downloadStatus.value) {
+    return { label: downloadStatusLabel(downloadStatus.value), tone: downloadStatusTone(downloadStatus.value) }
+  }
+  if (props.material?.video_status === 'failed') {
+    return { label: '下载失败', tone: 'danger' }
+  }
+  return { label: videoStatusLabel(props.material?.video_status), tone: videoStatusTone(props.material?.video_status) }
+})
 
 // 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
 function countLabel(value) { return Number(value || 0).toLocaleString() }
@@ -69,9 +111,11 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
  */
 watch(() => [props.visible, props.material?.id, props.mode], async ([open, id, mode]) => {
   localFile.value = null
+  downloadStatus.value = ''
   if (!open || !id || mode !== 'mine') return
   try {
     const tasks = await transfer.listTasks()
+    downloadStatus.value = deriveDownloadStatus(tasks, id)
     const name = downloadedFileName(tasks, id)
     if (!name) return
     localFile.value = (await savedFileStates([name]))[name] ?? null
@@ -129,7 +173,7 @@ async function openDirectory() {
             <div class="detail-badges">
               <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
               <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
-              <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+              <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
               <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
             </div>
           </div>
@@ -140,7 +184,7 @@ async function openDirectory() {
         <section class="detail-card">
           <h4 class="detail-card__title">当前进度 / 使用情况</h4>
           <dl class="detail-card__grid detail-card__grid--4">
-            <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" /></dd></div>
+            <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></dd></div>
             <div><dt>使用状态</dt><dd>
               <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
               <template v-else>—</template>
@@ -160,7 +204,7 @@ async function openDirectory() {
         <section class="detail-card">
           <h4 class="detail-card__title">
             文件信息
-            <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+            <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
           </h4>
           <dl class="detail-card__grid detail-card__grid--4">
             <div><dt>文件大小</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>

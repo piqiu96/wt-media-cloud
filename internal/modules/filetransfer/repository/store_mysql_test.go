@@ -998,3 +998,43 @@ func TestCreateUserDownloadTaskRefusesAnIncompleteIdentity(t *testing.T) {
 		assertExpectations(t, mock)
 	}
 }
+
+// The query is scoped to one user's user_download rows on the given materials,
+// and the first row reached for an asset is its latest (created_at DESC, id DESC).
+// A material with several tasks must yield only its newest status; the dedup must
+// not reach across materials.
+func TestLatestUserDownloadStatusesTakesTheNewestTaskPerMaterial(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT asset_id, status FROM file_transfer_tasks WHERE requested_by = ? AND asset_type = ? AND purpose = ? AND asset_id IN (?, ?) ORDER BY created_at DESC, id DESC")).
+		WithArgs(int64(9), "material", "user_download", int64(42), int64(30)).
+		WillReturnRows(sqlmock.NewRows([]string{"asset_id", "status"}).
+			AddRow(int64(42), "running"). // newest on 42
+			AddRow(int64(42), "success"). // older on 42, must be dropped
+			AddRow(int64(30), "failed"))  // separate material, kept
+
+	statuses, err := latestUserDownloadStatuses(db, identity.UserID(9), []int64{42, 30})
+	if err != nil {
+		t.Fatalf("latestUserDownloadStatuses() error = %v", err)
+	}
+	if statuses[int64(42)] != "running" || statuses[int64(30)] != "failed" {
+		t.Fatalf("statuses = %v, want 42->running (newest wins) and 30->failed", statuses)
+	}
+	if len(statuses) != 2 {
+		t.Fatalf("len(statuses) = %d, want 2 (the older 42 row must be deduped)", len(statuses))
+	}
+	assertExpectations(t, mock)
+}
+
+// An empty material list is answered without touching the database; nothing is
+// armed, so any query would trip the mock.
+func TestLatestUserDownloadStatusesAnswersAnEmptyListWithoutQuerying(t *testing.T) {
+	db, mock := newMockGORM(t)
+	statuses, err := latestUserDownloadStatuses(db, identity.UserID(9), nil)
+	if err != nil {
+		t.Fatalf("latestUserDownloadStatuses() error = %v", err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("len(statuses) = %d, want 0", len(statuses))
+	}
+	assertExpectations(t, mock)
+}

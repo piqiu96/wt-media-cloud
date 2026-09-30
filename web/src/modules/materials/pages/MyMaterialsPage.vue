@@ -11,6 +11,8 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import {
   VIDEO_STATUSES,
   downloadActionLabel,
+  downloadStatusLabel,
+  downloadStatusTone,
   gameName,
   usageStatusLabel,
   usageStatusTone,
@@ -71,8 +73,28 @@ function toRows(usages) {
     ...(usage.material || {}),
     usage_id: usage.id,
     usage_status: usage.status,
+    // 下载生命周期是**这条关系**的（按用户派生），不是素材的：同一行素材对两个
+    // 下载过不同次的人要显示不同状态。没下过时服务端不返回该键，这里记空串。
+    download_status: usage.download_status || '',
     added_at: usage.created_at,
   }))
+}
+
+/**
+ * 「文件状态」列：下载状态优先，素材云侧状态兜底。
+ *
+ * 有下载记录（下载中/已下载/下载失败）用它 —— 它是**这个运营**在下载这条素材上的
+ * 现状。没有时回落 `video_status`；其中 `failed`（云准备失败）也要画「下载失败」——
+ * 用户 2026-09-30 裁定「准备失败和本地下载失败都属于下载失败，不需要分那么细」。
+ */
+function fileStatus(row) {
+  if (row.download_status) {
+    return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
+  }
+  if (row.video_status === 'failed') {
+    return { label: '下载失败', tone: 'danger' }
+  }
+  return { label: videoStatusLabel(row.video_status), tone: videoStatusTone(row.video_status) }
 }
 
 // 「素材」格副行：游戏 · 作者。游戏查不到名字时 gameName 退回 id（那是真实数据），
@@ -234,7 +256,7 @@ onMounted(() => {
                 </div>
               </div>
             </template>
-            <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
+            <template #video_status="{ row }"><ResourceStatusBadge :tone="fileStatus(row).tone" :label="fileStatus(row).label" /></template>
             <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的（缺值兜底成「使用中」
                  就是替服务端宣布一条它没说过关系）。 -->
             <template #usage_status="{ row }">

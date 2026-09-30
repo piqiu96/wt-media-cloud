@@ -33,6 +33,10 @@ func ListTasks(actor identityservice.PublicUser) ([]dto.Task, error) {
 	return newWiredService().ListTasks(actor)
 }
 
+func LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	return newWiredService().LatestUserDownloadStatuses(userID, materialIDs)
+}
+
 func CancelTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
 	return newWiredService().CancelTask(actor, taskID)
 }
