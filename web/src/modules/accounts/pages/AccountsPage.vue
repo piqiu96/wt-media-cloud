@@ -1094,7 +1094,7 @@ const columns = [
       </t-form>
     </t-dialog>
 
-    <t-drawer v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close :footer="false">
+    <t-drawer :close-btn="true" v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
         <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>

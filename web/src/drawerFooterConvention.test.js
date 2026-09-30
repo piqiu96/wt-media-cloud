@@ -42,6 +42,28 @@ function openingTag(text, start) {
   return text.slice(start)
 }
 
+/** 取出 `#footer` 插槽本身。页脚里会有嵌套的 `<template v-if>`，按第一个
+    `</template>` 切会把动作条从第一个分支处剪断，所以按标签配对找收尾。 */
+function footerSlot(block) {
+  const at = block.search(/<template\s+#footer\b/)
+  if (at === -1) return null
+  let i = at + openingTag(block, at).length
+  let depth = 1
+  while (depth > 0) {
+    const nextOpen = block.indexOf('<template', i)
+    const nextClose = block.indexOf('</template>', i)
+    if (nextClose === -1) return block.slice(at)
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      depth += 1
+      i = nextOpen + '<template'.length
+    } else {
+      depth -= 1
+      i = nextClose + '</template>'.length
+    }
+  }
+  return block.slice(at, i)
+}
+
 /** 每个抽屉说清：它给自己的页脚，还是显式关掉；都没有就是漏了。 */
 export function auditDrawers() {
   const found = []
@@ -58,8 +80,10 @@ export function auditDrawers() {
       found.push({
         file: file.replace(SRC, ''),
         line: text.slice(0, at).split('\n').length,
+        tag,
         hasFooterProp: /\bfooter\s*=/.test(tag),
         hasFooterSlot: /<template\s+#footer\b/.test(block),
+        footerText: footerSlot(block),
       })
     }
   }
@@ -85,5 +109,36 @@ describe('drawer footer convention', () => {
       missing,
       'TDesign 的 drawer footer 默认是 true，不表态就会渲染「取消 / 确认」',
     ).toEqual([])
+  })
+
+  // 2026-09-30 用户裁定：关闭一律走抽屉右上角的 ×，页脚只放业务动作。素材详情与本机
+  // 扫描结果两个抽屉原本各有一颗「关闭」占着页脚靠左的位置，撤掉之后关闭入口只剩一个，
+  // 也就不会再出现「同一个抽屉，右上角一个 ×、左下角一个关闭」。
+  it('keeps every drawer footer on business actions, never a 关闭 button', () => {
+    const withFooter = drawers.filter((d) => d.footerText)
+    // 分母跟另一条读数对齐：`hasFooterSlot` 是不经切片的正则。切片器坏掉时（返回 null，
+    // 或者返回一段垃圾串）两个数就对不上，而不会安静地变成「没有抽屉带页脚」。
+    expect(
+      withFooter.length,
+      '切片器给出的页脚数与正则数对不上，这条约定就是空转',
+    ).toBe(drawers.filter((d) => d.hasFooterSlot).length)
+    expect(withFooter.length, '一个带页脚的抽屉都没扫到').toBeGreaterThanOrEqual(3)
+    const offenders = withFooter
+      .filter((d) => />\s*关闭\s*</.test(d.footerText))
+      .map((d) => `${d.file}:${d.line}`)
+    expect(offenders, '关闭请走抽屉右上角的 ×，页脚只留给业务动作').toEqual([])
+  })
+
+  // 页脚那颗「关闭」撤了之后，标题栏右上角的 × 就是唯一的明确关闭入口，而它**不会
+  // 自己出现**：本仓装的 tdesign-vue-next 1.20.3 里 `closeBtn` 没有 default
+  // （同版本的 `dialog` 写着 `default: true`，`drawer` 没写），Vue 对声明了 Boolean
+  // 又没有 default 的 prop 取值 `false`，于是渲染处那句 `props2.closeBtn && …` 为假。
+  // 2026-09-30 用 headless Chrome 渲染确认过：不写 `close-btn` 的抽屉 DOM 里没有
+  // `.t-drawer__close-btn`，写了 `:close-btn="true"` 才有。
+  it('enables the header close button on every drawer, which does not default on', () => {
+    const off = drawers
+      .filter((d) => !/:close-btn\s*=\s*"true"/.test(d.tag))
+      .map((d) => `${d.file}:${d.line}`)
+    expect(off, '不写 :close-btn="true" 的抽屉没有关闭入口').toEqual([])
   })
 })

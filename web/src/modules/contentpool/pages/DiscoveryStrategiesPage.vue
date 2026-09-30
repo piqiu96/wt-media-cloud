@@ -531,7 +531,7 @@ function latestStats(row) {
         </div>
       </t-dialog>
 
-      <t-drawer v-model:visible="detailVisible" header="策略详情" size="480px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="480px" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>

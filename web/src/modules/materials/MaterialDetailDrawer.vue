@@ -59,6 +59,7 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
     header="素材详情"
     size="min(62vw, 880px)"
     destroy-on-close
+    :close-btn="true"
     @update:visible="$emit('update:visible', $event)"
   >
     <t-loading :loading="loading" :show-overlay="true">
@@ -172,24 +173,21 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
          「取消 / 确认」；接管同时让动作条钉在底部，不随正文高度跳动。 -->
     <template #footer>
       <div v-if="material" class="material-detail__actions">
-        <t-button class="wt-secondary-button" variant="outline" @click="$emit('update:visible', false)">关闭</t-button>
-        <div class="material-detail__primary">
-          <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
-          <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
-          <!-- 我的素材这一组按两个维度分支（走查七轮用户提示词第十一节）：已放弃只给恢复，
-               其余按文件状态给一步主操作；「重新下载」是就绪行的次级入口。 -->
-          <template v-if="mode === 'mine'">
-            <template v-if="material.usage_status === 'removed'">
-              <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
-            </template>
-            <template v-else>
-              <t-button v-if="material.video_status === 'ready'" theme="primary" @click="$emit('compose', material)">加入合成</t-button>
-              <t-button v-else-if="material.video_status !== 'downloading'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
-              <t-button v-if="material.video_status === 'ready'" class="wt-secondary-button" variant="outline" @click="$emit('redownload', material)">重新下载</t-button>
-              <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
-            </template>
+        <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
+        <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
+        <!-- 我的素材这一组按两个维度分支（走查七轮用户提示词第十一节）：已放弃只给恢复，
+             其余按文件状态给一步主操作；「重新下载」是就绪行的次级入口。 -->
+        <template v-if="mode === 'mine'">
+          <template v-if="material.usage_status === 'removed'">
+            <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
           </template>
-        </div>
+          <template v-else>
+            <t-button v-if="material.video_status === 'ready'" theme="primary" @click="$emit('compose', material)">加入合成</t-button>
+            <t-button v-else-if="material.video_status !== 'downloading'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
+            <t-button v-if="material.video_status === 'ready'" class="wt-secondary-button" variant="outline" @click="$emit('redownload', material)">重新下载</t-button>
+            <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
+          </template>
+        </template>
       </div>
     </template>
   </t-drawer>
@@ -222,9 +220,8 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 .detail-metrics__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
 .detail-metrics__item span { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-error { margin: 12px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
-/* 左「关闭」右主操作：「关闭」是导航动作，与业务动作分开摆。 */
-.material-detail__actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.material-detail__primary { display: flex; gap: 8px; }
+/* 页脚只放业务动作、靠右收：关闭走抽屉右上角的 ×（规范 §6.3），不再占页脚一格。 */
+.material-detail__actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 </style>

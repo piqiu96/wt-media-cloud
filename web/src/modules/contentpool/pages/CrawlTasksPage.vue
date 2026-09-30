@@ -349,7 +349,7 @@ function hasFailed(task) {
         </div>
       </ResourceCard>
 
-      <t-drawer v-model:visible="visible" header="挖掘任务详情" size="760px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="visible" header="挖掘任务详情" size="760px" :footer="false">
         <div v-if="detail" class="task-detail">
           <div class="detail-head">
             <h3 class="task-title">{{ taskName(detail) }}</h3>
@@ -428,7 +428,7 @@ function hasFailed(task) {
         </div>
       </t-drawer>
 
-      <t-drawer v-model:visible="strategyDrawerVisible" header="策略详情" size="480px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="strategyDrawerVisible" header="策略详情" size="480px" :footer="false">
         <div v-if="strategyDrawer" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(strategyDrawer.game_id) }}</strong></div>

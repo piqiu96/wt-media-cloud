@@ -150,12 +150,16 @@ describe('material detail drawer', () => {
     expect(hero).toContain('已加入我的素材')
   })
 
-  // 规范 §6.3：详情不出现无意义的「确认 / 取消」。
+  // 规范 §6.3：关闭走抽屉右上角的 ×（2026-09-30 用户裁定），页脚不再放「关闭」。
   //
-  // 这一条证明不了那对按钮不在：用户看到的「取消 / 确认」是 TDesign Drawer 的
-  // footer 默认值（props.footer 默认 true），源码字符串断言看不见组件库注入的页脚。
-  it('closes with 关闭 instead of a meaningless 确认 / 取消 pair', () => {
-    expect(template).toContain('>关闭</t-button>')
+  // 这几条证明不了「取消 / 确认」不在：用户看到的那一对是 TDesign Drawer 的 footer
+  // 默认值（props.footer 默认 true），源码字符串断言看不见组件库注入的页脚——挡住它的
+  // 是下面「接管页脚」那条。
+  it('leaves closing to the header × and writes no 关闭 into the footer', () => {
+    // × 不是默认带上的：tdesign-vue-next 1.20.3 的 drawer `closeBtn` 没有 default，
+    // 不写这颗属性抽屉就没有关闭入口（见 drawerFooterConvention.test.js）。
+    expect(template).toContain(':close-btn="true"')
+    expect(template).not.toContain('>关闭</t-button>')
     expect(template).not.toContain('>确认</t-button>')
     expect(template).not.toContain('>取消</t-button>')
     expect(template).not.toContain('>新增</t-button>')
@@ -176,7 +180,7 @@ describe('material detail drawer', () => {
     // 有嵌套的 <template v-if>，按 `</template>` 切会把动作条从第一个分支处剪断。
     const footer = sliceBetween(template, '<template #footer>', '</template>\n  </t-drawer>')
     expect(footer).toContain('material-detail__actions')
-    expect(footer).toContain('>关闭</t-button>')
+    expect(footer).not.toContain('>关闭</t-button>')
     // 三颗上下文主操作都在页脚里，位置不随正文高度移动。
     expect(footer).toContain('加入我的素材')
     expect(footer).toContain('去我的素材')
@@ -186,14 +190,11 @@ describe('material detail drawer', () => {
     expect(body).not.toContain('material-detail__actions')
   })
 
-  // 页脚左边「关闭」、右边主操作，两者撑满整条页脚。
-  it('splits the footer into a 关闭 on the left and the context action on the right', () => {
-    const footer = sliceBetween(template, '<template #footer>', '</template>')
-    const closeAt = footer.indexOf('>关闭</t-button>')
-    expect(closeAt).toBeGreaterThan(-1)
-    expect(footer.indexOf('加入我的素材')).toBeGreaterThan(closeAt)
-    expect(footer.indexOf('去我的素材')).toBeGreaterThan(closeAt)
-    expect(source).toMatch(/\.material-detail__actions \{[^}]*justify-content: space-between/)
+  // 页脚整条只剩业务动作，靠右收；关闭是右上角 × 的事，不在页脚占一格。
+  it('keeps the footer on the context actions alone, aligned right', () => {
+    const footer = sliceBetween(template, '<template #footer>', '</template>\n  </t-drawer>')
+    expect(footer).not.toContain('>关闭</t-button>')
+    expect(source).toMatch(/\.material-detail__actions \{[^}]*justify-content: flex-end/)
   })
 
   // 顶部把「这是什么」（来源副行 + 状态徽章）一次说清，正文才用于解释细节。

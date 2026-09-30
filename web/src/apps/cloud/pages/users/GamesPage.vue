@@ -188,7 +188,7 @@ async function deleteGame(game) {
         <t-form-item label="备注"><t-textarea v-model="gameForm.remark" /></t-form-item>
       </t-form>
     </t-dialog>
-    <t-drawer v-model:visible="referencesVisible" :header="`${referenceGame?.name || ''} 的关联详情`" :size="'620px'" :footer="false">
+    <t-drawer :close-btn="true" v-model:visible="referencesVisible" :header="`${referenceGame?.name || ''} 的关联详情`" :size="'620px'" :footer="false">
       <t-loading :loading="referencesLoading">
         <div class="reference-section">用户授权</div>
         <t-table :data="references.users || []" size="small" row-key="user_id" :columns="[

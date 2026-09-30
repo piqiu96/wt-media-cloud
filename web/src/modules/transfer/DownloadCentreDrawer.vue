@@ -190,7 +190,7 @@ async function open(task) {
 </script>
 
 <template>
-  <t-drawer v-model:visible="visible" class="download-centre-drawer" header="下载中心" size="min(46vw, 640px)" :footer="false" destroy-on-close @close="close">
+  <t-drawer :close-btn="true" v-model:visible="visible" class="download-centre-drawer" header="下载中心" size="min(46vw, 640px)" :footer="false" destroy-on-close @close="close">
     <t-loading :loading="loading" :show-overlay="true">
       <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:12px" @close="error=''" />
       <t-tabs v-model="activeTab" class="transfer-tabs">

@@ -38,4 +38,16 @@ describe('browser window resource page', () => {
     expect(source).toContain('>查询</t-button>')
     expect(source).toContain('>重置</t-button>')
   })
+
+  // 扫描抽屉的页脚只剩业务动作（2026-09-30 裁定：关闭走抽屉右上角的 ×）。没有可接受的
+  // 变化时页脚整条不出现——`:footer` 为 false 时 TDesign 连页脚容器一起不渲染，否则会
+  // 留下一道空条。
+  it('keeps the scan drawer footer on the accept actions and drops it when there is nothing to accept', () => {
+    expect(source).toContain(':footer="scanAcceptsChanges"')
+    expect(source).toContain('const scanAcceptsChanges = computed(')
+    const footer = source.slice(source.indexOf('<template #footer>', source.indexOf('scanDetailVisible')))
+    expect(footer).toContain('接受本地变化')
+    expect(footer).toContain('恢复Cloud配置并读回验证')
+    expect(footer).not.toContain('>关闭</t-button>')
+  })
 })

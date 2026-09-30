@@ -565,7 +565,7 @@ function openImageViewer(url) {
         </div>
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
-      <t-drawer v-model:visible="detailVisible" class="content-detail-drawer" :header="reviewMode ? '内容审核' : '内容详情'" size="min(72vw, 1200px)" destroy-on-close :footer="reviewMode" @close="exitReviewMode()">
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" class="content-detail-drawer" :header="reviewMode ? '内容审核' : '内容详情'" size="min(72vw, 1200px)" destroy-on-close :footer="reviewMode" @close="exitReviewMode()">
         <div v-if="detail" class="detail-workspace">
           <div v-if="reviewMode" class="review-progress">
             <span>待审核 {{ reviewQueue.length }}</span>

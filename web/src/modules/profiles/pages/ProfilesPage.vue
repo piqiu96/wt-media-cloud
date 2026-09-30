@@ -247,6 +247,9 @@ function hasDiff(scan) {
   return diffCount(scan) > 0
 }
 
+// 扫描抽屉页脚那两颗按钮的前提，同时决定页脚本身在不在（见模板上的 :footer）。
+const scanAcceptsChanges = computed(() => currentScan.value?.status === 'ready' && hasDiff(currentScan.value))
+
 function localTrustMessage(e) {
   const message = String(e?.message || e || "")
   if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
@@ -1137,7 +1140,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
     </t-dialog>
 
     <!-- 详情抽屉 -->
-    <t-drawer v-model:visible="detailVisible" header="浏览器窗口详情" :size="'560px'" destroy-on-close :footer="false">
+    <t-drawer :close-btn="true" v-model:visible="detailVisible" header="浏览器窗口详情" :size="'560px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailProfile" :column="1" bordered size="small">
         <t-descriptions-item label="ID">{{ detailProfile.id }}</t-descriptions-item>
         <t-descriptions-item label="BitBrowser窗口ID">{{ detailProfile.bit_profile_id }}</t-descriptions-item>
@@ -1182,7 +1185,9 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
     </t-dialog>
 
     <!-- 扫描 Diff 抽屉 -->
-    <t-drawer v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close>
+    <!-- 页脚只剩业务动作，没有可接受的变化时整条页脚不出现：`:footer` 为 false 时
+         TDesign 连页脚容器一起不渲染，否则会留下一道空条。 -->
+    <t-drawer :close-btn="true" v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close :footer="scanAcceptsChanges">
       <div v-if="currentScan">
         <t-alert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
         <t-alert
@@ -1240,9 +1245,8 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       </div>
       <template #footer>
         <t-space>
-          <t-button variant="outline" @click="scanDetailVisible = false">关闭</t-button>
-          <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
-          <t-button v-if="currentScan?.status === 'ready' && hasDiff(currentScan)" theme="default" :loading="restoringCloud" @click="restoreCloudConfig">恢复Cloud配置并读回验证</t-button>
+          <t-button theme="primary" :loading="acceptingScan" @click="acceptLocalChanges">接受本地变化</t-button>
+          <t-button theme="default" :loading="restoringCloud" @click="restoreCloudConfig">恢复Cloud配置并读回验证</t-button>
         </t-space>
       </template>
     </t-drawer>

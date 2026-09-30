@@ -21,6 +21,7 @@ const emit = defineEmits(["close"])
     :size="'640px'"
     @close="emit('close')"
     destroy-on-close
+    :close-btn="true"
     :footer="false"
   >
     <t-tabs default-value="basic" :style="{ marginTop: '-16px' }">
