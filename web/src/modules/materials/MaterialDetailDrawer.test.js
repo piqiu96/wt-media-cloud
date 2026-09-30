@@ -12,10 +12,8 @@ function sliceBetween(text, start, end) {
   return text.slice(from, to)
 }
 
-// 走查修正（CHG-20260930-069）：作者主页、平台原视频页、文件大小与云端视频地址
-// 都在详情里。行内只剩识别信息。
 describe('material detail drawer', () => {
-  // 走查反馈：详情里的素材 ID 与列表同形，不带 # 前缀。
+  // 素材 ID 与列表同形，不带 # 前缀。
   it('shows the material id as a plain number', () => {
     expect(source).toContain('<dd>{{ material.id }}</dd>')
     expect(source).not.toContain('#{{ material.id }}')
@@ -42,10 +40,8 @@ describe('material detail drawer', () => {
     expect(source).toContain('MaterialCover')
   })
 
-  // 走查反馈（CHG-20260930-069）：来源行采集时的内容池统计以**独立区块**展现，不混进
-  // dl 的字段里——它们是采集时刻的快照，不是素材的属性。抖音接口不提供播放数
-  // （statistics.play_count 恒为 0，已对全部来源行核对），区块只展示拿得到数的四项；
-  // view_count 字段仍在契约里，只是不在这里渲染。
+  // 抖音接口不提供播放数（play_count 恒为 0，已对全部来源行核对），只展示拿得到数的四项；
+  // view_count 仍在契约里。
   it('shows the source content-pool statistics as their own section', () => {
     expect(source).toContain('material.like_count')
     expect(source).toContain('material.favorite_count')
@@ -59,9 +55,7 @@ describe('material detail drawer', () => {
     expect(template).not.toContain('material.view_count')
   })
 
-  // 走查三轮（交互对齐）：抽屉按上下文提供动作——library 只有「加入我的素材」，
-  // mine 只有「下载/重试」。走查四轮补上 library 的「已加入」分支：那时主操作是
-  // 「去我的素材」，不再给一个必然幂等空转的「加入我的素材」。
+  // 抽屉按上下文提供动作；已加入的行给「去我的素材」，不再给必然空转的「加入」。
   it('offers the actions of its context only', () => {
     expect(source).toContain("mode: { type: String, default: 'library' }")
     expect(source).toMatch(/v-if="mode === 'mine'"/)
@@ -71,41 +65,22 @@ describe('material detail drawer', () => {
     expect(source).toContain("$emit('download', material)\">{{ downloadActionLabel(material.video_status) }}")
   })
 
-  /**
-   * 走查六轮（2026-09-30 用户走查）：「详情里对应的 TAB 切换取消，直接平铺在一页，
-   * 当前内容较少」。
-   *
-   * 走查四轮分标签的理由是「每一屏只回答一个问题」，但当时正文只有十几行——分标签把
-   * 十来个字段摊成三屏，每一屏都要先点一次。分屏的门槛是**信息真的填满多屏**，不是
-   * 「信息可以分成三类」；今天的素材详情属于前者未达。卡片边界（.detail-card）留着，
-   * 它解决的是「哪几行是同一件事」，与分不分屏无关。
-   */
+  // 分屏的门槛是信息真的填满多屏，不是「信息可以分成三类」。
   it('lays the sections out flat instead of behind tabs', () => {
     expect(template).not.toContain('<t-tabs')
     expect(template).not.toContain('<t-tab-panel')
     // 标签状态一起消失：留一个没人读的 ref 就是留一段会腐坏的死代码。
     expect(source).not.toContain('activeTab')
-    // 平铺后仍是五张卡，顺序即设计图的顺序。
-    // 取卡片标题的**标记**而不是裸词：这几个词在上面的模板注释里也出现过，
-    // 裸词匹配会量到注释的位置（实测「基本信息」在注释里 752、在卡里 2232，
-    // 直接判反）。
+    // 取标题的标记而不是裸词：裸词会先量到注释里的那一次，直接判反。
     const titles = [...template.matchAll(/class="detail-card__title">\s*([一-龥]+)/g)].map((m) => m[1])
     expect(titles).toEqual(['使用情况', '基本信息', '文件信息', '来源信息', '来源内容池统计'])
   })
 
-  /**
-   * 走查五轮（2026-09-30 用户走查）：「详情里的展示框效果远不如预期」。用户给的参照是
-   * **内容池详情的框**（ContentPoolPage 的 .detail-panel 一族）：每一段信息是一张有边界的
-   * 卡片，不是一个把十几行 dt/dd 平铺下去的长条。
-   *
-   * 这条断言量到 CSS，不只量类名——类名是零成本的，样式才是用户看得见的那一半。
-   */
+  // 量到 CSS 而不只量类名：类名是零成本的，样式才是用户看得见的那一半。
   it('frames every section as a bordered card, the way the content-pool detail does', () => {
     expect(template).toContain('detail-hero')
     expect(template).toContain('detail-card')
-    // 设计图里的四个框 + 概览里的使用情况框；每一段的标题都挂在这张卡上。
-    // 量 `class="detail-card__title"` 而不是裸类名：`template` 一路切到文件尾，裸类名
-    // 会把 <style> 里那条定义也算进来，5 个框会数成 6。
+    // 量带引号的类名而不是裸类名：template 切到文件尾，裸类名会把 <style> 里的定义也算进来。
     expect(template.match(/class="detail-card__title"/g) ?? []).toHaveLength(5)
     const style = source.slice(source.indexOf('<style'))
     expect(style, '类名写了但样式没定义就只是一句说法').toContain('.detail-card {')
@@ -114,8 +89,7 @@ describe('material detail drawer', () => {
     expect(style).toContain('.detail-source-line {')
   })
 
-  // 设计图把「使用情况：成片数、发布数、最近时间、重复风险」放在最上面，
-  // 基本信息在它下面。两者都是卡片，平铺后顺序不变。
+  // 使用情况在最上面，基本信息在它下面。
   it('opens the body with the usage card, then 基本信息', () => {
     const body = sliceBetween(template, 'detail-workspace', '<template #footer>')
     expect(body).toContain('usageFacts(material)')
@@ -123,8 +97,7 @@ describe('material detail drawer', () => {
       .toBeLessThan(body.indexOf('class="detail-card__title">基本信息'))
   })
 
-  // 互动数据是来源行采集时的快照，跟着「来源」走：设计图把它画在来源信息里，
-  // 走查六轮平铺后它仍是紧接来源信息的那一张。
+  // 互动数据是来源行采集时的快照，跟着「来源」走。
   it('keeps the source content-pool statistics right after the 来源信息 card', () => {
     const body = sliceBetween(template, 'detail-workspace', '<template #footer>')
     expect(body).toContain('material.like_count')
@@ -142,12 +115,10 @@ describe('material detail drawer', () => {
     expect(hero).toContain('已加入我的素材')
   })
 
-  // 规范 §6.3：详情不出现无意义的「确认 / 取消」，关闭走统一的关闭动作。
+  // 规范 §6.3：详情不出现无意义的「确认 / 取消」。
   //
-  // 但这一条**证明不了**底下那对按钮不在——走查五轮就是这么被漏掉的：用户看到的
-  // 「取消 / 确认」根本不是本组件写的，而是 TDesign Drawer 的 footer 默认值
-  // （props.footer 默认 true，不给插槽就渲染 getDefaultFooter()）。源码字符串断言
-  // 看不见一个由组件库注入的默认页脚，所以下面这条一直是绿的。
+  // 这一条证明不了那对按钮不在：用户看到的「取消 / 确认」是 TDesign Drawer 的
+  // footer 默认值（props.footer 默认 true），源码字符串断言看不见组件库注入的页脚。
   it('closes with 关闭 instead of a meaningless 确认 / 取消 pair', () => {
     expect(template).toContain('>关闭</t-button>')
     expect(template).not.toContain('>确认</t-button>')
@@ -156,8 +127,7 @@ describe('material detail drawer', () => {
     expect(template).not.toContain('>保存</t-button>')
   })
 
-  // 走查五轮（2026-09-30 用户走查）：底部不该有「取消 / 确认」，且动作条要钉在
-  // 抽屉底部、不随标签内容高度上下跳。两件事同一个解法：接管 footer 插槽。
+  // 接管 footer 插槽：既挡掉默认那对按钮，又让动作条钉在底部不随正文高度跳。
   it('takes over the drawer footer so the framework default pair never renders', () => {
     // 要么给 #footer 插槽、要么显式 :footer="false"；两条都不做就会长出默认那对。
     expect(
@@ -170,7 +140,7 @@ describe('material detail drawer', () => {
     const footer = sliceBetween(template, '<template #footer>', '</template>')
     expect(footer).toContain('material-detail__actions')
     expect(footer).toContain('>关闭</t-button>')
-    // 三颗上下文主操作都在页脚里，位置不随标签切换而移动。
+    // 三颗上下文主操作都在页脚里，位置不随正文高度移动。
     expect(footer).toContain('加入我的素材')
     expect(footer).toContain('去我的素材')
     expect(footer).toContain("$emit('download', material)")
@@ -179,7 +149,7 @@ describe('material detail drawer', () => {
     expect(body).not.toContain('material-detail__actions')
   })
 
-  // 走查五轮（设计图）：页脚左边「关闭」、右边主操作，两者撑满整条页脚。
+  // 页脚左边「关闭」、右边主操作，两者撑满整条页脚。
   it('splits the footer into a 关闭 on the left and the context action on the right', () => {
     const footer = sliceBetween(template, '<template #footer>', '</template>')
     const closeAt = footer.indexOf('>关闭</t-button>')
@@ -197,13 +167,7 @@ describe('material detail drawer', () => {
     expect(source).toContain("mine: { type: Boolean, default: false }")
   })
 
-  /**
-   * 走查六轮（2026-09-30 用户走查）：「素材关联内容的标题点击可以去落地页」。
-   *
-   * 列表里标题早就是蓝色外链（走查四轮），详情里的标题却一直是一段死文本 —— 同一个
-   * 对象在两个页面上有两种可点性，是这次反馈里最难自己发现的一处不一致：两个文件各自
-   * 看都自洽，只有把两处并排才看得出来。
-   */
+  // 列表里的标题早就是外链，详情里的标题不能是一段死文本：同一个对象两处两种可点性。
   it('links the hero title to the source landing page', () => {
     const hero = sliceBetween(template, 'detail-hero', 'detail-card')
     expect(hero).toContain('<a v-if="material.source_url"')
@@ -213,16 +177,14 @@ describe('material detail drawer', () => {
     expect(hero).toContain('<span v-else>')
   })
 
-  // 走查六轮：「作者信息也需要有，同时作者也是可以点击跳转」。作者本来就在副行与
-  // 来源信息里，缺的是**可点性**——一处蓝色链接比一句「作者是谁」多一次跳转。
+  // 作者本来就在副行与来源信息里，缺的是可点性。
   it('makes the author in the hero clickable too', () => {
     const hero = sliceBetween(template, 'detail-hero', 'detail-card')
     expect(hero).toContain('material.author_home_url')
     expect(hero).toContain('material.author_name')
   })
 
-  // 走查六轮：「游戏是独立行」。副行只留来源识别信息（平台 · 作者）；游戏在列表里
-  // 有自己的列、在正文里有自己的一行，再在副行里说第三遍就是同一屏重复同一个值。
+  // 游戏在列表里有列、在正文里有行，再在副行里说第三遍就是重复。
   it('keeps 游戏 out of the hero source line', () => {
     const hero = sliceBetween(template, 'detail-hero', 'detail-card')
     const line = sliceBetween(hero, 'detail-source-line', '</p>')

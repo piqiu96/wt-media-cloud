@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.30.2"
+revision: "2026.09.30.3"
 
 # 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
 #
@@ -24,7 +24,7 @@ schemas:
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。
-    required: [id, team_id, source_content_id, title, source_url, platform, video_status, view_count, like_count, favorite_count, comment_count, share_count, created_at, updated_at]
+    required: [id, team_id, source_content_id, title, source_url, platform, status, video_status, view_count, like_count, favorite_count, comment_count, share_count, created_at, updated_at]
     properties:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
@@ -33,6 +33,11 @@ schemas:
       source_url: {type: string, format: uri}
       platform: {type: string}
       video_status: {type: string, enum: [not_downloaded, downloading, ready, failed]}
+      # 素材库自己的生命周期，与 video_status 是两个维度（规范 §7.2）：文件状态回答「源视频
+      # 准备好了没有」，这一档回答「这条素材还提供给运营选用吗」，可以同时是「已暂停 + 可下载」。
+      # 库列 NOT NULL DEFAULT 'available'，键恒在。写路径尚未存在，所以值恒为 available ——
+      # 那是这批素材的真实状态，不是兜底默认值。
+      status: {type: string, enum: [available, paused, delisted]}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
       game_id: {type: string, description: 素材未归游戏时该键不出现。}

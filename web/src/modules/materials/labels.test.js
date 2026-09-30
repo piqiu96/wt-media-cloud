@@ -35,17 +35,14 @@ describe('material labels', () => {
     expect(videoStatusLabel('')).toBe('-')
   })
 
-  // 门控与提示语都被拿掉了，而不只是被绕过（CHG-20260930-069 走查反馈：状态徽章
-  // 已说明一切，按钮下的小字只是噪声）。留在模块里，下一个页面就会再挂它一次，
-  // 而那份代码看起来完全合理。
+  // 拿掉了而不只是绕过：留在模块里，下一个页面就会再挂它一次。
   it('no longer exports a readiness gate or a download hint at all', async () => {
     const labels = await import('./labels.js')
     expect(labels.canDownload).toBeUndefined()
     expect(labels.downloadHint).toBeUndefined()
   })
 
-  // 走查三轮（交互对齐 §7.4）：主操作文案由状态驱动——失败行的下一步是「重试」，
-  // 其余状态都是「下载」。放行内与详情抽屉共用，两处文案分叉就是同义词混用的起点。
+  // 主操作文案由状态驱动（规范 §7.4）：失败行的下一步是「重试」，其余是「下载」。
   it('names the primary action from the video status', () => {
     expect(downloadActionLabel('failed')).toBe('重试')
     for (const status of ['not_downloaded', 'downloading', 'ready', 'mystery', undefined]) {
@@ -61,8 +58,7 @@ describe('material labels', () => {
     expect(gameName([], '')).toBe('-')
   })
 
-  // 体积的格式化搬去了 shared/utils/units.js —— 它不是素材的概念，下载中心也要用，
-  // 两个地方各写一份正是「三份各写各的日期格式化」那条老路。用例随之搬走。
+  // 体积格式化在 shared/utils/units.js，用例随之搬走。
 
   it('shortens a digest without inventing one', () => {
     const digest = 'a'.repeat(64)
@@ -71,13 +67,11 @@ describe('material labels', () => {
   })
 })
 
-// 走查五轮（2026-09-30 用户走查 + 设计图）：列表要同时给出两个状态维度。文件状态说
-// 「源视频准备好了没有」，素材状态说「这条素材还提供给运营选用吗」，规范 §7.2 明令
-// 两者不得合并——可以同时是「已暂停 + 可下载」。
+// 第二个状态维度。文件状态说「源视频准备好了没有」，素材状态说「这条素材还提供给运营选用吗」，
+// 规范 §7.2 明令不得合并——可以同时是「已暂停 + 可下载」。取值来自规范 §16.2 的三个生命周期状态。
 //
-// 取值来自规范 §16.2 的三个生命周期状态。字段名 `material.status` 是**前端先声明的
-// 读取协议**：服务端还没有这个字段（第五章「素材状态和生命周期」未落，change.md §3
-// 明确不做），用户裁定先落样式与协议，数据打通后再同步。
+// 下面「未知/缺值」的断言守的是协议与实现各错一半：服务端多发一个词、或某个读取路径漏了这列，
+// 都不该被静默吞成一个看着正常的默认值。
 describe('material status dimension', () => {
   it('names and tones every lifecycle state the spec draws', () => {
     expect(MATERIAL_STATUSES).toEqual(['available', 'paused', 'delisted'])
@@ -91,14 +85,14 @@ describe('material status dimension', () => {
     expect(materialStatusLabel('delisted')).toBe('已下架')
   })
 
-  // 「已退役」是本项目放弃的旧词（规范 §16.2 用词说明），但它仍是一个**服务端不会
-  // 发来**的值：不认识的值原样透出，同 videoStatusLabel 的处理，别把它吞成 `-`。
+  // 不认识的值原样透出（同 videoStatusLabel）：吞成 `-` 之后页面看着正常，
+  // 而运营永远看不到那个多出来的取值。
   it('passes through a state it does not know instead of hiding it', () => {
     expect(materialStatusLabel('mystery')).toBe('mystery')
   })
 
-  // 读不到状态**不等于**可用。退回一个默认状态就是在替服务端做它没做的判断，
-  // 而「可用」是这三态里唯一能触发「加入我的素材」的那一个。
+  // 读不到状态不等于可用：退回默认值就是替服务端做判断，而「可用」是唯一能触发
+  // 「加入我的素材」的那一个。列 NOT NULL 之后不是主路径，但漏列的投影会走到这里。
   it('never guesses a lifecycle state from a missing field', () => {
     expect(materialStatusLabel(undefined)).toBe('-')
     expect(materialStatusLabel('')).toBe('-')

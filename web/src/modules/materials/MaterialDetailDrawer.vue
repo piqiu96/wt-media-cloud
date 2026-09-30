@@ -1,19 +1,6 @@
 <script setup>
-// 素材详情抽屉，素材库与我的素材共用一份。
-//
-// 行内只放识别信息（封面、ID、标题、文件状态）；作者主页、平台原视频页、体积和云端视频
-// 地址都在这里（CHG-20260930-069）。云端地址不随素材 body 返回，就绪时才向详情
-// 链接接口要一次。
-//
-// 走查四轮（2026-09-30）：正文曾按「概览 / 文件信息 / 来源信息」分标签，理由是让每一屏
-// 只回答一个问题。
-//
-// 走查五轮：每一段信息各自成为一张有边界的卡（.detail-card），照内容池详情的框来做；
-// 顶部合成 hero（封面 + 标题 + 来源副行 + 两个状态维度）。互动数据从概览挪到来源信息
-// ——它是来源行的快照，跟着来源走。
-//
-// 走查六轮：标签去掉，五张卡平铺成一页。分屏的门槛是信息真的填满多屏，而这十几行没有；
-// 卡片边界留着，它回答的是「哪几行是同一件事」，与分不分屏是两回事。
+// 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
+// 其余在这里；云端视频地址不随素材 body 返回，就绪时才向详情链接接口要一次。
 import { ref, watch } from 'vue'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -36,11 +23,9 @@ const props = defineProps({
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   games: { type: Array, default: () => [] },
-  // 上下文决定动作（走查三轮，交互对齐）：素材库上下文的主操作是「加入我的素材」，
-  // 不提供下载——下载归「我的素材」；我的素材上下文相反。
+  // 上下文决定动作：素材库给「加入我的素材」，我的素材给下载。
   mode: { type: String, default: 'library' },
-  // 这条素材是否已经在「我的素材」里。只在素材库上下文有意义：那里要拿它把主操作
-  // 换成「去我的素材」，并说明为什么不再给一次「加入」。
+  // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
 defineEmits(['update:visible', 'add', 'download', 'go-mine'])
@@ -75,20 +60,14 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
   >
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="material" class="detail-workspace">
-        <!-- 顶部一次说清「这是什么」：封面、标题、来源副行、两个状态维度。 -->
         <section class="detail-hero">
           <MaterialCover class="detail-cover" :url="material.cover_url" />
           <div class="detail-primary">
-            <!-- 走查六轮：标题在列表里早就是去来源平台的入口（走查四轮），详情里却一直是
-                 一段死文本。同一个对象在两处有两种可点性，是最难自己发现的那类不一致。
-                 没有落地页的素材退回普通文本：链接形状留给真的能点的东西。 -->
             <h3>
               <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">{{ material.title || '未命名素材' }}</a>
               <span v-else>{{ material.title || '未命名素材' }}</span>
             </h3>
-            <!-- 副行只留来源识别信息：平台 · 作者。**游戏不并进来**（走查六轮用户裁定
-                 「游戏是独立行」）—— 它在列表里有一列、在下面的「基本信息」里有一行，
-                 副行里再说一遍就是同一屏重复同一个值。作者有主页时就是一个入口。 -->
+            <!-- 副行只留平台 · 作者：游戏在列表里有列、在基本信息里有行。 -->
             <p class="detail-source-line">
               <template v-if="material.platform">{{ material.platform }}</template>
               <template v-if="material.platform && (material.author_name || material.author_home_url)"> · </template>
@@ -96,23 +75,14 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
               <template v-else>{{ material.author_name }}</template>
             </p>
             <div class="detail-badges">
-              <!-- 规范 §7.2：两个状态维度并排，不合并。素材状态服务端还没返回，
-                   读不到就不画 —— 画一个默认的「可用」等于替服务端做了判断。 -->
               <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
               <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
-              <!-- 使用状态维度：加入状态与文件状态是两件事，可以同时是「已加入 + 准备失败」。 -->
               <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
             </div>
           </div>
         </section>
 
-        <!-- 走查六轮（2026-09-30 用户走查）：「详情里对应的 TAB 切换取消，直接平铺在一页，
-             当前内容较少」。走查四轮分标签的理由是「每一屏只回答一个问题」，但当时正文只有
-             十几行 —— 分标签把十来个字段摊成三屏，每一屏都先要点一次。分屏的门槛是信息
-             真的填满多屏，不是「信息可以分成三类」。卡片边界留着：它回答的是「哪几行是
-             同一件事」，与分不分屏是两回事。 -->
-        <!-- 使用情况的数据服务端尚未返回（change.md §3），这里先立设计图里的五格骨架：
-             数据打通后直接填，不用再动布局。 -->
+        <!-- 使用情况服务端尚未返回，这里先立骨架。 -->
         <section class="detail-card">
           <h4 class="detail-card__title">使用情况</h4>
           <div class="detail-usage">
@@ -133,7 +103,6 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
           </dl>
         </section>
 
-        <!-- 文件状态从字段挪进了卡片标题：它说的是这一整块信息成不成，不是其中一行。 -->
         <section class="detail-card">
           <h4 class="detail-card__title">
             文件信息
@@ -167,9 +136,7 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
           </dl>
         </section>
 
-        <!-- 互动数据是来源行采集时的快照，跟着「来源」走：走查五轮按设计图从概览挪到
-             这里。混进基本信息会把「入库时间」和「72313 个赞」读成同一类事实。
-             抖音接口不给 play_count（恒为 0，全部来源行核对过），只展示拿得到数的四项。 -->
+        <!-- 来源行采集时的快照；抖音不给 play_count，只展示拿得到数的四项。 -->
         <section class="detail-card">
           <h4 class="detail-card__title">来源内容池统计</h4>
           <div class="detail-metrics">
@@ -182,12 +149,8 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
       </div>
     </t-loading>
 
-    <!-- 走查五轮：动作条接管 footer 插槽，做两件事。
-         1）消掉 TDesign 的默认页脚。Drawer 的 footer 属性默认是 true，不给插槽就渲染
-            getDefaultFooter() 的「取消 / 确认」——规范 §6.3 明令详情不该有它。全站另
-            8 个抽屉都显式关掉了（`:footer="false"` 或给自己的 #footer），只有本抽屉漏了。
-         2）让它钉在抽屉底部。原先它在正文末尾，切标签时正文高度一变，按钮就跟着上下跳。
-         上下文只给一颗主操作（§2.3），「关闭」是导航动作、不算业务动作，随它留在同一行。 -->
+    <!-- 必须接管 footer：TDesign 的 footer 属性默认是 true，不给插槽就渲染出一对
+         「取消 / 确认」；接管同时让动作条钉在底部，不随正文高度跳动。 -->
     <template #footer>
       <div v-if="material" class="material-detail__actions">
         <t-button class="wt-secondary-button" variant="outline" @click="$emit('update:visible', false)">关闭</t-button>
@@ -202,21 +165,15 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 </template>
 
 <style scoped>
-/* 走查五轮（2026-09-30 用户走查）：「详情里的展示框效果远不如预期」，用户给的参照是
-   内容池详情的框。于是每一段信息都是一张有边界的卡（.detail-card），不再是十几行
-   dt/dd 平铺下来的长条——平铺的结局是「入库时间」和「72313 个赞」读成同一类事实。 */
 .detail-workspace { display: flex; flex-direction: column; gap: 14px; }
 .detail-hero { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: flex-start; }
 .detail-cover { width: 160px; height: 100px; border-radius: 10px; }
 .detail-primary { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .detail-primary h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
-/* 副行是识别信息，不是重点：一行、次要色、放不下就省略。 */
 .detail-source-line { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .detail-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* 卡片间距由 .detail-workspace 的 gap 统一给（平铺后五张卡都是它的直接子元素）：
-   再写一条 `.detail-card + .detail-card` 就会在这一层叠出第二份间距。 */
+/* 卡片间距由 .detail-workspace 的 gap 给；这里不要再写 + 选择器的 margin。 */
 .detail-card { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
-/* 标题与状态徽章同行：文件状态说的是这一整块成不成，不是其中一行。 */
 .detail-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--wt-text-primary); font-size: 15px; font-weight: 650; }
 .detail-card__grid { display: grid; gap: 12px 16px; margin: 0; }
 .detail-card__grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -226,22 +183,16 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 .detail-usage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 .detail-usage__item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .detail-usage__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
-/* 标签挂类名而不是 `.detail-usage__item > span`：重复风险那格的第一行是
-   ResourceStatusBadge，它的根元素也是 span，且会带上父组件的 scoped 属性——
-   用后代选择器写会把徽章一起染成次要色，绿色「正常」变成灰的。 */
+/* 标签挂类名而不是后代选择器：ResourceStatusBadge 的根元素也是 span，会被后代选择器染色。 */
 .detail-usage__label { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .detail-metrics__item { display: flex; flex-direction: column; gap: 6px; }
 .detail-metrics__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
 .detail-metrics__item span { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-error { margin: 12px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
-/* 设计图：页脚左边「关闭」、右边上下文主操作。单一主操作（交互对齐 §2.3）说的是
-   同一时刻只有一颗业务动作，不是「所有按钮都挤右边」——「关闭」是导航动作，
-   把它与主操作分开是让两者一眼可辨。页脚自带内边距，这里不再补 margin。 */
+/* 左「关闭」右主操作：「关闭」是导航动作，与业务动作分开摆。 */
 .material-detail__actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .material-detail__primary { display: flex; gap: 8px; }
-/* 抽屉里的链接此前借用 ContentPoolPage 的类名却没有那份样式；这里补上同一份定义，
-   「打开作者主页／原视频／云端视频」与标题链接才是同一个蓝色。 */
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 </style>

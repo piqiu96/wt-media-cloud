@@ -61,11 +61,10 @@ export function shortDigest(value) {
 // 压成一个混合状态，最先丢掉的就是「暂停了但文件还在」这种运营真正要做判断的情形。
 // 三个取值来自规范 §16.2 的素材生命周期（用词说明：「已下架」不是「已退役」）。
 //
-// 读取协议是 `material.status`。**服务端还没有这个字段**（契约里没有它，第五章
-// 「素材状态和生命周期」尚未落地 —— change.md §3 明确不做）。2026-09-30 走查五轮用户
-// 裁定：先把样式与协议定下来，数据打通后再同步过来。所以这里先声明可读的取值，
-// 读不到就显示 `—`，**不退回默认状态** —— 一条读不到状态的素材不等于「可用」，
-// 而「可用」正是这三个取值里唯一能触发「加入我的素材」的那一个。
+// 读取协议是 `material.status`（materials.status 列，NOT NULL，键恒在）。
+// 读不到显示 `—` 而不是退回默认值：缺值不等于「可用」，而「可用」正是唯一能触发
+// 「加入我的素材」的那一个。没有任何接口能把素材改成 paused / delisted，所以今天读到的
+// 值恒为 available —— 那是这批素材的真实状态，不是占位。
 export const MATERIAL_STATUSES = ['available', 'paused', 'delisted']
 
 const MATERIAL_STATUS_LABELS = {
@@ -98,8 +97,8 @@ export function materialStatusTone(value) {
 //   last_published_at  最近发布时间（ISO）
 //   duplicate_risk     normal | suspected    重复风险
 //
-// 与素材状态同理：服务端尚未返回 `usage`。这里先把键名与展示形状定死，是为了让后端
-// 照着这套键填 —— 键名对不上就是一次静默的空格子，没有东西会报错。
+// `usage` 还没有数据（要跨成片与发布聚合）。这里把键名定死，好让后端照着填 ——
+// 键名对不上就是一次静默的空格子，没有东西会报错。
 export const USAGE_FIELDS = ['clip_count', 'published_count', 'last_produced_at', 'last_published_at', 'duplicate_risk']
 
 export const DUPLICATE_RISKS = ['normal', 'suspected']

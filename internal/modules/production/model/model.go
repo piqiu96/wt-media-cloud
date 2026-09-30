@@ -23,6 +23,19 @@ const (
 	MaterialUsageRemoved MaterialUsageStatus = "removed"
 )
 
+// MaterialStatus is the library's own lifecycle, deliberately not VideoStatus:
+// §7.2 of the frontend interaction standard forbids collapsing the two (a
+// material may be paused and downloadable at once). Nothing writes Paused or
+// Delisted yet, so every row reads Available — the rows' real state, not a
+// placeholder for a missing column.
+type MaterialStatus string
+
+const (
+	MaterialAvailable MaterialStatus = "available"
+	MaterialPaused    MaterialStatus = "paused"
+	MaterialDelisted  MaterialStatus = "delisted"
+)
+
 // Material is the production projection of an M3 source material. It contains
 // a Cloud-owned readiness projection, never a user-local file location.
 type Material struct {
@@ -37,33 +50,34 @@ type Material struct {
 	// because it is worker plumbing, not part of the material the UI reads.
 	PlatformContentID string `json:"-"`
 	Title             string `json:"title"`
-	SourceURL       string          `json:"source_url"`
-	Platform        string          `json:"platform"`
-	AuthorName      string          `json:"author_name,omitempty"`
+	SourceURL         string `json:"source_url"`
+	Platform          string `json:"platform"`
+	AuthorName        string `json:"author_name,omitempty"`
 	// CoverURL and AuthorHomeURL are the source row's own links, joined in by
 	// the projection at read time rather than copied when the material was
 	// materialized: the source row is the one fact, and a copy would be a second
 	// one free to drift. The two lists identify a material by its cover, and the
 	// detail drawer links to the author's home page (CHG-20260930-069).
-	CoverURL        string          `json:"cover_url,omitempty"`
-	AuthorHomeURL   string          `json:"author_home_url,omitempty"`
+	CoverURL      string `json:"cover_url,omitempty"`
+	AuthorHomeURL string `json:"author_home_url,omitempty"`
 	// The source row's content-pool statistics, joined in at read time like the
 	// links above: crawl-time decision data for the detail drawer (CHG-20260930-069).
-	ViewCount     int64 `json:"view_count"`
-	LikeCount     int64 `json:"like_count"`
-	FavoriteCount int64 `json:"favorite_count"`
-	CommentCount  int64 `json:"comment_count"`
-	ShareCount    int64 `json:"share_count"`
-	PublishedAt     *time.Time      `json:"published_at,omitempty"`
-	VideoStatus     VideoStatus     `json:"video_status"`
-	SourceObjectKey string          `json:"-"`
-	VideoSizeBytes  *int64          `json:"video_size_bytes,omitempty"`
-	VideoSHA256     string          `json:"video_sha256,omitempty"`
-	VideoMedia      map[string]any  `json:"media_summary,omitempty"`
-	VideoError      string          `json:"last_error,omitempty"`
-	VideoPreparedAt *time.Time      `json:"video_prepared_at,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	ViewCount       int64          `json:"view_count"`
+	LikeCount       int64          `json:"like_count"`
+	FavoriteCount   int64          `json:"favorite_count"`
+	CommentCount    int64          `json:"comment_count"`
+	ShareCount      int64          `json:"share_count"`
+	PublishedAt     *time.Time     `json:"published_at,omitempty"`
+	Status          MaterialStatus `json:"status"`
+	VideoStatus     VideoStatus    `json:"video_status"`
+	SourceObjectKey string         `json:"-"`
+	VideoSizeBytes  *int64         `json:"video_size_bytes,omitempty"`
+	VideoSHA256     string         `json:"video_sha256,omitempty"`
+	VideoMedia      map[string]any `json:"media_summary,omitempty"`
+	VideoError      string         `json:"last_error,omitempty"`
+	VideoPreparedAt *time.Time     `json:"video_prepared_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // MaterialUsage is the sole durable relationship behind “My Materials”.
