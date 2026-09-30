@@ -9,7 +9,7 @@ import (
 const (
 	APIName                      = "cloud-agent"
 	MajorVersion                 = "v1"
-	ContractRevision             = "2026.07.15.1"
+	ContractRevision             = "2026.09.30.1"
 	MinimumAgentContractRevision = "2026.07.14.7"
 )
 

@@ -202,6 +202,11 @@ func TestLeaseAndTerminalMatchTheFrozenExecutorContract(t *testing.T) {
 			got = append(got, "file_name")
 			sort.Strings(got)
 		}
+		if testCase.schema == "LocalLease" {
+			// `game_name` is optional, so it is omitted until a material has a game.
+			got = append(got, "game_name")
+			sort.Strings(got)
+		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s keys = %v, want %v", testCase.schema, got, want)
 		}

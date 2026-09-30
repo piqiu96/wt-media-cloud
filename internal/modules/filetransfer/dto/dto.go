@@ -63,6 +63,7 @@ type LocalLease struct {
 	AssetType            string    `json:"asset_type"`
 	AssetID              int64     `json:"asset_id"`
 	Title                string    `json:"title"`
+	GameName             string    `json:"game_name,omitempty"`
 	TotalBytes           int64     `json:"total_bytes"`
 	ExpectedSHA256       string    `json:"expected_sha256"`
 	MaxAttempts          int       `json:"max_attempts"`

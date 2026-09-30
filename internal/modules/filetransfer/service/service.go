@@ -299,6 +299,7 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		TeamID:           input.TeamID,
 		AssetID:          input.AssetID,
 		AssetTitle:       input.AssetTitle,
+		GameName:         input.GameName,
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
 		AssignedNodeID:   input.AssignedNodeID,
@@ -317,9 +318,13 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 // identity of its own: who is downloading and which machine it goes to are
 // fields, so a caller cannot omit them and have a task created for somebody.
 type CreateUserDownloadInput struct {
-	TeamID          identityservice.TeamID
-	AssetID         int64
-	AssetTitle      string
+	TeamID     identityservice.TeamID
+	AssetID    int64
+	AssetTitle string
+	// GameName is what the executor files the download under, when the material
+	// has a game. Empty is a legal value: the executor falls back to a fixed
+	// placeholder.
+	GameName        string
 	SourceObjectKey string
 	RequestedBy     identityservice.UserID
 	AssignedNodeID  string
@@ -816,6 +821,7 @@ func leaseBody(task model.Task, grant DownloadGrant, lease time.Duration) *dto.L
 		AssetType:            string(task.AssetType),
 		AssetID:              task.AssetID,
 		Title:                task.AssetTitle,
+		GameName:             task.GameName,
 		TotalBytes:           task.TotalBytes,
 		ExpectedSHA256:       task.ExpectedSHA256,
 		MaxAttempts:          task.MaxAttempts,

@@ -603,6 +603,13 @@ func scopedActor(team service.TeamID, game string) service.PublicUser {
 	return service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{game}}
 }
 
+// stubResolveGame stands in for the identity store call `CreateDownload` makes to
+// name the game a download is filed under; the real resolver hits the global DB,
+// which no unit test here has.
+var stubResolveGame = func(gameID string) (string, bool, error) {
+	return "三角洲行动", true, nil
+}
+
 // The rule this route exists to keep is "a download is addressed to one machine".
 // A task created without an assignee would be claimed by whichever device polled
 // first, so the node has to reach the task as the one the resolver chose — not as
@@ -614,6 +621,7 @@ func TestCreateDownloadAddressesTheTaskToTheResolvedNode(t *testing.T) {
 	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-7", UserID: 9}}
 	transfers := &stubTransfers{}
 	svc := NewService(store, nodes, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
 	now := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
 
@@ -633,7 +641,7 @@ func TestCreateDownloadAddressesTheTaskToTheResolvedNode(t *testing.T) {
 	}
 	// The executor runs later, on another machine, and may not read `materials`:
 	// everything it needs to name, size and verify the file has to be on the task.
-	if got.AssetTitle != "示例视频" || got.SourceObjectKey != "materials/42/aaaaaaaa.mp4" || got.TotalBytes != 2048 || got.ExpectedSHA256 != strings.Repeat("a", 64) {
+	if got.AssetTitle != "示例视频" || got.GameName != "三角洲行动" || got.SourceObjectKey != "materials/42/aaaaaaaa.mp4" || got.TotalBytes != 2048 || got.ExpectedSHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("the material facts must travel with the task: %+v", got)
 	}
 	if task.ID != "transfer-1" {
@@ -707,6 +715,7 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 		store := &memoryStore{found: testCase.found, material: testCase.material}
 		transfers := &stubTransfers{err: testCase.transferErr}
 		svc := NewService(store, testCase.nodes, transfers, &stubLinks{})
+		svc.resolveGame = stubResolveGame
 
 		if _, err := svc.CreateDownload(actor, 42); !errors.Is(err, testCase.want) {
 			t.Fatalf("%s: error = %v, want %v", testCase.name, err, testCase.want)
@@ -736,6 +745,7 @@ func TestCreateDownloadDoesNotPresentAnIncompleteReadyRowAsUnavailable(t *testin
 	store := &memoryStore{found: true, material: material}
 	transfers := &stubTransfers{}
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
 
 	_, err := svc.CreateDownload(scopedActor(team, game), 42)
 	if err == nil {
@@ -771,6 +781,7 @@ func TestCreateDownloadQueuesAWaitingTaskForAMaterialWithNoPreparedVideo(t *test
 	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: true}
 	transfers := &stubTransfers{}
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
 
 	task, err := svc.CreateDownload(scopedActor(team, game), 42)
 	if err != nil {
@@ -810,6 +821,7 @@ func TestCreateDownloadQueuesNoPreparationForAPreparedMaterial(t *testing.T) {
 	store := &memoryStore{found: true, material: readyMaterial(team, game), preparing: true}
 	transfers := &stubTransfers{}
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
 
 	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
@@ -835,6 +847,7 @@ func TestCreateDownloadFetchesDirectlyWhenTheVideoBecameReadyMidRequest(t *testi
 	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &fresh}
 	transfers := &stubTransfers{}
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
 
 	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
@@ -861,6 +874,7 @@ func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) 
 	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &stillPending}
 	transfers := &stubTransfers{}
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
 
 	task, err := svc.CreateDownload(scopedActor(team, game), 42)
 	if err != nil {

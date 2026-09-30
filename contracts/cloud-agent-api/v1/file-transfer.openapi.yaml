@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent File Transfer API
-  version: 2026.09.26.2
+  version: 2026.09.30.1
   description: >-
     Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud
     preparation is never exposed to an Agent. A lease carries a short-lived single-object download grant
@@ -85,11 +85,12 @@ components:
           type: string
           minLength: 1
           maxLength: 255
-          pattern: '^[^/\\]+$'
+          pattern: '^[^/\\]+(?:/[^/\\]+)?$'
           description: >-
-            The final file name the executor wrote, with no directory component. Cloud records it so the UI
-            displays the name the executor actually used instead of deriving a second one that could drift.
-            A path separator is rejected by the pattern above.
+            The final file name the executor wrote, at most one relative directory component
+            (the download date) plus a bare file name. Cloud records it so the UI displays the name
+            the executor actually used instead of deriving a second one that could drift.
+            Two or more separators, or an absolute path, are rejected by the pattern above.
         error_code: {type: string, maxLength: 128}
         error_message: {type: string, maxLength: 500}
       allOf:
@@ -111,6 +112,12 @@ components:
             The material title, verbatim. The executor derives its target file name from this and sanitizes
             it for its own filesystem, because the reserved names and separators differ per operating system
             and only the executor knows which one it runs on.
+        game_name:
+          type: string
+          description: >-
+            The game's name as the operator chose it, or absent when the material has no game. The executor
+            uses it to name the file (`YYYYMMDD/<game_name>-<asset_id>.<ext>`), falling back to a fixed
+            placeholder when it is absent.
         total_bytes:
           type: integer
           format: int64

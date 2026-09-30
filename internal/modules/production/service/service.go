@@ -121,10 +121,19 @@ type Service struct {
 	transfers TransferCreator
 	links     ObjectLinker
 	now       func() time.Time
+	// resolveGame names the game a download is filed under. It is a field so the
+	// unit tests can stub the store call; the constructor installs the real one.
+	resolveGame func(gameID string) (string, bool, error)
 }
 
 func NewService(store Store, nodes LocalNodeResolver, transfers TransferCreator, links ObjectLinker) *Service {
-	return &Service{store: store, nodes: nodes, transfers: transfers, links: links, now: time.Now}
+	return &Service{
+		store: store, nodes: nodes, transfers: transfers, links: links, now: time.Now,
+		resolveGame: func(gameID string) (string, bool, error) {
+			game, ok, err := identityservice.ResolveGame(gameID)
+			return game.Name, ok, err
+		},
+	}
 }
 
 func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64) (model.Material, error) {
@@ -343,6 +352,7 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		TeamID:          material.TeamID,
 		AssetID:         material.ID,
 		AssetTitle:      material.Title,
+		GameName:        s.gameNameOf(material),
 		SourceObjectKey: objectKey,
 		RequestedBy:     actor.ID,
 		AssignedNodeID:  node.ID,
@@ -506,6 +516,21 @@ func (s *Service) PreparationSource(teamID identityservice.TeamID, materialID in
 		Platform:   platform,
 		ContentID:  contentID,
 	}, nil
+}
+
+// gameNameOf names the game a download should be filed under, or "" when there
+// is none to name. Naming is cosmetic: a lookup that fails (no game assigned, an
+// unknown id, a store error) degrades to empty and the executor falls back to a
+// fixed placeholder rather than blocking the download on it.
+func (s *Service) gameNameOf(material model.Material) string {
+	if material.GameID == nil {
+		return ""
+	}
+	name, ok, err := s.resolveGame(*material.GameID)
+	if err != nil || !ok {
+		return ""
+	}
+	return name
 }
 
 // videoFacts is the three facts a local download needs out of a `ready` row.

@@ -11,7 +11,7 @@ func TestCurrentCompatibility(t *testing.T) {
 	if got.MajorVersion != "v1" {
 		t.Fatalf("MajorVersion = %q", got.MajorVersion)
 	}
-	if got.ContractRevision != "2026.07.15.1" {
+	if got.ContractRevision != "2026.09.30.1" {
 		t.Fatalf("ContractRevision = %q", got.ContractRevision)
 	}
 	if got.MinimumAgentContractRevision != "2026.07.14.7" {
