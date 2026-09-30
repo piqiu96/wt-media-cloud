@@ -49,11 +49,14 @@ describe('material library page', () => {
   // 下载按钮不看 `video_status`：服务端接受未准备与失败，点了会先准备。判据随
   // `canDownload` 一起拿掉了，所以这里钉的是它的**缺席**——一个灰按钮会把「要多走一步」
   // 说成「这条路不通」，而运营据此去别处找绑定，正是走查里报的那一条。
-  it('offers the download action on every row and says what it will do', () => {
+  // 走查反馈（CHG-20260930-069）：按钮只叫「下载」，下面不再挂提示小字——
+  // 状态徽章已经说明了点下去会发生什么，再补一句只是噪声。
+  it('offers the download action on every row, named just「下载」and without a hint under it', () => {
     expect(source).not.toMatch(/:disabled="!canDownload\(/)
     expect(source).not.toContain('canDownload')
-    // 本页行内一处；详情抽屉里那颗在共用的 MaterialDetailDrawer.vue 上，同一句话。
-    expect(source.match(/downloadHint\(row\)/g)).toHaveLength(2)
+    expect(source).toContain('@click="download(row)">下载</t-button>')
+    expect(source).not.toContain('downloadHint')
+    expect(source).not.toContain('下载到本机</t-button>')
   })
 
   it('adds to my materials through the one idempotent command', () => {
@@ -68,12 +71,17 @@ describe('material library page', () => {
   })
 
   // 走查修正（CHG-20260930-069）：行内以封面与素材 ID 识别内容；作者、平台链接与
-  // 体积不再出现在行里，都归详情抽屉。
-  it('identifies a row by its cover and its id, and keeps the links and size in the detail', () => {
-    expect(source).toContain("{ colKey: 'cover', title: '封面'")
-    expect(source).toContain("{ colKey: 'id', title: '素材 ID'")
+  // 体积不再出现在行里，都归详情抽屉。ID 是第一列——走查反馈说运营扫行时先找编号。
+  // 标题本身蓝色可点，跳来源平台落地页（source_url），与内容池页同一形状。
+  it('puts the id column first, and makes the title the link to the source page', () => {
+    const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
+    const coverAt = source.indexOf("{ colKey: 'cover', title: '封面'")
+    expect(idAt).toBeGreaterThan(-1)
+    expect(coverAt).toBeGreaterThan(-1)
+    expect(idAt, '素材 ID 列必须在封面列之前').toBeLessThan(coverAt)
     expect(source).toContain('MaterialCover')
-    expect(source).not.toContain('row.source_url')
+    expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
+    expect(source).toContain('class="wt-primary-link')
     expect(source).not.toContain('· {{ row.author_name')
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })

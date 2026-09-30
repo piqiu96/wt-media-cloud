@@ -47,6 +47,13 @@ type Material struct {
 	// detail drawer links to the author's home page (CHG-20260930-069).
 	CoverURL        string          `json:"cover_url,omitempty"`
 	AuthorHomeURL   string          `json:"author_home_url,omitempty"`
+	// The source row's content-pool statistics, joined in at read time like the
+	// links above: crawl-time decision data for the detail drawer (CHG-20260930-069).
+	ViewCount     int64 `json:"view_count"`
+	LikeCount     int64 `json:"like_count"`
+	FavoriteCount int64 `json:"favorite_count"`
+	CommentCount  int64 `json:"comment_count"`
+	ShareCount    int64 `json:"share_count"`
 	PublishedAt     *time.Time      `json:"published_at,omitempty"`
 	VideoStatus     VideoStatus     `json:"video_status"`
 	SourceObjectKey string          `json:"-"`

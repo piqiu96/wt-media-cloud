@@ -26,4 +26,26 @@ describe('material detail drawer', () => {
   it('renders the cover with a placeholder when it is missing or fails to load', () => {
     expect(source).toContain('MaterialCover')
   })
+
+  // 走查反馈（CHG-20260930-069）：来源行采集时的内容池统计（播放/点赞/收藏/评论/分享）
+  // 以**独立区块**展现，不混进 dl 的字段里——它们是采集时刻的快照，不是素材的属性，
+  // 挤在一起会把「入库时间」和「72313 个赞」读成同一类事实。
+  it('shows the source content-pool statistics as their own section', () => {
+    expect(source).toContain('material.view_count')
+    expect(source).toContain('material.like_count')
+    expect(source).toContain('material.favorite_count')
+    expect(source).toContain('material.comment_count')
+    expect(source).toContain('material.share_count')
+    for (const label of ['播放', '点赞', '收藏', '评论', '分享']) {
+      expect(source).toContain(label)
+    }
+  })
+
+  // 下载按钮与列表行同一形状（CHG-20260930-069 走查反馈）：只叫「下载」，
+  // 下面不挂提示小字——状态徽章已经说明了点下去会发生什么。
+  it('names the download action just「下载」without a hint under it', () => {
+    expect(source).toContain("@click=\"$emit('download', material)\">下载</t-button>")
+    expect(source).not.toContain('downloadHint')
+    expect(source).not.toContain('下载到本机')
+  })
 })

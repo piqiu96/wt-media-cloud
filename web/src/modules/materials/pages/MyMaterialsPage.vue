@@ -8,7 +8,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { VIDEO_STATUSES, downloadHint, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
+import { VIDEO_STATUSES, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
@@ -30,10 +30,11 @@ const detail = ref(null)
 const detailLoading = ref(false)
 const pagination = ref({ current: 1, pageSize: 20 })
 
-// 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。
+// 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
+// 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
 const columns = [
-  { colKey: 'cover', title: '封面', width: 72 },
   { colKey: 'id', title: '素材 ID', width: 90 },
+  { colKey: 'cover', title: '封面', width: 72 },
   { colKey: 'title', title: '标题', width: 250 },
   { colKey: 'source', title: '来源平台', width: 95 },
   { colKey: 'game', title: '游戏', width: 65 },
@@ -189,7 +190,10 @@ onMounted(() => {
             <template #cover="{ row }"><MaterialCover :url="row.cover_url" /></template>
             <template #id="{ row }">#{{ row.id }}</template>
             <template #title="{ row }">
-              <span class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
+              <!-- 走查反馈：标题就是去来源平台的入口（与内容池页同一形状），蓝色可点；
+                   没有落地页的素材退回普通文本。 -->
+              <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
+              <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
             </template>
             <template #source="{ row }">{{ row.platform || '-' }}</template>
             <template #game="{ row }">{{ gameName(games, row.game_id) }}</template>
@@ -198,10 +202,7 @@ onMounted(() => {
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
-                <div class="wt-row-action">
-                  <t-button size="small" theme="primary" @click="download(row)">下载到本机</t-button>
-                  <small v-if="downloadHint(row)" class="wt-row-hint">{{ downloadHint(row) }}</small>
-                </div>
+                <t-button size="small" theme="primary" @click="download(row)">下载</t-button>
                 <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="remove(row)">移出</t-button>
               </t-space>
             </template>
@@ -227,7 +228,12 @@ onMounted(() => {
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
 .filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
-.material-title { display: block; overflow: hidden; color: var(--wt-text-primary); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+/* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
+   免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
+.material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+span.material-title { color: var(--wt-text-primary); }
+.wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
+.wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 @media (max-width: 680px) {
   .material-filter-card, .material-table-card { padding: 16px; }
 }

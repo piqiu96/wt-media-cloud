@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.30.1"
+revision: "2026.09.30.2"
 
 # 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
 #
@@ -24,7 +24,7 @@ schemas:
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。
-    required: [id, team_id, source_content_id, title, source_url, platform, video_status, created_at, updated_at]
+    required: [id, team_id, source_content_id, title, source_url, platform, video_status, view_count, like_count, favorite_count, comment_count, share_count, created_at, updated_at]
     properties:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
@@ -43,6 +43,14 @@ schemas:
       # 链接读的都是这两个键。
       cover_url: {type: string, format: uri, description: 来源没有封面时该键不出现。}
       author_home_url: {type: string, format: uri, description: 来源没有作者主页时该键不出现。}
+      # 来源行采集到时的内容池统计（CHG-20260930-069 走查反馈）：同样是读取时 JOIN
+      # source_contents 带出的事实，键与库列同名。列 NOT NULL，所以键恒在，0 表示
+      # 「采集时就是 0 / 采集器没有提供」，不是「未知」。
+      view_count: {type: integer, format: int64}
+      like_count: {type: integer, format: int64}
+      favorite_count: {type: integer, format: int64}
+      comment_count: {type: integer, format: int64}
+      share_count: {type: integer, format: int64}
       published_at: {type: string, format: date-time, description: 来源没有发布时间时该键不出现。}
       video_size_bytes: {type: integer, format: int64, description: 准备通过校验前该键不出现。}
       video_sha256: {type: string, description: 准备通过校验前该键不出现。}
@@ -81,4 +89,4 @@ schemas:
         description: >-
           这条关系指向的素材，随列表一并返回，键集即上方 `Material`。没有它，「我的素材」
           列表每行都要再发一次请求才能显示标题与视频状态 —— 代价付在页面上。
-          这里不重复列它的 17 个属性：同一批键写两遍就是第二个落点，改了这处忘了那处不会有任何症状。
+          这里不重复列它的属性：同一批键写两遍就是第二个落点，改了这处忘了那处不会有任何症状。

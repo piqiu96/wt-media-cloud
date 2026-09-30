@@ -10,7 +10,7 @@ import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vu
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
-import { downloadHint, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
+import { gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -22,6 +22,9 @@ defineEmits(['update:visible', 'add', 'download'])
 
 const client = createMaterialsClient()
 const videoUrl = ref('')
+
+// 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
+function countLabel(value) { return Number(value || 0).toLocaleString() }
 
 watch(() => [props.visible, props.material?.id, props.material?.video_status], async ([open, id, status]) => {
   videoUrl.value = ''
@@ -75,13 +78,23 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
             <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
           </dd></div>
         </dl>
+        <!-- 走查反馈（CHG-20260930-069）：来源行采集时的内容池统计以独立区块展现。
+             它们是采集时刻的快照，不是素材自己的属性，混进上面的 dl 会把「入库时间」
+             和「72313 个赞」读成同一类事实。 -->
+        <section class="material-detail__stats">
+          <h4>来源内容池统计</h4>
+          <div class="material-detail__stats-grid">
+            <div><span>播放</span><strong>{{ countLabel(material.view_count) }}</strong></div>
+            <div><span>点赞</span><strong>{{ countLabel(material.like_count) }}</strong></div>
+            <div><span>收藏</span><strong>{{ countLabel(material.favorite_count) }}</strong></div>
+            <div><span>评论</span><strong>{{ countLabel(material.comment_count) }}</strong></div>
+            <div><span>分享</span><strong>{{ countLabel(material.share_count) }}</strong></div>
+          </div>
+        </section>
         <p v-if="material.last_error" class="material-detail__error">最近一次准备失败：{{ material.last_error }}</p>
         <div class="material-detail__actions">
           <t-button class="wt-secondary-button" variant="outline" @click="$emit('add', material)">加入我的素材</t-button>
-          <div class="wt-row-action">
-            <t-button theme="primary" @click="$emit('download', material)">下载到本机</t-button>
-            <small v-if="downloadHint(material)" class="wt-row-hint">{{ downloadHint(material) }}</small>
-          </div>
+          <t-button theme="primary" @click="$emit('download', material)">下载</t-button>
         </div>
       </div>
     </t-loading>
@@ -97,7 +110,16 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 .material-detail dt { color: var(--wt-text-tertiary); font-size: 12px; }
 .material-detail dd { margin: 4px 0 0; color: var(--wt-text-primary); font-size: 14px; overflow-wrap: anywhere; }
 .material-detail__error { margin: 16px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
-/* `align-items: center`：下载那颗按钮下面可能挂着一句提示，于是它比旁边那颗高。
-   不居中就会让「加入我的素材」被拉成两行高，看起来像是另一类动作。 */
+/* `align-items: center`：与列表行同一句话——两颗按钮等高并排，谁也不像另一类动作。 */
 .material-detail__actions { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+.material-detail__stats { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 8px; background: var(--wt-bg-page); }
+.material-detail__stats h4 { margin: 0 0 10px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; }
+.material-detail__stats-grid { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.material-detail__stats-grid div { display: flex; align-items: baseline; gap: 6px; }
+.material-detail__stats-grid span { color: var(--wt-text-tertiary); font-size: 12px; }
+.material-detail__stats-grid strong { color: var(--wt-text-primary); font-size: 14px; }
+/* 抽屉里的链接此前借用 ContentPoolPage 的类名却没有那份样式；这里补上同一份定义，
+   「打开作者主页／原视频／云端视频」与标题链接才是同一个蓝色。 */
+.wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
+.wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 </style>

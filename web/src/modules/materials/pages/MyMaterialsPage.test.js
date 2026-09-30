@@ -62,13 +62,21 @@ describe('my materials page', () => {
     expect(source).not.toContain('material-detail-drawer')
   })
 
-  // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 封面与素材 ID 在行内，
-  // 作者、链接与体积在详情里。
-  it('identifies a row by its cover and its id, and keeps the links and size in the detail', () => {
-    expect(source).toContain("{ colKey: 'cover', title: '封面'")
-    expect(source).toContain("{ colKey: 'id', title: '素材 ID'")
+  // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 素材 ID 第一列、封面随后，
+  // 标题蓝色可点跳来源平台落地页，作者、链接与体积在详情里；下载按钮只叫「下载」，
+  // 下面不挂提示小字。
+  it('shares the library row shape: id first, clickable title, no download hint', () => {
+    const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
+    const coverAt = source.indexOf("{ colKey: 'cover', title: '封面'")
+    expect(idAt).toBeGreaterThan(-1)
+    expect(coverAt).toBeGreaterThan(-1)
+    expect(idAt, '素材 ID 列必须在封面列之前').toBeLessThan(coverAt)
     expect(source).toContain('MaterialCover')
-    expect(source).not.toContain('row.source_url')
+    expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
+    expect(source).toContain('class="wt-primary-link')
+    expect(source).toContain('@click="download(row)">下载</t-button>')
+    expect(source).not.toContain('downloadHint')
+    expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })

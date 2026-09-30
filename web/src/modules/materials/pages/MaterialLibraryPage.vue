@@ -9,7 +9,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { VIDEO_STATUSES, downloadHint, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
+import { VIDEO_STATUSES, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
@@ -35,10 +35,11 @@ const pagination = ref({ current: 1, pageSize: 20 })
 // 每一列都必须声明 width，不许只写 minWidth —— 理由与实测数据见
 // shared/testing/listPageConventions.js 里那条断言上面的说明（WebKit 的 fixed 布局下
 // minWidth 不产生确定列宽，这些列会被压成「剩余空间列」）。
-// 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。
+// 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
+// 第一列——走查反馈：运营扫行时先找编号，封面跟着它认内容。
 const columns = [
-  { colKey: 'cover', title: '封面', width: 72 },
   { colKey: 'id', title: '素材 ID', width: 90 },
+  { colKey: 'cover', title: '封面', width: 72 },
   { colKey: 'title', title: '标题', width: 250 },
   { colKey: 'source', title: '来源平台', width: 95 },
   { colKey: 'game', title: '游戏', width: 65 },
@@ -204,7 +205,10 @@ onMounted(() => {
             <template #cover="{ row }"><MaterialCover :url="row.cover_url" /></template>
             <template #id="{ row }">#{{ row.id }}</template>
             <template #title="{ row }">
-              <span class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
+              <!-- 走查反馈：标题就是去来源平台的入口（与内容池页同一形状），蓝色可点；
+                   没有落地页的素材退回普通文本，链接形状留给真的能点的东西。 -->
+              <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
+              <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
             </template>
             <template #source="{ row }">{{ row.platform || '-' }}</template>
             <template #game="{ row }">{{ gameName(games, row.game_id) }}</template>
@@ -215,12 +219,8 @@ onMounted(() => {
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="addToMine(row)">加入我的素材</t-button>
                 <!-- 按钮不因视频没准备好而变灰：服务端接受未准备与失败，点了会先准备。
-                     一句提示贴在按钮**下面**而不是右面：这一列只有 280px，横向再塞一句话
-                     会把按钮挤变形，而提示本身在窄列里换行也无所谓。 -->
-                <div class="wt-row-action">
-                  <t-button size="small" theme="primary" @click="download(row)">下载到本机</t-button>
-                  <small v-if="downloadHint(row)" class="wt-row-hint">{{ downloadHint(row) }}</small>
-                </div>
+                     走查反馈：状态徽章已说明一切，按钮下不再挂提示小字。 -->
+                <t-button size="small" theme="primary" @click="download(row)">下载</t-button>
               </t-space>
             </template>
           </t-table>
@@ -245,7 +245,12 @@ onMounted(() => {
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
 .filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
-.material-title { display: block; overflow: hidden; color: var(--wt-text-primary); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+/* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
+   免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
+.material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+span.material-title { color: var(--wt-text-primary); }
+.wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
+.wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 @media (max-width: 680px) {
   .material-filter-card, .material-table-card { padding: 16px; }
 }

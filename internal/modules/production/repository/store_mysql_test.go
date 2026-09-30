@@ -133,7 +133,7 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM materials m JOIN source_contents s ON s.id = m.source_content_id WHERE m.id = ? AND m.team_id = ?")).
 		WithArgs(int64(42), int64(7)).
-		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), "game-1", int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", now, "ready", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now))
+		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), "game-1", int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", int64(12000), int64(72313), int64(882), int64(4028), int64(8323), now, "ready", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now))
 
 	material, found, err := findMaterial(db, 42, identity.TeamID(7))
 	if err != nil {
@@ -157,6 +157,13 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 		t.Fatalf("material links = cover %q author_home %q, want the source row's own values",
 			material.CoverURL, material.AuthorHomeURL)
 	}
+	// The content-pool statistics are crawl-time decision data for the detail
+	// drawer; a missing column reads as zero, which is indistinguishable from
+	// “the crawl saw no plays”.
+	if material.ViewCount != 12000 || material.LikeCount != 72313 || material.FavoriteCount != 882 || material.CommentCount != 4028 || material.ShareCount != 8323 {
+		t.Fatalf("material stats = view %d like %d favorite %d comment %d share %d",
+			material.ViewCount, material.LikeCount, material.FavoriteCount, material.CommentCount, material.ShareCount)
+	}
 	assertExpectations(t, mock)
 }
 
@@ -167,7 +174,7 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 // as `TestMarkVideoPreparingStatementNamesBothStatesAPreparationMayStartFrom`,
 // is what makes the column list a reviewed fact.
 func TestMaterialProjectionJoinsTheSourceRowLinksIntoEveryRead(t *testing.T) {
-	for _, column := range []string{"s.cover_url", "s.author_home_url"} {
+	for _, column := range []string{"s.cover_url", "s.author_home_url", "s.view_count", "s.like_count", "s.favorite_count", "s.comment_count", "s.share_count"} {
 		if !strings.Contains(materialProjectionColumns, column) {
 			t.Errorf("materialProjectionColumns no longer selects %s: %s", column, materialProjectionColumns)
 		}
@@ -679,5 +686,5 @@ func usageColumns() []string {
 }
 
 func materialColumns() []string {
-	return []string{"id", "team_id", "game_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "published_at", "video_status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at"}
+	return []string{"id", "team_id", "game_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "view_count", "like_count", "favorite_count", "comment_count", "share_count", "published_at", "video_status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at"}
 }
