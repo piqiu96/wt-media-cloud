@@ -103,15 +103,23 @@ type TransferCreator interface {
 	EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error)
 }
 
+// ObjectLinker composes the stable public address of a stored object; a
+// consumer-side interface in the same shape as `LocalNodeResolver`, so a test
+// can answer it without the object-storage registry.
+type ObjectLinker interface {
+	PublicObjectURL(key string) (string, error)
+}
+
 type Service struct {
 	store     Store
 	nodes     LocalNodeResolver
 	transfers TransferCreator
+	links     ObjectLinker
 	now       func() time.Time
 }
 
-func NewService(store Store, nodes LocalNodeResolver, transfers TransferCreator) *Service {
-	return &Service{store: store, nodes: nodes, transfers: transfers, now: time.Now}
+func NewService(store Store, nodes LocalNodeResolver, transfers TransferCreator, links ObjectLinker) *Service {
+	return &Service{store: store, nodes: nodes, transfers: transfers, links: links, now: time.Now}
 }
 
 func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64) (model.Material, error) {
@@ -129,6 +137,25 @@ func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64
 		return model.Material{}, ErrForbidden
 	}
 	return material, nil
+}
+
+// VideoURL answers the stable cloud address of a prepared material's video —
+// the detail drawer's link, deliberately not part of the material body. Scope
+// first, then readiness (409 while preparation is unfinished), then the same
+// `videoFacts` completeness a local download reads.
+func (s *Service) VideoURL(actor identityservice.PublicUser, materialID int64) (string, error) {
+	material, err := s.GetMaterial(actor, materialID)
+	if err != nil {
+		return "", err
+	}
+	if material.VideoStatus != model.VideoReady {
+		return "", ErrMaterialUnavailable
+	}
+	objectKey, _, _, err := videoFacts(material)
+	if err != nil {
+		return "", err
+	}
+	return s.links.PublicObjectURL(objectKey)
 }
 
 // AddUsage adds the material to the actor's library and reports whether that

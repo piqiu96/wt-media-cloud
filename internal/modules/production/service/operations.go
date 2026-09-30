@@ -15,11 +15,13 @@ func AddUsage(actor identityservice.PublicUser, materialID int64) (model.Materia
 	return newWiredService().AddUsage(actor, materialID)
 }
 
-// newWiredService assembles the module's real dependencies, in one place. It
-// exists because there are three of them now, and repeating the triple at each
-// wrapper is how one of them eventually goes missing from one call site.
+// newWiredService assembles the module's real dependencies, in one place.
 func newWiredService() *Service {
-	return NewService(mysqlStore{}, runtimeNodeResolver{}, productionTransferCreator{})
+	return NewService(mysqlStore{}, runtimeNodeResolver{}, productionTransferCreator{}, productionObjectLinker{})
+}
+
+func VideoURL(actor identityservice.PublicUser, materialID int64) (string, error) {
+	return newWiredService().VideoURL(actor, materialID)
 }
 
 func CreateDownload(actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {

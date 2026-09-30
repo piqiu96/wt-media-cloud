@@ -144,7 +144,26 @@ func (s *stubTransfers) CreateUserDownload(input transferservice.CreateUserDownl
 }
 
 func testService(store Store) *Service {
-	return NewService(store, &stubNodes{}, &stubTransfers{})
+	return NewService(store, &stubNodes{}, &stubTransfers{}, &stubLinks{})
+}
+
+// stubLinks answers the one question this module asks the storage boundary: the
+// stable address of an object key. It records the key it was asked about, for
+// the same reason stubTransfers records its input — the key handed over is the
+// seam between "the material's own facts" and "where the bucket keeps it", and
+// a double that only answered could not show the wrong key being composed.
+type stubLinks struct {
+	url string
+	err error
+	key string
+}
+
+func (s *stubLinks) PublicObjectURL(key string) (string, error) {
+	s.key = key
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.url, nil
 }
 
 func (s *memoryStore) FindMaterial(int64) (model.Material, bool, error) {
@@ -314,6 +333,94 @@ func TestBothListsCarryTheSourceRowLinksWithoutFiltering(t *testing.T) {
 	}
 }
 
+// The video address is handed out on a stricter contract than the material
+// body: the actor's scope is checked first (an out-of-scope material must not
+// be told where the bucket keeps its video — that is a 404/403, not a 409), and
+// only a `ready` material has an address at all. The not-ready refusal reuses
+// `ErrMaterialUnavailable`, which the route already maps to the 409 the drawer
+// reads as "try again once preparation finishes".
+func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	size := int64(4096)
+	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+
+	// Out of scope: the game range is the actor's, not the material's.
+	store := &memoryStore{found: true, material: ready}
+	svc := testService(store)
+	if _, err := svc.VideoURL(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, 42); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("out-of-scope VideoURL() error = %v, want ErrForbidden", err)
+	}
+
+	// Missing: same answer the single-material read gives.
+	store = &memoryStore{found: false}
+	svc = testService(store)
+	if _, err := svc.VideoURL(operator, 42); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing VideoURL() error = %v, want ErrNotFound", err)
+	}
+
+	// Visible but not ready: 409, not an address and not a 404 — the material
+	// exists and the answer changes on its own once preparation finishes.
+	for _, status := range []model.VideoStatus{model.VideoNotDownloaded, model.VideoDownloading, model.VideoFailed} {
+		unready := ready
+		unready.VideoStatus = status
+		store = &memoryStore{found: true, material: unready}
+		svc = testService(store)
+		if _, err := svc.VideoURL(operator, 42); !errors.Is(err, ErrMaterialUnavailable) {
+			t.Fatalf("%s VideoURL() error = %v, want ErrMaterialUnavailable", status, err)
+		}
+	}
+
+	// Ready: the address is the linker's answer for the material's own object
+	// key, and nothing wider.
+	links := &stubLinks{url: "http://127.0.0.1:9000/wt-media/dev/materials/42/x.mp4"}
+	store = &memoryStore{found: true, material: ready}
+	svc = NewService(store, &stubNodes{}, &stubTransfers{}, links)
+	url, err := svc.VideoURL(operator, 42)
+	if err != nil {
+		t.Fatalf("ready VideoURL() error = %v", err)
+	}
+	if url != links.url {
+		t.Fatalf("VideoURL() = %q, want the composed address %q", url, links.url)
+	}
+	if links.key != ready.SourceObjectKey {
+		t.Fatalf("the address was composed for key %q, want the material's own %q", links.key, ready.SourceObjectKey)
+	}
+}
+
+// A `ready` row missing part of its facts is this module's own inconsistency,
+// and the address must not be an exception to the promise the projection makes:
+// the fault surfaces as an error, not as a URL composed from a half-empty key.
+func TestVideoURLReportsAReadyRowWithIncompleteFactsAsAFault(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	incomplete := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4"}
+	store := &memoryStore{found: true, material: incomplete}
+	links := &stubLinks{url: "http://unused"}
+	svc := NewService(store, &stubNodes{}, &stubTransfers{}, links)
+	if _, err := svc.VideoURL(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil {
+		t.Fatal("VideoURL() succeeded for a ready row with no size or hash, want a fault")
+	}
+	if links.key != "" {
+		t.Fatalf("a key was handed to the linker despite the incomplete facts: %q", links.key)
+	}
+}
+
+// The linker is the storage boundary; its refusal is not this module's to
+// re-classify, it is the route's 500 with the reason kept in the log.
+func TestVideoURLPropagatesTheLinkerRefusal(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	size := int64(4096)
+	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	store := &memoryStore{found: true, material: ready}
+	svc := NewService(store, &stubNodes{}, &stubTransfers{}, &stubLinks{err: errors.New("composition refused")})
+	if _, err := svc.VideoURL(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil || !strings.Contains(err.Error(), "composition refused") {
+		t.Fatalf("VideoURL() error = %v, want the linker's refusal to propagate", err)
+	}
+}
+
 func TestRemoveUsageChecksTheMaterialScopeBeforeSoftRemoval(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-b"
@@ -390,7 +497,7 @@ func TestCreateDownloadAddressesTheTaskToTheResolvedNode(t *testing.T) {
 	store := &memoryStore{found: true, material: material}
 	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-7", UserID: 9}}
 	transfers := &stubTransfers{}
-	svc := NewService(store, nodes, transfers)
+	svc := NewService(store, nodes, transfers, &stubLinks{})
 	now := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
 
@@ -483,7 +590,7 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 	} {
 		store := &memoryStore{found: testCase.found, material: testCase.material}
 		transfers := &stubTransfers{err: testCase.transferErr}
-		svc := NewService(store, testCase.nodes, transfers)
+		svc := NewService(store, testCase.nodes, transfers, &stubLinks{})
 
 		if _, err := svc.CreateDownload(actor, 42); !errors.Is(err, testCase.want) {
 			t.Fatalf("%s: error = %v, want %v", testCase.name, err, testCase.want)
@@ -512,7 +619,7 @@ func TestCreateDownloadDoesNotPresentAnIncompleteReadyRowAsUnavailable(t *testin
 	material.VideoSHA256 = ""
 	store := &memoryStore{found: true, material: material}
 	transfers := &stubTransfers{}
-	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 
 	_, err := svc.CreateDownload(scopedActor(team, game), 42)
 	if err == nil {
@@ -547,7 +654,7 @@ func TestCreateDownloadQueuesAWaitingTaskForAMaterialWithNoPreparedVideo(t *test
 	team, game := service.TeamID(7), "game-a"
 	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: true}
 	transfers := &stubTransfers{}
-	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 
 	task, err := svc.CreateDownload(scopedActor(team, game), 42)
 	if err != nil {
@@ -586,7 +693,7 @@ func TestCreateDownloadQueuesNoPreparationForAPreparedMaterial(t *testing.T) {
 	team, game := service.TeamID(7), "game-a"
 	store := &memoryStore{found: true, material: readyMaterial(team, game), preparing: true}
 	transfers := &stubTransfers{}
-	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 
 	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
@@ -611,7 +718,7 @@ func TestCreateDownloadFetchesDirectlyWhenTheVideoBecameReadyMidRequest(t *testi
 	fresh := readyMaterial(team, game)
 	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &fresh}
 	transfers := &stubTransfers{}
-	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 
 	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
@@ -637,7 +744,7 @@ func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) 
 	stillPending.VideoStatus = model.VideoDownloading
 	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &stillPending}
 	transfers := &stubTransfers{}
-	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers)
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 
 	task, err := svc.CreateDownload(scopedActor(team, game), 42)
 	if err != nil {

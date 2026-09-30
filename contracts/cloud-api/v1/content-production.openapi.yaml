@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.09.27.1
+  version: 2026.09.30.1
   description: Additive M4-A contract. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/materials:
@@ -43,6 +43,24 @@ paths:
       parameters: [{$ref: '#/components/parameters/UsageID'}]
       responses:
         '204': {description: Usage removed without deleting material or history.}
+  /api/v1/materials/{material_id}/video-url:
+    get:
+      operationId: getMaterialVideoURL
+      summary: Read the stable cloud object URL of a prepared material's video.
+      description: >-
+        The only endpoint that hands out the cloud video address. The material
+        list and the material body never carry it; the detail drawer asks here,
+        after the actor's scope has been checked and only once the video is
+        ready. The address is composed from the configured object-storage
+        endpoint, bucket and prefix and is stable for the object's lifetime —
+        it is not a presigned grant and carries no expiry.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/MaterialID'}]
+      responses:
+        '200': {description: '{url: string} — the stable object URL.'}
+        '403': {description: Material is outside the actor's scope.}
+        '404': {description: Material does not exist.}
+        '409': {description: The material's video is not prepared yet.}
   /api/v1/materials/{material_id}/downloads:
     post:
       operationId: createMaterialDownload

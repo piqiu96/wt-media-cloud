@@ -19,6 +19,10 @@ var resources struct {
 	// rather than passed by each caller so that how long an address stays valid
 	// is one operational decision, not one per call site.
 	grantTTL time.Duration
+	// publicBase is the address prefix `PublicURL` composes from, published at
+	// Initialize in both the configured and the unconfigured branch: the stable
+	// address is not a credential and must not depend on one being present.
+	publicBase string
 }
 
 // Initialize publishes the process-wide object-storage store.
@@ -37,6 +41,7 @@ func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageC
 	if strings.TrimSpace(credential.AccessKey) == "" && strings.TrimSpace(credential.SecretKey) == "" {
 		resources.store = notConfiguredStore{}
 		resources.grantTTL = cfg.PresignTTL.Duration
+		resources.publicBase = publicBaseOf(cfg)
 		return nil
 	}
 	store, err := newMinioStore(cfg, credential)
@@ -45,6 +50,7 @@ func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageC
 	}
 	resources.store = store
 	resources.grantTTL = cfg.PresignTTL.Duration
+	resources.publicBase = publicBaseOf(cfg)
 	return nil
 }
 
@@ -90,6 +96,7 @@ func Close() error {
 	resources.Lock()
 	resources.store = nil
 	resources.grantTTL = 0
+	resources.publicBase = ""
 	resources.Unlock()
 	return nil
 }

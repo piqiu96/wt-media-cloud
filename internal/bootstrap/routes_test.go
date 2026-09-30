@@ -61,6 +61,7 @@ func TestRegisterModuleRoutesReachesEveryModule(t *testing.T) {
 		{"proxy", consts.MethodGet, "/api/v1/proxies"},
 		{"contentpool", consts.MethodGet, "/api/v1/content-pool"},
 		{"production", consts.MethodGet, "/api/v1/materials"},
+		{"production", consts.MethodGet, "/api/v1/materials/42/video-url"},
 		{"filetransfer", consts.MethodGet, "/api/v1/file-transfer-tasks"},
 	} {
 		response := ut.PerformRequest(engine.Engine, route.method, route.path, nil)

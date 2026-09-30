@@ -82,6 +82,29 @@ func AddMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
 	writeUsageAdded(c, usage, created)
 }
 
+// VideoLink is the body of the detail link endpoint; see the Service method
+// for why the address is not part of the material body.
+type VideoLink struct {
+	URL string `json:"url"`
+}
+
+func GetMaterialVideoURL(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := materialID(c)
+	if !ok {
+		return
+	}
+	url, err := productionservice.VideoURL(actor, id)
+	if err != nil {
+		writeProductionError(c, err)
+		return
+	}
+	api.Success(c, VideoLink{URL: url})
+}
+
 // CreateMaterialDownload queues a download of a prepared material to the actor's
 // own Local Agent, and answers 202 because nothing has been downloaded yet: the
 // task is pending until a node claims it, and the client's next honest source of

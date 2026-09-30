@@ -3,6 +3,7 @@ package service
 import (
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
 	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -72,4 +73,12 @@ func (productionTransferCreator) CreateUserDownload(input transferservice.Create
 
 func (productionTransferCreator) EnsureMaterialSourcePrepare(input transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error) {
 	return transferservice.EnsureMaterialSourcePrepare(input)
+}
+
+// productionObjectLinker is this module's whole dependency on the storage
+// boundary; the composition itself lives in `infra/storage`.
+type productionObjectLinker struct{}
+
+func (productionObjectLinker) PublicObjectURL(key string) (string, error) {
+	return storage.PublicURL(key)
 }

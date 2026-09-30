@@ -25,6 +25,7 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 	}{
 		{consts.MethodGet, "/api/v1/materials"},
 		{consts.MethodGet, "/api/v1/materials/42"},
+		{consts.MethodGet, "/api/v1/materials/42/video-url"},
 		{consts.MethodPost, "/api/v1/materials/42/usages"},
 		{consts.MethodPost, "/api/v1/materials/42/downloads"},
 		{consts.MethodGet, "/api/v1/my-materials"},

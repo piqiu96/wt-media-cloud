@@ -236,6 +236,27 @@ func TestTheEmbeddedMaterialIsTheMaterialSchemaItself(t *testing.T) {
 	}
 }
 
+// The detail link body is pinned the same way the material body is: the handler
+// struct and the contract were written from the same change, and only a test
+// that compares them catches one side shrinking without the other.
+func TestVideoLinkBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
+	schemas := readContentProductionSchema(t)
+	schema, ok := schemas["MaterialVideoLink"]
+	if !ok {
+		t.Fatal("contract has no MaterialVideoLink schema")
+	}
+	want := schemaPropertyNames(schema.Properties)
+	if len(want) != 1 || want[0] != "url" {
+		t.Fatalf("MaterialVideoLink declares %v, want exactly [url]", want)
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "url" {
+		t.Fatalf("MaterialVideoLink requires %v, want exactly [url]", schema.Required)
+	}
+	if got := marshalledKeys(t, VideoLink{URL: "https://example.invalid/wt-media/materials/42/x.mp4"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("a video link marshals to %v, want %v", got, want)
+	}
+}
+
 func union(left, right []string) []string {
 	seen := make(map[string]bool, len(left)+len(right))
 	for _, values := range [][]string{left, right} {

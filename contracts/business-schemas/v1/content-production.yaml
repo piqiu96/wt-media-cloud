@@ -49,7 +49,19 @@ schemas:
       media_summary: {type: object, description: 准备通过校验前该键不出现；形状由媒体探针决定，不是对外契约。}
       last_error: {type: string, description: 最近一次准备没有错误时该键不出现。}
       video_prepared_at: {type: string, format: date-time, description: 尚未有一次通过校验的准备时该键不出现。}
-    forbidden_properties: [object_key, local_path, download_url, storage_credential]
+    forbidden_properties: [object_key, local_path, download_url, video_url, storage_credential]
+
+  MaterialVideoLink:
+    type: object
+    description: >-
+      详情链接接口（GET /api/v1/materials/{material_id}/video-url）的 body：云端视频的
+      稳定对象地址。它是这个地址的**唯一**出口 —— 列表与素材 body 都不携带（见
+      Material 的 forbidden_properties），因为一个浏览器拿得到的长期地址应当只落在
+      明确检查过登录与业务范围的读取上。地址由对象存储 endpoint、bucket、prefix 与
+      对象 key 组成，随对象存活，不是会过期的签名 grant。
+    required: [url]
+    properties:
+      url: {type: string, format: uri}
 
   MaterialUsage:
     type: object
