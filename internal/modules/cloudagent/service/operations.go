@@ -75,7 +75,6 @@ func ReportTask(taskID string, req dto.ReportTaskRequest) (model.Task, error) {
 		Result:    req.Result,
 	})
 }
-func CountTasksByStatus() map[string]int { return repository.CountTasksByStatus() }
 func CancelTask(taskID string, req dto.CancelTaskRequest) (model.Task, error) {
 	return repository.CancelTask(taskID, repository.CancelTaskInput{Message: req.Message})
 }

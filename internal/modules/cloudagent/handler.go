@@ -32,16 +32,6 @@ func GetAgent(ctx context.Context, c *hertzapp.RequestContext) {
 	node, err := service.GetAgent(c.Param("agent_id"))
 	writeAgentResult(c, node, err)
 }
-func TaskStats(ctx context.Context, c *hertzapp.RequestContext) {
-	api.Success(c, service.CountTasksByStatus())
-}
-func CreateTask(ctx context.Context, c *hertzapp.RequestContext) {
-	var req service.CreateTaskRequest
-	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {
-		return
-	}
-	api.Created(c, service.CreateTask(req))
-}
 func CreateNoopTask(ctx context.Context, c *hertzapp.RequestContext) {
 	var req service.CreateTaskRequest
 	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {

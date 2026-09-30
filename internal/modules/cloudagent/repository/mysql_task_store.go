@@ -173,27 +173,6 @@ func reportTask(db *gorm.DB, taskID string, req ReportTaskInput) (model.Task, er
 	return updated, err
 }
 
-func CountTasksByStatus() map[string]int {
-	return countTasksByStatus(database.DB())
-}
-
-func countTasksByStatus(db *gorm.DB) map[string]int {
-	counts := map[string]int{"pending": 0, "running": 0, "succeeded": 0, "failed": 0, "cancelled": 0}
-	rows, err := db.Raw(`SELECT status, COUNT(*) FROM tasks GROUP BY status`).Rows()
-	if err != nil {
-		return counts
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var status string
-		var count int
-		if rows.Scan(&status, &count) == nil {
-			counts[status] = count
-		}
-	}
-	return counts
-}
-
 func CancelTask(taskID string, req CancelTaskInput) (model.Task, error) {
 	return cancelTask(database.DB(), taskID, req)
 }
