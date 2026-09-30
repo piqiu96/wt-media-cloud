@@ -72,8 +72,9 @@ describe('material detail drawer', () => {
     // 标签状态一起消失：留一个没人读的 ref 就是留一段会腐坏的死代码。
     expect(source).not.toContain('activeTab')
     // 取标题的标记而不是裸词：裸词会先量到注释里的那一次，直接判反。
-    const titles = [...template.matchAll(/class="detail-card__title">\s*([一-龥]+)/g)].map((m) => m[1])
-    expect(titles).toEqual(['使用情况', '基本信息', '文件信息', '来源信息', '来源内容池统计'])
+    const titles = [...template.matchAll(/class="detail-card__title"[^>]*>\s*([^<]+)/g)]
+      .map((m) => m[1].trim())
+    expect(titles).toEqual(['当前进度 / 使用情况', '文件信息', '来源信息', '来源内容池统计', '基本信息'])
   })
 
   // 量到 CSS 而不只量类名：类名是零成本的，样式才是用户看得见的那一半。
@@ -89,12 +90,46 @@ describe('material detail drawer', () => {
     expect(style).toContain('.detail-source-line {')
   })
 
-  // 使用情况在最上面，基本信息在它下面。
-  it('opens the body with the usage card, then 基本信息', () => {
+  /**
+   * 走查七轮（用户提示词第十节「详情信息顺序」）：第一段回答「我现在处理到哪一步，
+   * 下一步是什么」，字段往后放。
+   *
+   * 「基本信息」剩下的三行（素材 ID / 游戏 / 入库时间）**没有删**，挪到最后一段：
+   * 提示词那四段是「建议」，而没有一段提到这两样东西该去哪，直接删掉就是一次用户没
+   * 裁定过的信息损失 —— 素材 ID 还是运营要复制去别处查的那串数字。顺序上官方那三段
+   * 紧跟第一段，与提示词列出的次序一致。
+   */
+  it('opens the body with 当前进度 / 使用情况 and keeps the rest in the prompt order', () => {
     const body = sliceBetween(template, 'detail-workspace', '<template #footer>')
+    expect(body).toContain('nextStepHint(material)')
     expect(body).toContain('usageFacts(material)')
-    expect(body.indexOf('class="detail-card__title">使用情况'))
-      .toBeLessThan(body.indexOf('class="detail-card__title">基本信息'))
+    // 量标题标记而不是裸词：裸词会先量到正文注释里的那一次，读数就成了注释的函数。
+    const cards = [...body.matchAll(/<h4 class="detail-card__title">\s*([^<\n]*)/g)]
+      .map((m) => ({ title: m[1].trim(), at: m.index }))
+    const at = (title) => cards.find((card) => card.title === title)?.at ?? -1
+    expect(at('当前进度 / 使用情况')).toBeGreaterThan(-1)
+    expect(at('基本信息')).toBeGreaterThan(at('来源内容池统计'))
+    expect(at('当前进度 / 使用情况')).toBeLessThan(at('文件信息'))
+    expect(at('文件信息')).toBeLessThan(at('来源信息'))
+    expect(at('来源信息')).toBeLessThan(at('来源内容池统计'))
+  })
+
+  // 第一段的四件事：两个状态各一颗徽章、加入时间、下一步。
+  it('states the file state, the usage state, the join time and the next step', () => {
+    const card = sliceBetween(template, 'class="detail-card__title">当前进度 / 使用情况', '<h4 class="detail-card__title">')
+    expect(card).toContain('videoStatusLabel(material.video_status)')
+    expect(card).toContain('usageStatusLabel(material.usage_status)')
+    expect(card).toContain('formatDateTime(material.added_at)')
+    expect(card).toContain('nextStepHint(material)')
+    // 加入时间是关系自己的时间，素材库上下文没有它——缺值画 —，不是画入库时间冒充。
+    expect(card).toContain("material.added_at ? formatDateTime(material.added_at) : '—'")
+  })
+
+  // 使用状态读不到画 —：素材库上下文打开的详情就属于这种，而那不等于「使用中」。
+  it('does not paint 使用中 on a relation it cannot read', () => {
+    const card = sliceBetween(template, 'class="detail-card__title">当前进度 / 使用情况', '<h4 class="detail-card__title">')
+    expect(card).toContain('v-if="material.usage_status"')
+    expect(card).toMatch(/<template v-else>—<\/template>/)
   })
 
   // 互动数据是来源行采集时的快照，跟着「来源」走。
@@ -137,7 +172,9 @@ describe('material detail drawer', () => {
   })
 
   it('pins the context actions into that footer instead of the scrolling body', () => {
-    const footer = sliceBetween(template, '<template #footer>', '</template>')
+    // 切的终点是抽屉自己那个收尾标记，不是第一个 `</template>`：走查七轮的页脚里
+    // 有嵌套的 <template v-if>，按 `</template>` 切会把动作条从第一个分支处剪断。
+    const footer = sliceBetween(template, '<template #footer>', '</template>\n  </t-drawer>')
     expect(footer).toContain('material-detail__actions')
     expect(footer).toContain('>关闭</t-button>')
     // 三颗上下文主操作都在页脚里，位置不随正文高度移动。
@@ -190,5 +227,39 @@ describe('material detail drawer', () => {
     const line = sliceBetween(hero, 'detail-source-line', '</p>')
     expect(line).not.toContain('gameName')
     expect(line).toContain('material.platform')
+  })
+
+  /**
+   * 走查七轮（用户提示词第九节）：顶部用小型 Badge，不用横跨整页的状态色块。
+   *
+   * 使用状态徽章只在读得到时出：素材库上下文打开的这个抽屉没有关系那一维，
+   * 画一颗「使用中」就是替服务端宣布了一条它没说过的关系。
+   */
+  it('adds the usage badge to the small badge row, without a full-width status bar', () => {
+    const hero = sliceBetween(template, 'detail-hero', 'detail-card')
+    expect(hero).toContain('usageStatusLabel(material.usage_status)')
+    expect(hero).toContain('v-if="material.usage_status"')
+    // 三颗徽章都在同一个 flex 行里——「不是色块」的判据是它们还在那个容器里。
+    expect(source).toMatch(/\.detail-badges \{[^}]*display: flex/)
+  })
+
+  /**
+   * 页脚按状态给真实业务动作（用户提示词第十一节）。「已放弃」只给恢复：一颗同时
+   * 出现的「下载」会让运营以为那条关系还通着。
+   *
+   * 「加入合成」今天跳 `/compose`（ComingSoon），和行操作走同一个判断——详情与列表
+   * 对同一个素材给出不同的下一步，是这两处各写一份的直接后果。
+   */
+  it('gives the footer the action the relation state calls for', () => {
+    const footer = sliceBetween(template, '<template #footer>', '</template>\n  </t-drawer>')
+    expect(footer).toContain("$emit('restore', material)")
+    expect(footer).toContain('>恢复使用</t-button>')
+    expect(footer).toContain("$emit('give-up', material)")
+    expect(footer).toContain('>放弃使用</t-button>')
+    expect(footer).toContain("$emit('compose', material)")
+    expect(footer).toContain("$emit('redownload', material)")
+    // 恢复与放弃互斥，下载与放弃互斥：同一个素材不能同时有两条相反的出路。
+    expect(footer).toContain("material.usage_status === 'removed'")
+    expect(footer).toContain("material.video_status === 'ready'")
   })
 })

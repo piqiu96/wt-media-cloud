@@ -14,8 +14,9 @@ const read = pageReader(import.meta.url)
 const FILES = ['MaterialLibraryPage.vue', 'MyMaterialsPage.vue']
 
 // 走查四轮把封面/标题/来源平台三列合成一个「素材」格，8 列降到 6 列；走查五轮又加回
-// 两列（素材状态、使用情况，规范 §7.2 的第二个状态维度），素材库回到 8 列。分母留在这里，
-// 列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
+// 两列（素材状态、使用情况，规范 §7.2 的第二个状态维度），素材库回到 8 列。
+// 走查七轮我的素材换了列但不加列数（游戏并入「素材」格副行，腾出的位置给「使用状态」），
+// 仍是 6 列。分母留在这里，列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
 const TABLES = [
   { file: 'MaterialLibraryPage.vue', name: 'columns', count: 8 },
   { file: 'MyMaterialsPage.vue', name: 'columns', count: 6 },

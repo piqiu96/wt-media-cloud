@@ -87,6 +87,61 @@ export function materialStatusTone(value) {
   return MATERIAL_STATUS_TONES[value] || 'neutral'
 }
 
+// ── 使用状态（第三个状态维度）─────────────────────────────────────────────
+//
+// 文件状态说「源视频准备好了没有」，素材状态说「这条素材还提供给运营选用吗」，
+// 使用状态说「当前这个人还在用这条素材吗」。三个各自回答一个问题，规范 §7.2 明令不合并。
+//
+// 取值就是 `material_usages.status` 的两档（Business Schema MaterialUsage 的
+// `active / removed`），一档不多 —— 那个 CHECK 约束里没有第三个值。用户 2026-09-30
+// 那句「如果当前代码尚未正式存在某个状态，不要直接新增 enum」挡的正是「已中断」。
+//
+// 读取协议是 `material.usage_status`：素材库列表不返回它（那是别人的关系），
+// 只有「我的素材」的行与它打开的详情带着。读不到不退回 active —— 「使用中」正是
+// 唯一能触发下载与加入合成的那个取值，兜底成它就是替服务端宣布了一条关系。
+export const USAGE_STATUSES = ['active', 'removed']
+
+const USAGE_STATUS_LABELS = {
+  active: '使用中',
+  removed: '已放弃',
+}
+
+const USAGE_STATUS_TONES = {
+  active: 'success',
+  removed: 'neutral',
+}
+
+export function usageStatusLabel(value) {
+  return USAGE_STATUS_LABELS[value] || value || '-'
+}
+
+export function usageStatusTone(value) {
+  return USAGE_STATUS_TONES[value] || 'neutral'
+}
+
+/**
+ * 「下一步」是前端提示文案，不是业务状态（2026-09-30 走查七轮用户提示词明说）。
+ * 它只把「这两个维度意味着接下来该做什么」说出来，不发请求、不改任何状态。
+ *
+ * 已放弃的关系先说恢复：这时候再提「去下载」，运营会以为那条路还通着。
+ * 谁也不认识的取值画 `-`，不猜 —— 猜出来的下一步会指向一个不存在的动作。
+ */
+export function nextStepHint(material) {
+  if (material?.usage_status === 'removed') return '恢复使用后可继续下载与加入合成'
+  switch (material?.video_status) {
+    case 'not_downloaded':
+      return '下载到本机后可加入合成'
+    case 'downloading':
+      return '文件准备中，完成后即可下载到本机'
+    case 'ready':
+      return '可加入合成，或重新下载到其他机器'
+    case 'failed':
+      return '重试下载，或查看最近一次失败原因'
+    default:
+      return '-'
+  }
+}
+
 // ── 使用情况 ──────────────────────────────────────────────────────────────
 //
 // 列表的「使用情况」列与详情的「使用情况」卡读的同一份协议，形状是 `material.usage`：

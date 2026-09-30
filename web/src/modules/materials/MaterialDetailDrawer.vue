@@ -12,8 +12,11 @@ import {
   gameName,
   materialStatusLabel,
   materialStatusTone,
+  nextStepHint,
   shortDigest,
   usageFacts,
+  usageStatusLabel,
+  usageStatusTone,
   videoStatusLabel,
   videoStatusTone,
 } from './labels.js'
@@ -23,12 +26,12 @@ const props = defineProps({
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   games: { type: Array, default: () => [] },
-  // 上下文决定动作：素材库给「加入我的素材」，我的素材给下载。
+  // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支。
   mode: { type: String, default: 'library' },
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
-defineEmits(['update:visible', 'add', 'download', 'go-mine'])
+defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give-up', 'restore', 'compose'])
 
 const client = createMaterialsClient()
 const videoUrl = ref('')
@@ -67,14 +70,18 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
               <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">{{ material.title || '未命名素材' }}</a>
               <span v-else>{{ material.title || '未命名素材' }}</span>
             </h3>
-            <!-- 副行只留平台 · 作者：游戏在列表里有列、在基本信息里有行。 -->
+            <!-- 副行只留平台 · 作者：游戏在列表里有列、在详情最后一段有行。 -->
             <p class="detail-source-line">
               <template v-if="material.platform">{{ material.platform }}</template>
               <template v-if="material.platform && (material.author_name || material.author_home_url)"> · </template>
               <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
               <template v-else>{{ material.author_name }}</template>
             </p>
+            <!-- 走查七轮：小型 Badge 组，不是横跨整页的状态色块（§7.1）。使用状态只在
+                 读得到时出——素材库上下文打开的这个抽屉没有关系那一维，画一颗「使用中」
+                 就是替服务端宣布一条它没说过的关系。 -->
             <div class="detail-badges">
+              <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
               <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
               <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
               <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
@@ -82,9 +89,19 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
           </div>
         </section>
 
-        <!-- 使用情况服务端尚未返回，这里先立骨架。 -->
+        <!-- 首段回答「我现在处理到哪一步，下一步是什么」（走查七轮用户提示词）：两个状态
+             维度 + 加入时间 + 一句下一步，使用情况的五个事实跟在下面（协议见 labels.js）。 -->
         <section class="detail-card">
-          <h4 class="detail-card__title">使用情况</h4>
+          <h4 class="detail-card__title">当前进度 / 使用情况</h4>
+          <dl class="detail-card__grid detail-card__grid--4">
+            <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" /></dd></div>
+            <div><dt>使用状态</dt><dd>
+              <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
+              <template v-else>—</template>
+            </dd></div>
+            <div><dt>加入时间</dt><dd>{{ material.added_at ? formatDateTime(material.added_at) : '—' }}</dd></div>
+            <div><dt>下一步</dt><dd>{{ nextStepHint(material) }}</dd></div>
+          </dl>
           <div class="detail-usage">
             <div v-for="fact in usageFacts(material)" :key="fact.key" class="detail-usage__item">
               <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
@@ -92,15 +109,6 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
               <span class="detail-usage__label">{{ fact.label }}</span>
             </div>
           </div>
-        </section>
-
-        <section class="detail-card">
-          <h4 class="detail-card__title">基本信息</h4>
-          <dl class="detail-card__grid detail-card__grid--3">
-            <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
-            <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
-            <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
-          </dl>
         </section>
 
         <section class="detail-card">
@@ -146,6 +154,17 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
             <div class="detail-metrics__item"><strong>{{ countLabel(material.share_count) }}</strong><span>分享</span></div>
           </div>
         </section>
+
+        <!-- 素材自身的三个字段放最后：走查七轮那份提示词按「先进度、后字段」排序，没有安排
+             它们的位置；直接删掉会丢掉运营要复制去别处查的素材 ID。 -->
+        <section class="detail-card">
+          <h4 class="detail-card__title">基本信息</h4>
+          <dl class="detail-card__grid detail-card__grid--3">
+            <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
+            <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
+            <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
+          </dl>
+        </section>
       </div>
     </t-loading>
 
@@ -157,7 +176,19 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
         <div class="material-detail__primary">
           <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
           <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
-          <t-button v-if="mode === 'mine'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
+          <!-- 我的素材这一组按两个维度分支（走查七轮用户提示词第十一节）：已放弃只给恢复，
+               其余按文件状态给一步主操作；「重新下载」是就绪行的次级入口。 -->
+          <template v-if="mode === 'mine'">
+            <template v-if="material.usage_status === 'removed'">
+              <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
+            </template>
+            <template v-else>
+              <t-button v-if="material.video_status === 'ready'" theme="primary" @click="$emit('compose', material)">加入合成</t-button>
+              <t-button v-else-if="material.video_status !== 'downloading'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
+              <t-button v-if="material.video_status === 'ready'" class="wt-secondary-button" variant="outline" @click="$emit('redownload', material)">重新下载</t-button>
+              <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
+            </template>
+          </template>
         </div>
       </div>
     </template>
@@ -180,7 +211,8 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 .detail-card__grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .detail-card__grid dt { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-card__grid dd { margin: 5px 0 0; color: var(--wt-text-primary); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
-.detail-usage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+/* 使用情况的五个事实与上面那行进度事实同卡不同组：一条虚线分开，不另起一张卡。 */
+.detail-usage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--wt-border); }
 .detail-usage__item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .detail-usage__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
 /* 标签挂类名而不是后代选择器：ResourceStatusBadge 的根元素也是 span，会被后代选择器染色。 */

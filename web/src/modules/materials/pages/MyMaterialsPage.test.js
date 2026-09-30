@@ -36,16 +36,19 @@ describe('my materials page', () => {
     expect(source).toContain('v-model="statusFilter"')
   })
 
-  // 列表只返回 active 的关系，所以看不到已移出的行，也就没有「撤销移出」。
-  // 恢复 = 回素材库再点一次「加入我的素材」（冻结合同里没有恢复端点，那条命令
-  // 本身就是幂等的创建或恢复）。走查三轮后本页不再提供「加入我的素材」——
-  // 在「我的素材」里给自己一个加入按钮是同义反复。
-  it('offers no undo, because the list cannot contain a removed row', () => {
-    // 只看模板：页面上不该出现「恢复」这类控件。脚本里的注释提到它不算数，
-    // 而且那条注释正是要说明为什么这里没有它。
-    const template = source.slice(source.indexOf('<template>'))
-    expect(template).not.toContain('恢复')
-    expect(template).not.toContain('撤销')
+  /**
+   * 走查七轮（2026-09-30）推翻了「本页看不到已放弃的行」这条旧事实：列表接口不再
+   * 只取 `status = 'active'`，已放弃的关系照样返回，所以本页第一次有了「恢复使用」。
+   *
+   * 恢复走**关系自己的端点**（`POST /material-usages/{id}/restore`），不是回素材库
+   * 再点一次「加入我的素材」：那条命令按素材 id 走，对一个已经放弃过、又被别的入口
+   * 恢复过的关系说不清它恢复的是哪一行。`uq_material_usages_user_material` 保证
+   * 一个(用户,素材)只有一行，两条路径最终落到同一行。
+   */
+  it('restores a given-up relation through the relation endpoint', () => {
+    expect(source).toContain('await client.restoreUsage(row.usage_id)')
+    expect(source).not.toContain('restoreUsage(row.id)')
+    expect(source).toContain('>恢复使用</t-button>')
     expect(source).not.toContain('addUsage')
   })
 
@@ -64,23 +67,87 @@ describe('my materials page', () => {
     expect(source).not.toContain('material-detail-drawer')
   })
 
-  // 走查三轮（交互对齐 §2.3/§5.5/§5.6/§7.4）：行操作收敛为「详情 | 下载（failed 时
-  // 文案「重试」）| 移出」。规范 §5.6（2026-09-30 用户补充裁定）：按钮不超过 5 个
-  // 全部平铺——本行 3 个，移出平铺并保留危险样式，不进「更多」。
-  it('narrows each row to详情, one status-driven primary action, and a flat danger remove', () => {
-    expect(source).toContain('@click="openDetail(row)">详情</t-button>')
-    expect(source).not.toContain('>查看</t-button>')
-    expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>')
-    expect(source).toContain('class="wt-secondary-button wt-danger-button" variant="outline" @click="remove(row)">移出</t-button>')
+  /**
+   * 走查七轮：行操作按「使用状态 × 文件状态」分支，每行只突出一个下一步动作。
+   *
+   * 规范 §5.6 与用户同轮裁定（「按钮按照超过 5 个才有更多按钮出现」）：本项目按钮数
+   * 上限是 3 个（详情 + 一个主操作 + 放弃使用），永远到不了 5，所以**没有「更多」**——
+   * 用户提示词里那套「3 个动作也收进更多」的写法按 §5.6 不采用。
+   */
+  it('branches each row on the two dimensions, flat and never behind 更多', () => {
+    const op = source.slice(source.indexOf('#op="{ row }"'), source.indexOf('</t-space>'))
+    expect(op).toContain('@click="openDetail(row)">详情</t-button>')
+    expect(op).not.toContain('>查看</t-button>')
+    // 已放弃：只有「恢复使用」，不再给必然空转的下载。
+    expect(op).toContain("row.usage_status === 'removed'")
+    expect(op).toContain("row.video_status === 'ready'")
+    expect(op).toContain('@click="giveUp(row)">放弃使用</t-button>')
     expect(source).not.toContain('<t-dropdown')
+    expect(source).not.toContain('>更多<')
+  })
+
+  // 「移出」是收藏夹的用词。关系是使用关系：放弃的是「使用」，不是把素材从清单里删掉。
+  it('says 放弃使用 instead of 移出', () => {
+    expect(source).not.toContain('>移出</t-button>')
+    expect(source).not.toContain('已移出我的素材')
+    expect(source).toContain('已放弃使用')
+  })
+
+  // 走查七轮用户提示词第一节：这一页不是收藏夹，副标题不该说「收藏」。
+  it('describes the page as the place work continues, not a favourites list', () => {
+    expect(source).toContain('已加入的素材，在这里下载、补充文件并进入后续生产')
+    expect(source).not.toContain('你收藏的素材')
+  })
+
+  /**
+   * 规范 §7.2：使用状态与文件状态并排、不合并——同一个素材可以同时是「使用中 + 准备失败」，
+   * 压成一个混合状态最先丢掉的正是运营要做判断的那种组合。
+   *
+   * 游戏这一列同时被收进「素材」格副行（与作者同格）：走查七轮把它从列里拿掉，
+   * 是因为列里的「游戏」和素材识别信息说的是同一件事，而列本身占了 100px。
+   */
+  it('carries 使用状态 next to 文件状态 and folds the game into the 素材 cell', () => {
+    expect(source).toContain("{ colKey: 'usage_status', title: '使用状态'")
+    expect(source.indexOf("{ colKey: 'usage_status'")).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(source.indexOf("{ colKey: 'usage_status'")).toBeLessThan(source.indexOf("{ colKey: 'added_at'"))
+    expect(source).not.toContain("{ colKey: 'game'")
+    expect(source).toContain('usageStatusLabel(row.usage_status)')
+    expect(source).toContain('usageStatusTone(row.usage_status)')
+    // 副行是「游戏 · 作者」。
+    expect(source).toContain('gameName(games.value, row.game_id)')
+    expect(source).toContain('row.author_name')
+  })
+
+  // 关系自己的两个字段必须随行带出来：使用状态列读 `usage_status`，详情卡片读同一个值。
+  it('carries the relation state and its own timestamp out of the usage row', () => {
+    expect(source).toContain('usage_status: usage.status')
+    expect(source).toContain('added_at: usage.created_at')
+  })
+
+  // 详情抽屉在我的素材上下文里要按关系状态给动作，所以打开时必须把关系那一维带上——
+  // 单条素材接口返回的是素材，它不知道「我」和这条素材是什么关系。
+  it('hands the relation state to the drawer it opens', () => {
+    expect(source).toMatch(/client\.get\(row\.id\)[\s\S]{0,200}?usage_status: row\.usage_status/)
   })
 
   // 抽屉按上下文给动作：我的素材上下文提供下载/重试，不再提供「加入我的素材」
   // （它在这里就是自己）。
-  it('opens the drawer in mine mode with download and no add', () => {
+  it('opens the drawer in mine mode with the actions of a relation, and no add', () => {
     expect(source).toContain('mode="mine"')
     expect(source).toContain('@download="download"')
+    expect(source).toContain('@give-up="giveUp"')
+    expect(source).toContain('@restore="restore"')
     expect(source).not.toContain('@add=')
+  })
+
+  // 「加入合成」在这条 CHG 里没有后端端点：`/compose` 今天指向 ComingSoon。它是一个
+  // **跳转**，不是一次假装成功的提交——点了会看见那一页的真实状态，而不是一个说
+  // 「已加入合成」的 toast，然后在合成页里找不到这条素材。
+  it('routes 加入合成 to the compose page instead of faking a submission', () => {
+    expect(source).toContain("{ name: 'Compose' }")
+    // 只看模板：脚本里那句「发一个『已加入合成』的提示才是伪造」是这条决定本身的记录。
+    const template = source.slice(source.indexOf('<template>'))
+    expect(template).not.toContain('已加入合成')
   })
 
   // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 素材 ID 第一列、封面随后，

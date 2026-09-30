@@ -23,6 +23,9 @@ export function createMaterialsClient({ base = '/api/v1', fetch = globalThis.fet
     get(id) { return api.get(`/materials/${id}`) },
     addUsage(id) { return api.post(`/materials/${id}/usages`, {}) },
     removeUsage(usageId) { return api.delete(`/material-usages/${usageId}`) },
+    // 恢复走关系自己的端点，不靠「再 add 一次」：那条命令按素材 id 走，说不清它恢复的是
+    // 哪一行。两条路径最终落到同一行（uq_material_usages_user_material）。
+    restoreUsage(usageId) { return api.post(`/material-usages/${usageId}/restore`, {}) },
     listMyMaterials() { return api.get('/my-materials') },
     // 202 恒定：此刻还没有任何字节被下载，任务在节点领取前一直是 pending。
     // 下一次诚实的进度来源是 GET /file-transfer-tasks，不是这个响应。

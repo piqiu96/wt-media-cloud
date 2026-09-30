@@ -3,6 +3,7 @@ import {
   DUPLICATE_RISKS,
   MATERIAL_STATUSES,
   USAGE_FIELDS,
+  USAGE_STATUSES,
   VIDEO_STATUSES,
   downloadActionLabel,
   duplicateRiskLabel,
@@ -10,9 +11,12 @@ import {
   gameName,
   materialStatusLabel,
   materialStatusTone,
+  nextStepHint,
   shortDigest,
   usageFacts,
   usageLines,
+  usageStatusLabel,
+  usageStatusTone,
   videoStatusLabel,
   videoStatusTone,
 } from './labels.js'
@@ -151,5 +155,59 @@ describe('usage protocol', () => {
     expect(duplicateRiskLabel('mystery')).toBe('mystery')
     expect(duplicateRiskTone(undefined)).toBe('neutral')
     expect(duplicateRiskTone('suspected')).toBe('danger')
+  })
+})
+
+// 第三个状态维度。文件状态说「源视频准备好了没有」，素材状态说「这条素材还提供给运营选用吗」，
+// 使用状态说「当前这个人还在用这条素材吗」。三者各自回答一个问题，规范 §7.2 明令不合并。
+//
+// 取值就是 `material_usages.status` 的两档（Business Schema MaterialUsage），一档不多：
+// 用户 2026-09-30 走查七轮的那句「如果当前代码尚未正式存在某个状态，不要直接新增 enum」
+// 挡的正是「已中断」——它在这张表里没有第三个取值。
+describe('usage status dimension', () => {
+  it('names both relation states the frozen schema allows', () => {
+    expect(USAGE_STATUSES).toEqual(['active', 'removed'])
+    for (const status of USAGE_STATUSES) {
+      expect(usageStatusLabel(status), status).not.toBe(status)
+      expect(usageStatusLabel(status), status).not.toBe('-')
+      expect(usageStatusTone(status), status).toBeTruthy()
+    }
+    expect(usageStatusLabel('active')).toBe('使用中')
+    expect(usageStatusLabel('removed')).toBe('已放弃')
+    expect(usageStatusTone('active')).toBe('success')
+  })
+
+  // 读不到不等于「在使用」：素材库列表不带这个字段（那是别人的关系），而「使用中」正是
+  // 唯一能触发下载与加入合成的那个取值。缺值兜底成它，就是替服务端宣布了一条关系。
+  it('never reads a missing field as 使用中', () => {
+    expect(usageStatusLabel(undefined)).toBe('-')
+    expect(usageStatusLabel('')).toBe('-')
+    expect(usageStatusTone(undefined)).toBe('neutral')
+  })
+
+  it('passes through a state it does not know instead of hiding it', () => {
+    expect(usageStatusLabel('mystery')).toBe('mystery')
+  })
+})
+
+// 「下一步」是前端提示文案，不是业务状态（用户提示词明说）。它只把「这个文件状态意味着
+// 接下来该做什么」说出来，不发请求、不改状态。
+describe('next-step hint', () => {
+  it('speaks from the file state', () => {
+    expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('下载到本机后可加入合成')
+    expect(nextStepHint({ video_status: 'downloading' })).toBe('文件准备中，完成后即可下载到本机')
+    expect(nextStepHint({ video_status: 'ready' })).toBe('可加入合成，或重新下载到其他机器')
+    expect(nextStepHint({ video_status: 'failed' })).toBe('重试下载，或查看最近一次失败原因')
+  })
+
+  // 已放弃的关系先要恢复，才轮到文件那一维：一句「去下载」会让运营以为这条路还通着。
+  it('sends a given-up relation to restore before anything else', () => {
+    expect(nextStepHint({ usage_status: 'removed', video_status: 'ready' })).toBe('恢复使用后可继续下载与加入合成')
+    expect(nextStepHint({ usage_status: 'removed' })).toBe('恢复使用后可继续下载与加入合成')
+  })
+
+  it('invents nothing when it cannot read the file state', () => {
+    expect(nextStepHint({})).toBe('-')
+    expect(nextStepHint(undefined)).toBe('-')
   })
 })
