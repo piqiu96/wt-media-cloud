@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(new URL('./MaterialLibraryPage.vue', import.meta.url), 'utf8')
 
+/** 取出两段定界文本之间的内容；找不到就抛，别让断言在空串上静默通过。 */
+function sliceBetween(text, start, end) {
+  const from = text.indexOf(start)
+  const to = text.indexOf(end, from)
+  if (from === -1 || to === -1) throw new Error(`找不到切片：${start} … ${end}`)
+  return text.slice(from, to)
+}
+
+// 「素材库不提供下载」这条规则管的是**行操作**，不是整页：加入成功的即时反馈里
+// 可以给一步「立即下载」（走查四轮，2026-09-30 用户裁定）。所以这条断言量的是
+// 行操作那一块，而不是整份源码。
+const opBlock = sliceBetween(source, '#op=', '</template>')
+
 describe('material library page', () => {
   /**
    * `?material_id=N` 是一个**真实入口**，不是装饰。
@@ -38,16 +51,6 @@ describe('material library page', () => {
     expect(source).toContain('new Set(rows.value.map((row) => row.game_id).filter(Boolean))')
   })
 
-  // 走查三轮（交互对齐）：下载归「我的素材」。素材库行与它打开的详情抽屉都不再
-  // 提供下载——留着入口就是把「先领取再下载」说成两条并行的路。
-  it('offers no download anywhere on the library page', () => {
-    expect(source).not.toContain('@click="download(row)"')
-    expect(source).not.toContain('createDownload')
-    expect(source).not.toContain('createDownloadFailureMessage')
-    expect(source).not.toContain('downloadCentre')
-    expect(source).not.toContain('@download')
-  })
-
   it('adds to my materials through the one idempotent command', () => {
     expect(source).toContain('await client.addUsage(row.id)')
     // 200 与 201 的响应体相同，客户端分支不了 —— 也就不该假装能分支。
@@ -59,41 +62,119 @@ describe('material library page', () => {
     expect(source).toContain('videoStatusTone(row.video_status)')
   })
 
-  // 走查修正（CHG-20260930-069）：行内以封面与素材 ID 识别内容；作者、平台链接与
-  // 体积不再出现在行里，都归详情抽屉。ID 是第一列——走查反馈说运营扫行时先找编号。
-  // 标题本身蓝色可点，跳来源平台落地页（source_url），与内容池页同一形状。
-  it('puts the id column first, and makes the title the link to the source page', () => {
+  // 走查四轮（2026-09-30 用户带设计图 + 裁定）：封面、标题、来源平台合成一个「素材」
+  // 单元格，减少列数；素材 ID 仍独立成列且是第一业务列（规范 §5.1，用户明确裁定保留）。
+  it('collapses cover, title and platform into one material cell behind a leading id column', () => {
     const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
-    const coverAt = source.indexOf("{ colKey: 'cover', title: '封面'")
+    const materialAt = source.indexOf("{ colKey: 'material', title: '素材'")
     expect(idAt).toBeGreaterThan(-1)
-    expect(coverAt).toBeGreaterThan(-1)
-    expect(idAt, '素材 ID 列必须在封面列之前').toBeLessThan(coverAt)
+    expect(materialAt).toBeGreaterThan(-1)
+    expect(idAt, '素材 ID 列仍必须是第一业务列').toBeLessThan(materialAt)
+    // 三样识别信息不再各自成列。
+    for (const gone of ["title: '封面'", "title: '标题'", "title: '来源平台'"]) {
+      expect(source, `不该再有 ${gone} 列`).not.toContain(gone)
+    }
+    expect(source).toContain('<template #material="{ row }">')
+    expect(source).toContain('MaterialCover')
+    expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
+    expect(source).toContain('{{ row.platform')
     // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
-    expect(source).toContain('MaterialCover')
-    expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
-    expect(source).toContain('class="wt-primary-link')
+    // 副行只带来源平台；游戏有自己的一列，同一格里再说一遍就是重复。
     expect(source).not.toContain('· {{ row.author_name')
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })
 
+  // 列名换成了「文件状态」，因为它描述的是源视频文件的准备进度，不是这条素材的业务状态
+  // （业务状态维度本轮不存在，见 change.md §3）。取值没换，仍是 video_status 四态。
+  it('names the video status column 文件状态 and keeps the four-state labels', () => {
+    expect(source).toContain("{ colKey: 'video_status', title: '文件状态'")
+    expect(source).not.toContain("title: '视频状态'")
+    expect(source).toContain('videoStatusLabel(row.video_status)')
+    expect(source).toContain('videoStatusTone(row.video_status)')
+  })
+
+  /**
+   * 走查三轮裁定「素材库不提供下载入口」，走查四轮把它收窄到**行与详情抽屉**：
+   * 加入成功的即时反馈可以给一步「立即下载」（用户 2026-09-30 裁定）。
+   *
+   * 所以这条断言量的是行操作那一块 + 抽屉绑定，不是整份源码 —— 整份源码里现在
+   * 确实有 `createDownload`，那是反馈里的那一步。
+   */
+  it('offers no download in the row or the drawer, only on the add-success toast', () => {
+    expect(opBlock).not.toContain('下载')
+    expect(source).not.toContain('@download')
+    expect(source).not.toContain('downloadCentre')
+    const toast = sliceBetween(source, 'function notifyAdded(', '\n}')
+    expect(toast).toContain('立即下载')
+  })
+
+  // 「已加入 → 去我的素材」需要知道每行的加入状态。列表接口不返回它，但
+  // `/api/v1/my-materials` 已经能全量取回当前用户的关系，join 一次即可——
+  // 不为此新增后端字段（2026-09-30 用户裁定）。
+  it('reads my materials so a row knows it is already joined', () => {
+    expect(source).toContain('await client.listMyMaterials()')
+    expect(source).toContain('usage.material_id')
+    expect(source).toContain('const mineIds = ref(')
+    expect(source).toMatch(/onMounted\(\(\) => \{[\s\S]*loadMine\(\)/)
+  })
+
+  // 走查四轮（用户裁定 + 设计图）：已加入的行主操作是「去我的素材」，
+  // 未加入的行仍是「加入我的素材」。两个主操作互斥。
+  it('swaps the row primary action to 去我的素材 once the material is joined', () => {
+    expect(opBlock).toContain('@click="openDetail(row)">详情</t-button>')
+    expect(opBlock).not.toContain('>查看</t-button>')
+    expect(opBlock).toContain('@click="addToMine(row)">加入我的素材</t-button>')
+    expect(opBlock).toContain('@click="goToMyMaterials()">去我的素材</t-button>')
+    expect(source).toMatch(/v-if="!isMine\(row\)"[\s\S]{0,200}?addToMine\(row\)/)
+    expect(source).toMatch(/v-else[\s\S]{0,200}?goToMyMaterials\(\)/)
+    // 跳转目标就是「我的素材」页，两个端同名（cloud / desktop router 都是 MyMaterial）。
+    expect(source).toContain("{ name: 'MyMaterial' }")
+  })
+
+  // 走查四轮：加入成功的反馈里给两个下一步。「立即下载」只在文件已就绪时出现——
+  // 未就绪时那颗按钮必然换来一个 409，而不是一次下载。
+  it('offers 立即下载 and 去我的素材 on the add-success toast', () => {
+    const toast = sliceBetween(source, 'function notifyAdded(', '\n}')
+    expect(toast).toContain('MessagePlugin.success')
+    expect(toast).toContain('已加入我的素材')
+    expect(toast).toContain('立即下载')
+    expect(toast).toContain('去我的素材')
+    expect(toast).toContain("row.video_status === 'ready'")
+    expect(toast).toContain('downloadNow(row)')
+    // 「立即下载」走的是与「我的素材」同一颗命令，不另开一条下载路径；
+    // 409 的两种拒绝只能靠 error.type 区分，翻译件也是同一份。
+    const downloadFn = sliceBetween(source, 'async function downloadNow(', '\n}')
+    expect(downloadFn).toContain('client.createDownload(row.id)')
+    expect(downloadFn).toContain('createDownloadFailureMessage')
+    expect(source).toContain("from '../../transfer/downloadErrors.js'")
+  })
+
+  // 反馈发出去之后行要立刻翻转，不能让运营再点一次刷新才看见「去我的素材」。
+  it('flips the row to 去我的素材 without a reload', () => {
+    expect(source).toMatch(/mineIds\.value\.add\(row\.id\)/)
+  })
+
   // 详情抽屉是两页共用的一个组件：各写一份的结局是同一个素材在两页显示得不一样，
   // 且没有任何东西会报错。走查三轮：抽屉按上下文给动作——素材库上下文只有
-  // 「加入我的素材」，不提供下载。
+  // 「加入我的素材」，不提供下载；走查四轮补上「已加入」时的「去我的素材」。
   it('uses the shared material detail drawer in library mode', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
     expect(source).toContain('mode="library"')
     expect(source).toContain('@add="addToMine"')
+    expect(source).toContain('@go-mine="goToMyMaterials"')
+    expect(source).toContain(':mine="isMine(detail)"')
     expect(source).not.toContain('material-detail-drawer')
   })
 
-  // 走查三轮（交互对齐 §2.3/§5.3/§5.5）：行操作收敛为「详情 | 加入我的素材」，
-  // 每行单一主操作；「查看」是全系统要消灭的同义词。
-  it('narrows each row to详情 followed by one primary action', () => {
-    expect(source).toContain('@click="openDetail(row)">详情</t-button>')
-    expect(source).not.toContain('>查看</t-button>')
-    expect(source).toContain('theme="primary" @click="addToMine(row)">加入我的素材</t-button>')
+  // 走查三轮（交互对齐 §2.3/§5.3/§5.5）：行操作收敛为「详情 | 单一主操作」；
+  // 「查看」是全系统要消灭的同义词。
+  it('narrows each row to 详情 followed by one primary action', () => {
+    expect(opBlock).toContain('@click="openDetail(row)">详情</t-button>')
+    expect(opBlock).not.toContain('>查看</t-button>')
+    // 行里只有这两颗：详情 + 主操作（加入或去我的素材），没有第二个业务动作。
+    expect(opBlock.match(/<t-button/g)).toHaveLength(3)
   })
 })

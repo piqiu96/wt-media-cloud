@@ -13,9 +13,11 @@ const read = pageReader(import.meta.url)
 
 const FILES = ['MaterialLibraryPage.vue', 'MyMaterialsPage.vue']
 
+// 走查四轮把封面/标题/来源平台三列合成一个「素材」格，8 列降到 6 列。分母留在这里，
+// 列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
 const TABLES = [
-  { file: 'MaterialLibraryPage.vue', name: 'columns', count: 8 },
-  { file: 'MyMaterialsPage.vue', name: 'columns', count: 8 },
+  { file: 'MaterialLibraryPage.vue', name: 'columns', count: 6 },
+  { file: 'MyMaterialsPage.vue', name: 'columns', count: 6 },
 ]
 
 describe('material list page conventions', () => {

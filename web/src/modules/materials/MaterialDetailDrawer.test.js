@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(new URL('./MaterialDetailDrawer.vue', import.meta.url), 'utf8')
+const template = source.slice(source.indexOf('<template>'))
 
 // 走查修正（CHG-20260930-069）：作者主页、平台原视频页、文件大小与云端视频地址
 // 都在详情里。行内只剩识别信息。
@@ -38,7 +39,6 @@ describe('material detail drawer', () => {
   // （statistics.play_count 恒为 0，已对全部来源行核对），区块只展示拿得到数的四项；
   // view_count 字段仍在契约里，只是不在这里渲染。
   it('shows the source content-pool statistics as their own section', () => {
-    const template = source.slice(source.indexOf('<template>'))
     expect(source).toContain('material.like_count')
     expect(source).toContain('material.favorite_count')
     expect(source).toContain('material.comment_count')
@@ -52,13 +52,44 @@ describe('material detail drawer', () => {
   })
 
   // 走查三轮（交互对齐）：抽屉按上下文提供动作——library 只有「加入我的素材」，
-  // mine 只有「下载/重试」。共用一个组件、两个上下文各给一个主操作，
-  // 而不是把两页的动作都堆进来。
+  // mine 只有「下载/重试」。走查四轮补上 library 的「已加入」分支：那时主操作是
+  // 「去我的素材」，不再给一个必然幂等空转的「加入我的素材」。
   it('offers the actions of its context only', () => {
     expect(source).toContain("mode: { type: String, default: 'library' }")
-    expect(source).toMatch(/v-if="mode === 'library'"/)
     expect(source).toMatch(/v-if="mode === 'mine'"/)
+    expect(source).toMatch(/mode === 'library' && !mine/)
+    expect(source).toMatch(/mode === 'library' && mine/)
     // mine 上下文的主操作文案由状态驱动：failed 是「重试」，其余是「下载」。
     expect(source).toContain("$emit('download', material)\">{{ downloadActionLabel(material.video_status) }}")
+  })
+
+  // 走查四轮（2026-09-30 用户带设计图）：正文按「概览 / 文件信息 / 来源信息」分标签，
+  // 而不是把十几行 dl 平铺——平铺的结局是「入库时间」和「72313 个赞」读成同一类事实。
+  it('organises the body into 概览 / 文件信息 / 来源信息 tabs', () => {
+    expect(template).toContain('<t-tabs')
+    expect(template).toContain('<t-tab-panel')
+    for (const label of ['概览', '文件信息', '来源信息']) {
+      expect(template, `缺少 ${label} 标签`).toContain(`label="${label}"`)
+    }
+    // 基本信息留在概览；文件事实与来源事实各自归位。
+    expect(template).toContain('基本信息')
+    expect(template).toContain('来源内容池统计')
+  })
+
+  // 规范 §6.3：详情不出现无意义的「确认 / 取消」，关闭走统一的关闭动作。
+  it('closes with 关闭 instead of a meaningless 确认 / 取消 pair', () => {
+    expect(template).toContain('>关闭</t-button>')
+    expect(template).not.toContain('>确认</t-button>')
+    expect(template).not.toContain('>取消</t-button>')
+    expect(template).not.toContain('>新增</t-button>')
+    expect(template).not.toContain('>保存</t-button>')
+  })
+
+  // 顶部把「这是什么」（来源副行 + 状态徽章）一次说清，正文才用于解释细节。
+  it('heads the drawer with the source line and the status badges', () => {
+    expect(template).toContain('material.author_name')
+    expect(source).toContain('gameName(games, material.game_id)')
+    expect(template).toContain('已加入我的素材')
+    expect(source).toContain("mine: { type: Boolean, default: false }")
   })
 })

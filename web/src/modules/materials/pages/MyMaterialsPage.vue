@@ -31,14 +31,14 @@ const detailLoading = ref(false)
 const pagination = ref({ current: 1, pageSize: 20 })
 
 // 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
-// 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
+// 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。走查四轮与素材库一起
+// 把封面/标题/来源平台并成一个「素材」格，列名也从「视频状态」改为「文件状态」：
+// 它描述的是源视频文件的准备进度，不是这条素材的业务状态（后者本轮不存在）。
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90 },
-  { colKey: 'cover', title: '封面', width: 72 },
-  { colKey: 'title', title: '标题', width: 250 },
-  { colKey: 'source', title: '来源平台', width: 95 },
-  { colKey: 'game', title: '游戏', width: 65 },
-  { colKey: 'video_status', title: '视频状态', width: 90 },
+  { colKey: 'material', title: '素材', width: 380 },
+  { colKey: 'game', title: '游戏', width: 100 },
+  { colKey: 'video_status', title: '文件状态', width: 100 },
   { colKey: 'added_at', title: '加入时间', width: 105 },
   { colKey: 'op', title: '操作', width: 285, fixed: 'right' },
 ]
@@ -169,7 +169,7 @@ onMounted(() => {
       <ResourceCard class="material-filter-card">
         <div class="filter-row">
           <label class="filter-field"><span>综合搜索</span><t-input v-model="search" clearable placeholder="标题、作者" style="width:220px" /></label>
-          <label class="filter-field"><span>视频状态</span><t-select v-model="statusFilter" clearable placeholder="视频状态" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <label class="filter-field"><span>文件状态</span><t-select v-model="statusFilter" clearable placeholder="文件状态" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
           <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
         </div>
       </ResourceCard>
@@ -177,15 +177,20 @@ onMounted(() => {
       <ResourceCard class="material-table-card">
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" empty="我的素材还是空的">
-            <template #cover="{ row }"><MaterialCover :url="row.cover_url" /></template>
             <template #id="{ row }">{{ row.id }}</template>
-            <template #title="{ row }">
-              <!-- 走查反馈：标题就是去来源平台的入口（与内容池页同一形状），蓝色可点；
-                   没有落地页的素材退回普通文本。 -->
-              <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
-              <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
+            <!-- 走查四轮：与素材库同一条行形状——封面、标题与来源平台合成一格。
+                 标题就是去来源平台的入口（与内容池页同一形状），蓝色可点；
+                 没有落地页的素材退回普通文本。 -->
+            <template #material="{ row }">
+              <div class="material-cell">
+                <MaterialCover class="material-cell__cover" :url="row.cover_url" />
+                <div class="material-cell__text">
+                  <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
+                  <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
+                  <span class="material-cell__source">{{ row.platform || '-' }}</span>
+                </div>
+              </div>
             </template>
-            <template #source="{ row }">{{ row.platform || '-' }}</template>
             <template #game="{ row }">{{ gameName(games, row.game_id) }}</template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
@@ -223,6 +228,10 @@ onMounted(() => {
 .filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
+.material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.material-cell__cover { width: 56px; height: 36px; flex: none; }
+.material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.material-cell__source { color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 span.material-title { color: var(--wt-text-primary); }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }

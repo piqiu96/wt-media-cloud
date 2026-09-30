@@ -88,10 +88,10 @@ describe('my materials page', () => {
   // 下面不挂提示小字。
   it('shares the library row shape: id first, clickable title, no download hint', () => {
     const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
-    const coverAt = source.indexOf("{ colKey: 'cover', title: '封面'")
+    const materialAt = source.indexOf("{ colKey: 'material', title: '素材'")
     expect(idAt).toBeGreaterThan(-1)
-    expect(coverAt).toBeGreaterThan(-1)
-    expect(idAt, '素材 ID 列必须在封面列之前').toBeLessThan(coverAt)
+    expect(materialAt).toBeGreaterThan(-1)
+    expect(idAt, '素材 ID 列必须是第一业务列，且排在「素材」格之前').toBeLessThan(materialAt)
     // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
@@ -103,5 +103,16 @@ describe('my materials page', () => {
     expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
+  })
+
+  // 走查四轮：两页共用同一条行形状与同一个列名。「视频状态」只描述源视频文件的准备
+  // 进度，叫「文件状态」才不会和并不存在的素材业务状态混起来。
+  it('uses the same 素材 cell and 文件状态 column name as the library', () => {
+    expect(source).toContain('<template #material="{ row }">')
+    expect(source).toContain("{ colKey: 'video_status', title: '文件状态'")
+    expect(source).not.toContain("title: '视频状态'")
+    for (const gone of ["title: '封面'", "title: '标题'", "title: '来源平台'"]) {
+      expect(source, `不该再有 ${gone} 列`).not.toContain(gone)
+    }
   })
 })
