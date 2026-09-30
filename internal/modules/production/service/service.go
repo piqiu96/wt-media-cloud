@@ -51,9 +51,14 @@ type Store interface {
 	FindMaterial(int64) (model.Material, bool, error)
 	ListMaterials(repository.MaterialFilter) ([]model.Material, error)
 	CreateOrRestoreUsage(repository.CreateUsageInput, time.Time) (model.MaterialUsage, bool, error)
-	ListActiveUsages(identityservice.UserID) ([]model.MaterialUsage, error)
+	ListUsages(identityservice.UserID) ([]model.MaterialUsage, error)
 	FindUsageForUser(int64, identityservice.UserID) (model.MaterialUsage, bool, error)
 	RemoveUsageByID(int64, identityservice.UserID, time.Time) (bool, error)
+
+	// RestoreUsageByID is the inverse of RemoveUsageByID. It reports no flag: the
+	// one outcome a zero-row result can describe is "the row was already back in
+	// use", which is the state the caller asked for (see the repository).
+	RestoreUsageByID(int64, identityservice.UserID, time.Time) error
 
 	// MarkVideoPreparing writes the material's readiness projection for the start
 	// of a preparation, and reports whether the row was in a state that allowed it.
@@ -197,7 +202,7 @@ func (s *Service) ListMyMaterials(actor identityservice.PublicUser) ([]model.Mat
 	if actor.Status != identityservice.UserStatusEnabled || actor.ID <= 0 {
 		return nil, ErrForbidden
 	}
-	usages, err := s.store.ListActiveUsages(actor.ID)
+	usages, err := s.store.ListUsages(actor.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +250,40 @@ func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) e
 		return ErrUsageNotFound
 	}
 	return nil
+}
+
+// RestoreUsage puts a relation the actor gave up back into use.
+//
+// The checks are the removal's, in the removal's order, because they refuse the
+// same two things: a relation that is not the actor's (answered as absent, so that
+// one operator cannot probe another's rows by id) and a material outside the
+// actor's game scope.
+//
+// A relation that is already in use is not a refusal — the click asked for exactly
+// that state. The common way to ask twice is a double-click arriving before the
+// list reloads, and the answer to the second one is the same as to the first.
+func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) error {
+	if usageID <= 0 || actor.ID <= 0 {
+		return ErrInvalidInput
+	}
+	usage, found, err := s.store.FindUsageForUser(usageID, actor.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrUsageNotFound
+	}
+	material, err := s.GetMaterial(actor, usage.MaterialID)
+	if err != nil {
+		return err
+	}
+	if material.TeamID != usage.TeamID {
+		return ErrUsageForbidden
+	}
+	if usage.Status != model.MaterialUsageRemoved {
+		return nil
+	}
+	return s.store.RestoreUsageByID(usageID, actor.ID, s.now().UTC())
 }
 
 // CreateDownload queues the actor's download of one material, whether or not its

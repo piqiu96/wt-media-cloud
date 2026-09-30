@@ -30,6 +30,7 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 		{consts.MethodPost, "/api/v1/materials/42/downloads"},
 		{consts.MethodGet, "/api/v1/my-materials"},
 		{consts.MethodDelete, "/api/v1/material-usages/5"},
+		{consts.MethodPost, "/api/v1/material-usages/5/restore"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {
@@ -164,6 +165,35 @@ func TestRemoveUsageRouteAnswersThroughTheEmpty204Helper(t *testing.T) {
 	}
 	if strings.Contains(text, "api.NoContent(c)") {
 		t.Error("a 200 data:null envelope is not the 204 this route's contract declares")
+	}
+}
+
+// The restoration answers the same 204 as the removal it undoes: the frontend's
+// client treats 204 as "no body" and reads nothing, so a `data: null` envelope or
+// a stray payload here would be a shape the caller is not written against.
+//
+// A source assertion rather than a request, for the same reason the route test
+// above stops at 401: reaching the handler past `actor(c)` needs a live session
+// row and the call behind it needs MySQL.
+func TestRestoreUsageRouteAnswersThroughTheEmpty204Helper(t *testing.T) {
+	source, err := os.ReadFile("handler.go")
+	if err != nil {
+		t.Fatalf("read production handler: %v", err)
+	}
+	handler := string(source)
+	start := strings.Index(handler, "func RestoreMaterialUsage(")
+	if start < 0 {
+		t.Fatal("handler.go has no RestoreMaterialUsage")
+	}
+	body := handler[start:]
+	if end := strings.Index(body, "\nfunc "); end >= 0 {
+		body = body[:end]
+	}
+	if !strings.Contains(body, "api.NoContentEmpty(c)") {
+		t.Error("the restore route must answer 204 with no body")
+	}
+	if !strings.Contains(body, "writeProductionError(c, err)") {
+		t.Error("the restore route must answer through the module's shared error mapping")
 	}
 }
 

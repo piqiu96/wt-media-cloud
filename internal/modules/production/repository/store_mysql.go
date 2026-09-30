@@ -183,15 +183,24 @@ func removeUsage(db *gorm.DB, teamID identity.TeamID, materialID int64, userID i
 	return result.RowsAffected == 1, nil
 }
 
-func ListActiveUsages(userID identity.UserID) ([]model.MaterialUsage, error) {
-	return listActiveUsages(database.DB(), userID)
+// ListUsages returns every relation the user has with a material, in both states.
+//
+// It deliberately does not filter `status = 'active'`. A given-up relation is what
+// the page renders as 已放弃 with a 恢复使用 button on it, so a list that dropped it
+// would make the removal irreversible in the UI while the row sat in the database.
+//
+// Ordered by `created_at`, the timestamp the page shows as 加入时间, so that a row
+// does not jump to the top the moment it is given up or restored — the user is
+// usually about to click that same row again.
+func ListUsages(userID identity.UserID) ([]model.MaterialUsage, error) {
+	return listUsages(database.DB(), userID)
 }
 
-func listActiveUsages(db *gorm.DB, userID identity.UserID) ([]model.MaterialUsage, error) {
+func listUsages(db *gorm.DB, userID identity.UserID) ([]model.MaterialUsage, error) {
 	if userID <= 0 {
 		return nil, fmt.Errorf("invalid material usage user")
 	}
-	rows, err := db.Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC`, userID).Rows()
+	rows, err := db.Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id = ? ORDER BY created_at DESC, id DESC`, userID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +245,33 @@ func removeUsageByID(db *gorm.DB, usageID int64, userID identity.UserID, now tim
 		return false, result.Error
 	}
 	return result.RowsAffected == 1, nil
+}
+
+// RestoreUsageByID is the inverse of RemoveUsageByID: it puts a given-up relation
+// back into use and clears the moment it was given up in the same statement.
+//
+// Clearing `removed_at` is not cosmetic. The row is what 使用情况 renders, so a
+// relation that reads 使用中 while still carrying its removal timestamp would show
+// 已放弃's history on something that is in use again.
+//
+// The `status = 'removed'` guard is what keeps two concurrent restores from both
+// writing, and it is asserted as text in the tests for the same reason the
+// preparation guards are: sqlmock cannot execute it, and a statement without the
+// guard would match a mock that only checked the table.
+//
+// No flag comes back. The only outcome zero affected rows can describe — the row
+// was already `active` when the statement ran — is the state the caller asked for,
+// so the caller reads it as success either way and a bool would be a value nobody
+// branches on.
+func RestoreUsageByID(usageID int64, userID identity.UserID, now time.Time) error {
+	return restoreUsageByID(database.DB(), usageID, userID, now)
+}
+
+func restoreUsageByID(db *gorm.DB, usageID int64, userID identity.UserID, now time.Time) error {
+	if usageID <= 0 || userID <= 0 {
+		return fmt.Errorf("invalid material usage restoration")
+	}
+	return db.Exec(`UPDATE material_usages SET status = 'active', removed_at = NULL, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'removed'`, now, usageID, userID).Error
 }
 
 // MarkVideoPreparing moves the material's readiness projection to `downloading`,

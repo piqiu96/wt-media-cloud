@@ -40,6 +40,10 @@ func RemoveUsage(actor identityservice.PublicUser, usageID int64) error {
 	return newWiredService().RemoveUsage(actor, usageID)
 }
 
+func RestoreUsage(actor identityservice.PublicUser, usageID int64) error {
+	return newWiredService().RestoreUsage(actor, usageID)
+}
+
 // MarkVideoReady and MarkVideoFailed are the Cloud worker's entry points, and the
 // only functions in this module that no actor reaches. They are declared here
 // beside the actor-facing ones so that the module's public surface is one list

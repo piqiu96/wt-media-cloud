@@ -34,6 +34,14 @@ type memoryStore struct {
 	removed    int64
 	removedFor sharedidentity.UserID
 
+	// restored is the same record for the inverse write, and listedFor is the user
+	// the list was asked about — the list is scoped by the query rather than by
+	// filtering, so a service that asked about the wrong user would return another
+	// operator's materials with nothing in the rows themselves to show it.
+	restored    int64
+	restoredFor sharedidentity.UserID
+	listedFor   sharedidentity.UserID
+
 	// findCount counts the material lookups, and refind — when set — is what the
 	// store answers from the second one on. `CreateDownload` re-reads the material
 	// when its guarded projection write was refused, and that second row is the
@@ -201,7 +209,8 @@ func (s *memoryStore) ListMaterials(filter repository.MaterialFilter) ([]model.M
 	s.filter = filter
 	return []model.Material{s.material}, nil
 }
-func (s *memoryStore) ListActiveUsages(sharedidentity.UserID) ([]model.MaterialUsage, error) {
+func (s *memoryStore) ListUsages(userID sharedidentity.UserID) ([]model.MaterialUsage, error) {
+	s.listedFor = userID
 	return s.usages, nil
 }
 func (s *memoryStore) FindUsageForUser(usageID int64, _ sharedidentity.UserID) (model.MaterialUsage, bool, error) {
@@ -216,6 +225,11 @@ func (s *memoryStore) RemoveUsageByID(usageID int64, userID sharedidentity.UserI
 	s.removed = usageID
 	s.removedFor = userID
 	return true, nil
+}
+func (s *memoryStore) RestoreUsageByID(usageID int64, userID sharedidentity.UserID, _ time.Time) error {
+	s.restored = usageID
+	s.restoredFor = userID
+	return nil
 }
 
 func TestAddUsageRejectsMaterialOutsideActorGameScope(t *testing.T) {
@@ -469,6 +483,108 @@ func TestRemoveUsageScopesTheSoftRemovalToTheActingUser(t *testing.T) {
 	}
 	if store.removed != 5 || store.removedFor != 9 {
 		t.Fatalf("removed=%d removedFor=%d, want 5 and 9", store.removed, store.removedFor)
+	}
+}
+
+// The page shows a given-up relation as a row of its own, with the state and the
+// moment it was given up, and offers 恢复使用 on it (CHG-20260930-069 task 15).
+// None of that is reachable while the list drops every row that is not `active`,
+// so the removed row has to survive the whole way through the service — the
+// relation's own state and timestamp included, not just the material it embeds.
+//
+// Both rows are asked for in one query about the acting user. The scope is
+// asserted on the argument, because a list read for the wrong user returns rows
+// that look perfectly ordinary.
+func TestListMyMaterialsKeepsTheGivenUpRelationWithItsOwnState(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	givenUpAt := time.Date(2026, 9, 27, 11, 0, 0, 0, time.UTC)
+	store := &memoryStore{
+		found:    true,
+		material: model.Material{ID: 42, TeamID: team, GameID: &game},
+		usages: []model.MaterialUsage{
+			{ID: 6, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageRemoved, RemovedAt: &givenUpAt},
+			{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive},
+		},
+	}
+	items, err := testService(store).ListMyMaterials(scopedActor(team, game))
+	if err != nil {
+		t.Fatalf("ListMyMaterials() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want the given-up relation kept alongside the one in use", items)
+	}
+	if items[0].Status != model.MaterialUsageRemoved || items[0].RemovedAt == nil || !items[0].RemovedAt.Equal(givenUpAt) {
+		t.Fatalf("the given-up relation lost its own state: %+v", items[0])
+	}
+	if items[0].Material == nil || items[0].Material.ID != 42 {
+		t.Fatalf("a given-up relation is still a relation to a material: %+v", items[0])
+	}
+	if items[1].Status != model.MaterialUsageActive {
+		t.Fatalf("the relation in use came back as %q", items[1].Status)
+	}
+	if store.listedFor != 9 {
+		t.Fatalf("the list was read for user %d, want the acting user 9", store.listedFor)
+	}
+}
+
+func TestRestoreUsageChecksTheMaterialScopeBeforeRestoration(t *testing.T) {
+	team, game := service.TeamID(7), "game-b"
+	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageRemoved}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
+	err := testService(store).RestoreUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 5)
+	if !errors.Is(err, ErrForbidden) || store.restored != 0 {
+		t.Fatalf("err=%v restored=%d", err, store.restored)
+	}
+}
+
+// The same split the removal already keeps: "this row is not yours" and "this
+// material does not exist" are published as different errcodes, so they have to
+// stay different sentinels here too.
+func TestRestoreUsageReportsAMissingUsageSeparatelyFromAMissingMaterial(t *testing.T) {
+	team := service.TeamID(7)
+	store := &memoryStore{found: false}
+	err := testService(store).RestoreUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team}, 5)
+	if !errors.Is(err, ErrUsageNotFound) {
+		t.Fatalf("RestoreUsage() error = %v, want ErrUsageNotFound", err)
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("a missing usage must not be reported as a missing material: %v", err)
+	}
+	if store.restored != 0 {
+		t.Fatalf("nothing may be restored when the usage is not the actor's: %d", store.restored)
+	}
+}
+
+// Scoped to the acting user for the same reason the removal is: one operator must
+// not be able to put another operator's given-up row back into use. The ID alone
+// would pass even if the user never reached the store.
+func TestRestoreUsageScopesTheRestorationToTheActingUser(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageRemoved}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
+	if err := testService(store).RestoreUsage(scopedActor(team, game), 5); err != nil {
+		t.Fatalf("RestoreUsage() error = %v", err)
+	}
+	if store.restored != 5 || store.restoredFor != 9 {
+		t.Fatalf("restored=%d restoredFor=%d, want 5 and 9", store.restored, store.restoredFor)
+	}
+}
+
+// Restoring a relation that is already in use is not a refusal. The click asks
+// for "this is in use again", which is already true — and the second click of a
+// double-click arrives before the list has reloaded, so answering it with an
+// error would put a failure message on a successful action.
+//
+// This does not pin *where* that is decided: the service may answer from the row
+// it already read, and the conditional `UPDATE` is the backstop for the race the
+// read cannot see. Both are the same answer to the user, so the assertion is that
+// answer rather than which of the two produced it.
+func TestRestoreUsageTreatsARelationAlreadyInUseAsDone(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
+	if err := testService(store).RestoreUsage(scopedActor(team, game), 5); err != nil {
+		t.Fatalf("RestoreUsage() error = %v, want the relation it was asked to reach", err)
 	}
 }
 

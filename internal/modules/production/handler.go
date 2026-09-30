@@ -176,6 +176,25 @@ func RemoveMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
 	api.NoContentEmpty(c)
 }
 
+func RestoreMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
+	actor, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := usageID(c)
+	if !ok {
+		return
+	}
+	if err := productionservice.RestoreUsage(actor, id); err != nil {
+		writeProductionError(c, err)
+		return
+	}
+	// The removal's answer, for the removal's reason: the frontend's client reads a
+	// 204 as "no body" and hands nothing back, so a `data:null` envelope here would
+	// be a shape its caller is not written against.
+	api.NoContentEmpty(c)
+}
+
 func writeProductionError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, productionservice.ErrForbidden):

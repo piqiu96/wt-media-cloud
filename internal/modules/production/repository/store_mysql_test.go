@@ -196,22 +196,43 @@ func TestMaterialProjectionCarriesTheLibraryLifecycleStatus(t *testing.T) {
 }
 
 // The list a user sees is scoped by `user_id` in the query, not by filtering in
-// Go. Both halves matter: an unscoped SELECT would return other users' rows and
-// rely on the service to drop them, and a missing `status = 'active'` would show
-// materials the user has already removed.
-func TestListActiveUsagesScopesTheQueryToTheUserAndTheActiveStatus(t *testing.T) {
+// Go — an unscoped SELECT would return other users' rows and rely on the service
+// to drop them.
+//
+// It carries **both** relation states (CHG-20260930-069 task 15). Until then the
+// statement filtered `status = 'active'`, which is exactly what the page's
+// 「已放弃」rows and their 「恢复使用」button need to read back: a list that dropped
+// them would leave the button unreachable and the removal irreversible in the UI.
+// The removed row's `removed_at` has to survive the scan too — the row is what
+// the page branches on, and a projection that dropped the column would render
+// 已放弃 with an empty 加入时间.
+//
+// The two rows are ordered by `created_at DESC` because that is the timestamp the
+// page shows: ordering by `updated_at` would make a row jump to the top the moment
+// it is given up or restored, so the row the user just clicked would move out from
+// under the cursor they are about to click again.
+func TestListUsagesScopesTheQueryToTheUserAndKeepsBothRelationStates(t *testing.T) {
 	db, mock := newMockGORM(t)
-	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id = ? AND status = 'active' ORDER BY updated_at DESC, id DESC")).
+	added := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
+	removedAt := time.Date(2026, 9, 27, 11, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id = ? ORDER BY created_at DESC, id DESC")).
 		WithArgs(int64(9)).
-		WillReturnRows(sqlmock.NewRows(usageColumns()).AddRow(int64(11), int64(7), int64(42), int64(9), "active", nil, now, now))
+		WillReturnRows(sqlmock.NewRows(usageColumns()).
+			AddRow(int64(11), int64(7), int64(42), int64(9), "removed", removedAt, added, removedAt).
+			AddRow(int64(5), int64(7), int64(43), int64(9), "active", nil, added, added))
 
-	usages, err := listActiveUsages(db, identity.UserID(9))
+	usages, err := listUsages(db, identity.UserID(9))
 	if err != nil {
-		t.Fatalf("listActiveUsages() error = %v", err)
+		t.Fatalf("listUsages() error = %v", err)
 	}
-	if len(usages) != 1 || usages[0].ID != 11 || usages[0].MaterialID != 42 {
-		t.Fatalf("usages = %+v", usages)
+	if len(usages) != 2 {
+		t.Fatalf("usages = %+v, want the given-up row alongside the one in use", usages)
+	}
+	if usages[0].Status != model.MaterialUsageRemoved || usages[0].RemovedAt == nil || !usages[0].RemovedAt.Equal(removedAt) {
+		t.Fatalf("a given-up relation must read back as removed with its timestamp: %+v", usages[0])
+	}
+	if usages[1].Status != model.MaterialUsageActive || usages[1].RemovedAt != nil {
+		t.Fatalf("an in-use relation must read back as active with no removal time: %+v", usages[1])
 	}
 	assertExpectations(t, mock)
 }
@@ -263,6 +284,71 @@ func TestRemoveUsageByIDReportsWhetherTheRowWasStillActive(t *testing.T) {
 		t.Fatal("an already-removed row must report as not removed")
 	}
 	assertExpectations(t, mock)
+}
+
+// Restoration is the inverse statement of the removal above, and it must clear
+// `removed_at` in the same write. Setting only `status` would leave a row that
+// reads 使用中 while still carrying the moment it was given up — the page renders
+// that timestamp in the 使用情况 block, and 已放弃's history would then show up on a
+// relation that is in use again.
+//
+// The statement is asserted as text for the same reason the WHERE clauses of the
+// preparation guards are: sqlmock cannot execute it, and dropping the
+// `status = 'removed'` guard would still match a mock that only looked at the
+// table name. The guard is what keeps a concurrent second restore from rewriting
+// the timestamp of a row this call did not touch.
+//
+// Zero affected rows is not an error. It means the row was no longer `removed` by
+// the time the statement ran — another request restored it, or the actor's own
+// first click did — which is the state this call was asked to reach. Reporting it
+// as a failure would turn a successful second click into an error message.
+func TestRestoreUsageByIDOnlyTakesBackARowTheUserGaveUp(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	statement := "UPDATE material_usages SET status = 'active', removed_at = NULL, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'removed'"
+	mock.ExpectExec(regexp.QuoteMeta(statement)).
+		WithArgs(now, int64(5), int64(9)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(statement)).
+		WithArgs(now, int64(5), int64(9)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	if err := restoreUsageByID(db, 5, identity.UserID(9), now); err != nil {
+		t.Fatalf("restoreUsageByID() error = %v", err)
+	}
+	if err := restoreUsageByID(db, 5, identity.UserID(9), now); err != nil {
+		t.Fatalf("restoreUsageByID() on an already-active row error = %v, want the same success", err)
+	}
+	assertExpectations(t, mock)
+}
+
+// An incomplete scope must be refused before anything reaches MySQL: an `UPDATE`
+// with no `WHERE user_id` would restore every user's row, and one with no id would
+// read as a full-table write.
+//
+// The catch-all expectation is what turns that into a measurement. Asserting only
+// `err != nil` would pass for the wrong reason — an Exec the mock was never told
+// to expect also returns an error — so the assertion here is that the catch-all
+// went **unused**, which is the positive control for "no statement was sent".
+func TestRestoreUsageByIDRefusesAnIncompleteScope(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	for _, scope := range []struct {
+		name    string
+		usageID int64
+		userID  identity.UserID
+	}{
+		{"no usage", 0, identity.UserID(9)},
+		{"no user", 5, 0},
+	} {
+		db, mock := newMockGORM(t)
+		mock.ExpectExec(".*").WillReturnResult(sqlmock.NewResult(0, 1))
+		if err := restoreUsageByID(db, scope.usageID, scope.userID, now); err == nil {
+			t.Fatalf("%s: restoreUsageByID() error = nil, want a refusal before any statement", scope.name)
+		}
+		if err := mock.ExpectationsWereMet(); err == nil {
+			t.Fatalf("%s: restoreUsageByID() sent a statement, want a refusal before the database", scope.name)
+		}
+	}
 }
 
 // The projection may only move forward. `ready` is the promise that the object

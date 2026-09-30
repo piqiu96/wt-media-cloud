@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.09.30.1
+  version: 2026.09.30.2
   description: Additive M4-A contract. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/materials:
@@ -33,8 +33,16 @@ paths:
   /api/v1/my-materials:
     get:
       operationId: listMyMaterialUsages
-      summary: List the current user's active material usages.
+      summary: List the current user's material usages, in both states.
+      description: >-
+        Every relation the user has with a material, not only the ones in use.
+        A given-up relation is returned as such — `status: removed` with the
+        moment it was given up — because that row is what "My Materials" renders
+        as 已放弃 and what its 恢复使用 action addresses. `material` is embedded on
+        each usage, so the page needs no second request.
       security: [{sessionCookie: []}]
+      responses:
+        '200': {description: The user's usages, active and removed, each with its material.}
   /api/v1/material-usages/{usage_id}:
     delete:
       operationId: removeMaterialUsage
@@ -43,6 +51,23 @@ paths:
       parameters: [{$ref: '#/components/parameters/UsageID'}]
       responses:
         '204': {description: Usage removed without deleting material or history.}
+  /api/v1/material-usages/{usage_id}/restore:
+    post:
+      operationId: restoreMaterialUsage
+      summary: Put the current user's given-up material usage back into use.
+      description: >-
+        The inverse of removeMaterialUsage, on the same row: the relation returns
+        to `active` and `removed_at` is cleared in one write. Addressed by usage
+        id and scoped to the calling user, so another operator's row answers 404
+        rather than being restored. Already being in use is not an error — the
+        call asked for that state, and the second click of a double-click is the
+        ordinary way to ask twice.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/UsageID'}]
+      responses:
+        '204': {description: Usage in use again, with no removal timestamp.}
+        '403': {description: The usage's material is outside the actor's scope.}
+        '404': {description: No such usage for this user.}
   /api/v1/materials/{material_id}/video-url:
     get:
       operationId: getMaterialVideoURL

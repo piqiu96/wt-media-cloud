@@ -26,8 +26,8 @@ func (mysqlStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now ti
 	return repository.CreateOrRestoreUsage(input, now)
 }
 
-func (mysqlStore) ListActiveUsages(userID identityservice.UserID) ([]model.MaterialUsage, error) {
-	return repository.ListActiveUsages(userID)
+func (mysqlStore) ListUsages(userID identityservice.UserID) ([]model.MaterialUsage, error) {
+	return repository.ListUsages(userID)
 }
 
 func (mysqlStore) FindUsageForUser(usageID int64, userID identityservice.UserID) (model.MaterialUsage, bool, error) {
@@ -36,6 +36,9 @@ func (mysqlStore) FindUsageForUser(usageID int64, userID identityservice.UserID)
 
 func (mysqlStore) RemoveUsageByID(usageID int64, userID identityservice.UserID, now time.Time) (bool, error) {
 	return repository.RemoveUsageByID(usageID, userID, now)
+}
+func (mysqlStore) RestoreUsageByID(usageID int64, userID identityservice.UserID, now time.Time) error {
+	return repository.RestoreUsageByID(usageID, userID, now)
 }
 
 func (mysqlStore) MarkVideoPreparing(teamID identityservice.TeamID, materialID int64, now time.Time) (bool, error) {
