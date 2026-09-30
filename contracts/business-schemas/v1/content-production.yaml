@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.27.1"
+revision: "2026.09.30.1"
 
 # 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
 #
@@ -37,6 +37,12 @@ schemas:
       updated_at: {type: string, format: date-time}
       game_id: {type: string, description: 素材未归游戏时该键不出现。}
       author_name: {type: string, description: 为空时该键不出现。}
+      # 封面与作者主页是来源行自己的两个链接（CHG-20260930-069）：投影在读取时 JOIN
+      # source_contents 带出来，不是物化时抄进 materials 的副本 —— 来源是唯一事实，
+      # 抄一份就是第二个会漂移的事实。两页列表的封面缩略图与详情抽屉里的作者主页
+      # 链接读的都是这两个键。
+      cover_url: {type: string, format: uri, description: 来源没有封面时该键不出现。}
+      author_home_url: {type: string, format: uri, description: 来源没有作者主页时该键不出现。}
       published_at: {type: string, format: date-time, description: 来源没有发布时间时该键不出现。}
       video_size_bytes: {type: integer, format: int64, description: 准备通过校验前该键不出现。}
       video_sha256: {type: string, description: 准备通过校验前该键不出现。}

@@ -103,6 +103,8 @@ func readyMaterial() model.Material {
 		SourceURL:       "https://example.invalid/video/42",
 		Platform:        "douyin",
 		AuthorName:      author,
+		CoverURL:        "https://example.invalid/cover/42.jpg",
+		AuthorHomeURL:   "https://example.invalid/author/42",
 		PublishedAt:     &published,
 		VideoStatus:     model.VideoReady,
 		VideoSizeBytes:  &size,
@@ -125,8 +127,8 @@ func TestMaterialBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 		t.Fatal("contract has no Material schema")
 	}
 	want := schemaPropertyNames(schema.Properties)
-	if len(want) != 17 {
-		t.Fatalf("Material declares %d properties, want the measured 17: %v", len(want), want)
+	if len(want) != 19 {
+		t.Fatalf("Material declares %d properties, want the measured 19: %v", len(want), want)
 	}
 
 	if got := marshalledKeys(t, readyMaterial()); !reflect.DeepEqual(got, want) {

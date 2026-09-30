@@ -40,6 +40,13 @@ type Material struct {
 	SourceURL       string          `json:"source_url"`
 	Platform        string          `json:"platform"`
 	AuthorName      string          `json:"author_name,omitempty"`
+	// CoverURL and AuthorHomeURL are the source row's own links, joined in by
+	// the projection at read time rather than copied when the material was
+	// materialized: the source row is the one fact, and a copy would be a second
+	// one free to drift. The two lists identify a material by its cover, and the
+	// detail drawer links to the author's home page (CHG-20260930-069).
+	CoverURL        string          `json:"cover_url,omitempty"`
+	AuthorHomeURL   string          `json:"author_home_url,omitempty"`
 	PublishedAt     *time.Time      `json:"published_at,omitempty"`
 	VideoStatus     VideoStatus     `json:"video_status"`
 	SourceObjectKey string          `json:"-"`

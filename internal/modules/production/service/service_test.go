@@ -283,6 +283,37 @@ func TestListMyMaterialsReturnsOnlyUsagesWithCurrentlyVisibleMaterials(t *testin
 	}
 }
 
+// Both lists identify a material by its cover and its id (CHG-20260930-069), so
+// the two source links have to survive the service untouched. The service has
+// no reason to drop them today, and that is exactly why the check is here: a
+// future field whitelist or response DTO introduced between the store and the
+// route would otherwise strip them silently, and both pages would fall back to
+// the placeholder cover with nothing failing.
+func TestBothListsCarryTheSourceRowLinksWithoutFiltering(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	material := model.Material{ID: 42, TeamID: team, GameID: &game, CoverURL: "https://cover/42.jpg", AuthorHomeURL: "https://author/42"}
+	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+	store := &memoryStore{found: true, material: material, usages: []model.MaterialUsage{{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}}}
+	svc := testService(store)
+
+	items, err := svc.ListMaterials(operator, "")
+	if err != nil {
+		t.Fatalf("ListMaterials() error = %v", err)
+	}
+	if len(items) != 1 || items[0].CoverURL != material.CoverURL || items[0].AuthorHomeURL != material.AuthorHomeURL {
+		t.Fatalf("the library list returned %+v, want the source links carried through", items)
+	}
+
+	usages, err := svc.ListMyMaterials(operator)
+	if err != nil {
+		t.Fatalf("ListMyMaterials() error = %v", err)
+	}
+	if len(usages) != 1 || usages[0].Material == nil || usages[0].Material.CoverURL != material.CoverURL || usages[0].Material.AuthorHomeURL != material.AuthorHomeURL {
+		t.Fatalf("the my-materials list returned %+v, want the source links carried through", usages)
+	}
+}
+
 func TestRemoveUsageChecksTheMaterialScopeBeforeSoftRemoval(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-b"

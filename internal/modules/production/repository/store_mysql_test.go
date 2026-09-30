@@ -133,7 +133,7 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM materials m JOIN source_contents s ON s.id = m.source_content_id WHERE m.id = ? AND m.team_id = ?")).
 		WithArgs(int64(42), int64(7)).
-		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), "game-1", int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", now, "ready", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now))
+		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), "game-1", int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", now, "ready", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now))
 
 	material, found, err := findMaterial(db, 42, identity.TeamID(7))
 	if err != nil {
@@ -149,7 +149,29 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 		t.Fatalf("material ids = source_content_id %d platform_content_id %q, want 8 and 7123456789012345678",
 			material.SourceContentID, material.PlatformContentID)
 	}
+	// The cover and the author's home page are the source row's own links, and
+	// the two lists identify a material by them (CHG-20260930-069). A column the
+	// SELECT forgets reads as an empty string here, which the UI would render as
+	// a permanently missing cover rather than as an error.
+	if material.CoverURL != "https://cover/42.jpg" || material.AuthorHomeURL != "https://author/42" {
+		t.Fatalf("material links = cover %q author_home %q, want the source row's own values",
+			material.CoverURL, material.AuthorHomeURL)
+	}
 	assertExpectations(t, mock)
+}
+
+// The two source links have to be in the projection's column list itself, not
+// only in the scan: a SELECT that forgot them would still satisfy sqlmock (the
+// expectation pins only the FROM clause), and the scan above would fail only at
+// runtime with a column-count mismatch. Pinning the statement, in the same shape
+// as `TestMarkVideoPreparingStatementNamesBothStatesAPreparationMayStartFrom`,
+// is what makes the column list a reviewed fact.
+func TestMaterialProjectionJoinsTheSourceRowLinksIntoEveryRead(t *testing.T) {
+	for _, column := range []string{"s.cover_url", "s.author_home_url"} {
+		if !strings.Contains(materialProjectionColumns, column) {
+			t.Errorf("materialProjectionColumns no longer selects %s: %s", column, materialProjectionColumns)
+		}
+	}
 }
 
 // The list a user sees is scoped by `user_id` in the query, not by filtering in
@@ -657,5 +679,5 @@ func usageColumns() []string {
 }
 
 func materialColumns() []string {
-	return []string{"id", "team_id", "game_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "published_at", "video_status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at"}
+	return []string{"id", "team_id", "game_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "published_at", "video_status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at"}
 }
