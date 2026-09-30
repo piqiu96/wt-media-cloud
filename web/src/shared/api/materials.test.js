@@ -67,3 +67,16 @@ describe('materials api client', () => {
     await expect(client.removeUsage(3)).resolves.toBeNull()
   })
 })
+
+// 云端视频地址只从详情链接接口读（CHG-20260930-069）：列表与素材 body 都不携带，
+// 这是它在客户端的唯一入口。
+describe('materials api client video url', () => {
+  it('reads the cloud video address through the detail link endpoint', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok({ url: 'http://127.0.0.1:9000/wt-media/materials/7/x.mp4' }))
+    const client = createMaterialsClient({ fetch })
+
+    await expect(client.getVideoUrl(7)).resolves.toEqual({ url: 'http://127.0.0.1:9000/wt-media/materials/7/x.mp4' })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/materials/7/video-url')
+    expect(fetch.mock.calls[0][1].method).toBe('GET')
+  })
+})

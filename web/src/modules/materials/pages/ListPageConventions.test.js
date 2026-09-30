@@ -14,8 +14,8 @@ const read = pageReader(import.meta.url)
 const FILES = ['MaterialLibraryPage.vue', 'MyMaterialsPage.vue']
 
 const TABLES = [
-  { file: 'MaterialLibraryPage.vue', name: 'columns', count: 7 },
-  { file: 'MyMaterialsPage.vue', name: 'columns', count: 7 },
+  { file: 'MaterialLibraryPage.vue', name: 'columns', count: 8 },
+  { file: 'MyMaterialsPage.vue', name: 'columns', count: 8 },
 ]
 
 describe('material list page conventions', () => {

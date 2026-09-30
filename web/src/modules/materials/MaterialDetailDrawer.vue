@@ -1,21 +1,38 @@
 <script setup>
 // 素材详情抽屉，素材库与我的素材共用一份。
 //
-// 两个页面都要它，而它显示的是**同一份冻结的素材体**（content-production.yaml 的
-// Material）。各写一份的结局是两份慢慢分叉：加一个字段时只改了一处，于是同一个素材
-// 在两个页面上显示得不一样，且没有任何东西会报错。
+// 行内只放识别信息（封面、ID、标题、状态）；作者主页、平台原视频页、体积和云端视频
+// 地址都在这里（CHG-20260930-069）。云端地址不随素材 body 返回，就绪时才向详情
+// 链接接口要一次。
+import { ref, watch } from 'vue'
+import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
+import MaterialCover from './components/MaterialCover.vue'
 import { downloadHint, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
 
-defineProps({
+const props = defineProps({
   visible: { type: Boolean, default: false },
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   games: { type: Array, default: () => [] },
 })
 defineEmits(['update:visible', 'add', 'download'])
+
+const client = createMaterialsClient()
+const videoUrl = ref('')
+
+watch(() => [props.visible, props.material?.id, props.material?.video_status], async ([open, id, status]) => {
+  videoUrl.value = ''
+  if (!open || !id || status !== 'ready') return
+  try {
+    const data = await client.getVideoUrl(id)
+    videoUrl.value = data?.url || ''
+  } catch {
+    // 拿不到地址只少一个链接，不打断详情本身。
+  }
+})
 </script>
 
 <template>
@@ -29,18 +46,34 @@ defineEmits(['update:visible', 'add', 'download'])
   >
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="material" class="material-detail">
-        <h3>{{ material.title || '未命名素材' }}</h3>
-        <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+        <div class="material-detail__head">
+          <MaterialCover class="material-detail__cover" :url="material.cover_url" />
+          <div class="material-detail__heading">
+            <h3>{{ material.title || '未命名素材' }}</h3>
+            <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+          </div>
+        </div>
         <dl>
           <div><dt>素材 ID</dt><dd>#{{ material.id }}</dd></div>
           <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
           <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
-          <div><dt>作者</dt><dd>{{ material.author_name || '-' }}</dd></div>
+          <div><dt>作者</dt><dd>
+            <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
+            <template v-else>{{ material.author_name || '-' }}</template>
+          </dd></div>
           <div><dt>发布时间</dt><dd>{{ formatDateTime(material.published_at) }}</dd></div>
           <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
           <div><dt>体积</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>
           <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
           <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
+          <div><dt>平台原视频</dt><dd>
+            <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原视频页面</a>
+            <template v-else>-</template>
+          </dd></div>
+          <div><dt>云端视频</dt><dd>
+            <a v-if="videoUrl" class="wt-primary-link" :href="videoUrl" target="_blank" rel="noopener noreferrer">打开云端视频</a>
+            <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
+          </dd></div>
         </dl>
         <p v-if="material.last_error" class="material-detail__error">最近一次准备失败：{{ material.last_error }}</p>
         <div class="material-detail__actions">
@@ -56,7 +89,10 @@ defineEmits(['update:visible', 'add', 'download'])
 </template>
 
 <style scoped>
-.material-detail h3 { margin: 0 0 10px; color: var(--wt-text-primary); font-size: 18px; line-height: 1.4; }
+.material-detail__head { display: flex; gap: 14px; align-items: flex-start; }
+.material-detail__cover { width: 120px; height: 78px; }
+.material-detail__heading { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.material-detail h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
 .material-detail dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 18px 0 0; }
 .material-detail dt { color: var(--wt-text-tertiary); font-size: 12px; }
 .material-detail dd { margin: 4px 0 0; color: var(--wt-text-primary); font-size: 14px; overflow-wrap: anywhere; }

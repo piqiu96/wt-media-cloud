@@ -61,4 +61,15 @@ describe('my materials page', () => {
     expect(source).toContain('createDownloadFailureMessage(e)')
     expect(source).not.toContain('material-detail-drawer')
   })
+
+  // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 封面与素材 ID 在行内，
+  // 作者、链接与体积在详情里。
+  it('identifies a row by its cover and its id, and keeps the links and size in the detail', () => {
+    expect(source).toContain("{ colKey: 'cover', title: '封面'")
+    expect(source).toContain("{ colKey: 'id', title: '素材 ID'")
+    expect(source).toContain('MaterialCover')
+    expect(source).not.toContain('row.source_url')
+    expect(source).not.toContain('· {{ row.author_name')
+    expect(source).not.toContain('formatBytes(row.video_size_bytes)')
+  })
 })

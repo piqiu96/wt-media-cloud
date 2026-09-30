@@ -9,9 +9,9 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { formatBytes } from '../../../shared/utils/units.js'
 import { VIDEO_STATUSES, downloadHint, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
+import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 
@@ -35,14 +35,16 @@ const pagination = ref({ current: 1, pageSize: 20 })
 // 每一列都必须声明 width，不许只写 minWidth —— 理由与实测数据见
 // shared/testing/listPageConventions.js 里那条断言上面的说明（WebKit 的 fixed 布局下
 // minWidth 不产生确定列宽，这些列会被压成「剩余空间列」）。
+// 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。
 const columns = [
-  { colKey: 'title', title: '素材', width: 340 },
-  { colKey: 'source', title: '来源', width: 280 },
-  { colKey: 'game', title: '游戏', width: 140 },
-  { colKey: 'video_status', title: '视频状态', width: 140 },
-  { colKey: 'video_size_bytes', title: '体积', width: 120 },
-  { colKey: 'created_at', title: '入库时间', width: 150 },
-  { colKey: 'op', title: '操作', width: 280, fixed: 'right' },
+  { colKey: 'cover', title: '封面', width: 72 },
+  { colKey: 'id', title: '素材 ID', width: 90 },
+  { colKey: 'title', title: '标题', width: 250 },
+  { colKey: 'source', title: '来源平台', width: 95 },
+  { colKey: 'game', title: '游戏', width: 65 },
+  { colKey: 'video_status', title: '视频状态', width: 90 },
+  { colKey: 'created_at', title: '入库时间', width: 105 },
+  { colKey: 'op', title: '操作', width: 285, fixed: 'right' },
 ]
 
 const tableScroll = computed(() => ({
@@ -186,33 +188,27 @@ onMounted(() => {
         </template>
       </ResourcePageHeader>
       <ResourceStatGrid :items="stats" @select="applyStatFilter" />
-      <ResourceCard>
-        <div class="filter-bar">
-          <t-space wrap>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题" @enter="load" /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">视频状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
-            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
-          </t-space>
+      <ResourceCard class="material-filter-card">
+        <div class="filter-row">
+          <label class="filter-field"><span>综合搜索</span><t-input v-model="search" clearable placeholder="标题" style="width:220px" @enter="load" /></label>
+          <label class="filter-field"><span>视频状态</span><t-select v-model="statusFilter" clearable placeholder="视频状态" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <label class="filter-field"><span>游戏</span><t-select v-model="gameFilter" clearable placeholder="游戏" style="width:140px"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
+          <t-button theme="primary" @click="load">查询</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
         </div>
+      </ResourceCard>
+
+      <ResourceCard class="material-table-card">
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无素材">
+            <template #cover="{ row }"><MaterialCover :url="row.cover_url" /></template>
+            <template #id="{ row }">#{{ row.id }}</template>
             <template #title="{ row }">
-              <div class="material-cell">
-                <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
-                <span v-else :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
-                <small>#{{ row.id }}<template v-if="row.author_name"> · {{ row.author_name }}</template></small>
-              </div>
+              <span class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
             </template>
-            <template #source="{ row }">
-              <div class="material-source">
-                <span>{{ row.platform || '-' }}</span>
-                <small v-if="row.published_at">发布 {{ formatDateTime(row.published_at) }}</small>
-              </div>
-            </template>
+            <template #source="{ row }">{{ row.platform || '-' }}</template>
             <template #game="{ row }">{{ gameName(games, row.game_id) }}</template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
-            <template #video_size_bytes="{ row }">{{ formatBytes(row.video_size_bytes) }}</template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
@@ -245,9 +241,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.material-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.material-cell a, .material-cell > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.material-cell small { color: var(--wt-text-tertiary); font-size: 12px; }
-.material-source { display: flex; flex-direction: column; gap: 2px; }
-.material-source small { color: var(--wt-text-tertiary); font-size: 12px; }
+.material-filter-card { padding: 14px 20px; }
+.material-table-card { padding: 18px 20px; margin-top: 16px; }
+.filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.material-title { display: block; overflow: hidden; color: var(--wt-text-primary); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+@media (max-width: 680px) {
+  .material-filter-card, .material-table-card { padding: 16px; }
+}
 </style>

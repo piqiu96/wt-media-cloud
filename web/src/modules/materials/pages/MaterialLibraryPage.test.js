@@ -62,11 +62,20 @@ describe('material library page', () => {
     expect(source).not.toContain('created ===')
   })
 
-  it('renders the four video states and the size through the shared formatters', () => {
+  it('renders the four video states through the shared formatters', () => {
     expect(source).toContain('videoStatusLabel(row.video_status)')
     expect(source).toContain('videoStatusTone(row.video_status)')
-    expect(source).toContain('formatBytes(row.video_size_bytes)')
-    expect(source).toContain("from '../../../shared/utils/units.js'")
+  })
+
+  // 走查修正（CHG-20260930-069）：行内以封面与素材 ID 识别内容；作者、平台链接与
+  // 体积不再出现在行里，都归详情抽屉。
+  it('identifies a row by its cover and its id, and keeps the links and size in the detail', () => {
+    expect(source).toContain("{ colKey: 'cover', title: '封面'")
+    expect(source).toContain("{ colKey: 'id', title: '素材 ID'")
+    expect(source).toContain('MaterialCover')
+    expect(source).not.toContain('row.source_url')
+    expect(source).not.toContain('· {{ row.author_name')
+    expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })
 
   // 详情抽屉是两页共用的一个组件：各写一份的结局是同一个素材在两页显示得不一样，
