@@ -169,7 +169,8 @@ onMounted(() => {
       <ResourceCard class="material-filter-card">
         <div class="filter-row">
           <label class="filter-field"><span>综合搜索</span><t-input v-model="search" clearable placeholder="标题、作者" style="width:220px" /></label>
-          <label class="filter-field"><span>文件状态</span><t-select v-model="statusFilter" clearable placeholder="文件状态" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <label class="filter-field"><span>文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <t-button theme="primary" @click="load">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
         </div>
       </ResourceCard>

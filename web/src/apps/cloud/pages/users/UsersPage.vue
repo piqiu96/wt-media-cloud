@@ -228,26 +228,25 @@ function gameScopeText(gameIds) {
         <t-button theme="default" size="small" style="margin-left:8px" @click="loadAll">刷新</t-button>
       </template>
       <div class="filter-row">
-        <span class="filter-title">筛选</span>
-        <t-input v-model="filters.uid" placeholder="UID" clearable />
-        <t-input v-model="filters.username" placeholder="用户名" clearable />
-        <t-select v-model="filters.role" placeholder="角色" clearable>
+        <label class="filter-field"><span>UID</span><t-input v-model="filters.uid" placeholder="UID" clearable style="width:120px" /></label>
+        <label class="filter-field"><span>用户名</span><t-input v-model="filters.username" placeholder="用户名" clearable style="width:140px" /></label>
+        <label class="filter-field"><span>角色</span><t-select v-model="filters.role" placeholder="全部" clearable style="width:140px">
           <t-option value="admin" label="管理员" />
           <t-option value="senior_operator" label="高级运营" />
           <t-option value="operator" label="普通运营" />
-        </t-select>
-        <t-select v-model="filters.teamId" placeholder="运营分组" clearable>
+        </t-select></label>
+        <label class="filter-field"><span>运营分组</span><t-select v-model="filters.teamId" placeholder="全部" clearable style="width:160px">
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-        </t-select>
-        <t-select v-model="filters.gameId" placeholder="游戏" clearable>
+        </t-select></label>
+        <label class="filter-field"><span>游戏</span><t-select v-model="filters.gameId" placeholder="全部" clearable style="width:160px">
           <t-option v-for="game in games" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
-        </t-select>
-        <t-select v-model="filters.status" placeholder="状态" clearable>
+        </t-select></label>
+        <label class="filter-field"><span>状态</span><t-select v-model="filters.status" placeholder="全部" clearable style="width:120px">
           <t-option value="enabled" label="启用" />
           <t-option value="disabled" label="停用" />
-        </t-select>
-        <t-button size="small" @click="applyFilters">查询</t-button>
-        <t-button size="small" variant="text" @click="clearFilters">清空</t-button>
+        </t-select></label>
+        <t-button theme="primary" size="small" @click="applyFilters">查询</t-button>
+        <t-button class="wt-secondary-button" size="small" variant="outline" @click="clearFilters">重置</t-button>
       </div>
 
       <t-table :data="pagedUsers" :columns="columns" size="small" hover row-key="id">
@@ -306,8 +305,7 @@ function gameScopeText(gameIds) {
 </template>
 
 <style scoped>
-.filter-row { display:grid; grid-template-columns:auto repeat(6, minmax(110px, 1fr)) auto auto; gap:8px; align-items:center; margin-bottom:16px; }
-.filter-title { color:var(--td-text-color-secondary); }
+.filter-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
+.filter-field { display:flex; align-items:center; gap:8px; color:var(--wt-text-secondary); font-size:13px; font-weight:500; white-space:nowrap; }
 .pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
-@media (max-width: 1200px) { .filter-row { grid-template-columns:repeat(3, minmax(140px, 1fr)); } }
 </style>

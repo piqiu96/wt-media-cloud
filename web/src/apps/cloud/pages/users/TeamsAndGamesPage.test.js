@@ -15,14 +15,14 @@ describe('M2-A3 management pages', () => {
   })
 
   it('gives operation team page search/list/pagination basics', () => {
-    for (const required of ['运营分组', '搜索分组ID或名称', '用户数', 't-table', 't-pagination', '该分组下还有']) {
+    for (const required of ['运营分组', '综合搜索', '分组 ID / 名称', '查询', '重置', '用户数', 't-table', 't-pagination', '该分组下还有']) {
       expect(teamsSource).toContain(required)
     }
     expect(teamsSource).toContain(':disabled="row.user_count > 0"')
   })
 
   it('gives game page search/list/filter/pagination basics', () => {
-    for (const required of ['游戏管理', '搜索游戏ID或名称', '关联情况', '用户授权', '媒体账号', '新建游戏', 't-table', 't-pagination', '查看关联详情']) {
+    for (const required of ['游戏管理', '综合搜索', '游戏 ID / 名称', '状态', '查询', '重置', '关联情况', '用户授权', '媒体账号', '新建游戏', 't-table', 't-pagination', '查看关联详情']) {
       expect(gamesSource).toContain(required)
     }
     expect(gamesSource).toContain(":disabled=\"row.status === 'enabled' && hasReferences(row)\"")

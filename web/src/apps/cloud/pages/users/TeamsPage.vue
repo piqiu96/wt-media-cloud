@@ -55,6 +55,11 @@ function search() {
   pagination.value.current = 1
 }
 
+function resetFilters() {
+  keyword.value = ''
+  pagination.value.current = 1
+}
+
 function openCreate() {
   editingTeam.value = null
   teamName.value = ''
@@ -106,8 +111,9 @@ async function deleteTeam(team) {
         <t-button size="small" style="margin-left:8px" @click="loadAll">刷新</t-button>
       </template>
       <div class="filter-row">
-        <t-input v-model="keyword" placeholder="搜索分组ID或名称" clearable @change="search" />
-        <t-button size="small" @click="search">查询</t-button>
+        <label class="filter-field"><span>综合搜索</span><t-input v-model="keyword" placeholder="分组 ID / 名称" clearable @change="search" style="width:220px" /></label>
+        <t-button theme="primary" size="small" @click="search">查询</t-button>
+        <t-button class="wt-secondary-button" size="small" variant="outline" @click="resetFilters">重置</t-button>
       </div>
       <t-table :data="pagedTeams" :columns="columns" row-key="id" size="small" hover>
         <template #operations="{ row }">
@@ -128,6 +134,7 @@ async function deleteTeam(team) {
 </template>
 
 <style scoped>
-.filter-row { display:flex; gap:8px; align-items:center; margin-bottom:16px; max-width:420px; }
+.filter-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
+.filter-field { display:flex; align-items:center; gap:8px; color:var(--wt-text-secondary); font-size:13px; font-weight:500; white-space:nowrap; }
 .pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
 </style>

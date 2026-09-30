@@ -37,6 +37,11 @@ function emptyGameForm() {
   return { id: '', name: '', status: 'enabled', remark: '' }
 }
 
+function resetFilters() {
+  filters.value = { keyword: '', status: '' }
+  loadGames()
+}
+
 async function loadGames() {
   loading.value = true
   error.value = ''
@@ -144,12 +149,13 @@ async function deleteGame(game) {
         <t-button size="small" style="margin-left:8px" @click="loadGames">刷新</t-button>
       </template>
       <div class="filter-row">
-        <t-input v-model="filters.keyword" placeholder="搜索游戏ID或名称" clearable />
-        <t-select v-model="filters.status" placeholder="状态" clearable>
+        <label class="filter-field"><span>综合搜索</span><t-input v-model="filters.keyword" placeholder="游戏 ID / 名称" clearable style="width:220px" /></label>
+        <label class="filter-field"><span>状态</span><t-select v-model="filters.status" placeholder="全部" clearable style="width:140px">
           <t-option value="enabled" label="启用" />
           <t-option value="disabled" label="停用" />
-        </t-select>
-        <t-button size="small" @click="loadGames">查询</t-button>
+        </t-select></label>
+        <t-button theme="primary" size="small" @click="loadGames">查询</t-button>
+        <t-button class="wt-secondary-button" size="small" variant="outline" @click="resetFilters">重置</t-button>
       </div>
       <t-table :data="pagedGames" :columns="columns" row-key="id" size="small" hover>
         <template #references="{ row }">
@@ -198,7 +204,8 @@ async function deleteGame(game) {
 </template>
 
 <style scoped>
-.filter-row { display:grid; grid-template-columns:minmax(180px, 1fr) minmax(120px, 180px) auto; gap:8px; align-items:center; margin-bottom:16px; max-width:620px; }
+.filter-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
+.filter-field { display:flex; align-items:center; gap:8px; color:var(--wt-text-secondary); font-size:13px; font-weight:500; white-space:nowrap; }
 .pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
 .reference-section { margin: 16px 0 8px; font-weight: 600; }
 </style>

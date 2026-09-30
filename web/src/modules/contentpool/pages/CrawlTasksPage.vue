@@ -310,14 +310,14 @@ function hasFailed(task) {
 
       <ResourceCard class="task-filter-card">
         <div class="filter-row">
-          <t-input v-model="filters.name" clearable placeholder="搜索任务名称 / 来源策略" style="width:240px" />
-          <t-select v-model="filters.status" clearable placeholder="状态" style="width:150px">
+          <label class="filter-field"><span>任务名称 / 来源策略</span><t-input v-model="filters.name" clearable placeholder="搜索任务名称 / 来源策略" style="width:240px" /></label>
+          <label class="filter-field"><span>状态</span><t-select v-model="filters.status" clearable placeholder="全部" style="width:150px">
             <t-option value="success" label="成功" />
             <t-option value="partial_success" label="部分成功" />
             <t-option value="failed" label="失败" />
             <t-option value="running" label="执行中" />
             <t-option value="pending" label="待执行" />
-          </t-select>
+          </t-select></label>
           <t-button theme="primary" @click="load">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
         </div>
@@ -450,6 +450,7 @@ function hasFailed(task) {
 .task-card { padding: 18px 20px; margin-top: 16px; }
 .task-filter-card { padding: 14px 20px; }
 .filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .task-detail { display: flex; flex-direction: column; gap: 14px; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .task-title { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 600; }

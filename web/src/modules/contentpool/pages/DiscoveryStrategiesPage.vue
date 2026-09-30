@@ -391,15 +391,15 @@ function latestStats(row) {
 
       <ResourceCard class="strategy-filter-card">
         <div class="filter-row">
-          <t-input v-model="filters.name" clearable placeholder="搜索策略名称" style="width:220px" @enter="load" />
-          <t-select v-model="filters.type" clearable placeholder="策略类型" style="width:140px">
+          <label class="filter-field"><span>策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" style="width:220px" @enter="load" /></label>
+          <label class="filter-field"><span>策略类型</span><t-select v-model="filters.type" clearable placeholder="全部" style="width:140px">
             <t-option value="keyword" label="关键词" />
             <t-option value="author" label="作者" />
-          </t-select>
-          <t-select v-model="filters.status" clearable placeholder="状态" style="width:140px">
+          </t-select></label>
+          <label class="filter-field"><span>状态</span><t-select v-model="filters.status" clearable placeholder="全部" style="width:140px">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
-          </t-select>
+          </t-select></label>
           <t-button theme="primary" @click="load">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
         </div>
@@ -555,6 +555,7 @@ function latestStats(row) {
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
 .strategy-filter-card { padding: 14px 20px; }
 .filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .strategy-rule-link { color: #7c3aed; cursor: pointer; font-weight: 500; }
 .strategy-rule-link:hover { text-decoration: underline; }
 .form-section { margin: 6px 0 4px; padding-left: 96px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 600; }
