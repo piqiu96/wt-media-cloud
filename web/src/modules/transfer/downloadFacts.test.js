@@ -275,6 +275,9 @@ describe('the local copy of one material', () => {
 
   it('ignores everything that is not this material, this machine and this action', () => {
     expect(downloadedFileName([download({ asset_id: 7 })], 42)).toBeNull()
+    // 今天库里只有 `material` 一种（`model.AssetMaterial`），所以这一条钉的是**过滤还在**：
+    // 另一类资源的 42 号不该被当成这块素材。取值沿用同文件既有写法。
+    expect(downloadedFileName([download({ asset_type: 'compose_input' })], 42)).toBeNull()
     expect(downloadedFileName([download({ execution_scope: 'cloud' })], 42)).toBeNull()
     // 合成准备的落点是另一个功能的产物（本 CHG 不含合成）：「下载目录」要说的是运营自己
     // 点过「下载」的那一份。

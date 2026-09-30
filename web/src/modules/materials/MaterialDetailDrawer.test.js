@@ -285,8 +285,10 @@ describe('the local copy of a downloaded material', () => {
     expect(source).toContain('revealSavedFile(localFile.value.name')
   })
 
+  // 切到这张卡自己的 `</section>` 为止，不是切到下一张卡的标题：后者会把两张卡之间的空档
+  // 也算进来，把这块搬出卡片照样通过（实测：搬到空档里 29 条仍全绿）。
   it('puts the download directory in the 文件信息 card, with a way to open it', () => {
-    const card = sliceBetween(template, 'class="detail-card__title">\n            文件信息', '<h4 class="detail-card__title">来源信息')
+    const card = sliceBetween(template, 'class="detail-card__title">\n            文件信息', '</section>')
     expect(card).toContain('下载目录')
     expect(card).toContain('localFile.directory')
     expect(card).toContain('打开目录')
@@ -322,5 +324,9 @@ describe('the local copy of a downloaded material', () => {
     const block = sliceBetween(template, 'class="detail-local-file"', '</section>')
     expect(block).not.toContain('video_status')
     expect(source).toContain('downloadedFileName(tasks, id)')
+    // 判据在**取事实的那一段**里：这条 watch 体里一次都不提文件状态。整份源码不能这样断言
+    // ——文件状态在别处有正当用处（云端视频地址那条 watch 就按它分支）。
+    const watcher = sliceBetween(source, 'watch(() => [props.visible, props.material?.id, props.mode]', '\n})')
+    expect(watcher).not.toContain('video_status')
   })
 })
