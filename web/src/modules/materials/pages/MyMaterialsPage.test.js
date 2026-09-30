@@ -65,14 +65,14 @@ describe('my materials page', () => {
   })
 
   // 走查三轮（交互对齐 §2.3/§5.5/§5.6/§7.4）：行操作收敛为「详情 | 下载（failed 时
-  // 文案「重试」）| 更多：移出」；移出是危险操作，收进「更多」下拉，不再平铺。
-  it('narrows each row to详情, one status-driven primary action, and a更多 menu for remove', () => {
+  // 文案「重试」）| 移出」。规范 §5.6（2026-09-30 用户补充裁定）：按钮不超过 5 个
+  // 全部平铺——本行 3 个，移出平铺并保留危险样式，不进「更多」。
+  it('narrows each row to详情, one status-driven primary action, and a flat danger remove', () => {
     expect(source).toContain('@click="openDetail(row)">详情</t-button>')
     expect(source).not.toContain('>查看</t-button>')
     expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>')
-    expect(source).toContain('<t-dropdown')
-    expect(source).toContain('@click="remove(row)">移出</t-dropdown-item>')
-    expect(source).not.toContain('>移出</t-button>')
+    expect(source).toContain('class="wt-secondary-button wt-danger-button" variant="outline" @click="remove(row)">移出</t-button>')
+    expect(source).not.toContain('<t-dropdown')
   })
 
   // 抽屉按上下文给动作：我的素材上下文提供下载/重试，不再提供「加入我的素材」

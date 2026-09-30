@@ -191,17 +191,12 @@ onMounted(() => {
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
             <template #op="{ row }">
               <!-- 走查三轮（交互对齐 §2.3/§5.5/§5.6/§7.4）：详情 | 状态驱动的单一主操作
-                   （failed 是「重试」，其余是「下载」）| 更多。移出是危险操作，收进「更多」，
-                   与挖掘策略页同一个下拉形状。 -->
+                   （failed 是「重试」，其余是「下载」）| 移出。§5.6（用户补充裁定）：
+                   按钮不超过 5 个全部平铺——本行 3 个，移出平铺保留危险样式，不进「更多」。 -->
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
                 <t-button size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>
-                <t-dropdown trigger="click">
-                  <t-button size="small" class="wt-secondary-button" variant="outline">更多</t-button>
-                  <t-dropdown-menu>
-                    <t-dropdown-item @click="remove(row)">移出</t-dropdown-item>
-                  </t-dropdown-menu>
-                </t-dropdown>
+                <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="remove(row)">移出</t-button>
               </t-space>
             </template>
           </t-table>
