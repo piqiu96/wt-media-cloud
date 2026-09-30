@@ -8,7 +8,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { VIDEO_STATUSES, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
+import { VIDEO_STATUSES, downloadActionLabel, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
@@ -141,16 +141,6 @@ async function download(row) {
   }
 }
 
-async function addBack(row) {
-  try {
-    await client.addUsage(row.id)
-    MessagePlugin.success('已加入我的素材')
-    await load()
-  } catch (e) {
-    MessagePlugin.error(e?.message || '加入我的素材失败')
-  }
-}
-
 onMounted(() => {
   load()
   loadGames()
@@ -200,10 +190,18 @@ onMounted(() => {
             <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
             <template #op="{ row }">
+              <!-- 走查三轮（交互对齐 §2.3/§5.5/§5.6/§7.4）：详情 | 状态驱动的单一主操作
+                   （failed 是「重试」，其余是「下载」）| 更多。移出是危险操作，收进「更多」，
+                   与挖掘策略页同一个下拉形状。 -->
               <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
-                <t-button size="small" theme="primary" @click="download(row)">下载</t-button>
-                <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="remove(row)">移出</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>
+                <t-dropdown trigger="click">
+                  <t-button size="small" class="wt-secondary-button" variant="outline">更多</t-button>
+                  <t-dropdown-menu>
+                    <t-dropdown-item @click="remove(row)">移出</t-dropdown-item>
+                  </t-dropdown-menu>
+                </t-dropdown>
               </t-space>
             </template>
           </t-table>
@@ -216,7 +214,7 @@ onMounted(() => {
         :material="detail"
         :loading="detailLoading"
         :games="games"
-        @add="addBack"
+        mode="mine"
         @download="download"
       />
     </div>

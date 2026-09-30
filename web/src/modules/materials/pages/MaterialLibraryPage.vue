@@ -12,13 +12,10 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { VIDEO_STATUSES, gameName, videoStatusLabel, videoStatusTone } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
-import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
-import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 
 const client = createMaterialsClient()
 const users = createUsersClient()
 const route = useRoute()
-const downloadCentre = useDownloadCentre()
 
 const rows = ref([])
 const loading = ref(false)
@@ -149,18 +146,6 @@ async function addToMine(row) {
   }
 }
 
-async function download(row) {
-  try {
-    await client.createDownload(row.id)
-    MessagePlugin.success('已开始下载，可在下载中心查看进度')
-    downloadCentre.open()
-  } catch (e) {
-    // 409 的两种：素材还没准备好、本机没有可用的下载节点。它们靠响应里的 error.type
-    // 区分（errcode 之别无意义），由 createDownloadFailureMessage 翻成人话。
-    MessagePlugin.error(createDownloadFailureMessage(e))
-  }
-}
-
 function reset() {
   search.value = ''
   statusFilter.value = ''
@@ -183,7 +168,7 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page material-library-page">
       <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="素材库" description="云端的原素材：视频准备就绪后即可下载到本机">
+      <ResourcePageHeader title="素材库" description="云端的原素材：加入我的素材后即可下载到本机">
         <template #actions>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
@@ -215,12 +200,11 @@ onMounted(() => {
             <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
+              <!-- 走查三轮（交互对齐 §2.3/§5.5）：详情 | 单一主操作。素材库的主操作是
+                   领取（加入我的素材）；下载归「我的素材」，这里不给第二条路。 -->
               <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="addToMine(row)">加入我的素材</t-button>
-                <!-- 按钮不因视频没准备好而变灰：服务端接受未准备与失败，点了会先准备。
-                     走查反馈：状态徽章已说明一切，按钮下不再挂提示小字。 -->
-                <t-button size="small" theme="primary" @click="download(row)">下载</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" theme="primary" @click="addToMine(row)">加入我的素材</t-button>
               </t-space>
             </template>
           </t-table>
@@ -233,8 +217,8 @@ onMounted(() => {
         :material="detail"
         :loading="detailLoading"
         :games="games"
+        mode="library"
         @add="addToMine"
-        @download="download"
       />
     </div>
   </t-loading>

@@ -37,16 +37,16 @@ describe('my materials page', () => {
   })
 
   // 列表只返回 active 的关系，所以看不到已移出的行，也就没有「撤销移出」。
-  // 恢复 = 在素材库里再点一次「加入我的素材」（冻结合同里没有恢复端点）。
+  // 恢复 = 回素材库再点一次「加入我的素材」（冻结合同里没有恢复端点，那条命令
+  // 本身就是幂等的创建或恢复）。走查三轮后本页不再提供「加入我的素材」——
+  // 在「我的素材」里给自己一个加入按钮是同义反复。
   it('offers no undo, because the list cannot contain a removed row', () => {
     // 只看模板：页面上不该出现「恢复」这类控件。脚本里的注释提到它不算数，
     // 而且那条注释正是要说明为什么这里没有它。
     const template = source.slice(source.indexOf('<template>'))
     expect(template).not.toContain('恢复')
     expect(template).not.toContain('撤销')
-    // 详情抽屉里那一颗叫「加入我的素材」，做的就是恢复 —— 同一个命令。
-    expect(source).toContain('@add="addBack"')
-    expect(source).toContain('await client.addUsage(row.id)')
+    expect(source).not.toContain('addUsage')
   })
 
   it('opens the material a deep link names', () => {
@@ -55,11 +55,32 @@ describe('my materials page', () => {
     expect(source).toContain('await client.get(row.id)')
   })
 
-  it('shares the detail drawer and the download failure wording with the library', () => {
+  it('shares the detail drawer and translates a refused download through its error type', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
+    // 409 的两种拒绝（素材未准备好、本机无可用节点）只能靠 error.type 区分，
+    // 由 downloadErrors 翻成人话交给用户；直接把 err.message 抛出去会丢掉这个判别位。
     expect(source).toContain('createDownloadFailureMessage(e)')
     expect(source).not.toContain('material-detail-drawer')
+  })
+
+  // 走查三轮（交互对齐 §2.3/§5.5/§5.6/§7.4）：行操作收敛为「详情 | 下载（failed 时
+  // 文案「重试」）| 更多：移出」；移出是危险操作，收进「更多」下拉，不再平铺。
+  it('narrows each row to详情, one status-driven primary action, and a更多 menu for remove', () => {
+    expect(source).toContain('@click="openDetail(row)">详情</t-button>')
+    expect(source).not.toContain('>查看</t-button>')
+    expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>')
+    expect(source).toContain('<t-dropdown')
+    expect(source).toContain('@click="remove(row)">移出</t-dropdown-item>')
+    expect(source).not.toContain('>移出</t-button>')
+  })
+
+  // 抽屉按上下文给动作：我的素材上下文提供下载/重试，不再提供「加入我的素材」
+  // （它在这里就是自己）。
+  it('opens the drawer in mine mode with download and no add', () => {
+    expect(source).toContain('mode="mine"')
+    expect(source).toContain('@download="download"')
+    expect(source).not.toContain('@add=')
   })
 
   // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 素材 ID 第一列、封面随后，
@@ -77,7 +98,7 @@ describe('my materials page', () => {
     expect(source).toContain('MaterialCover')
     expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
     expect(source).toContain('class="wt-primary-link')
-    expect(source).toContain('@click="download(row)">下载</t-button>')
+    expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>')
     expect(source).not.toContain('downloadHint')
     expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')

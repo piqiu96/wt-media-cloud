@@ -10,13 +10,16 @@ import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vu
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
-import { gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
+import { downloadActionLabel, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   games: { type: Array, default: () => [] },
+  // 上下文决定动作（走查三轮，交互对齐）：素材库上下文的主操作是「加入我的素材」，
+  // 不提供下载——下载归「我的素材」；我的素材上下文相反。
+  mode: { type: String, default: 'library' },
 })
 defineEmits(['update:visible', 'add', 'download'])
 
@@ -93,8 +96,8 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
         </section>
         <p v-if="material.last_error" class="material-detail__error">最近一次准备失败：{{ material.last_error }}</p>
         <div class="material-detail__actions">
-          <t-button class="wt-secondary-button" variant="outline" @click="$emit('add', material)">加入我的素材</t-button>
-          <t-button theme="primary" @click="$emit('download', material)">下载</t-button>
+          <t-button v-if="mode === 'library'" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
+          <t-button v-if="mode === 'mine'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
         </div>
       </div>
     </t-loading>
@@ -110,7 +113,7 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
 .material-detail dt { color: var(--wt-text-tertiary); font-size: 12px; }
 .material-detail dd { margin: 4px 0 0; color: var(--wt-text-primary); font-size: 14px; overflow-wrap: anywhere; }
 .material-detail__error { margin: 16px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
-/* `align-items: center`：与列表行同一句话——两颗按钮等高并排，谁也不像另一类动作。 */
+/* 单一主操作（交互对齐 §2.3）：上下文给哪颗就渲染哪颗，没有并排的第二个业务动作。 */
 .material-detail__actions { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
 .material-detail__stats { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 8px; background: var(--wt-bg-page); }
 .material-detail__stats h4 { margin: 0 0 10px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; }

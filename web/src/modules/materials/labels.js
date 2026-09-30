@@ -29,6 +29,16 @@ export function videoStatusTone(value) {
 }
 
 /**
+ * 主操作的文案由状态驱动（交互规范 §7.4：异常状态给出「状态 + 下一步恢复动作」）。
+ * 失败行的下一步是「重试」，其余状态都是「下载」——服务端的 CreateDownload 对
+ * 未准备/失败都会先建准备任务，所以按钮行为不变，只是把「失败后再次执行」
+ * 这个语义说出来。行内与详情抽屉共用，两处文案分叉就是同义词混用的起点。
+ */
+export function downloadActionLabel(videoStatus) {
+  return videoStatus === 'failed' ? '重试' : '下载'
+}
+
+/**
  * 游戏名。查不到就退回 id 而不是 `-`：素材的 `game_id` 是一份真实数据，
  * 游戏表里没有它只是「这一页拿不到名字」，把它显示成「没有游戏」是另一回事。
  */

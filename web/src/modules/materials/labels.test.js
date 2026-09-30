@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { VIDEO_STATUSES, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
+import { VIDEO_STATUSES, downloadActionLabel, gameName, shortDigest, videoStatusLabel, videoStatusTone } from './labels.js'
 
 describe('material labels', () => {
   // 四种状态全覆盖：漏掉一种就是页面上出现空白徽章，而空白看起来像「没问题」。
@@ -26,6 +26,15 @@ describe('material labels', () => {
     const labels = await import('./labels.js')
     expect(labels.canDownload).toBeUndefined()
     expect(labels.downloadHint).toBeUndefined()
+  })
+
+  // 走查三轮（交互对齐 §7.4）：主操作文案由状态驱动——失败行的下一步是「重试」，
+  // 其余状态都是「下载」。放行内与详情抽屉共用，两处文案分叉就是同义词混用的起点。
+  it('names the primary action from the video status', () => {
+    expect(downloadActionLabel('failed')).toBe('重试')
+    for (const status of ['not_downloaded', 'downloading', 'ready', 'mystery', undefined]) {
+      expect(downloadActionLabel(status), String(status)).toBe('下载')
+    }
   })
 
   // 素材带了 game_id 而游戏表里没有它时，显示 id 而不是「-」：

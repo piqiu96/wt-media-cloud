@@ -51,11 +51,14 @@ describe('material detail drawer', () => {
     expect(template).not.toContain('material.view_count')
   })
 
-  // 下载按钮与列表行同一形状（CHG-20260930-069 走查反馈）：只叫「下载」，
-  // 下面不挂提示小字——状态徽章已经说明了点下去会发生什么。
-  it('names the download action just「下载」without a hint under it', () => {
-    expect(source).toContain("@click=\"$emit('download', material)\">下载</t-button>")
-    expect(source).not.toContain('downloadHint')
-    expect(source).not.toContain('下载到本机')
+  // 走查三轮（交互对齐）：抽屉按上下文提供动作——library 只有「加入我的素材」，
+  // mine 只有「下载/重试」。共用一个组件、两个上下文各给一个主操作，
+  // 而不是把两页的动作都堆进来。
+  it('offers the actions of its context only', () => {
+    expect(source).toContain("mode: { type: String, default: 'library' }")
+    expect(source).toMatch(/v-if="mode === 'library'"/)
+    expect(source).toMatch(/v-if="mode === 'mine'"/)
+    // mine 上下文的主操作文案由状态驱动：failed 是「重试」，其余是「下载」。
+    expect(source).toContain("$emit('download', material)\">{{ downloadActionLabel(material.video_status) }}")
   })
 })

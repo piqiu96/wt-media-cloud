@@ -38,25 +38,14 @@ describe('material library page', () => {
     expect(source).toContain('new Set(rows.value.map((row) => row.game_id).filter(Boolean))')
   })
 
-  // 409 的两种拒绝（素材未准备好、本机无可用节点）只能靠 error.type 区分，
-  // 由 downloadErrors 翻成人话交给用户；直接把 err.message 抛出去会丢掉这个判别位。
-  it('translates a refused download through its error type', () => {
-    expect(source).toContain('createDownloadFailureMessage(e)')
-    expect(source).toContain('await client.createDownload(row.id)')
-    expect(source).toContain('downloadCentre.open()')
-  })
-
-  // 下载按钮不看 `video_status`：服务端接受未准备与失败，点了会先准备。判据随
-  // `canDownload` 一起拿掉了，所以这里钉的是它的**缺席**——一个灰按钮会把「要多走一步」
-  // 说成「这条路不通」，而运营据此去别处找绑定，正是走查里报的那一条。
-  // 走查反馈（CHG-20260930-069）：按钮只叫「下载」，下面不再挂提示小字——
-  // 状态徽章已经说明了点下去会发生什么，再补一句只是噪声。
-  it('offers the download action on every row, named just「下载」and without a hint under it', () => {
-    expect(source).not.toMatch(/:disabled="!canDownload\(/)
-    expect(source).not.toContain('canDownload')
-    expect(source).toContain('@click="download(row)">下载</t-button>')
-    expect(source).not.toContain('downloadHint')
-    expect(source).not.toContain('下载到本机</t-button>')
+  // 走查三轮（交互对齐）：下载归「我的素材」。素材库行与它打开的详情抽屉都不再
+  // 提供下载——留着入口就是把「先领取再下载」说成两条并行的路。
+  it('offers no download anywhere on the library page', () => {
+    expect(source).not.toContain('@click="download(row)"')
+    expect(source).not.toContain('createDownload')
+    expect(source).not.toContain('createDownloadFailureMessage')
+    expect(source).not.toContain('downloadCentre')
+    expect(source).not.toContain('@download')
   })
 
   it('adds to my materials through the one idempotent command', () => {
@@ -90,10 +79,21 @@ describe('material library page', () => {
   })
 
   // 详情抽屉是两页共用的一个组件：各写一份的结局是同一个素材在两页显示得不一样，
-  // 且没有任何东西会报错。
-  it('uses the shared material detail drawer rather than its own copy', () => {
+  // 且没有任何东西会报错。走查三轮：抽屉按上下文给动作——素材库上下文只有
+  // 「加入我的素材」，不提供下载。
+  it('uses the shared material detail drawer in library mode', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
+    expect(source).toContain('mode="library"')
+    expect(source).toContain('@add="addToMine"')
     expect(source).not.toContain('material-detail-drawer')
+  })
+
+  // 走查三轮（交互对齐 §2.3/§5.3/§5.5）：行操作收敛为「详情 | 加入我的素材」，
+  // 每行单一主操作；「查看」是全系统要消灭的同义词。
+  it('narrows each row to详情 followed by one primary action', () => {
+    expect(source).toContain('@click="openDetail(row)">详情</t-button>')
+    expect(source).not.toContain('>查看</t-button>')
+    expect(source).toContain('theme="primary" @click="addToMine(row)">加入我的素材</t-button>')
   })
 })
