@@ -31,22 +31,22 @@ describe('material detail drawer', () => {
 
   // 云端视频地址是签名的、会过期：只在点击那一刻去取，不在打开抽屉时预取。
   it('asks for the cloud video address on the click, not when the drawer opens', () => {
-    expect(source).toContain('getVideoUrl(')
+    expect(source).toContain('handOverCloudVideo(')
     expect(source).toContain('@click.prevent="openCloudVideo"')
     // 未就绪的素材没有地址，一次必然 409 的请求不发出去 —— 链接本身就不渲染。
     expect(source).toContain('v-if="material.video_status === \'ready\'"')
   })
 
-  // 跨过 await 之后浏览器不再算「用户手势」，那时才调 window.open 会被 WebKit
-  // 拦下（打包的 Desktop 用的就是它）。所以空标签页必须在取地址之前同步开出来。
-  it('opens the tab before awaiting the address, and drops the opener link', () => {
-    const body = source.slice(source.indexOf('async function openCloudVideo'))
-    const openAt = body.indexOf('window.open(')
-    const awaitAt = body.indexOf('await client.getVideoUrl(')
-    expect(openAt).toBeGreaterThan(-1)
-    expect(awaitAt).toBeGreaterThan(-1)
-    expect(openAt).toBeLessThan(awaitAt)
-    expect(body).toContain('opener = null')
+  // 两个宿主的交付方式不同（浏览器自己开标签页、桌面端由壳交给系统浏览器），判在
+  // `cloudVideo.js` 里，由它自己的用例逐条钉住。抽屉要回答的是**现在跑在哪个宿主
+  // 里**——此前这一问漏了，桌面端被当成浏览器，于是弹出「浏览器拦截了新标签页」。
+  it('asks the running host before deciding how the video is opened', () => {
+    const body = source.slice(source.indexOf('function openCloudVideo'))
+    expect(body).toContain('isDesktopRuntime()')
+    expect(body).toContain('props.material.id')
+    expect(body).toContain('handOverCloudVideo({')
+    // 窗口怎么开也不由这里决定：抽屉里不该再有窗口 API。
+    expect(body).not.toContain('window.open(')
   })
 
   // 预取留下的那两个形状不该有残留：一个 ref、一段「地址获取中」的中间态。
@@ -305,7 +305,7 @@ describe('the local copy of a downloaded material', () => {
   it('takes the file name from the download tasks and the directory from this machine', () => {
     expect(source).toContain("import { createFileTransferClient } from '../../shared/api/fileTransfer.js'")
     expect(source).toContain("import { downloadedFileName, isTerminal } from '../transfer/downloadFacts.js'")
-    expect(source).toContain("import { revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'")
+    expect(source).toContain("import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'")
     expect(source).toContain('downloadedFileName(tasks')
     expect(source).toContain('savedFileStates([name])')
     // 名字从扫描结果那一条上读回来（`savedFileStates` 的表里带着 `name`），不另存一份。

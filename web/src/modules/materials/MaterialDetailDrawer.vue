@@ -8,7 +8,8 @@ import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 import { downloadedFileName, isTerminal } from '../transfer/downloadFacts.js'
 import { transferRow } from '../transfer/transferRows.js'
-import { revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
+import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
+import { handOverCloudVideo } from './cloudVideo.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
@@ -128,30 +129,18 @@ function countLabel(value) { return Number(value || 0).toLocaleString() }
 /**
  * 云端视频地址是**签名**的、会过期，所以每次点击现取，不预先拿也不留。
  *
- * 空标签页在 `await` **之前**同步开出来，拿到地址后再导航：跨过 `await` 之后浏览器
- * 已经不算「用户手势」，那时才调的 `window.open` 会被拦（WebKit 一律拦，打包的
- * Desktop 用的就是它）。`opener` 置空等价于 `rel="noopener"`。
+ * 交付方式两个宿主不同（浏览器自己开标签页，打包的桌面端由壳交给系统浏览器），
+ * 判据与理由都在 `cloudVideo.js`；这里只回答「现在跑在哪个宿主里」。
  *
  * 未就绪的素材没有地址，按钮也就不渲染 —— 一次必然 409 的请求不发出去。
  */
-async function openCloudVideo() {
-  const tab = window.open('', '_blank')
-  if (!tab) {
-    // 连同步的 window.open 都被拦，就没有可导航的标签页了；此时再去取地址是白发一次
-    // 签名请求。
-    MessagePlugin.error('浏览器拦截了新标签页，请允许弹出窗口后重试')
-    return
-  }
-  tab.opener = null
-  try {
-    const data = await client.getVideoUrl(props.material.id)
-    const url = data?.url
-    if (!url) throw new Error('云端视频地址为空')
-    tab.location.replace(url)
-  } catch (e) {
-    tab.close()
-    MessagePlugin.error(e?.message || '打开云端视频失败')
-  }
+function openCloudVideo() {
+  return handOverCloudVideo({
+    client,
+    materialId: props.material.id,
+    desktop: isDesktopRuntime(),
+    reportError: (message) => MessagePlugin.error(message),
+  })
 }
 
 /**
