@@ -144,6 +144,13 @@ describe('download centre drawer tabs', () => {
     expect(source).toContain('row.sizeText')
   })
 
+  // 走查修正（任务 23 收尾）：下载中心抽屉与详情抽屉同宽 min(62vw, 880px)。
+  // 旧宽度 min(46vw, 640px) 下历史表格五列（素材/大小/完成时间/状态/操作 ≈720px）
+  // 必然横向滚动——参考详情的弹窗尺寸、做更大，让整张表一眼看全。
+  it('sizes the drawer like the detail drawer so the history table fits', () => {
+    expect(source).toContain('size="min(62vw, 880px)"')
+  })
+
   // 每一栏各自的空态：进行中为空不等于没有任务，失败/历史为空也不等于都在跑。
   it('gives each tab its own empty text', () => {
     expect(source).toContain('暂无正在下载的任务')
