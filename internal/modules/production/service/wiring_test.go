@@ -20,7 +20,7 @@ import (
 // contract body is a single `url` string either way.
 //
 // The assertion is on the signature, not on the shape of the call: reverting the
-// adapter to `storage.PublicURL(key)` produces a URL that addresses the right
+// adapter to the stable unsigned address produces a URL that addresses the right
 // object and turns this red anyway.
 func TestTheObjectStoreAdapterSignsTheAddressItPublishes(t *testing.T) {
 	t.Cleanup(func() { _ = storage.Close() })
