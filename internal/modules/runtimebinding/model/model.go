@@ -2,9 +2,15 @@
 package model
 
 import (
+	"errors"
 	"time"
 
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
+)
+
+var (
+	ErrDeviceNotBound = errors.New("no device is bound")
+	ErrDeviceMismatch = errors.New("another device is bound")
 )
 
 type BindingTicket struct {
@@ -21,6 +27,9 @@ type AgentNode struct {
 	ID                   string                `json:"id"`
 	AgentID              string                `json:"agent_id"`
 	DeviceID             string                `json:"device_id"`
+	DevicePublicKey      []byte                `json:"-"`
+	DeviceName           string                `json:"-"`
+	BindDevice           bool                  `json:"-"`
 	UserID               sharedidentity.UserID `json:"user_id"`
 	SessionID            string                `json:"-"`
 	Mode                 string                `json:"mode"`
@@ -31,6 +40,16 @@ type AgentNode struct {
 	CredentialHash       string                `json:"-"`
 	RegisteredAt         time.Time             `json:"registered_at"`
 	LastHeartbeatAt      time.Time             `json:"last_heartbeat_at"`
+}
+
+type DeviceBinding struct {
+	Bound               bool       `json:"bound"`
+	DeviceID            string     `json:"device_id,omitempty"`
+	DeviceName          string     `json:"device_name,omitempty"`
+	BoundAt             *time.Time `json:"bound_at,omitempty"`
+	LastVerifiedAt      *time.Time `json:"last_verified_at,omitempty"`
+	BitAccountBound     bool       `json:"bit_account_bound"`
+	BitMainUserIDMasked string     `json:"bit_main_user_id_masked,omitempty"`
 }
 
 type DependencyFact struct {

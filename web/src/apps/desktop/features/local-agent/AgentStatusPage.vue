@@ -68,7 +68,7 @@ onMounted(reloadPage)
         <t-descriptions-item label="比特浏览器账号">
           {{ page.mainUserText }}
         </t-descriptions-item>
-        <t-descriptions-item label="本机可信状态">
+        <t-descriptions-item label="当前会话节点">
           {{ page.nodeText }}
         </t-descriptions-item>
         <t-descriptions-item label="运行环境">
@@ -80,6 +80,7 @@ onMounted(reloadPage)
       </t-descriptions>
       <div v-if="page" class="agent-actions">
         <t-button :loading="loading" @click="reloadPage">重新检测本机环境</t-button>
+        <t-button variant="outline" @click="$router.push('/personal-info')">查看设备绑定</t-button>
         <t-button
           v-if="page.canBindTrustedNode"
           theme="primary"

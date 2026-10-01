@@ -36,6 +36,29 @@ func RegisterLocalNode(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Created(c, registration)
 }
+func GetDeviceBinding(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	binding, err := runtimeservice.GetDeviceBinding(actor.ID)
+	if err != nil {
+		writeRuntimeError(c, err)
+		return
+	}
+	api.Success(c, binding)
+}
+func UnbindDevice(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	if err := runtimeservice.UnbindDevice(actor.ID); err != nil {
+		writeRuntimeError(c, err)
+		return
+	}
+	api.NoContent(c)
+}
 func ReportRuntime(ctx context.Context, c *hertzapp.RequestContext) {
 	var report runtimeservice.RuntimeReport
 	if !api.DecodeJSON(c, &report) {
@@ -76,6 +99,10 @@ func writeRuntimeError(c *hertzapp.RequestContext, err error) {
 		api.Unauthorized(c, 11001, "节点凭证无效")
 	case errors.Is(err, runtimeservice.ErrProfileOwnershipMismatch):
 		api.Conflict(c, 23003, "上报的 Profile 与绑定用户不匹配")
+	case errors.Is(err, runtimeservice.ErrDeviceNotBound):
+		api.Conflict(c, 23010, "尚未绑定运营电脑，请在个人信息页手动绑定")
+	case errors.Is(err, runtimeservice.ErrDeviceMismatch):
+		api.Conflict(c, 23011, "当前电脑与已绑定设备不一致，请先在个人信息页解除旧设备绑定")
 	case errors.Is(err, cloudagentservice.ErrIncompatibleAgent):
 		api.Conflict(c, 30005, "Agent 合同版本不兼容")
 	default:

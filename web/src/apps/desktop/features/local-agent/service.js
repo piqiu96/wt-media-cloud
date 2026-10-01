@@ -96,11 +96,12 @@ export function createLocalAgentService({ invoke }) {
       const result = await invoke(LOCAL_AGENT_COMMANDS.bind);
       return normalizeBoundNode(result);
     },
-    async bindSession({ bindingTicket, cloudBaseUrl }) {
+    async bindSession({ bindingTicket, cloudBaseUrl, bindDevice = false }) {
       const result = await invoke(LOCAL_AGENT_COMMANDS.bindSession, {
         args: {
           binding_ticket: bindingTicket,
           cloud_base_url: cloudBaseUrl,
+          bind_device: bindDevice,
         },
       });
       return normalizeBoundNode(result);

@@ -101,6 +101,8 @@ type GameReferences struct {
 type User struct {
 	ID           UserID
 	Username     string
+	Nickname     string
+	AvatarID     string
 	PasswordHash string
 	Role         Role
 	Status       UserStatus
@@ -116,6 +118,8 @@ type User struct {
 type PublicUser struct {
 	ID       UserID     `json:"id"`
 	Username string     `json:"username"`
+	Nickname string     `json:"nickname"`
+	AvatarID string     `json:"avatar_id"`
 	Role     Role       `json:"role"`
 	Status   UserStatus `json:"status"`
 	TeamID   *TeamID    `json:"team_id"`

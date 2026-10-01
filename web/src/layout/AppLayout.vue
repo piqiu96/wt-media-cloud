@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isDesktop } from '../utils.js'
 import { createSessionClient } from '../shared/api/session.js'
 import DownloadCentreDrawer from '../modules/transfer/DownloadCentreDrawer.vue'
 import { useDownloadCentre } from '../modules/transfer/downloadCentre.js'
+import BrandLogo from '../shared/ui/BrandLogo.vue'
+import SystemAvatar from '../shared/ui/SystemAvatar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -60,13 +62,18 @@ const desktopItems = [
 const adminOnlyPaths = new Set(['/users', '/operation-teams', '/games'])
 const desktopHiddenPaths = new Set(['/users', '/operation-teams', '/games'])
 
-onMounted(async () => {
+async function refreshUser() {
   try {
     currentUser.value = await sessionClient.me()
   } catch {
     currentUser.value = null
   }
+}
+onMounted(async () => {
+  await refreshUser()
+  window.addEventListener('wt-media:profile-updated', refreshUser)
 })
+onUnmounted(() => window.removeEventListener('wt-media:profile-updated', refreshUser))
 
 const allItems = computed(() => {
   const hiddenPaths = new Set()
@@ -128,7 +135,8 @@ async function logout() {
   try {
     await sessionClient.logout()
   } finally {
-    router.push('/login')
+    currentUser.value = null
+    router.replace('/login')
   }
 }
 </script>
@@ -137,11 +145,7 @@ async function logout() {
   <t-layout class="app-shell">
     <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
       <div class="sidebar-header" :class="{ 'is-collapsed': collapsed }" @click="router.push('/')">
-        <span class="brand-mark" aria-hidden="true">W</span>
-        <div v-if="!collapsed" class="brand-copy">
-          <span class="brand-kicker">内容运营平台</span>
-          <span class="sidebar-title">WT Media</span>
-        </div>
+        <BrandLogo :compact="collapsed" />
       </div>
       <t-menu
         :value="route.path"
@@ -192,7 +196,17 @@ async function logout() {
             <t-icon name="download" />
             下载中心
           </t-button>
-          <t-button variant="text" @click="logout">退出</t-button>
+          <t-dropdown trigger="click">
+            <button type="button" class="profile-trigger" aria-label="打开个人菜单">
+              <SystemAvatar :avatar-id="currentUser?.avatar_id || 'sky'" :size="30" />
+              <span class="profile-name">{{ currentUser?.nickname || currentUser?.username || '个人信息' }}</span>
+              <t-icon name="chevron-down" />
+            </button>
+            <t-dropdown-menu>
+              <t-dropdown-item @click="router.push('/personal-info')">个人信息</t-dropdown-item>
+              <t-dropdown-item @click="logout">退出</t-dropdown-item>
+            </t-dropdown-menu>
+          </t-dropdown>
         </div>
       </t-header>
 
@@ -227,24 +241,9 @@ async function logout() {
   cursor: pointer;
 }
 .sidebar-header.is-collapsed { justify-content: center; padding: 0; }
-.brand-mark {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 28px;
-  border-radius: 8px;
-  color: #F8FAFC;
-  background: #243B53;
-  font-family: Georgia, "Songti SC", serif;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.08em;
-}
-.brand-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.brand-kicker { color: #9CA3AF; font-size: 11px; line-height: 1; letter-spacing: 0.08em; }
-.sidebar-title { color: #273142; font-size: 15px; line-height: 1.2; font-weight: 600; letter-spacing: 0.04em; }
+.profile-trigger { display: inline-flex; align-items: center; gap: 9px; min-height: 38px; padding: 2px 8px 2px 4px; border: 0; border-radius: 9px; color: #243957; background: transparent; cursor: pointer; font: inherit; }
+.profile-trigger:hover, .profile-trigger:focus-visible { background: #eff6ff; outline: none; }
+.profile-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 
 :deep(.t-default-menu) {
   width: 100%;

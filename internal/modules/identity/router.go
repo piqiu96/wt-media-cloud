@@ -9,6 +9,7 @@ import (
 func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/auth/login", Login)
 	h.GET("/api/v1/auth/me", Me)
+	h.PATCH("/api/v1/auth/me", UpdateOwnProfile)
 	h.POST("/api/v1/auth/logout", Logout)
 	h.POST("/api/v1/users", CreateUser)
 	h.PATCH("/api/v1/users/:user_id", UpdateUser)

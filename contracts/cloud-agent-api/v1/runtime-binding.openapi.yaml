@@ -1,8 +1,26 @@
 openapi: 3.1.0
 info:
   title: WT Media Local Agent Runtime Binding API
-  version: 2026.07.14.7
+  version: 2026.10.01.1
 paths:
+  /api/v1/local-agent/device-binding:
+    get:
+      operationId: getMyDeviceBinding
+      summary: Read the current user's durable Desktop device binding.
+      responses:
+        "200":
+          description: Device binding status, without public key or credentials.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DeviceBindingEnvelope"}
+        "401": {description: Active user session required.}
+    delete:
+      operationId: unbindMyDevice
+      summary: Explicitly revoke the bound device and all of its local nodes.
+      responses:
+        "204": {description: Device unbound; local files remain on the old computer.}
+        "401": {description: Active user session required.}
+        "409": {description: No device is currently bound.}
   /api/v1/local-agent/binding-tickets:
     post:
       operationId: createLocalAgentBindingTicket
@@ -68,15 +86,34 @@ components:
             expires_at: {type: string, format: date-time}
     RegisterLocalNode:
       type: object
-      required: [binding_token, agent_id, device_id, agent_version, contract_major_version, contract_revision]
+      required: [binding_token, agent_id, device_id, device_public_key, device_signature, bind_device, agent_version, contract_major_version, contract_revision]
       properties:
         binding_token: {type: string, writeOnly: true}
         agent_id: {type: string}
         device_id: {type: string}
+        device_public_key: {type: string, description: Base64url Ed25519 public key; SHA-256 hex fingerprint equals device_id.}
+        device_signature: {type: string, writeOnly: true, description: Base64url signature over "wt-media-device-v1\n" + binding_token + "\n" + device_id.}
+        device_name: {type: string, maxLength: 64}
+        bind_device: {type: boolean, description: True only after explicit user action to enroll an unbound device; false for automatic renewal.}
         agent_version: {type: string}
         contract_major_version: {type: string, const: v1}
         contract_revision: {type: string}
       additionalProperties: false
+    DeviceBindingEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [bound, bit_account_bound]
+          properties:
+            bound: {type: boolean}
+            device_id: {type: string}
+            device_name: {type: string}
+            bound_at: {type: string, format: date-time}
+            last_verified_at: {type: string, format: date-time}
+            bit_account_bound: {type: boolean}
+            bit_main_user_id_masked: {type: string}
     RegistrationEnvelope:
       type: object
       required: [data]

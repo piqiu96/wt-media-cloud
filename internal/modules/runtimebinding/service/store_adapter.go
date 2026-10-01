@@ -21,6 +21,15 @@ func (mysqlStore) IsSessionActive(sessionID string, userID sharedidentity.UserID
 	return repository.IsSessionActive(sessionID, userID, at)
 }
 func (mysqlStore) SaveNode(node model.AgentNode) error { return repository.SaveNode(node) }
+func (mysqlStore) GetDeviceBinding(userID sharedidentity.UserID) (model.DeviceBinding, error) {
+	return repository.GetDeviceBinding(userID)
+}
+func (mysqlStore) UnbindDevice(userID sharedidentity.UserID, at time.Time) error {
+	return repository.UnbindDevice(userID, at)
+}
+func (mysqlStore) IsDeviceBound(userID sharedidentity.UserID, deviceID string) (bool, error) {
+	return repository.IsDeviceBound(userID, deviceID)
+}
 func (mysqlStore) FindNodeByCredentialHash(hash string) (model.AgentNode, bool, error) {
 	return repository.FindNodeByCredentialHash(hash)
 }

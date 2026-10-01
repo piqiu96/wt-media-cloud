@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
@@ -79,6 +80,7 @@ type Store interface {
 	FindUserByUsername(username string) (User, bool, error)
 	ListUsers() ([]User, error)
 	UpdateUser(User) error
+	UpdateOwnProfile(UserID, string, string, time.Time, AuditEvent) error
 	UpdateUserAndInvalidateSessions(User, AuditEvent) error
 	DeleteUser(UserID) error
 	DeleteUserWithAudit(UserID, AuditEvent) error
@@ -837,7 +839,43 @@ func (s *Service) CanAccessGame(userID UserID, gameID string) bool {
 }
 
 func publicUser(user User) PublicUser {
-	return PublicUser{ID: user.ID, Username: user.Username, Role: user.Role, Status: user.Status, TeamID: cloneTeamID(user.TeamID), TeamName: user.TeamName, GameIDs: append([]string(nil), user.GameIDs...)}
+	nickname := strings.TrimSpace(user.Nickname)
+	if nickname == "" {
+		nickname = user.Username
+	}
+	avatarID := user.AvatarID
+	if !validAvatarID(avatarID) {
+		avatarID = "sky"
+	}
+	return PublicUser{ID: user.ID, Username: user.Username, Nickname: nickname, AvatarID: avatarID, Role: user.Role, Status: user.Status, TeamID: cloneTeamID(user.TeamID), TeamName: user.TeamName, GameIDs: append([]string(nil), user.GameIDs...)}
+}
+
+func validAvatarID(id string) bool {
+	switch id {
+	case "sky", "ocean", "sun", "mountain", "flower", "star":
+		return true
+	}
+	return false
+}
+
+func (s *Service) UpdateOwnProfile(userID UserID, nickname, avatarID string) (PublicUser, error) {
+	nickname = strings.TrimSpace(nickname)
+	avatarID = strings.TrimSpace(avatarID)
+	if nickname == "" || utf8.RuneCountInString(nickname) > 64 || !validAvatarID(avatarID) {
+		return PublicUser{}, ErrInvalidInput
+	}
+	user, found, err := s.store.FindUser(userID)
+	if err != nil {
+		return PublicUser{}, err
+	}
+	if !found || user.Status != UserStatusEnabled {
+		return PublicUser{}, ErrForbidden
+	}
+	if err := s.store.UpdateOwnProfile(userID, nickname, avatarID, s.now(), s.newAuditEvent(userID, "user.profile.update", "user", userID, map[string]string{"avatar_id": avatarID})); err != nil {
+		return PublicUser{}, err
+	}
+	user.Nickname, user.AvatarID = nickname, avatarID
+	return publicUser(user), nil
 }
 
 func validRole(role Role) bool {
@@ -1032,6 +1070,19 @@ func (s *memoryStore) UpdateUser(user User) error {
 		return ErrInvalidInput
 	}
 	s.users[user.ID] = cloneUser(user)
+	return nil
+}
+
+func (s *memoryStore) UpdateOwnProfile(userID UserID, nickname, avatarID string, at time.Time, event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, found := s.users[userID]
+	if !found {
+		return ErrInvalidInput
+	}
+	user.Nickname, user.AvatarID, user.UpdatedAt = nickname, avatarID, at
+	s.users[userID] = user
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
 	return nil
 }
 

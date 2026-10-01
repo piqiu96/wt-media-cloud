@@ -18,6 +18,11 @@ function isTauri() {
 export async function startDesktopLocalAgent({ tauri = isTauri(), invokeImpl = invoke } = {}) {
   if (!tauri) return false
   await createLocalAgentService({ invoke: invokeImpl }).start()
+  // A restart clears the Agent's in-memory node credential. The same bound
+  // installation may renew it using the current login, without manual binding.
+  void ensureTrustedLocalAgent().catch((error) => {
+    console.info('本机执行授权将在登录或下一次执行前恢复', error?.message || error)
+  })
   return true
 }
 
@@ -84,7 +89,7 @@ export async function createDesktopStatusPreview() {
   return createLocalAgentStatusPage(snapshot, { cloudUser, canBindTrustedNode: tauri })
 }
 
-export async function bindTrustedLocalAgent() {
+export async function bindTrustedLocalAgent({ bindDevice = false } = {}) {
   const { service, cloudUser, tauri } = await createDesktopStatusContext()
   if (!tauri) {
     throw new Error("请在Desktop应用内刷新本机可信状态")
@@ -122,6 +127,16 @@ export async function bindTrustedLocalAgent() {
   await service.bindSession({
     bindingTicket: ticket.binding_token,
     cloudBaseUrl: address,
+    bindDevice,
   })
   return createDesktopStatusPreview()
+}
+
+let pendingRenewal = null
+export function ensureTrustedLocalAgent() {
+  if (!isTauri()) return Promise.resolve(null)
+  if (!pendingRenewal) {
+    pendingRenewal = bindTrustedLocalAgent().finally(() => { pendingRenewal = null })
+  }
+  return pendingRenewal
 }

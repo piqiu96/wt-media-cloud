@@ -20,9 +20,15 @@ export function createSessionClient({ base = '/api/v1', fetch = globalThis.fetch
     async me() {
       return api.get('/auth/me')
     },
+    async updateProfile(nickname, avatarId) {
+      return api.patch('/auth/me', { nickname, avatar_id: avatarId })
+    },
     async logout() {
-      setSessionToken('')
-      return api.post('/auth/logout')
+	  try {
+	    return await api.post('/auth/logout')
+	  } finally {
+	    setSessionToken('')
+	  }
     },
   }
 }

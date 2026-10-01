@@ -1,6 +1,11 @@
 package service
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -21,6 +26,7 @@ type memoryStore struct {
 	consumeCount     int
 	storedTokenHash  string
 	storedCredential string
+	boundDevices     map[identityservice.UserID]string
 }
 
 func newMemoryStore() *memoryStore {
@@ -29,6 +35,7 @@ func newMemoryStore() *memoryStore {
 		nodes:          make(map[string]AgentNode),
 		activeSessions: make(map[string]bool),
 		validProfiles:  make(map[string]bool),
+		boundDevices:   make(map[identityservice.UserID]string),
 	}
 }
 
@@ -55,9 +62,56 @@ func (s *memoryStore) IsSessionActive(sessionID string, userID identityservice.U
 }
 
 func (s *memoryStore) SaveNode(node AgentNode) error {
+	if bound := s.boundDevices[node.UserID]; bound != "" && bound != node.DeviceID {
+		return ErrDeviceMismatch
+	}
+	if node.BindDevice {
+		s.boundDevices[node.UserID] = node.DeviceID
+	}
 	s.nodes[node.CredentialHash] = node
 	s.storedCredential = node.CredentialHash
 	return nil
+}
+
+func (s *memoryStore) GetDeviceBinding(userID identityservice.UserID) (DeviceBinding, error) {
+	id := s.boundDevices[userID]
+	return DeviceBinding{Bound: id != "", DeviceID: id}, nil
+}
+func (s *memoryStore) UnbindDevice(userID identityservice.UserID, _ time.Time) error {
+	if s.boundDevices[userID] == "" {
+		return ErrDeviceNotBound
+	}
+	delete(s.boundDevices, userID)
+	for key, node := range s.nodes {
+		if node.UserID == userID {
+			node.Status = AgentStatusReplaced
+			s.nodes[key] = node
+		}
+	}
+	return nil
+}
+func (s *memoryStore) IsDeviceBound(userID identityservice.UserID, deviceID string) (bool, error) {
+	bound, explicit := s.boundDevices[userID]
+	if !explicit {
+		return true, nil
+	} // Existing fixture nodes predate device enrollment.
+	return bound == deviceID, nil
+}
+
+func signedInput(token, agentID string, bind bool) RegisterLocalInput {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	fingerprint := sha256.Sum256(publicKey)
+	deviceID := hex.EncodeToString(fingerprint[:])
+	return RegisterLocalInput{
+		BindingToken: token, AgentID: agentID, DeviceID: deviceID,
+		DevicePublicKey: base64.RawURLEncoding.EncodeToString(publicKey),
+		DeviceSignature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, deviceProofMessage(token, deviceID))),
+		BindDevice:      bind, DeviceName: "测试设备", AgentVersion: "0.2.0",
+		ContractMajorVersion: cloudagentservice.MajorVersion, ContractRevision: cloudagentservice.ContractRevision,
+	}
 }
 
 func (s *memoryStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, error) {
@@ -164,14 +218,7 @@ func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 	service := testService(store, &now)
 	grant, _ := service.IssueTicket(identityservice.PublicUser{ID: identityservice.UserID(1), Status: identityservice.UserStatusEnabled}, "session-1")
 
-	registration, err := service.RegisterLocal(RegisterLocalInput{
-		BindingToken:         grant.BindingToken,
-		AgentID:              "agent-1",
-		DeviceID:             "device-1",
-		AgentVersion:         "0.2.0",
-		ContractMajorVersion: cloudagentservice.MajorVersion,
-		ContractRevision:     cloudagentservice.ContractRevision,
-	})
+	registration, err := service.RegisterLocal(signedInput(grant.BindingToken, "agent-1", true))
 	if err != nil {
 		t.Fatalf("RegisterLocal() error = %v", err)
 	}
@@ -181,7 +228,7 @@ func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 	if registration.NodeCredential != "node-secret" || store.storedCredential == registration.NodeCredential {
 		t.Fatalf("credential handling is unsafe: grant=%q stored=%q", registration.NodeCredential, store.storedCredential)
 	}
-	if _, err := service.RegisterLocal(RegisterLocalInput{BindingToken: grant.BindingToken, AgentID: "agent-2", DeviceID: "device-2", AgentVersion: "0.2.0", ContractMajorVersion: cloudagentservice.MajorVersion, ContractRevision: cloudagentservice.ContractRevision}); !errors.Is(err, ErrBindingTicketInvalid) {
+	if _, err := service.RegisterLocal(signedInput(grant.BindingToken, "agent-2", true)); !errors.Is(err, ErrBindingTicketInvalid) {
 		t.Fatalf("second RegisterLocal() error = %v", err)
 	}
 }
@@ -192,7 +239,7 @@ func TestRuntimeReportRequiresActiveBoundSession(t *testing.T) {
 	store.activeSessions[runtimeKey("session-1", 1)] = true
 	service := testService(store, &now)
 	grant, _ := service.IssueTicket(identityservice.PublicUser{ID: identityservice.UserID(1), Status: identityservice.UserStatusEnabled}, "session-1")
-	registration, _ := service.RegisterLocal(RegisterLocalInput{BindingToken: grant.BindingToken, AgentID: "agent-1", DeviceID: "device-1", AgentVersion: "0.2.0", ContractMajorVersion: cloudagentservice.MajorVersion, ContractRevision: cloudagentservice.ContractRevision})
+	registration, _ := service.RegisterLocal(signedInput(grant.BindingToken, "agent-1", true))
 
 	store.activeSessions[runtimeKey("session-1", 1)] = false
 	err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, validRuntimeReport())
@@ -242,7 +289,7 @@ func TestRuntimeReportValidatesMainIdentityAndLeavesUnknownProfilesToDiff(t *tes
 	store.validProfiles[runtimeKey("profile-2", 1)] = true
 	service := testService(store, &now)
 	grant, _ := service.IssueTicket(identityservice.PublicUser{ID: identityservice.UserID(1), Status: identityservice.UserStatusEnabled}, "session-1")
-	registration, _ := service.RegisterLocal(RegisterLocalInput{BindingToken: grant.BindingToken, AgentID: "agent-1", DeviceID: "device-1", AgentVersion: "0.2.0", ContractMajorVersion: cloudagentservice.MajorVersion, ContractRevision: cloudagentservice.ContractRevision})
+	registration, _ := service.RegisterLocal(signedInput(grant.BindingToken, "agent-1", true))
 
 	report := validRuntimeReport()
 	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, report); err != nil {

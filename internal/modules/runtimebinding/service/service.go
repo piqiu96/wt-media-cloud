@@ -2,6 +2,7 @@
 package service
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -26,6 +27,8 @@ var (
 	ErrNodeCredentialInvalid    = errors.New("node credential is invalid")
 	ErrLocalTrustUnavailable    = errors.New("local runtime trust is unavailable")
 	ErrProfileOwnershipMismatch = errors.New("runtime profiles do not match confirmed ownership")
+	ErrDeviceNotBound           = model.ErrDeviceNotBound
+	ErrDeviceMismatch           = model.ErrDeviceMismatch
 )
 
 const AgentStatusReplaced = "replaced"
@@ -39,6 +42,7 @@ type (
 	DependencyFact     = model.DependencyFact
 	DiskFact           = model.DiskFact
 	RuntimeReport      = dto.RuntimeReport
+	DeviceBinding      = model.DeviceBinding
 )
 
 type Store interface {
@@ -46,6 +50,9 @@ type Store interface {
 	ConsumeTicket(tokenHash string, at time.Time) (BindingTicket, bool, error)
 	IsSessionActive(sessionID string, userID identityservice.UserID, at time.Time) (bool, error)
 	SaveNode(AgentNode) error
+	GetDeviceBinding(identityservice.UserID) (DeviceBinding, error)
+	UnbindDevice(identityservice.UserID, time.Time) error
+	IsDeviceBound(identityservice.UserID, string) (bool, error)
 	FindNodeByCredentialHash(hash string) (AgentNode, bool, error)
 	CheckLocalTrust(userID identityservice.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error)
 	FindTrustedLocalNode(userID identityservice.UserID) (AgentNode, bool, error)
@@ -116,6 +123,16 @@ func (s *Service) RegisterLocal(input RegisterLocalInput) (Registration, error) 
 	if !cloudagentservice.IsAgentCompatible(input.ContractMajorVersion, input.ContractRevision) {
 		return Registration{}, cloudagentservice.ErrIncompatibleAgent
 	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(input.DevicePublicKey)
+	signature, signatureErr := base64.RawURLEncoding.DecodeString(input.DeviceSignature)
+	fingerprint := sha256.Sum256(publicKey)
+	if err != nil || signatureErr != nil || len(publicKey) != ed25519.PublicKeySize || len(signature) != ed25519.SignatureSize ||
+		len(input.DeviceName) > 64 || hex.EncodeToString(fingerprint[:]) != input.DeviceID {
+		return Registration{}, ErrInvalidInput
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), deviceProofMessage(input.BindingToken, input.DeviceID), signature) {
+		return Registration{}, ErrForbidden
+	}
 	now := s.now()
 	ticket, ok, err := s.store.ConsumeTicket(secretHash(input.BindingToken), now)
 	if err != nil {
@@ -134,6 +151,7 @@ func (s *Service) RegisterLocal(input RegisterLocalInput) (Registration, error) 
 	credential := s.newSecret()
 	node := AgentNode{
 		ID: s.newID("agent-node"), AgentID: strings.TrimSpace(input.AgentID), DeviceID: strings.TrimSpace(input.DeviceID),
+		DevicePublicKey: publicKey, DeviceName: strings.TrimSpace(input.DeviceName), BindDevice: input.BindDevice,
 		UserID: ticket.UserID, SessionID: ticket.SessionID, Mode: "local", AgentVersion: strings.TrimSpace(input.AgentVersion),
 		ContractMajorVersion: input.ContractMajorVersion, ContractRevision: input.ContractRevision,
 		Status: cloudagentservice.AgentStatusOnline, CredentialHash: secretHash(credential), RegisteredAt: now, LastHeartbeatAt: now,
@@ -142,6 +160,24 @@ func (s *Service) RegisterLocal(input RegisterLocalInput) (Registration, error) 
 		return Registration{}, err
 	}
 	return Registration{Node: node, NodeCredential: credential}, nil
+}
+
+func deviceProofMessage(token, deviceID string) []byte {
+	return []byte("wt-media-device-v1\n" + token + "\n" + deviceID)
+}
+
+func (s *Service) GetDeviceBinding(userID identityservice.UserID) (DeviceBinding, error) {
+	if userID <= 0 {
+		return DeviceBinding{}, ErrForbidden
+	}
+	return s.store.GetDeviceBinding(userID)
+}
+
+func (s *Service) UnbindDevice(userID identityservice.UserID) error {
+	if userID <= 0 {
+		return ErrForbidden
+	}
+	return s.store.UnbindDevice(userID, s.now())
 }
 
 func (s *Service) CheckLocalTrust(userID identityservice.UserID, nodeID string) error {
@@ -230,6 +266,13 @@ func (s *Service) authenticateCredential(credential string) (AgentNode, error) {
 	}
 	if !ok || node.Mode != "local" || node.Status == AgentStatusReplaced {
 		return AgentNode{}, ErrNodeCredentialInvalid
+	}
+	bound, err := s.store.IsDeviceBound(node.UserID, node.DeviceID)
+	if err != nil {
+		return AgentNode{}, err
+	}
+	if !bound {
+		return AgentNode{}, ErrDeviceMismatch
 	}
 	active, err := s.store.IsSessionActive(node.SessionID, node.UserID, s.now())
 	if err != nil {

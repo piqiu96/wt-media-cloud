@@ -13,6 +13,7 @@ export const desktopRoutes = [
     component: () => import("../../layout/AppLayout.vue"),
     children: [
       { path: "", name: "Dashboard", component: () => import("../../modules/dashboard/pages/DashboardPage.vue") },
+      { path: "personal-info", name: "PersonalInfo", component: () => import("../../modules/auth/pages/PersonalInfoPage.vue"), meta: { title: '个人信息' } },
       { path: "discovery", redirect: "/content-pool" },
       { path: "content-pool", name: "ContentPool", component: () => import("../../modules/contentpool/pages/ContentPoolPage.vue") },
       { path: "discovery-strategies", name: "DiscoveryStrategies", component: () => import("../../modules/contentpool/pages/DiscoveryStrategiesPage.vue") },

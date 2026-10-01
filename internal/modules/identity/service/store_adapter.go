@@ -22,6 +22,10 @@ func (mysqlStore) FindUser(id model.UserID) (model.User, bool, error) {
 func (mysqlStore) FindUserByUsername(username string) (model.User, bool, error) {
 	return repository.FindUserByUsername(username)
 }
+
+func (mysqlStore) UpdateOwnProfile(userID model.UserID, nickname, avatarID string, at time.Time, event model.AuditEvent) error {
+	return repository.UpdateOwnProfile(userID, nickname, avatarID, at, event)
+}
 func (mysqlStore) ListUsers() ([]model.User, error) { return repository.ListUsers() }
 func (mysqlStore) UpdateUser(user model.User) error { return repository.UpdateUser(user) }
 func (mysqlStore) UpdateUserAndInvalidateSessions(user model.User, event model.AuditEvent) error {
