@@ -29,11 +29,30 @@ describe('material detail drawer', () => {
     expect(source).toContain("from '../../shared/utils/units.js'")
   })
 
-  // 云端视频地址只在就绪时去取：未就绪的素材没有地址，一次必然 409 的请求
-  // 不该发出去。
-  it('asks for the cloud video address only when the material is ready', () => {
-    expect(source).toContain('material.video_status === \'ready\'')
+  // 云端视频地址是签名的、会过期：只在点击那一刻去取，不在打开抽屉时预取。
+  it('asks for the cloud video address on the click, not when the drawer opens', () => {
     expect(source).toContain('getVideoUrl(')
+    expect(source).toContain('@click.prevent="openCloudVideo"')
+    // 未就绪的素材没有地址，一次必然 409 的请求不发出去 —— 链接本身就不渲染。
+    expect(source).toContain('v-if="material.video_status === \'ready\'"')
+  })
+
+  // 跨过 await 之后浏览器不再算「用户手势」，那时才调 window.open 会被 WebKit
+  // 拦下（打包的 Desktop 用的就是它）。所以空标签页必须在取地址之前同步开出来。
+  it('opens the tab before awaiting the address, and drops the opener link', () => {
+    const body = source.slice(source.indexOf('async function openCloudVideo'))
+    const openAt = body.indexOf('window.open(')
+    const awaitAt = body.indexOf('await client.getVideoUrl(')
+    expect(openAt).toBeGreaterThan(-1)
+    expect(awaitAt).toBeGreaterThan(-1)
+    expect(openAt).toBeLessThan(awaitAt)
+    expect(body).toContain('opener = null')
+  })
+
+  // 预取留下的那两个形状不该有残留：一个 ref、一段「地址获取中」的中间态。
+  it('keeps no held address and no fetching placeholder', () => {
+    expect(source).not.toContain('videoUrl')
+    expect(source).not.toContain('地址获取中')
   })
 
   it('renders the cover with a placeholder when it is missing or fails to load', () => {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -169,18 +170,22 @@ func testService(store Store) *Service {
 }
 
 // stubLinks answers the one question this module asks the storage boundary: the
-// stable address of an object key. It records the key it was asked about, for
+// signed address of an object key. It records the key it was asked about, for
 // the same reason stubTransfers records its input — the key handed over is the
 // seam between "the material's own facts" and "where the bucket keeps it", and
-// a double that only answered could not show the wrong key being composed.
+// a double that only answered could not show the wrong key being signed. It
+// records the context for the same reason: the real issuer signs locally today,
+// so an implementation that dropped the caller's context would still compile and
+// still pass every other arm here.
 type stubLinks struct {
 	url string
 	err error
 	key string
+	ctx context.Context
 }
 
-func (s *stubLinks) PublicObjectURL(key string) (string, error) {
-	s.key = key
+func (s *stubLinks) PresignObjectURL(ctx context.Context, key string) (string, error) {
+	s.key, s.ctx = key, ctx
 	if s.err != nil {
 		return "", s.err
 	}
@@ -426,6 +431,7 @@ func TestBothListsCarryTheSourceRowLinksWithoutFiltering(t *testing.T) {
 // `ErrMaterialUnavailable`, which the route already maps to the 409 the drawer
 // reads as "try again once preparation finishes".
 func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T) {
+	ctx := context.Background()
 	team := service.TeamID(7)
 	game := "game-a"
 	size := int64(4096)
@@ -435,14 +441,14 @@ func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T)
 	// Out of scope: the game range is the actor's, not the material's.
 	store := &memoryStore{found: true, material: ready}
 	svc := testService(store)
-	if _, err := svc.VideoURL(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, 42); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, 42); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("out-of-scope VideoURL() error = %v, want ErrForbidden", err)
 	}
 
 	// Missing: same answer the single-material read gives.
 	store = &memoryStore{found: false}
 	svc = testService(store)
-	if _, err := svc.VideoURL(operator, 42); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.VideoURL(ctx, operator, 42); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing VideoURL() error = %v, want ErrNotFound", err)
 	}
 
@@ -453,25 +459,51 @@ func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T)
 		unready.VideoStatus = status
 		store = &memoryStore{found: true, material: unready}
 		svc = testService(store)
-		if _, err := svc.VideoURL(operator, 42); !errors.Is(err, ErrMaterialUnavailable) {
+		if _, err := svc.VideoURL(ctx, operator, 42); !errors.Is(err, ErrMaterialUnavailable) {
 			t.Fatalf("%s VideoURL() error = %v, want ErrMaterialUnavailable", status, err)
 		}
 	}
 
 	// Ready: the address is the linker's answer for the material's own object
 	// key, and nothing wider.
-	links := &stubLinks{url: "http://127.0.0.1:9000/wt-media/dev/materials/42/x.mp4"}
+	links := &stubLinks{url: "http://127.0.0.1:9000/wt-media/dev/materials/42/x.mp4?sig=stub"}
 	store = &memoryStore{found: true, material: ready}
 	svc = NewService(store, &stubNodes{}, &stubTransfers{}, links)
-	url, err := svc.VideoURL(operator, 42)
+	url, err := svc.VideoURL(ctx, operator, 42)
 	if err != nil {
 		t.Fatalf("ready VideoURL() error = %v", err)
 	}
 	if url != links.url {
-		t.Fatalf("VideoURL() = %q, want the composed address %q", url, links.url)
+		t.Fatalf("VideoURL() = %q, want the signed address %q", url, links.url)
 	}
 	if links.key != ready.SourceObjectKey {
-		t.Fatalf("the address was composed for key %q, want the material's own %q", links.key, ready.SourceObjectKey)
+		t.Fatalf("the address was signed for key %q, want the material's own %q", links.key, ready.SourceObjectKey)
+	}
+}
+
+// The issuer the wired today signs locally, so it cannot fail on a context —
+// which means a `VideoURL` that quietly passed `context.Background()` instead
+// of the caller's context would still satisfy every other arm in this file. The
+// arm exists to be the one that goes red if it does: a request that is cancelled
+// between the store read and the signature must reach the signer cancelled.
+func TestVideoURLHandsTheCallersContextToTheLinker(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	size := int64(4096)
+	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	links := &stubLinks{url: "http://unused"}
+	svc := NewService(&memoryStore{found: true, material: ready}, &stubNodes{}, &stubTransfers{}, links)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err != nil {
+		t.Fatalf("VideoURL() error = %v", err)
+	}
+	if links.ctx == nil {
+		t.Fatal("the linker was called with no context at all")
+	}
+	if links.ctx.Err() == nil {
+		t.Fatal("the linker was called with a live context, want the caller's cancelled one")
 	}
 }
 
@@ -485,7 +517,7 @@ func TestVideoURLReportsAReadyRowWithIncompleteFactsAsAFault(t *testing.T) {
 	store := &memoryStore{found: true, material: incomplete}
 	links := &stubLinks{url: "http://unused"}
 	svc := NewService(store, &stubNodes{}, &stubTransfers{}, links)
-	if _, err := svc.VideoURL(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil {
+	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil {
 		t.Fatal("VideoURL() succeeded for a ready row with no size or hash, want a fault")
 	}
 	if links.key != "" {
@@ -494,15 +526,18 @@ func TestVideoURLReportsAReadyRowWithIncompleteFactsAsAFault(t *testing.T) {
 }
 
 // The linker is the storage boundary; its refusal is not this module's to
-// re-classify, it is the route's 500 with the reason kept in the log.
+// re-classify, it is the route's 500 with the reason kept in the log. The
+// refusal this route actually meets in production is an unconfigured or
+// unreachable object store, so the arm keeps the issuer's own message intact
+// rather than replacing it with a generic one.
 func TestVideoURLPropagatesTheLinkerRefusal(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-a"
 	size := int64(4096)
 	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
 	store := &memoryStore{found: true, material: ready}
-	svc := NewService(store, &stubNodes{}, &stubTransfers{}, &stubLinks{err: errors.New("composition refused")})
-	if _, err := svc.VideoURL(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil || !strings.Contains(err.Error(), "composition refused") {
+	svc := NewService(store, &stubNodes{}, &stubTransfers{}, &stubLinks{err: errors.New("minting refused")})
+	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil || !strings.Contains(err.Error(), "minting refused") {
 		t.Fatalf("VideoURL() error = %v, want the linker's refusal to propagate", err)
 	}
 }

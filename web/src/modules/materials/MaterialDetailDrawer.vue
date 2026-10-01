@@ -1,6 +1,7 @@
 <script setup>
 // 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
-// 其余在这里；云端视频地址不随素材 body 返回，就绪时才向详情链接接口要一次。
+// 其余在这里；云端视频地址不随素材 body 返回，是签名地址、会过期，故点「打开云端视频」
+// 时才向详情链接接口要一次。
 import { computed, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { createMaterialsClient } from '../../shared/api/materials.js'
@@ -42,7 +43,6 @@ defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give
 
 const client = createMaterialsClient()
 const transfer = createFileTransferClient()
-const videoUrl = ref('')
 // 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
 // `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
 const localFile = ref(null)
@@ -125,17 +125,34 @@ const fileStatus = computed(() => {
 // 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 
-// 云端视频地址只在就绪时才去要：未就绪的素材没有地址，一次必然 409 的请求不该发出去。
-watch(() => [props.visible, props.material?.id, props.material?.video_status], async ([open, id, status]) => {
-  videoUrl.value = ''
-  if (!open || !id || status !== 'ready') return
-  try {
-    const data = await client.getVideoUrl(id)
-    videoUrl.value = data?.url || ''
-  } catch {
-    // 拿不到地址只少一个链接，不打断详情本身。
+/**
+ * 云端视频地址是**签名**的、会过期，所以每次点击现取，不预先拿也不留。
+ *
+ * 空标签页在 `await` **之前**同步开出来，拿到地址后再导航：跨过 `await` 之后浏览器
+ * 已经不算「用户手势」，那时才调的 `window.open` 会被拦（WebKit 一律拦，打包的
+ * Desktop 用的就是它）。`opener` 置空等价于 `rel="noopener"`。
+ *
+ * 未就绪的素材没有地址，按钮也就不渲染 —— 一次必然 409 的请求不发出去。
+ */
+async function openCloudVideo() {
+  const tab = window.open('', '_blank')
+  if (!tab) {
+    // 连同步的 window.open 都被拦，就没有可导航的标签页了；此时再去取地址是白发一次
+    // 签名请求。
+    MessagePlugin.error('浏览器拦截了新标签页，请允许弹出窗口后重试')
+    return
   }
-})
+  tab.opener = null
+  try {
+    const data = await client.getVideoUrl(props.material.id)
+    const url = data?.url
+    if (!url) throw new Error('云端视频地址为空')
+    tab.location.replace(url)
+  } catch (e) {
+    tab.close()
+    MessagePlugin.error(e?.message || '打开云端视频失败')
+  }
+}
 
 /**
  * 这个素材在本机的那一份在哪个文件夹里。
@@ -273,8 +290,8 @@ async function openDirectory() {
             <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
             <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
             <div><dt>云端视频</dt><dd>
-              <a v-if="videoUrl" class="wt-primary-link" :href="videoUrl" target="_blank" rel="noopener noreferrer">打开云端视频</a>
-              <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
+              <a v-if="material.video_status === 'ready'" class="wt-primary-link" href="#" @click.prevent="openCloudVideo">打开云端视频</a>
+              <template v-else>视频未就绪</template>
             </dd></div>
           </dl>
           <!-- 下载进行中：进度/速度/预计时间都是服务端任务表里的读数（与下载中心同一

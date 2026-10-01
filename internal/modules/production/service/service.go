@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -114,11 +115,21 @@ type TransferCreator interface {
 	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
 }
 
-// ObjectLinker composes the stable public address of a stored object; a
-// consumer-side interface in the same shape as `LocalNodeResolver`, so a test
-// can answer it without the object-storage registry.
+// ObjectLinker mints the address a stored object is read at; a consumer-side
+// interface in the same shape as `LocalNodeResolver`, so a test can answer it
+// without the object-storage registry.
+//
+// It is a signed, short-lived grant rather than the bucket's stable address:
+// the bucket refuses anonymous reads, so an unsigned address is one Cloud
+// itself has already proven a browser cannot open. The context is passed
+// through for an issuer that has to reach the object store; the one wired today
+// signs locally and ignores it.
+//
+// The expiry is deliberately not part of the answer. It is not in the frozen
+// `MaterialVideoLink` body, and the drawer asks for the address at the moment
+// the operator clicks, so there is no held address for an expiry to invalidate.
 type ObjectLinker interface {
-	PublicObjectURL(key string) (string, error)
+	PresignObjectURL(ctx context.Context, objectKey string) (string, error)
 }
 
 type Service struct {
@@ -159,11 +170,11 @@ func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64
 	return material, nil
 }
 
-// VideoURL answers the stable cloud address of a prepared material's video —
-// the detail drawer's link, deliberately not part of the material body. Scope
-// first, then readiness (409 while preparation is unfinished), then the same
-// `videoFacts` completeness a local download reads.
-func (s *Service) VideoURL(actor identityservice.PublicUser, materialID int64) (string, error) {
+// VideoURL answers the cloud address of a prepared material's video — the
+// detail drawer's link, deliberately not part of the material body. Scope first,
+// then readiness (409 while preparation is unfinished), then the same
+// `videoFacts` completeness a local download reads, and only then a signature.
+func (s *Service) VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID int64) (string, error) {
 	material, err := s.GetMaterial(actor, materialID)
 	if err != nil {
 		return "", err
@@ -175,7 +186,7 @@ func (s *Service) VideoURL(actor identityservice.PublicUser, materialID int64) (
 	if err != nil {
 		return "", err
 	}
-	return s.links.PublicObjectURL(objectKey)
+	return s.links.PresignObjectURL(ctx, objectKey)
 }
 
 // AddUsage adds the material to the actor's library and reports whether that
