@@ -61,10 +61,10 @@ type memoryStore struct {
 	lastStatusID identityservice.UserID
 	statusResult map[int64]string
 	lastCreate   repository.CreateTaskInput
-	lastProg   repository.ProgressInput
-	lastDone   repository.CompletionInput
-	lastFail   repository.FailureInput
-	lastCancel struct {
+	lastProg     repository.ProgressInput
+	lastDone     repository.CompletionInput
+	lastFail     repository.FailureInput
+	lastCancel   struct {
 		taskID string
 		team   identityservice.TeamID
 		user   identityservice.UserID
@@ -126,8 +126,9 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 	}
 	return Task{
 		ID: input.ID, TeamID: input.TeamID, AssetType: model.AssetMaterial, AssetID: input.AssetID,
-		AssetTitle: input.AssetTitle, SourceObjectKey: input.SourceObjectKey,
-		Purpose: model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
+		AssetTitle: input.AssetTitle, GameName: input.GameName, PublishedAt: input.PublishedAt,
+		SourceObjectKey: input.SourceObjectKey,
+		Purpose:         model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
 		Status: model.StatusPending, RequestedBy: input.RequestedBy, AssignedNodeID: input.AssignedNodeID,
 		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
@@ -328,8 +329,10 @@ func taskFixture(id string, status model.Status, user identityservice.UserID, te
 	if status == model.StatusRunning {
 		claimedBy = nodeID
 	}
+	published := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
 	return Task{
 		ID: id, TeamID: team, AssetType: model.AssetMaterial, AssetID: 42, AssetTitle: "演示素材",
+		GameName: "三角洲行动", PublishedAt: &published,
 		SourceObjectKey: "materials/42/deadbeef.mp4", Purpose: model.PurposeUserDownload,
 		ExecutionScope: model.ExecutionLocalAgent, Status: status, RequestedBy: user,
 		AssignedNodeID: nodeID, ClaimedByNodeID: claimedBy, TotalBytes: 1000, ExpectedSHA256: strings.Repeat("a", 64),
@@ -789,6 +792,14 @@ func TestClaimTaskCarriesTheFactsTheExecutorNeeds(t *testing.T) {
 	if lease.TaskID != "transfer-1" || lease.Title != "演示素材" || lease.AssetID != 42 {
 		t.Fatalf("lease = %+v", lease)
 	}
+	// The naming facts travel on the lease: the executor files the file under the
+	// game and can append the publish time, neither of which it can read itself.
+	if lease.GameName != "三角洲行动" {
+		t.Fatalf("lease game name = %q, want the material's game", lease.GameName)
+	}
+	if lease.PublishedAt == nil || !lease.PublishedAt.Equal(time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)) {
+		t.Fatalf("lease published_at = %v, want the material's publish time", lease.PublishedAt)
+	}
 	if lease.TotalBytes != 1000 || lease.ExpectedSHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("lease = %+v, want the declared size and hash", lease)
 	}
@@ -1007,10 +1018,13 @@ func TestCompleteTaskNormalisesTheChecksumItStores(t *testing.T) {
 	}
 }
 
-// A file name is a name, not a path: the frozen pattern refuses separators, and a
-// name long enough to be truncated somewhere else is refused rather than stored.
-func TestCompleteTaskRefusesANameThatCouldBecomeAPath(t *testing.T) {
-	for _, name := range []string{"a/b.mp4", `a\b.mp4`, strings.Repeat("x", 256)} {
+// A file name is at most one relative directory plus a bare name, exactly as the
+// frozen `^[^/\\]+(?:/[^/\\]+)?$` pattern says: the executor writes
+// `<date>/<name>` since the date subdirectory arrived, so a single `/` is the
+// ordinary shape, and what is refused is anything that could escape the date
+// directory or overrun the 255-byte cap.
+func TestCompleteTaskEnforcesTheFrozenOneSubdirectoryNamePattern(t *testing.T) {
+	for _, name := range []string{`a\b.mp4`, "a/b/c.mp4", "/abs.mp4", "a/b.mp4/", "a//b.mp4", strings.Repeat("x", 256)} {
 		store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 		store.completeOK = true
 		service := testService(store, workingNode(), fixedClock(testNow()))
@@ -1020,6 +1034,21 @@ func TestCompleteTaskRefusesANameThatCouldBecomeAPath(t *testing.T) {
 		})
 		if !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("name %q error = %v, want invalid input", name, err)
+		}
+	}
+	// The one-subdirectory shape is the accepted one, and it must reach the store.
+	for _, name := range []string{"20261001/三角洲-31.mp4", "a/b.mp4"} {
+		store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
+		store.completeOK = true
+		service := testService(store, workingNode(), fixedClock(testNow()))
+
+		if _, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+			Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64), FileName: name,
+		}); err != nil {
+			t.Fatalf("name %q error = %v, want accepted", name, err)
+		}
+		if store.lastDone.FileName != name {
+			t.Fatalf("name %q stored as %q", name, store.lastDone.FileName)
 		}
 	}
 	// An executor that named no file is not an error: the key is optional in the

@@ -396,6 +396,7 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		AssetID:         material.ID,
 		AssetTitle:      material.Title,
 		GameName:        s.gameNameOf(material),
+		PublishedAt:     material.PublishedAt,
 		SourceObjectKey: objectKey,
 		RequestedBy:     actor.ID,
 		AssignedNodeID:  node.ID,

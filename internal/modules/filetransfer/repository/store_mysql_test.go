@@ -19,8 +19,8 @@ const testSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
-		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
+		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, nil)
 
@@ -44,8 +44,8 @@ func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 // that the returned task is the pre-existing row with the *other* id.
 func TestCreateTaskReadsBackTheExistingRowWhenTheDedupeKeyIsTaken(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
-		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"id": "transfer-1", "status": "running"})
 
@@ -482,6 +482,39 @@ func TestGetTaskReportsNotFoundForAnAbsentOrEmptyID(t *testing.T) {
 // The list is what a client polls, so its order has to be a total order: with
 // `created_at` alone, two tasks created in the same microsecond come back in an
 // arbitrary order and rows visibly swap places between polls.
+// The publish time is carried on the row so the lease can name the file with it,
+// which means the scan has to read it both ways: a material without a publish time
+// reads NULL, and one with reads the time back. A column the scan forgot would
+// silently read nil in every test, and a material with a publish time would be
+// filed without its date segment and nothing would say why.
+func TestGetTaskScansThePublishedAtColumn(t *testing.T) {
+	published := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE id = ?")).
+		WithArgs("transfer-1").
+		WillReturnRows(taskRow(testNow, map[string]any{"published_at": published}))
+	task, err := getTask(db, "transfer-1")
+	if err != nil {
+		t.Fatalf("getTask() error = %v", err)
+	}
+	if task.PublishedAt == nil || !task.PublishedAt.Equal(published) {
+		t.Fatalf("task.PublishedAt = %v, want the row's publish time", task.PublishedAt)
+	}
+
+	db, mock = newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE id = ?")).
+		WithArgs("transfer-1").
+		WillReturnRows(taskRow(testNow, map[string]any{"published_at": nil}))
+	task, err = getTask(db, "transfer-1")
+	if err != nil {
+		t.Fatalf("getTask() error = %v", err)
+	}
+	if task.PublishedAt != nil {
+		t.Fatalf("task.PublishedAt = %v, want nil for a material without a publish time", task.PublishedAt)
+	}
+}
+
 func TestListTasksScopesToTheRequestingUserAndOrdersDeterministically(t *testing.T) {
 	db, mock := newMockGORM(t)
 	requestedBy := identity.UserID(9)
@@ -553,8 +586,8 @@ func TestCreateTaskAllowsAWaitingDownloadButNeverALeasableFactlessOne(t *testing
 	input.SourceObjectKey = ""
 	input.TotalBytes = 0
 	input.ExpectedSHA256 = ""
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
-		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "user_download", "local_agent", int64(9), "node-1", "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, nil, "user_download", "local_agent", int64(9), "node-1", "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"dependency_task_id": "prepare-1", "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
 
@@ -764,7 +797,7 @@ func expectTaskByDedupeKey(mock sqlmock.Sqlmock, dedupeKey string, now time.Time
 }
 
 func taskColumns() []string {
-	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "assigned_node_id", "claimed_by_node_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
+	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "assigned_node_id", "claimed_by_node_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
 }
 
 // taskDefaults is the value each column reads as in a row builder call that did
@@ -783,6 +816,8 @@ func taskDefaults(column string, now time.Time) (driver.Value, bool) {
 		return "示例视频", true
 	case "game_name":
 		return "三角洲行动", true
+	case "published_at":
+		return time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC), true
 	case "source_object_key":
 		return "materials/42/aaaaaaaa.mp4", true
 	case "purpose":
@@ -858,7 +893,7 @@ func validUserDownloadInput() CreateUserDownloadInput {
 
 const (
 	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')"
-	insertTaskSQL             = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
+	insertTaskSQL             = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
 	// The preparation count is the same shape as the download count minus the user:
 	// a preparation belongs to the material, so scoping it to a user would let one
 	// user's click start a second download of a video another user is already
@@ -879,7 +914,7 @@ func expectUserDownloadCount(mock sqlmock.Sqlmock, finished int64) {
 
 func expectUserDownloadInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -899,7 +934,7 @@ func expectMaterialPrepareCount(mock sqlmock.Sqlmock, finished int64) {
 // insert, so that the guard is what refuses rather than the mock.
 func expectMaterialPrepareInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string, dependency any) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "compose_input_prepare", "cloud", int64(9), nil, dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, nil, "compose_input_prepare", "cloud", int64(9), nil, dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 

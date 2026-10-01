@@ -23,7 +23,7 @@ var ErrNotFound = errors.New("file transfer task not found")
 // visible at all, which is the point: with a list per query, a column reaches
 // the callers that remembered it and is silently missing from the ones that did
 // not.
-const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
+const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
 
 type CreateTaskInput struct {
 	ID               string
@@ -32,6 +32,7 @@ type CreateTaskInput struct {
 	AssetID          int64
 	AssetTitle       string
 	GameName         string
+	PublishedAt      *time.Time
 	SourceObjectKey  string
 	Purpose          model.Purpose
 	ExecutionScope   model.ExecutionScope
@@ -85,11 +86,15 @@ type FailureInput struct {
 // purpose/scope pair are this function's to decide, and a caller that supplied
 // them could supply them inconsistently.
 type CreateUserDownloadInput struct {
-	ID              string
-	TeamID          identity.TeamID
-	AssetID         int64
-	AssetTitle      string
-	GameName        string
+	ID         string
+	TeamID     identity.TeamID
+	AssetID    int64
+	AssetTitle string
+	GameName   string
+	// PublishedAt is when the material was published, copied onto the task like
+	// GameName so the lease can carry it to the executor for naming. A material
+	// without a publish time leaves it nil and the executor omits that segment.
+	PublishedAt     *time.Time
 	SourceObjectKey string
 	RequestedBy     identity.UserID
 	AssignedNodeID  string
@@ -154,6 +159,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			AssetID:          input.AssetID,
 			AssetTitle:       input.AssetTitle,
 			GameName:         input.GameName,
+			PublishedAt:      input.PublishedAt,
 			SourceObjectKey:  input.SourceObjectKey,
 			Purpose:          model.PurposeUserDownload,
 			ExecutionScope:   model.ExecutionLocalAgent,
@@ -365,7 +371,7 @@ func createTask(db *gorm.DB, input CreateTaskInput, now time.Time) (model.Task, 
 	if err := validateCreateInput(input); err != nil {
 		return model.Task{}, err
 	}
-	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
 		return model.Task{}, err
 	}
 	return selectTask(db, "dedupe_key = ?", input.DedupeKey)
@@ -976,8 +982,8 @@ func scanTask(row rowScanner, task *model.Task) error {
 	var assetType, purpose, scope, status string
 	var assetTitle, gameName, objectKey, fileName, assignedNode, claimedNode, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
 	var eta, integrityBytes sql.NullInt64
-	var lease, heartbeat, started, finished, cancelRequested sql.NullTime
-	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
+	var lease, heartbeat, started, finished, cancelRequested, publishedAt sql.NullTime
+	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
 		return err
 	}
 	task.TeamID = identity.TeamID(teamID)
@@ -985,6 +991,9 @@ func scanTask(row rowScanner, task *model.Task) error {
 	task.AssetTitle = assetTitle.String
 	task.GameName = gameName.String
 	task.SourceObjectKey = objectKey.String
+	if publishedAt.Valid {
+		task.PublishedAt = &publishedAt.Time
+	}
 	task.Purpose = model.Purpose(purpose)
 	task.ExecutionScope = model.ExecutionScope(scope)
 	task.Status = model.Status(status)

@@ -59,18 +59,19 @@ type Task struct {
 // verified, so `ready` and `video_sha256` are written together and the executor
 // always has something to check its bytes against.
 type LocalLease struct {
-	TaskID               string    `json:"task_id"`
-	AssetType            string    `json:"asset_type"`
-	AssetID              int64     `json:"asset_id"`
-	Title                string    `json:"title"`
-	GameName             string    `json:"game_name,omitempty"`
-	TotalBytes           int64     `json:"total_bytes"`
-	ExpectedSHA256       string    `json:"expected_sha256"`
-	MaxAttempts          int       `json:"max_attempts"`
-	AttemptCount         int       `json:"attempt_count"`
-	LeaseSeconds         int       `json:"lease_seconds"`
-	DownloadURL          string    `json:"download_url"`
-	DownloadURLExpiresAt time.Time `json:"download_url_expires_at"`
+	TaskID               string     `json:"task_id"`
+	AssetType            string     `json:"asset_type"`
+	AssetID              int64      `json:"asset_id"`
+	Title                string     `json:"title"`
+	GameName             string     `json:"game_name,omitempty"`
+	PublishedAt          *time.Time `json:"published_at,omitempty"`
+	TotalBytes           int64      `json:"total_bytes"`
+	ExpectedSHA256       string     `json:"expected_sha256"`
+	MaxAttempts          int        `json:"max_attempts"`
+	AttemptCount         int        `json:"attempt_count"`
+	LeaseSeconds         int        `json:"lease_seconds"`
+	DownloadURL          string     `json:"download_url"`
+	DownloadURLExpiresAt time.Time  `json:"download_url_expires_at"`
 }
 
 // ClaimResult answers a claim. `Task` is emitted even when it is nil: the schema

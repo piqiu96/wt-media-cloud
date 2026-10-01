@@ -301,6 +301,7 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		AssetID:          input.AssetID,
 		AssetTitle:       input.AssetTitle,
 		GameName:         input.GameName,
+		PublishedAt:      input.PublishedAt,
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
 		AssignedNodeID:   input.AssignedNodeID,
@@ -325,7 +326,10 @@ type CreateUserDownloadInput struct {
 	// GameName is what the executor files the download under, when the material
 	// has a game. Empty is a legal value: the executor falls back to a fixed
 	// placeholder.
-	GameName        string
+	GameName string
+	// PublishedAt is when the material was published, carried to the executor for
+	// naming. Nil is a legal value: the executor omits that segment.
+	PublishedAt     *time.Time
 	SourceObjectKey string
 	RequestedBy     identityservice.UserID
 	AssignedNodeID  string
@@ -684,10 +688,11 @@ func (s *Service) recordSuccess(task model.Task, nodeID string, body dto.Complet
 	if body.CompletedBytes < 0 || !isHexSHA256(checksum) {
 		return ErrInvalidInput
 	}
-	if len(fileName) > maxFileNameLength || strings.ContainsAny(fileName, `/\`) {
+	if fileName != "" && !validCompletedFileName(fileName) {
 		// Not a path, and not a name that would become one when an executor joined
 		// it to a directory. The frozen contract states this as a pattern; refusing
-		// it here is the same rule, enforceable before the row is written.
+		// it here is the same rule, enforceable before the row is written. An empty
+		// name is the "no file reported yet" case and is not an error.
 		return ErrInvalidInput
 	}
 	if task.TotalBytes > 0 && body.CompletedBytes != task.TotalBytes {
@@ -833,6 +838,7 @@ func leaseBody(task model.Task, grant DownloadGrant, lease time.Duration) *dto.L
 		AssetID:              task.AssetID,
 		Title:                task.AssetTitle,
 		GameName:             task.GameName,
+		PublishedAt:          task.PublishedAt,
 		TotalBytes:           task.TotalBytes,
 		ExpectedSHA256:       task.ExpectedSHA256,
 		MaxAttempts:          task.MaxAttempts,
@@ -862,6 +868,29 @@ func remainingSeconds(total, completed, speed int64) int64 {
 		return 0
 	}
 	return (total - completed) / speed
+}
+
+// validCompletedFileName applies the frozen `^[^/\\]+(?:/[^/\\]+)?$` pattern the
+// contract declares for `Completion.file_name`: at most one relative directory
+// component (the download date) plus a bare file name, neither segment empty, no
+// backslash, and within the 255-byte cap. An absolute path, two separators, or a
+// trailing slash all fail, exactly as the pattern fails them.
+//
+// The runtime and the pattern must not disagree: this check used to reject any
+// `/` at all, which refused the one-subdirectory name the pattern admits, and
+// every date-filed download came back as a `400` the executor could not act on.
+func validCompletedFileName(name string) bool {
+	if name == "" || len(name) > maxFileNameLength {
+		return false
+	}
+	if strings.ContainsRune(name, '\\') {
+		return false
+	}
+	slash := strings.IndexByte(name, '/')
+	if slash < 0 {
+		return true
+	}
+	return slash > 0 && slash < len(name)-1 && strings.IndexByte(name[slash+1:], '/') < 0
 }
 
 // isHexSHA256 applies the frozen `^[A-Fa-f0-9]{64}$` pattern.
