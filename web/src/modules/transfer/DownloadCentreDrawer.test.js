@@ -103,23 +103,65 @@ describe('download centre shows one row per click', () => {
   })
 })
 
-// 两栏（CHG-20260930-069）：未完成与最近终态分开，计数来自任务事实。
+// 三栏（CHG-20260930-069 任务 23）：进行中 / 失败 / 历史。栏由服务端按状态分好、
+// 按各自窗口查询 —— 不再在客户端把终态行再劈成两栏。
 describe('download centre drawer tabs', () => {
-  it('renders the two switchable tabs with live counts', () => {
+  it('renders the three switchable tabs, counting only the loaded tab', () => {
     expect(source).toContain('<t-tabs')
     expect(source).toContain('value="active"')
-    expect(source).toContain('value="recent"')
-    expect(source).toContain('activeRows.length')
-    expect(source).toContain('recentRows.length')
+    expect(source).toContain('value="failed"')
+    expect(source).toContain('value="history"')
+    // 计数只挂在当前这一栏：别的栏的数据此刻不在手里，给一个没拉回来的数才是编造。
+    // 历史有窗口与上限，只标名不计数。
+    expect(source).toContain('activeLabel')
+    expect(source).toContain('failedLabel')
+    expect(source).not.toContain('recent')
   })
 
-  it('splits the rows through the shared pure function, not its own filter', () => {
-    expect(source).toContain('splitTransferRows(')
+  // 每栏各拉各的查询（`status`/`finished_after`/`limit`）。窗口是展示层截断——
+  // DB 从不删行，这里只决定某一栏还显示哪些。
+  it('queries each tab through its own status window', () => {
+    expect(source).toContain('const QUERIES = {')
+    expect(source).toContain("active: { status: 'pending,running' }")
+    expect(source).toContain("failed: () => ({ status: 'failed', finished_after: daysAgoISO(90) })")
+    expect(source).toContain("history: () => ({ status: 'success,cancelled', finished_after: daysAgoISO(30), limit: 50 })")
+    expect(source).toContain('function daysAgoISO(days)')
+    expect(source).toContain('client.listTasks(query)')
+    // 切 Tab 就拉那个 Tab 的查询。
+    expect(source).toContain('watch(activeTab, () => { if (visible.value) load() })')
   })
 
-  // 每一栏各自的空态：正在下载为空不等于没有任务，最近完成为空也不等于都在跑。
+  // 取消 7 天窗口在客户端再收一次：历史查询用 30 天（覆盖成功），cancelled 只留 7 天内的。
+  it('re-widens the cancelled rows to their 7-day window on history', () => {
+    expect(source).toContain('const visibleRows = computed')
+    expect(source).toContain("row.task.status === 'cancelled'")
+    expect(source).toContain('withinDays(row.task, 7)')
+  })
+
+  it('shows history as a table with terminal facts', () => {
+    expect(source).toContain('<t-table')
+    expect(source).toContain('row.finishedText')
+    expect(source).toContain('row.sizeText')
+  })
+
+  // 每一栏各自的空态：进行中为空不等于没有任务，失败/历史为空也不等于都在跑。
   it('gives each tab its own empty text', () => {
     expect(source).toContain('暂无正在下载的任务')
-    expect(source).toContain('最近没有完成的任务')
+    expect(source).toContain('暂无失败的任务')
+    expect(source).toContain('暂无历史记录')
+  })
+
+  // 轮询只在「停在进行中」且有非终态任务时进行：失败/历史是终态事实，拉一次就够。
+  it('polls only while on the active tab and something is unfinished', () => {
+    expect(source).toContain("activeTab.value !== 'active'")
+    expect(source).toContain('hasLiveTask(liveDownloads.value)')
+  })
+
+  // 失败行的「详情」打开这条素材的详情，用不带页脚动作的 transfer 上下文 —— 传输动作
+  //（重新下载）就在下载中心这一栏里，详情只回答「这是什么」。
+  it('opens the failed-row detail in a footer-less transfer context', () => {
+    expect(source).toContain('@click="openDetail(row)"')
+    expect(source).toContain('materials.get(row.task.asset_id)')
+    expect(source).toContain('mode="transfer"')
   })
 })

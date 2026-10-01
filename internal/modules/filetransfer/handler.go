@@ -10,7 +10,9 @@ package filetransfer
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -24,18 +26,60 @@ func actor(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
 	return middleware.AuthenticateRequest(c)
 }
 
-// ListTasks answers with the acting user's tasks, newest first.
+// ListTasks answers with the acting user's tasks, newest first, optionally
+// narrowed by the query parameters `status` (comma-separated task statuses to
+// keep), `finished_after` (an RFC3339 instant; only rows whose finished_at is
+// at or after it are kept, which is how the download centre's terminal tabs
+// apply their retention windows) and `limit` (page size, capped at 200,
+// defaulting to 100). A malformed `finished_after` or `limit` is a 400; an
+// unknown status is rejected by the service as a 400.
 func ListTasks(_ context.Context, c *hertzapp.RequestContext) {
 	current, ok := actor(c)
 	if !ok {
 		return
 	}
-	items, err := transferservice.ListTasks(current)
+	opts, ok := parseListOptions(c)
+	if !ok {
+		return
+	}
+	items, err := transferservice.ListTasks(current, opts)
 	if err != nil {
 		writeTransferError(c, err)
 		return
 	}
 	api.Success(c, items)
+}
+
+// parseListOptions reads the listing's query parameters. `status` is split on
+// commas and trimmed, with blank segments dropped, and passed through for the
+// service to validate against the task enum; a malformed `finished_after` or
+// `limit` writes a 400 and answers false.
+func parseListOptions(c *hertzapp.RequestContext) (transferservice.TaskListOptions, bool) {
+	opts := transferservice.TaskListOptions{}
+	if raw := strings.TrimSpace(c.Query("status")); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			if value := strings.TrimSpace(part); value != "" {
+				opts.Statuses = append(opts.Statuses, value)
+			}
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("finished_after")); raw != "" {
+		instant, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			api.BadRequest(c, 10001, "finished_after 时间格式无效")
+			return opts, false
+		}
+		opts.FinishedAfter = &instant
+	}
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 {
+			api.BadRequest(c, 10001, "limit 参数无效")
+			return opts, false
+		}
+		opts.Limit = value
+	}
+	return opts, true
 }
 
 // CancelTask asks for a transfer to stop. The body is the refreshed task, which

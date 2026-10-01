@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -358,7 +359,7 @@ func TestListTasksAsksTheRepositoryForTheActingUser(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
@@ -381,7 +382,7 @@ func TestListTasksCarriesTheAssetTitleTheTaskWasCreatedWith(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
@@ -397,7 +398,7 @@ func TestListTasksNullsTheOptionalFieldsThatHaveNoValueYet(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
@@ -417,11 +418,101 @@ func TestListTasksRefusesAnActorWithNoIdentity(t *testing.T) {
 	store := newMemoryStore()
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	if _, err := service.ListTasks(identityservice.PublicUser{}); !errors.Is(err, ErrInvalidInput) {
+	if _, err := service.ListTasks(identityservice.PublicUser{}, TaskListOptions{}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
 	if store.count("list") != 0 {
 		t.Fatalf("list called %d times, want none for a request with no actor", store.count("list"))
+	}
+}
+
+// The terminal tabs pass their retention window as finished_after, and the
+// service hands it to the store unchanged: the window is a display decision the
+// caller owns, not one the module re-derives.
+func TestListTasksPassesFinishedAfterToTheRepository(t *testing.T) {
+	store := newMemoryStore(taskFixture("transfer-1", model.StatusSuccess, 9, teamOf(7)))
+	service := testService(store, workingNode(), fixedClock(testNow()))
+	cutoff := testNow().Add(-90 * 24 * time.Hour)
+
+	_, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{FinishedAfter: &cutoff})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if store.listFilter.FinishedAfter == nil || !store.listFilter.FinishedAfter.Equal(cutoff) {
+		t.Fatalf("filter.FinishedAfter = %v, want %v", store.listFilter.FinishedAfter, cutoff)
+	}
+}
+
+// A request's statuses reach the store as typed enum values, and a status that
+// is not a task status is refused rather than ignored: `?status=downloaded`
+// would otherwise silently widen the window past what the caller meant.
+func TestListTasksMapsStatusesOntoTheEnumAndRejectsUnknownOnes(t *testing.T) {
+	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Statuses: []string{"pending", "running"}}); err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if got, want := store.listFilter.Statuses, []model.Status{model.StatusPending, model.StatusRunning}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("filter.Statuses = %v, want %v", got, want)
+	}
+
+	store.listFilter.Statuses = nil
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Statuses: []string{"pending", "downloaded"}}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("ListTasks() with an unknown status = %v, want ErrInvalidInput", err)
+	}
+	if len(store.listFilter.Statuses) != 0 {
+		t.Fatalf("a refused request must not reach the store; filter.Statuses = %v", store.listFilter.Statuses)
+	}
+}
+
+// A caller can cap the page itself; the module default only applies when the
+// caller does not ask.
+func TestListTasksUsesTheCallersLimitOrTheModuleDefault(t *testing.T) {
+	store := newMemoryStore()
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Limit: 50}); err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if store.listFilter.Limit != 50 {
+		t.Fatalf("filter.Limit = %d, want the caller's 50", store.listFilter.Limit)
+	}
+
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{}); err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if store.listFilter.Limit != defaultListLimit {
+		t.Fatalf("filter.Limit = %d, want the module default %d", store.listFilter.Limit, defaultListLimit)
+	}
+}
+
+// The download centre's terminal rows need the completion time: a row that has
+// finished carries it, one that has not answers null.
+func TestListTasksCarriesFinishedAtForTerminalRows(t *testing.T) {
+	finished := testNow().Add(-1 * time.Hour)
+	done := taskFixture("transfer-1", model.StatusSuccess, 9, teamOf(7))
+	done.FinishedAt = &finished
+	store := newMemoryStore(done)
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if items[0].FinishedAt == nil || !items[0].FinishedAt.Equal(finished) {
+		t.Fatalf("finished_at = %v, want %v", items[0].FinishedAt, finished)
+	}
+
+	running := taskFixture("transfer-2", model.StatusRunning, 9, teamOf(7))
+	store2 := newMemoryStore(running)
+	service2 := testService(store2, workingNode(), fixedClock(testNow()))
+	items2, err := service2.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if items2[0].FinishedAt != nil {
+		t.Fatalf("finished_at = %v, want nil for a running row", *items2[0].FinishedAt)
 	}
 }
 

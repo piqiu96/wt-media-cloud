@@ -97,8 +97,8 @@ func TestTaskMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 
 	// The denominator, measured here. A property quietly dropped from the schema would
 	// otherwise keep this comparison green while shrinking what the frontend is promised.
-	if len(want) != 19 || len(schema.Required) != 12 {
-		t.Fatalf("contract declares %d properties / %d required, want the measured 19 / 12", len(want), len(schema.Required))
+	if len(want) != 20 || len(schema.Required) != 12 {
+		t.Fatalf("contract declares %d properties / %d required, want the measured 20 / 12", len(want), len(schema.Required))
 	}
 
 	if got := marshalledKeys(t, Task{}); !reflect.DeepEqual(got, want) {
@@ -146,7 +146,7 @@ func TestTaskMarshalsUnknownNullableFieldsAsNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal Task: %v", err)
 	}
-	for _, key := range []string{"estimated_remaining_seconds", "checksum_sha256", "file_name", "error_code", "error_message"} {
+	for _, key := range []string{"estimated_remaining_seconds", "checksum_sha256", "file_name", "error_code", "error_message", "finished_at"} {
 		if !strings.Contains(string(data), `"`+key+`":null`) {
 			t.Errorf("%s = not null in %s", key, data)
 		}

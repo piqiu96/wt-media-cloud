@@ -11,6 +11,31 @@ export function isTerminal(task) {
   return TERMINAL_STATUSES.includes(task?.status)
 }
 
+/** 失败 Tab 的依据：只有 `failed` 进失败，成功与取消都是历史。 */
+export function isFailed(task) {
+  return task?.status === 'failed'
+}
+
+/** 历史 Tab 的依据：成功与已取消都是事实记录，只有失败单列。 */
+export function isHistory(task) {
+  return task?.status === 'success' || task?.status === 'cancelled'
+}
+
+/**
+ * 行是否落在「从现在往前 days 天」的窗口里。
+ *
+ * 保留窗口是**展示层截断**（DB 从不删行，见 CHG-069 任务 23 裁定），所以这条只决定一行
+ * 还显不显示，不碰任何事实。取 `finished_at`（终态行必有，任务 23 起进入契约）；它缺了
+ * 才退回 `updated_at`，而 `updated_at` 会被租约续租移动，只是兜底。
+ */
+export function withinDays(task, days, now = Date.now()) {
+  if (!Number.isFinite(days) || days <= 0) return false
+  const source = task?.finished_at || task?.updated_at
+  const stamp = source ? Date.parse(source) : Number.NaN
+  if (!Number.isFinite(stamp)) return false
+  return now - stamp <= days * 24 * 60 * 60 * 1000
+}
+
 /** 轮询闸门：没有非终态任务时不该继续拉。 */
 export function hasLiveTask(tasks) {
   return tasks.some((task) => !isTerminal(task))

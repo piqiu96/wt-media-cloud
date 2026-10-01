@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetry, downloadedFileName, fileFact, filePresence, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetry, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -27,6 +27,42 @@ describe('transfer terminal states', () => {
     expect(hasLiveTask([task({ status: 'success' }), task({ status: 'running' })])).toBe(true)
     expect(hasLiveTask([task({ status: 'success' }), task({ status: 'cancelled' })])).toBe(false)
     expect(hasLiveTask([])).toBe(false)
+  })
+})
+
+describe('transfer tab membership', () => {
+  // 失败单独一栏，成功与取消都是历史事实（CHG-069 任务 23）。一行恰好属于一栏：
+  // isFailed 与 isHistory 不相交，而它们并起来正是「终态」。
+  it('parts the terminal rows into failed and history with no overlap', () => {
+    expect(isFailed(task({ status: 'failed' }))).toBe(true)
+    expect(isFailed(task({ status: 'success' }))).toBe(false)
+    expect(isFailed(task({ status: 'cancelled' }))).toBe(false)
+    expect(isHistory(task({ status: 'success' }))).toBe(true)
+    expect(isHistory(task({ status: 'cancelled' }))).toBe(true)
+    expect(isHistory(task({ status: 'failed' }))).toBe(false)
+    expect(isHistory(task({ status: 'running' }))).toBe(false)
+  })
+
+  // 保留窗口是**展示层截断**：DB 从不删行，这条只决定一行还显不显示。
+  it('keeps a terminal row only within its retention window', () => {
+    const now = Date.parse('2026-10-01T00:00:00Z')
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-20T00:00:00Z' }), 30, now)).toBe(true) // 11 天前
+    expect(withinDays(task({ status: 'success', finished_at: '2026-08-01T00:00:00Z' }), 30, now)).toBe(false) // 61 天前
+    // 边界：正好 days 天前仍在窗口内（now - stamp <= days × 86400e3）。
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-01T00:00:00Z' }), 30, now)).toBe(true)
+  })
+
+  // `finished_at` 终态行必有（契约任务 23 起暴露）；它缺了才退回 `updated_at`——
+  // 而 `updated_at` 会被租约续租移动，只是兜底。
+  it('prefers finished_at and only then falls back to updated_at', () => {
+    const now = Date.parse('2026-10-01T00:00:00Z')
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-30T00:00:00Z' }), 30, now)).toBe(true)
+    expect(withinDays(task({ status: 'success', updated_at: '2026-09-01T00:00:00Z' }), 30, now)).toBe(true)
+    // 没有时间戳就不是窗口能判的事：false，而不是当它「一定过期」或「一定在窗口内」。
+    expect(withinDays(task({ status: 'success' }), 30, now)).toBe(false)
+    expect(withinDays(null, 30, now)).toBe(false)
+    // 天数不是正数时这条守卫无意义。
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-01T00:00:00Z' }), 0, now)).toBe(false)
   })
 })
 

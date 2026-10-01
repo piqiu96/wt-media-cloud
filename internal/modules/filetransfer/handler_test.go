@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -185,5 +187,55 @@ func TestTheTransferErrorNamesAreTheFrozenOnes(t *testing.T) {
 	// `local_transfer_node_unavailable`, which production answers, not this module.
 	if checked != 5 {
 		t.Fatalf("checked %d names, want 5: the loop is no longer covering the table", checked)
+	}
+}
+
+// The listing's query parameters are read by the handler into a service options
+// value: statuses split on commas and trim blank segments, and a malformed
+// finished_after or limit is refused with a 400 before anything is asked of the
+// service. The probe runs the parse on a real request context so the refusal
+// actually writes its response.
+func TestListTasksParsesItsQueryParameters(t *testing.T) {
+	instant := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	testCases := []struct {
+		name     string
+		query    string
+		status   int
+		expected transferservice.TaskListOptions
+	}{
+		{"no parameters is the unfiltered listing", "", 200, transferservice.TaskListOptions{}},
+		{"statuses split on commas and trim", "status=success, cancelled", 200, transferservice.TaskListOptions{Statuses: []string{"success", "cancelled"}}},
+		{"a blank segment is dropped", "status=pending,,running", 200, transferservice.TaskListOptions{Statuses: []string{"pending", "running"}}},
+		{"finished_after parses as RFC3339", "finished_after=2026-07-01T00:00:00Z", 200, transferservice.TaskListOptions{FinishedAfter: &instant}},
+		{"a malformed finished_after is a 400", "finished_after=not-a-time", 400, transferservice.TaskListOptions{}},
+		{"limit parses", "limit=50", 200, transferservice.TaskListOptions{Limit: 50}},
+		{"a non-numeric limit is a 400", "limit=abc", 400, transferservice.TaskListOptions{}},
+		{"a zero limit is a 400", "limit=0", 400, transferservice.TaskListOptions{}},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			engine := server.New()
+			var got transferservice.TaskListOptions
+			var ok bool
+			engine.GET("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+				got, ok = parseListOptions(c)
+			})
+			path := "/probe"
+			if testCase.query != "" {
+				path += "?" + testCase.query
+			}
+			result := ut.PerformRequest(engine.Engine, consts.MethodGet, path, nil)
+
+			if status := result.Result().StatusCode(); status != testCase.status {
+				t.Fatalf("status = %d, want %d", status, testCase.status)
+			}
+			if wantOK := testCase.status == 200; ok != wantOK {
+				t.Fatalf("ok = %t, want %t", ok, wantOK)
+			}
+			if testCase.status == 200 && !reflect.DeepEqual(got, testCase.expected) {
+				t.Fatalf("options = %+v, want %+v", got, testCase.expected)
+			}
+		})
 	}
 }

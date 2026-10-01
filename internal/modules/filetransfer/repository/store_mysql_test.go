@@ -544,6 +544,34 @@ func TestListTasksScopesToTheRequestingUserAndOrdersDeterministically(t *testing
 	assertExpectations(t, mock)
 }
 
+// The download centre's terminal tabs window their lists by completion time, so
+// the listing has to accept a finished_at bound. It is ANDed with the other
+// conditions, and rows finished before it never reach the query — a NULL
+// finished_at (a task still in flight) is excluded the same way.
+func TestListTasksAppliesAFinishedAfterBound(t *testing.T) {
+	db, mock := newMockGORM(t)
+	requestedBy := identity.UserID(9)
+	cutoff := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+taskColumnList+" FROM file_transfer_tasks WHERE requested_by = ? AND status IN (?) AND finished_at >= ? ORDER BY created_at DESC, id DESC LIMIT 50")).
+		WithArgs(int64(9), "success", cutoff).
+		WillReturnRows(sqlmock.NewRows(taskColumns()).
+			AddRow(taskRowValues(testNow, map[string]any{"id": "transfer-9", "status": "success"})...))
+
+	tasks, err := listTasks(db, TaskFilter{
+		RequestedBy:   &requestedBy,
+		Statuses:      []model.Status{model.StatusSuccess},
+		FinishedAfter: &cutoff,
+		Limit:         50,
+	})
+	if err != nil {
+		t.Fatalf("listTasks() error = %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "transfer-9" {
+		t.Fatalf("tasks = %+v", tasks)
+	}
+	assertExpectations(t, mock)
+}
+
 // The row builder above is only trustworthy while it covers every column. A
 // column it does not know would silently read as NULL in every test, which is
 // how a scan-order bug hides.

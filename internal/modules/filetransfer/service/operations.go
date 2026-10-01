@@ -29,8 +29,8 @@ func EnsureMaterialSourcePrepare(input EnsureMaterialSourcePrepareInput) (dto.Ta
 	return newWiredService().EnsureMaterialSourcePrepare(input)
 }
 
-func ListTasks(actor identityservice.PublicUser) ([]dto.Task, error) {
-	return newWiredService().ListTasks(actor)
+func ListTasks(actor identityservice.PublicUser, opts TaskListOptions) ([]dto.Task, error) {
+	return newWiredService().ListTasks(actor, opts)
 }
 
 func LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {

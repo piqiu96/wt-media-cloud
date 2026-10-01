@@ -8,7 +8,7 @@
 // 2. 一张行表能被单测钉住。模板字符串不能。
 import { formatByteRate, formatBytes, formatEta } from '../../shared/utils/units.js'
 import { formatDateTime } from '../../shared/utils/datetime.js'
-import { canCancel, canOpenFile, canRedownload, canRetry, fileFact, filePresence, isTerminal, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetry, fileFact, filePresence, isFailed, isHistory, isTerminal, progressOf, taskState } from './downloadFacts.js'
 import { taskErrorLabel } from './downloadErrors.js'
 
 /** 「已传 / 总长」。总长未知时只说已传了多少，绝不写 `0 / 0`。 */
@@ -43,9 +43,11 @@ export function transferRow(task, { tasks = [], cancelRequested = false, presenc
     etaText: task.status === 'running' ? formatEta(task.estimated_remaining_seconds) : '',
     errorText: task.status === 'failed' ? taskErrorLabel(task.error_code) || task.error_message || '下载失败' : '',
     attemptsText: Number(task.attempt_count) > 1 ? `第 ${task.attempt_count} 次尝试` : '',
-    // 冻结的任务体只有 created_at／updated_at，**没有 finished_at**（那不是契约里的键）。
-    // 所以「完成于」写不出来，只写发起时间；更新时间为终点会被读成完成时刻。
+    // 发起时间一直是写的；任务 23 起契约暴露了 `finished_at`（终态前为 null），终态行
+    // 因此能写出完成时间。`updated_at` 会被租约续租移动，不能拿它当完成时刻。
     createdText: formatDateTime(task.created_at),
+    finishedAt: task.finished_at || null,
+    finishedText: task.finished_at ? formatDateTime(task.finished_at) : '',
     canCancel: canCancel(task) && !cancelRequested,
     canRetry: canRetry(task),
     canOpen: canOpenFile(task, presenceOfFile),
@@ -72,12 +74,14 @@ export function liveCount(tasks) {
   return (Array.isArray(tasks) ? tasks : []).filter((task) => !isTerminal(task)).length
 }
 
-// 下载中心的两栏（CHG-20260930-069）：非终态是「正在下载」，终态是「最近完成」。
-// 依据任务事实（isTerminal），一行恰好属于一栏。
+// 下载中心的三栏（CHG-20260930-069 任务 23）：非终态「进行中」，失败单列「失败」，
+// 其余终态「历史」。依据任务事实（isFailed／isHistory／isTerminal），一行恰好属于一栏，
+// 三栏计数之和等于行数。
 export function splitTransferRows(rows) {
   const list = Array.isArray(rows) ? rows : []
   return {
     active: list.filter((row) => !isTerminal(row.task)),
-    recent: list.filter((row) => isTerminal(row.task)),
+    failed: list.filter((row) => isFailed(row.task)),
+    history: list.filter((row) => isHistory(row.task)),
   }
 }

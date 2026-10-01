@@ -14,7 +14,7 @@ import { createApiClient } from './http.js'
 export function createFileTransferClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    listTasks() { return api.get('/file-transfer-tasks') },
+    listTasks(params) { return api.get('/file-transfer-tasks', params) },
     cancelTask(taskId) { return api.post(`/file-transfer-tasks/${taskId}/cancel`, {}) },
     retryTask(taskId) { return api.post(`/file-transfer-tasks/${taskId}/retry`, {}) },
   }

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.27.1"
+revision: "2026.10.01.1"
 
 schemas:
   FileTransferTask:
@@ -36,4 +36,12 @@ schemas:
       error_message: {type: string, nullable: true}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
+      finished_at:
+        type: string
+        format: date-time
+        nullable: true
+        description: >-
+          When the task became terminal (success, failed or cancelled), null while the transfer is pending
+          or running. Added for the download centre's terminal tabs, which order their rows and apply their
+          retention windows against it.
     forbidden_properties: [local_path, download_url, storage_credential, node_credential]

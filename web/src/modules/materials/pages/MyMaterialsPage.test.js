@@ -68,20 +68,29 @@ describe('my materials page', () => {
   })
 
   /**
-   * 走查七轮：行操作按「使用状态 × 文件状态」分支，每行只突出一个下一步动作。
+   * 走查七轮：行操作按「使用状态 × 下载状态」矩阵分支（CHG-069 任务 23，任务状态与业务
+   * 状态严格隔离），每行只给一个主操作。
    *
    * 规范 §5.6 与用户同轮裁定（「按钮按照超过 5 个才有更多按钮出现」）：本项目按钮数
    * 上限是 3 个（详情 + 一个主操作 + 放弃使用），永远到不了 5，所以**没有「更多」**——
    * 用户提示词里那套「3 个动作也收进更多」的写法按 §5.6 不采用。
    */
-  it('branches each row on the two dimensions, flat and never behind 更多', () => {
+  it('branches each row on the usage × download matrix, flat and never behind 更多', () => {
     const op = source.slice(source.indexOf('#op="{ row }"'), source.indexOf('</t-space>'))
     expect(op).toContain('@click="openDetail(row)">详情</t-button>')
     expect(op).not.toContain('>查看</t-button>')
     // 已放弃：只有「恢复使用」，不再给必然空转的下载。
     expect(op).toContain("row.usage_status === 'removed'")
-    expect(op).toContain("row.video_status === 'ready'")
+    expect(op).toContain('@click="restore(row)">恢复使用</t-button>')
+    // 使用中：主操作由 download_status 驱动 —— 已下载给「加入合成」，下载中不给主操作
+    //（文件已经在准备了，再点还是同一条命令），未下载/失败给「下载/重新下载」。
+    expect(op).toContain("row.download_status === 'downloaded'")
+    expect(op).toContain("row.download_status !== 'downloading'")
+    expect(op).toContain('@click="goToCompose()">加入合成</t-button>')
+    expect(op).toContain('downloadActionLabel(row.download_status)')
     expect(op).toContain('@click="giveUp(row)">放弃使用</t-button>')
+    // 矩阵判据从 video_status 切走：行内不再碰云端源文件态。
+    expect(op).not.toContain('video_status')
     expect(source).not.toContain('<t-dropdown')
     expect(source).not.toContain('>更多<')
   })
@@ -165,7 +174,7 @@ describe('my materials page', () => {
     expect(source).toContain('MaterialCover')
     expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
     expect(source).toContain('class="wt-primary-link')
-    expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>')
+    expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
     expect(source).not.toContain('downloadHint')
     expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')
@@ -184,22 +193,22 @@ describe('my materials page', () => {
   })
 
   /**
-   * 「文件状态」列 = 下载状态优先 + video_status 兜底（用户 2026-09-30 裁定：
-   * 排队到传输都算下载中；准备失败和本地下载失败都属于下载失败）。
+   * 「文件状态」列 = 纯 `download_status`（CHG-069 任务 23 裁定：不再回落 video_status）。
    *
    * 下载状态是**这条关系**的（后端按「最新一条 user_download 任务」派生），不是素材的：
    * 同一行素材对两个下载过不同次的人要显示不同状态，所以它随 usage 走、落在行对象上，
-   * 与 `usage_status` 同列同格。
+   * 与 `usage_status` 同列同格。云端源文件态（可下载/准备失败）只留在详情抽屉的
+   * 「文件信息」区 —— 把两个维度混在一起，就把「还没下」画成「没准备」。
    */
-  it('derives the 文件状态 cell from the relation download status first, then video_status', () => {
+  it('derives the 文件状态 cell purely from the relation download status', () => {
     expect(source).toContain('download_status: usage.download_status || \'\'')
     expect(source).toContain('downloadStatusLabel(row.download_status)')
     expect(source).toContain('downloadStatusTone(row.download_status)')
-    const fallback = source.slice(source.indexOf('function fileStatus(row)'), source.indexOf('function ', source.indexOf('function fileStatus(row)') + 1))
-    expect(fallback).toContain("if (row.download_status)")
-    expect(fallback).toContain("row.video_status === 'failed'")
-    expect(fallback).toContain("label: '下载失败'")
-    expect(fallback).toContain('videoStatusLabel(row.video_status)')
+    const cell = source.slice(source.indexOf('function fileStatus(row)'), source.indexOf('function ', source.indexOf('function fileStatus(row)') + 1))
+    // 列只读 download_status；video_status 兜底已经拿掉。
+    expect(cell).not.toContain('video_status')
+    expect(cell).toContain('downloadStatusLabel(row.download_status)')
+    expect(cell).toContain('downloadStatusTone(row.download_status)')
     // 下载状态与素材云侧状态不合并：video_status 那四档仍在筛选下拉里原样使用。
     expect(source).toContain('row.video_status !== statusFilter.value')
   })

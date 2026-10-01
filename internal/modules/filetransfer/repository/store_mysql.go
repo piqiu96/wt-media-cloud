@@ -49,11 +49,12 @@ type CreateTaskInput struct {
 // with AND; an empty filter is not scoped to anything, so callers that need a
 // boundary must set one.
 type TaskFilter struct {
-	RequestedBy *identity.UserID
-	AssetID     *int64
-	Statuses    []model.Status
-	Purposes    []model.Purpose
-	Limit       int
+	RequestedBy   *identity.UserID
+	AssetID       *int64
+	Statuses      []model.Status
+	Purposes      []model.Purpose
+	FinishedAfter *time.Time
+	Limit         int
 }
 
 type ProgressInput struct {
@@ -414,6 +415,10 @@ func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 		for _, purpose := range purposes {
 			args = append(args, purpose)
 		}
+	}
+	if filter.FinishedAfter != nil {
+		conditions = append(conditions, "finished_at >= ?")
+		args = append(args, *filter.FinishedAfter)
 	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {

@@ -81,20 +81,13 @@ function toRows(usages) {
 }
 
 /**
- * 「文件状态」列：下载状态优先，素材云侧状态兜底。
- *
- * 有下载记录（下载中/已下载/下载失败）用它 —— 它是**这个运营**在下载这条素材上的
- * 现状。没有时回落 `video_status`；其中 `failed`（云准备失败）也要画「下载失败」——
- * 用户 2026-09-30 裁定「准备失败和本地下载失败都属于下载失败，不需要分那么细」。
+ * 「文件状态」列：纯 `download_status`（CHG-069 任务 23）——它回答「**这个运营**在这条
+ * 素材上下载到了哪一步」：未下载/下载中/已下载/下载失败。不再回落 `video_status`：
+ * 那回答的是云端源文件准备好了没有，是另一件事，混在一起就把「还没下」画成「没准备」。
+ * 云端准备态只留在详情抽屉的「文件信息」区。
  */
 function fileStatus(row) {
-  if (row.download_status) {
-    return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
-  }
-  if (row.video_status === 'failed') {
-    return { label: '下载失败', tone: 'danger' }
-  }
-  return { label: videoStatusLabel(row.video_status), tone: videoStatusTone(row.video_status) }
+  return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
 }
 
 // 「素材」格副行：游戏 · 作者。游戏查不到名字时 gameName 退回 id（那是真实数据），
@@ -264,9 +257,9 @@ onMounted(() => {
               <template v-else>—</template>
             </template>
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
-            <!-- 走查七轮：按「使用状态 × 文件状态」分支，每行只突出一个下一步。
-                 规范 §5.6 与用户同轮裁定（超过 5 个才出现「更多」）：本行最多 3 颗，
-                 全部平铺。下载中不给主操作——文件已经在准备了，再点一次还是同一条命令。 -->
+            <!-- CHG-069 任务 23：按钮由「使用状态 × 下载状态」矩阵驱动（任务状态与业务状态
+                 严格隔离），每行最多 3 颗全部平铺（规范 §5.6）。已放弃只给恢复；使用中按
+                 下载状态给一步主操作——下载中不给（文件已经在准备了，再点还是同一条命令）。 -->
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
@@ -274,8 +267,8 @@ onMounted(() => {
                   <t-button size="small" theme="primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="row.video_status === 'ready'" size="small" theme="primary" @click="goToCompose()">加入合成</t-button>
-                  <t-button v-else-if="row.video_status !== 'downloading'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>
+                  <t-button v-if="row.download_status === 'downloaded'" size="small" theme="primary" @click="goToCompose()">加入合成</t-button>
+                  <t-button v-else-if="row.download_status !== 'downloading'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
                   <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="giveUp(row)">放弃使用</t-button>
                 </template>
               </t-space>

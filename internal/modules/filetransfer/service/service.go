@@ -381,17 +381,44 @@ func (s *Service) EnsureMaterialSourcePrepare(input EnsureMaterialSourcePrepareI
 	return taskBody(task), nil
 }
 
-// ListTasks returns the acting user's tasks, newest first.
+// TaskListOptions narrows the acting user's task listing. Every field is
+// optional and combined with AND; the zero value is the unfiltered newest-first
+// listing the download centre has always asked for.
+type TaskListOptions struct {
+	// Statuses are the task status enum values to keep, e.g. "running" for the
+	// in-flight tab or "success,cancelled" for history.
+	Statuses []string
+	// FinishedAfter keeps only rows whose finished_at is at or after this
+	// instant, which is how the terminal tabs apply their retention windows.
+	FinishedAfter *time.Time
+	// Limit caps the page. Zero means the module default.
+	Limit int
+}
+
+// ListTasks returns the acting user's tasks, newest first, narrowed by options.
 //
 // The filter is built from the actor alone: there is no parameter for a team or
 // a user to widen it with, so the listing cannot be asked for someone else's
 // work even by a caller that tries.
-func (s *Service) ListTasks(actor identityservice.PublicUser) ([]dto.Task, error) {
+func (s *Service) ListTasks(actor identityservice.PublicUser, opts TaskListOptions) ([]dto.Task, error) {
 	if actor.ID <= 0 {
 		return nil, ErrInvalidInput
 	}
+	statuses, err := validateStatuses(opts.Statuses)
+	if err != nil {
+		return nil, err
+	}
 	requestedBy := actor.ID
-	tasks, err := s.store.ListTasks(repository.TaskFilter{RequestedBy: &requestedBy, Limit: s.listMax})
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = s.listMax
+	}
+	tasks, err := s.store.ListTasks(repository.TaskFilter{
+		RequestedBy:   &requestedBy,
+		Statuses:      statuses,
+		FinishedAfter: opts.FinishedAfter,
+		Limit:         limit,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +427,25 @@ func (s *Service) ListTasks(actor identityservice.PublicUser) ([]dto.Task, error
 		items = append(items, taskBody(task))
 	}
 	return items, nil
+}
+
+// validateStatuses maps wire status strings onto the task status enum. Unknown
+// values are rejected rather than ignored, so `?status=typo` fails loudly
+// instead of silently widening the window.
+func validateStatuses(values []string) ([]model.Status, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	statuses := make([]model.Status, 0, len(values))
+	for _, value := range values {
+		switch model.Status(value) {
+		case model.StatusPending, model.StatusRunning, model.StatusSuccess, model.StatusFailed, model.StatusCancelled:
+			statuses = append(statuses, model.Status(value))
+		default:
+			return nil, ErrInvalidInput
+		}
+	}
+	return statuses, nil
 }
 
 // LatestUserDownloadStatuses answers each material's newest user_download status
@@ -828,6 +874,7 @@ func taskBody(task model.Task) dto.Task {
 		ErrorMessage:              optional(task.ErrorMessage),
 		CreatedAt:                 task.CreatedAt,
 		UpdatedAt:                 task.UpdatedAt,
+		FinishedAt:                task.FinishedAt,
 	}
 }
 
