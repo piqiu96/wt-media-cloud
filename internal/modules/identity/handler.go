@@ -68,6 +68,11 @@ type passwordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
+type ownProfileRequest struct {
+	Nickname string `json:"nickname"`
+	AvatarID string `json:"avatar_id"`
+}
+
 type teamRequest struct {
 	Name string `json:"name"`
 }
@@ -120,8 +125,24 @@ func Me(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, actor)
 }
+func UpdateOwnProfile(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var req ownProfileRequest
+	if !api.DecodeJSON(c, &req) {
+		return
+	}
+	user, err := identityservice.UpdateOwnProfile(actor.ID, req.Nickname, req.AvatarID)
+	if err != nil {
+		writeIdentityError(c, err)
+		return
+	}
+	api.Success(c, user)
+}
 func Logout(ctx context.Context, c *hertzapp.RequestContext) {
-	token := string(c.Cookie(middleware.SessionCookieName))
+	token := sessionToken(c)
 	if err := identityservice.Logout(token); err != nil {
 		writeIdentityError(c, err)
 		return

@@ -39,6 +39,10 @@ func ChangeOwnPassword(userID UserID, currentPassword, newPassword string) error
 	return newService(mysqlStore{}).ChangeOwnPassword(userID, currentPassword, newPassword)
 }
 
+func UpdateOwnProfile(userID UserID, nickname, avatarID string) (PublicUser, error) {
+	return newService(mysqlStore{}).UpdateOwnProfile(userID, nickname, avatarID)
+}
+
 func ResetPassword(actorID, userID UserID, newPassword string) error {
 	return newService(mysqlStore{}).ResetPassword(actorID, userID, newPassword)
 }

@@ -14,6 +14,11 @@ func RegisterLocal(input dto.RegisterLocalInput) (dto.Registration, error) {
 	return newService(mysqlStore{}).RegisterLocal(input)
 }
 
+func GetDeviceBinding(userID service.UserID) (model.DeviceBinding, error) {
+	return newService(mysqlStore{}).GetDeviceBinding(userID)
+}
+func UnbindDevice(userID service.UserID) error { return newService(mysqlStore{}).UnbindDevice(userID) }
+
 func CheckLocalTrust(userID service.UserID, nodeID string) error {
 	return newService(mysqlStore{}).CheckLocalTrust(userID, nodeID)
 }

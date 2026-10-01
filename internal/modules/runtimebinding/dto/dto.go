@@ -17,6 +17,10 @@ type RegisterLocalInput struct {
 	BindingToken         string `json:"binding_token"`
 	AgentID              string `json:"agent_id"`
 	DeviceID             string `json:"device_id"`
+	DevicePublicKey      string `json:"device_public_key"`
+	DeviceSignature      string `json:"device_signature"`
+	DeviceName           string `json:"device_name"`
+	BindDevice           bool   `json:"bind_device"`
 	AgentVersion         string `json:"agent_version"`
 	ContractMajorVersion string `json:"contract_major_version"`
 	ContractRevision     string `json:"contract_revision"`

@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+func TestOwnProfileDefaultsAndChoiceSurviveNewLogin(t *testing.T) {
+	s := NewService(NewMemoryStore())
+	user, err := s.BootstrapAdmin("admin", "a-long-initial-password")
+	if err != nil { t.Fatal(err) }
+	if user.Nickname != "admin" || user.AvatarID != "sky" { t.Fatalf("defaults = %+v", user) }
+	if _, err := s.UpdateOwnProfile(user.ID, "", "ocean"); !errors.Is(err, ErrInvalidInput) { t.Fatalf("empty nickname = %v", err) }
+	if _, err := s.UpdateOwnProfile(user.ID, "小明", "external-url"); !errors.Is(err, ErrInvalidInput) { t.Fatalf("external avatar = %v", err) }
+	updated, err := s.UpdateOwnProfile(user.ID, " 小明 ", "ocean")
+	if err != nil { t.Fatal(err) }
+	if updated.Nickname != "小明" || updated.AvatarID != "ocean" || updated.Username != "admin" { t.Fatalf("updated = %+v", updated) }
+	logged, err := s.Login("admin", "a-long-initial-password")
+	if err != nil { t.Fatal(err) }
+	if logged.User.Nickname != "小明" || logged.User.AvatarID != "ocean" { t.Fatalf("login user = %+v", logged.User) }
+}
+
 func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T) {
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	tokens := []string{"session-first", "session-second"}

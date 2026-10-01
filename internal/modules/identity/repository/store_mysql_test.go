@@ -37,11 +37,11 @@ func TestIdentityRepositoryUsesExplicitSQLThroughGORM(t *testing.T) {
 func TestFindUserByUsernameUsesGORMAndMapsStoredUser(t *testing.T) {
 	db, mock, closeDB := newIdentityMockGORM(t)
 	defer closeDB()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT u.id, u.username, u.password_hash")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT u.id, u.username, COALESCE(u.nickname, u.username), COALESCE(u.avatar_id, 'sky'), u.password_hash")).
 		WithArgs("admin").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "username", "password_hash", "role", "status", "team_id", "team_name", "created_at", "updated_at",
-		}).AddRow(int64(1), "admin", "hash", "admin", "enabled", nil, "", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+			"id", "username", "nickname", "avatar_id", "password_hash", "role", "status", "team_id", "team_name", "created_at", "updated_at",
+		}).AddRow(int64(1), "admin", "Admin", "sky", "hash", "admin", "enabled", nil, "", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT game_id FROM user_game_scopes")).
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"game_id"}).AddRow("game-a"))
@@ -50,7 +50,7 @@ func TestFindUserByUsernameUsesGORMAndMapsStoredUser(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("findUserByUsername() = %v, %v, want found without error", found, err)
 	}
-	if user.ID != 1 || user.Username != "admin" || len(user.GameIDs) != 1 || user.GameIDs[0] != "game-a" {
+	if user.ID != 1 || user.Username != "admin" || user.Nickname != "Admin" || user.AvatarID != "sky" || len(user.GameIDs) != 1 || user.GameIDs[0] != "game-a" {
 		t.Fatalf("user = %#v", user)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

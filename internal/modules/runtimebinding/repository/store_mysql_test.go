@@ -66,7 +66,7 @@ func TestTheHeartbeatWindowSeparatesQueueingFromTrustChecks(t *testing.T) {
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`FROM local_agent_nodes n\s+JOIN users u ON u\.id = n\.user_id\s+JOIN user_sessions s ON s\.id = n\.session_id\s+WHERE n\.user_id = \? AND n\.mode = 'local' AND n\.status = 'online'\s+AND s\.invalidated_at IS NULL AND u\.status = 'enabled'\s+AND u\.bit_main_user_id IS NOT NULL AND n\.bitbrowser_status = 'normal'\s+AND n\.reported_main_user_id = u\.bit_main_user_id\s+ORDER BY n\.last_heartbeat_at DESC, n\.id ASC LIMIT 1`).
+	mock.ExpectQuery(`FROM local_agent_nodes n\s+JOIN users u ON u\.id = n\.user_id\s+JOIN user_sessions s ON s\.id = n\.session_id\s+WHERE n\.user_id = \? AND n\.mode = 'local' AND n\.status = 'online'\s+AND s\.invalidated_at IS NULL AND u\.status = 'enabled' AND u\.device_id = n\.device_id\s+AND u\.bit_main_user_id IS NOT NULL AND n\.bitbrowser_status = 'normal'\s+AND n\.reported_main_user_id = u\.bit_main_user_id\s+ORDER BY n\.last_heartbeat_at DESC, n\.id ASC LIMIT 1`).
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "agent_id", "device_id", "user_id", "session_id", "mode", "agent_version",

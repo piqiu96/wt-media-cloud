@@ -100,7 +100,7 @@ func FindUser(id model.UserID) (model.User, bool, error) {
 }
 
 func findUserByID(db *gorm.DB, id model.UserID) (model.User, bool, error) {
-	return findUserByQuery(db, `SELECT u.id, u.username, u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id WHERE u.id = ?`, id)
+	return findUserByQuery(db, `SELECT u.id, u.username, COALESCE(u.nickname, u.username), COALESCE(u.avatar_id, 'sky'), u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id WHERE u.id = ?`, id)
 }
 
 func FindUserByUsername(username string) (model.User, bool, error) {
@@ -108,7 +108,7 @@ func FindUserByUsername(username string) (model.User, bool, error) {
 }
 
 func findUserByUsername(db *gorm.DB, username string) (model.User, bool, error) {
-	return findUserByQuery(db, `SELECT u.id, u.username, u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id WHERE u.username = ?`, username)
+	return findUserByQuery(db, `SELECT u.id, u.username, COALESCE(u.nickname, u.username), COALESCE(u.avatar_id, 'sky'), u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id WHERE u.username = ?`, username)
 }
 
 func findUserByQuery(db *gorm.DB, query string, arg any) (model.User, bool, error) {
@@ -117,6 +117,8 @@ func findUserByQuery(db *gorm.DB, query string, arg any) (model.User, bool, erro
 	err := queryRow(db, query, arg).Scan(
 		&user.ID,
 		&user.Username,
+		&user.Nickname,
+		&user.AvatarID,
 		&user.PasswordHash,
 		&user.Role,
 		&user.Status,
@@ -163,6 +165,22 @@ func findGameIDs(db *gorm.DB, userID model.UserID) ([]string, error) {
 
 func UpdateUser(user model.User) error {
 	return updateUser(database.DB(), user)
+}
+
+func UpdateOwnProfile(userID model.UserID, nickname, avatarID string, at time.Time, event model.AuditEvent) error {
+	tx := database.DB().Begin()
+	defer rollbackTx(tx)
+	changed, err := execSQL(tx, `UPDATE users SET nickname = ?, avatar_id = ?, updated_at = ? WHERE id = ? AND status = 'enabled'`, nickname, avatarID, at, userID)
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return model.ErrInvalidInput
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit().Error
 }
 
 func updateUser(db *gorm.DB, user model.User) error {
@@ -783,7 +801,7 @@ func ListUsers() ([]model.User, error) {
 }
 
 func listUsers(db *gorm.DB) ([]model.User, error) {
-	rows, err := queryRows(db, "SELECT u.id, u.username, u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id ORDER BY u.created_at DESC")
+	rows, err := queryRows(db, "SELECT u.id, u.username, COALESCE(u.nickname, u.username), COALESCE(u.avatar_id, 'sky'), u.password_hash, u.role, u.status, u.team_id, COALESCE(t.name, ''), u.created_at, u.updated_at FROM users u LEFT JOIN operation_teams t ON t.id = u.team_id ORDER BY u.created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -792,7 +810,7 @@ func listUsers(db *gorm.DB) ([]model.User, error) {
 	for rows.Next() {
 		var u model.User
 		var teamID sql.NullInt64
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &teamID, &u.TeamName, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Nickname, &u.AvatarID, &u.PasswordHash, &u.Role, &u.Status, &teamID, &u.TeamName, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if teamID.Valid {

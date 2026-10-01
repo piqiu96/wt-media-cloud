@@ -21,10 +21,10 @@ describe('local agent status page', () => {
     expect(page.trustText).toBe('可执行本机浏览器操作')
     expect(page.trustReason).toContain('扫描窗口、配置代理和检查账号')
     expect(page.canBindTrustedNode).toBe(true)
-    expect(page.bindActionText).toBe('确认并刷新本机可信环境')
+    expect(page.bindActionText).toBe('刷新本机执行状态')
   })
 
-  it('uses first-bind wording before a local node exists', () => {
+  it('keeps device binding and session connection distinct before a local node exists', () => {
     const page = createLocalAgentStatusPage({
       agentId: 'local-agent-dev',
       status: 'idle',
@@ -35,8 +35,9 @@ describe('local agent status page', () => {
       canBindTrustedNode: true,
     })
 
-    expect(page.trustText).toBe('尚未完成可信绑定')
-    expect(page.trustReason).toContain('暂不能执行本机浏览器相关操作')
-    expect(page.bindActionText).toBe('绑定当前比特浏览器账号')
+    expect(page.trustText).toBe('当前会话待连接')
+    expect(page.trustReason).toContain('当前会话尚未连接本机执行节点')
+    expect(page.trustReason).toContain('个人信息中的设备绑定状态')
+    expect(page.bindActionText).toBe('连接当前会话')
   })
 })

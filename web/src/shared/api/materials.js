@@ -1,4 +1,5 @@
 import { createApiClient } from './http.js'
+import { isDesktop } from '../../utils.js'
 
 /**
  * 素材库与我的素材的 API client。形状照 `contentPool.js`：工厂函数 + 显式注入 fetch，
@@ -29,7 +30,13 @@ export function createMaterialsClient({ base = '/api/v1', fetch = globalThis.fet
     listMyMaterials() { return api.get('/my-materials') },
     // 202 恒定：此刻还没有任何字节被下载，任务在节点领取前一直是 pending。
     // 下一次诚实的进度来源是 GET /file-transfer-tasks，不是这个响应。
-    createDownload(id) { return api.post(`/materials/${id}/downloads`, {}) },
+    async createDownload(id) {
+      if (isDesktop()) {
+        const { ensureTrustedLocalAgent } = await import('../../apps/desktop/features/local-agent/init.js')
+        await ensureTrustedLocalAgent()
+      }
+      return api.post(`/materials/${id}/downloads`, {})
+    },
     // 云端视频地址的唯一入口：列表与素材 body 都不携带（详情抽屉专用）。
     getVideoUrl(id) { return api.get(`/materials/${id}/video-url`) },
   }

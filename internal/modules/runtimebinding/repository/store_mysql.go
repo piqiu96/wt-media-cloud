@@ -1,8 +1,10 @@
 package repository
 
 import (
+	"bytes"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,6 +81,33 @@ func SaveNode(node model.AgentNode) error { return saveNode(database.DB(), node)
 
 func saveNode(db *gorm.DB, node model.AgentNode) error {
 	return db.Transaction(func(tx *gorm.DB) error {
+		var existingID sql.NullString
+		var existingKey []byte
+		err := tx.Raw(`SELECT device_id, device_public_key FROM users WHERE id = ? AND status = 'enabled' FOR UPDATE`, node.UserID).Row().Scan(&existingID, &existingKey)
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.ErrDeviceNotBound
+		}
+		if err != nil {
+			return err
+		}
+		if !existingID.Valid || existingID.String == "" {
+			if !node.BindDevice {
+				return model.ErrDeviceNotBound
+			}
+			if err := tx.Exec(`UPDATE users SET device_id = ?, device_public_key = ?, device_name = ?, device_bound_at = ?, device_last_verified_at = ? WHERE id = ?`, node.DeviceID, node.DevicePublicKey, node.DeviceName, node.RegisteredAt, node.RegisteredAt, node.UserID).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, 'user.device.bind', 'user', ?, ?, ?)`, id.NewID("audit"), node.UserID, strconv.FormatInt(int64(node.UserID), 10), `{"result":"bound"}`, node.RegisteredAt).Error; err != nil {
+				return err
+			}
+		} else {
+			if existingID.String != node.DeviceID || !bytes.Equal(existingKey, node.DevicePublicKey) {
+				return model.ErrDeviceMismatch
+			}
+			if err := tx.Exec(`UPDATE users SET device_last_verified_at = ? WHERE id = ?`, node.RegisteredAt, node.UserID).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Exec(`UPDATE local_agent_nodes SET status = 'replaced', updated_at = ?
 			WHERE user_id = ? AND device_id = ? AND status <> 'replaced'`, node.RegisteredAt, node.UserID, node.DeviceID).Error; err != nil {
 			return err
@@ -91,6 +120,59 @@ func saveNode(db *gorm.DB, node model.AgentNode) error {
 			node.RegisteredAt, node.LastHeartbeatAt, node.RegisteredAt,
 		).Error
 	})
+}
+
+func GetDeviceBinding(userID sharedidentity.UserID) (model.DeviceBinding, error) {
+	var id, name, bitID sql.NullString
+	var boundAt, verifiedAt sql.NullTime
+	err := database.DB().Raw(`SELECT device_id, device_name, device_bound_at, device_last_verified_at, bit_main_user_id FROM users WHERE id = ? AND status = 'enabled'`, userID).Row().Scan(&id, &name, &boundAt, &verifiedAt, &bitID)
+	if err != nil {
+		return model.DeviceBinding{}, err
+	}
+	binding := model.DeviceBinding{Bound: id.Valid && id.String != "", DeviceID: id.String, DeviceName: name.String, BitAccountBound: bitID.Valid && bitID.String != "", BitMainUserIDMasked: maskDeviceIdentity(bitID.String)}
+	if boundAt.Valid {
+		binding.BoundAt = &boundAt.Time
+	}
+	if verifiedAt.Valid {
+		binding.LastVerifiedAt = &verifiedAt.Time
+	}
+	return binding, nil
+}
+
+func maskDeviceIdentity(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
+}
+
+func UnbindDevice(userID sharedidentity.UserID, at time.Time) error {
+	return database.DB().Transaction(func(tx *gorm.DB) error {
+		var deviceID sql.NullString
+		err := tx.Raw(`SELECT device_id FROM users WHERE id = ? AND status = 'enabled' FOR UPDATE`, userID).Row().Scan(&deviceID)
+		if err != nil {
+			return err
+		}
+		if !deviceID.Valid || deviceID.String == "" {
+			return model.ErrDeviceNotBound
+		}
+		if err := tx.Exec(`UPDATE users SET device_id = NULL, device_public_key = NULL, device_name = NULL, device_bound_at = NULL, device_last_verified_at = NULL WHERE id = ?`, userID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`UPDATE local_agent_nodes SET status = 'replaced', updated_at = ? WHERE user_id = ? AND mode = 'local' AND status <> 'replaced'`, at, userID).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, 'user.device.unbind', 'user', ?, ?, ?)`, id.NewID("audit"), userID, strconv.FormatInt(int64(userID), 10), `{"result":"unbound"}`, at).Error
+	})
+}
+
+func IsDeviceBound(userID sharedidentity.UserID, deviceID string) (bool, error) {
+	var bound bool
+	err := database.DB().Raw(`SELECT EXISTS(SELECT 1 FROM users WHERE id = ? AND status = 'enabled' AND device_id = ?)`, userID, deviceID).Row().Scan(&bound)
+	return bound, err
 }
 
 func FindNodeByCredentialHash(hash string) (model.AgentNode, bool, error) {
@@ -124,7 +206,7 @@ func checkLocalTrust(db *gorm.DB, userID sharedidentity.UserID, nodeID string, a
 		JOIN users u ON u.id = n.user_id
 		JOIN user_sessions s ON s.id = n.session_id
 		WHERE n.id = ? AND n.user_id = ? AND n.mode = 'local' AND n.status = 'online'
-		  AND n.last_heartbeat_at >= ? AND s.invalidated_at IS NULL AND u.status = 'enabled'
+		  AND n.last_heartbeat_at >= ? AND s.invalidated_at IS NULL AND u.status = 'enabled' AND u.device_id = n.device_id
 		  AND u.bit_main_user_id IS NOT NULL AND n.bitbrowser_status = 'normal'
 		  AND n.reported_main_user_id = u.bit_main_user_id
 	)`, nodeID, userID, at.Add(-freshness)).Row().Scan(&trusted)
@@ -175,7 +257,7 @@ func findTrustedLocalNode(db *gorm.DB, userID sharedidentity.UserID) (model.Agen
 		JOIN users u ON u.id = n.user_id
 		JOIN user_sessions s ON s.id = n.session_id
 		WHERE n.user_id = ? AND n.mode = 'local' AND n.status = 'online'
-		  AND s.invalidated_at IS NULL AND u.status = 'enabled'
+		  AND s.invalidated_at IS NULL AND u.status = 'enabled' AND u.device_id = n.device_id
 		  AND u.bit_main_user_id IS NOT NULL AND n.bitbrowser_status = 'normal'
 		  AND n.reported_main_user_id = u.bit_main_user_id
 		ORDER BY n.last_heartbeat_at DESC, n.id ASC LIMIT 1`, userID).
