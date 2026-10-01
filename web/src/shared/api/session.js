@@ -24,11 +24,11 @@ export function createSessionClient({ base = '/api/v1', fetch = globalThis.fetch
       return api.patch('/auth/me', { nickname, avatar_id: avatarId })
     },
     async logout() {
-	  try {
-	    return await api.post('/auth/logout')
-	  } finally {
-	    setSessionToken('')
-	  }
+      try {
+        return await api.post('/auth/logout')
+      } finally {
+        setSessionToken('')
+      }
     },
   }
 }
