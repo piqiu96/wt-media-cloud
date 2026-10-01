@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.30.3"
+revision: "2026.10.01.2"
 
 # 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
 #
@@ -68,10 +68,14 @@ schemas:
     type: object
     description: >-
       详情链接接口（GET /api/v1/materials/{material_id}/video-url）的 body：云端视频的
-      稳定对象地址。它是这个地址的**唯一**出口 —— 列表与素材 body 都不携带（见
-      Material 的 forbidden_properties），因为一个浏览器拿得到的长期地址应当只落在
-      明确检查过登录与业务范围的读取上。地址由对象存储 endpoint、bucket、prefix 与
-      对象 key 组成，随对象存活，不是会过期的签名 grant。
+      **签名**地址。它是这个地址的**唯一**出口 —— 列表与素材 body 都不携带（见
+      Material 的 forbidden_properties），因为一个浏览器拿得到的地址应当只落在明确
+      检查过登录与业务范围的读取上。地址是对该对象的一次性短时 GET grant：桶拒绝匿名
+      读取（2026-10-01 实测 403 `Garage does not support anonymous access yet`），
+      不签名的地址是服务端自己已经证明打不开的那一个。**它会过期**，所以调用方每次
+      用之前重新要，不要持有 —— 详情抽屉因此在点击「打开云端视频」时才发这次请求，
+      而不是在抽屉打开时。存活时长是配置项（`object_storage.presign_ttl`），不是本
+      body 的一部分，故这里**不发布** `expires_at`。
     required: [url]
     properties:
       url: {type: string, format: uri}
@@ -86,6 +90,13 @@ schemas:
       material_id: {type: integer, format: int64}
       user_id: {type: integer, format: int64}
       status: {type: string, enum: [active, removed]}
+      download_status:
+        type: string
+        enum: [downloading, downloaded, failed]
+        description: >-
+          该用户在这条素材上的下载生命周期，按「最新一条 user_download 任务」派生
+          （pending/running→downloading；success→downloaded；failed/cancelled→failed），
+          与素材云侧 `video_status` 正交。从未下载过时该键不出现。
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
       removed_at: {type: string, format: date-time, description: 关系仍是 active 时该键不出现。}

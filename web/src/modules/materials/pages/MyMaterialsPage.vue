@@ -11,6 +11,8 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import {
   VIDEO_STATUSES,
   downloadActionLabel,
+  downloadStatusLabel,
+  downloadStatusTone,
   gameName,
   usageStatusLabel,
   usageStatusTone,
@@ -71,8 +73,21 @@ function toRows(usages) {
     ...(usage.material || {}),
     usage_id: usage.id,
     usage_status: usage.status,
+    // 下载生命周期是**这条关系**的（按用户派生），不是素材的：同一行素材对两个
+    // 下载过不同次的人要显示不同状态。没下过时服务端不返回该键，这里记空串。
+    download_status: usage.download_status || '',
     added_at: usage.created_at,
   }))
+}
+
+/**
+ * 「文件状态」列：纯 `download_status`（CHG-069 任务 23）——它回答「**这个运营**在这条
+ * 素材上下载到了哪一步」：未下载/下载中/已下载/下载失败。不再回落 `video_status`：
+ * 那回答的是云端源文件准备好了没有，是另一件事，混在一起就把「还没下」画成「没准备」。
+ * 云端准备态只留在详情抽屉的「文件信息」区。
+ */
+function fileStatus(row) {
+  return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
 }
 
 // 「素材」格副行：游戏 · 作者。游戏查不到名字时 gameName 退回 id（那是真实数据），
@@ -234,7 +249,7 @@ onMounted(() => {
                 </div>
               </div>
             </template>
-            <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
+            <template #video_status="{ row }"><ResourceStatusBadge :tone="fileStatus(row).tone" :label="fileStatus(row).label" /></template>
             <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的（缺值兜底成「使用中」
                  就是替服务端宣布一条它没说过关系）。 -->
             <template #usage_status="{ row }">
@@ -242,9 +257,9 @@ onMounted(() => {
               <template v-else>—</template>
             </template>
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
-            <!-- 走查七轮：按「使用状态 × 文件状态」分支，每行只突出一个下一步。
-                 规范 §5.6 与用户同轮裁定（超过 5 个才出现「更多」）：本行最多 3 颗，
-                 全部平铺。下载中不给主操作——文件已经在准备了，再点一次还是同一条命令。 -->
+            <!-- CHG-069 任务 23：按钮由「使用状态 × 下载状态」矩阵驱动（任务状态与业务状态
+                 严格隔离），每行最多 3 颗全部平铺（规范 §5.6）。已放弃只给恢复；使用中按
+                 下载状态给一步主操作——下载中不给（文件已经在准备了，再点还是同一条命令）。 -->
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
@@ -252,8 +267,8 @@ onMounted(() => {
                   <t-button size="small" theme="primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="row.video_status === 'ready'" size="small" theme="primary" @click="goToCompose()">加入合成</t-button>
-                  <t-button v-else-if="row.video_status !== 'downloading'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.video_status) }}</t-button>
+                  <t-button v-if="row.download_status === 'downloaded'" size="small" theme="primary" @click="goToCompose()">加入合成</t-button>
+                  <t-button v-else-if="row.download_status !== 'downloading'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
                   <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="giveUp(row)">放弃使用</t-button>
                 </template>
               </t-space>

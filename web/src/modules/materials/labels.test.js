@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DOWNLOAD_STATUSES,
   DUPLICATE_RISKS,
   MATERIAL_STATUSES,
   USAGE_FIELDS,
   USAGE_STATUSES,
   VIDEO_STATUSES,
   downloadActionLabel,
+  downloadStatusLabel,
+  downloadStatusTone,
   duplicateRiskLabel,
   duplicateRiskTone,
   gameName,
@@ -39,6 +42,28 @@ describe('material labels', () => {
     expect(videoStatusLabel('')).toBe('-')
   })
 
+  // 下载状态是**按用户派生**的状态组（MaterialUsage.download_status），四档不多不少，
+  // 与冻结的 video_status 分开：那个 enum 里没有这些值，页面上出现它们就是替服务端发明。
+  // 空串是矩阵里真实的一格「从未下载过」（CHG-069 任务 23），不是「缺值兜底」——它
+  // 有自己的一行按钮与一档文案，不再回落 video_status。
+  it('names and tones the four download-lifecycle statuses without touching video_status', () => {
+    expect(DOWNLOAD_STATUSES).toEqual(['', 'downloading', 'downloaded', 'failed'])
+    for (const status of DOWNLOAD_STATUSES) {
+      expect(downloadStatusLabel(status), JSON.stringify(status)).not.toBe('-')
+      expect(downloadStatusTone(status), JSON.stringify(status)).toBeTruthy()
+    }
+    expect(downloadStatusLabel('')).toBe('未下载')
+    expect(downloadStatusLabel('downloading')).toBe('下载中')
+    expect(downloadStatusLabel('downloaded')).toBe('已下载')
+    expect(downloadStatusLabel('failed')).toBe('下载失败')
+    expect(downloadStatusTone('')).toBe('neutral')
+    expect(downloadStatusTone('downloading')).toBe('info')
+    expect(downloadStatusTone('downloaded')).toBe('success')
+    expect(downloadStatusTone('failed')).toBe('danger')
+    // 不并入冻结数组：VIDEO_STATUSES 仍是那四个云侧取值。
+    expect(VIDEO_STATUSES).toEqual(['not_downloaded', 'downloading', 'ready', 'failed'])
+  })
+
   // 拿掉了而不只是绕过：留在模块里，下一个页面就会再挂它一次。
   it('no longer exports a readiness gate or a download hint at all', async () => {
     const labels = await import('./labels.js')
@@ -46,10 +71,12 @@ describe('material labels', () => {
     expect(labels.downloadHint).toBeUndefined()
   })
 
-  // 主操作文案由状态驱动（规范 §7.4）：失败行的下一步是「重试」，其余是「下载」。
-  it('names the primary action from the video status', () => {
-    expect(downloadActionLabel('failed')).toBe('重试')
-    for (const status of ['not_downloaded', 'downloading', 'ready', 'mystery', undefined]) {
+  // 主操作文案由下载状态驱动（规范 §7.4：异常状态给出「状态 + 下一步恢复动作」）。
+  // 失败行的下一步是「重新下载」，其余（未下载）是「下载」——服务端 CreateDownload
+  // 对未下载/失败都会先建准备任务再下，按钮行为不变，只是把「失败后再次执行」说出来。
+  it('names the primary action from the download status', () => {
+    expect(downloadActionLabel('failed')).toBe('重新下载')
+    for (const status of ['', 'not_downloaded', 'downloading', 'ready', 'downloaded', 'mystery', undefined]) {
       expect(downloadActionLabel(status), String(status)).toBe('下载')
     }
   })
@@ -197,7 +224,7 @@ describe('next-step hint', () => {
     expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('下载到本机后可加入合成')
     expect(nextStepHint({ video_status: 'downloading' })).toBe('文件准备中，完成后即可下载到本机')
     expect(nextStepHint({ video_status: 'ready' })).toBe('可加入合成，或重新下载到其他机器')
-    expect(nextStepHint({ video_status: 'failed' })).toBe('重试下载，或查看最近一次失败原因')
+    expect(nextStepHint({ video_status: 'failed' })).toBe('重新下载，或查看最近一次失败原因')
   })
 
   // 已放弃的关系先要恢复，才轮到文件那一维：一句「去下载」会让运营以为这条路还通着。

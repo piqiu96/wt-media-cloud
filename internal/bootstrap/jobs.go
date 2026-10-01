@@ -46,6 +46,17 @@ func runWorkerProcess() error {
 	runner.Register("material-prepare-worker", cfg.Scheduler.WorkerInterval.Duration, func(ctx context.Context) error {
 		return jobs.RunMaterialPrepareWorker(ctx)
 	})
+	// The transfer reconciliation shares the discovery worker's interval for the
+	// same reason the preparation worker does: it is a polled sweep, the interval
+	// is how long an idle worker waits between looks, and a 5s idempotent UPDATE
+	// that usually touches zero rows needs no knob of its own. It lives in the
+	// worker process rather than the scheduler process because that is the only
+	// one the deployment runs — the reconcile exists to finish tasks the executor
+	// abandoned, and a sweep no process runs is exactly the dead code that left
+	// cancelled downloads stuck.
+	runner.Register("transfer-reconcile", cfg.Scheduler.WorkerInterval.Duration, func(ctx context.Context) error {
+		return jobs.RunTransferReconcile(ctx)
+	})
 	runner.Start(ctx)
 	<-ctx.Done()
 	return nil

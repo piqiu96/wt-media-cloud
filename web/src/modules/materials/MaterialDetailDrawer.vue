@@ -1,18 +1,23 @@
 <script setup>
 // 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
-// 其余在这里；云端视频地址不随素材 body 返回，就绪时才向详情链接接口要一次。
-import { ref, watch } from 'vue'
+// 其余在这里；云端视频地址不随素材 body 返回，是签名地址、会过期，故点「打开云端视频」
+// 时才向详情链接接口要一次。
+import { computed, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
-import { downloadedFileName } from '../transfer/downloadFacts.js'
-import { revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
+import { downloadedFileName, isTerminal } from '../transfer/downloadFacts.js'
+import { transferRow } from '../transfer/transferRows.js'
+import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
+import { handOverCloudVideo } from './cloudVideo.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
 import {
   downloadActionLabel,
+  downloadStatusLabel,
+  downloadStatusTone,
   gameName,
   materialStatusLabel,
   materialStatusTone,
@@ -39,25 +44,104 @@ defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give
 
 const client = createMaterialsClient()
 const transfer = createFileTransferClient()
-const videoUrl = ref('')
 // 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
 // `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
 const localFile = ref(null)
+// 这个运营在这条素材上的下载生命周期（downloading/downloaded/failed；空串=没下过）。
+// 详情从它已拉的这张用户任务表里就地派生，不为此加接口。
+const downloadStatus = ref('')
+// 该素材**最新一条进行中的 user_download 任务**（pending/running）：下载进度/速度/
+// 预计时间/取消下载都挂在它身上，与下载中心同一套读数。null=这条素材没有在下载。
+const activeTransferTask = ref(null)
+// 「正在取消」是本机记忆而不是服务端字段（与下载中心同一条约定）：取消 running 任务后
+// 它仍然报 running，终态由执行器写。按下取消后记在这里，按钮收回、显示「正在取消」。
+const cancelRequested = ref(false)
+// 已拉的那张用户任务表整份留着：transferRow 的 needsCloudPreparation 要看同素材的云
+// 准备兄弟行，不能让进度把「等云端准备」误画成「卡住」。
+const downloadTasks = ref([])
+
+/**
+ * 从这条用户的下载任务表里挑该素材**最新一次** user_download 的状态。
+ *
+ * `ListTasks` 是 created_at DESC, id DESC，第一条匹配即最新；与下载中心同一套过滤
+ * （只看本机 + 这个动作），并映射成素材页同款三档。
+ */
+function deriveDownloadStatus(tasks, assetId) {
+  const wanted = Number(assetId)
+  if (!Number.isFinite(wanted)) return ''
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (task?.asset_type !== 'material') continue
+    if (Number(task?.asset_id) !== wanted) continue
+    if (task?.execution_scope !== 'local_agent') continue
+    if (task?.purpose !== 'user_download') continue
+    if (task?.status === 'pending' || task?.status === 'running') return 'downloading'
+    if (task?.status === 'success') return 'downloaded'
+    if (task?.status === 'failed' || task?.status === 'cancelled') return 'failed'
+    return ''
+  }
+  return ''
+}
+
+/**
+ * 该素材**最新一条进行中的 user_download 任务**（pending/running），没有就是 `null`。
+ *
+ * 与 `deriveDownloadStatus` 同一套过滤，只是拿整条任务而不是压缩成三档：进度、速度、
+ * 预计时间与「取消下载」都需要任务本身（`completed_bytes`/`bytes_per_second`/id）。
+ */
+function deriveActiveTask(tasks, assetId) {
+  const wanted = Number(assetId)
+  if (!Number.isFinite(wanted)) return null
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (task?.asset_type !== 'material') continue
+    if (Number(task?.asset_id) !== wanted) continue
+    if (task?.execution_scope !== 'local_agent') continue
+    if (task?.purpose !== 'user_download') continue
+    if (task?.status === 'pending' || task?.status === 'running') return task
+  }
+  return null
+}
+
+/** 进行中那一条的完整行（进度/大小/速度/预计时间/能否取消）。null=没在下载。 */
+const activeRow = computed(() => (
+  activeTransferTask.value
+    ? transferRow(activeTransferTask.value, { tasks: downloadTasks.value, cancelRequested: cancelRequested.value })
+    : null
+))
+
+/**
+ * 文件状态：下载状态优先（有记录时），素材云侧 `video_status` 兜底。兜底里
+ * `failed`（云准备失败）也画「下载失败」——用户裁定「准备失败和本地下载失败都
+ * 属于下载失败，不需要分那么细」。与我的素材页同语义。
+ */
+const fileStatus = computed(() => {
+  if (downloadStatus.value) {
+    return { label: downloadStatusLabel(downloadStatus.value), tone: downloadStatusTone(downloadStatus.value) }
+  }
+  if (props.material?.video_status === 'failed') {
+    return { label: '下载失败', tone: 'danger' }
+  }
+  return { label: videoStatusLabel(props.material?.video_status), tone: videoStatusTone(props.material?.video_status) }
+})
 
 // 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 
-// 云端视频地址只在就绪时才去要：未就绪的素材没有地址，一次必然 409 的请求不该发出去。
-watch(() => [props.visible, props.material?.id, props.material?.video_status], async ([open, id, status]) => {
-  videoUrl.value = ''
-  if (!open || !id || status !== 'ready') return
-  try {
-    const data = await client.getVideoUrl(id)
-    videoUrl.value = data?.url || ''
-  } catch {
-    // 拿不到地址只少一个链接，不打断详情本身。
-  }
-})
+/**
+ * 云端视频地址是**签名**的、会过期，所以每次点击现取，不预先拿也不留。
+ *
+ * 交付方式两个宿主不同（浏览器自己开标签页，打包的桌面端由壳交给系统浏览器），
+ * 判据与理由都在 `cloudVideo.js`；这里只回答「现在跑在哪个宿主里」。
+ *
+ * 未就绪的素材没有地址，按钮也就不渲染 —— 一次必然 409 的请求不发出去。
+ */
+function openCloudVideo() {
+  return handOverCloudVideo({
+    client,
+    materialId: props.material.id,
+    desktop: isDesktopRuntime(),
+    reportError: (message) => MessagePlugin.error(message),
+  })
+}
 
 /**
  * 这个素材在本机的那一份在哪个文件夹里。
@@ -69,9 +153,15 @@ watch(() => [props.visible, props.material?.id, props.material?.video_status], a
  */
 watch(() => [props.visible, props.material?.id, props.mode], async ([open, id, mode]) => {
   localFile.value = null
+  downloadStatus.value = ''
+  activeTransferTask.value = null
+  cancelRequested.value = false
   if (!open || !id || mode !== 'mine') return
   try {
     const tasks = await transfer.listTasks()
+    downloadTasks.value = tasks
+    downloadStatus.value = deriveDownloadStatus(tasks, id)
+    activeTransferTask.value = deriveActiveTask(tasks, id)
     const name = downloadedFileName(tasks, id)
     if (!name) return
     localFile.value = (await savedFileStates([name]))[name] ?? null
@@ -80,6 +170,28 @@ watch(() => [props.visible, props.material?.id, props.mode], async ([open, id, m
     // 不弹提示，也不把「读不到」写成「文件不在」。
   }
 })
+
+/**
+ * 取消这条素材正在进行的下载。
+ *
+ * 与下载中心同一个两阶段语义：`CancelTask` 对 pending 立即终态化，对 running 只写
+ * 取消请求、终态由执行器写。响应体是刷新后的任务，仍可能 running —— 那时记下
+ * 「正在取消」并把按钮收回，等执行器真正把它写终态。
+ */
+async function cancelDownload() {
+  if (!activeTransferTask.value || cancelRequested.value) return
+  try {
+    const refreshed = await transfer.cancelTask(activeTransferTask.value.id)
+    if (!isTerminal(refreshed)) cancelRequested.value = true
+    const tasks = await transfer.listTasks()
+    downloadTasks.value = tasks
+    const id = props.material?.id
+    downloadStatus.value = deriveDownloadStatus(tasks, id)
+    activeTransferTask.value = deriveActiveTask(tasks, id)
+  } catch (e) {
+    MessagePlugin.error(e?.message || '取消失败')
+  }
+}
 
 /**
  * 在文件管理器里打开那个文件夹。
@@ -129,7 +241,7 @@ async function openDirectory() {
             <div class="detail-badges">
               <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
               <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
-              <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+              <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
               <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
             </div>
           </div>
@@ -140,7 +252,7 @@ async function openDirectory() {
         <section class="detail-card">
           <h4 class="detail-card__title">当前进度 / 使用情况</h4>
           <dl class="detail-card__grid detail-card__grid--4">
-            <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" /></dd></div>
+            <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></dd></div>
             <div><dt>使用状态</dt><dd>
               <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
               <template v-else>—</template>
@@ -160,17 +272,39 @@ async function openDirectory() {
         <section class="detail-card">
           <h4 class="detail-card__title">
             文件信息
-            <ResourceStatusBadge :tone="videoStatusTone(material.video_status)" :label="videoStatusLabel(material.video_status)" />
+            <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
           </h4>
           <dl class="detail-card__grid detail-card__grid--4">
             <div><dt>文件大小</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>
             <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
             <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
             <div><dt>云端视频</dt><dd>
-              <a v-if="videoUrl" class="wt-primary-link" :href="videoUrl" target="_blank" rel="noopener noreferrer">打开云端视频</a>
-              <template v-else>{{ material.video_status === 'ready' ? '地址获取中' : '视频未就绪' }}</template>
+              <a v-if="material.video_status === 'ready'" class="wt-primary-link" href="#" @click.prevent="openCloudVideo">打开云端视频</a>
+              <template v-else>视频未就绪</template>
             </dd></div>
           </dl>
+          <!-- 下载进行中：进度/速度/预计时间都是服务端任务表里的读数（与下载中心同一
+               套），不是前端编的；取消也是真实请求。它与「下载目录」那一行不同屏 ——
+               下载中还没有「已下载」的文件可量。 -->
+          <div v-if="activeRow" class="detail-download">
+            <div class="detail-download__progress">
+              <div class="detail-download__head">
+                <span class="detail-download__label">下载进度</span>
+                <span v-if="activeRow.progress.kind === 'determinate'" class="detail-download__percent">{{ activeRow.progress.percent }}%</span>
+                <span v-else class="detail-download__pending">{{ activeRow.pendingText }}</span>
+              </div>
+              <t-progress v-if="activeRow.showBar" theme="line" :percentage="activeRow.progress.percent" :label="false" />
+              <p class="detail-download__meta">
+                <span>{{ activeRow.sizeText }}</span>
+                <span v-if="activeRow.rateText">· {{ activeRow.rateText }}</span>
+                <span v-if="activeRow.etaText">· 预计 {{ activeRow.etaText }}</span>
+              </p>
+            </div>
+            <div class="detail-download__actions">
+              <t-button v-if="activeRow.canCancel" size="small" theme="primary" @click="cancelDownload">取消下载</t-button>
+              <span v-else-if="cancelRequested" class="detail-download__pending">正在取消…</span>
+            </div>
+          </div>
           <!-- 本机那一份在哪个文件夹里。这一行说的是磁盘上的文件，与上面那条云端地址
                是两份东西：路径可能很长，所以不塞进四列网格，整行铺开、换行不截断。
                量不到（浏览器读不了本机、Desktop 还没扫到）时整行不出现 —— 与下载中心
@@ -231,16 +365,17 @@ async function openDirectory() {
       <div v-if="material" class="material-detail__actions">
         <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
         <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
-        <!-- 我的素材这一组按两个维度分支（走查七轮用户提示词第十一节）：已放弃只给恢复，
-             其余按文件状态给一步主操作；「重新下载」是就绪行的次级入口。 -->
+        <!-- 我的素材这一组由「使用状态 × 下载状态」矩阵驱动（CHG-069 任务 23，与行内同一
+             张表）：已放弃只给恢复；使用中按下载状态给一步主操作 —— 下载中不给「再下载」
+             （文件已经在准备了，再点还是同一条命令），给的是「取消下载」。 -->
         <template v-if="mode === 'mine'">
           <template v-if="material.usage_status === 'removed'">
             <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
           </template>
           <template v-else>
-            <t-button v-if="material.video_status === 'ready'" theme="primary" @click="$emit('compose', material)">加入合成</t-button>
-            <t-button v-else-if="material.video_status !== 'downloading'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(material.video_status) }}</t-button>
-            <t-button v-if="material.video_status === 'ready'" class="wt-secondary-button" variant="outline" @click="$emit('redownload', material)">重新下载</t-button>
+            <t-button v-if="downloadStatus === 'downloaded'" theme="primary" @click="$emit('compose', material)">加入合成</t-button>
+            <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" @click="cancelDownload">取消下载</t-button>
+            <t-button v-else theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
             <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
           </template>
         </template>
@@ -282,6 +417,16 @@ async function openDirectory() {
 .detail-local-file__where { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .detail-local-file__label { flex: 0 0 auto; color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-local-file__path { color: var(--wt-text-primary); font-size: 13px; line-height: 1.5; word-break: break-all; }
+/* 下载进行中那一块：与「下载目录」行同一种上下分隔（虚线）。下载中还没有文件可量，
+   所以它与那一行不同屏。 */
+.detail-download { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--wt-border); }
+.detail-download__progress { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.detail-download__head { display: flex; align-items: baseline; gap: 8px; }
+.detail-download__label { flex: 0 0 auto; color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-download__percent { color: var(--wt-primary); font-size: 14px; font-weight: 600; }
+.detail-download__pending { color: var(--wt-text-tertiary); font-size: 13px; }
+.detail-download__meta { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-download__actions { flex: 0 0 auto; }
 /* 页脚只放业务动作、靠右收：关闭走抽屉右上角的 ×（规范 §6.3），不再占页脚一格。 */
 .material-detail__actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }

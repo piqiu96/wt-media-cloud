@@ -29,16 +29,16 @@ func EnsureMaterialSourcePrepare(input EnsureMaterialSourcePrepareInput) (dto.Ta
 	return newWiredService().EnsureMaterialSourcePrepare(input)
 }
 
-func ListTasks(actor identityservice.PublicUser) ([]dto.Task, error) {
-	return newWiredService().ListTasks(actor)
+func ListTasks(actor identityservice.PublicUser, opts TaskListOptions) ([]dto.Task, error) {
+	return newWiredService().ListTasks(actor, opts)
+}
+
+func LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	return newWiredService().LatestUserDownloadStatuses(userID, materialIDs)
 }
 
 func CancelTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
 	return newWiredService().CancelTask(actor, taskID)
-}
-
-func RetryTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
-	return newWiredService().RetryTask(actor, taskID)
 }
 
 func ClaimTask(ctx context.Context, credential string) (dto.ClaimResult, error) {

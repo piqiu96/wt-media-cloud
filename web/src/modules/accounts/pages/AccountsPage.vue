@@ -481,7 +481,7 @@ function canOperateBoundWindow(account) {
 function localTrustMessage(e) {
   const message = String(e?.message || e || "")
   if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
-    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境状态」页刷新本机状态后重试。"
+    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境检测」页刷新本机状态后重试。"
   }
   if (message.includes("timed out") || message.includes("timeout")) {
     return "BitBrowser窗口操作超时：Local Agent 已请求 BitBrowser，但 BitBrowser 未在限定时间内返回。请查看 Agent 日志确认是否已延迟打开，或稍后重试。"
@@ -530,7 +530,7 @@ async function runSingleAccountCheck(account, service) {
   const status = await refreshRuntimeWithCooldown(service)
   const nodeId = status.node_id || ""
   if (!nodeId) {
-    throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
+    throw new Error("当前电脑尚未完成可信绑定，请先到「环境检测」页重新检测并绑定。")
   }
   const start = await accountClient.check(account.id, { nodeId })
   const localResult = await service.accountCheck({
@@ -561,7 +561,7 @@ async function readProfileCookieFor(account) {
     const service = await desktopLocalAgentService()
     const status = await refreshRuntimeWithCooldown(service)
     const nodeId = status.node_id || ""
-    if (!nodeId) throw new Error("当前电脑尚未完成可信绑定，请先到环境状态页重新检测并绑定。")
+    if (!nodeId) throw new Error("当前电脑尚未完成可信绑定，请先到「环境检测」页重新检测并绑定。")
     const start = await accountClient.startCookieReadSync(target.id, { nodeId })
     const localResult = await service.cookieRead({
       cloudBaseUrl: cloudBaseUrl(),

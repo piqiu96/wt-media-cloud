@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
+	transfermodel "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
@@ -106,13 +108,28 @@ type TransferCreator interface {
 	// waiting download needs, and answers with the one already outstanding when
 	// there is one. The caller cannot tell the difference and must not need to.
 	EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error)
+
+	// LatestUserDownloadStatuses answers each material's newest user_download
+	// status for one user, raw (see the transfer service). "My Materials" derives
+	// its download lifecycle from it; the transfer module stays out of badges.
+	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
 }
 
-// ObjectLinker composes the stable public address of a stored object; a
-// consumer-side interface in the same shape as `LocalNodeResolver`, so a test
-// can answer it without the object-storage registry.
+// ObjectLinker mints the address a stored object is read at; a consumer-side
+// interface in the same shape as `LocalNodeResolver`, so a test can answer it
+// without the object-storage registry.
+//
+// It is a signed, short-lived grant rather than the bucket's stable address:
+// the bucket refuses anonymous reads, so an unsigned address is one Cloud
+// itself has already proven a browser cannot open. The context is passed
+// through for an issuer that has to reach the object store; the one wired today
+// signs locally and ignores it.
+//
+// The expiry is deliberately not part of the answer. It is not in the frozen
+// `MaterialVideoLink` body, and the drawer asks for the address at the moment
+// the operator clicks, so there is no held address for an expiry to invalidate.
 type ObjectLinker interface {
-	PublicObjectURL(key string) (string, error)
+	PresignObjectURL(ctx context.Context, objectKey string) (string, error)
 }
 
 type Service struct {
@@ -153,11 +170,11 @@ func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64
 	return material, nil
 }
 
-// VideoURL answers the stable cloud address of a prepared material's video —
-// the detail drawer's link, deliberately not part of the material body. Scope
-// first, then readiness (409 while preparation is unfinished), then the same
-// `videoFacts` completeness a local download reads.
-func (s *Service) VideoURL(actor identityservice.PublicUser, materialID int64) (string, error) {
+// VideoURL answers the cloud address of a prepared material's video — the
+// detail drawer's link, deliberately not part of the material body. Scope first,
+// then readiness (409 while preparation is unfinished), then the same
+// `videoFacts` completeness a local download reads, and only then a signature.
+func (s *Service) VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID int64) (string, error) {
 	material, err := s.GetMaterial(actor, materialID)
 	if err != nil {
 		return "", err
@@ -169,7 +186,7 @@ func (s *Service) VideoURL(actor identityservice.PublicUser, materialID int64) (
 	if err != nil {
 		return "", err
 	}
-	return s.links.PublicObjectURL(objectKey)
+	return s.links.PresignObjectURL(ctx, objectKey)
 }
 
 // AddUsage adds the material to the actor's library and reports whether that
@@ -227,7 +244,44 @@ func (s *Service) ListMyMaterials(actor identityservice.PublicUser) ([]model.Mat
 		usage.Material = &material
 		visible = append(visible, usage)
 	}
+	// The download lifecycle is per user, not per material: the same row renders
+	// differently for two users who downloaded it at different times. One batch
+	// query covers the whole visible list instead of a task poll per row.
+	statuses, err := s.transfers.LatestUserDownloadStatuses(actor.ID, materialIDsOf(visible))
+	if err != nil {
+		return nil, err
+	}
+	for i := range visible {
+		visible[i].DownloadStatus = downloadStatusOf(statuses[visible[i].MaterialID])
+	}
 	return visible, nil
+}
+
+// downloadStatusOf maps a raw user_download task status to the user-facing
+// download lifecycle. pending and running are one bucket on purpose (the user
+// ruled "排队到传输都算下载中"), and failed/cancelled are one bucket too
+// ("准备失败和本地下载失败都属于下载失败"). Any other value — or no value at
+// all — leaves the field empty and the UI falls back to the material's
+// video_status.
+func downloadStatusOf(raw string) string {
+	switch transfermodel.Status(raw) {
+	case transfermodel.StatusPending, transfermodel.StatusRunning:
+		return "downloading"
+	case transfermodel.StatusSuccess:
+		return "downloaded"
+	case transfermodel.StatusFailed, transfermodel.StatusCancelled:
+		return "failed"
+	default:
+		return ""
+	}
+}
+
+func materialIDsOf(usages []model.MaterialUsage) []int64 {
+	ids := make([]int64, 0, len(usages))
+	for _, usage := range usages {
+		ids = append(ids, usage.MaterialID)
+	}
+	return ids
 }
 
 func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) error {
@@ -353,6 +407,7 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		AssetID:         material.ID,
 		AssetTitle:      material.Title,
 		GameName:        s.gameNameOf(material),
+		PublishedAt:     material.PublishedAt,
 		SourceObjectKey: objectKey,
 		RequestedBy:     actor.ID,
 		AssignedNodeID:  node.ID,

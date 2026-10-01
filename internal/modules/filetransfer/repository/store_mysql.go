@@ -23,7 +23,7 @@ var ErrNotFound = errors.New("file transfer task not found")
 // visible at all, which is the point: with a list per query, a column reaches
 // the callers that remembered it and is silently missing from the ones that did
 // not.
-const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
+const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
 
 type CreateTaskInput struct {
 	ID               string
@@ -32,6 +32,7 @@ type CreateTaskInput struct {
 	AssetID          int64
 	AssetTitle       string
 	GameName         string
+	PublishedAt      *time.Time
 	SourceObjectKey  string
 	Purpose          model.Purpose
 	ExecutionScope   model.ExecutionScope
@@ -48,11 +49,12 @@ type CreateTaskInput struct {
 // with AND; an empty filter is not scoped to anything, so callers that need a
 // boundary must set one.
 type TaskFilter struct {
-	RequestedBy *identity.UserID
-	AssetID     *int64
-	Statuses    []model.Status
-	Purposes    []model.Purpose
-	Limit       int
+	RequestedBy   *identity.UserID
+	AssetID       *int64
+	Statuses      []model.Status
+	Purposes      []model.Purpose
+	FinishedAfter *time.Time
+	Limit         int
 }
 
 type ProgressInput struct {
@@ -85,11 +87,15 @@ type FailureInput struct {
 // purpose/scope pair are this function's to decide, and a caller that supplied
 // them could supply them inconsistently.
 type CreateUserDownloadInput struct {
-	ID              string
-	TeamID          identity.TeamID
-	AssetID         int64
-	AssetTitle      string
-	GameName        string
+	ID         string
+	TeamID     identity.TeamID
+	AssetID    int64
+	AssetTitle string
+	GameName   string
+	// PublishedAt is when the material was published, copied onto the task like
+	// GameName so the lease can carry it to the executor for naming. A material
+	// without a publish time leaves it nil and the executor omits that segment.
+	PublishedAt     *time.Time
 	SourceObjectKey string
 	RequestedBy     identity.UserID
 	AssignedNodeID  string
@@ -132,6 +138,21 @@ func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
 // in the direction that is hard to see: a cancelled transfer would let the next
 // click resurrect the same key, and the row it lands on already carries the
 // cancelled executor's state.
+//
+// A material this user has already downloaded is answered with the task that
+// downloaded it, and no new row is written. "Download", here, is a **record of an
+// execution**; "this material is downloaded" is an **asset state**, and asking
+// for it twice does not produce a second file — it produces a second execution
+// row that the transport view would then have to collapse. The check is on the
+// *latest* task, not on "has ever succeeded": a material that succeeded and was
+// then downloaded again and failed is, right now, a failed download, and
+// re-downloading it is a request that should be honoured.
+//
+// The check is per user rather than per user-and-node, matching
+// `latestUserDownloadStatuses`: the state the UI shows as "已下载" is the
+// user-level one, so gating the write on a narrower predicate than the one that
+// produced the label would let the list say "downloaded" while the API happily
+// queued another one.
 func CreateUserDownloadTask(input CreateUserDownloadInput, now time.Time) (model.Task, error) {
 	return createUserDownloadTask(database.DB(), input, now)
 }
@@ -142,11 +163,18 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	}
 	var task model.Task
 	err := db.Transaction(func(tx *gorm.DB) error {
+		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1", model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err == nil && latest.Status == model.StatusSuccess {
+			task = latest
+			return nil
+		}
 		var finished int64
 		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy).Row().Scan(&finished); err != nil {
 			return err
 		}
-		var err error
 		task, err = createTask(tx, CreateTaskInput{
 			ID:               input.ID,
 			TeamID:           input.TeamID,
@@ -154,6 +182,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			AssetID:          input.AssetID,
 			AssetTitle:       input.AssetTitle,
 			GameName:         input.GameName,
+			PublishedAt:      input.PublishedAt,
 			SourceObjectKey:  input.SourceObjectKey,
 			Purpose:          model.PurposeUserDownload,
 			ExecutionScope:   model.ExecutionLocalAgent,
@@ -353,9 +382,10 @@ func failDependentsOfTerminalTasks(db *gorm.DB, now time.Time) (int64, error) {
 // transfer is still outstanding resolves to the same row rather than creating a
 // second one. `ON DUPLICATE KEY UPDATE id = id` is a deliberate no-op: it turns
 // the unique-key collision into a harmless statement, and it does not rewrite
-// the instruction, because re-running a task is `RetryTask`'s job and doing it
-// here would let a second click mid-transfer retarget a task an executor is
-// already running.
+// the instruction, because re-running a task is a **new** task's job — a click
+// after a terminal state counts a new generation (see `createUserDownloadTask`)
+// — and doing it here would let a second click mid-transfer retarget a task an
+// executor is already running.
 //
 // The row is then read back by `dedupe_key`, not by the id we tried to insert.
 // On a collision the surviving row keeps its own id — the caller's freshly
@@ -365,7 +395,7 @@ func createTask(db *gorm.DB, input CreateTaskInput, now time.Time) (model.Task, 
 	if err := validateCreateInput(input); err != nil {
 		return model.Task{}, err
 	}
-	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
 		return model.Task{}, err
 	}
 	return selectTask(db, "dedupe_key = ?", input.DedupeKey)
@@ -409,6 +439,10 @@ func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 			args = append(args, purpose)
 		}
 	}
+	if filter.FinishedAfter != nil {
+		conditions = append(conditions, "finished_at >= ?")
+		args = append(args, *filter.FinishedAfter)
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 200
@@ -435,6 +469,57 @@ func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 		tasks = append(tasks, task)
 	}
 	return tasks, rows.Err()
+}
+
+// LatestUserDownloadStatuses answers, for each material, the status of this
+// user's *latest* user_download task on it. It is the derived "download
+// lifecycle" fact behind My Materials — the production module calls it after
+// listing usages, never to scan the whole task table.
+//
+// The return value is the raw task status keyed by asset_id, so the mapping to a
+// display state stays a production-domain decision and this store is not asked
+// to learn what a badge means. `compose_input_prepare` rows are deliberately
+// excluded: cloud preparation surfaces through `materials.video_status`, not
+// through a per-user download state.
+func LatestUserDownloadStatuses(userID identity.UserID, materialIDs []int64) (map[int64]string, error) {
+	return latestUserDownloadStatuses(database.DB(), userID, materialIDs)
+}
+
+func latestUserDownloadStatuses(db *gorm.DB, userID identity.UserID, materialIDs []int64) (map[int64]string, error) {
+	statuses := make(map[int64]string, len(materialIDs))
+	if len(materialIDs) == 0 {
+		return statuses, nil
+	}
+	// created_at alone is not a total order (see listTasks), so id breaks the
+	// tie; the first row reached for an asset_id is its latest task.
+	query := "SELECT asset_id, status FROM file_transfer_tasks" +
+		" WHERE requested_by = ? AND asset_type = ? AND purpose = ? AND asset_id IN (" +
+		placeholders(len(materialIDs)) + ")" +
+		" ORDER BY created_at DESC, id DESC"
+	args := make([]any, 0, 2+len(materialIDs))
+	args = append(args, userID, model.AssetMaterial, model.PurposeUserDownload)
+	for _, id := range materialIDs {
+		args = append(args, id)
+	}
+	rows, err := db.Raw(query, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := make(map[int64]struct{}, len(materialIDs))
+	for rows.Next() {
+		var assetID int64
+		var status string
+		if err := rows.Scan(&assetID, &status); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[assetID]; ok {
+			continue
+		}
+		seen[assetID] = struct{}{}
+		statuses[assetID] = status
+	}
+	return statuses, rows.Err()
 }
 
 // leaseable is the single statement of "this task can be leased right now". It is
@@ -690,45 +775,6 @@ func cancelTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy 
 	return running.RowsAffected == 1, nil
 }
 
-// RetryTask requeues a failed transfer for the user who asked for it, within its
-// bounded attempt count, and returns the requeued task.
-//
-// `attempt_count` is not reset: it is the count of attempts this task has
-// already consumed, and clearing it would make `max_attempts` unbounded through
-// repeated retries — the exact thing a bound is for. The task becomes `pending`
-// again with the executor state cleared, because a previous executor's lease,
-// heartbeat and byte counts describe bytes that are no longer known to be on
-// disk.
-//
-// A task still pointing at its preparation is refused, because requeueing it
-// would write back the state it is already in. `leaseable` admits a local task
-// only while `dependency_task_id IS NULL`, and the pointer is cleared by the
-// hand-over alone, so a failed task that still has one is waiting on a
-// preparation that ended without producing anything: the row would be `pending`,
-// un-leasable, and never handed over or failed again, since the dependency is
-// terminal too. The user's click would land on the database and change nothing
-// they could see. Retrying a download whose preparation delivered is unaffected —
-// the pointer is NULL by then — and the remedy for the refused rows is a new
-// download, which queues a new preparation.
-func RetryTask(taskID string, teamID identity.TeamID, requestedBy identity.UserID, now time.Time) (model.Task, bool, error) {
-	return retryTask(database.DB(), taskID, teamID, requestedBy, now)
-}
-
-func retryTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy identity.UserID, now time.Time) (model.Task, bool, error) {
-	if strings.TrimSpace(taskID) == "" || teamID <= 0 || requestedBy <= 0 {
-		return model.Task{}, false, fmt.Errorf("invalid transfer retry")
-	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND dependency_task_id IS NULL AND attempt_count < max_attempts`, now, taskID, teamID, requestedBy)
-	if result.Error != nil {
-		return model.Task{}, false, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return model.Task{}, false, nil
-	}
-	task, err := getTask(db, taskID)
-	return task, err == nil, err
-}
-
 // ReconcileCancelledTasks finishes the cancellation of running tasks whose
 // executor never came back to confirm it.
 //
@@ -925,8 +971,8 @@ func scanTask(row rowScanner, task *model.Task) error {
 	var assetType, purpose, scope, status string
 	var assetTitle, gameName, objectKey, fileName, assignedNode, claimedNode, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
 	var eta, integrityBytes sql.NullInt64
-	var lease, heartbeat, started, finished, cancelRequested sql.NullTime
-	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
+	var lease, heartbeat, started, finished, cancelRequested, publishedAt sql.NullTime
+	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
 		return err
 	}
 	task.TeamID = identity.TeamID(teamID)
@@ -934,6 +980,9 @@ func scanTask(row rowScanner, task *model.Task) error {
 	task.AssetTitle = assetTitle.String
 	task.GameName = gameName.String
 	task.SourceObjectKey = objectKey.String
+	if publishedAt.Valid {
+		task.PublishedAt = &publishedAt.Time
+	}
 	task.Purpose = model.Purpose(purpose)
 	task.ExecutionScope = model.ExecutionScope(scope)
 	task.Status = model.Status(status)

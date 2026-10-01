@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetry, downloadedFileName, fileFact, filePresence, hasLiveTask, isTerminal, needsCloudPreparation, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -27,6 +27,42 @@ describe('transfer terminal states', () => {
     expect(hasLiveTask([task({ status: 'success' }), task({ status: 'running' })])).toBe(true)
     expect(hasLiveTask([task({ status: 'success' }), task({ status: 'cancelled' })])).toBe(false)
     expect(hasLiveTask([])).toBe(false)
+  })
+})
+
+describe('transfer tab membership', () => {
+  // 失败单独一栏，成功与取消都是历史事实（CHG-069 任务 23）。一行恰好属于一栏：
+  // isFailed 与 isHistory 不相交，而它们并起来正是「终态」。
+  it('parts the terminal rows into failed and history with no overlap', () => {
+    expect(isFailed(task({ status: 'failed' }))).toBe(true)
+    expect(isFailed(task({ status: 'success' }))).toBe(false)
+    expect(isFailed(task({ status: 'cancelled' }))).toBe(false)
+    expect(isHistory(task({ status: 'success' }))).toBe(true)
+    expect(isHistory(task({ status: 'cancelled' }))).toBe(true)
+    expect(isHistory(task({ status: 'failed' }))).toBe(false)
+    expect(isHistory(task({ status: 'running' }))).toBe(false)
+  })
+
+  // 保留窗口是**展示层截断**：DB 从不删行，这条只决定一行还显不显示。
+  it('keeps a terminal row only within its retention window', () => {
+    const now = Date.parse('2026-10-01T00:00:00Z')
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-20T00:00:00Z' }), 30, now)).toBe(true) // 11 天前
+    expect(withinDays(task({ status: 'success', finished_at: '2026-08-01T00:00:00Z' }), 30, now)).toBe(false) // 61 天前
+    // 边界：正好 days 天前仍在窗口内（now - stamp <= days × 86400e3）。
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-01T00:00:00Z' }), 30, now)).toBe(true)
+  })
+
+  // `finished_at` 终态行必有（契约任务 23 起暴露）；它缺了才退回 `updated_at`——
+  // 而 `updated_at` 会被租约续租移动，只是兜底。
+  it('prefers finished_at and only then falls back to updated_at', () => {
+    const now = Date.parse('2026-10-01T00:00:00Z')
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-30T00:00:00Z' }), 30, now)).toBe(true)
+    expect(withinDays(task({ status: 'success', updated_at: '2026-09-01T00:00:00Z' }), 30, now)).toBe(true)
+    // 没有时间戳就不是窗口能判的事：false，而不是当它「一定过期」或「一定在窗口内」。
+    expect(withinDays(task({ status: 'success' }), 30, now)).toBe(false)
+    expect(withinDays(null, 30, now)).toBe(false)
+    // 天数不是正数时这条守卫无意义。
+    expect(withinDays(task({ status: 'success', finished_at: '2026-09-01T00:00:00Z' }), 0, now)).toBe(false)
   })
 })
 
@@ -104,12 +140,6 @@ describe('task row state', () => {
 })
 
 describe('row actions', () => {
-  it('offers retry only while attempts remain', () => {
-    expect(canRetry(task({ status: 'failed', attempt_count: 1, max_attempts: 3 }))).toBe(true)
-    expect(canRetry(task({ status: 'failed', attempt_count: 3, max_attempts: 3 }))).toBe(false)
-    expect(canRetry(task({ status: 'running', attempt_count: 1, max_attempts: 3 }))).toBe(false)
-  })
-
   it('offers cancel on anything unfinished and open-file only on a reported success', () => {
     expect(canCancel(task({ status: 'pending' }))).toBe(true)
     expect(canCancel(task({ status: 'running' }))).toBe(true)
@@ -122,27 +152,10 @@ describe('row actions', () => {
   })
 
   /**
-   * 重试的排除项只放**服务端必然拒绝**的那一类。
+   * 「重新下载」是失败与已取消两态的唯一出路（走查后不再有单独的「重试」按钮）。
    *
-   * `retryTask` 的 WHERE 要求 `dependency_task_id IS NULL`：一条在等准备的下载失败后，
-   * 指针还在，重试改不动它，租约里也没有对象键／大小／hash 可发 —— 那条行的 `attempt_count`
-   * 会一直是 0，用户看到的是「点了没反应」。
-   */
-  it('hides retry only for failures that a retry could never move', () => {
-    expect(canRetry(task({ status: 'failed', attempt_count: 1, max_attempts: 3, error_code: 'download_integrity_failed' }))).toBe(true)
-    expect(canRetry(task({ status: 'failed', error_code: 'dependency_failed' }))).toBe(false)
-    expect(canRetry(task({ status: 'failed', error_code: 'cancelled_by_user' }))).toBe(false)
-    // `lease_lost` 分不出来：一条本机下载自己丢了租约也是这个码，而那种行重试是成立的
-    // （依赖为空）。留着按钮，让服务端用自己的理由拒绝 —— 藏掉一个成立的动作更糟。
-    expect(canRetry(task({ status: 'failed', attempt_count: 1, max_attempts: 3, error_code: 'lease_lost' }))).toBe(true)
-    expect(canRetry(task({ status: 'cancelled', error_code: 'dependency_failed' }))).toBe(false)
-  })
-
-  /**
-   * 「重新下载」是走查里报的第三条：「已取消的无法再次点击下载」。
-   *
-   * 已取消行今天零动作（`canRetry` 只认 failed、`canOpenFile` 只认 success、
-   * `canCancel` 只认非终态）—— 一条卡住的行看上去无路可走。
+   * 已取消行原先一个动作都没有（`canOpenFile` 只认 success、`canCancel` 只认非终态），
+   * 一条卡住的行看上去无路可走；失败行也一样，两个按钮都在说「再来一次」，收成一个。
    */
   it('gives every terminal material row a way back to a download', () => {
     expect(canRedownload(task({ status: 'cancelled' }))).toBe(true)
@@ -153,19 +166,19 @@ describe('row actions', () => {
   })
 
   /**
-   * 成功行是唯一需要**实测**才能推荐重新下载的一态。
+   * 成功的行**不给**重新下载 —— 走查裁定「已成功的不能再次下载」。
    *
-   * `presence` 默认 `unknown`：浏览器查不了本机文件，Desktop 也要先扫过才知道。
-   * 未知不等于不在 —— 文件好好地在那儿，却因为「没查过」而给人一个重新下载的按钮，
-   * 那是拿猜当事实。文件实测不在（被搬走／被删）时它才是那个该出现的动作。
+   * 下载在库里是**执行记录**，一个素材的「已下载」是**资产状态**：重复发起不会得到第二
+   * 份文件，只会再落一行执行历史。文件在不在不由这里断言（`presence` 只有 Desktop 实测
+   * 过才有意义），所以也不按「文件找不到了」再开一个口子。
    */
-  it('recommends a re-download of a success only once the file is measured gone', () => {
+  it('never offers a re-download of a material that already succeeded', () => {
     expect(canRedownload(task({ status: 'success' }))).toBe(false)
     expect(canRedownload(task({ status: 'success' }), 'unknown')).toBe(false)
     expect(canRedownload(task({ status: 'success' }), 'present_current')).toBe(false)
     expect(canRedownload(task({ status: 'success' }), 'present_elsewhere')).toBe(false)
-    expect(canRedownload(task({ status: 'success' }), 'absent')).toBe(true)
-    // 成功行的原动作是「打开文件」，不是因为多了这个按钮就少一个。
+    expect(canRedownload(task({ status: 'success' }), 'absent')).toBe(false)
+    // 成功行的原动作是「打开文件」，不是因为少了这个按钮就没了。
     expect(canOpenFile(task({ status: 'success', file_name: 'x.mp4' }))).toBe(true)
   })
 
@@ -239,14 +252,15 @@ describe('where a downloaded file is', () => {
     expect(canOpenFile(success, 'unknown')).toBe(true)
     expect(canOpenFile(success, 'present_current')).toBe(true)
     expect(canOpenFile(success, 'absent')).toBe(false)
-    expect(canRedownload(success, 'absent')).toBe(true)
+    // 实测不在也不给重新下载：已成功的素材不重下（走查裁定），扫描结果不改变这一条。
+    expect(canRedownload(success, 'absent')).toBe(false)
   })
 })
 
 /**
  * 一个素材在本机的那一份叫什么名字 —— 详情抽屉问「下载目录」之前要先有名字问。
  *
- * 这一块钉的是**筛掉什么**：任务表里同一个素材会有好几条（失败重试、云端准备、上一次
+ * 这一块钉的是**筛掉什么**：任务表里同一个素材会有好几条（一次失败、云端准备、上一次
  * 换目录前的成功），而磁盘上只有执行器最后写下去的那一份。
  */
 describe('the local copy of one material', () => {

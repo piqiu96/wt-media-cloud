@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
@@ -20,8 +22,8 @@ func newWiredService() *Service {
 	return NewService(mysqlStore{}, runtimeNodeResolver{}, productionTransferCreator{}, productionObjectLinker{})
 }
 
-func VideoURL(actor identityservice.PublicUser, materialID int64) (string, error) {
-	return newWiredService().VideoURL(actor, materialID)
+func VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID int64) (string, error) {
+	return newWiredService().VideoURL(ctx, actor, materialID)
 }
 
 func CreateDownload(actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {

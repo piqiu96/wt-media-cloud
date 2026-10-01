@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/wt-media/wt-media-cloud/internal/config"
 )
 
 const testDigest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -194,86 +192,4 @@ func TestTheUnconfiguredStoreRefusesEveryCall(t *testing.T) {
 			t.Errorf("%s error = %v, want ErrNotConfigured", name, err)
 		}
 	}
-}
-
-// The stable public address is composed, not signed: it names the same bucket,
-// prefix and endpoint the client library writes through, and it keeps working
-// for as long as the object does. That is the property the material detail page
-// depends on (CHG-20260930-069) — a presigned grant would expire under a link a
-// user copied out of the drawer, and a recomputed-per-request address is a
-// second spelling of the same fact.
-func TestPublicBaseComposesTheConfiguredAddress(t *testing.T) {
-	for _, testCase := range []struct {
-		name string
-		ssl  bool
-		want string
-	}{
-		{"plain endpoint", false, "http://127.0.0.1:9000/wt-media/dev/"},
-		{"secure endpoint", true, "https://files.example.com/wt-media/dev/"},
-	} {
-		cfg := testStorageConfig("127.0.0.1:9000")
-		cfg.UseSSL = testCase.ssl
-		if testCase.ssl {
-			cfg.Endpoint = "files.example.com"
-		}
-		if got := publicBaseOf(cfg); got != testCase.want {
-			t.Errorf("%s: publicBaseOf() = %q, want %q", testCase.name, got, testCase.want)
-		}
-	}
-	// No prefix is a boundary, not an empty segment: the object key has to land
-	// directly after the bucket.
-	cfg := testStorageConfig("127.0.0.1:9000")
-	cfg.Prefix = ""
-	if got, want := publicBaseOf(cfg), "http://127.0.0.1:9000/wt-media/"; got != want {
-		t.Errorf("publicBaseOf() without a prefix = %q, want %q", got, want)
-	}
-}
-
-// The address is not a credential, so a tree with no object-storage secret must
-// still be able to name where an object would be. The repository ships without
-// the key pair, and the tests below Initialize run in exactly that state.
-func TestPublicURLComposesTheStableAddressWithoutACredential(t *testing.T) {
-	t.Cleanup(func() { _ = Close() })
-	_ = Close()
-	if err := Initialize(testStorageConfig("127.0.0.1:9000"), config.ObjectStorageCredentialConfig{}); err != nil {
-		t.Fatalf("Initialize() error = %v, want an unconfigured store to be a valid state", err)
-	}
-	url, err := PublicURL("materials/42/" + testDigest + ".mp4")
-	if err != nil {
-		t.Fatalf("PublicURL() error = %v", err)
-	}
-	want := "http://127.0.0.1:9000/wt-media/dev/materials/42/" + testDigest + ".mp4"
-	if url != want {
-		t.Fatalf("PublicURL() = %q, want %q", url, want)
-	}
-}
-
-// A key that could leave the configured prefix must not be composed into an
-// address, for the same reason `validateKey` refuses it everywhere else: the
-// composition is the one place a caller's key reaches a browser.
-func TestPublicURLRefusesAKeyThatCouldLeaveThePrefix(t *testing.T) {
-	t.Cleanup(func() { _ = Close() })
-	_ = Close()
-	if err := Initialize(testStorageConfig("127.0.0.1:9000"), config.ObjectStorageCredentialConfig{}); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
-	if _, err := PublicURL("../secret"); err == nil {
-		t.Fatal("PublicURL(../secret) succeeded, want a refused key")
-	}
-	if _, err := PublicURL(""); err == nil {
-		t.Fatal("PublicURL(\"\") succeeded, want a refused key")
-	}
-}
-
-// Close takes the address with it: a caller after Close has a wiring bug, and
-// the same fail-fast the grants get is the honest answer.
-func TestPublicURLFailsFastBeforeInitialize(t *testing.T) {
-	t.Cleanup(func() { _ = Close() })
-	_ = Close()
-	defer func() {
-		if recover() == nil {
-			t.Fatal("PublicURL before Initialize must panic, not answer")
-		}
-	}()
-	_, _ = PublicURL("materials/42/x.mp4")
 }

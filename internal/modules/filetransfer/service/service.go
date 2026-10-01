@@ -111,6 +111,7 @@ type Store interface {
 	CreateMaterialSourcePrepareTask(repository.CreateMaterialSourcePrepareInput, time.Time) (model.Task, error)
 	GetTask(string) (model.Task, error)
 	ListTasks(repository.TaskFilter) ([]model.Task, error)
+	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
 	NextLocalTask(string, time.Time) (model.Task, bool, error)
 	ClaimLocalTask(string, string, time.Time, time.Duration) (model.Task, bool, error)
 	HeartbeatTask(string, string, time.Time, time.Duration) (bool, error)
@@ -119,7 +120,6 @@ type Store interface {
 	FailTask(repository.FailureInput, time.Time) (bool, error)
 	CancelTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (bool, error)
 	FailDependents(string, string, string, time.Time) (int64, error)
-	RetryTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (model.Task, bool, error)
 }
 
 // NodeAuthenticator is the one question this module asks the runtime-binding
@@ -300,6 +300,7 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		AssetID:          input.AssetID,
 		AssetTitle:       input.AssetTitle,
 		GameName:         input.GameName,
+		PublishedAt:      input.PublishedAt,
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
 		AssignedNodeID:   input.AssignedNodeID,
@@ -324,7 +325,10 @@ type CreateUserDownloadInput struct {
 	// GameName is what the executor files the download under, when the material
 	// has a game. Empty is a legal value: the executor falls back to a fixed
 	// placeholder.
-	GameName        string
+	GameName string
+	// PublishedAt is when the material was published, carried to the executor for
+	// naming. Nil is a legal value: the executor omits that segment.
+	PublishedAt     *time.Time
 	SourceObjectKey string
 	RequestedBy     identityservice.UserID
 	AssignedNodeID  string
@@ -376,17 +380,44 @@ func (s *Service) EnsureMaterialSourcePrepare(input EnsureMaterialSourcePrepareI
 	return taskBody(task), nil
 }
 
-// ListTasks returns the acting user's tasks, newest first.
+// TaskListOptions narrows the acting user's task listing. Every field is
+// optional and combined with AND; the zero value is the unfiltered newest-first
+// listing the download centre has always asked for.
+type TaskListOptions struct {
+	// Statuses are the task status enum values to keep, e.g. "running" for the
+	// in-flight tab or "success,cancelled" for history.
+	Statuses []string
+	// FinishedAfter keeps only rows whose finished_at is at or after this
+	// instant, which is how the terminal tabs apply their retention windows.
+	FinishedAfter *time.Time
+	// Limit caps the page. Zero means the module default.
+	Limit int
+}
+
+// ListTasks returns the acting user's tasks, newest first, narrowed by options.
 //
 // The filter is built from the actor alone: there is no parameter for a team or
 // a user to widen it with, so the listing cannot be asked for someone else's
 // work even by a caller that tries.
-func (s *Service) ListTasks(actor identityservice.PublicUser) ([]dto.Task, error) {
+func (s *Service) ListTasks(actor identityservice.PublicUser, opts TaskListOptions) ([]dto.Task, error) {
 	if actor.ID <= 0 {
 		return nil, ErrInvalidInput
 	}
+	statuses, err := validateStatuses(opts.Statuses)
+	if err != nil {
+		return nil, err
+	}
 	requestedBy := actor.ID
-	tasks, err := s.store.ListTasks(repository.TaskFilter{RequestedBy: &requestedBy, Limit: s.listMax})
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = s.listMax
+	}
+	tasks, err := s.store.ListTasks(repository.TaskFilter{
+		RequestedBy:   &requestedBy,
+		Statuses:      statuses,
+		FinishedAfter: opts.FinishedAfter,
+		Limit:         limit,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -395,6 +426,35 @@ func (s *Service) ListTasks(actor identityservice.PublicUser) ([]dto.Task, error
 		items = append(items, taskBody(task))
 	}
 	return items, nil
+}
+
+// validateStatuses maps wire status strings onto the task status enum. Unknown
+// values are rejected rather than ignored, so `?status=typo` fails loudly
+// instead of silently widening the window.
+func validateStatuses(values []string) ([]model.Status, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	statuses := make([]model.Status, 0, len(values))
+	for _, value := range values {
+		switch model.Status(value) {
+		case model.StatusPending, model.StatusRunning, model.StatusSuccess, model.StatusFailed, model.StatusCancelled:
+			statuses = append(statuses, model.Status(value))
+		default:
+			return nil, ErrInvalidInput
+		}
+	}
+	return statuses, nil
+}
+
+// LatestUserDownloadStatuses answers each material's newest user_download status
+// for one user, as a raw task status keyed by asset_id. The production module
+// maps that to a display state; this module stays out of what a badge means.
+func (s *Service) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	if userID <= 0 {
+		return nil, ErrInvalidInput
+	}
+	return s.store.LatestUserDownloadStatuses(userID, materialIDs)
 }
 
 // CancelTask asks for a transfer to stop and answers with the refreshed task.
@@ -459,36 +519,6 @@ const (
 	// ended without producing a file.
 	cancelledPreparationMessage = "the preparation this download waited for was cancelled"
 )
-
-// RetryTask requeues a failed task within its attempt bound, and answers with
-// the requeued body.
-//
-// Both guards are checked here *and* in the update: here so the caller gets
-// `transfer_task_conflict` instead of a silent no-op, and in the update so a race
-// between the two cannot requeue a task that has since succeeded.
-//
-// The third guard is the dependency pointer, and it is the same "no silent no-op"
-// rule: a failed download that still points at its preparation is waiting on
-// something that already ended, so the requeue would leave it `pending` and
-// un-leasable — exactly the row it is now. See `retryTask` for the full argument;
-// the remedy for these rows is a new download rather than a retry.
-func (s *Service) RetryTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
-	task, team, err := s.scopedTask(actor, taskID)
-	if err != nil {
-		return dto.Task{}, err
-	}
-	if task.Status != model.StatusFailed || task.DependencyTaskID != "" || task.AttemptCount >= task.MaxAttempts {
-		return dto.Task{}, ErrTaskConflict
-	}
-	requeued, retried, err := s.store.RetryTask(task.ID, team, actor.ID, s.now().UTC())
-	if err != nil {
-		return dto.Task{}, err
-	}
-	if !retried {
-		return dto.Task{}, ErrTaskConflict
-	}
-	return taskBody(requeued), nil
-}
 
 // ClaimTask leases one task for the node a credential identifies, or answers
 // with no task at all.
@@ -673,10 +703,11 @@ func (s *Service) recordSuccess(task model.Task, nodeID string, body dto.Complet
 	if body.CompletedBytes < 0 || !isHexSHA256(checksum) {
 		return ErrInvalidInput
 	}
-	if len(fileName) > maxFileNameLength || strings.ContainsAny(fileName, `/\`) {
+	if fileName != "" && !validCompletedFileName(fileName) {
 		// Not a path, and not a name that would become one when an executor joined
 		// it to a directory. The frozen contract states this as a pattern; refusing
-		// it here is the same rule, enforceable before the row is written.
+		// it here is the same rule, enforceable before the row is written. An empty
+		// name is the "no file reported yet" case and is not an error.
 		return ErrInvalidInput
 	}
 	if task.TotalBytes > 0 && body.CompletedBytes != task.TotalBytes {
@@ -812,6 +843,7 @@ func taskBody(task model.Task) dto.Task {
 		ErrorMessage:              optional(task.ErrorMessage),
 		CreatedAt:                 task.CreatedAt,
 		UpdatedAt:                 task.UpdatedAt,
+		FinishedAt:                task.FinishedAt,
 	}
 }
 
@@ -822,6 +854,7 @@ func leaseBody(task model.Task, grant DownloadGrant, lease time.Duration) *dto.L
 		AssetID:              task.AssetID,
 		Title:                task.AssetTitle,
 		GameName:             task.GameName,
+		PublishedAt:          task.PublishedAt,
 		TotalBytes:           task.TotalBytes,
 		ExpectedSHA256:       task.ExpectedSHA256,
 		MaxAttempts:          task.MaxAttempts,
@@ -851,6 +884,29 @@ func remainingSeconds(total, completed, speed int64) int64 {
 		return 0
 	}
 	return (total - completed) / speed
+}
+
+// validCompletedFileName applies the frozen `^[^/\\]+(?:/[^/\\]+)?$` pattern the
+// contract declares for `Completion.file_name`: at most one relative directory
+// component (the download date) plus a bare file name, neither segment empty, no
+// backslash, and within the 255-byte cap. An absolute path, two separators, or a
+// trailing slash all fail, exactly as the pattern fails them.
+//
+// The runtime and the pattern must not disagree: this check used to reject any
+// `/` at all, which refused the one-subdirectory name the pattern admits, and
+// every date-filed download came back as a `400` the executor could not act on.
+func validCompletedFileName(name string) bool {
+	if name == "" || len(name) > maxFileNameLength {
+		return false
+	}
+	if strings.ContainsRune(name, '\\') {
+		return false
+	}
+	slash := strings.IndexByte(name, '/')
+	if slash < 0 {
+		return true
+	}
+	return slash > 0 && slash < len(name)-1 && strings.IndexByte(name[slash+1:], '/') < 0
 }
 
 // isHexSHA256 applies the frozen `^[A-Fa-f0-9]{64}$` pattern.

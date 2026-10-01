@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,21 +54,16 @@ type memoryStore struct {
 	completeOK        bool
 	failOK            bool
 	cancelOK          bool
-	retryOK           bool
-	retryResult       Task
 	failDependentsErr error
 
-	listFilter repository.TaskFilter
-	lastCreate repository.CreateTaskInput
-	lastProg   repository.ProgressInput
-	lastDone   repository.CompletionInput
-	lastFail   repository.FailureInput
-	lastCancel struct {
-		taskID string
-		team   identityservice.TeamID
-		user   identityservice.UserID
-	}
-	lastRetry struct {
+	listFilter   repository.TaskFilter
+	lastStatusID identityservice.UserID
+	statusResult map[int64]string
+	lastCreate   repository.CreateTaskInput
+	lastProg     repository.ProgressInput
+	lastDone     repository.CompletionInput
+	lastFail     repository.FailureInput
+	lastCancel   struct {
 		taskID string
 		team   identityservice.TeamID
 		user   identityservice.UserID
@@ -124,8 +120,9 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 	}
 	return Task{
 		ID: input.ID, TeamID: input.TeamID, AssetType: model.AssetMaterial, AssetID: input.AssetID,
-		AssetTitle: input.AssetTitle, SourceObjectKey: input.SourceObjectKey,
-		Purpose: model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
+		AssetTitle: input.AssetTitle, GameName: input.GameName, PublishedAt: input.PublishedAt,
+		SourceObjectKey: input.SourceObjectKey,
+		Purpose:         model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
 		Status: model.StatusPending, RequestedBy: input.RequestedBy, AssignedNodeID: input.AssignedNodeID,
 		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
@@ -166,6 +163,12 @@ func (s *memoryStore) ListTasks(filter repository.TaskFilter) ([]Task, error) {
 		ordered = append(ordered, task)
 	}
 	return ordered, nil
+}
+
+func (s *memoryStore) LatestUserDownloadStatuses(userID identityservice.UserID, _ []int64) (map[int64]string, error) {
+	s.counts["status"]++
+	s.lastStatusID = userID
+	return s.statusResult, nil
 }
 
 func (s *memoryStore) NextLocalTask(_ string, _ time.Time) (Task, bool, error) {
@@ -251,15 +254,6 @@ func (s *memoryStore) FailDependents(prepareTaskID, errorCode, errorMessage stri
 	return 0, nil
 }
 
-func (s *memoryStore) RetryTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, _ time.Time) (Task, bool, error) {
-	s.counts["retry"]++
-	s.lastRetry.taskID, s.lastRetry.team, s.lastRetry.user = taskID, teamID, requestedBy
-	if !s.retryOK {
-		return Task{}, false, nil
-	}
-	return s.retryResult, true, nil
-}
-
 type stubNodes struct {
 	node           runtimeservice.AgentNode
 	err            error
@@ -320,8 +314,10 @@ func taskFixture(id string, status model.Status, user identityservice.UserID, te
 	if status == model.StatusRunning {
 		claimedBy = nodeID
 	}
+	published := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
 	return Task{
 		ID: id, TeamID: team, AssetType: model.AssetMaterial, AssetID: 42, AssetTitle: "演示素材",
+		GameName: "三角洲行动", PublishedAt: &published,
 		SourceObjectKey: "materials/42/deadbeef.mp4", Purpose: model.PurposeUserDownload,
 		ExecutionScope: model.ExecutionLocalAgent, Status: status, RequestedBy: user,
 		AssignedNodeID: nodeID, ClaimedByNodeID: claimedBy, TotalBytes: 1000, ExpectedSHA256: strings.Repeat("a", 64),
@@ -347,7 +343,7 @@ func TestListTasksAsksTheRepositoryForTheActingUser(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
@@ -370,7 +366,7 @@ func TestListTasksCarriesTheAssetTitleTheTaskWasCreatedWith(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
@@ -386,7 +382,7 @@ func TestListTasksNullsTheOptionalFieldsThatHaveNoValueYet(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	items, err := service.ListTasks(actorWith(9, teamOf(7)))
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
@@ -406,11 +402,122 @@ func TestListTasksRefusesAnActorWithNoIdentity(t *testing.T) {
 	store := newMemoryStore()
 	service := testService(store, workingNode(), fixedClock(testNow()))
 
-	if _, err := service.ListTasks(identityservice.PublicUser{}); !errors.Is(err, ErrInvalidInput) {
+	if _, err := service.ListTasks(identityservice.PublicUser{}, TaskListOptions{}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("ListTasks() error = %v", err)
 	}
 	if store.count("list") != 0 {
 		t.Fatalf("list called %d times, want none for a request with no actor", store.count("list"))
+	}
+}
+
+// The terminal tabs pass their retention window as finished_after, and the
+// service hands it to the store unchanged: the window is a display decision the
+// caller owns, not one the module re-derives.
+func TestListTasksPassesFinishedAfterToTheRepository(t *testing.T) {
+	store := newMemoryStore(taskFixture("transfer-1", model.StatusSuccess, 9, teamOf(7)))
+	service := testService(store, workingNode(), fixedClock(testNow()))
+	cutoff := testNow().Add(-90 * 24 * time.Hour)
+
+	_, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{FinishedAfter: &cutoff})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if store.listFilter.FinishedAfter == nil || !store.listFilter.FinishedAfter.Equal(cutoff) {
+		t.Fatalf("filter.FinishedAfter = %v, want %v", store.listFilter.FinishedAfter, cutoff)
+	}
+}
+
+// A request's statuses reach the store as typed enum values, and a status that
+// is not a task status is refused rather than ignored: `?status=downloaded`
+// would otherwise silently widen the window past what the caller meant.
+func TestListTasksMapsStatusesOntoTheEnumAndRejectsUnknownOnes(t *testing.T) {
+	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Statuses: []string{"pending", "running"}}); err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if got, want := store.listFilter.Statuses, []model.Status{model.StatusPending, model.StatusRunning}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("filter.Statuses = %v, want %v", got, want)
+	}
+
+	store.listFilter.Statuses = nil
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Statuses: []string{"pending", "downloaded"}}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("ListTasks() with an unknown status = %v, want ErrInvalidInput", err)
+	}
+	if len(store.listFilter.Statuses) != 0 {
+		t.Fatalf("a refused request must not reach the store; filter.Statuses = %v", store.listFilter.Statuses)
+	}
+}
+
+// A caller can cap the page itself; the module default only applies when the
+// caller does not ask.
+func TestListTasksUsesTheCallersLimitOrTheModuleDefault(t *testing.T) {
+	store := newMemoryStore()
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Limit: 50}); err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if store.listFilter.Limit != 50 {
+		t.Fatalf("filter.Limit = %d, want the caller's 50", store.listFilter.Limit)
+	}
+
+	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{}); err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if store.listFilter.Limit != defaultListLimit {
+		t.Fatalf("filter.Limit = %d, want the module default %d", store.listFilter.Limit, defaultListLimit)
+	}
+}
+
+// The download centre's terminal rows need the completion time: a row that has
+// finished carries it, one that has not answers null.
+func TestListTasksCarriesFinishedAtForTerminalRows(t *testing.T) {
+	finished := testNow().Add(-1 * time.Hour)
+	done := taskFixture("transfer-1", model.StatusSuccess, 9, teamOf(7))
+	done.FinishedAt = &finished
+	store := newMemoryStore(done)
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if items[0].FinishedAt == nil || !items[0].FinishedAt.Equal(finished) {
+		t.Fatalf("finished_at = %v, want %v", items[0].FinishedAt, finished)
+	}
+
+	running := taskFixture("transfer-2", model.StatusRunning, 9, teamOf(7))
+	store2 := newMemoryStore(running)
+	service2 := testService(store2, workingNode(), fixedClock(testNow()))
+	items2, err := service2.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if items2[0].FinishedAt != nil {
+		t.Fatalf("finished_at = %v, want nil for a running row", *items2[0].FinishedAt)
+	}
+}
+
+// The derived download lifecycle is a pass-through to the store, scoped to the
+// given user: the module does not decide what the raw statuses mean (the
+// production module maps them), it only refuses an identity-less caller.
+func TestLatestUserDownloadStatusesPassesTheUserThroughAndRefusesNobody(t *testing.T) {
+	store := newMemoryStore()
+	store.statusResult = map[int64]string{42: "success"}
+	service := testService(store, workingNode(), fixedClock(testNow()))
+
+	got, err := service.LatestUserDownloadStatuses(identityservice.UserID(9), []int64{42})
+	if err != nil {
+		t.Fatalf("LatestUserDownloadStatuses() error = %v", err)
+	}
+	if got[42] != "success" || store.lastStatusID != identityservice.UserID(9) {
+		t.Fatalf("got = %v (asked as %v), want the store's raw answer for user 9", got, store.lastStatusID)
+	}
+
+	if _, err := service.LatestUserDownloadStatuses(0, []int64{42}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("LatestUserDownloadStatuses(0) error = %v, want ErrInvalidInput", err)
 	}
 }
 
@@ -550,113 +657,6 @@ func TestCancellingAPreparationReportsAFailedWaiterRelease(t *testing.T) {
 	}
 }
 
-// The update carries the actor's team, not the row's. Handing the statement the
-// value it just read would make its `team_id = ?` a restatement of the row
-// rather than a constraint, and the statement's own scope would stop being one.
-func TestRetryTaskScopesTheUpdateToTheActorsTeam(t *testing.T) {
-	store := newMemoryStore(taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7)))
-	store.retryOK = true
-	store.retryResult = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
-	service := testService(store, workingNode(), fixedClock(testNow()))
-
-	body, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1")
-	if err != nil {
-		t.Fatalf("RetryTask() error = %v", err)
-	}
-	if store.lastRetry.team != teamOf(7) || store.lastRetry.user != 9 {
-		t.Fatalf("retry scoped by %+v, want the acting user", store.lastRetry)
-	}
-	if body.Status != string(model.StatusPending) {
-		t.Fatalf("status = %q, want the requeued body", body.Status)
-	}
-	if store.count("get") != 1 {
-		t.Fatalf("get called %d times, want one read and no more", store.count("get"))
-	}
-}
-
-// A failed download whose preparation never delivered cannot be retried, and
-// saying so is the whole point of the guard.
-//
-// Requeueing it would write a row that is `pending` with its `dependency_task_id`
-// still set — the state it was just in. `leaseable` refuses a local task whose
-// dependency is set, and the dependency is terminal, so nothing will ever hand it
-// facts or fail it again: the retry would land on the database and change nothing
-// the user could observe, which is what "I pressed retry and nothing happened"
-// was. The remedy for these rows is a new download, which builds a new
-// preparation, so the answer here is a conflict rather than a silent no-op.
-func TestRetryTaskRefusesADownloadWhosePreparationNeverDelivered(t *testing.T) {
-	task := taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7))
-	task.DependencyTaskID = "prepare-1"
-	store := newMemoryStore(task)
-	store.retryOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
-
-	if _, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1"); !errors.Is(err, ErrTaskConflict) {
-		t.Fatalf("RetryTask() error = %v, want conflict", err)
-	}
-	if store.count("retry") != 0 {
-		t.Fatalf("retry called %d times, want none while the dependency pointer is set", store.count("retry"))
-	}
-}
-
-// The other half of the same guard: once the preparation has handed the facts
-// over, the pointer is gone and the retry is the ordinary one — the download that
-// failed on its own account, after it had something to download.
-func TestRetryTaskStillRequeuesADownloadWhoseFactsArrived(t *testing.T) {
-	task := taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7))
-	store := newMemoryStore(task)
-	store.retryOK = true
-	store.retryResult = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
-	service := testService(store, workingNode(), fixedClock(testNow()))
-
-	if _, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1"); err != nil {
-		t.Fatalf("RetryTask() error = %v", err)
-	}
-	if store.count("retry") != 1 {
-		t.Fatalf("retry called %d times, want the requeue", store.count("retry"))
-	}
-}
-
-func TestRetryTaskRequiresAFailedTaskWithinItsBound(t *testing.T) {
-	exhausted := taskFixture("exhausted", model.StatusFailed, 9, teamOf(7))
-	exhausted.AttemptCount = exhausted.MaxAttempts
-
-	for _, testCase := range []struct {
-		name   string
-		task   Task
-		refuse bool
-	}{
-		{name: "failed with an attempt left", task: taskFixture("fresh", model.StatusFailed, 9, teamOf(7))},
-		{name: "already succeeded", task: taskFixture("done", model.StatusSuccess, 9, teamOf(7)), refuse: true},
-		{name: "still running", task: taskFixture("running", model.StatusRunning, 9, teamOf(7)), refuse: true},
-		{name: "every attempt used", task: exhausted, refuse: true},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			store := newMemoryStore(testCase.task)
-			store.retryOK = true
-			store.retryResult = testCase.task
-			service := testService(store, workingNode(), fixedClock(testNow()))
-
-			_, err := service.RetryTask(actorWith(9, teamOf(7)), testCase.task.ID)
-			if testCase.refuse {
-				if !errors.Is(err, ErrTaskConflict) {
-					t.Fatalf("error = %v, want conflict", err)
-				}
-				if store.count("retry") != 0 {
-					t.Fatalf("retry called %d times, want none", store.count("retry"))
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("RetryTask() error = %v", err)
-			}
-			if store.count("retry") != 1 {
-				t.Fatalf("retry called %d times, want one", store.count("retry"))
-			}
-		})
-	}
-}
-
 // ---- the executor surface ----
 
 // The order is the point: nothing is leased until a grant exists. A lease
@@ -759,6 +759,14 @@ func TestClaimTaskCarriesTheFactsTheExecutorNeeds(t *testing.T) {
 	lease := *result.Task
 	if lease.TaskID != "transfer-1" || lease.Title != "演示素材" || lease.AssetID != 42 {
 		t.Fatalf("lease = %+v", lease)
+	}
+	// The naming facts travel on the lease: the executor files the file under the
+	// game and can append the publish time, neither of which it can read itself.
+	if lease.GameName != "三角洲行动" {
+		t.Fatalf("lease game name = %q, want the material's game", lease.GameName)
+	}
+	if lease.PublishedAt == nil || !lease.PublishedAt.Equal(time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)) {
+		t.Fatalf("lease published_at = %v, want the material's publish time", lease.PublishedAt)
 	}
 	if lease.TotalBytes != 1000 || lease.ExpectedSHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("lease = %+v, want the declared size and hash", lease)
@@ -978,10 +986,13 @@ func TestCompleteTaskNormalisesTheChecksumItStores(t *testing.T) {
 	}
 }
 
-// A file name is a name, not a path: the frozen pattern refuses separators, and a
-// name long enough to be truncated somewhere else is refused rather than stored.
-func TestCompleteTaskRefusesANameThatCouldBecomeAPath(t *testing.T) {
-	for _, name := range []string{"a/b.mp4", `a\b.mp4`, strings.Repeat("x", 256)} {
+// A file name is at most one relative directory plus a bare name, exactly as the
+// frozen `^[^/\\]+(?:/[^/\\]+)?$` pattern says: the executor writes
+// `<date>/<name>` since the date subdirectory arrived, so a single `/` is the
+// ordinary shape, and what is refused is anything that could escape the date
+// directory or overrun the 255-byte cap.
+func TestCompleteTaskEnforcesTheFrozenOneSubdirectoryNamePattern(t *testing.T) {
+	for _, name := range []string{`a\b.mp4`, "a/b/c.mp4", "/abs.mp4", "a/b.mp4/", "a//b.mp4", strings.Repeat("x", 256)} {
 		store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 		store.completeOK = true
 		service := testService(store, workingNode(), fixedClock(testNow()))
@@ -991,6 +1002,21 @@ func TestCompleteTaskRefusesANameThatCouldBecomeAPath(t *testing.T) {
 		})
 		if !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("name %q error = %v, want invalid input", name, err)
+		}
+	}
+	// The one-subdirectory shape is the accepted one, and it must reach the store.
+	for _, name := range []string{"20261001/三角洲-31.mp4", "a/b.mp4"} {
+		store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
+		store.completeOK = true
+		service := testService(store, workingNode(), fixedClock(testNow()))
+
+		if _, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+			Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64), FileName: name,
+		}); err != nil {
+			t.Fatalf("name %q error = %v, want accepted", name, err)
+		}
+		if store.lastDone.FileName != name {
+			t.Fatalf("name %q stored as %q", name, store.lastDone.FileName)
 		}
 	}
 	// An executor that named no file is not an error: the key is optional in the

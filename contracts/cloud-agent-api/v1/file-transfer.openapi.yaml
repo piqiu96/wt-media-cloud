@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent File Transfer API
-  version: 2026.09.30.1
+  version: 2026.10.01.1
   description: >-
     Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud
     preparation is never exposed to an Agent. A lease carries a short-lived single-object download grant
@@ -116,8 +116,14 @@ components:
           type: string
           description: >-
             The game's name as the operator chose it, or absent when the material has no game. The executor
-            uses it to name the file (`YYYYMMDD/<game_name>-<asset_id>.<ext>`), falling back to a fixed
-            placeholder when it is absent.
+            uses it to name the file, falling back to a fixed placeholder when it is absent.
+        published_at:
+          type: string
+          format: date-time
+          description: >-
+            When the material was published, copied onto the task when it was created. Optional: a material
+            without a publish time sends no value and the executor omits that segment of the file name
+            (`YYYYMMDD/<game_name>-<asset_id>[-<YYYYMMDD>][-<title>].<ext>`).
         total_bytes:
           type: integer
           format: int64

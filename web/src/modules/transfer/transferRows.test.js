@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { formatDateTime } from '../../shared/utils/datetime.js'
 import { splitTransferRows, transferRow, transferRows } from './transferRows.js'
 
 const task = (over = {}) => ({
@@ -26,7 +27,8 @@ describe('transfer row', () => {
   it('carries every row action through to the row object', () => {
     const row = transferRow(task({ status: 'cancelled' }))
     expect(row.canCancel).toBe(false)
-    expect(row.canRetry).toBe(false)
+    // 行上**没有** canRetry 这个位了（走查后收起「重试」，只留「重新下载」）。
+    expect('canRetry' in row).toBe(false)
     expect(row.canRedownload).toBe(true)
     expect('canOpen' in row).toBe(true)
   })
@@ -34,8 +36,7 @@ describe('transfer row', () => {
   it('puts 重新下载 on the rows that were stuck with nothing to do', () => {
     // 走查里报的那一条：已取消行原先零动作。
     expect(transferRow(task({ status: 'cancelled' })).canRedownload).toBe(true)
-    // 在等准备的下载失败后（依赖没交付）：重试会被服务端拒绝，出路是这一条。
-    expect(transferRow(task({ status: 'failed', error_code: 'dependency_failed' })).canRetry).toBe(false)
+    // 在等准备的下载失败后（依赖没交付）：那条行也只有这一条出路能走。
     expect(transferRow(task({ status: 'failed', error_code: 'dependency_failed' })).canRedownload).toBe(true)
   })
 
@@ -53,6 +54,17 @@ describe('transfer row', () => {
     expect(row.canOpen).toBe(true)
     expect(row.canRedownload).toBe(false)
     expect(row.progress).toEqual({ kind: 'complete', percent: 100 })
+  })
+
+  // 终态行的完成时间来自契约新暴露的 `finished_at`（任务 23）；非终态没有它。
+  // 不能用 `updated_at` 兜底：它会被租约续租移动，拿它当完成时刻是错的。
+  it('carries the terminal completion time through finished_at, not updated_at', () => {
+    const finished = transferRow(task({ status: 'success', finished_at: '2026-09-30T05:17:00Z', updated_at: '2026-09-30T09:00:00Z' }))
+    expect(finished.finishedAt).toBe('2026-09-30T05:17:00Z')
+    expect(finished.finishedText).toBe(formatDateTime('2026-09-30T05:17:00Z'))
+    const running = transferRow(task({ status: 'running', finished_at: null, updated_at: '2026-09-30T09:00:00Z' }))
+    expect(running.finishedAt).toBeNull()
+    expect(running.finishedText).toBe('')
   })
 })
 
@@ -83,7 +95,7 @@ describe('transfer rows', () => {
    *
    * 这是走查第二条的落点：已完成的行要能说出「文件在旧目录里」而不是只会说「可能已被
    * 移动或删除」。名字索引而不是任务索引，因为磁盘上只有一个文件，而名字可能对应多条
-   * 任务（重试、重新下载各一条）。
+   * 任务（同一个素材下载过多次）。
    */
   it('gives each row the file fact its own name was scanned as', () => {
     const presence = {
@@ -102,9 +114,9 @@ describe('transfer rows', () => {
     expect(rows[0].canRedownload).toBe(false)
 
     expect(rows[1].presence).toBe('absent')
-    // 实测不在：打开文件没了，重新下载来了 —— 这一格就是第二条报障的修法。
+    // 实测不在：打开文件没了。重新下载也**不给** —— 已成功的素材不重下（走查裁定）。
     expect(rows[1].canOpen).toBe(false)
-    expect(rows[1].canRedownload).toBe(true)
+    expect(rows[1].canRedownload).toBe(false)
 
     // 名单里没有的名字是「没查过」，不是「不在」。
     expect(rows[2].presence).toBe('unknown')
@@ -122,11 +134,11 @@ describe('transfer rows', () => {
   })
 })
 
-// 下载中心的两栏（CHG-20260930-069）：非终态进「正在下载」，终态进「最近完成」。
-// 分组依据任务事实（isTerminal），不依据行的显示状态；一行恰好属于一栏，
-// 两栏计数之和等于行数。
+// 下载中心的三栏（CHG-20260930-069 任务 23）：非终态进「进行中」，失败单列「失败」，
+// 其余终态进「历史」。分组依据任务事实（isFailed／isHistory／isTerminal），不依据行的
+// 显示状态；一行恰好属于一栏，三栏计数之和等于行数。
 describe('splitTransferRows', () => {
-  it('puts pending and running under active, and only terminal rows under recent', () => {
+  it('puts pending and running under active, failed alone, and the rest under history', () => {
     const rows = transferRows([
       task({ id: 'p', status: 'pending' }),
       task({ id: 'r', status: 'running' }),
@@ -134,21 +146,24 @@ describe('splitTransferRows', () => {
       task({ id: 'f', status: 'failed', error_code: 'lease_lost' }),
       task({ id: 'c', status: 'cancelled' }),
     ])
-    const { active, recent } = splitTransferRows(rows)
+    const { active, failed, history } = splitTransferRows(rows)
     expect(active.map((row) => row.task.id)).toEqual(['p', 'r'])
-    expect(recent.map((row) => row.task.id)).toEqual(['s', 'f', 'c'])
-    expect(active.length + recent.length).toBe(rows.length)
+    expect(failed.map((row) => row.task.id)).toEqual(['f'])
+    expect(history.map((row) => row.task.id)).toEqual(['s', 'c'])
+    expect(active.length + failed.length + history.length).toBe(rows.length)
   })
 
   it('keeps the original order inside each group', () => {
     const rows = transferRows([
       task({ id: 'r1', status: 'running' }),
       task({ id: 's1', status: 'success' }),
-      task({ id: 'p1', status: 'pending' }),
       task({ id: 'f1', status: 'failed' }),
+      task({ id: 'p1', status: 'pending' }),
+      task({ id: 'c1', status: 'cancelled' }),
     ])
-    const { active, recent } = splitTransferRows(rows)
+    const { active, failed, history } = splitTransferRows(rows)
     expect(active.map((row) => row.task.id)).toEqual(['r1', 'p1'])
-    expect(recent.map((row) => row.task.id)).toEqual(['s1', 'f1'])
+    expect(failed.map((row) => row.task.id)).toEqual(['f1'])
+    expect(history.map((row) => row.task.id)).toEqual(['s1', 'c1'])
   })
 })

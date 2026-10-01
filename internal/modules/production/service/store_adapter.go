@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
@@ -78,10 +79,21 @@ func (productionTransferCreator) EnsureMaterialSourcePrepare(input transferservi
 	return transferservice.EnsureMaterialSourcePrepare(input)
 }
 
+func (productionTransferCreator) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	return transferservice.LatestUserDownloadStatuses(userID, materialIDs)
+}
+
 // productionObjectLinker is this module's whole dependency on the storage
-// boundary; the composition itself lives in `infra/storage`.
+// boundary; the minting itself lives in `infra/storage`.
 type productionObjectLinker struct{}
 
-func (productionObjectLinker) PublicObjectURL(key string) (string, error) {
-	return storage.PublicURL(key)
+// PresignObjectURL mints the grant with the lifetime configuration already
+// decides and publishes only its address. The expiry stops here for the same
+// reason it is absent from the contract body: nothing on the wire reads it.
+func (productionObjectLinker) PresignObjectURL(ctx context.Context, key string) (string, error) {
+	grant, err := storage.PresignGet(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	return grant.URL, nil
 }

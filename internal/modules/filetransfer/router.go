@@ -15,7 +15,6 @@ import (
 func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/file-transfer-tasks", ListTasks)
 	h.POST("/api/v1/file-transfer-tasks/:task_id/cancel", CancelTask)
-	h.POST("/api/v1/file-transfer-tasks/:task_id/retry", RetryTask)
 
 	h.POST("/api/v1/cloud-agent/file-transfer-tasks/claim", ClaimTask)
 	h.POST("/api/v1/cloud-agent/file-transfer-tasks/:task_id/heartbeat", HeartbeatTask)

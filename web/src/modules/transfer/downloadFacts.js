@@ -11,6 +11,31 @@ export function isTerminal(task) {
   return TERMINAL_STATUSES.includes(task?.status)
 }
 
+/** 失败 Tab 的依据：只有 `failed` 进失败，成功与取消都是历史。 */
+export function isFailed(task) {
+  return task?.status === 'failed'
+}
+
+/** 历史 Tab 的依据：成功与已取消都是事实记录，只有失败单列。 */
+export function isHistory(task) {
+  return task?.status === 'success' || task?.status === 'cancelled'
+}
+
+/**
+ * 行是否落在「从现在往前 days 天」的窗口里。
+ *
+ * 保留窗口是**展示层截断**（DB 从不删行，见 CHG-069 任务 23 裁定），所以这条只决定一行
+ * 还显不显示，不碰任何事实。取 `finished_at`（终态行必有，任务 23 起进入契约）；它缺了
+ * 才退回 `updated_at`，而 `updated_at` 会被租约续租移动，只是兜底。
+ */
+export function withinDays(task, days, now = Date.now()) {
+  if (!Number.isFinite(days) || days <= 0) return false
+  const source = task?.finished_at || task?.updated_at
+  const stamp = source ? Date.parse(source) : Number.NaN
+  if (!Number.isFinite(stamp)) return false
+  return now - stamp <= days * 24 * 60 * 60 * 1000
+}
+
 /** 轮询闸门：没有非终态任务时不该继续拉。 */
 export function hasLiveTask(tasks) {
   return tasks.some((task) => !isTerminal(task))
@@ -135,8 +160,8 @@ export function downloadedFileName(tasks, assetId) {
 /**
  * 这个任务的**文件名**在扫描结果里的那一条，没有就是 `null`。
  *
- * 按名字查而不是按任务查：一个名字可能对应多条任务（重试、重新下载），而磁盘上只有一个
- * 文件 —— 名字是执行器写下去的那一个，也是唯一能定位它的东西。
+ * 按名字查而不是按任务查：一个名字可能对应多条任务（同一个素材下载过多次），而磁盘上只有
+ * 一个文件 —— 名字是执行器写下去的那一个，也是唯一能定位它的东西。
  */
 export function fileFact(task, presence = {}) {
   const name = task?.file_name
@@ -165,44 +190,21 @@ export function canOpenFile(task, presence = FILE_PRESENCE.unknown) {
 }
 
 /**
- * 这一行的失败能不能断言「它在等的那条准备没有交付」。
- *
- * 只有两个码可以这么断言：
- * - `dependency_failed` 只由 `failDependentsOfTerminalTasks` 写，那条 SQL 的 WHERE
- *   要求被改的行自己有 `dependency_task_id`；
- * - `cancelled_by_user` 落在一条 **`failed`** 行上时只可能来自 `FailDependents` ——
- *   用户直接取消一条下载，终态写的是 `cancelled`，而这一格的前提是 `failed`。
- *
- * 其余码客户端分不出来：一条本机下载丢了租约也是 `lease_lost`，而那种行的重试是成立
- * 的（它的 `dependency_task_id` 为空，服务端会放行）。分不出来时**留下按钮**，让服务端
- * 用它自己的理由拒绝 —— 藏掉一个成立的动作，比多显示一个会被拒绝的动作更糟。
- *
- * 也就是说这里排除的只是「服务端必然拒绝」的那一类，不是「我猜它不行」的那一类。
- */
-const WAITER_RELEASE_CODES = ['dependency_failed', 'cancelled_by_user']
-
-export function canRetry(task) {
-  return task?.status === 'failed'
-    && Number(task.attempt_count || 0) < Number(task.max_attempts || 0)
-    && !WAITER_RELEASE_CODES.includes(task?.error_code)
-}
-
-/**
  * 「重新下载」：终态行重新发起一次下载，走的是和第一次点击**完全相同**的那个入口。
  *
- * 失败与已取消的行无条件给：这正是走查里报的第三条 ——「已取消的无法再次点击下载」。
- * 这两态的行今天一个动作都没有（`canRetry` 只认 failed，`canOpenFile` 只认 success，
- * `canCancel` 只认非终态），运营看着一条卡住的行无从下手。
+ * 失败与已取消的行给：走查裁定把两个都在说「再来一次」的按钮（「重试」与「重新下载」）
+ * 收成一个 —— `retryTask` 改的是原来那条行、还要求它没在等准备（依赖已交付），一条在等
+ * 准备的失败行会被服务端直接拒绝。已取消的行原先一个动作都没有（`canOpenFile` 只认
+ * success、`canCancel` 只认非终态），「已取消的无法再次点击下载」就是这么来的。
  *
- * 成功的行另说：文件在不在**不是这里能断言的**。`presence` 默认 `unknown` —— 浏览器
- * 根本查不了本机文件，Desktop 也要先扫过才知道 —— 而 `unknown` 不等于「不在」。
- * 只有实测不在（`absent`：文件被搬走或被删）时才推荐重新下载；文件还在时该出现的
- * 动作是「打开文件」。
+ * 成功的行**不给**：走查裁定「已成功的不能再次下载」。下载在库里是**执行记录**，一个
+ * 素材的「已下载」是**资产状态** —— 重复发起不会得到第二份文件，只会再落一行执行历史。
+ * 文件在不在也不由这里断言（`presence` 只有 Desktop 实测过才有意义），所以不按「文件
+ * 找不到了」另开一个口子。
  */
-export function canRedownload(task, presence = FILE_PRESENCE.unknown) {
+export function canRedownload(task) {
   if (task?.asset_type !== 'material' || !task?.asset_id) return false
-  if (task?.status === 'failed' || task?.status === 'cancelled') return true
-  return task?.status === 'success' && presence === FILE_PRESENCE.absent
+  return task?.status === 'failed' || task?.status === 'cancelled'
 }
 
 export function canCancel(task) {

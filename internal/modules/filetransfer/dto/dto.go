@@ -29,26 +29,32 @@ import "time"
 // `asset_title` was added for the download centre, which otherwise had only an id to
 // name a row with: `file_name` is the executor's report and does not exist until the
 // transfer finishes, and a list of `#42` is not something an operator can act on.
+//
+// `finished_at` was added for the download centre's terminal rows: the failed and
+// history tabs need a completion time to order their lists and apply their retention
+// windows, and `updated_at` moves on lease renewals that are not completions. It is
+// null until the task is terminal, like the other nullable fields.
 type Task struct {
-	ID                        string    `json:"id"`
-	AssetType                 string    `json:"asset_type"`
-	AssetID                   int64     `json:"asset_id"`
-	AssetTitle                string    `json:"asset_title"`
-	Purpose                   string    `json:"purpose"`
-	ExecutionScope            string    `json:"execution_scope"`
-	Status                    string    `json:"status"`
-	TotalBytes                int64     `json:"total_bytes"`
-	CompletedBytes            int64     `json:"completed_bytes"`
-	BytesPerSecond            int64     `json:"bytes_per_second"`
-	EstimatedRemainingSeconds *int64    `json:"estimated_remaining_seconds"`
-	AttemptCount              int       `json:"attempt_count"`
-	MaxAttempts               int       `json:"max_attempts"`
-	ChecksumSHA256            *string   `json:"checksum_sha256"`
-	FileName                  *string   `json:"file_name"`
-	ErrorCode                 *string   `json:"error_code"`
-	ErrorMessage              *string   `json:"error_message"`
-	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	ID                        string     `json:"id"`
+	AssetType                 string     `json:"asset_type"`
+	AssetID                   int64      `json:"asset_id"`
+	AssetTitle                string     `json:"asset_title"`
+	Purpose                   string     `json:"purpose"`
+	ExecutionScope            string     `json:"execution_scope"`
+	Status                    string     `json:"status"`
+	TotalBytes                int64      `json:"total_bytes"`
+	CompletedBytes            int64      `json:"completed_bytes"`
+	BytesPerSecond            int64      `json:"bytes_per_second"`
+	EstimatedRemainingSeconds *int64     `json:"estimated_remaining_seconds"`
+	AttemptCount              int        `json:"attempt_count"`
+	MaxAttempts               int        `json:"max_attempts"`
+	ChecksumSHA256            *string    `json:"checksum_sha256"`
+	FileName                  *string    `json:"file_name"`
+	ErrorCode                 *string    `json:"error_code"`
+	ErrorMessage              *string    `json:"error_message"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	FinishedAt                *time.Time `json:"finished_at"`
 }
 
 // LocalLease is what a claiming executor receives, and the only place a download
@@ -59,18 +65,19 @@ type Task struct {
 // verified, so `ready` and `video_sha256` are written together and the executor
 // always has something to check its bytes against.
 type LocalLease struct {
-	TaskID               string    `json:"task_id"`
-	AssetType            string    `json:"asset_type"`
-	AssetID              int64     `json:"asset_id"`
-	Title                string    `json:"title"`
-	GameName             string    `json:"game_name,omitempty"`
-	TotalBytes           int64     `json:"total_bytes"`
-	ExpectedSHA256       string    `json:"expected_sha256"`
-	MaxAttempts          int       `json:"max_attempts"`
-	AttemptCount         int       `json:"attempt_count"`
-	LeaseSeconds         int       `json:"lease_seconds"`
-	DownloadURL          string    `json:"download_url"`
-	DownloadURLExpiresAt time.Time `json:"download_url_expires_at"`
+	TaskID               string     `json:"task_id"`
+	AssetType            string     `json:"asset_type"`
+	AssetID              int64      `json:"asset_id"`
+	Title                string     `json:"title"`
+	GameName             string     `json:"game_name,omitempty"`
+	PublishedAt          *time.Time `json:"published_at,omitempty"`
+	TotalBytes           int64      `json:"total_bytes"`
+	ExpectedSHA256       string     `json:"expected_sha256"`
+	MaxAttempts          int        `json:"max_attempts"`
+	AttemptCount         int        `json:"attempt_count"`
+	LeaseSeconds         int        `json:"lease_seconds"`
+	DownloadURL          string     `json:"download_url"`
+	DownloadURLExpiresAt time.Time  `json:"download_url_expires_at"`
 }
 
 // ClaimResult answers a claim. `Task` is emitted even when it is nil: the schema

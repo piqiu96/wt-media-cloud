@@ -30,14 +30,51 @@ export function videoStatusTone(value) {
   return VIDEO_STATUS_TONES[value] || 'neutral'
 }
 
+// ── 下载状态（按用户派生的下载生命周期）────────────────────────────────────
+//
+// `video_status` 回答「源视频准备好了没有」，这里回答「**这个运营**在这条素材上下载到了
+// 哪一步」。两者正交：同一条素材可以「可下载 + 还没下过」，也可以「下载中 + 之前已成功
+// 过」（正在重新下载）。
+//
+// 取值来自 `MaterialUsage.download_status` —— 后端按「最新一条 user_download 任务」派生，
+// pending/running→downloading、success→downloaded、failed/cancelled→failed。空串是第四档
+// 「从未下载过」，CHG-069 任务 23 起**我的素材按钮矩阵与文件状态列就由它驱动**（任务状态
+// 与业务状态严格隔离），所以它不再是「回落 video_status」的缺省，而是矩阵里的一格。
+//
+// 不并入 `VIDEO_STATUSES`：那是冻结的 `video_status` enum，一个服务端不会写的值出现在
+// 那里，页面上就会出现永远等不到的状态。
+export const DOWNLOAD_STATUSES = ['', 'downloading', 'downloaded', 'failed']
+
+const DOWNLOAD_STATUS_LABELS = {
+  '': '未下载',
+  downloading: '下载中',
+  downloaded: '已下载',
+  failed: '下载失败',
+}
+
+const DOWNLOAD_STATUS_TONES = {
+  '': 'neutral',
+  downloading: 'info',
+  downloaded: 'success',
+  failed: 'danger',
+}
+
+export function downloadStatusLabel(value) {
+  return DOWNLOAD_STATUS_LABELS[value] || value || '-'
+}
+
+export function downloadStatusTone(value) {
+  return DOWNLOAD_STATUS_TONES[value] || 'neutral'
+}
+
 /**
- * 主操作的文案由状态驱动（交互规范 §7.4：异常状态给出「状态 + 下一步恢复动作」）。
- * 失败行的下一步是「重试」，其余状态都是「下载」——服务端的 CreateDownload 对
- * 未准备/失败都会先建准备任务，所以按钮行为不变，只是把「失败后再次执行」
- * 这个语义说出来。行内与详情抽屉共用，两处文案分叉就是同义词混用的起点。
+ * 主操作的文案由下载状态驱动（交互规范 §7.4：异常状态给出「状态 + 下一步恢复动作」）。
+ * 失败行的下一步是「重新下载」，其余是「下载」——服务端的 CreateDownload 对未下载/
+ * 失败都会先建准备任务再下，按钮行为不变，只是把「失败后再次执行」这个语义说出来。
+ * 行内与详情抽屉共用，两处文案分叉就是同义词混用的起点。
  */
-export function downloadActionLabel(videoStatus) {
-  return videoStatus === 'failed' ? '重试' : '下载'
+export function downloadActionLabel(status) {
+  return status === 'failed' ? '重新下载' : '下载'
 }
 
 /**
@@ -136,7 +173,9 @@ export function nextStepHint(material) {
     case 'ready':
       return '可加入合成，或重新下载到其他机器'
     case 'failed':
-      return '重试下载，或查看最近一次失败原因'
+      // 「重试」这个动作已被收起（走查裁定只留「重新下载」），所以这句提示也用同一个
+      // 词 —— 指着一个界面上不存在的按钮说「下一步」，比不说更糟。
+      return '重新下载，或查看最近一次失败原因'
     default:
       return '-'
   }

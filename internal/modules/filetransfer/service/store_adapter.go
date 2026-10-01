@@ -26,6 +26,9 @@ func (mysqlStore) GetTask(taskID string) (model.Task, error) { return repository
 func (mysqlStore) ListTasks(filter repository.TaskFilter) ([]model.Task, error) {
 	return repository.ListTasks(filter)
 }
+func (mysqlStore) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
+	return repository.LatestUserDownloadStatuses(userID, materialIDs)
+}
 func (mysqlStore) NextLocalTask(nodeID string, now time.Time) (model.Task, bool, error) {
 	return repository.NextLocalTask(nodeID, now)
 }
@@ -49,9 +52,6 @@ func (mysqlStore) CancelTask(taskID string, teamID identityservice.TeamID, reque
 }
 func (mysqlStore) FailDependents(prepareTaskID, errorCode, errorMessage string, now time.Time) (int64, error) {
 	return repository.FailDependents(prepareTaskID, errorCode, errorMessage, now)
-}
-func (mysqlStore) RetryTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, now time.Time) (model.Task, bool, error) {
-	return repository.RetryTask(taskID, teamID, requestedBy, now)
 }
 
 // runtimeNodeAuth is the whole of this module's dependency on the

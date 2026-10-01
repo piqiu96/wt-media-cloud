@@ -88,7 +88,7 @@ type VideoLink struct {
 	URL string `json:"url"`
 }
 
-func GetMaterialVideoURL(_ context.Context, c *hertzapp.RequestContext) {
+func GetMaterialVideoURL(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
 		return
@@ -97,7 +97,7 @@ func GetMaterialVideoURL(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	url, err := productionservice.VideoURL(actor, id)
+	url, err := productionservice.VideoURL(ctx, actor, id)
 	if err != nil {
 		writeProductionError(c, err)
 		return
