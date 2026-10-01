@@ -253,7 +253,7 @@ const scanAcceptsChanges = computed(() => currentScan.value?.status === 'ready' 
 function localTrustMessage(e) {
   const message = String(e?.message || e || "")
   if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
-    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境状态」页刷新本机状态后重试。"
+    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境检测」页刷新本机状态后重试。"
   }
   if (message.includes("timed out") || message.includes("timeout")) {
     return "BitBrowser窗口操作超时：Local Agent 已请求 BitBrowser，但 BitBrowser 未在限定时间内返回。请查看 Agent 日志确认是否已延迟打开，或稍后重试。"
@@ -315,7 +315,7 @@ async function createProfile() {
     const localAgent = await desktopLocalAgentService()
     const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
     if (!status.node_id) {
-      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
+      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境检测」页绑定当前比特浏览器账号。")
     }
     const created = await localAgent.profileCreate(newProfile.value)
     const readback = created.snapshot || {}
@@ -651,7 +651,7 @@ async function triggerScan() {
     const localAgent = await desktopLocalAgentService()
     const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
     if (!status.node_id) {
-      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
+      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境检测」页绑定当前比特浏览器账号。")
     }
     const snapshot = await localAgent.profileScan()
     const scan = await bindingClient.submit({
@@ -769,7 +769,7 @@ async function confirmRestoreCloudConfig() {
     const localAgent = await desktopLocalAgentService()
     const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
     if (!status.node_id) {
-      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境状态」页绑定当前比特浏览器账号。")
+      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境检测」页绑定当前比特浏览器账号。")
     }
     const result = await localAgent.profileRestore(restoreTargets.value)
     const readback = result.snapshot || {}

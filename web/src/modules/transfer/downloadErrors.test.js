@@ -3,13 +3,13 @@ import { createDownloadFailureMessage, taskErrorLabel } from './downloadErrors.j
 
 describe('download failure messages', () => {
   // 走查里报的第一条：「有些点击下载需要绑定，但不知道去哪里绑定」。原文案只说了
-  // 「请确认本机 Agent 已启动并绑定」，没说是**哪一页**——那个按钮在「本地环境 → Agent
-  // 状态」上，不在这条提示里，运营就得自己找。判据（node 是否已绑定）不变，变的是这句
+  // 「请确认本机 Agent 已启动并绑定」，没说是**哪一页**——那个按钮在「桌面环境 → 环境检测」
+  // 上，不在这条提示里，运营就得自己找。判据（node 是否已绑定）不变，变的是这句
   // 话必须把去处说出来。
   it('names the page that fixes a missing local node', () => {
     const message = createDownloadFailureMessage({ type: 'local_transfer_node_unavailable' })
-    expect(message).toContain('本地环境')
-    expect(message).toContain('Agent 状态')
+    expect(message).toContain('桌面环境')
+    expect(message).toContain('环境检测')
   })
 
   // 第二条是「文案改准」。Cloud 只在 `source_url` 为空时抛 `material_unavailable`，

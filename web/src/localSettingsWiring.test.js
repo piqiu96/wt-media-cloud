@@ -53,7 +53,7 @@ describe('the 本机设置 route', () => {
     expect(layout).toContain(`path: '/${settings.path}'`)
   })
 
-  it('is listed under 本地环境, after the two pages that were already there', () => {
+  it('is listed under 桌面环境, after the two pages that were already there', () => {
     const layout = read('./layout/AppLayout.vue')
     const desktopItems = layout.slice(layout.indexOf('const desktopItems'))
 
