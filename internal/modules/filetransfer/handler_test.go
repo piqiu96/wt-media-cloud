@@ -37,7 +37,6 @@ func TestRegisterRoutesBindsTransferEndpoints(t *testing.T) {
 	}{
 		{"session", consts.MethodGet, "/api/v1/file-transfer-tasks"},
 		{"session", consts.MethodPost, "/api/v1/file-transfer-tasks/task-1/cancel"},
-		{"session", consts.MethodPost, "/api/v1/file-transfer-tasks/task-1/retry"},
 		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/claim"},
 		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/heartbeat"},
 		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/progress"},

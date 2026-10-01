@@ -97,20 +97,6 @@ func CancelTask(_ context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, task)
 }
 
-// RetryTask requeues a failed transfer within its attempt bound.
-func RetryTask(_ context.Context, c *hertzapp.RequestContext) {
-	current, ok := actor(c)
-	if !ok {
-		return
-	}
-	task, err := transferservice.RetryTask(current, c.Param("task_id"))
-	if err != nil {
-		writeTransferError(c, err)
-		return
-	}
-	api.Success(c, task)
-}
-
 // ClaimTask leases one task to the node the bearer credential identifies, or
 // answers with a null task.
 //

@@ -41,10 +41,6 @@ func CancelTask(actor identityservice.PublicUser, taskID string) (dto.Task, erro
 	return newWiredService().CancelTask(actor, taskID)
 }
 
-func RetryTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
-	return newWiredService().RetryTask(actor, taskID)
-}
-
 func ClaimTask(ctx context.Context, credential string) (dto.ClaimResult, error) {
 	return newWiredService().ClaimTask(ctx, credential)
 }

@@ -224,7 +224,7 @@ describe('next-step hint', () => {
     expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('下载到本机后可加入合成')
     expect(nextStepHint({ video_status: 'downloading' })).toBe('文件准备中，完成后即可下载到本机')
     expect(nextStepHint({ video_status: 'ready' })).toBe('可加入合成，或重新下载到其他机器')
-    expect(nextStepHint({ video_status: 'failed' })).toBe('重试下载，或查看最近一次失败原因')
+    expect(nextStepHint({ video_status: 'failed' })).toBe('重新下载，或查看最近一次失败原因')
   })
 
   // 已放弃的关系先要恢复，才轮到文件那一维：一句「去下载」会让运营以为这条路还通着。

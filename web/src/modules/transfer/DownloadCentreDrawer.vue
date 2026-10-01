@@ -12,7 +12,7 @@ import MaterialDetailDrawer from '../materials/MaterialDetailDrawer.vue'
 import { isDesktop } from '../../utils.js'
 import { openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
-import { hasLiveTask, isTerminal, withinDays } from './downloadFacts.js'
+import { hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
 import { transferRows } from './transferRows.js'
 
@@ -34,24 +34,12 @@ const presence = ref({})
 const POLL_INTERVAL_MS = 2000
 let timer = null
 
-// 三 Tab 各自的查询（CHG-20260930-069 任务 23）。进行中是活的、要轮询；失败按 90 天、
-// 历史按 30 天窗口各拉一次，服务端已经按状态把栏拆好。窗口是**展示层截断**——DB 从不
-// 删行，这里只决定某一栏还显示哪些。
-const QUERIES = {
-  active: { status: 'pending,running' },
-  failed: () => ({ status: 'failed', finished_after: daysAgoISO(90) }),
-  history: () => ({ status: 'success,cancelled', finished_after: daysAgoISO(30), limit: 50 }),
-}
-
-function daysAgoISO(days) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-}
+// 一次拉回全量（CHG-20260930-069 任务 23）。**不带** `status`/`finished_after`：终态与
+// 非终态都要，而 `finished_after` 会把 `finished_at` 为 null 的非终态行滤掉 —— 「进行中」
+// 正需要它们。分栏与窗口都在客户端做（见 `buckets`），窗口是**展示层截断**，DB 从不删行。
+const LIST_LIMIT = 200
 
 const activeTab = ref('active')
-// 计数只挂在当前这一栏上：三栏各自查询、按需加载，别的栏的数据此刻并不在手里，
-// 给一个没拉回来的数才是编造。历史有窗口与上限，只标名不计数。
-const activeLabel = computed(() => (activeTab.value === 'active' ? `进行中 (${rows.value.length})` : '进行中'))
-const failedLabel = computed(() => (activeTab.value === 'failed' ? `失败 (${rows.value.length})` : '失败'))
 
 // 一次点击在库里是两行（云端准备 `compose_input_prepare` + 本机下载 `user_download`，
 // 同一毫秒同建），下载中心只显示**本机那一条**，用状态区分阶段。
@@ -59,20 +47,46 @@ const failedLabel = computed(() => (activeTab.value === 'failed' ? `失败 (${ro
 // 状态推导仍喂**全量**列表：`taskState → needsCloudPreparation` 要看到兄弟云任务才知道
 // 「等待云端准备」，所以在 `transferRows` 之后才滤 —— 在它之前滤会把那条徽标退化成
 // 「排队中」。DB 两行不动，这里只是展示层合并。
-const rows = computed(() => transferRows(tasks.value, {
-  cancelRequested: cancelRequested.value,
-  presence: presence.value,
-}).filter((row) => row.task.purpose === 'user_download'))
+//
+// **每个素材一行**（走查修正）：同一素材的失败/成功/取消各是一次执行，记录都还在库里；
+// 这张表是传输观察面，不是执行流水账，所以按素材收敛到**最新那一条**任务。服务端按
+// `created_at DESC, id DESC` 返回，首见即最新 —— 与「我的素材」的 `download_status` 从
+// 最新一条 user_download 派生是同一个口径。
+const rows = computed(() => {
+  const seen = new Set()
+  return transferRows(tasks.value, {
+    cancelRequested: cancelRequested.value,
+    presence: presence.value,
+  }).filter((row) => row.task.purpose === 'user_download')
+    .filter((row) => {
+      const key = row.task.asset_id || `task:${row.task.id}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+})
 
 // 轮询闸门也只认 user_download：云准备行是本机行的影子，随本机行一起终态。
 const liveDownloads = computed(() => tasks.value.filter((task) => task.purpose === 'user_download'))
 
-// 历史 Tab 的窗口服务端只给了一个（30 天，覆盖成功），取消 7 天在这里再收一次：
-// `finished_after=30d` 把 success+cancelled 都拉回来，其中 cancelled 只显示最近 7 天的。
-const visibleRows = computed(() => {
-  if (activeTab.value !== 'history') return rows.value
-  return rows.value.filter((row) => !(row.task.status === 'cancelled' && !withinDays(row.task, 7)))
+// 三栏：收敛后每行按**最新那条任务**的状态归栏 —— 非终态进进行中、失败单列、其余终态进
+// 历史。窗口跟着最新那条走（失败 90 天；历史里成功 30 天、取消 7 天）：同一素材更早的
+// 失败不该把它的行从「历史」拉回「失败」。
+const buckets = computed(() => {
+  const list = rows.value
+  return {
+    active: list.filter((row) => !isTerminal(row.task)),
+    failed: list.filter((row) => isFailed(row.task) && withinDays(row.task, 90)),
+    history: list.filter((row) => isHistory(row.task)
+      && (row.task.status === 'success' ? withinDays(row.task, 30) : withinDays(row.task, 7))),
+  }
 })
+
+const visibleRows = computed(() => buckets.value[activeTab.value] || [])
+
+// 计数只挂在当前这一栏上：历史有窗口，别的栏此刻没在屏幕上，给一个没算过的数才是编造。
+const activeLabel = computed(() => (activeTab.value === 'active' ? `进行中 (${buckets.value.active.length})` : '进行中'))
+const failedLabel = computed(() => (activeTab.value === 'failed' ? `失败 (${buckets.value.failed.length})` : '失败'))
 
 // 历史 Tab 的表格式。`visibleRows` 已经做过取消 7 天窗口，表格直接吃这一份。
 const historyColumns = [
@@ -144,9 +158,8 @@ function ensurePolling() {
 }
 
 async function load() {
-  const query = typeof QUERIES[activeTab.value] === 'function' ? QUERIES[activeTab.value]() : QUERIES[activeTab.value]
   try {
-    const data = await client.listTasks(query)
+    const data = await client.listTasks({ limit: LIST_LIMIT })
     tasks.value = Array.isArray(data) ? data : []
     error.value = ''
   } catch (e) {
@@ -159,8 +172,8 @@ async function load() {
   ensurePresence()
 }
 
-// 切 Tab 就拉那个 Tab 的查询；进行中 Tab 的轮询由 `ensurePolling` 门控。
-watch(activeTab, () => { if (visible.value) load() })
+// 切 Tab 不再重新拉取（一次拉回全量、分栏在客户端做），只重估轮询闸门：停在进行中才轮询。
+watch(activeTab, () => { if (visible.value) ensurePolling() })
 
 watch(visible, (open) => {
   if (!open) {
@@ -201,22 +214,12 @@ async function cancel(task) {
   }
 }
 
-async function retry(task) {
-  try {
-    await client.retryTask(task.id)
-    cancelRequested.value = cancelRequested.value.filter((id) => id !== task.id)
-    await load()
-  } catch (e) {
-    MessagePlugin.error(e?.message || '重试失败')
-  }
-}
-
 /**
- * 终态行重新发起下载。
+ * 失败 / 已取消行重新发起下载。
  *
- * 这是**新建一条任务**，不是重试：服务端去重键的 generation 把终态算作已结束，所以
- * 重新点击会得到一条新行，而 `retryTask` 改的是原来那条（且要求它没在等准备）。
- * 两者不是一个动作，所以 UI 上也是两个按钮。
+ * 这是**新建一条任务**：服务端去重键的 generation 把终态算作已结束，所以重新点击会得到
+ * 一条新行。走查裁定后 UI 上只有这一个动作 —— 原先并排的「重试」改的是原来那条行（且
+ * 要求它没在等准备），两个按钮都在说「再来一次」，收成一个。
  */
 async function redownload(task) {
   try {
@@ -297,24 +300,18 @@ async function openDetail(row) {
             <p v-if="row.presence === 'present_elsewhere'" class="transfer-item__where">
               文件还在原来的保存位置：{{ row.fileFact.directory }}
             </p>
-            <!-- 查过、所有已知位置都没有。这一句只在**成功**的行上说：别的行本来就没落盘。 -->
+            <!-- 查过、所有已知位置都没有。这一句只在**成功**的行上说：别的行本来就没落盘。
+                 只陈述事实 —— 已成功的素材不重下（走查裁定），所以这里不再承诺「可以重新下载」。 -->
             <p v-else-if="row.presence === 'absent' && row.task.status === 'success'" class="transfer-item__where">
-              文件已不在本机已知的保存位置，可以重新下载
+              文件已不在本机已知的保存位置
             </p>
 
             <div class="transfer-item__footer">
               <p class="transfer-item__time">发起于 {{ row.createdText }}</p>
               <div class="transfer-item__actions">
+                <!-- 进行中的行只有这一个动作：终态的「重新下载」「打开文件」在这一栏恒不
+                     成立（它们要求终态），所以模板里也不留死按钮。 -->
                 <t-button v-if="row.canCancel" size="small" class="wt-secondary-button" variant="outline" @click="cancel(row.task)">取消</t-button>
-                <t-button v-if="row.canRetry" size="small" theme="primary" @click="retry(row.task)">重试</t-button>
-                <!-- 终态行的出路。已取消行原先一个动作都没有，「已取消的无法再次点击下载」
-                     就是这么来的；失败行里那些在等准备的（重试必然被服务端拒绝）也只有这一条能走。 -->
-                <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
-                <!--
-                  打开文件是桌面端专属：文件落在运营这台机器上（Agent 写的），浏览器打不开它。
-                  守卫写在按钮上而不是点下去再报错 —— 一个点了必然失败的按钮不该出现在那里。
-                -->
-                <t-button v-if="row.canOpen && isDesktop()" size="small" class="wt-secondary-button" variant="outline" @click="open(row.task)">打开文件</t-button>
               </div>
             </div>
           </li>
@@ -331,7 +328,6 @@ async function openDetail(row) {
             <div class="transfer-item__footer">
               <p class="transfer-item__time">失败于 {{ row.finishedText || row.createdText }}</p>
               <div class="transfer-item__actions">
-                <t-button v-if="row.canRetry" size="small" theme="primary" @click="retry(row.task)">重试</t-button>
                 <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
               </div>
@@ -339,7 +335,8 @@ async function openDetail(row) {
           </li>
         </ul>
 
-        <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件，取消/成功都可重新下载。 -->
+        <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件，只有已取消的
+             一条能重新下载 —— 已成功的素材不重下（走查裁定）。 -->
         <t-table v-else class="transfer-table" :data="visibleRows" :columns="historyColumns" :row-key="(row) => row.task.id" size="small" :scroll="{ x: 640 }">
           <template #title="{ row }">
             <span class="transfer-table__title" :title="row.task.asset_title">{{ row.task.asset_title || `素材 #${row.task.asset_id}` }}</span>
@@ -380,7 +377,9 @@ async function openDetail(row) {
 .transfer-item__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--wt-border); }
 .transfer-item__time { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; white-space: nowrap; }
 .transfer-item__actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.transfer-table__title { color: var(--wt-text-primary); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* `display: block` 是这一条的**尺子**：省略号三件套在行内元素上不生效，标题会直接冲出
+   单元格（走查报的「每行最后标题冲出边界」就是这个）。有了它，宽度才由单元格定下来。 */
+.transfer-table__title { display: block; max-width: 100%; color: var(--wt-text-primary); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .download-centre-drawer :deep(.t-drawer__body) { padding: 16px; }
 @media (max-width: 620px) {
   .transfer-item { padding: 12px; }

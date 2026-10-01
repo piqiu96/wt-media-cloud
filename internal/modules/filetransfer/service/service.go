@@ -120,7 +120,6 @@ type Store interface {
 	FailTask(repository.FailureInput, time.Time) (bool, error)
 	CancelTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (bool, error)
 	FailDependents(string, string, string, time.Time) (int64, error)
-	RetryTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (model.Task, bool, error)
 }
 
 // NodeAuthenticator is the one question this module asks the runtime-binding
@@ -520,36 +519,6 @@ const (
 	// ended without producing a file.
 	cancelledPreparationMessage = "the preparation this download waited for was cancelled"
 )
-
-// RetryTask requeues a failed task within its attempt bound, and answers with
-// the requeued body.
-//
-// Both guards are checked here *and* in the update: here so the caller gets
-// `transfer_task_conflict` instead of a silent no-op, and in the update so a race
-// between the two cannot requeue a task that has since succeeded.
-//
-// The third guard is the dependency pointer, and it is the same "no silent no-op"
-// rule: a failed download that still points at its preparation is waiting on
-// something that already ended, so the requeue would leave it `pending` and
-// un-leasable — exactly the row it is now. See `retryTask` for the full argument;
-// the remedy for these rows is a new download rather than a retry.
-func (s *Service) RetryTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
-	task, team, err := s.scopedTask(actor, taskID)
-	if err != nil {
-		return dto.Task{}, err
-	}
-	if task.Status != model.StatusFailed || task.DependencyTaskID != "" || task.AttemptCount >= task.MaxAttempts {
-		return dto.Task{}, ErrTaskConflict
-	}
-	requeued, retried, err := s.store.RetryTask(task.ID, team, actor.ID, s.now().UTC())
-	if err != nil {
-		return dto.Task{}, err
-	}
-	if !retried {
-		return dto.Task{}, ErrTaskConflict
-	}
-	return taskBody(requeued), nil
-}
 
 // ClaimTask leases one task for the node a credential identifies, or answers
 // with no task at all.

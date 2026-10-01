@@ -53,9 +53,6 @@ func (mysqlStore) CancelTask(taskID string, teamID identityservice.TeamID, reque
 func (mysqlStore) FailDependents(prepareTaskID, errorCode, errorMessage string, now time.Time) (int64, error) {
 	return repository.FailDependents(prepareTaskID, errorCode, errorMessage, now)
 }
-func (mysqlStore) RetryTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, now time.Time) (model.Task, bool, error) {
-	return repository.RetryTask(taskID, teamID, requestedBy, now)
-}
 
 // runtimeNodeAuth is the whole of this module's dependency on the
 // runtime-binding domain. It is a type rather than a call inside the service so

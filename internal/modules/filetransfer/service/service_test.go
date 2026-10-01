@@ -54,8 +54,6 @@ type memoryStore struct {
 	completeOK        bool
 	failOK            bool
 	cancelOK          bool
-	retryOK           bool
-	retryResult       Task
 	failDependentsErr error
 
 	listFilter   repository.TaskFilter
@@ -66,11 +64,6 @@ type memoryStore struct {
 	lastDone     repository.CompletionInput
 	lastFail     repository.FailureInput
 	lastCancel   struct {
-		taskID string
-		team   identityservice.TeamID
-		user   identityservice.UserID
-	}
-	lastRetry struct {
 		taskID string
 		team   identityservice.TeamID
 		user   identityservice.UserID
@@ -259,15 +252,6 @@ func (s *memoryStore) FailDependents(prepareTaskID, errorCode, errorMessage stri
 		return 0, s.failDependentsErr
 	}
 	return 0, nil
-}
-
-func (s *memoryStore) RetryTask(taskID string, teamID identityservice.TeamID, requestedBy identityservice.UserID, _ time.Time) (Task, bool, error) {
-	s.counts["retry"]++
-	s.lastRetry.taskID, s.lastRetry.team, s.lastRetry.user = taskID, teamID, requestedBy
-	if !s.retryOK {
-		return Task{}, false, nil
-	}
-	return s.retryResult, true, nil
 }
 
 type stubNodes struct {
@@ -670,113 +654,6 @@ func TestCancellingAPreparationReportsAFailedWaiterRelease(t *testing.T) {
 
 	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "prepare-1"); !errors.Is(err, store.failDependentsErr) {
 		t.Fatalf("CancelTask() error = %v, want the release failure", err)
-	}
-}
-
-// The update carries the actor's team, not the row's. Handing the statement the
-// value it just read would make its `team_id = ?` a restatement of the row
-// rather than a constraint, and the statement's own scope would stop being one.
-func TestRetryTaskScopesTheUpdateToTheActorsTeam(t *testing.T) {
-	store := newMemoryStore(taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7)))
-	store.retryOK = true
-	store.retryResult = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
-	service := testService(store, workingNode(), fixedClock(testNow()))
-
-	body, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1")
-	if err != nil {
-		t.Fatalf("RetryTask() error = %v", err)
-	}
-	if store.lastRetry.team != teamOf(7) || store.lastRetry.user != 9 {
-		t.Fatalf("retry scoped by %+v, want the acting user", store.lastRetry)
-	}
-	if body.Status != string(model.StatusPending) {
-		t.Fatalf("status = %q, want the requeued body", body.Status)
-	}
-	if store.count("get") != 1 {
-		t.Fatalf("get called %d times, want one read and no more", store.count("get"))
-	}
-}
-
-// A failed download whose preparation never delivered cannot be retried, and
-// saying so is the whole point of the guard.
-//
-// Requeueing it would write a row that is `pending` with its `dependency_task_id`
-// still set — the state it was just in. `leaseable` refuses a local task whose
-// dependency is set, and the dependency is terminal, so nothing will ever hand it
-// facts or fail it again: the retry would land on the database and change nothing
-// the user could observe, which is what "I pressed retry and nothing happened"
-// was. The remedy for these rows is a new download, which builds a new
-// preparation, so the answer here is a conflict rather than a silent no-op.
-func TestRetryTaskRefusesADownloadWhosePreparationNeverDelivered(t *testing.T) {
-	task := taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7))
-	task.DependencyTaskID = "prepare-1"
-	store := newMemoryStore(task)
-	store.retryOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
-
-	if _, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1"); !errors.Is(err, ErrTaskConflict) {
-		t.Fatalf("RetryTask() error = %v, want conflict", err)
-	}
-	if store.count("retry") != 0 {
-		t.Fatalf("retry called %d times, want none while the dependency pointer is set", store.count("retry"))
-	}
-}
-
-// The other half of the same guard: once the preparation has handed the facts
-// over, the pointer is gone and the retry is the ordinary one — the download that
-// failed on its own account, after it had something to download.
-func TestRetryTaskStillRequeuesADownloadWhoseFactsArrived(t *testing.T) {
-	task := taskFixture("transfer-1", model.StatusFailed, 9, teamOf(7))
-	store := newMemoryStore(task)
-	store.retryOK = true
-	store.retryResult = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
-	service := testService(store, workingNode(), fixedClock(testNow()))
-
-	if _, err := service.RetryTask(actorWith(9, teamOf(7)), "transfer-1"); err != nil {
-		t.Fatalf("RetryTask() error = %v", err)
-	}
-	if store.count("retry") != 1 {
-		t.Fatalf("retry called %d times, want the requeue", store.count("retry"))
-	}
-}
-
-func TestRetryTaskRequiresAFailedTaskWithinItsBound(t *testing.T) {
-	exhausted := taskFixture("exhausted", model.StatusFailed, 9, teamOf(7))
-	exhausted.AttemptCount = exhausted.MaxAttempts
-
-	for _, testCase := range []struct {
-		name   string
-		task   Task
-		refuse bool
-	}{
-		{name: "failed with an attempt left", task: taskFixture("fresh", model.StatusFailed, 9, teamOf(7))},
-		{name: "already succeeded", task: taskFixture("done", model.StatusSuccess, 9, teamOf(7)), refuse: true},
-		{name: "still running", task: taskFixture("running", model.StatusRunning, 9, teamOf(7)), refuse: true},
-		{name: "every attempt used", task: exhausted, refuse: true},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			store := newMemoryStore(testCase.task)
-			store.retryOK = true
-			store.retryResult = testCase.task
-			service := testService(store, workingNode(), fixedClock(testNow()))
-
-			_, err := service.RetryTask(actorWith(9, teamOf(7)), testCase.task.ID)
-			if testCase.refuse {
-				if !errors.Is(err, ErrTaskConflict) {
-					t.Fatalf("error = %v, want conflict", err)
-				}
-				if store.count("retry") != 0 {
-					t.Fatalf("retry called %d times, want none", store.count("retry"))
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("RetryTask() error = %v", err)
-			}
-			if store.count("retry") != 1 {
-				t.Fatalf("retry called %d times, want one", store.count("retry"))
-			}
-		})
 	}
 }
 

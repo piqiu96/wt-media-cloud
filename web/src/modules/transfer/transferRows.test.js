@@ -27,7 +27,8 @@ describe('transfer row', () => {
   it('carries every row action through to the row object', () => {
     const row = transferRow(task({ status: 'cancelled' }))
     expect(row.canCancel).toBe(false)
-    expect(row.canRetry).toBe(false)
+    // 行上**没有** canRetry 这个位了（走查后收起「重试」，只留「重新下载」）。
+    expect('canRetry' in row).toBe(false)
     expect(row.canRedownload).toBe(true)
     expect('canOpen' in row).toBe(true)
   })
@@ -35,8 +36,7 @@ describe('transfer row', () => {
   it('puts 重新下载 on the rows that were stuck with nothing to do', () => {
     // 走查里报的那一条：已取消行原先零动作。
     expect(transferRow(task({ status: 'cancelled' })).canRedownload).toBe(true)
-    // 在等准备的下载失败后（依赖没交付）：重试会被服务端拒绝，出路是这一条。
-    expect(transferRow(task({ status: 'failed', error_code: 'dependency_failed' })).canRetry).toBe(false)
+    // 在等准备的下载失败后（依赖没交付）：那条行也只有这一条出路能走。
     expect(transferRow(task({ status: 'failed', error_code: 'dependency_failed' })).canRedownload).toBe(true)
   })
 
@@ -95,7 +95,7 @@ describe('transfer rows', () => {
    *
    * 这是走查第二条的落点：已完成的行要能说出「文件在旧目录里」而不是只会说「可能已被
    * 移动或删除」。名字索引而不是任务索引，因为磁盘上只有一个文件，而名字可能对应多条
-   * 任务（重试、重新下载各一条）。
+   * 任务（同一个素材下载过多次）。
    */
   it('gives each row the file fact its own name was scanned as', () => {
     const presence = {
@@ -114,9 +114,9 @@ describe('transfer rows', () => {
     expect(rows[0].canRedownload).toBe(false)
 
     expect(rows[1].presence).toBe('absent')
-    // 实测不在：打开文件没了，重新下载来了 —— 这一格就是第二条报障的修法。
+    // 实测不在：打开文件没了。重新下载也**不给** —— 已成功的素材不重下（走查裁定）。
     expect(rows[1].canOpen).toBe(false)
-    expect(rows[1].canRedownload).toBe(true)
+    expect(rows[1].canRedownload).toBe(false)
 
     // 名单里没有的名字是「没查过」，不是「不在」。
     expect(rows[2].presence).toBe('unknown')

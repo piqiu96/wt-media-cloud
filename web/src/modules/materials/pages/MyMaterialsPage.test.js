@@ -139,7 +139,7 @@ describe('my materials page', () => {
     expect(source).toMatch(/client\.get\(row\.id\)[\s\S]{0,200}?usage_status: row\.usage_status/)
   })
 
-  // 抽屉按上下文给动作：我的素材上下文提供下载/重试，不再提供「加入我的素材」
+  // 抽屉按上下文给动作：我的素材上下文提供下载/重新下载，不再提供「加入我的素材」
   // （它在这里就是自己）。
   it('opens the drawer in mine mode with the actions of a relation, and no add', () => {
     expect(source).toContain('mode="mine"')

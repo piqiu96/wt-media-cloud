@@ -20,22 +20,29 @@ describe('download centre drawer', () => {
   it('shows the re-download button under the fact the row computed', () => {
     expect(source).toContain('v-if="row.canRedownload"')
     expect(source).toContain('@click="redownload(row.task)"')
-    // 已取消行的出路就是这个按钮；它旁边还得有重试与打开文件各自的条件，
-    // 三者混用同一个布尔量会让某一行同时出现两个动作。
-    expect(source).toContain('v-if="row.canRetry"')
+    // 终态行的出路就是这个按钮；它旁边还得有「打开文件」各自的条件，
+    // 两者混用同一个布尔量会让某一行同时出现两个动作。
     expect(source).toContain('v-if="row.canOpen && isDesktop()"')
   })
 
   /**
-   * 「重新下载」是**新建一条任务**，所以它必须走发起下载那个入口。
+   * 「重试」收进「重新下载」（走查裁定）：模板里不再有它，也不再调那个接口。
    *
-   * 走 `retryTask` 是错的：那个接口改的是原来那条行，且服务端要求它没在等准备
-   * （依赖已交付），一条已在等准备的失败行会被直接拒绝 —— 而用户按的是「重新下载」，
-   * 得到的会是「重试失败」。
+   * 两个按钮都在说「再来一次」，而 `retryTask` 改的是原来那条行、还要求它没在等准备
+   * （依赖已交付）—— 一条在等准备的失败行会被服务端直接拒绝。留着它，用户按下去得到的
+   * 会是「重试失败」。
    */
-  it('re-downloads through the download entry point, not through retry', () => {
+  it('has no retry button or retry call left', () => {
+    expect(source).not.toContain('canRetry')
+    expect(source).not.toContain('retryTask')
+    expect(source).not.toContain('>重试<')
+  })
+
+  /**
+   * 「重新下载」是**新建一条任务**，所以它必须走发起下载那个入口。
+   */
+  it('re-downloads through the download entry point', () => {
     expect(source).toContain('await materials.createDownload(task.asset_id)')
-    expect(source).not.toContain('materials.retryTask')
     // 失败的话术取自发起下载那份词表（`error.type` 是冻结的名字），不是任务行的 error_code。
     expect(source).toContain('MessagePlugin.error(createDownloadFailureMessage(e))')
   })
@@ -103,45 +110,65 @@ describe('download centre shows one row per click', () => {
   })
 })
 
-// 三栏（CHG-20260930-069 任务 23）：进行中 / 失败 / 历史。栏由服务端按状态分好、
-// 按各自窗口查询 —— 不再在客户端把终态行再劈成两栏。
+// 三栏（CHG-20260930-069 任务 23）：进行中 / 失败 / 历史。**一次拉取**，按素材收敛成
+// 一行，再按该素材最新那条任务的状态归栏；窗口仍在客户端套（展示层截断，DB 不删行）。
 describe('download centre drawer tabs', () => {
-  it('renders the three switchable tabs, counting only the loaded tab', () => {
+  it('renders the three switchable tabs, counting only the current one', () => {
     expect(source).toContain('<t-tabs')
     expect(source).toContain('value="active"')
     expect(source).toContain('value="failed"')
     expect(source).toContain('value="history"')
-    // 计数只挂在当前这一栏：别的栏的数据此刻不在手里，给一个没拉回来的数才是编造。
-    // 历史有窗口与上限，只标名不计数。
     expect(source).toContain('activeLabel')
     expect(source).toContain('failedLabel')
     expect(source).not.toContain('recent')
   })
 
-  // 每栏各拉各的查询（`status`/`finished_after`/`limit`）。窗口是展示层截断——
-  // DB 从不删行，这里只决定某一栏还显示哪些。
-  it('queries each tab through its own status window', () => {
-    expect(source).toContain('const QUERIES = {')
-    expect(source).toContain("active: { status: 'pending,running' }")
-    expect(source).toContain("failed: () => ({ status: 'failed', finished_after: daysAgoISO(90) })")
-    expect(source).toContain("history: () => ({ status: 'success,cancelled', finished_after: daysAgoISO(30), limit: 50 })")
-    expect(source).toContain('function daysAgoISO(days)')
-    expect(source).toContain('client.listTasks(query)')
-    // 切 Tab 就拉那个 Tab 的查询。
-    expect(source).toContain('watch(activeTab, () => { if (visible.value) load() })')
+  // 不再三栏各查各的：一次拉回全部任务，分栏与窗口都在客户端做（每个素材一行之后）。
+  // 不带 `status`/`finished_after` —— `finished_after` 会把 `finished_at` 为 null 的
+  // 非终态行滤掉，而「进行中」正需要它们。
+  it('loads the task list once instead of querying per tab', () => {
+    expect(source).not.toContain('const QUERIES = {')
+    expect(source).not.toContain('daysAgoISO')
+    expect(source).toContain('client.listTasks({ limit: LIST_LIMIT })')
+    // 切 Tab 不再重新拉取（数据一次在手），只重估轮询闸门。
+    expect(source).not.toContain('watch(activeTab, () => { if (visible.value) load() })')
   })
 
-  // 取消 7 天窗口在客户端再收一次：历史查询用 30 天（覆盖成功），cancelled 只留 7 天内的。
-  it('re-widens the cancelled rows to their 7-day window on history', () => {
+  // 每个素材一行 = 该素材最新那条任务：服务端用 `created_at DESC, id DESC` 返回，首见即最新。
+  it('keeps one row per material, taking the newest task the server returned', () => {
+    const block = sliceBetween(source, 'const rows = computed', 'const liveDownloads')
+    expect(block).toContain('transferRows(tasks.value, {')
+    expect(block).toContain(".filter((row) => row.task.purpose === 'user_download')")
+    expect(block).toContain('seen.has(key)')
+    expect(block).toContain('seen.add(key)')
+    // 收敛发生在 `transferRows` 之后：状态推导要看到兄弟云任务，先滤会让徽标退化。
+    expect(block.indexOf('transferRows(tasks.value')).toBeLessThan(block.indexOf('.filter((row)'))
+  })
+
+  // 归栏按**最新任务**的状态：非终态→进行中，failed→失败，success/cancelled→历史；
+  // 窗口在客户端套（失败 90 天，历史成功 30 天、取消 7 天）。
+  it('buckets each material by its newest task and applies the windows locally', () => {
+    expect(source).toContain('const buckets = computed')
+    expect(source).toContain('!isTerminal(row.task)')
+    expect(source).toContain('isFailed(row.task) && withinDays(row.task, 90)')
+    expect(source).toContain("row.task.status === 'success' ? withinDays(row.task, 30) : withinDays(row.task, 7)")
     expect(source).toContain('const visibleRows = computed')
-    expect(source).toContain("row.task.status === 'cancelled'")
-    expect(source).toContain('withinDays(row.task, 7)')
   })
 
   it('shows history as a table with terminal facts', () => {
     expect(source).toContain('<t-table')
     expect(source).toContain('row.finishedText')
     expect(source).toContain('row.sizeText')
+  })
+
+  // 走查修正（任务 23 收尾）：历史表格的标题要真的被截断。省略号三件套在**行内**元素上
+  // 不生效 —— 得先给它一把可量的尺子（`display: block`），否则长标题直接冲出单元格。
+  it('clips the history title inside its cell', () => {
+    const block = sliceBetween(source, '.transfer-table__title {', '}')
+    expect(block).toContain('display: block')
+    expect(block).toContain('overflow: hidden')
+    expect(block).toContain('white-space: nowrap')
+    expect(block).toContain('text-overflow: ellipsis')
   })
 
   // 走查修正（任务 23 收尾）：下载中心抽屉与详情抽屉同宽 min(62vw, 880px)。

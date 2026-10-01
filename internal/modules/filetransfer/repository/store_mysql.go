@@ -138,6 +138,21 @@ func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
 // in the direction that is hard to see: a cancelled transfer would let the next
 // click resurrect the same key, and the row it lands on already carries the
 // cancelled executor's state.
+//
+// A material this user has already downloaded is answered with the task that
+// downloaded it, and no new row is written. "Download", here, is a **record of an
+// execution**; "this material is downloaded" is an **asset state**, and asking
+// for it twice does not produce a second file — it produces a second execution
+// row that the transport view would then have to collapse. The check is on the
+// *latest* task, not on "has ever succeeded": a material that succeeded and was
+// then downloaded again and failed is, right now, a failed download, and
+// re-downloading it is a request that should be honoured.
+//
+// The check is per user rather than per user-and-node, matching
+// `latestUserDownloadStatuses`: the state the UI shows as "已下载" is the
+// user-level one, so gating the write on a narrower predicate than the one that
+// produced the label would let the list say "downloaded" while the API happily
+// queued another one.
 func CreateUserDownloadTask(input CreateUserDownloadInput, now time.Time) (model.Task, error) {
 	return createUserDownloadTask(database.DB(), input, now)
 }
@@ -148,11 +163,18 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	}
 	var task model.Task
 	err := db.Transaction(func(tx *gorm.DB) error {
+		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1", model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err == nil && latest.Status == model.StatusSuccess {
+			task = latest
+			return nil
+		}
 		var finished int64
 		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy).Row().Scan(&finished); err != nil {
 			return err
 		}
-		var err error
 		task, err = createTask(tx, CreateTaskInput{
 			ID:               input.ID,
 			TeamID:           input.TeamID,
@@ -360,9 +382,10 @@ func failDependentsOfTerminalTasks(db *gorm.DB, now time.Time) (int64, error) {
 // transfer is still outstanding resolves to the same row rather than creating a
 // second one. `ON DUPLICATE KEY UPDATE id = id` is a deliberate no-op: it turns
 // the unique-key collision into a harmless statement, and it does not rewrite
-// the instruction, because re-running a task is `RetryTask`'s job and doing it
-// here would let a second click mid-transfer retarget a task an executor is
-// already running.
+// the instruction, because re-running a task is a **new** task's job — a click
+// after a terminal state counts a new generation (see `createUserDownloadTask`)
+// — and doing it here would let a second click mid-transfer retarget a task an
+// executor is already running.
 //
 // The row is then read back by `dedupe_key`, not by the id we tried to insert.
 // On a collision the surviving row keeps its own id — the caller's freshly
@@ -750,45 +773,6 @@ func cancelTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy 
 		return false, running.Error
 	}
 	return running.RowsAffected == 1, nil
-}
-
-// RetryTask requeues a failed transfer for the user who asked for it, within its
-// bounded attempt count, and returns the requeued task.
-//
-// `attempt_count` is not reset: it is the count of attempts this task has
-// already consumed, and clearing it would make `max_attempts` unbounded through
-// repeated retries — the exact thing a bound is for. The task becomes `pending`
-// again with the executor state cleared, because a previous executor's lease,
-// heartbeat and byte counts describe bytes that are no longer known to be on
-// disk.
-//
-// A task still pointing at its preparation is refused, because requeueing it
-// would write back the state it is already in. `leaseable` admits a local task
-// only while `dependency_task_id IS NULL`, and the pointer is cleared by the
-// hand-over alone, so a failed task that still has one is waiting on a
-// preparation that ended without producing anything: the row would be `pending`,
-// un-leasable, and never handed over or failed again, since the dependency is
-// terminal too. The user's click would land on the database and change nothing
-// they could see. Retrying a download whose preparation delivered is unaffected —
-// the pointer is NULL by then — and the remedy for the refused rows is a new
-// download, which queues a new preparation.
-func RetryTask(taskID string, teamID identity.TeamID, requestedBy identity.UserID, now time.Time) (model.Task, bool, error) {
-	return retryTask(database.DB(), taskID, teamID, requestedBy, now)
-}
-
-func retryTask(db *gorm.DB, taskID string, teamID identity.TeamID, requestedBy identity.UserID, now time.Time) (model.Task, bool, error) {
-	if strings.TrimSpace(taskID) == "" || teamID <= 0 || requestedBy <= 0 {
-		return model.Task{}, false, fmt.Errorf("invalid transfer retry")
-	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'pending', claimed_by_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, started_at = NULL, finished_at = NULL, cancel_requested_at = NULL, transferred_bytes = 0, speed_bytes_per_sec = 0, eta_seconds = NULL, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND team_id = ? AND requested_by = ? AND status = 'failed' AND dependency_task_id IS NULL AND attempt_count < max_attempts`, now, taskID, teamID, requestedBy)
-	if result.Error != nil {
-		return model.Task{}, false, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return model.Task{}, false, nil
-	}
-	task, err := getTask(db, taskID)
-	return task, err == nil, err
 }
 
 // ReconcileCancelledTasks finishes the cancellation of running tasks whose

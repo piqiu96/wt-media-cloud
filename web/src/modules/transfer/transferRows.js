@@ -8,7 +8,7 @@
 // 2. 一张行表能被单测钉住。模板字符串不能。
 import { formatByteRate, formatBytes, formatEta } from '../../shared/utils/units.js'
 import { formatDateTime } from '../../shared/utils/datetime.js'
-import { canCancel, canOpenFile, canRedownload, canRetry, fileFact, filePresence, isFailed, isHistory, isTerminal, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, fileFact, filePresence, isFailed, isHistory, isTerminal, progressOf, taskState } from './downloadFacts.js'
 import { taskErrorLabel } from './downloadErrors.js'
 
 /** 「已传 / 总长」。总长未知时只说已传了多少，绝不写 `0 / 0`。 */
@@ -49,9 +49,8 @@ export function transferRow(task, { tasks = [], cancelRequested = false, presenc
     finishedAt: task.finished_at || null,
     finishedText: task.finished_at ? formatDateTime(task.finished_at) : '',
     canCancel: canCancel(task) && !cancelRequested,
-    canRetry: canRetry(task),
     canOpen: canOpenFile(task, presenceOfFile),
-    canRedownload: canRedownload(task, presenceOfFile),
+    canRedownload: canRedownload(task),
     // `presence` 是给界面读的：文件在旧目录里时要说出来在哪儿，不然「打开文件」能用而
     // 「重新下载」没出现的组合看起来像少了点什么。`fileFact` 是那一条记录（含目录与
     // 体积），`null` 表示没查过或不适用。

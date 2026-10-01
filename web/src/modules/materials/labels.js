@@ -173,7 +173,9 @@ export function nextStepHint(material) {
     case 'ready':
       return '可加入合成，或重新下载到其他机器'
     case 'failed':
-      return '重试下载，或查看最近一次失败原因'
+      // 「重试」这个动作已被收起（走查裁定只留「重新下载」），所以这句提示也用同一个
+      // 词 —— 指着一个界面上不存在的按钮说「下一步」，比不说更糟。
+      return '重新下载，或查看最近一次失败原因'
     default:
       return '-'
   }
