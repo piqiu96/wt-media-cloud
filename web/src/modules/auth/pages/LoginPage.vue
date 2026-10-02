@@ -84,7 +84,7 @@ async function login(options = {}) {
   } catch (e) {
     if (e.errcode === 20010) {
       replaceNeeded.value = true
-      error.value = '当前账号已在其他位置登录。请确认是否替换旧会话。'
+      error.value = '当前账号已有进行中的桌面端登录，再次登录将替换旧会话。'
       return
     }
     error.value = e.message
@@ -133,7 +133,7 @@ async function login(options = {}) {
             <label class="field-label" for="login-password">密码</label>
             <div class="login-field"><t-icon name="lock-on" /><input id="login-password" v-model="password" type="password" autocomplete="current-password" placeholder="密码" @input="resetReplacePrompt" /></div>
             <t-alert v-if="error" :message="error" theme="error" />
-            <t-alert v-if="replaceNeeded" message="确认后会替换旧登录会话；旧设备不能继续领取新的本地任务。设备绑定本身不会改变。" theme="warning" />
+            <t-alert v-if="replaceNeeded" message="替换的只是登录会话；任务执行由设备绑定决定，本次操作不改变设备绑定，已绑定电脑的执行不受影响。" theme="warning" />
             <t-alert v-if="loginAction" :message="loginAction" theme="info" />
             <button type="submit" class="login-button primary" :disabled="submitting">{{ submitting ? loginAction : replaceNeeded ? '替换旧会话并登录' : '登录' }}</button>
             <button v-if="replaceNeeded" type="button" class="login-button outline" :disabled="submitting" @click="resetReplacePrompt">取消</button>
