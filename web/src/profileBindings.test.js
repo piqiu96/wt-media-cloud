@@ -36,7 +36,7 @@ describe('profile binding client', () => {
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 
-  // 「以当前环境为准」是唯一的 overwrite 出口（CHG-20261002-074 阶段 3）：只有显式传入
+  // 「比特账号绑定」自助入口是唯一的 overwrite 出口（CHG-20261002-074 阶段 3）：只有显式传入
   // overwrite 时才随请求发送，缺省路径不发送 —— 服务端把「账号不一致」当作 23002 拒绝。
   it('sends overwrite only when the deliberate self-service entry asks for it', async () => {
     const fetch = vi.fn(async () => response({}))

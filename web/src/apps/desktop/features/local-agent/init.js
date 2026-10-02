@@ -106,7 +106,7 @@ export async function bindTrustedLocalAgent({ bindDevice = false } = {}) {
     await createProfileBindingClient().confirmMainIdentityDirect(mainUserId)
   } catch (error) {
     if (error?.errcode === 23002) {
-      throw new Error("当前比特浏览器登录账号与系统绑定账号不一致，已阻止本机浏览器相关操作。请切换回已绑定的比特浏览器账号后重新检测；如果确实要改用当前账号，可在「个人信息 → 设备与本机环境」点「以当前环境为准」自助确认。")
+      throw new Error("当前比特浏览器登录账号与系统绑定账号不一致，已阻止本机浏览器相关操作。请切换回已绑定的比特浏览器账号后重新检测；如果确实要改用当前账号，可在「个人信息 → 设备与本机环境」点「比特账号绑定」自助确认。")
     }
     throw error
   }

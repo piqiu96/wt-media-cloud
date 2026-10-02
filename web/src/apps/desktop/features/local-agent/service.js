@@ -98,8 +98,14 @@ export function createLocalAgentService({ invoke }) {
   }
 
   return {
-    async status() {
-      return normalizeLocalAgentStatus(await invoke(LOCAL_AGENT_COMMANDS.status));
+    // `reuseScan` asks the Agent to reuse a recent BitBrowser scan instead of
+    // paying for a fresh one. Only background polling sets it: the account id in
+    // the answer is what the bind flow and the runtime report act on, so a
+    // caller that shows one has to get a live scan.
+    async status({ reuseScan = false } = {}) {
+      return normalizeLocalAgentStatus(
+        await invoke(LOCAL_AGENT_COMMANDS.status, { reuseScan })
+      );
     },
     async health() {
       return invoke(LOCAL_AGENT_COMMANDS.health);
@@ -189,7 +195,8 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
   let current = normalizeLocalAgentStatus(initialStatus);
 
   return {
-    async status() {
+    async status({ reuseScan = false } = {}) {
+      void reuseScan;
       return clone(current);
     },
     async health() {

@@ -29,7 +29,7 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     confirmMainIdentity(scanId) {
       return api.post(`/bit-browser/profile-scans/${scanId}/confirm-main-identity`, {})
     },
-    // 以当前环境为准（CHG-20261002-074 阶段 3）：只有显式的自助入口才带 `overwrite`，
+    // 「比特账号绑定」自助入口（CHG-20261002-074 阶段 3）：只有显式确认才带 `overwrite`，
     // 缺省（扫描确认等既有路径）不发送，服务端照旧把「账号不一致」当作 23002 拒绝。
     confirmMainIdentityDirect(mainUserId, options = {}) {
       const body = { main_user_id: mainUserId }

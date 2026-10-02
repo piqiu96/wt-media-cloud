@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { aggregateWorkEnv } from './apps/desktop/features/local-agent/work-env-status.js'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  aggregateWorkEnv,
+  bitAccountDiffers,
+  loadWorkEnvInputs,
+  maskBitAccountId,
+} from './apps/desktop/features/local-agent/work-env-status.js'
 import { normalizeLocalAgentStatus } from './apps/desktop/features/local-agent/service.js'
 
 // 快照夹具用 Agent `/api/v1/status` 的真实线格式（snake_case，2026-10-02 实测
@@ -93,6 +98,132 @@ describe('work env rows', () => {
   it('shows the running task on the service row', () => {
     const env = aggregateWorkEnv({ snapshot: healthySnapshot({ status: 'running', current_task_id: 'task-9' }), cloudUser, binding, localDevice })
     expect(env.page.serviceText).toBe('已连接，当前任务 task-9')
+  })
+})
+
+// 比特账号一致性判定是个人中心入口可见性与胶囊结论的共同来源。32 位 hex 账号
+// （形如 2c9b…619f）经掩码比对；下面每组输入都标出「谁更该被信」的走向。
+const BOUND_MASK = '2c9b****619f'
+const LOCAL_ID = '2c9b000000000000000000000000619f'
+const OTHER_ID = 'aaaa111111111111111111111111bbbb'
+
+describe('bitAccountDiffers', () => {
+  const bound = { bit_account_bound: true, bit_main_user_id_masked: BOUND_MASK }
+
+  it('is false when the environment account matches the bound one', () => {
+    expect(bitAccountDiffers(bound, LOCAL_ID)).toBe(false)
+  })
+
+  it('is true when the client switched to another account', () => {
+    expect(bitAccountDiffers(bound, OTHER_ID)).toBe(true)
+  })
+
+  it('is false when no bit account is bound yet', () => {
+    expect(bitAccountDiffers({ bit_account_bound: false, bit_main_user_id_masked: '' }, LOCAL_ID)).toBe(false)
+  })
+
+  // 闸门是 bit_account_bound，不是「掩码非空」：只凭一段残留掩码就宣告不一致，
+  // 会让未绑定的账号被推去点一次无意义的「比特账号绑定」。
+  it('gates on the bound flag rather than on a leftover mask', () => {
+    expect(bitAccountDiffers({ bit_account_bound: false, bit_main_user_id_masked: BOUND_MASK }, OTHER_ID)).toBe(false)
+  })
+
+  it('is false when the environment reports no account at all', () => {
+    expect(bitAccountDiffers(bound, '')).toBe(false)
+    expect(bitAccountDiffers(bound, undefined)).toBe(false)
+  })
+
+  // 下面两条钉住的是「比对不了时倒向哪边」——不是「一致」。后端掩码在长度 ≤8 时
+  // 整体变成 ****（maskDeviceIdentity），或本机账号短到无法按首尾4位比对：两者都
+  // 不能证明一致，判定按不一致走（多给一次自助绑定入口，好过静默当作已一致）。
+  it('reads a masked-out bound value as differing rather than as matching', () => {
+    expect(bitAccountDiffers({ bit_account_bound: true, bit_main_user_id_masked: '****' }, LOCAL_ID)).toBe(true)
+  })
+
+  it('reads an environment id too short to split as differing', () => {
+    expect(bitAccountDiffers(bound, 'short')).toBe(true)
+  })
+
+  // 唯一判定源：同一输入下，个人中心读的函数与胶囊读的聚合字段必须同值。
+  it('agrees with the aggregate on the same inputs', () => {
+    const cases = [
+      bound,
+      { bit_account_bound: false, bit_main_user_id_masked: '' },
+      { bit_account_bound: false, bit_main_user_id_masked: BOUND_MASK },
+      { bit_account_bound: true, bit_main_user_id_masked: '****' },
+    ]
+    for (const b of cases) {
+      for (const local of [LOCAL_ID, OTHER_ID, '', 'short']) {
+        const env = aggregateWorkEnv({ snapshot: healthySnapshot({ main_user_id: local }), cloudUser, binding: b, localDevice })
+        expect(env.bitAccountDiffers).toBe(bitAccountDiffers(b, local))
+      }
+    }
+  })
+})
+
+describe('maskBitAccountId', () => {
+  it('keeps the first and last four, the rule the backend masks with', () => {
+    expect(maskBitAccountId(LOCAL_ID)).toBe(BOUND_MASK)
+  })
+
+  it('masks everything when the id is too short to split', () => {
+    expect(maskBitAccountId('abc12345')).toBe('****')
+    expect(maskBitAccountId('abc123456')).toBe('abc1****3456')
+  })
+
+  it('stays empty when there is no id', () => {
+    expect(maskBitAccountId('')).toBe('')
+    expect(maskBitAccountId('   ')).toBe('')
+    expect(maskBitAccountId(undefined)).toBe('')
+  })
+})
+
+// 接线用例：四项输入一次读齐。此前胶囊的轮询只刷本机状态与云端绑定，
+// cloudUser / localDevice 挂载后再不重读——在个人中心改完绑定，胶囊停在旧结论。
+describe('loadWorkEnvInputs', () => {
+  function deps(overrides = {}) {
+    return {
+      session: { me: vi.fn(async () => ({ id: 'u-1', username: 'op' })) },
+      devices: { get: vi.fn(async () => ({ bound: true, device_id: 'dev-1' })) },
+      service: { status: vi.fn(async () => healthySnapshot()) },
+      invoke: vi.fn(async () => ({ device_id: 'dev-1' })),
+      ...overrides,
+    }
+  }
+
+  it('reads all four inputs in one load', async () => {
+    const d = deps()
+    const inputs = await loadWorkEnvInputs(d)
+
+    expect(d.session.me).toHaveBeenCalledTimes(1)
+    expect(d.invoke).toHaveBeenCalledWith('local_device_identity')
+    expect(d.service.status).toHaveBeenCalledTimes(1)
+    expect(d.devices.get).toHaveBeenCalledTimes(1)
+    expect(inputs.cloudUser).toEqual({ id: 'u-1', username: 'op' })
+    expect(inputs.localDevice).toEqual({ device_id: 'dev-1' })
+    expect(inputs.snapshot.status).toBe('idle')
+    expect(inputs.binding).toEqual({ bound: true, device_id: 'dev-1' })
+    expect(inputs.errors).toEqual([])
+  })
+
+  // 冷启动竞态：sidecar 还没监听时 local_agent_status 直接抛错，另外三项照样可用。
+  it('keeps the other three inputs when the local agent is not up yet', async () => {
+    const failure = new Error('agent unreachable: connection refused')
+    const inputs = await loadWorkEnvInputs(deps({ service: { status: vi.fn(async () => { throw failure }) } }))
+
+    expect(inputs.snapshot).toBeNull()
+    expect(inputs.cloudUser).toEqual({ id: 'u-1', username: 'op' })
+    expect(inputs.localDevice).toEqual({ device_id: 'dev-1' })
+    expect(inputs.binding).toEqual({ bound: true, device_id: 'dev-1' })
+    expect(inputs.errors).toEqual([failure])
+  })
+
+  it('treats a missing device identity as absent, not as a failed load', async () => {
+    const inputs = await loadWorkEnvInputs(deps({ invoke: vi.fn(async () => { throw new Error('no identity') }) }))
+
+    expect(inputs.localDevice).toBeNull()
+    expect(inputs.binding).toEqual({ bound: true, device_id: 'dev-1' })
+    expect(inputs.errors).toHaveLength(1)
   })
 })
 
