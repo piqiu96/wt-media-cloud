@@ -162,7 +162,7 @@ func (s *memoryStore) FindNodeByCredentialHash(hash string) (AgentNode, bool, er
 func (s *memoryStore) CheckLocalTrust(userID identityservice.UserID, nodeID string, at time.Time, freshness time.Duration) (bool, error) {
 	for _, node := range s.nodes {
 		if node.ID == nodeID && node.UserID == userID && node.Status == cloudagentservice.AgentStatusOnline &&
-			node.LastHeartbeatAt.After(at.Add(-freshness)) && s.activeSessions[runtimeKey(node.SessionID, userID)] {
+			node.LastHeartbeatAt.After(at.Add(-freshness)) {
 			return true, nil
 		}
 	}
@@ -183,9 +183,6 @@ func (s *memoryStore) FindTrustedLocalNode(userID identityservice.UserID) (Agent
 	candidates := make([]AgentNode, 0, len(s.nodes))
 	for _, node := range s.nodes {
 		if node.UserID != userID || node.Mode != "local" || node.Status != cloudagentservice.AgentStatusOnline {
-			continue
-		}
-		if !s.activeSessions[runtimeKey(node.SessionID, userID)] {
 			continue
 		}
 		candidates = append(candidates, node)
@@ -282,7 +279,7 @@ func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterLocal() error = %v", err)
 	}
-	if registration.Node.UserID != identityservice.UserID(1) || registration.Node.SessionID != "session-1" {
+	if registration.Node.UserID != identityservice.UserID(1) || registration.Node.DeviceID == "" {
 		t.Fatalf("node = %+v", registration.Node)
 	}
 	if registration.NodeCredential != "node-secret" || store.storedCredential == registration.NodeCredential {
@@ -293,7 +290,9 @@ func TestRegisterConsumesTicketOnceAndIssuesHashedCredential(t *testing.T) {
 	}
 }
 
-func TestRuntimeReportRequiresActiveBoundSession(t *testing.T) {
+// The whole of stage 2's decoupling: a login session that ends must not revoke
+// the node credential. Only an unbind (or a superseding registration) does.
+func TestRuntimeReportSurvivesSessionInvalidation(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
@@ -301,17 +300,25 @@ func TestRuntimeReportRequiresActiveBoundSession(t *testing.T) {
 	grant, _ := service.IssueTicket(identityservice.PublicUser{ID: identityservice.UserID(1), Status: identityservice.UserStatusEnabled}, "session-1")
 	registration, _ := service.RegisterLocal(signedInput(grant.BindingToken, "agent-1", true))
 
+	// The binding session ends (logout / replacement / expiry); the credential
+	// keeps authenticating — device bound + node online, no session in the check.
 	store.activeSessions[runtimeKey("session-1", 1)] = false
-	err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, validRuntimeReport())
-	if !errors.Is(err, ErrBoundSessionInvalid) {
-		t.Fatalf("ReportRuntime() error = %v", err)
+	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, validRuntimeReport()); err != nil {
+		t.Fatalf("ReportRuntime() after session invalidation error = %v", err)
+	}
+	// What still revokes it: the device is unbound.
+	if err := service.UnbindDevice(identityservice.UserID(1)); err != nil {
+		t.Fatalf("UnbindDevice() error = %v", err)
+	}
+	if err := service.ReportRuntime(registration.Node.ID, registration.NodeCredential, validRuntimeReport()); !errors.Is(err, ErrNodeCredentialInvalid) {
+		t.Fatalf("ReportRuntime() after unbind error = %v, want ErrNodeCredentialInvalid", err)
 	}
 }
 
 func TestRuntimeReportRejectsCredentialForReplacedNode(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
-	store.nodes[secretHash("old-node-secret")] = AgentNode{ID: "old-node", Mode: "local", Status: AgentStatusReplaced, UserID: identityservice.UserID(1), SessionID: "session-1"}
+	store.nodes[secretHash("old-node-secret")] = AgentNode{ID: "old-node", Mode: "local", Status: AgentStatusReplaced, UserID: identityservice.UserID(1)}
 	service := testService(store, &now)
 
 	err := service.ReportRuntime("old-node", "old-node-secret", validRuntimeReport())
@@ -320,21 +327,18 @@ func TestRuntimeReportRejectsCredentialForReplacedNode(t *testing.T) {
 	}
 }
 
-func TestCheckLocalTrustRequiresFreshOnlineNodeAndActiveSession(t *testing.T) {
+// The trust check keeps its freshness window but drops the session bound: a
+// session that dies does not untrust a fresh online node (contract v2), while a
+// node that stops reporting within the window still does.
+func TestCheckLocalTrustRequiresFreshOnlineNode(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
-	store.activeSessions[runtimeKey("session-1", 1)] = true
-	store.nodes["node-secret"] = AgentNode{ID: "node-1", Mode: "local", Status: cloudagentservice.AgentStatusOnline, UserID: identityservice.UserID(1), SessionID: "session-1", LastHeartbeatAt: now}
+	store.nodes["node-secret"] = AgentNode{ID: "node-1", Mode: "local", Status: cloudagentservice.AgentStatusOnline, UserID: identityservice.UserID(1), LastHeartbeatAt: now}
 	service := testService(store, &now)
 
 	if err := service.CheckLocalTrust(identityservice.UserID(1), "node-1"); err != nil {
 		t.Fatalf("CheckLocalTrust() error = %v", err)
 	}
-	store.activeSessions[runtimeKey("session-1", 1)] = false
-	if err := service.CheckLocalTrust(identityservice.UserID(1), "node-1"); !errors.Is(err, ErrLocalTrustUnavailable) {
-		t.Fatalf("inactive session error = %v", err)
-	}
-	store.activeSessions[runtimeKey("session-1", 1)] = true
 	now = now.Add(2 * time.Minute)
 	if err := service.CheckLocalTrust(identityservice.UserID(1), "node-1"); !errors.Is(err, ErrLocalTrustUnavailable) {
 		t.Fatalf("stale node error = %v", err)
@@ -373,8 +377,8 @@ func TestRuntimeReportValidatesMainIdentityAndLeavesUnknownProfilesToDiff(t *tes
 	}
 }
 
-func liveNode(id, sessionID string, userID identityservice.UserID, heartbeat time.Time) AgentNode {
-	return AgentNode{ID: id, Mode: "local", Status: cloudagentservice.AgentStatusOnline, UserID: userID, SessionID: sessionID, LastHeartbeatAt: heartbeat}
+func liveNode(id string, userID identityservice.UserID, heartbeat time.Time) AgentNode {
+	return AgentNode{ID: id, Mode: "local", Status: cloudagentservice.AgentStatusOnline, UserID: userID, LastHeartbeatAt: heartbeat}
 }
 
 // The claim route offers no node id, so the credential has to be enough on its
@@ -385,7 +389,7 @@ func TestAuthenticateNodeCredentialIdentifiesANodeWithoutAnID(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
-	store.nodes[secretHash("node-secret")] = liveNode("node-1", "session-1", identityservice.UserID(1), now)
+	store.nodes[secretHash("node-secret")] = liveNode("node-1", identityservice.UserID(1), now)
 	service := testService(store, &now)
 
 	node, err := service.AuthenticateNodeCredential("node-secret")
@@ -403,25 +407,25 @@ func TestAuthenticateNodeCredentialIdentifiesANodeWithoutAnID(t *testing.T) {
 	}
 }
 
-// What the credential route does not relax: a replaced node's credential was
-// superseded by a later registration and must not be usable, and the bound session
-// still has to be live.
-func TestAuthenticateNodeCredentialStillRefusesAReplacedNodeAndADeadSession(t *testing.T) {
+// What the credential route still refuses: a replaced node's credential was
+// superseded by a later registration and must not be usable. A dead binding
+// session is no longer a refusal — session independence is the point of stage 2.
+func TestAuthenticateNodeCredentialRefusesReplacedNodeButNotDeadSession(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
-	replaced := liveNode("node-1", "session-1", identityservice.UserID(1), now)
+	replaced := liveNode("node-1", identityservice.UserID(1), now)
 	replaced.Status = AgentStatusReplaced
 	store.nodes[secretHash("replaced-secret")] = replaced
-	store.nodes[secretHash("node-secret")] = liveNode("node-2", "session-1", identityservice.UserID(1), now)
+	store.nodes[secretHash("node-secret")] = liveNode("node-2", identityservice.UserID(1), now)
 	service := testService(store, &now)
 
 	if _, err := service.AuthenticateNodeCredential("replaced-secret"); !errors.Is(err, ErrNodeCredentialInvalid) {
 		t.Fatalf("replaced node error = %v", err)
 	}
 	store.activeSessions[runtimeKey("session-1", 1)] = false
-	if _, err := service.AuthenticateNodeCredential("node-secret"); !errors.Is(err, ErrBoundSessionInvalid) {
-		t.Fatalf("dead session error = %v", err)
+	if _, err := service.AuthenticateNodeCredential("node-secret"); err != nil {
+		t.Fatalf("dead session revoked the credential: %v", err)
 	}
 }
 
@@ -437,8 +441,8 @@ func TestResolveTrustedLocalNodePicksTheNewestBoundDeviceDespiteStaleHeartbeats(
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store := newMemoryStore()
 	store.activeSessions[runtimeKey("session-1", 1)] = true
-	store.nodes[secretHash("older")] = liveNode("node-a", "session-1", identityservice.UserID(1), now.Add(-3*time.Hour))
-	store.nodes[secretHash("newer")] = liveNode("node-b", "session-1", identityservice.UserID(1), now.Add(-2*time.Hour))
+	store.nodes[secretHash("older")] = liveNode("node-a", identityservice.UserID(1), now.Add(-3*time.Hour))
+	store.nodes[secretHash("newer")] = liveNode("node-b", identityservice.UserID(1), now.Add(-2*time.Hour))
 	service := testService(store, &now)
 
 	node, err := service.ResolveTrustedLocalNode(identityservice.UserID(1))
@@ -463,19 +467,15 @@ func TestResolveTrustedLocalNodeReportsNoBoundNode(t *testing.T) {
 	if _, err := service.ResolveTrustedLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
 		t.Fatalf("no node at all error = %v", err)
 	}
-	// A node whose session is no longer active is not usable however it reported.
-	store.nodes[secretHash("stale")] = liveNode("node-a", "session-2", identityservice.UserID(1), now.Add(-2*time.Minute))
-	if _, err := service.ResolveTrustedLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
-		t.Fatalf("inactive session error = %v", err)
-	}
 	// Another user's live node is not this user's node.
-	store.nodes[secretHash("other")] = liveNode("node-b", "session-1", identityservice.UserID(2), now)
+	store.nodes[secretHash("other")] = liveNode("node-b", identityservice.UserID(2), now)
 	if _, err := service.ResolveTrustedLocalNode(identityservice.UserID(1)); !errors.Is(err, ErrLocalTrustUnavailable) {
 		t.Fatalf("another user's node error = %v", err)
 	}
-	// The first user's own node, on an active session, is found — stale heartbeat
-	// and all. This is the arm the old bound made red.
-	store.nodes[secretHash("bound")] = liveNode("node-c", "session-1", identityservice.UserID(1), now.Add(-2*time.Hour))
+	// The user's own node is found however it reported: stale heartbeat and no
+	// session at all are both outside the question now (contract v2). This arm
+	// was red under the old session bound.
+	store.nodes[secretHash("bound")] = liveNode("node-c", identityservice.UserID(1), now.Add(-2*time.Hour))
 	node, err := service.ResolveTrustedLocalNode(identityservice.UserID(1))
 	if err != nil {
 		t.Fatalf("stale but bound node error = %v", err)
@@ -516,9 +516,6 @@ func TestDeviceRenewalReusesTheSameKeyAcrossSessions(t *testing.T) {
 	renewed, err := service.RegisterLocal(signer.input(secondGrant.BindingToken, "agent-2", true))
 	if err != nil {
 		t.Fatalf("renewal RegisterLocal() error = %v", err)
-	}
-	if renewed.Node.SessionID != "session-2" {
-		t.Fatalf("renewed node session = %s, want session-2", renewed.Node.SessionID)
 	}
 	binding, err := service.GetDeviceBinding(identityservice.UserID(1))
 	if err != nil || !binding.Bound || binding.DeviceID != signer.deviceID {

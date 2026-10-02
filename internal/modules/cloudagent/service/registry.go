@@ -17,7 +17,6 @@ var (
 	ErrAgentNotFound     = model.ErrAgentNotFound
 	ErrInvalidAgent      = model.ErrInvalidAgent
 	ErrIncompatibleAgent = model.ErrIncompatibleAgent
-	ErrSessionInvalid    = model.ErrSessionInvalid
 )
 
 type (

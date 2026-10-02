@@ -46,6 +46,53 @@ func TestFindAuthorizedTaskUsesGORM(t *testing.T) {
 	}
 }
 
+// The permit gate answers "is the *device* still bound, online and present" —
+// contract v2's node layer — and must not ask whether the login session that
+// registered it is still alive: a logout or replaced session must not revoke an
+// authorized sensitive operation the device is still bound to. The COUNT text is
+// pinned whole, like the runtimebinding pair, so the session JOIN and
+// `invalidated_at` stay out: re-adding either fails this arm.
+func TestAcquirePermitRequiresOnlineNodeButNotALiveSession(t *testing.T) {
+	db, mock, closeDB := newGuardMockGORM(t)
+	defer closeDB()
+	at := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
+	task := model.SensitiveTask{
+		ID: "task-1", UserID: 1, ProfileID: "profile-1", BitProfileID: "bit-profile-1",
+		NodeID: "node-1", Operation: model.OperationInteraction, Status: model.TaskAuthorized,
+	}
+	permit := model.Permit{
+		ID: "permit-1", TaskID: "task-1", UserID: 1, ProfileID: "profile-1", NodeID: "node-1",
+		Operation: model.OperationInteraction, Status: model.PermitActive, CredentialHash: "hash",
+		AcquiredAt: at, ExpiresAt: at.Add(10 * time.Minute),
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id FROM browser_profiles\s+WHERE id = \? FOR UPDATE`).
+		WithArgs("profile-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("profile-1"))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM sensitive_browser_tasks t\s+JOIN browser_profiles bp ON bp\.id = t\.profile_id\s+JOIN users u ON u\.id = t\.user_id\s+JOIN local_agent_nodes n ON n\.id = t\.node_id\s+JOIN browser_profile_runtime_presence rp ON rp\.profile_id = bp\.id AND rp\.node_id = n\.id\s+WHERE t\.id = \? AND t\.user_id = \? AND t\.profile_id = \? AND t\.node_id = \? AND t\.operation = \?\s+AND t\.bit_profile_id = \? AND t\.status = 'authorized' AND bp\.local_status = 'active'\s+AND bp\.bit_profile_id = t\.bit_profile_id AND bp\.main_user_id = u\.bit_main_user_id\s+AND u\.status = 'enabled' AND n\.status = 'online'\s+AND n\.bitbrowser_status = 'normal' AND n\.reported_main_user_id = u\.bit_main_user_id\s+AND rp\.status = 'visible' AND rp\.main_user_id = u\.bit_main_user_id AND rp\.last_seen_at >= \?`).
+		WithArgs("task-1", int64(1), "profile-1", "node-1", "interaction", "bit-profile-1", at.Add(-90*time.Second)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id, status, expires_at FROM sensitive_profile_permits\s+WHERE profile_id = \? ORDER BY acquired_at DESC LIMIT 1`).
+		WithArgs("profile-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "expires_at"}))
+	mock.ExpectExec(`INSERT INTO sensitive_profile_permits`).
+		WithArgs("permit-1", "task-1", int64(1), "profile-1", "node-1", "interaction", "active", "hash", at, at.Add(10*time.Minute), nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE sensitive_browser_tasks SET status = \?, updated_at = \?\s+WHERE id = \? AND status = \?`).
+		WithArgs("running", at, "task-1", "authorized").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	outcome, err := acquirePermit(db, task, "node-1", permit, at, 90*time.Second)
+	if err != nil {
+		t.Fatalf("acquirePermit() error = %v", err)
+	}
+	if outcome.Outcome != model.OutcomeGranted || outcome.PermitID != "permit-1" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+}
+
 func newGuardMockGORM(t *testing.T) (*gorm.DB, sqlmock.Sqlmock, func()) {
 	t.Helper()
 	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))

@@ -23,6 +23,10 @@ type BindingTicket struct {
 	UsedAt    *time.Time
 }
 
+// AgentNode is the execution-presence layer (contract v2): it binds by
+// device_id, never by a login session, so session invalidation cannot revoke a
+// node's credential. Registration still requires a live session, but only
+// through the binding ticket, which carries its own session_id.
 type AgentNode struct {
 	ID                   string                `json:"id"`
 	AgentID              string                `json:"agent_id"`
@@ -31,7 +35,6 @@ type AgentNode struct {
 	DeviceName           string                `json:"-"`
 	BindDevice           bool                  `json:"-"`
 	UserID               sharedidentity.UserID `json:"user_id"`
-	SessionID            string                `json:"-"`
 	Mode                 string                `json:"mode"`
 	AgentVersion         string                `json:"agent_version"`
 	ContractMajorVersion string                `json:"contract_major_version"`

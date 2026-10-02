@@ -32,16 +32,39 @@ func TestRuntimeMigrationStoresOnlyHashesAndSeparatesPresence(t *testing.T) {
 	}
 }
 
+// The stage-2 migration severs the node row from user_sessions: the session
+// foreign key (and with it the column) must go, while the binding ticket keeps
+// its own session link — registration stays session-gated, the node does not.
+func TestNodeSessionColumnIsDroppedAndTicketKeepsItsSession(t *testing.T) {
+	content, err := os.ReadFile("../../../../migrations/20261002_047_local_agent_node_device_scoped.sql")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	text := string(content)
+	for _, required := range []string{
+		"ALTER TABLE local_agent_nodes",
+		"DROP FOREIGN KEY fk_local_agent_node_session",
+		"DROP COLUMN session_id",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("migration missing %q", required)
+		}
+	}
+	if strings.Contains(text, "ALTER TABLE local_agent_binding_tickets") {
+		t.Fatalf("migration must not touch the ticket table: %s", text)
+	}
+}
+
 func TestFindNodeByCredentialHashUsesGORM(t *testing.T) {
 	db, mock, closeDB := newRuntimeMockGORM(t)
 	defer closeDB()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, agent_id, device_id, user_id, session_id, mode, agent_version")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, agent_id, device_id, user_id, mode, agent_version")).
 		WithArgs("hash").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "agent_id", "device_id", "user_id", "session_id", "mode", "agent_version",
+			"id", "agent_id", "device_id", "user_id", "mode", "agent_version",
 			"contract_major_version", "contract_revision", "credential_hash", "status", "registered_at", "last_heartbeat_at",
-		}).AddRow("node-1", "agent-1", "device-1", 1, "session-1", "local", "1.0", "v1", "2026.07.15.1", "hash", "online", now, now))
+		}).AddRow("node-1", "agent-1", "device-1", 1, "local", "1.0", "v1", "2026.07.15.1", "hash", "online", now, now))
 
 	node, found, err := findNodeByCredentialHash(db, "hash")
 	if err != nil || !found {
@@ -60,18 +83,20 @@ func TestFindNodeByCredentialHashUsesGORM(t *testing.T) {
 // up on its own schedule. So this query has no heartbeat bound while
 // `checkLocalTrust` — the check behind the sensitive flows — keeps its own. Both
 // texts are asserted because a sqlmock expectation is exact, and because the pair
-// is the property: an edit that "unified" them would fail this arm.
+// is the property: an edit that "unified" them would fail this arm. Neither query
+// touches `user_sessions` any more (contract v2) — the session JOIN would be a
+// regression, and this text pins its absence.
 func TestTheHeartbeatWindowSeparatesQueueingFromTrustChecks(t *testing.T) {
 	db, mock, closeDB := newRuntimeMockGORM(t)
 	defer closeDB()
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`FROM local_agent_nodes n\s+JOIN users u ON u\.id = n\.user_id\s+JOIN user_sessions s ON s\.id = n\.session_id\s+WHERE n\.user_id = \? AND n\.mode = 'local' AND n\.status = 'online'\s+AND s\.invalidated_at IS NULL AND u\.status = 'enabled' AND u\.device_id = n\.device_id\s+AND u\.bit_main_user_id IS NOT NULL AND n\.bitbrowser_status = 'normal'\s+AND n\.reported_main_user_id = u\.bit_main_user_id\s+ORDER BY n\.last_heartbeat_at DESC, n\.id ASC LIMIT 1`).
+	mock.ExpectQuery(`FROM local_agent_nodes n\s+JOIN users u ON u\.id = n\.user_id\s+WHERE n\.user_id = \? AND n\.mode = 'local' AND n\.status = 'online'\s+AND u\.status = 'enabled' AND u\.device_id = n\.device_id\s+AND u\.bit_main_user_id IS NOT NULL AND n\.bitbrowser_status = 'normal'\s+AND n\.reported_main_user_id = u\.bit_main_user_id\s+ORDER BY n\.last_heartbeat_at DESC, n\.id ASC LIMIT 1`).
 		WithArgs(int64(1)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "agent_id", "device_id", "user_id", "session_id", "mode", "agent_version",
+			"id", "agent_id", "device_id", "user_id", "mode", "agent_version",
 			"contract_major_version", "contract_revision", "credential_hash", "status", "registered_at", "last_heartbeat_at",
-		}).AddRow("node-1", "agent-1", "device-1", 1, "session-1", "local", "0.2.0", "v1", "2026.09.26.1", "hash", "online", now, now.Add(-time.Hour)))
+		}).AddRow("node-1", "agent-1", "device-1", 1, "local", "0.2.0", "v1", "2026.09.26.1", "hash", "online", now, now.Add(-time.Hour)))
 
 	node, found, err := findTrustedLocalNode(db, 1)
 	if err != nil || !found {
@@ -83,7 +108,7 @@ func TestTheHeartbeatWindowSeparatesQueueingFromTrustChecks(t *testing.T) {
 		t.Fatalf("node = %#v", node)
 	}
 
-	mock.ExpectQuery(`SELECT EXISTS\(\s+SELECT 1 FROM local_agent_nodes n`).
+	mock.ExpectQuery(`SELECT EXISTS\(\s+SELECT 1 FROM local_agent_nodes n\s+JOIN users u ON u\.id = n\.user_id\s+WHERE n\.id = \? AND n\.user_id = \? AND n\.mode = 'local' AND n\.status = 'online'\s+AND n\.last_heartbeat_at >= \? AND u\.status = 'enabled' AND u\.device_id = n\.device_id\s+AND u\.bit_main_user_id IS NOT NULL AND n\.bitbrowser_status = 'normal'\s+AND n\.reported_main_user_id = u\.bit_main_user_id\s+\)`).
 		WithArgs("node-1", int64(1), now.Add(-90*time.Second)).
 		WillReturnRows(sqlmock.NewRows([]string{"trusted"}).AddRow(true))
 	if _, err := checkLocalTrust(db, 1, "node-1", now, 90*time.Second); err != nil {

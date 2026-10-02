@@ -3,13 +3,12 @@
 // 正常时安静（绿点 + 短文案），异常才变色并展开面板看「哪一项坏了、为什么、怎么修」。
 //
 // 取数全部走 Tauri invoke 与 Cloud API（Local Agent 服务/设备绑定），不直连本机端口、
-// 不接触执行凭据。定时自检只做只读的本地状态 + 云端绑定；重同步这类写操作必须由用户点按钮触发。
+// 不接触执行凭据。定时自检只做只读的本地状态 + 云端绑定。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { createLocalAgentService } from './service.js'
 import { createDeviceBindingClient } from '../../../../shared/api/deviceBinding.js'
 import { createSessionClient } from '../../../../shared/api/session.js'
-import { bindTrustedLocalAgent } from './init.js'
 import { aggregateWorkEnv } from './work-env-status.js'
 
 const POLL_MS = 30_000
@@ -24,7 +23,6 @@ const binding = ref(null)
 const localDevice = ref(null)
 const checkedAt = ref(null)
 const busy = ref(false)
-const syncing = ref(false)
 const error = ref('')
 
 const env = computed(() => aggregateWorkEnv({
@@ -75,21 +73,6 @@ async function check() {
   }
 }
 
-// 过渡期的修复入口：阶段 2 完成后执行凭据持久、登录后自动可用，此入口不再需要。
-async function resync() {
-  if (syncing.value) return
-  syncing.value = true
-  error.value = ''
-  try {
-    await bindTrustedLocalAgent()
-    await check()
-  } catch (e) {
-    error.value = e?.message || '重新同步失败'
-  } finally {
-    syncing.value = false
-  }
-}
-
 // 可见期间轮询，窗口隐藏/最小化时暂停（document.hidden 由 Tauri WebView 反映窗口可见性）。
 let timer = null
 let visible = typeof document !== 'undefined' ? !document.hidden : true
@@ -137,9 +120,6 @@ onBeforeUnmount(() => {
           <ul class="env-blockers">
             <li v-for="(reason, i) in env.blockers" :key="i">{{ reason }}</li>
           </ul>
-          <t-button v-if="env.page.canBindTrustedNode" size="small" theme="primary" :loading="syncing" @click="resync">
-            重新同步本机环境
-          </t-button>
         </template>
         <t-alert v-if="error" :message="error" theme="error" style="margin-top:10px" />
       </div>

@@ -7,7 +7,6 @@ var (
 	ErrAgentNotFound       = errors.New("agent not found")
 	ErrInvalidAgent        = errors.New("invalid agent")
 	ErrIncompatibleAgent   = errors.New("incompatible agent contract")
-	ErrSessionInvalid      = errors.New("agent session was invalidated by user re-login")
 	ErrTaskNotFound        = errors.New("task not found")
 	ErrNoPendingTask       = errors.New("no pending task")
 	ErrTaskLeaseTaken      = errors.New("task lease taken")

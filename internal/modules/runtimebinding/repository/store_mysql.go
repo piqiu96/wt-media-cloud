@@ -113,9 +113,9 @@ func saveNode(db *gorm.DB, node model.AgentNode) error {
 			return err
 		}
 		return tx.Exec(`INSERT INTO local_agent_nodes
-			(id, agent_id, device_id, user_id, session_id, mode, agent_version, contract_major_version, contract_revision, credential_hash, status, registered_at, last_heartbeat_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			node.ID, node.AgentID, node.DeviceID, node.UserID, node.SessionID, node.Mode, node.AgentVersion,
+			(id, agent_id, device_id, user_id, mode, agent_version, contract_major_version, contract_revision, credential_hash, status, registered_at, last_heartbeat_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			node.ID, node.AgentID, node.DeviceID, node.UserID, node.Mode, node.AgentVersion,
 			node.ContractMajorVersion, node.ContractRevision, node.CredentialHash, node.Status,
 			node.RegisteredAt, node.LastHeartbeatAt, node.RegisteredAt,
 		).Error
@@ -181,10 +181,10 @@ func FindNodeByCredentialHash(hash string) (model.AgentNode, bool, error) {
 
 func findNodeByCredentialHash(db *gorm.DB, hash string) (model.AgentNode, bool, error) {
 	var node model.AgentNode
-	err := db.Raw(`SELECT id, agent_id, device_id, user_id, session_id, mode, agent_version,
+	err := db.Raw(`SELECT id, agent_id, device_id, user_id, mode, agent_version,
 		contract_major_version, contract_revision, credential_hash, status, registered_at, last_heartbeat_at
 		FROM local_agent_nodes WHERE credential_hash = ?`, hash).
-		Row().Scan(&node.ID, &node.AgentID, &node.DeviceID, &node.UserID, &node.SessionID, &node.Mode, &node.AgentVersion,
+		Row().Scan(&node.ID, &node.AgentID, &node.DeviceID, &node.UserID, &node.Mode, &node.AgentVersion,
 		&node.ContractMajorVersion, &node.ContractRevision, &node.CredentialHash, &node.Status, &node.RegisteredAt, &node.LastHeartbeatAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.AgentNode{}, false, nil
@@ -204,9 +204,8 @@ func checkLocalTrust(db *gorm.DB, userID sharedidentity.UserID, nodeID string, a
 	err := db.Raw(`SELECT EXISTS(
 		SELECT 1 FROM local_agent_nodes n
 		JOIN users u ON u.id = n.user_id
-		JOIN user_sessions s ON s.id = n.session_id
 		WHERE n.id = ? AND n.user_id = ? AND n.mode = 'local' AND n.status = 'online'
-		  AND n.last_heartbeat_at >= ? AND s.invalidated_at IS NULL AND u.status = 'enabled' AND u.device_id = n.device_id
+		  AND n.last_heartbeat_at >= ? AND u.status = 'enabled' AND u.device_id = n.device_id
 		  AND u.bit_main_user_id IS NOT NULL AND n.bitbrowser_status = 'normal'
 		  AND n.reported_main_user_id = u.bit_main_user_id
 	)`, nodeID, userID, at.Add(-freshness)).Row().Scan(&trusted)
@@ -234,9 +233,11 @@ func ValidateRuntimeProfiles(userID sharedidentity.UserID, mainUserID string, pr
 // bound and plainly running — and a machine that is genuinely gone shows up as a
 // task waiting for its node, which is the state the operator can act on.
 //
-// Everything else is the same: a live session, an online node, an enabled user
-// with a bound BitBrowser main account, and a node reporting that same main
-// account. A change to any of those belongs in both functions.
+// Everything else is the same as `checkLocalTrust`: an online node (the
+// device's current registration, session-independent — see
+// `authenticateCredential`), an enabled user with a bound BitBrowser main
+// account, and a node reporting that same main account. A change to any of
+// those belongs in both functions.
 //
 // A user may have several bound devices, so the choice has to be deterministic:
 // newest heartbeat first, and `n.id` breaks the tie, because two nodes reporting
@@ -251,17 +252,16 @@ func findTrustedLocalNode(db *gorm.DB, userID sharedidentity.UserID) (model.Agen
 		return model.AgentNode{}, false, nil
 	}
 	var node model.AgentNode
-	err := db.Raw(`SELECT n.id, n.agent_id, n.device_id, n.user_id, n.session_id, n.mode, n.agent_version,
+	err := db.Raw(`SELECT n.id, n.agent_id, n.device_id, n.user_id, n.mode, n.agent_version,
 		n.contract_major_version, n.contract_revision, n.credential_hash, n.status, n.registered_at, n.last_heartbeat_at
 		FROM local_agent_nodes n
 		JOIN users u ON u.id = n.user_id
-		JOIN user_sessions s ON s.id = n.session_id
 		WHERE n.user_id = ? AND n.mode = 'local' AND n.status = 'online'
-		  AND s.invalidated_at IS NULL AND u.status = 'enabled' AND u.device_id = n.device_id
+		  AND u.status = 'enabled' AND u.device_id = n.device_id
 		  AND u.bit_main_user_id IS NOT NULL AND n.bitbrowser_status = 'normal'
 		  AND n.reported_main_user_id = u.bit_main_user_id
 		ORDER BY n.last_heartbeat_at DESC, n.id ASC LIMIT 1`, userID).
-		Row().Scan(&node.ID, &node.AgentID, &node.DeviceID, &node.UserID, &node.SessionID, &node.Mode, &node.AgentVersion,
+		Row().Scan(&node.ID, &node.AgentID, &node.DeviceID, &node.UserID, &node.Mode, &node.AgentVersion,
 		&node.ContractMajorVersion, &node.ContractRevision, &node.CredentialHash, &node.Status, &node.RegisteredAt, &node.LastHeartbeatAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.AgentNode{}, false, nil

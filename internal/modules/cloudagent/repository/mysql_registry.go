@@ -42,22 +42,18 @@ func Heartbeat(agentID string, req HeartbeatInput) (model.AgentNode, error) {
 	return heartbeat(database.DB(), agentID, req)
 }
 
+// heartbeat is pure presence: it updates the registry row and nothing else.
+// The old code additionally drained and replaced a local node when its bound
+// session was invalidated — contract v1, where session death revoked execution.
+// Under contract v2 the node is the execution-presence layer bound by device,
+// not by a login session, so a logged-out/replaced/expired session must not
+// revoke it (runtimebinding.authenticateCredential is the same split). Node
+// revocation now happens only where it belongs: unbinding the device or a
+// superseding registration for the same device.
 func heartbeat(db *gorm.DB, agentID string, req HeartbeatInput) (model.AgentNode, error) {
 	status := req.Status
 	if status == "" {
 		status = "online"
-	}
-	if status == "online" {
-		var sessionValid bool
-		err := db.Raw(`SELECT COUNT(*) > 0 FROM local_agent_nodes n
-			JOIN user_sessions s ON n.session_id = s.id
-			WHERE n.agent_id = ? AND n.mode = 'local' AND s.invalidated_at IS NULL`, agentID).
-			Row().Scan(&sessionValid)
-		if err == nil && !sessionValid {
-			_ = db.Exec(`UPDATE agent_nodes SET status = 'draining' WHERE agent_id = ?`, agentID).Error
-			_ = db.Exec(`UPDATE local_agent_nodes SET status = 'replaced' WHERE agent_id = ?`, agentID).Error
-			return model.AgentNode{}, model.ErrSessionInvalid
-		}
 	}
 
 	result := db.Exec(`UPDATE agent_nodes SET status = ?, last_heartbeat_at = ? WHERE agent_id = ?`, status, time.Now().UTC(), agentID)

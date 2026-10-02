@@ -2,6 +2,15 @@ openapi: 3.1.0
 info:
   title: WT Media Local Agent Runtime Binding API
   version: 2026.10.01.1
+  description: |
+    Binding and presence for Local Agent nodes (contract v2). The node is the
+    execution-presence layer: it binds by `device_id` and its credential is
+    valid while the device is bound and the node is online (the device's current
+    registration, not superseded). Login sessions form the separate
+    identity layer: session invalidation (logout, replacement, expiry) does not
+    revoke a node credential — only unbinding the device or a superseding
+    registration for the same device does. Registration remains session-gated
+    through the one-use binding ticket.
 paths:
   /api/v1/local-agent/device-binding:
     get:
@@ -65,7 +74,7 @@ paths:
             schema: {$ref: "#/components/schemas/RuntimeReport"}
       responses:
         "200": {description: Runtime report accepted.}
-        "401": {description: Node credential or bound session invalid.}
+        "401": {description: Node credential invalid (device unbound or node superseded).}
         "409": {description: Profile main account or assigned Profile mismatch.}
 components:
   securitySchemes:

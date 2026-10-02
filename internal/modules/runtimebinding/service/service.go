@@ -152,7 +152,7 @@ func (s *Service) RegisterLocal(input RegisterLocalInput) (Registration, error) 
 	node := AgentNode{
 		ID: s.newID("agent-node"), AgentID: strings.TrimSpace(input.AgentID), DeviceID: strings.TrimSpace(input.DeviceID),
 		DevicePublicKey: publicKey, DeviceName: strings.TrimSpace(input.DeviceName), BindDevice: input.BindDevice,
-		UserID: ticket.UserID, SessionID: ticket.SessionID, Mode: "local", AgentVersion: strings.TrimSpace(input.AgentVersion),
+		UserID: ticket.UserID, Mode: "local", AgentVersion: strings.TrimSpace(input.AgentVersion),
 		ContractMajorVersion: input.ContractMajorVersion, ContractRevision: input.ContractRevision,
 		Status: cloudagentservice.AgentStatusOnline, CredentialHash: secretHash(credential), RegisteredAt: now, LastHeartbeatAt: now,
 	}
@@ -222,8 +222,8 @@ func (s *Service) ReportRuntime(nodeID, credential string, report RuntimeReport)
 	return s.store.ApplyRuntimeReport(node, report, now)
 }
 
-// AuthenticateNode verifies the bearer node credential and the bound active
-// user session for other Cloud security modules. It never exposes the hash.
+// AuthenticateNode verifies the bearer node credential and the bound device
+// for other Cloud security modules. It never exposes the hash.
 func (s *Service) AuthenticateNode(nodeID, credential string) (AgentNode, error) {
 	if strings.TrimSpace(nodeID) == "" {
 		return AgentNode{}, ErrNodeCredentialInvalid
@@ -249,13 +249,25 @@ func (s *Service) AuthenticateNode(nodeID, credential string) (AgentNode, error)
 // verified.
 //
 // What is *not* relaxed: the credential's hash is the lookup key (so a caller
-// cannot name a node it has no secret for), and the bound session still has to be
-// active. A replaced node is still refused, because its credential was superseded
-// by a later registration.
+// cannot name a node it has no secret for). A replaced node is still refused,
+// because its credential was superseded by a later registration.
 func (s *Service) AuthenticateNodeCredential(credential string) (AgentNode, error) {
 	return s.authenticateCredential(credential)
 }
 
+// authenticateCredential is the one check every node-authenticated flow shares.
+//
+// Credential validity is "device bound + node online" — contract v2's split of
+// the execution-presence layer from the identity/session layer. A login session
+// that is logged out, replaced or expired must not revoke a node the device is
+// still bound to: the Agent authenticates before and independent of any session,
+// so a live-session requirement here would make a logout kill in-flight work
+// (and a fresh-heartbeat requirement would forbid the Agent from authenticating
+// before it has reported, a chicken-and-egg). "Online" is therefore the node
+// being the device's current registration — not superseded — not a heartbeat
+// window; trust checks (`CheckLocalTrust`) apply the heartbeat separately.
+// What still revokes the credential: the device being unbound, or the node
+// superseded by a later registration for the same device.
 func (s *Service) authenticateCredential(credential string) (AgentNode, error) {
 	if strings.TrimSpace(credential) == "" {
 		return AgentNode{}, ErrNodeCredentialInvalid
@@ -273,13 +285,6 @@ func (s *Service) authenticateCredential(credential string) (AgentNode, error) {
 	}
 	if !bound {
 		return AgentNode{}, ErrDeviceMismatch
-	}
-	active, err := s.store.IsSessionActive(node.SessionID, node.UserID, s.now())
-	if err != nil {
-		return AgentNode{}, err
-	}
-	if !active {
-		return AgentNode{}, ErrBoundSessionInvalid
 	}
 	return node, nil
 }
