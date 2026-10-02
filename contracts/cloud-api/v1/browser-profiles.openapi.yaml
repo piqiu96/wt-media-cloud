@@ -1,5 +1,5 @@
 openapi: 3.0.3
-info: {title: WT Media Cloud Browser Profile API, version: 2026.09.04.1}
+info: {title: WT Media Cloud Browser Profile API, version: 2026.10.02.1}
 paths:
   /api/v1/bit-browser/profile-scans:
     post:
@@ -35,13 +35,21 @@ paths:
     post:
       operationId: confirmBitBrowserMainIdentity
       summary: Confirm the current user's BitBrowser main account without applying Profile Diff.
+      description: >
+        The user's environment confirmation (环境确认) self-service entry, replacing the
+        admin-only main-identity unbind. The caller submits the main account the local
+        environment reports. If it matches the bound account the binding is re-verified; if
+        the environment reports a different account, the call is refused with errcode 23002
+        unless `overwrite` is true — the deliberate "以当前环境为准" confirmation from the user
+        standing at this machine, which rebinds to the reported account. Never set overwrite
+        from the scan-confirm path: only the explicit self-service entry does.
       security: [{sessionCookie: []}]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/MainIdentityInput'}}}
       responses:
         '200': {description: User main account identity confirmed; formal Profile mirror is unchanged.}
-        '409': {description: Empty or mismatched BitBrowser main identity.}
+        '409': {description: 'Empty identity, or mismatch without overwrite (errcode 23002; see `bitbrowser_identity_unverifiable` / `bitbrowser_identity_mismatch`).'}
   /api/v1/browser-profiles:
     get:
       operationId: listBrowserProfiles
@@ -82,6 +90,7 @@ components:
       additionalProperties: false
       properties:
         main_user_id: {type: string, description: Normalized from BitBrowser mainUserId read by Desktop through Local Agent.}
+        overwrite: {type: boolean, default: false, description: 'The "以当前环境为准" (take the current environment as authoritative) flag. When the reported account differs from the bound one, only overwrite=true accepts and rebinds; false (the default) is refused as a mismatch.'}
     ProfileInput:
       type: object
       required: [bit_profile_id, main_user_id, profile_user_id]

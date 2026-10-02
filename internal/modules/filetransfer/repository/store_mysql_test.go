@@ -19,8 +19,8 @@ const testSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
-		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, nil)
 
@@ -44,8 +44,8 @@ func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 // that the returned task is the pre-existing row with the *other* id.
 func TestCreateTaskReadsBackTheExistingRowWhenTheDedupeKeyIsTaken(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
-		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"id": "transfer-1", "status": "running"})
 
@@ -82,6 +82,7 @@ func TestCreateTaskRefusesATaskWithoutTheFactsAnExecutorNeeds(t *testing.T) {
 		"a truncated hash":               {func(in *CreateTaskInput) { in.ExpectedSHA256 = testSHA256[:63] }, "expected sha256"},
 		"a hash that is not hex":         {func(in *CreateTaskInput) { in.ExpectedSHA256 = "z" + testSHA256[1:] }, "expected sha256"},
 		"a local transfer with no node":  {func(in *CreateTaskInput) { in.AssignedNodeID = "" }, "assigned node"},
+		"a user download with no device": {func(in *CreateTaskInput) { in.AssignedDeviceID = "" }, "assigned device"},
 		"a negative total size":          {func(in *CreateTaskInput) { in.TotalBytes = -1 }, "invalid transfer total size"},
 	} {
 		input := validCreateInput()
@@ -576,8 +577,8 @@ func TestCreateTaskAllowsAWaitingDownloadButNeverALeasableFactlessOne(t *testing
 	input.SourceObjectKey = ""
 	input.TotalBytes = 0
 	input.ExpectedSHA256 = ""
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id")).
-		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, nil, "user_download", "local_agent", int64(9), "node-1", "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, nil, "user_download", "local_agent", int64(9), "node-1", "device-1", "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"dependency_task_id": "prepare-1", "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
 
@@ -679,7 +680,7 @@ func TestMaterialSourcePrepareKeyIgnoresTheUser(t *testing.T) {
 	if materialSourcePrepareDedupeKey(42, 1) == materialSourcePrepareDedupeKey(42, 2) {
 		t.Fatal("a retry after a failed preparation reuses the finished generation's key")
 	}
-	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(42, identity.UserID(9), "node-1", 1)} {
+	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(42, identity.UserID(9), "device-1", 1)} {
 		if len(key) != 64 {
 			t.Fatalf("dedupe key %q is %d characters, but the column is CHAR(64) and a longer key is truncated into a collision", key, len(key))
 		}
@@ -748,20 +749,21 @@ func TestFailDependentsEndsTheWaitersOfAFailedPreparation(t *testing.T) {
 
 func validCreateInput() CreateTaskInput {
 	return CreateTaskInput{
-		ID:              "transfer-1",
-		TeamID:          identity.TeamID(7),
-		AssetType:       model.AssetMaterial,
-		AssetID:         42,
-		AssetTitle:      "示例视频",
-		SourceObjectKey: "materials/42/aaaaaaaa.mp4",
-		Purpose:         model.PurposeUserDownload,
-		ExecutionScope:  model.ExecutionLocalAgent,
-		RequestedBy:     identity.UserID(9),
-		AssignedNodeID:  "node-1",
-		DedupeKey:       "dedupe-1",
-		TotalBytes:      100,
-		ExpectedSHA256:  testSHA256,
-		MaxAttempts:     3,
+		ID:               "transfer-1",
+		TeamID:           identity.TeamID(7),
+		AssetType:        model.AssetMaterial,
+		AssetID:          42,
+		AssetTitle:       "示例视频",
+		SourceObjectKey:  "materials/42/aaaaaaaa.mp4",
+		Purpose:          model.PurposeUserDownload,
+		ExecutionScope:   model.ExecutionLocalAgent,
+		RequestedBy:      identity.UserID(9),
+		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
+		DedupeKey:        "dedupe-1",
+		TotalBytes:       100,
+		ExpectedSHA256:   testSHA256,
+		MaxAttempts:      3,
 	}
 }
 
@@ -787,7 +789,7 @@ func expectTaskByDedupeKey(mock sqlmock.Sqlmock, dedupeKey string, now time.Time
 }
 
 func taskColumns() []string {
-	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "assigned_node_id", "claimed_by_node_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
+	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "assigned_node_id", "assigned_device_id", "claimed_by_node_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
 }
 
 // taskDefaults is the value each column reads as in a row builder call that did
@@ -820,6 +822,8 @@ func taskDefaults(column string, now time.Time) (driver.Value, bool) {
 		return int64(9), true
 	case "assigned_node_id":
 		return "node-1", true
+	case "assigned_device_id":
+		return "device-1", true
 	case "total_bytes":
 		return int64(100), true
 	case "transferred_bytes", "speed_bytes_per_sec", "attempt_count":
@@ -868,27 +872,31 @@ func taskRow(now time.Time, overrides map[string]any) *sqlmock.Rows {
 
 func validUserDownloadInput() CreateUserDownloadInput {
 	return CreateUserDownloadInput{
-		ID:              "transfer-1",
-		TeamID:          identity.TeamID(7),
-		AssetID:         42,
-		AssetTitle:      "示例视频",
-		SourceObjectKey: "materials/42/aaaaaaaa.mp4",
-		RequestedBy:     identity.UserID(9),
-		AssignedNodeID:  "node-1",
-		TotalBytes:      100,
-		ExpectedSHA256:  testSHA256,
-		MaxAttempts:     3,
+		ID:               "transfer-1",
+		TeamID:           identity.TeamID(7),
+		AssetID:          42,
+		AssetTitle:       "示例视频",
+		SourceObjectKey:  "materials/42/aaaaaaaa.mp4",
+		RequestedBy:      identity.UserID(9),
+		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
+		TotalBytes:       100,
+		ExpectedSHA256:   testSHA256,
+		MaxAttempts:      3,
 	}
 }
 
 const (
-	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')"
+	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? AND status IN ('success', 'failed', 'cancelled')"
 	// The latest-task read that decides whether this click is a repeat of a
-	// download that already succeeded. Same order as `latestUserDownloadStatuses`
-	// — created_at alone is not a total order, so id breaks the tie — because the
-	// two must agree on which task is "the" one.
-	latestUserDownloadSQL = "SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1"
-	insertTaskSQL         = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
+	// download that already succeeded. Scoped to the device like the count and
+	// the key: the write-gate answers "does *this device* already have it?", not
+	// "does the user have it somewhere" — a device switch is a new destination
+	// and must not be swallowed by another device's success row. `latestUserDownloadStatuses`
+	// stays user-level on purpose (the badge is asset state); the divergence is
+	// intended and documented on `createUserDownloadTask`.
+	latestUserDownloadSQL = "SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+	insertTaskSQL         = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, assigned_device_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
 	// The preparation count is the same shape as the download count minus the user:
 	// a preparation belongs to the material, so scoping it to a user would let one
 	// user's click start a second download of a video another user is already
@@ -900,28 +908,31 @@ const (
 // scope it must be asked for. The filter is part of the expectation, not a
 // detail: a count that forgot `purpose` would include the Cloud preparation
 // tasks for the same material, and one that forgot the user would let another
-// user's downloads advance this one's generation.
+// user's downloads advance this one's generation. The device is in the scope
+// too — a generation counts finishes on *this destination*, because a device
+// switch is a new destination with its own generation.
 func expectUserDownloadCount(mock sqlmock.Sqlmock, finished int64) {
 	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
-		WithArgs("material", int64(42), "user_download", int64(9)).
+		WithArgs("material", int64(42), "user_download", int64(9), "device-1").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(finished))
 }
 
 func expectUserDownloadInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 // expectNoLatestUserDownload arms the "has this user already got it?" read with
 // the row it returns when there is nothing: an empty result, which `selectTask`
 // turns into `ErrNotFound`. The scope is part of the expectation for the same
-// reason the count's is — a lookup that forgot the user or the purpose would
-// answer with somebody else's download, or with a Cloud preparation, and refuse
-// a download that never happened.
+// reason the count's is — a lookup that forgot the user, the purpose or the
+// device would answer with somebody else's download, or with a Cloud
+// preparation, or with another device's row, and refuse a download that never
+// happened.
 func expectNoLatestUserDownload(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-		WithArgs("material", int64(42), "user_download", int64(9)).
+		WithArgs("material", int64(42), "user_download", int64(9), "device-1").
 		WillReturnRows(sqlmock.NewRows(taskColumns()))
 }
 
@@ -941,7 +952,7 @@ func expectMaterialPrepareCount(mock sqlmock.Sqlmock, finished int64) {
 // insert, so that the guard is what refuses rather than the mock.
 func expectMaterialPrepareInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string, dependency any) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, nil, "compose_input_prepare", "cloud", int64(9), nil, dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, nil, "compose_input_prepare", "cloud", int64(9), nil, nil, dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -968,12 +979,12 @@ func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing
 		{
 			name:     "nothing finished yet",
 			finished: 0,
-			wantKey:  "a7aacdc43fe78897d2da66126f170aaa5288ec7620030a97c60a98425925fe98",
+			wantKey:  "497e9d3c44e07831b5c5e8a33b3a8e11bf73d399338c0ffdc1c43716078374c7",
 		},
 		{
 			name:     "one download already finished",
 			finished: 1,
-			wantKey:  "3cdcb3725f7968c8173b5efe71aaaa5493663d14516e9f9a9d55abd351306220",
+			wantKey:  "a765abb582b22d32bf09d5ee9745aaa2b599f59faeaaebc43a4f8eca877fed80",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1007,7 +1018,7 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 		db, mock := newMockGORM(t)
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-			WithArgs("material", int64(42), "user_download", int64(9)).
+			WithArgs("material", int64(42), "user_download", int64(9), "device-1").
 			WillReturnRows(taskRow(testNow, map[string]any{"status": "success"}))
 		mock.ExpectCommit()
 
@@ -1028,14 +1039,14 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 		db, mock := newMockGORM(t)
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-			WithArgs("material", int64(42), "user_download", int64(9)).
+			WithArgs("material", int64(42), "user_download", int64(9), "device-1").
 			WillReturnRows(taskRow(testNow, map[string]any{"status": "failed"}))
 		// Two terminal rows by now — the success and the failure after it — so the
 		// new task is the third generation. The literal is the same kind of frozen
 		// value the table above uses.
 		expectUserDownloadCount(mock, 2)
-		expectUserDownloadInsert(mock, "transfer-1", "d9a9bd8a97cc660ce592801b080cc05412a190365f10df9ccf19e3e864c1e75c")
-		expectTaskByDedupeKey(mock, "d9a9bd8a97cc660ce592801b080cc05412a190365f10df9ccf19e3e864c1e75c", testNow, nil)
+		expectUserDownloadInsert(mock, "transfer-1", "1c1003eca3973120a239b813628406c6081ecaa0ced97715683b9953c9a5278a")
+		expectTaskByDedupeKey(mock, "1c1003eca3973120a239b813628406c6081ecaa0ced97715683b9953c9a5278a", testNow, nil)
 		mock.ExpectCommit()
 
 		if _, err := createUserDownloadTask(db, validUserDownloadInput(), testNow); err != nil {
@@ -1045,23 +1056,70 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 	})
 }
 
+// The stage-3 redelivery (CHG-20261002-074): a download that succeeded on device
+// A must not answer a click on device B. The two devices are two destinations —
+// the file A has is not on B — so the device-scoped latest-success read must
+// come back empty for B and a fresh task must be queued, at B's own generation,
+// even though a user-level read would have found A's success row. Without the
+// device scope this is the bug the dimension change exists to fix: the write-gate
+// swallows the redelivery before the key is even reached.
+//
+// The key and count are literals, not calls to the helper under test (same rule
+// as the generation table): B's first click is generation 1 on B, not generation
+// 2 inherited from A, which is exactly what the count scoped to device-2 asserts.
+func TestCreateUserDownloadTaskADeviceSwitchIsANewDestination(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectBegin()
+	// Device A succeeded; the click names device B. The latest read is scoped to
+	// B, so it is empty. A version that dropped the device filter would query
+	// with four args against a five-arg expectation and fail the run — the scope
+	// is asserted, not assumed.
+	mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
+		WithArgs("material", int64(42), "user_download", int64(9), "device-2").
+		WillReturnRows(sqlmock.NewRows(taskColumns()))
+	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
+		WithArgs("material", int64(42), "user_download", int64(9), "device-2").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	const deviceSwitchKey = "d02308e31a3e068d35ed49e90a7d2085ebd1506cb1a6c1654ed1a164bb8e8df3"
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-2", "device-2", nil, deviceSwitchKey, int64(100), testSHA256, 3, testNow, testNow).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectTaskByDedupeKey(mock, deviceSwitchKey, testNow, nil)
+	mock.ExpectCommit()
+
+	input := validUserDownloadInput()
+	input.AssignedNodeID = "node-2"
+	input.AssignedDeviceID = "device-2"
+	task, err := createUserDownloadTask(db, input, testNow)
+	if err != nil {
+		t.Fatalf("createUserDownloadTask() error = %v, want a fresh task on the new device", err)
+	}
+	if task.ID == "" {
+		t.Fatal("a device switch must queue a new task, not be answered with the old device's row")
+	}
+	assertExpectations(t, mock)
+}
+
 // The key has to be a function of the tuple and nothing else. A clock or a random
 // value in it would make two clicks that should collapse into one produce two
 // tasks — the failure the unique index exists to prevent — and it would do so
 // only under timing, so no other test here would see it.
 func TestUserDownloadDedupeKeyIsAFunctionOfTheTupleAlone(t *testing.T) {
-	base := userDownloadDedupeKey(42, identity.UserID(9), "node-1", 1)
-	if base != userDownloadDedupeKey(42, identity.UserID(9), "node-1", 1) {
+	base := userDownloadDedupeKey(42, identity.UserID(9), "device-1", 1)
+	if base != userDownloadDedupeKey(42, identity.UserID(9), "device-1", 1) {
 		t.Fatal("the same tuple must produce the same key, or a repeat click creates a second task")
 	}
 	if len(base) != 64 {
 		t.Fatalf("key length = %d, want 64 for the CHAR(64) column", len(base))
 	}
 	for _, other := range []string{
-		userDownloadDedupeKey(43, identity.UserID(9), "node-1", 1),
-		userDownloadDedupeKey(42, identity.UserID(10), "node-1", 1),
-		userDownloadDedupeKey(42, identity.UserID(9), "node-2", 1),
-		userDownloadDedupeKey(42, identity.UserID(9), "node-1", 2),
+		userDownloadDedupeKey(43, identity.UserID(9), "device-1", 1),
+		userDownloadDedupeKey(42, identity.UserID(10), "device-1", 1),
+		// A device switch is the whole point of the dimension change: the new
+		// device's click must be a different key even at the same generation,
+		// or unbind→rebind would be swallowed by the old device's task.
+		userDownloadDedupeKey(42, identity.UserID(9), "device-2", 1),
+		userDownloadDedupeKey(42, identity.UserID(9), "device-1", 2),
 	} {
 		if other == base {
 			t.Fatalf("the tuple is not discriminating: %s collides with %s", other, base)
@@ -1078,6 +1136,9 @@ func TestCreateUserDownloadTaskRefusesAnIncompleteIdentity(t *testing.T) {
 		"no team":     func(input *CreateUserDownloadInput) { input.TeamID = 0 },
 		"no material": func(input *CreateUserDownloadInput) { input.AssetID = 0 },
 		"no user":     func(input *CreateUserDownloadInput) { input.RequestedBy = 0 },
+		// No device: the download has no destination, the dedupe key would have
+		// nothing to bind to, and every device-less click would share one key.
+		"no device": func(input *CreateUserDownloadInput) { input.AssignedDeviceID = "" },
 	} {
 		input := validUserDownloadInput()
 		mutate(&input)

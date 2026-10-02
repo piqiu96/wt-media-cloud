@@ -26,6 +26,40 @@ describe('download centre drawer', () => {
   })
 
   /**
+   * 「重取」（CHG-20261002-074 阶段 3）：悬置/可重取的行走**重取**，而不是「重新下载」。
+   *
+   * 两个按钮都在说「再来一次」，但重取要先处理「发给这台设备却没人领」的悬置行（取消再
+   * 发起）；可重取的行（解绑遗留）则是换机重投递的入口，为当前设备建新任务。它们互斥：
+   * 可重取的行给「重取」，其余终态行才给「重新下载」。
+   */
+  it('shows the re-take button under the fact the row computed', () => {
+    expect(source).toContain('v-if="row.canRetake"')
+    expect(source).toContain('@click="retake(row.task)"')
+    expect(source).toContain('v-else-if="row.canRedownload"')
+  })
+
+  // 重取悬置行先取消（pending 没有执行器，取消是立即终态）再重新发起；可重取行已是终态，
+  // 直接发起。两条都走与第一次点击完全相同的下载入口。
+  it('re-takes through the download entry point, cancelling a suspended task first', () => {
+    expect(source).toContain("if (task.status === 'pending') {")
+    expect(source).toContain('await client.cancelTask(task.id)')
+    expect(source).toContain('await materials.createDownload(task.asset_id)')
+    expect(source).toContain('MessagePlugin.error(createDownloadFailureMessage(e))')
+  })
+
+  // 新任务要出现在这张列表里，重取之后同样要刷新（与「重新下载」同一条理由）。
+  it('refreshes the list after re-taking', () => {
+    expect(source).toMatch(/async function retake\(task\) \{(.|\n)*?await load\(\)/)
+  })
+
+  // 悬置行的「发给这台设备」由本机 device_id 认出：面板打开时先问 runtime，再穿给每一行。
+  it('asks the runtime for the local device id and feeds it into the rows', () => {
+    expect(source).toContain("await invoke('local_device_identity')")
+    expect(source).toContain('identity?.device_id')
+    expect(source).toContain('localDeviceId: localDeviceId.value,')
+  })
+
+  /**
    * 「重试」收进「重新下载」（走查裁定）：模板里不再有它，也不再调那个接口。
    *
    * 两个按钮都在说「再来一次」，而 `retryTask` 改的是原来那条行、还要求它没在等准备

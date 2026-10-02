@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.07.14.4"
+revision: "2026.10.02.1"
 errors:
   authentication_required: {http_status: 401}
   invalid_runtime_report: {http_status: 400}
@@ -7,6 +7,10 @@ errors:
   binding_ticket_invalid: {http_status: 401}
   bound_session_invalid: {http_status: 401}
   node_credential_invalid: {http_status: 401}
-  profile_runtime_ownership_mismatch: {http_status: 409}
+  # 23003: the Profile a report or a scan names belongs to a bound user other
+  # than the one standing at this machine. Same environment confirmation
+  # (环境确认) gate as profile_runtime_unavailable: the user must confirm the
+  # environment (or switch back to the bound account) before local operations.
+  profile_runtime_ownership_mismatch: {http_status: 409, code: 23003}
   incompatible_agent_contract: {http_status: 409}
   runtime_binding_store_error: {http_status: 500}

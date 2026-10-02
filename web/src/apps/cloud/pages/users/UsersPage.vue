@@ -162,17 +162,6 @@ async function deleteUser(user) {
   }
 }
 
-async function clearBitBrowserBinding(user) {
-  const confirmed = window.confirm(`确定解除 ${user.username} 的比特浏览器账号绑定？\n\n解除后，该用户需要在 Desktop 重新绑定正确的比特浏览器账号。\n系统不会删除已有浏览器窗口、媒体账号和历史记录。`)
-  if (!confirmed) return
-  try {
-    await client.clearBitBrowserBinding(user.id)
-    await loadAll()
-  } catch (e) {
-    error.value = friendlyError(e)
-  }
-}
-
 function openPasswordReset(user) {
   passwordTarget.value = user
   newPassword.value = ''
@@ -258,7 +247,6 @@ function gameScopeText(gameIds) {
           <t-space>
             <t-button size="small" variant="text" @click="openEditUser(row)">编辑用户</t-button>
             <t-button size="small" variant="text" @click="openPasswordReset(row)">重置密码</t-button>
-            <t-button size="small" variant="text" theme="warning" @click="clearBitBrowserBinding(row)">解除比特绑定</t-button>
             <t-button size="small" variant="text" @click="toggleUser(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</t-button>
             <t-button size="small" variant="text" theme="danger" @click="deleteUser(row)">删除</t-button>
           </t-space>

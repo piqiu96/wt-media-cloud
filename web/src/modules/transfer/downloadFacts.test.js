@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetake, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isReclaimableAfterUnbind, isSuspendedOnDevice, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -188,6 +188,51 @@ describe('row actions', () => {
     expect(canRedownload(task({ status: 'cancelled', asset_type: 'compose_input' }))).toBe(false)
     expect(canRedownload(task({ status: 'cancelled', asset_id: 0 }))).toBe(false)
     expect(canRedownload(null)).toBe(false)
+  })
+})
+
+/**
+ * 「重取」（CHG-20261002-074 阶段 3）：悬置在这台设备上没人领的 pending 任务，或解绑时
+ * 被标记可重取的终态行。前者要本机 device_id 才能认出（浏览器读不到 → 恒 false），后者
+ * 恰恰是旧设备名下的任务，不需要本机 id。
+ */
+describe('re-take', () => {
+  it('knows a pending task that is stuck on this device', () => {
+    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(true)
+    // 发给别的设备的不算「这台」。
+    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-A' }), 'dev-B')).toBe(false)
+    // 没有本机 device_id（浏览器）就认不出，不重取。
+    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-B' }), null)).toBe(false)
+    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-B' }))).toBe(false)
+    // 没有寻址设备 / 已经终态 / 正在跑，都不是「没人领的悬置」。
+    expect(isSuspendedOnDevice(task({ status: 'pending' }), 'dev-B')).toBe(false)
+    expect(isSuspendedOnDevice(task({ status: 'success', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(false)
+    expect(isSuspendedOnDevice(task({ status: 'running', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(false)
+  })
+
+  it('knows a cancelled row that UnbindDevice marked reclaimable', () => {
+    expect(isReclaimableAfterUnbind(task({ status: 'cancelled', error_code: 'device_unbound' }))).toBe(true)
+    // 手动取消、失败都不带这个标记。
+    expect(isReclaimableAfterUnbind(task({ status: 'cancelled' }))).toBe(false)
+    expect(isReclaimableAfterUnbind(task({ status: 'failed', error_code: 'device_unbound' }))).toBe(false)
+    expect(isReclaimableAfterUnbind(null)).toBe(false)
+  })
+
+  it('offers re-take for a reclaimable row no matter which device you are on', () => {
+    // 设备 A 领任务→解绑→设备 B 绑定后，这条在 B 上仍要能重取：认的是 device_unbound
+    // 标记，不是把当前设备拿去比。
+    expect(canRetake(task({ status: 'cancelled', error_code: 'device_unbound' }), 'dev-B')).toBe(true)
+    expect(canRetake(task({ status: 'cancelled', error_code: 'device_unbound' }))).toBe(true)
+  })
+
+  it('offers re-take for a suspended task only when we can identify this device', () => {
+    expect(canRetake(task({ status: 'pending', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(true)
+    // 浏览器读不到本机 device_id：悬置那一支不能认，退给可重取那一支（这里不是它）。
+    expect(canRetake(task({ status: 'pending', assigned_device_id: 'dev-B' }))).toBe(false)
+    // 成功的行、非素材的行都不重取。
+    expect(canRetake(task({ status: 'success', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(false)
+    expect(canRetake(task({ status: 'cancelled', error_code: 'device_unbound', asset_type: 'compose_input' }), 'dev-B')).toBe(false)
+    expect(canRetake(null)).toBe(false)
   })
 })
 

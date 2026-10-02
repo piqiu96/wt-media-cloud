@@ -8,7 +8,7 @@
 // 2. 一张行表能被单测钉住。模板字符串不能。
 import { formatByteRate, formatBytes, formatEta } from '../../shared/utils/units.js'
 import { formatDateTime } from '../../shared/utils/datetime.js'
-import { canCancel, canOpenFile, canRedownload, fileFact, filePresence, isFailed, isHistory, isTerminal, progressOf, taskState } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetake, fileFact, filePresence, isFailed, isHistory, isTerminal, progressOf, taskState } from './downloadFacts.js'
 import { taskErrorLabel } from './downloadErrors.js'
 
 /** 「已传 / 总长」。总长未知时只说已传了多少，绝不写 `0 / 0`。 */
@@ -22,7 +22,7 @@ function sizeTextOf(task, progress) {
   return `${done} / ${total}`
 }
 
-export function transferRow(task, { tasks = [], cancelRequested = false, presence = {} } = {}) {
+export function transferRow(task, { tasks = [], cancelRequested = false, presence = {}, localDeviceId = null } = {}) {
   const progress = progressOf(task)
   const state = taskState(task, { tasks, cancelRequested })
   // 量出来的那一条（可能是「查过、不在」），和由它推出的三种呈现。`presence` 缺省是
@@ -51,6 +51,9 @@ export function transferRow(task, { tasks = [], cancelRequested = false, presenc
     canCancel: canCancel(task) && !cancelRequested,
     canOpen: canOpenFile(task, presenceOfFile),
     canRedownload: canRedownload(task),
+    // 悬置/可重取由「重取」按钮接（见 DownloadCentreDrawer）；localDeviceId 是浏览器读
+    // 不到的（缺省 null），所以 web 上只有「解绑可重取」这一支成立。
+    canRetake: canRetake(task, localDeviceId),
     // `presence` 是给界面读的：文件在旧目录里时要说出来在哪儿，不然「打开文件」能用而
     // 「重新下载」没出现的组合看起来像少了点什么。`fileFact` 是那一条记录（含目录与
     // 体积），`null` 表示没查过或不适用。
@@ -59,12 +62,13 @@ export function transferRow(task, { tasks = [], cancelRequested = false, presenc
   }
 }
 
-export function transferRows(tasks, { cancelRequested = [], presence = {} } = {}) {
+export function transferRows(tasks, { cancelRequested = [], presence = {}, localDeviceId = null } = {}) {
   const list = Array.isArray(tasks) ? tasks : []
   return list.map((task) => transferRow(task, {
     tasks: list,
     cancelRequested: cancelRequested.includes(task.id),
     presence,
+    localDeviceId,
   }))
 }
 

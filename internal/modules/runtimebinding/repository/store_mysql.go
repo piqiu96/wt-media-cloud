@@ -150,7 +150,11 @@ func maskDeviceIdentity(value string) string {
 }
 
 func UnbindDevice(userID sharedidentity.UserID, at time.Time) error {
-	return database.DB().Transaction(func(tx *gorm.DB) error {
+	return unbindDevice(database.DB(), userID, at)
+}
+
+func unbindDevice(db *gorm.DB, userID sharedidentity.UserID, at time.Time) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		var deviceID sql.NullString
 		err := tx.Raw(`SELECT device_id FROM users WHERE id = ? AND status = 'enabled' FOR UPDATE`, userID).Row().Scan(&deviceID)
 		if err != nil {
@@ -163,6 +167,21 @@ func UnbindDevice(userID sharedidentity.UserID, at time.Time) error {
 			return err
 		}
 		if err := tx.Exec(`UPDATE local_agent_nodes SET status = 'replaced', updated_at = ? WHERE user_id = ? AND mode = 'local' AND status <> 'replaced'`, at, userID).Error; err != nil {
+			return err
+		}
+		// The unbound device's in-flight downloads are marked reclaimable
+		// (CHG-20261002-074 stage 3). A node that has been `replaced` can never be
+		// claimed again — claims are node-scoped and every continuation predicate
+		// requires an online claimant — so a pending/running task still assigned to
+		// it would sit forever with no reachable terminal state. There is nothing to
+		// reassign it to at unbind time: the next device binds later, and the user
+		// download dedupe is device-scoped, so "标记可重取" here is a terminal
+		// cancel that the download centre's 重新下载 turns into a fresh task on the
+		// current device. The write is the same server-side terminal shape the
+		// reconcilers use (status + finished_at + lease cleared + reason), scoped by
+		// the device's nodes so a future re-bind of the same device id does not
+		// cancel tasks it did not own.
+		if err := tx.Exec(`UPDATE file_transfer_tasks SET status = 'cancelled', finished_at = ?, lease_expires_at = NULL, error_code = 'device_unbound', error_message = '设备已解绑，可重新下载', updated_at = ? WHERE requested_by = ? AND purpose = 'user_download' AND execution_scope = 'local_agent' AND status IN ('pending', 'running') AND assigned_node_id IN (SELECT id FROM local_agent_nodes WHERE device_id = ? AND mode = 'local')`, at, at, userID, deviceID.String).Error; err != nil {
 			return err
 		}
 		return tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, 'user.device.unbind', 'user', ?, ?, ?)`, id.NewID("audit"), userID, strconv.FormatInt(int64(userID), 10), `{"result":"unbound"}`, at).Error

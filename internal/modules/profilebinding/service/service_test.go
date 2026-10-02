@@ -79,31 +79,6 @@ func TestConfirmMainIdentityDirectRejectsSilentRebind(t *testing.T) {
 	}
 }
 
-func TestAdminCanClearMainIdentityWithoutDeletingProfiles(t *testing.T) {
-	store := newMemoryStore()
-	store.bindings[2] = BitAccountBinding{UserID: 2, MainUserID: "main-user-a", Status: BitAccountBound}
-	store.profiles["profile-1"] = BrowserProfile{ID: "profile-1", UserID: 2, BitProfileID: "bit-profile-1", MainUserID: "main-user-a"}
-	service := newTestService(store)
-	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
-
-	if err := service.ClearMainIdentity(admin, identityservice.UserID(2)); err != nil {
-		t.Fatalf("ClearMainIdentity() error=%v", err)
-	}
-	if _, ok := store.bindings[2]; ok {
-		t.Fatalf("binding was not cleared: %#v", store.bindings[2])
-	}
-	if _, ok := store.profiles["profile-1"]; !ok {
-		t.Fatal("clearing main identity deleted browser profiles")
-	}
-}
-
-func TestOperatorCannotClearMainIdentity(t *testing.T) {
-	err := newTestService(newMemoryStore()).ClearMainIdentity(profileActor("user-1"), identityservice.UserID(1))
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("ClearMainIdentity(operator) error=%v, want ErrForbidden", err)
-	}
-}
-
 func TestSeniorCanViewButCannotMutateSameTeamProfileCloudRecord(t *testing.T) {
 	store := newMemoryStore()
 	teamA := identityservice.TeamID(10)
@@ -533,14 +508,6 @@ func (s *memoryStore) ConfirmMainIdentityDirect(binding BitAccountBinding, _ tim
 	s.bindings[binding.UserID] = binding
 	s.audits = append(s.audits,
 		identityservice.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(binding.UserID), 10), Summary: map[string]string{"main_user_id": binding.MainUserID, "result": "identity_verified", "identity_only": "true"}},
-	)
-	return nil
-}
-
-func (s *memoryStore) ClearMainIdentity(userID identityservice.UserID, actorID identityservice.UserID, at time.Time) error {
-	delete(s.bindings, userID)
-	s.audits = append(s.audits,
-		identityservice.AuditEvent{ActorUserID: actorID, Action: "bitbrowser.main_account.clear", TargetType: "user", TargetID: strconv.FormatInt(int64(userID), 10), Summary: map[string]string{"result": "cleared"}, CreatedAt: at},
 	)
 	return nil
 }

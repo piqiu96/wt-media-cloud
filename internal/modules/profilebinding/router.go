@@ -12,7 +12,6 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/confirm", ConfirmProfileScan)
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/confirm-main-identity", ConfirmScanMainIdentity)
 	h.POST("/api/v1/bit-browser/main-identity", ConfirmMainIdentity)
-	h.DELETE("/api/v1/users/:user_id/bit-browser-main-identity", ClearMainIdentity)
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/reject", RejectProfileScan)
 	h.GET("/api/v1/browser-profiles", ListBrowserProfiles)
 	h.POST("/api/v1/browser-profiles", CreateBrowserProfile)

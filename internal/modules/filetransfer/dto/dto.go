@@ -34,11 +34,18 @@ import "time"
 // history tabs need a completion time to order their lists and apply their retention
 // windows, and `updated_at` moves on lease renewals that are not completions. It is
 // null until the task is terminal, like the other nullable fields.
+//
+// `assigned_device_id` was added so the download centre can recognise the tasks
+// bound to this computer: it matches the durable device (users.device_id) against
+// the local device identity, which is what lets it tell a suspended task of this
+// machine's from a row that belongs to another machine. Empty for Cloud
+// preparations, which have no destination device.
 type Task struct {
 	ID                        string     `json:"id"`
 	AssetType                 string     `json:"asset_type"`
 	AssetID                   int64      `json:"asset_id"`
 	AssetTitle                string     `json:"asset_title"`
+	AssignedDeviceID          string     `json:"assigned_device_id"`
 	Purpose                   string     `json:"purpose"`
 	ExecutionScope            string     `json:"execution_scope"`
 	Status                    string     `json:"status"`

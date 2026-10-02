@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.01.1"
+revision: "2026.10.02.1"
 
 schemas:
   FileTransferTask:
@@ -16,6 +16,15 @@ schemas:
           task row is otherwise unnameable: the id alone tells the download centre nothing about what it is
           downloading, and `file_name` only arrives once an executor has finished. Held on the row rather than
           looked up on read, because a task outlives the rename of what it points at.
+      assigned_device_id:
+        type: string
+        description: >-
+          The durable destination device (users.device_id) the download was created for, carried from the
+          resolved node at creation time. The download centre matches it against the local device identity to
+          recognise the tasks bound to this computer — the suspended ones are the ones it can re-take. A
+          device switch is a new destination, so a task on the old device never satisfies a click on the new
+          one (the user download dedupe is device-scoped). Empty for Cloud preparations, which have no
+          destination device.
       purpose: {type: string, enum: [compose_input_prepare, user_download]}
       execution_scope: {type: string, enum: [cloud, local_agent]}
       status: {type: string, enum: [pending, running, success, failed, cancelled]}

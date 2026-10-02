@@ -721,11 +721,14 @@ var stubResolveGame = func(gameID string) (string, bool, error) {
 // A task created without an assignee would be claimed by whichever device polled
 // first, so the node has to reach the task as the one the resolver chose — not as
 // an empty string the transfer module would then reject, and not as the actor.
+// Stage 3 adds the durable device (users.device_id) beside the node: the dedupe
+// key is device-scoped, so the same resolved node's DeviceID must reach the
+// transfer input or the task is created against an empty destination.
 func TestCreateDownloadAddressesTheTaskToTheResolvedNode(t *testing.T) {
 	team, game := service.TeamID(7), "game-a"
 	material := readyMaterial(team, game)
 	store := &memoryStore{found: true, material: material}
-	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-7", UserID: 9}}
+	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-7", UserID: 9, DeviceID: "device-7"}}
 	transfers := &stubTransfers{}
 	svc := NewService(store, nodes, transfers, &stubLinks{})
 	svc.resolveGame = stubResolveGame
@@ -743,7 +746,7 @@ func TestCreateDownloadAddressesTheTaskToTheResolvedNode(t *testing.T) {
 		t.Fatalf("transfer calls = %d, want 1", transfers.count)
 	}
 	got := transfers.last
-	if got.AssignedNodeID != "node-7" || got.RequestedBy != 9 || got.TeamID != team || got.AssetID != 42 {
+	if got.AssignedNodeID != "node-7" || got.AssignedDeviceID != "device-7" || got.RequestedBy != 9 || got.TeamID != team || got.AssetID != 42 {
 		t.Fatalf("transfer input = %+v", got)
 	}
 	// The executor runs later, on another machine, and may not read `materials`:

@@ -31,6 +31,18 @@ describe('transfer row', () => {
     expect('canRetry' in row).toBe(false)
     expect(row.canRedownload).toBe(true)
     expect('canOpen' in row).toBe(true)
+    // 手动取消的行不带 device_unbound 标记，也没有悬置那一支 → 不重取。
+    expect(row.canRetake).toBe(false)
+  })
+
+  // 悬置行的「重取」靠本机 device_id 认出「发给这台设备」；它要穿到每一行上，否则算对了
+  // 也没人读（与 `presence` 同一层防漏传的理由）。
+  it('feeds the local device id into each row so suspended tasks are recognised', () => {
+    const suspended = transferRow(task({ status: 'pending', assigned_device_id: 'dev-B' }), { localDeviceId: 'dev-B' })
+    expect(suspended.canRetake).toBe(true)
+    // 不传（浏览器读不到本机）时认不出，不重取。
+    const noId = transferRow(task({ status: 'pending', assigned_device_id: 'dev-B' }))
+    expect(noId.canRetake).toBe(false)
   })
 
   it('puts 重新下载 on the rows that were stuck with nothing to do', () => {

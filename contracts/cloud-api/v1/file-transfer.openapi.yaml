@@ -1,12 +1,19 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud File Transfer API
-  version: 2026.10.01.1
+  version: 2026.10.02.1
   description: >-
     Executor-neutral transfer task API. Asset domains may create tasks but do not own the transfer
     lifecycle. Every response uses the Cloud errcode/message/data/logid envelope, and every task body is a
     `FileTransferTask` record from `business-schemas/v1/file-transfer.yaml` — never a local path, a signed
     URL, or a storage credential.
+
+    Redelivery (重投递) semantics: the user download dedupe is device-scoped — the dedupe key and the
+    latest-success check both carry `assigned_device_id`, so a click on the old device never satisfies a
+    click on the new one. A device switch is a fresh destination and produces a fresh task; a task created
+    for a device that is later unbound is cancelled (reclaimable) rather than delivered to the wrong
+    machine. The download centre proactively re-takes tasks whose `assigned_device_id` is this local device
+    but whose status is suspended (pending/running not taken).
 paths:
   /api/v1/file-transfer-tasks:
     get:

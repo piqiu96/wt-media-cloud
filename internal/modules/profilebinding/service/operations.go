@@ -29,10 +29,6 @@ func ConfirmMainIdentityDirect(actor service.PublicUser, input dto.MainIdentityI
 	return newService(mysqlStore{}).ConfirmMainIdentityDirect(actor, input)
 }
 
-func ClearMainIdentity(actor service.PublicUser, userID service.UserID) error {
-	return newService(mysqlStore{}).ClearMainIdentity(actor, userID)
-}
-
 func RejectScan(actor service.PublicUser, scanID string) error {
 	return newService(mysqlStore{}).RejectScan(actor, scanID)
 }

@@ -1,9 +1,13 @@
 schema_version: 1
-revision: "2026.07.14.5"
+revision: "2026.10.02.1"
 errors:
   sensitive_credential_invalid: {http_status: 401}
   invalid_sensitive_preflight: {http_status: 400}
   sensitive_task_not_found: {http_status: 404}
   sensitive_task_assignment_mismatch: {http_status: 403}
-  profile_runtime_unavailable: {http_status: 409}
+  # 23003: the Profile's local runtime environment is not available, so a
+  # sensitive window operation cannot be permitted. This is the environment
+  # confirmation (环境确认) gate: the Desktop must refresh and confirm the local
+  # environment before such operations are allowed.
+  profile_runtime_unavailable: {http_status: 409, code: 23003}
   profile_guard_store_error: {http_status: 500}

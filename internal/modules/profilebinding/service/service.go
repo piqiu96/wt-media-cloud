@@ -69,7 +69,6 @@ type Store interface {
 	FindScan(scanID string) (ProfileScan, bool, error)
 	ConfirmMainIdentity(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	ConfirmMainIdentityDirect(binding BitAccountBinding, at time.Time, bindingAuditAction string) error
-	ClearMainIdentity(userID identityservice.UserID, actorID identityservice.UserID, at time.Time) error
 	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
 	DeleteProfile(id string) error
 	UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
@@ -242,7 +241,16 @@ func (s *Service) ConfirmMainIdentityDirect(actor identityservice.PublicUser, in
 		return BitAccountBinding{}, err
 	}
 	if found && binding.MainUserID != mainUserID {
-		return BitAccountBinding{}, ErrIdentityMismatch
+		// The mismatch is the safety guard: one account must not silently take
+		// over another's binding. "以当前环境为准" is the deliberate exception —
+		// the user standing at this machine states that the account the
+		// environment reports is the one to bind — and only that explicit flag
+		// clears the guard. Everything else, including the scan-confirm path,
+		// is refused so a wrong-environment report cannot rebind the account.
+		if !input.Overwrite {
+			return BitAccountBinding{}, ErrIdentityMismatch
+		}
+		binding.MainUserID = mainUserID
 	}
 	if !found {
 		boundAt := now
@@ -258,16 +266,6 @@ func (s *Service) ConfirmMainIdentityDirect(actor identityservice.PublicUser, in
 		return BitAccountBinding{}, err
 	}
 	return binding, nil
-}
-
-func (s *Service) ClearMainIdentity(actor identityservice.PublicUser, userID identityservice.UserID) error {
-	if !validActor(actor) || actor.Role != identityservice.RoleAdmin {
-		return ErrForbidden
-	}
-	if userID <= 0 {
-		return ErrInvalidInput
-	}
-	return s.store.ClearMainIdentity(userID, actor.ID, s.now())
 }
 
 func (s *Service) confirmScan(actor identityservice.PublicUser, scanID string, applyProfiles bool) (ProfileScan, error) {

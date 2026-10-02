@@ -1,8 +1,14 @@
 schema_version: 1
-revision: "2026.07.14.3"
+revision: "2026.10.02.1"
 errors:
-  bitbrowser_identity_unverifiable: {http_status: 409}
-  bitbrowser_identity_mismatch: {http_status: 409}
+  # 23002: the BitBrowser main identity cannot be verified, or the account the
+  # environment reports differs from the one the Cloud has bound to this user.
+  # Both are the user's own account-confirmation (身份确认) gate. The user can
+  # resolve them at the machine via "以当前环境为准" (main-identity confirm with
+  # overwrite=true); without that deliberate flag a mismatch is refused so one
+  # user's browser cannot silently take over another's binding.
+  bitbrowser_identity_unverifiable: {http_status: 409, code: 23002}
+  bitbrowser_identity_mismatch: {http_status: 409, code: 23002}
   profile_scan_not_found: {http_status: 404}
   profile_scan_expired: {http_status: 410}
   profile_scan_not_ready: {http_status: 409}

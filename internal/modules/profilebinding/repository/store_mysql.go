@@ -432,39 +432,6 @@ func confirmMainIdentityDirect(db *gorm.DB, binding model.BitAccountBinding, at 
 	return tx.Commit().Error
 }
 
-func ClearMainIdentity(userID sharedidentity.UserID, actorID sharedidentity.UserID, at time.Time) error {
-	return clearMainIdentity(database.DB(), userID, actorID, at)
-}
-
-func clearMainIdentity(db *gorm.DB, userID sharedidentity.UserID, actorID sharedidentity.UserID, at time.Time) error {
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	result, err := execSQL(tx,
-		`UPDATE users SET bit_main_user_id = NULL, bit_account_status = NULL, bit_account_bound_at = NULL, bit_account_last_verified_at = NULL, updated_at = ? WHERE id = ?`,
-		at, userID,
-	)
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return model.ErrInvalidInput
-	}
-	if _, err := execSQL(tx,
-		`UPDATE local_agent_nodes SET status = ?, updated_at = ?, last_heartbeat_at = ? WHERE user_id = ? AND mode = 'local'`,
-		"replaced", at, at, userID,
-	); err != nil {
-		return err
-	}
-	summary, _ := json.Marshal(map[string]any{"result": "cleared", "kept_profiles": true, "kept_accounts": true, "invalidated_local_nodes": true})
-	if _, err := execSQL(tx,
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.NewID("audit"), actorID, "bitbrowser.main_account.clear", "user", userID, summary, at,
-	); err != nil {
-		return err
-	}
-	return tx.Commit().Error
-}
-
 type scanner interface{ Scan(...any) error }
 
 func scanProfile(row scanner) (model.BrowserProfile, error) {

@@ -124,7 +124,8 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 		SourceObjectKey: input.SourceObjectKey,
 		Purpose:         model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
 		Status: model.StatusPending, RequestedBy: input.RequestedBy, AssignedNodeID: input.AssignedNodeID,
-		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
+		AssignedDeviceID: input.AssignedDeviceID,
+		TotalBytes:       input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -1243,14 +1244,15 @@ func TestCreateUserDownloadFixesThePurposeTheScopeAndTheAttemptBound(t *testing.
 	svc := testService(store, workingNode())
 
 	task, err := svc.CreateUserDownload(CreateUserDownloadInput{
-		TeamID:          7,
-		AssetID:         42,
-		AssetTitle:      "示例视频",
-		SourceObjectKey: "materials/42/abc.mp4",
-		RequestedBy:     9,
-		AssignedNodeID:  "node-1",
-		TotalBytes:      1024,
-		ExpectedSHA256:  strings.Repeat("a", 64),
+		TeamID:           7,
+		AssetID:          42,
+		AssetTitle:       "示例视频",
+		SourceObjectKey:  "materials/42/abc.mp4",
+		RequestedBy:      9,
+		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
+		TotalBytes:       1024,
+		ExpectedSHA256:   strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatalf("CreateUserDownload() error = %v", err)
@@ -1259,7 +1261,7 @@ func TestCreateUserDownloadFixesThePurposeTheScopeAndTheAttemptBound(t *testing.
 		t.Fatalf("the download path must not go through the generic create: %v", store.counts)
 	}
 	input := store.lastDownload
-	if input.TeamID != 7 || input.AssetID != 42 || input.RequestedBy != 9 || input.AssignedNodeID != "node-1" {
+	if input.TeamID != 7 || input.AssetID != 42 || input.RequestedBy != 9 || input.AssignedNodeID != "node-1" || input.AssignedDeviceID != "device-1" {
 		t.Fatalf("download input = %+v", input)
 	}
 	if input.TotalBytes != 1024 || input.ExpectedSHA256 != strings.Repeat("a", 64) {
@@ -1314,6 +1316,7 @@ func TestCreateUserDownloadCarriesThePreparationItWaitsFor(t *testing.T) {
 		AssetTitle:       "示例视频",
 		RequestedBy:      9,
 		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
 		DependencyTaskID: "transfer-prepare-1",
 	})
 	if err != nil {

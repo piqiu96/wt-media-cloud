@@ -403,16 +403,17 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		return transferdto.Task{}, ErrLocalNodeUnavailable
 	}
 	input := transferservice.CreateUserDownloadInput{
-		TeamID:          material.TeamID,
-		AssetID:         material.ID,
-		AssetTitle:      material.Title,
-		GameName:        s.gameNameOf(material),
-		PublishedAt:     material.PublishedAt,
-		SourceObjectKey: objectKey,
-		RequestedBy:     actor.ID,
-		AssignedNodeID:  node.ID,
-		TotalBytes:      size,
-		ExpectedSHA256:  sha256,
+		TeamID:           material.TeamID,
+		AssetID:          material.ID,
+		AssetTitle:       material.Title,
+		GameName:         s.gameNameOf(material),
+		PublishedAt:      material.PublishedAt,
+		SourceObjectKey:  objectKey,
+		RequestedBy:      actor.ID,
+		AssignedNodeID:   node.ID,
+		AssignedDeviceID: node.DeviceID,
+		TotalBytes:       size,
+		ExpectedSHA256:   sha256,
 	}
 	if !ready {
 		// The preparation is a Cloud task keyed on the material rather than on this

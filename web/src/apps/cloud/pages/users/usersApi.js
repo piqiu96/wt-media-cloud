@@ -22,9 +22,6 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
     resetPassword(userId, newPassword) {
       return api.post(`/users/${userId}/reset-password`, { new_password: newPassword })
     },
-    clearBitBrowserBinding(userId) {
-      return api.delete(`/users/${userId}/bit-browser-main-identity`)
-    },
     deleteUser(userId) {
       return api.delete(`/users/${userId}`)
     },

@@ -32,9 +32,6 @@ func (mysqlStore) ConfirmMainIdentity(scan model.ProfileScan, binding model.BitA
 func (mysqlStore) ConfirmMainIdentityDirect(binding model.BitAccountBinding, at time.Time, action string) error {
 	return repository.ConfirmMainIdentityDirect(binding, at, action)
 }
-func (mysqlStore) ClearMainIdentity(userID, actorID identityservice.UserID, at time.Time) error {
-	return repository.ClearMainIdentity(userID, actorID, at)
-}
 func (mysqlStore) ApplyScan(scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, action string) error {
 	return repository.ApplyScan(scan, binding, at, action)
 }

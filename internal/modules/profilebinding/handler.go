@@ -111,22 +111,6 @@ func ConfirmMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, binding)
 }
-func ClearMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	userID, valid := parseProfileUserID(c.Param("user_id"))
-	if !valid {
-		writeProfileError(c, profileservice.ErrInvalidInput)
-		return
-	}
-	if err := profileservice.ClearMainIdentity(actor, userID); err != nil {
-		writeProfileError(c, err)
-		return
-	}
-	api.NoContent(c)
-}
 func RejectProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {

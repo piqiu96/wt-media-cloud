@@ -10,7 +10,8 @@ import { createMaterialsClient } from '../../shared/api/materials.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import MaterialDetailDrawer from '../materials/MaterialDetailDrawer.vue'
 import { isDesktop } from '../../utils.js'
-import { openSavedFile, savedFileStates } from './desktopBridge.js'
+import { invoke } from '@tauri-apps/api/core'
+import { isDesktopRuntime, openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
 import { hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
@@ -30,6 +31,9 @@ const cancelRequested = ref([])
 // 空表 ＝ 没查过：浏览器读不到本机、Desktop 还没扫完 —— 界面此时一个字都不说，
 // 不能把「我读不到」写成「文件不在」。
 const presence = ref({})
+// 本机的持久化设备 id。悬置行（pending 且 assigned_device_id 是这台）要靠它认出来；
+// 浏览器读不到本机，读不到就留着 null —— `canRetake` 那一支恒 false，不认就不重取。
+const localDeviceId = ref(null)
 
 const POLL_INTERVAL_MS = 2000
 let timer = null
@@ -57,6 +61,7 @@ const rows = computed(() => {
   return transferRows(tasks.value, {
     cancelRequested: cancelRequested.value,
     presence: presence.value,
+    localDeviceId: localDeviceId.value,
   }).filter((row) => row.task.purpose === 'user_download')
     .filter((row) => {
       const key = row.task.asset_id || `task:${row.task.id}`
@@ -142,6 +147,19 @@ function ensurePresence() {
 // 事实，拉一次就够；进行中 Tab 每一次 tick 都是一次真实的 GET，屏幕上的每个数字都来自
 // 服务端，定时器只决定「多久问一次」。没有非终态任务时它立刻停下 —— 一个永远跑着的
 // 2 秒轮询会浪费本机 Agent 与云端之间的带宽。
+// 本机的持久化设备 id，用来认出悬置在这台设备上的任务（见 `canRetake`）。Desktop 运行时
+// 才问（浏览器里 invoke 会炸，见 desktopBridge 的守卫说明），问不到就留着 null —— 认不
+// 出就不重取，比「猜一个设备去重取」诚实。
+async function loadLocalDevice() {
+  if (!isDesktopRuntime()) return
+  try {
+    const identity = await invoke('local_device_identity')
+    localDeviceId.value = identity?.device_id || null
+  } catch {
+    localDeviceId.value = null
+  }
+}
+
 function stopPolling() {
   if (timer) {
     clearInterval(timer)
@@ -175,7 +193,7 @@ async function load() {
 // 切 Tab 不再重新拉取（一次拉回全量、分栏在客户端做），只重估轮询闸门：停在进行中才轮询。
 watch(activeTab, () => { if (visible.value) ensurePolling() })
 
-watch(visible, (open) => {
+watch(visible, async (open) => {
   if (!open) {
     stopPolling()
     return
@@ -183,6 +201,9 @@ watch(visible, (open) => {
   // 重新打开要重扫一次：面板关着的这段时间里文件可能被搬走、被删，也可能换了保存位置。
   // 清掉指纹就够了 —— `load()` 结尾的 `ensurePresence()` 会补上这一次。
   measuredKey = null
+  // 先问本机 device_id 再拉列表：悬置行的「重取」要拿它认出「发给这台设备」，首帧就得有，
+  // 免得画面上先出现一帧没有重取按钮的样子。
+  await loadLocalDevice()
   if (activeTab.value !== 'active') {
     // 停在别的 Tab 时切回去本身会触发上面的 activeTab watcher。
     activeTab.value = 'active'
@@ -225,6 +246,29 @@ async function redownload(task) {
   try {
     await materials.createDownload(task.asset_id)
     // 新任务要出现在这张列表里 —— 不刷新的话画面停在旧行上，看起来像没反应。
+    await load()
+  } catch (e) {
+    MessagePlugin.error(createDownloadFailureMessage(e))
+  }
+}
+
+/**
+ * 重取：把一条悬置（发给本机、没人领的 pending）或可重取（解绑遗留）的任务重新驱动起来。
+ *
+ * 悬置行先取消 —— pending 没有执行器，取消是立即终态（契约「cancelled when it had no
+ * executor」）；再重新发起下载，去重键的 generation 把刚取消的那条算作已结束，新任务于是
+ * 落在**当前**可信节点上，而不是仍指着已被替换的旧节点。可重取行已是终态，直接发起。
+ * 两条都走与第一次点击**完全相同**的入口（`materials.createDownload`），设备维度的去重
+ * 保证不会重复造任务。
+ */
+async function retake(task) {
+  try {
+    if (task.status === 'pending') {
+      // 取消失败也照发：挡不住「重新发起」这一步；若确实没取消成，去重键会把新请求折叠回
+      // 原行，不会造出重复任务。
+      try { await client.cancelTask(task.id) } catch { /* 继续重取 */ }
+    }
+    await materials.createDownload(task.asset_id)
     await load()
   } catch (e) {
     MessagePlugin.error(createDownloadFailureMessage(e))
@@ -309,8 +353,9 @@ async function openDetail(row) {
             <div class="transfer-item__footer">
               <p class="transfer-item__time">发起于 {{ row.createdText }}</p>
               <div class="transfer-item__actions">
-                <!-- 进行中的行只有这一个动作：终态的「重新下载」「打开文件」在这一栏恒不
-                     成立（它们要求终态），所以模板里也不留死按钮。 -->
+                <!-- 进行中的行：取消；悬置在这台设备上、没人领的 pending 行多一个「重取」。
+                     终态的「重新下载」「打开文件」在这一栏恒不成立（它们要求终态）。 -->
+                <t-button v-if="row.canRetake" size="small" theme="primary" @click="retake(row.task)">重取</t-button>
                 <t-button v-if="row.canCancel" size="small" class="wt-secondary-button" variant="outline" @click="cancel(row.task)">取消</t-button>
               </div>
             </div>
@@ -335,8 +380,9 @@ async function openDetail(row) {
           </li>
         </ul>
 
-        <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件，只有已取消的
-             一条能重新下载 —— 已成功的素材不重下（走查裁定）。 -->
+        <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件。已取消的行里，
+             解绑遗留（device_unbound）的给「重取」—— 换机重投递的入口，为当前设备建新任务；
+             其余已取消/失败给「重新下载」。已成功的素材不重下（走查裁定）。 -->
         <t-table v-else class="transfer-table" :data="visibleRows" :columns="historyColumns" :row-key="(row) => row.task.id" size="small" :scroll="{ x: 640 }">
           <template #title="{ row }">
             <span class="transfer-table__title" :title="row.task.asset_title">{{ row.task.asset_title || `素材 #${row.task.asset_id}` }}</span>
@@ -347,7 +393,10 @@ async function openDetail(row) {
           <template #op="{ row }">
             <t-space class="wt-resource-actions">
               <t-button v-if="row.canOpen && isDesktop()" size="small" class="wt-secondary-button" variant="outline" @click="open(row.task)">打开文件</t-button>
-              <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
+              <!-- 解绑遗留（device_unbound）的行叫「重取」而不是「重新下载」：它是换机重投递
+                   的入口，重取会为当前设备建一条新任务。其余已取消/失败的行照旧「重新下载」。 -->
+              <t-button v-if="row.canRetake" size="small" theme="primary" @click="retake(row.task)">重取</t-button>
+              <t-button v-else-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
             </t-space>
           </template>
         </t-table>

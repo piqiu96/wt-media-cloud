@@ -36,6 +36,18 @@ describe('profile binding client', () => {
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 
+  // 「以当前环境为准」是唯一的 overwrite 出口（CHG-20261002-074 阶段 3）：只有显式传入
+  // overwrite 时才随请求发送，缺省路径不发送 —— 服务端把「账号不一致」当作 23002 拒绝。
+  it('sends overwrite only when the deliberate self-service entry asks for it', async () => {
+    const fetch = vi.fn(async () => response({}))
+    const client = createProfileBindingClient({ fetch })
+
+    await client.confirmMainIdentityDirect('main-user-1', { overwrite: true })
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ main_user_id: 'main-user-1', overwrite: true })
+  })
+
   it('sends node id for local sensitive profile entries', async () => {
     const fetch = vi.fn(async () => response({ task_id: 'task-1' }))
     const client = createProfileBindingClient({ fetch })

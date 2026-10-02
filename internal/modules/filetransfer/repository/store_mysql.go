@@ -23,7 +23,7 @@ var ErrNotFound = errors.New("file transfer task not found")
 // visible at all, which is the point: with a list per query, a column reaches
 // the callers that remembered it and is silently missing from the ones that did
 // not.
-const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
+const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, assigned_device_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
 
 type CreateTaskInput struct {
 	ID               string
@@ -38,6 +38,7 @@ type CreateTaskInput struct {
 	ExecutionScope   model.ExecutionScope
 	RequestedBy      identity.UserID
 	AssignedNodeID   string
+	AssignedDeviceID string
 	DependencyTaskID string
 	DedupeKey        string
 	TotalBytes       int64
@@ -95,12 +96,13 @@ type CreateUserDownloadInput struct {
 	// PublishedAt is when the material was published, copied onto the task like
 	// GameName so the lease can carry it to the executor for naming. A material
 	// without a publish time leaves it nil and the executor omits that segment.
-	PublishedAt     *time.Time
-	SourceObjectKey string
-	RequestedBy     identity.UserID
-	AssignedNodeID  string
-	TotalBytes      int64
-	ExpectedSHA256  string
+	PublishedAt      *time.Time
+	SourceObjectKey  string
+	RequestedBy      identity.UserID
+	AssignedNodeID   string
+	AssignedDeviceID string
+	TotalBytes       int64
+	ExpectedSHA256   string
 	// DependencyTaskID names the Cloud preparation task whose object this download
 	// will fetch, when there is one. With it set, the object key, size and hash may
 	// be left empty: the download is a queued request whose facts do not exist yet,
@@ -148,22 +150,32 @@ func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
 // then downloaded again and failed is, right now, a failed download, and
 // re-downloading it is a request that should be honoured.
 //
-// The check is per user rather than per user-and-node, matching
-// `latestUserDownloadStatuses`: the state the UI shows as "已下载" is the
-// user-level one, so gating the write on a narrower predicate than the one that
-// produced the label would let the list say "downloaded" while the API happily
-// queued another one.
+// The check and the generation count are scoped to the **device** the click names,
+// the same dimension the dedupe key is keyed on. A device switch is a new
+// destination: a material downloaded on the old computer was never downloaded
+// here, so the new device's click must queue its own task rather than be answered
+// with the old device's success row. A repeat click on the same device keeps the
+// existing behaviour — answered with the success row, or collapsed onto the
+// outstanding task by the key.
+//
+// That is a deliberate divergence from `latestUserDownloadStatuses`, which stays
+// user-level: "已下载" is an asset state (this material is downloaded on some
+// device of this user's) and must not flip as the user moves between machines,
+// while the write-gate has to be destination-aware because a new destination
+// genuinely needs its own file. For a single-device user — the whole installed
+// base at the time the dimension changed — the two scopes select the same rows,
+// so the change is invisible until a second device exists.
 func CreateUserDownloadTask(input CreateUserDownloadInput, now time.Time) (model.Task, error) {
 	return createUserDownloadTask(database.DB(), input, now)
 }
 
 func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time.Time) (model.Task, error) {
-	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
+	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 || strings.TrimSpace(input.AssignedDeviceID) == "" {
 		return model.Task{}, fmt.Errorf("invalid user download input")
 	}
 	var task model.Task
 	err := db.Transaction(func(tx *gorm.DB) error {
-		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1", model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy)
+		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
@@ -172,7 +184,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			return nil
 		}
 		var finished int64
-		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy).Row().Scan(&finished); err != nil {
+		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID).Row().Scan(&finished); err != nil {
 			return err
 		}
 		task, err = createTask(tx, CreateTaskInput{
@@ -188,8 +200,9 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			ExecutionScope:   model.ExecutionLocalAgent,
 			RequestedBy:      input.RequestedBy,
 			AssignedNodeID:   input.AssignedNodeID,
+			AssignedDeviceID: input.AssignedDeviceID,
 			DependencyTaskID: input.DependencyTaskID,
-			DedupeKey:        userDownloadDedupeKey(input.AssetID, input.RequestedBy, input.AssignedNodeID, finished+1),
+			DedupeKey:        userDownloadDedupeKey(input.AssetID, input.RequestedBy, input.AssignedDeviceID, finished+1),
 			TotalBytes:       input.TotalBytes,
 			ExpectedSHA256:   input.ExpectedSHA256,
 			MaxAttempts:      input.MaxAttempts,
@@ -202,22 +215,27 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	return task, nil
 }
 
-// userDownloadDedupeKey binds a download to the user, the material, **the node**
-// and the generation.
+// userDownloadDedupeKey binds a download to the user, the material, **the
+// device** and the generation.
 //
-// The node is in the key because the task is assigned to one: two devices are two
-// destinations, and collapsing them would send a file the user asked for on the
-// laptop only to the desktop. The generation is a counter rather than a timestamp
-// so that the key is a pure function of durable state — a clock or a random value
+// The device is in the key because it is the stable destination. The node was
+// in the key before stage 3, but a node is a registration instance: renewal and
+// supersede mint a new node id, and unbind replaces the device's node entirely,
+// so the node dimension was not stable across a device's lifetime. Two devices
+// are two destinations and collapsing them would send a file the user asked for
+// on the laptop only to the desktop; two nodes on the same device are the same
+// destination, so a task re-keyed on the node would have stopped deduping on
+// every re-registration. The generation is a counter rather than a timestamp so
+// that the key is a pure function of durable state — a clock or a random value
 // here would make the duplicate-click case depend on timing.
 //
 // It is hashed because `dedupe_key` is `CHAR(64)`: the readable form is longer
-// than that as soon as a node id is a uuid, and MySQL would answer a silent
+// than that as soon as a device id is a uuid, and MySQL would answer a silent
 // truncation with a collision between two different downloads. The generation is
 // part of the digest, so the key is still exactly as discriminating as the tuple
 // — it is just no longer readable in a row dump.
-func userDownloadDedupeKey(assetID int64, userID identity.UserID, nodeID string, generation int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%d|%d|%s|%d", assetID, userID, strings.TrimSpace(nodeID), generation)))
+func userDownloadDedupeKey(assetID int64, userID identity.UserID, deviceID string, generation int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%d|%d|%s|%d", assetID, userID, strings.TrimSpace(deviceID), generation)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -395,7 +413,7 @@ func createTask(db *gorm.DB, input CreateTaskInput, now time.Time) (model.Task, 
 	if err := validateCreateInput(input); err != nil {
 		return model.Task{}, err
 	}
-	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, assigned_device_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.AssignedDeviceID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
 		return model.Task{}, err
 	}
 	return selectTask(db, "dedupe_key = ?", input.DedupeKey)
@@ -890,6 +908,13 @@ func validateCreateInput(input CreateTaskInput) error {
 	if input.ExecutionScope == model.ExecutionLocalAgent && strings.TrimSpace(input.AssignedNodeID) == "" {
 		return fmt.Errorf("local transfer requires assigned node")
 	}
+	// A user download goes to one device, and the dedupe key and the
+	// latest-success check are both scoped to it (see `createUserDownloadTask`).
+	// A download without a destination device could not be deduped without
+	// colliding every device-less click onto one key.
+	if input.Purpose == model.PurposeUserDownload && strings.TrimSpace(input.AssignedDeviceID) == "" {
+		return fmt.Errorf("user download requires assigned device")
+	}
 	// A Cloud preparation produces the object; a local transfer downloads one that
 	// is already verified. So the local side is the one that must have the object
 	// key, size and hash — with one exception, the download that waits for a
@@ -969,10 +994,10 @@ type rowScanner interface{ Scan(...any) error }
 func scanTask(row rowScanner, task *model.Task) error {
 	var teamID, requestedBy int64
 	var assetType, purpose, scope, status string
-	var assetTitle, gameName, objectKey, fileName, assignedNode, claimedNode, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
+	var assetTitle, gameName, objectKey, fileName, assignedNode, assignedDevice, claimedNode, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
 	var eta, integrityBytes sql.NullInt64
 	var lease, heartbeat, started, finished, cancelRequested, publishedAt sql.NullTime
-	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
+	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &assignedDevice, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
 		return err
 	}
 	task.TeamID = identity.TeamID(teamID)
@@ -988,6 +1013,7 @@ func scanTask(row rowScanner, task *model.Task) error {
 	task.Status = model.Status(status)
 	task.RequestedBy = identity.UserID(requestedBy)
 	task.AssignedNodeID = assignedNode.String
+	task.AssignedDeviceID = assignedDevice.String
 	task.ClaimedByNodeID = claimedNode.String
 	task.DependencyTaskID = dependency.String
 	task.ExpectedSHA256 = expectedSHA256.String

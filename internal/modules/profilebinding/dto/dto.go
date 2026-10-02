@@ -25,4 +25,13 @@ type SnapshotInput struct {
 
 type MainIdentityInput struct {
 	MainUserID string `json:"main_user_id"`
+	// Overwrite is the user's "以当前环境为准" (take the current environment as
+	// authoritative) confirmation. Without it a confirm that names a different
+	// main account than the one bound is refused as a mismatch — the safety guard
+	// that stops one user's browser from silently taking over another's binding.
+	// With it, the user standing at this machine explicitly states that the
+	// account the environment reports IS the one to bind, and the mismatch is
+	// accepted and overwritten. False by default; only the deliberate self-service
+	// entry sets it, never the scan-confirm path.
+	Overwrite bool `json:"overwrite"`
 }

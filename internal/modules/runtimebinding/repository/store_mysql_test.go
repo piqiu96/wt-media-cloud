@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	mysqlgorm "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -135,6 +136,40 @@ func TestFindTrustedLocalNodeReportsAbsenceForAUserWithNoBoundDevice(t *testing.
 	// user.
 	if _, found, err := findTrustedLocalNode(db, 0); err != nil || found {
 		t.Fatalf("findTrustedLocalNode(0) = %v, %v", found, err)
+	}
+}
+
+// Unbinding a device is one transaction, and stage 3 adds one statement to it:
+// the unbound device's in-flight local downloads are cancelled so they become
+// re-takeable (重新下载) instead of sitting forever assigned to a node that has
+// just been marked replaced. Every statement is pinned, so a future edit that
+// drops the cancellation, re-scopes it to the wrong user, or stops scoping it by
+// the unbound device's nodes fails this run.
+func TestUnbindDeviceMarksTheUnboundDevicesInflightDownloadsReclaimable(t *testing.T) {
+	db, mock, closeDB := newRuntimeMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT device_id FROM users WHERE id = ? AND status = 'enabled' FOR UPDATE")).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"device_id"}).AddRow("device-7"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET device_id = NULL, device_public_key = NULL, device_name = NULL, device_bound_at = NULL, device_last_verified_at = NULL WHERE id = ?")).
+		WithArgs(int64(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE local_agent_nodes SET status = 'replaced', updated_at = ? WHERE user_id = ? AND mode = 'local' AND status <> 'replaced'")).
+		WithArgs(now, int64(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'cancelled', finished_at = ?, lease_expires_at = NULL, error_code = 'device_unbound', error_message = '设备已解绑，可重新下载', updated_at = ? WHERE requested_by = ? AND purpose = 'user_download' AND execution_scope = 'local_agent' AND status IN ('pending', 'running') AND assigned_node_id IN (SELECT id FROM local_agent_nodes WHERE device_id = ? AND mode = 'local')")).
+		WithArgs(now, now, int64(1), "device-7").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, 'user.device.unbind', 'user', ?, ?, ?)")).
+		WithArgs(sqlmock.AnyArg(), int64(1), "1", `{"result":"unbound"}`, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := unbindDevice(db, sharedidentity.UserID(1), now); err != nil {
+		t.Fatalf("unbindDevice() error = %v", err)
 	}
 }
 

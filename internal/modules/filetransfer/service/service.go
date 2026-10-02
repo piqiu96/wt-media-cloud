@@ -304,6 +304,7 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
 		AssignedNodeID:   input.AssignedNodeID,
+		AssignedDeviceID: input.AssignedDeviceID,
 		TotalBytes:       input.TotalBytes,
 		ExpectedSHA256:   input.ExpectedSHA256,
 		DependencyTaskID: input.DependencyTaskID,
@@ -328,12 +329,13 @@ type CreateUserDownloadInput struct {
 	GameName string
 	// PublishedAt is when the material was published, carried to the executor for
 	// naming. Nil is a legal value: the executor omits that segment.
-	PublishedAt     *time.Time
-	SourceObjectKey string
-	RequestedBy     identityservice.UserID
-	AssignedNodeID  string
-	TotalBytes      int64
-	ExpectedSHA256  string
+	PublishedAt      *time.Time
+	SourceObjectKey  string
+	RequestedBy      identityservice.UserID
+	AssignedNodeID   string
+	AssignedDeviceID string
+	TotalBytes       int64
+	ExpectedSHA256   string
 	// DependencyTaskID is the Cloud preparation this download waits for, when the
 	// video was not ready at the moment the user asked for it. With it set, the
 	// object key, size and hash above are empty — the preparation produces them —
@@ -828,6 +830,7 @@ func taskBody(task model.Task) dto.Task {
 		AssetType:                 string(task.AssetType),
 		AssetID:                   task.AssetID,
 		AssetTitle:                task.AssetTitle,
+		AssignedDeviceID:          task.AssignedDeviceID,
 		Purpose:                   string(task.Purpose),
 		ExecutionScope:            string(task.ExecutionScope),
 		Status:                    string(task.Status),

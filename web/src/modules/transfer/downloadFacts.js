@@ -207,6 +207,43 @@ export function canRedownload(task) {
   return task?.status === 'failed' || task?.status === 'cancelled'
 }
 
+/**
+ * 悬置（suspended）：任务已寻址到**这台**设备，却从没被任何执行器领走。
+ *
+ * 阶段 2 起任务按 `assigned_node_id` 领（claim 匹配节点，不是设备），而节点是一次注册
+ * 实例：桌面重启、重注册都会铸出新节点，旧节点被替换后它名下还没人领的 pending 任务就
+ * 永远没有执行器了。能认出「这台设备」的是任务创建时写入的持久化 `assigned_device_id`
+ * 与本机的 device_id。浏览器读不到本机，所以 `localDeviceId` 缺省为 null 时这条恒为
+ * false —— 读不到就不该断言。
+ */
+export function isSuspendedOnDevice(task, localDeviceId) {
+  if (task?.status !== 'pending') return false
+  return !!localDeviceId && !!task?.assigned_device_id && task.assigned_device_id === localDeviceId
+}
+
+/**
+ * 可重取（reclaimable）：解绑时被 `UnbindDevice` 标记「设备已解绑，可重新下载」的终态行
+ * （`cancelled` + `error_code = 'device_unbound'`）。
+ *
+ * 换机重投递就是这条：设备 A 领任务→解绑→设备 B 绑定后，A 名下没跑完的任务被标成它；
+ * 在 B 上「重取」重新发起下载，设备维度的去重键把 B 当成新目的地，得到一条新任务。它
+ * **不需要**本机 device_id —— 要重取的恰恰是旧设备名下的任务，拿当前设备去比反而认不出。
+ */
+export function isReclaimableAfterUnbind(task) {
+  return task?.status === 'cancelled' && task?.error_code === 'device_unbound'
+}
+
+/**
+ * 「重取」：悬置在**这台**设备上的 pending 任务，或解绑后被标记可重取的终态行。
+ *
+ * 与「重新下载」的差别在语义：重新下载只回答终态行的「再来一次」；重取回答的是「这条该由
+ * 这台机器执行的下载还悬着/还躺在上家机器那里，把它重新驱动起来」。
+ */
+export function canRetake(task, localDeviceId) {
+  if (task?.asset_type !== 'material' || !task?.asset_id) return false
+  return isSuspendedOnDevice(task, localDeviceId) || isReclaimableAfterUnbind(task)
+}
+
 export function canCancel(task) {
   return task?.status === 'pending' || task?.status === 'running'
 }
