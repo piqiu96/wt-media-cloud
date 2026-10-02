@@ -23,3 +23,7 @@ logs/
 # the tracked `credentials/agent.toml` and `credentials/douyin.toml`.
 config/credentials/object_storage.toml
 config_online/credentials/object_storage.toml
+# Generated skill copies distributed by workspace `scripts/sync_skills.py`;
+# rebuild with that script instead of committing them.
+.claude
+.codex
