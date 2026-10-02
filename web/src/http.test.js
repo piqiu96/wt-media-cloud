@@ -104,4 +104,45 @@ describe('createApiClient', () => {
 
     expect(location.href).toBe('')
   })
+
+  // The login page probes the session on mount, so this 401 is its normal
+  // logged-out answer. Redirecting there reloads the page, which probes again:
+  // the URL grows a ?redirect= layer per round and the form can never be used.
+  it('does not redirect when the session probe 401s on the login page', async () => {
+    const location = { pathname: '/login', search: '', href: '' }
+    globalThis.window = {
+      __WT_MEDIA_APP__: 'desktop',
+      location,
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    }
+    const fetch = vi.fn(async () => ({
+      status: 401,
+      ok: false,
+      json: async () => ({ errcode: 11001, message: '请先登录或凭证已过期', data: null, logid: 't-3' }),
+    }))
+    const client = createApiClient({ fetchImpl: fetch })
+
+    await expect(client.get('/auth/me')).rejects.toThrow()
+
+    expect(location.href).toBe('')
+  })
+
+  it('never navigates away from the login page, whatever the endpoint', async () => {
+    const location = { pathname: '/login', search: '?redirect=%2Fmaterial-library', href: '' }
+    globalThis.window = {
+      __WT_MEDIA_APP__: 'desktop',
+      location,
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    }
+    const fetch = vi.fn(async () => ({
+      status: 401,
+      ok: false,
+      json: async () => ({ errcode: 11001, message: '请先登录或凭证已过期', data: null, logid: 't-4' }),
+    }))
+    const client = createApiClient({ fetchImpl: fetch })
+
+    await expect(client.get('/material-library')).rejects.toThrow()
+
+    expect(location.href).toBe('')
+  })
 })

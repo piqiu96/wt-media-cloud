@@ -124,10 +124,17 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
     // request with HTTP 401 *and* a structured body whose errcode is non-zero
     // (e.g. 11001), which parseResponse throws on first — a redirect placed after
     // it could never run.
-    if (response.status === 401 && !path.startsWith('/auth/login')) {
+    //
+    // Never navigate while already on /login. The login page probes the session on
+    // mount and 401s when logged out; navigating back to /login reloads the page,
+    // which probes again — the login page would never stay put and its form could
+    // never be submitted.
+    const win = typeof window === 'undefined' ? null : window
+    const onLoginPage = win?.location?.pathname === '/login'
+    if (response.status === 401 && !path.startsWith('/auth/login') && !onLoginPage) {
       setSessionToken('')
-      const returnUrl = encodeURIComponent(window.location.pathname + window.location.search)
-      window.location.href = `/login?redirect=${returnUrl}`
+      const returnUrl = encodeURIComponent(win.location.pathname + win.location.search)
+      win.location.href = `/login?redirect=${returnUrl}`
     }
 
     const result = await parseResponse(response)
