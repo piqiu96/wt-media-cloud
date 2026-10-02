@@ -721,8 +721,8 @@ func CreateSession(session model.Session) error {
 
 func createSession(db *gorm.DB, session model.Session) error {
 	_, err := execSQL(db,
-		`INSERT INTO user_sessions (id, user_id, token_hash, created_at, invalidated_at) VALUES (?, ?, ?, ?, ?)`,
-		session.ID, session.UserID, session.TokenHash, session.CreatedAt, session.InvalidAt,
+		`INSERT INTO user_sessions (id, user_id, token_hash, client_type, created_at, invalidated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		session.ID, session.UserID, session.TokenHash, session.ClientType, session.CreatedAt, session.InvalidAt,
 	)
 	return err
 }
@@ -734,16 +734,18 @@ func FindSessionByTokenHash(tokenHash string) (model.Session, bool, error) {
 func findSessionByTokenHash(db *gorm.DB, tokenHash string) (model.Session, bool, error) {
 	var session model.Session
 	var invalidatedAt sql.NullTime
+	var clientType string
 	err := queryRow(db,
-		`SELECT id, user_id, token_hash, created_at, invalidated_at FROM user_sessions WHERE token_hash = ?`,
+		`SELECT id, user_id, token_hash, client_type, created_at, invalidated_at FROM user_sessions WHERE token_hash = ?`,
 		tokenHash,
-	).Scan(&session.ID, &session.UserID, &session.TokenHash, &session.CreatedAt, &invalidatedAt)
+	).Scan(&session.ID, &session.UserID, &session.TokenHash, &clientType, &session.CreatedAt, &invalidatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Session{}, false, nil
 	}
 	if err != nil {
 		return model.Session{}, false, err
 	}
+	session.ClientType = model.ClientType(clientType)
 	if invalidatedAt.Valid {
 		at := invalidatedAt.Time
 		session.InvalidAt = &at
@@ -751,27 +753,39 @@ func findSessionByTokenHash(db *gorm.DB, tokenHash string) (model.Session, bool,
 	return session, true, nil
 }
 
-func HasActiveSession(userID model.UserID) (bool, error) {
-	return hasActiveSession(database.DB(), userID)
+func HasActiveSessionForClientType(userID model.UserID, clientType model.ClientType) (bool, error) {
+	return hasActiveSessionForClientType(database.DB(), userID, clientType)
 }
 
-func hasActiveSession(db *gorm.DB, userID model.UserID) (bool, error) {
+func hasActiveSessionForClientType(db *gorm.DB, userID model.UserID, clientType model.ClientType) (bool, error) {
 	var count int
 	err := queryRow(db,
-		`SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND invalidated_at IS NULL`,
-		userID,
+		`SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND client_type = ? AND invalidated_at IS NULL`,
+		userID, clientType,
 	).Scan(&count)
 	return count > 0, err
 }
 
-func InvalidateUserSessions(userID model.UserID, at time.Time) error {
-	return invalidateUserSessions(database.DB(), userID, at)
+func InvalidateUserSessionsForClientType(userID model.UserID, clientType model.ClientType, at time.Time) error {
+	return invalidateUserSessionsForClientType(database.DB(), userID, clientType, at)
 }
 
-func invalidateUserSessions(db *gorm.DB, userID model.UserID, at time.Time) error {
+func invalidateUserSessionsForClientType(db *gorm.DB, userID model.UserID, clientType model.ClientType, at time.Time) error {
 	_, err := execSQL(db,
-		`UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND invalidated_at IS NULL`,
-		at, userID,
+		`UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND client_type = ? AND invalidated_at IS NULL`,
+		at, userID, clientType,
+	)
+	return err
+}
+
+func InvalidateSessionByID(sessionID string, at time.Time) error {
+	return invalidateSessionByID(database.DB(), sessionID, at)
+}
+
+func invalidateSessionByID(db *gorm.DB, sessionID string, at time.Time) error {
+	_, err := execSQL(db,
+		`UPDATE user_sessions SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL`,
+		at, sessionID,
 	)
 	return err
 }

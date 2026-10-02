@@ -127,12 +127,20 @@ type PublicUser struct {
 	GameIDs  []string   `json:"game_ids"`
 }
 
+type ClientType string
+
+const (
+	ClientTypeWeb     ClientType = "web"
+	ClientTypeDesktop ClientType = "desktop"
+)
+
 type Session struct {
-	ID        string
-	UserID    UserID
-	TokenHash string
-	CreatedAt time.Time
-	InvalidAt *time.Time
+	ID         string
+	UserID     UserID
+	TokenHash  string
+	ClientType ClientType
+	CreatedAt  time.Time
+	InvalidAt  *time.Time
 }
 
 type AuditEvent = sharedidentity.AuditEvent

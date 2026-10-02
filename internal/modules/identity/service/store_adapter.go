@@ -87,11 +87,14 @@ func (mysqlStore) CreateSession(session model.Session) error {
 func (mysqlStore) FindSessionByTokenHash(tokenHash string) (model.Session, bool, error) {
 	return repository.FindSessionByTokenHash(tokenHash)
 }
-func (mysqlStore) HasActiveSession(userID model.UserID) (bool, error) {
-	return repository.HasActiveSession(userID)
+func (mysqlStore) HasActiveSessionForClientType(userID model.UserID, clientType model.ClientType) (bool, error) {
+	return repository.HasActiveSessionForClientType(userID, clientType)
 }
-func (mysqlStore) InvalidateUserSessions(userID model.UserID, at time.Time) error {
-	return repository.InvalidateUserSessions(userID, at)
+func (mysqlStore) InvalidateUserSessionsForClientType(userID model.UserID, clientType model.ClientType, at time.Time) error {
+	return repository.InvalidateUserSessionsForClientType(userID, clientType, at)
+}
+func (mysqlStore) InvalidateSessionByID(sessionID string, at time.Time) error {
+	return repository.InvalidateSessionByID(sessionID, at)
 }
 func (mysqlStore) AppendAudit(event model.AuditEvent) error { return repository.AppendAudit(event) }
 func (mysqlStore) ListAuditLogs(limit int) ([]model.AuditEvent, error) {

@@ -102,7 +102,14 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 		api.Success(c, context.User)
 		return
 	}
-	result, err := identityservice.LoginWithOptions(req.Username, req.Password, identityservice.LoginOptions{ReplaceExisting: req.ReplaceExisting})
+	// Session client_type is inferred from the Origin (Tauri WebView -> desktop,
+	// anything else -> web), the same signal already used below to decide between
+	// the token and cookie paths. It is not a client-declared field.
+	clientType := identityservice.ClientTypeWeb
+	if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
+		clientType = identityservice.ClientTypeDesktop
+	}
+	result, err := identityservice.LoginWithOptions(req.Username, req.Password, identityservice.LoginOptions{ReplaceExisting: req.ReplaceExisting, ClientType: clientType})
 	if err != nil {
 		writeIdentityError(c, err)
 		return

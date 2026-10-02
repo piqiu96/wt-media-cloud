@@ -51,6 +51,12 @@ type (
 	LoginOptions    = dto.LoginOptions
 	AuthContext     = dto.AuthContext
 	CreateUserInput = dto.CreateUserInput
+	ClientType      = model.ClientType
+)
+
+const (
+	ClientTypeWeb     = model.ClientTypeWeb
+	ClientTypeDesktop = model.ClientTypeDesktop
 )
 
 var (
@@ -95,8 +101,9 @@ type Store interface {
 	TeamHasReferences(TeamID) (bool, error)
 	CreateSession(Session) error
 	FindSessionByTokenHash(tokenHash string) (Session, bool, error)
-	HasActiveSession(userID UserID) (bool, error)
-	InvalidateUserSessions(userID UserID, at time.Time) error
+	HasActiveSessionForClientType(userID UserID, clientType ClientType) (bool, error)
+	InvalidateUserSessionsForClientType(userID UserID, clientType ClientType, at time.Time) error
+	InvalidateSessionByID(sessionID string, at time.Time) error
 	AppendAudit(AuditEvent) error
 	ListAuditLogs(limit int) ([]AuditEvent, error)
 }
@@ -274,23 +281,30 @@ func (s *Service) LoginWithOptions(username, password string, options LoginOptio
 	if !ok || user.Status != UserStatusEnabled || s.passwords.Compare([]byte(user.PasswordHash), []byte(password)) != nil {
 		return LoginResult{}, ErrAuthenticationFailed
 	}
+	clientType := options.ClientType
+	if clientType == "" {
+		clientType = ClientTypeWeb
+	}
 	now := s.now()
-	hasActive, err := s.store.HasActiveSession(user.ID)
+	// Replacement is per client type: desktop and web sessions coexist, and a
+	// new login only kicks the same type's previous active session.
+	hasActive, err := s.store.HasActiveSessionForClientType(user.ID, clientType)
 	if err != nil {
 		return LoginResult{}, err
 	}
 	if hasActive && !options.ReplaceExisting {
 		return LoginResult{}, ErrSessionReplaceNeeded
 	}
-	if err := s.store.InvalidateUserSessions(user.ID, now); err != nil {
+	if err := s.store.InvalidateUserSessionsForClientType(user.ID, clientType, now); err != nil {
 		return LoginResult{}, err
 	}
 	token := s.newToken()
 	if err := s.store.CreateSession(Session{
-		ID:        s.newID("session"),
-		UserID:    user.ID,
-		TokenHash: tokenHash(token),
-		CreatedAt: now,
+		ID:         s.newID("session"),
+		UserID:     user.ID,
+		TokenHash:  tokenHash(token),
+		ClientType: clientType,
+		CreatedAt:  now,
 	}); err != nil {
 		return LoginResult{}, err
 	}
@@ -340,7 +354,9 @@ func (s *Service) Logout(token string) error {
 	if !ok || session.InvalidAt != nil {
 		return ErrSessionInvalid
 	}
-	return s.store.InvalidateUserSessions(session.UserID, s.now())
+	// Invalidate only the current session: with desktop and web sessions
+	// coexisting, logging out of one must not kill the other.
+	return s.store.InvalidateSessionByID(session.ID, s.now())
 }
 
 func (s *Service) SetUserStatus(actorID, userID UserID, status UserStatus) error {
@@ -1284,25 +1300,39 @@ func (s *memoryStore) FindSessionByTokenHash(tokenHash string) (Session, bool, e
 	return session, ok, nil
 }
 
-func (s *memoryStore) HasActiveSession(userID UserID) (bool, error) {
+func (s *memoryStore) HasActiveSessionForClientType(userID UserID, clientType ClientType) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, session := range s.sessions {
-		if session.UserID == userID && session.InvalidAt == nil {
+		if session.UserID == userID && session.ClientType == clientType && session.InvalidAt == nil {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (s *memoryStore) InvalidateUserSessions(userID UserID, at time.Time) error {
+func (s *memoryStore) InvalidateUserSessionsForClientType(userID UserID, clientType ClientType, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for hash, session := range s.sessions {
-		if session.UserID == userID && session.InvalidAt == nil {
+		if session.UserID == userID && session.ClientType == clientType && session.InvalidAt == nil {
 			invalidAt := at
 			session.InvalidAt = &invalidAt
 			s.sessions[hash] = session
+		}
+	}
+	return nil
+}
+
+func (s *memoryStore) InvalidateSessionByID(sessionID string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for hash, session := range s.sessions {
+		if session.ID == sessionID && session.InvalidAt == nil {
+			invalidAt := at
+			session.InvalidAt = &invalidAt
+			s.sessions[hash] = session
+			return nil
 		}
 	}
 	return nil

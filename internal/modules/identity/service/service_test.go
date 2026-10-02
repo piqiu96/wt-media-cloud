@@ -770,11 +770,11 @@ func (s *failingIdentityStore) AppendAudit(event AuditEvent) error {
 	return s.Store.AppendAudit(event)
 }
 
-func (s *failingIdentityStore) InvalidateUserSessions(userID UserID, at time.Time) error {
+func (s *failingIdentityStore) InvalidateUserSessionsForClientType(userID UserID, clientType ClientType, at time.Time) error {
 	if s.failInvalidate {
 		return errors.New("session invalidation unavailable")
 	}
-	return s.Store.InvalidateUserSessions(userID, at)
+	return s.Store.InvalidateUserSessionsForClientType(userID, clientType, at)
 }
 
 func (s *failingIdentityStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent) error {
