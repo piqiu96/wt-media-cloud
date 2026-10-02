@@ -57,6 +57,29 @@ export function normalizeLocalAgentStatus(value) {
   };
 }
 
+// The camelCase view of a status snapshot. `normalizeLocalAgentStatus` keeps the
+// Agent's wire spelling (snake_case) — init.js and PersonalInfoPage read that —
+// while the status page and the work-env aggregate read camelCase. This is the
+// one place that spells the mapping; the store and the aggregate both go
+// through it, so a renamed field breaks here once, not per consumer.
+export function localAgentStateFromStatus(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    nodeId: String(source.node_id ?? DEFAULT_STATUS.node_id),
+    agentId: String(source.agent_id ?? DEFAULT_STATUS.agent_id),
+    status: String(source.status ?? DEFAULT_STATUS.status),
+    bitbrowserStatus: String(source.bitbrowser_status ?? DEFAULT_STATUS.bitbrowser_status),
+    mainUserId: String(source.main_user_id ?? DEFAULT_STATUS.main_user_id),
+    operatingSystem: String(source.operating_system ?? DEFAULT_STATUS.operating_system),
+    cpuArchitecture: String(source.cpu_architecture ?? DEFAULT_STATUS.cpu_architecture),
+    agentVersion: String(source.agent_version ?? DEFAULT_STATUS.agent_version),
+    currentTaskId: source.current_task_id ?? null,
+    currentTaskProgress: source.current_task_progress ?? null,
+    currentTaskStatus: source.current_task_status ?? null,
+    pendingResultCount: Number(source.pending_result_count ?? 0),
+  };
+}
+
 export function normalizeBoundNode(value) {
   const source = value && typeof value === "object" ? value : {};
   return {

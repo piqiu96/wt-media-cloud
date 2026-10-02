@@ -4,16 +4,18 @@
 // 纯函数，便于 vitest 直测；组件（WorkEnvPill.vue）只负责取数、轮询和渲染。
 
 import { createLocalAgentStatusPage } from './local-agent-status.js'
+import { localAgentStateFromStatus } from './service.js'
 
 /**
  * @param {object} input
- * @param {object|null} input.snapshot   本机 Agent 状态（normalizeLocalAgentStatus 的产物）
+ * @param {object|null} input.snapshot   本机 Agent 状态（Agent 上报的 snake_case 形状，
+ *                                       即 normalizeLocalAgentStatus 的产物）
  * @param {object|null} input.cloudUser  当前登录用户（session.me() 的产物，可为 null）
  * @param {object|null} input.binding    云端设备绑定（deviceBinding.get() 的产物）
  * @param {object|null} input.localDevice 本机设备身份（invoke('local_device_identity') 的产物）
  */
 export function aggregateWorkEnv({ snapshot, cloudUser, binding, localDevice }) {
-  const page = createLocalAgentStatusPage(snapshot, { cloudUser })
+  const page = createLocalAgentStatusPage(localAgentStateFromStatus(snapshot), { cloudUser })
   const bound = !!binding?.bound
   const localDeviceId = localDevice?.device_id || ''
   const mismatched = bound && !!localDeviceId && binding.device_id !== localDeviceId

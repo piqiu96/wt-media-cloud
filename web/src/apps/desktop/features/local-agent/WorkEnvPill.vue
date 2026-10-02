@@ -37,14 +37,10 @@ const checkedTime = computed(() => {
   return new Date(checkedAt.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 })
 
-const taskText = computed(() => snapshot.value?.currentTaskId ? `当前任务 ${snapshot.value.currentTaskId}` : '当前无任务')
-
 const deviceRowText = computed(() => {
   if (!env.value.bound) return '尚未绑定'
   return env.value.mismatched ? '已绑定其他电脑，当前不一致' : '正在这台电脑工作'
 })
-const localRowText = computed(() => env.value.page.bound ? `已连接，${taskText.value}` : '未连接执行节点')
-const bitRowText = computed(() => env.value.page.bound ? '已登录指定账号' : env.value.page.bitbrowserStatusText)
 
 // 轻量自检：只读的本地 Agent 状态 + 云端绑定，供 30s 轮询与「重新检查」共用。
 async function refreshStatus() {
@@ -113,8 +109,8 @@ onBeforeUnmount(() => {
         </header>
         <ul class="env-rows">
           <li><span class="row-label">工作设备</span><span class="row-value">{{ deviceRowText }}</span></li>
-          <li><span class="row-label">本机服务</span><span class="row-value">{{ localRowText }}</span></li>
-          <li><span class="row-label">比特浏览器</span><span class="row-value">{{ bitRowText }}</span></li>
+          <li><span class="row-label">本机服务</span><span class="row-value">{{ env.page.serviceText }}</span></li>
+          <li><span class="row-label">比特浏览器</span><span class="row-value">{{ env.page.bitbrowserText }}</span></li>
         </ul>
         <template v-if="!env.workable">
           <ul class="env-blockers">

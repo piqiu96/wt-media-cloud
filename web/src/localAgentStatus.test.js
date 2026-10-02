@@ -36,8 +36,8 @@ describe('local agent status page', () => {
     })
 
     expect(page.trustText).toBe('当前会话待连接')
-    expect(page.trustReason).toContain('当前会话尚未连接本机执行节点')
-    expect(page.trustReason).toContain('个人信息中的设备绑定状态')
+    expect(page.trustReason).toContain('本机服务尚未连接云端')
+    expect(page.trustReason).toContain('个人信息')
     expect(page.bindActionText).toBe('连接当前会话')
   })
 })
