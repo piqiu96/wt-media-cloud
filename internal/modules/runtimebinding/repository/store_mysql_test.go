@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/model"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	mysqlgorm "gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -170,6 +171,52 @@ func TestUnbindDeviceMarksTheUnboundDevicesInflightDownloadsReclaimable(t *testi
 
 	if err := unbindDevice(db, sharedidentity.UserID(1), now); err != nil {
 		t.Fatalf("unbindDevice() error = %v", err)
+	}
+}
+
+// Re-registering for a device mints a new node id and marks the previous node
+// `replaced`, and a replaced node can never be claimed: `nextLocalTask` and
+// `claimLocalTask` both match `assigned_node_id` exactly. So the registration
+// transaction has to move the downloads that were pointed at the old node onto
+// the new one, or a download clicked shortly before a re-login waits forever
+// with no claimant that could ever match it.
+//
+// The statement and its scope are pinned in the same style as the unbind test
+// above, because the failure mode here is silent: widening it to every task
+// would still pass a "does it re-point" reading, and narrowing it to pending
+// only would strand exactly the tasks whose lease outlives their executor.
+func TestRegisteringForADeviceRePointsItsInflightDownloadsAtTheNewNode(t *testing.T) {
+	db, mock, closeDB := newRuntimeMockGORM(t)
+	defer closeDB()
+	at := time.Date(2026, 10, 2, 22, 9, 59, 0, time.UTC)
+	key := []byte("device-public-key")
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT device_id, device_public_key FROM users WHERE id = ? AND status = 'enabled' FOR UPDATE")).
+		WithArgs(int64(3)).
+		WillReturnRows(sqlmock.NewRows([]string{"device_id", "device_public_key"}).AddRow("device-7", key))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET device_last_verified_at = ? WHERE id = ?")).
+		WithArgs(at, int64(3)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE local_agent_nodes SET status = 'replaced', updated_at = ? WHERE user_id = ? AND device_id = ? AND status <> 'replaced'")).
+		WithArgs(at, int64(3), "device-7").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET assigned_node_id = ?, updated_at = ? WHERE requested_by = ? AND purpose = 'user_download' AND execution_scope = 'local_agent' AND status IN ('pending', 'running') AND assigned_node_id IN (SELECT id FROM local_agent_nodes WHERE user_id = ? AND device_id = ? AND mode = 'local')")).
+		WithArgs("agent-node_new", at, int64(3), int64(3), "device-7").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO local_agent_nodes")).
+		WithArgs("agent-node_new", "local-agent-dev", "device-7", int64(3), "local", "0.2.2", "1", "r1", "hash", "online", at, at, at).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := saveNode(db, model.AgentNode{
+		ID: "agent-node_new", AgentID: "local-agent-dev", DeviceID: "device-7",
+		DevicePublicKey: key, UserID: 3, Mode: "local", AgentVersion: "0.2.2",
+		ContractMajorVersion: "1", ContractRevision: "r1", CredentialHash: "hash",
+		Status: "online", RegisteredAt: at, LastHeartbeatAt: at,
+	})
+	if err != nil {
+		t.Fatalf("saveNode() error = %v", err)
 	}
 }
 

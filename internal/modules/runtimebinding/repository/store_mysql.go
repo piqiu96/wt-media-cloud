@@ -112,6 +112,32 @@ func saveNode(db *gorm.DB, node model.AgentNode) error {
 			WHERE user_id = ? AND device_id = ? AND status <> 'replaced'`, node.RegisteredAt, node.UserID, node.DeviceID).Error; err != nil {
 			return err
 		}
+		// Registration mints a new node id, so the previous node for this device is
+		// now unreachable: `nextLocalTask` and `claimLocalTask` both match
+		// `assigned_node_id` exactly, and a `replaced` node is never the one a
+		// credential resolves to. A pending download that was pointed at it can
+		// therefore never be claimed by anyone — the same dead end `unbindDevice`
+		// names, reached by re-registering instead of unbinding.
+		//
+		// Unlike unbinding, there is a correct continuation here: the same user,
+		// the same device and the same bit account are asking again, so the work is
+		// re-pointed rather than cancelled. Only the assignment moves — status,
+		// lease and `claimed_by_node_id` are left exactly as they were, so a
+		// `running` task keeps the lease it holds and the new node can pick it up
+		// only once that lease expires, on the same predicate the reconcilers use.
+		//
+		// The scope is the one `unbindDevice` writes, deliberately: this covers the
+		// user's own downloads and nothing else. Other tables carry a node id too
+		// (`sensitive_browser_tasks.node_id`, `browser_profile_runtime_presence.node_id`),
+		// but those name the node a dispatch chose at that moment rather than work
+		// still owed to a click, and moving them is a different question.
+		if err := tx.Exec(`UPDATE file_transfer_tasks SET assigned_node_id = ?, updated_at = ?
+			WHERE requested_by = ? AND purpose = 'user_download' AND execution_scope = 'local_agent'
+			AND status IN ('pending', 'running')
+			AND assigned_node_id IN (SELECT id FROM local_agent_nodes WHERE user_id = ? AND device_id = ? AND mode = 'local')`,
+			node.ID, node.RegisteredAt, node.UserID, node.UserID, node.DeviceID).Error; err != nil {
+			return err
+		}
 		return tx.Exec(`INSERT INTO local_agent_nodes
 			(id, agent_id, device_id, user_id, mode, agent_version, contract_major_version, contract_revision, credential_hash, status, registered_at, last_heartbeat_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
