@@ -53,11 +53,10 @@ describe('the 本机设置 route', () => {
     expect(layout).toContain(`path: '/${settings.path}'`)
   })
 
-  it('is listed under 桌面环境, after the two pages that were already there', () => {
+  it('is listed under 桌面环境, after the page that was already there', () => {
     const layout = read('./layout/AppLayout.vue')
     const desktopItems = layout.slice(layout.indexOf('const desktopItems'))
 
-    expect(desktopItems.indexOf("path: '/agent'")).toBeGreaterThan(-1)
     expect(desktopItems.indexOf("path: '/logs'")).toBeGreaterThan(-1)
     expect(desktopItems.indexOf("path: '/settings'")).toBeGreaterThan(
       desktopItems.indexOf("path: '/logs'")
@@ -92,7 +91,7 @@ describe('the 本机设置 route', () => {
     // Exact rather than a floor: a floor catches only a table that has been emptied,
     // not one that lost a route, and the walk below would then cover one page fewer
     // without saying so.
-    expect(loaders.length, 'desktop routes carrying a loader (measured 21)').toBe(21)
+    expect(loaders.length, 'desktop routes carrying a loader (measured 20)').toBe(20)
 
     const projectRoot = new URL('../', import.meta.url)
     let checked = 0
@@ -152,7 +151,6 @@ describe('desktop page imports', () => {
   const pages = [
     './apps/desktop/features/local-settings/LocalSettingsPage.vue',
     './apps/desktop/features/local-logs/LocalLogsPage.vue',
-    './apps/desktop/features/local-agent/AgentStatusPage.vue',
   ]
 
   /** The script block, so a name appearing in a template does not count. */

@@ -101,13 +101,13 @@ describe('the two material pages are real pages on both ends', () => {
 })
 
 /**
- * 两端各自不该有的页面。这两条原先也只是注释（「不包含 /agent, /logs」「不包含 /users」）。
+ * 两端各自不该有的页面。这两条原先也只是注释（「不包含 /logs, /settings」「不包含 /users」）。
  * 一个地址在错的树上存在，不会报错：它会渲染出一个那个端根本进不到的服务器的页面，
  * 或者一个运营无从管理的管理页。
  */
 describe('the two ends keep their own exclusions', () => {
   it('keeps the desktop-only pages out of the cloud table', () => {
-    for (const path of ['agent', 'logs', 'settings']) {
+    for (const path of ['logs', 'settings']) {
       expect(cloudByPath.has(path), path).toBe(false)
       expect(desktopByPath.has(path), path).toBe(true)
     }

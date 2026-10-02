@@ -3,8 +3,8 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { canUseDesktop, isDesktop } from '../../../utils.js'
+import { resolveAppVersion } from '../../../shared/utils/appVersion.js'
 import BrandLogo from '../../../shared/ui/BrandLogo.vue'
-import webPackage from '../../../../package.json'
 
 const router = useRouter()
 const sessionClient = createSessionClient()
@@ -15,7 +15,7 @@ const submitting = ref(false)
 const error = ref('')
 const replaceNeeded = ref(false)
 const loginAction = ref('')
-const version = ref(webPackage.version)
+const version = ref('')
 
 function resetReplacePrompt() {
   replaceNeeded.value = false
@@ -33,12 +33,7 @@ function submitReplacementLogin() {
 }
 
 onMounted(async () => {
-  if (isDesktop()) {
-    try {
-      const { getVersion } = await import('@tauri-apps/api/app')
-      version.value = await getVersion()
-    } catch { /* Browser preview uses the Web build version. */ }
-  }
+  version.value = await resolveAppVersion()
   if (isDesktop() && new URLSearchParams(window.location.search).has('desktop_role_forbidden')) {
     error.value = '当前角色不能登录 Desktop，请使用 Cloud Web 管理。'
     loading.value = false
@@ -111,8 +106,8 @@ async function login(options = {}) {
       <section class="login-layout">
         <div class="login-story">
           <div class="story-copy">
-            <h1>敢想，真做。</h1>
-            <p class="story-subtitle">下一场浪，从一个想法开始。</p>
+            <h1>敢想，真干。</h1>
+            <p class="story-subtitle">下次起飞，从一个想法开始。</p>
             <p class="story-description">找内容、管素材、做生产、发内容、看数据，让内容运营简单一点。</p>
           </div>
           <div class="story-features" aria-label="平台能力">

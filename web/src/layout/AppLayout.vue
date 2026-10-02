@@ -2,11 +2,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isDesktop } from '../utils.js'
+import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
 import DownloadCentreDrawer from '../modules/transfer/DownloadCentreDrawer.vue'
 import { useDownloadCentre } from '../modules/transfer/downloadCentre.js'
 import BrandLogo from '../shared/ui/BrandLogo.vue'
 import SystemAvatar from '../shared/ui/SystemAvatar.vue'
+import WorkEnvPill from '../apps/desktop/features/local-agent/WorkEnvPill.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,9 +18,9 @@ const SIDEBAR_EXPANDED_GROUPS_KEY = 'wt-media:sidebar-expanded-groups'
 const expandedGroups = ref(readExpandedGroups())
 const sessionClient = createSessionClient()
 const currentUser = ref(null)
+const appVersion = ref('')
 
 const menuItems = [
-  { title: '工作台', path: '/', icon: 'dashboard' },
   { value: 'discovery', title: '内容挖掘', icon: 'browse', children: [
     { title: '内容池', path: '/content-pool', icon: 'browse' },
     { title: '挖掘策略', path: '/discovery-strategies', icon: 'setting' },
@@ -36,13 +38,13 @@ const menuItems = [
     { title: '互动管理', path: '/interact', icon: 'chat' },
     { title: '评论模板', path: '/comment-templates', icon: 'chat-bubble' },
   ] },
-  { value: 'analytics', title: '数据分析', icon: 'chart-bar', children: [
-    { title: '数据统计', path: '/stats', icon: 'chart-bar' },
-  ] },
   { value: 'operation-resources', title: '运营资源', icon: 'folder', children: [
     { title: '浏览器窗口', path: '/browser-windows', icon: 'desktop' },
     { title: '代理管理', path: '/proxies', icon: 'link' },
     { title: '社媒账号', path: '/accounts', icon: 'user' },
+  ] },
+  { value: 'analytics', title: '数据分析', icon: 'chart-bar', children: [
+    { title: '数据统计', path: '/stats', icon: 'chart-bar' },
   ] },
   { value: 'system', title: '系统', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
@@ -53,7 +55,6 @@ const menuItems = [
 
 const desktopItems = [
   { value: 'local-environment', title: '桌面环境', icon: 'server', children: [
-    { title: '环境检测', path: '/agent', icon: 'server' },
     { title: '本地日志', path: '/logs', icon: 'file' },
     { title: '本机设置', path: '/settings', icon: 'setting' },
   ] },
@@ -70,6 +71,7 @@ async function refreshUser() {
   }
 }
 onMounted(async () => {
+  appVersion.value = await resolveAppVersion()
   await refreshUser()
   window.addEventListener('wt-media:profile-updated', refreshUser)
 })
@@ -146,6 +148,7 @@ async function logout() {
     <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
       <div class="sidebar-header" :class="{ 'is-collapsed': collapsed }" @click="router.push('/')">
         <BrandLogo :compact="collapsed" />
+        <span v-if="!collapsed && appVersion" class="sidebar-version">v{{ appVersion }}</span>
       </div>
       <t-menu
         :value="route.path"
@@ -192,6 +195,7 @@ async function logout() {
             成片导出，它不属于其中任何一页。面板本身只有一份（modules/transfer），
             页面用 `useDownloadCentre().open()` 把它叫出来。
           -->
+          <WorkEnvPill v-if="isDesktop()" />
           <t-button variant="text" @click="downloadCentre.open">
             <t-icon name="download" />
             下载中心
@@ -241,6 +245,7 @@ async function logout() {
   cursor: pointer;
 }
 .sidebar-header.is-collapsed { justify-content: center; padding: 0; }
+.sidebar-version { margin: auto 0 3px; color: #9aa8bd; font-size: 11px; white-space: nowrap; }
 .profile-trigger { display: inline-flex; align-items: center; gap: 9px; min-height: 38px; padding: 2px 8px 2px 4px; border: 0; border-radius: 9px; color: #243957; background: transparent; cursor: pointer; font: inherit; }
 .profile-trigger:hover, .profile-trigger:focus-visible { background: #eff6ff; outline: none; }
 .profile-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

@@ -51,6 +51,7 @@ export function createLocalAgentStatusPage(snapshot, context = {}) {
     mainUserText: snapshot?.mainUserId ? "已读取" : "未读取",
     nodeText: snapshot?.nodeId ? "当前会话已连接" : "当前会话未连接",
     runtimeText: [snapshot?.operatingSystem, snapshot?.cpuArchitecture, snapshot?.agentVersion].filter(Boolean).join(" / ") || "未上报",
+    bound: componentsReady && !!snapshot?.nodeId,
     trustStatus: bound ? "normal" : "warning",
     trustText: bound ? "可执行本机浏览器操作" : (componentsReady ? "当前会话待连接" : "本机环境不可用"),
     trustReason: reason,

@@ -32,7 +32,6 @@ export const desktopRoutes = [
       { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue") },
       { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue") },
       // Desktop 独有页面
-      { path: "agent", name: "AgentStatus", component: () => import("./features/local-agent/AgentStatusPage.vue") },
       { path: "logs", name: "LocalLogs", component: () => import("./features/local-logs/LocalLogsPage.vue") },
       { path: "settings", name: "LocalSettings", component: () => import("./features/local-settings/LocalSettingsPage.vue") },
       // 不包含 /users — Cloud 管理页面

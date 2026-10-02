@@ -36,7 +36,7 @@ export const cloudRoutes = [
       { path: "users", name: "Users", component: () => import("./pages/users/UsersPage.vue") },
       { path: "operation-teams", name: "OperationTeams", component: () => import("./pages/users/TeamsPage.vue") },
       { path: "games", name: "Games", component: () => import("./pages/users/GamesPage.vue") },
-      // 不包含 /agent, /logs — 这些是 Desktop-only
+      // 不包含 /logs, /settings — 这些是 Desktop-only
     ],
   },
 ]

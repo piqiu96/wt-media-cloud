@@ -143,7 +143,7 @@ describe('media account client', () => {
     expect(source).toContain('>批量检查</t-button>')
     expect(source).toContain('v-if="isDesktop" variant="outline"')
     expect(source).toContain('请先勾选要检查的账号')
-    expect(source).toContain('前往环境监测')
+    expect(source).toContain('前往个人中心检查设备')
     expect(source).toContain('v-model="searchProfile"')
     expect(source).toContain('重试失败项')
     expect(source).toContain('retryFailedOnly')

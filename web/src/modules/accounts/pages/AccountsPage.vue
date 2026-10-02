@@ -1133,7 +1133,7 @@ const columns = [
       <t-alert v-if="checkFailure" theme="error" style="margin-top:12px">
         <template #message>{{ checkFailure }}</template>
         <template #operation>
-          <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/agent')">前往环境监测</t-button>
+          <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/personal-info')">前往个人中心检查设备</t-button>
         </template>
       </t-alert>
     </t-drawer>

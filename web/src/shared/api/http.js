@@ -116,19 +116,25 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
     if (response.status === 204) {
       return null
     }
+
+    // 401 → redirect to login (skip for login endpoint itself). Clear any
+    // stale Desktop token so it does not persist and loop on reload.
+    //
+    // This must come before parseResponse: the backend answers an unauthenticated
+    // request with HTTP 401 *and* a structured body whose errcode is non-zero
+    // (e.g. 11001), which parseResponse throws on first — a redirect placed after
+    // it could never run.
+    if (response.status === 401 && !path.startsWith('/auth/login')) {
+      setSessionToken('')
+      const returnUrl = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/login?redirect=${returnUrl}`
+    }
+
     const result = await parseResponse(response)
 
     // HTTP error without structured body
     if (!response.ok && result === null) {
       throw new ApiError({ errcode: 50000, message: `HTTP ${response.status}` })
-    }
-
-    // 401 → redirect to login (skip for login endpoint itself). Clear any
-    // stale Desktop token so it does not persist and loop on reload.
-    if (response.status === 401 && !path.startsWith('/auth/login')) {
-      setSessionToken('')
-      const returnUrl = encodeURIComponent(window.location.pathname + window.location.search)
-      window.location.href = `/login?redirect=${returnUrl}`
     }
 
     return result

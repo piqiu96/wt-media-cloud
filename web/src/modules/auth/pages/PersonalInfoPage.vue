@@ -1,13 +1,11 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { createDeviceBindingClient } from '../../../shared/api/deviceBinding.js'
 import { avatarOptions } from '../../../shared/ui/systemAvatars.js'
 import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
-const router = useRouter()
 const session = createSessionClient()
 const devices = createDeviceBindingClient()
 const user = ref(null)
@@ -27,6 +25,8 @@ const message = ref('')
 const inDesktop = typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
 const deviceMatches = computed(() => !!binding.value?.bound && !!localDevice.value?.device_id && binding.value.device_id === localDevice.value.device_id)
 const deviceConflicts = computed(() => !!binding.value?.bound && !!localDevice.value?.device_id && !deviceMatches.value)
+// 本机 Agent 就绪 = 空闲或运行中（Agent 无事可做时报 idle，不是不可用）。
+const localAgentReady = computed(() => ['idle', 'running'].includes(localAgent.value?.status))
 const deviceLabel = computed(() => binding.value?.bound ? binding.value.device_name || '已绑定的运营电脑' : '尚未绑定运营电脑')
 const maskedDeviceId = computed(() => {
   const value = binding.value?.device_id || ''
@@ -117,7 +117,7 @@ async function unbindDevice() {
               <SystemAvatar :avatar-id="option.id" :size="42" /><span>{{ option.label }}</span>
             </button>
           </div>
-          <t-button theme="primary" :loading="saving" @click="saveProfile">保存个人信息</t-button>
+          <t-button theme="primary" :loading="saving" @click="saveProfile">保存</t-button>
         </section>
 
         <section class="device-card">
@@ -128,7 +128,7 @@ async function unbindDevice() {
             <div><dt>绑定时间</dt><dd>{{ binding?.bound_at ? new Date(binding.bound_at).toLocaleString() : '—' }}</dd></div>
             <div><dt>最近验证</dt><dd>{{ binding?.last_verified_at ? new Date(binding.last_verified_at).toLocaleString() : '—' }}</dd></div>
             <div><dt>比特浏览器账号</dt><dd>{{ binding?.bit_account_bound ? binding.bit_main_user_id_masked || '已绑定' : '尚未确认' }}</dd></div>
-            <div v-if="inDesktop"><dt>Local Agent</dt><dd>{{ localAgent?.status === 'running' ? '运行中' : '当前不可用' }}</dd></div>
+            <div v-if="inDesktop"><dt>Local Agent</dt><dd>{{ localAgentReady ? '可用' : '当前不可用' }}</dd></div>
             <div v-if="inDesktop"><dt>当前比特浏览器</dt><dd>{{ localAgent?.bitbrowser_status === 'normal' ? '已连接' : '待检查' }}</dd></div>
           </dl>
           <div v-if="deviceConflicts" class="device-alert">当前电脑与已绑定设备不同。请先确认旧电脑上的本地文件位置，再手动解除旧设备绑定。</div>
@@ -137,7 +137,6 @@ async function unbindDevice() {
           <div class="device-actions">
             <t-button v-if="!binding?.bound && inDesktop" theme="primary" :loading="bindingBusy" @click="bindThisDevice">绑定这台电脑</t-button>
             <t-button v-if="binding?.bound" theme="danger" variant="outline" @click="confirmUnbind = true">解除设备绑定</t-button>
-            <t-button v-if="inDesktop" variant="outline" @click="router.push('/agent')">查看 Agent 状态</t-button>
           </div>
           <p v-if="!inDesktop" class="device-note">Cloud 网页可查看及解除绑定；绑定新设备需在 Desktop 应用中操作。</p>
         </section>
