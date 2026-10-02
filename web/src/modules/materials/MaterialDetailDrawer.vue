@@ -40,7 +40,7 @@ const props = defineProps({
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
-defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give-up', 'restore', 'compose'])
+const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give-up', 'restore', 'compose', 'cancel'])
 
 const client = createMaterialsClient()
 const transfer = createFileTransferClient()
@@ -188,6 +188,9 @@ async function cancelDownload() {
     const id = props.material?.id
     downloadStatus.value = deriveDownloadStatus(tasks, id)
     activeTransferTask.value = deriveActiveTask(tasks, id)
+    // 上面重读的是抽屉自己的几份 ref；宿主列表那一行按同一批任务算出的「文件状态」不跟着
+    // 变，所以要让页面知道该重读了。
+    emit('cancel')
   } catch (e) {
     MessagePlugin.error(e?.message || '取消失败')
   }

@@ -428,4 +428,17 @@ describe('the drawer while a download is in progress', () => {
   it('shows the download block only while a transfer is actually running', () => {
     expect(template).toContain('v-if="activeRow" class="detail-download"')
   })
+
+  /**
+   * 取消之后要让宿主页面重读。
+   *
+   * 这里重读的只是抽屉自己的 `downloadTasks` / `downloadStatus` / `activeTransferTask`，
+   * 而列表那一行的「文件状态」由同一批任务另算一份 —— 不通知宿主，取消完回到列表，
+   * 那一行还写着「下载中」。
+   */
+  it('tells the host page to re-read after cancelling', () => {
+    expect(source).toMatch(/defineEmits\(\[[^\]]*'cancel'/)
+    const handler = sliceBetween(source, 'async function cancelDownload()', '\n}')
+    expect(handler).toContain("emit('cancel')")
+  })
 })

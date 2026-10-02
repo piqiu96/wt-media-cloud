@@ -192,6 +192,8 @@ async function download(row) {
   try {
     await client.createDownload(row.id)
     MessagePlugin.success('已开始下载，可在下载中心查看进度')
+    // 重读一次：这一行的「文件状态」和按钮都按使用记录算，不重读就停在上一帧，看起来像没反应。
+    await load()
     downloadCentre.open()
   } catch (e) {
     MessagePlugin.error(createDownloadFailureMessage(e))
@@ -286,6 +288,7 @@ onMounted(() => {
         mode="mine"
         @download="download"
         @redownload="download"
+        @cancel="load"
         @give-up="giveUp"
         @restore="restore"
         @compose="goToCompose"

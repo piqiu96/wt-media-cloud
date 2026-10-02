@@ -204,11 +204,10 @@ watch(visible, async (open) => {
   // 先问本机 device_id 再拉列表：悬置行的「重取」要拿它认出「发给这台设备」，首帧就得有，
   // 免得画面上先出现一帧没有重取按钮的样子。
   await loadLocalDevice()
-  if (activeTab.value !== 'active') {
-    // 停在别的 Tab 时切回去本身会触发上面的 activeTab watcher。
-    activeTab.value = 'active'
-    return
-  }
+  // 切回「进行中」**不代替**这一次拉取：`activeTab` 的 watcher 只重估轮询闸门，不取数，
+  // 而闸门又依赖已缓存的列表。所以从「历史」再打开时必须自己 `load()`，否则列表停在关闭
+  // 前那一帧，中途新发起的下载在面板里根本不存在。
+  activeTab.value = 'active'
   // 没有在跑的任务但有历史时直接落在历史，免得先看一屏空列表（沿用旧偏好）。
   load().then(() => {
     if (!hasLiveTask(liveDownloads.value)) activeTab.value = 'history'

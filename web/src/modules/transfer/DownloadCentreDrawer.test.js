@@ -52,6 +52,21 @@ describe('download centre drawer', () => {
     expect(source).toMatch(/async function retake\(task\) \{(.|\n)*?await load\(\)/)
   })
 
+  /**
+   * 从「历史」再打开面板也要取数。
+   *
+   * 面板每次收尾会自己落到「历史」（没有在跑的任务时），所以下一次打开时 `activeTab`
+   * 往往不是「进行中」。原先是把它切回去就 `return`，理由是「切 Tab 会触发上面那个
+   * watcher」—— 但那个 watcher 只重估轮询闸门、不取数，闸门又依赖已缓存的列表。于是
+   * 关闭期间（或上一次操作后）新发起的下载在面板里根本不存在，得手动刷新才看得到。
+   */
+  it('fetches on every open, including one that starts on the history tab', () => {
+    const watcher = sliceBetween(source, 'watch(visible, async (open) => {', '\n})')
+    expect(watcher).toContain("activeTab.value = 'active'")
+    expect(watcher).not.toMatch(/activeTab\.value = 'active'\s*\n\s*return/)
+    expect(watcher).toMatch(/load\(\)\.then\(/)
+  })
+
   // 悬置行的「发给这台设备」由本机 device_id 认出：面板打开时先问 runtime，再穿给每一行。
   it('asks the runtime for the local device id and feeds it into the rows', () => {
     expect(source).toContain("await invoke('local_device_identity')")

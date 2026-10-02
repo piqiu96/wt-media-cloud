@@ -212,4 +212,20 @@ describe('my materials page', () => {
     // 下载状态与素材云侧状态不合并：video_status 那四档仍在筛选下拉里原样使用。
     expect(source).toContain('row.video_status !== statusFilter.value')
   })
+
+  /**
+   * 「已开始下载」只是开始 —— 这一页也要重读。
+   *
+   * 「文件状态」格与行上的按钮都由使用记录派生的 `download_status` 算，`createDownload`
+   * 只改服务端；不重读的话这一行停在上一帧（还写着「下载」），用户看到的就是「点了没反应，
+   * 得手动刷新」。
+   */
+  it('re-reads the list after starting a download', () => {
+    expect(source).toMatch(/await client\.createDownload\(row\.id\)(.|\n)*?await load\(\)/)
+  })
+
+  // 详情抽屉里的取消只重读了它自己那几份 ref；宿主列表那一行不跟着变，所以它要发信号。
+  it('re-reads the list when the detail drawer cancels a download', () => {
+    expect(source).toContain('@cancel="load"')
+  })
 })
