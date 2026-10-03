@@ -186,6 +186,20 @@ class DeploymentPackageTest(unittest.TestCase):
         self.assertIn("wt-media-cloud-worker.service", manual)
         self.assertIn("回退", manual)
 
+    def test_baota_site_serves_cloud_web_and_proxies_api(self) -> None:
+        manual = (DEPLOY / "DEPLOYMENT.md").read_text(encoding="utf-8")
+        site_path = DEPLOY / "nginx-site-locations.conf.example"
+        self.assertTrue(site_path.is_file(), "BaoTa Nginx site snippet must be shipped")
+        site = site_path.read_text(encoding="utf-8")
+        self.assertIn("current/web", manual)
+        self.assertIn("index.cloud.html", manual)
+        self.assertIn("/login", manual)
+        self.assertIn("root /www/wt-media-cloud/current/web;", site)
+        self.assertIn("index index.cloud.html;", site)
+        self.assertIn("location ^~ /api/", site)
+        self.assertIn("proxy_pass http://127.0.0.1:8080;", site)
+        self.assertIn("try_files $uri $uri/ /index.cloud.html;", site)
+
 
 if __name__ == "__main__":
     unittest.main()

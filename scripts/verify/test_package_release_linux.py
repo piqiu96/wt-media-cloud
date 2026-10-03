@@ -56,6 +56,9 @@ class PackageReleaseLinuxTest(unittest.TestCase):
             "name = 'primary'\n", encoding="utf-8"
         )
         (deploy / "DEPLOYMENT.md").write_text("# Deployment\n", encoding="utf-8")
+        (deploy / "nginx-site-locations.conf.example").write_text(
+            "root /example/web;\nindex index.cloud.html;\n", encoding="utf-8"
+        )
         migrate_script = deploy / "migrate.sh"
         migrate_script.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\nexec bin/migrate -dir migrations --create-database=false\n",

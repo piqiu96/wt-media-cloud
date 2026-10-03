@@ -76,6 +76,7 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
         root / "deploy" / "config-template" / "app.toml",
         root / "deploy" / "config-template" / "database" / "primary.toml",
         root / "deploy" / "migrate.sh",
+        root / "deploy" / "nginx-site-locations.conf.example",
     )
     if any(not path.is_file() for path in required_deployment_paths):
         raise ValueError("deployment scripts/templates are required")

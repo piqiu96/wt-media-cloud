@@ -86,7 +86,14 @@ sudo ./deploy/activate.sh --install-root /www/wt-media-cloud --to <tag>
 
 > `schema_migrations` 只证明数据库结构已应用；`admin` 是 Server 首次启动时按配置初始化的，所以在第 6 步先启动并验证 Server，再执行数据库验收。
 
-## 6. 启动三个进程
+## 6. 配置宝塔 HTTPS 站点并启动三个进程
+
+Cloud 的 Go Server 只提供 API 与健康接口，不负责静态 Web。宝塔站点必须同时提供两条路径：
+
+1. 静态站点根目录设为 `/www/wt-media-cloud/current/web`，默认首页设为 `index.cloud.html`。Cloud Web 使用 history 路由，刷新 `/login` 等页面要回退到 `index.cloud.html`。
+2. 在宝塔当前域名的 HTTPS Nginx `server` 块里，按 `deploy/nginx-site-locations.conf.example` 设置 `/api/` 与 `/healthz` 到 `127.0.0.1:8080` 的代理，并设置静态站点 `location /`。不要把整个域名都代理到 Go Server；它没有首页路由。
+
+宝塔原有的 `root`、`index`、`location /` 如果已存在，应替换对应项，避免重复配置。TLS 证书、域名和维护提示继续由宝塔管理。保存配置后先执行宝塔的 Nginx 配置检查，再重载 Nginx。
 
 systemd 模板在 `deploy/systemd/`。按服务器实际安装路径检查后复制：
 
@@ -103,7 +110,7 @@ sudo systemctl enable --now wt-media-cloud-scheduler.service
 sudo systemctl enable --now wt-media-cloud-worker.service
 ```
 
-Server 默认监听 `127.0.0.1:8080`。宝塔反向代理将 HTTPS 域名转发到该地址，不要把 3306 或 8080 直接暴露公网。
+Server 默认监听 `127.0.0.1:8080`。宝塔只将 `/api/` 与 `/healthz` 转发到该地址，不要把 3306 或 8080 直接暴露公网。
 
 ## 7. 验收
 
@@ -118,7 +125,7 @@ sudo /www/wt-media-cloud/current/deploy/verify-runtime.sh \
 sudo ./deploy/verify-database.sh --database wt_media_cloud --user wt_media_cloud
 ```
 
-预期：`database verified: migrations=50 initial_admin=admin/enabled`。最后用浏览器通过 HTTPS 域名打开 Cloud Web，用已裁定的初始管理员密码登录，并立即修改密码。
+预期：`database verified: migrations=50 initial_admin=admin/enabled`。然后从服务器之外检查 `https://wt.longyanyue.cn/`、`https://wt.longyanyue.cn/login` 都能返回 Cloud Web 页面，`https://wt.longyanyue.cn/api/v1/health` 返回 JSON 健康结果；浏览器使用已裁定的初始管理员密码登录，并立即修改密码。
 
 ## 8. 回退
 

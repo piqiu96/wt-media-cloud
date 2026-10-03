@@ -7,7 +7,7 @@ for path in \
   bin/server bin/discovery-scheduler bin/discovery-worker bin/migrate bin/ffmpeg bin/ffprobe \
   deploy/init-config.sh deploy/migrate.sh deploy/verify-package.sh deploy/verify-database.sh \
   deploy/verify-runtime.sh deploy/install.sh deploy/activate.sh deploy/rollback.sh \
-  release-info.json web/index.cloud.html \
+  release-info.json web/index.cloud.html deploy/nginx-site-locations.conf.example \
   deploy/config-template/app.toml deploy/config-template/database/primary.toml; do
   if [[ "$path" == *.sh ]]; then
     [[ -f "$path" && -x "$path" ]] || { echo "missing or non-executable: $path" >&2; exit 1; }
