@@ -1,0 +1,4 @@
+discovery_interval = '1m'
+proxy_expiry_interval = '6h'
+worker_batch_size = 10
+worker_interval = '5s'

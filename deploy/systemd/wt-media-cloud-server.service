@@ -1,0 +1,18 @@
+[Unit]
+Description=WT Media Cloud API Server
+After=network.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/www/wt-media-cloud/current
+Environment=TMPDIR=/www/wt-media-cloud/shared/data/tmp
+ExecStart=/www/wt-media-cloud/current/bin/server
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

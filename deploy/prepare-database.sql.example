@@ -1,0 +1,17 @@
+-- Copy this file on the MySQL server, replace both quoted identifiers/password,
+-- and execute it as a MySQL administrator before Cloud migration.
+--
+-- The defaults match deploy/init-config.sh. Cloud itself never creates the
+-- production database when deploy/migrate.sh is used.
+
+CREATE DATABASE IF NOT EXISTS `wt_media_cloud`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+
+CREATE USER IF NOT EXISTS 'wt_media_cloud'@'127.0.0.1'
+  IDENTIFIED BY 'REPLACE_WITH_DATABASE_PASSWORD';
+
+-- MySQL 8 keeps an existing user's old password after CREATE USER IF NOT EXISTS.
+-- If this account already exists, reset its password here before deployment.
+GRANT ALL PRIVILEGES ON `wt_media_cloud`.* TO 'wt_media_cloud'@'127.0.0.1';
+FLUSH PRIVILEGES;

@@ -35,6 +35,33 @@ class PackageReleaseLinuxTest(unittest.TestCase):
         secret = self.root / "config_online" / "credentials" / "agent.toml"
         secret.parent.mkdir(parents=True)
         secret.write_text("password = 'must-not-ship'\n", encoding="utf-8")
+        (self.root / "migrations").mkdir()
+        (self.root / "migrations" / "001_identity.sql").write_text(
+            "CREATE TABLE users (id INT PRIMARY KEY);\n", encoding="utf-8"
+        )
+        deploy = self.root / "deploy"
+        (deploy / "config-template" / "database").mkdir(parents=True)
+        (deploy / "config-template" / "app.toml").write_text(
+            "name = 'wt-media-cloud'\n", encoding="utf-8"
+        )
+        (deploy / "config-template" / "credentials").mkdir(parents=True)
+        (deploy / "config-template" / "credentials" / "agent.toml").write_text(
+            "auth_token = ''\n", encoding="utf-8"
+        )
+        (deploy / "systemd").mkdir()
+        (deploy / "systemd" / "wt-media-cloud-server.service").write_text(
+            "[Service]\nExecStart=/example/server\n", encoding="utf-8"
+        )
+        (deploy / "config-template" / "database" / "primary.toml").write_text(
+            "name = 'primary'\n", encoding="utf-8"
+        )
+        (deploy / "DEPLOYMENT.md").write_text("# Deployment\n", encoding="utf-8")
+        migrate_script = deploy / "migrate.sh"
+        migrate_script.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\nexec bin/migrate -dir migrations --create-database=false\n",
+            encoding="utf-8",
+        )
+        migrate_script.chmod(0o755)
         self.archive = Path(self.tmp.name) / "ffmpeg.tar.xz"
         with tarfile.open(self.archive, "w:xz") as tar:
             for name in ("ffmpeg", "ffprobe"):
@@ -58,7 +85,8 @@ class PackageReleaseLinuxTest(unittest.TestCase):
             self.lock.write_text(json.dumps(data), encoding="utf-8")
         return subprocess.run([
             sys.executable, str(SCRIPT), "--root", str(self.root),
-            "--tag", "v0.1.0-rc.1", "--ffmpeg-lock", str(self.lock),
+            "--tag", "v0.1.0-rc.1", "--source-commit", "a" * 40,
+            "--ffmpeg-lock", str(self.lock),
             "--output-dir", str(Path(self.tmp.name) / "out"),
         ], text=True, capture_output=True)
 
@@ -72,7 +100,27 @@ class PackageReleaseLinuxTest(unittest.TestCase):
                 self.assertIn(f"wt-media-cloud_v0.1.0-rc.1_linux-amd64/bin/{name}", names)
             self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/web/index.cloud.html", names)
             self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/ffmpeg-source.json", names)
-            self.assertFalse(any("credentials" in name for name in names))
+            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/migrations/001_identity.sql", names)
+            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/deploy/DEPLOYMENT.md", names)
+            self.assertIn(
+                "wt-media-cloud_v0.1.0-rc.1_linux-amd64/deploy/config-template/database/primary.toml",
+                names,
+            )
+            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/deploy/systemd/wt-media-cloud-server.service", names)
+            self.assertFalse(any("config_online" in name for name in names))
+            credential_members = [member for member in tar.getmembers() if "/deploy/config-template/credentials/" in member.name]
+            self.assertTrue(credential_members)
+            for member in credential_members:
+                content = tar.extractfile(member).read().decode("utf-8")  # type: ignore[union-attr]
+                self.assertNotIn("must-not-ship", content)
+            release_info = json.loads(
+                tar.extractfile(
+                    "wt-media-cloud_v0.1.0-rc.1_linux-amd64/release-info.json"
+                ).read().decode("utf-8")  # type: ignore[union-attr]
+            )
+            self.assertEqual(release_info["source_commit"], "a" * 40)
+            self.assertEqual(release_info["product_tag"], "v0.1.0-rc.1")
+            self.assertEqual(release_info["database_migration"], "migrations")
         self.assertTrue((Path(self.tmp.name) / "out" / "desktop-web_v0.1.0-rc.1.tar.gz").is_file())
 
     def test_rejects_unexpected_ffmpeg_archive_digest(self) -> None:

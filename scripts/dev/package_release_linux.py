@@ -66,9 +66,21 @@ def copy_ffmpeg(lock_path: Path, destination: Path, temporary: Path) -> dict[str
     return result
 
 
-def package(root: Path, tag: str, lock: Path, output: Path) -> tuple[Path, Path]:
+def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) -> tuple[Path, Path]:
     if not TAG.fullmatch(tag):
         raise ValueError(f"invalid product Tag: {tag}")
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise ValueError("source commit must be a full Git SHA-1 value")
+    required_deployment_paths = (
+        root / "deploy" / "DEPLOYMENT.md",
+        root / "deploy" / "config-template" / "app.toml",
+        root / "deploy" / "config-template" / "database" / "primary.toml",
+        root / "deploy" / "migrate.sh",
+    )
+    if any(not path.is_file() for path in required_deployment_paths):
+        raise ValueError("deployment scripts/templates are required")
+    if not any((root / "migrations").glob("*.sql")):
+        raise ValueError("SQL migrations are required")
     for name in BINARIES:
         require_elf(root / "bin" / name)
     cloud_web = root / "web" / "dist-cloud"
@@ -93,9 +105,23 @@ def package(root: Path, tag: str, lock: Path, output: Path) -> tuple[Path, Path]
         provenance = copy_ffmpeg(lock, bin_dir, temp)
         (staged / "ffmpeg-source.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
         shutil.copytree(cloud_web, staged / "web")
+        shutil.copytree(root / "migrations", staged / "migrations")
+        shutil.copytree(root / "deploy", staged / "deploy")
+        release_info = {
+            "schema_version": 1,
+            "product_tag": tag,
+            "source_commit": source_commit,
+            "processes": ("server", "discovery-scheduler", "discovery-worker"),
+            "web_targets": ("cloud", "desktop"),
+            "database_migration": "migrations",
+        }
+        (staged / "release-info.json").write_text(
+            json.dumps(release_info, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         (staged / "DEPLOYMENT.txt").write_text(
-            "Inject this environment's private config/ on the server before starting Cloud. "
-            "No database, object-storage, or platform credentials are shipped.\n",
+            "Read deploy/DEPLOYMENT.md. Inject this environment's private config/ on the server "
+            "before migration or startup. No live database, object-storage, or platform "
+            "credentials are shipped.\n",
             encoding="utf-8",
         )
         with tarfile.open(cloud_archive, "w:gz") as archive:
@@ -115,11 +141,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--source-commit", required=True, help="full Cloud commit SHA")
     parser.add_argument("--ffmpeg-lock", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     try:
-        for path in package(args.root, args.tag, args.ffmpeg_lock, args.output_dir):
+        for path in package(args.root, args.tag, args.source_commit, args.ffmpeg_lock, args.output_dir):
             print(path)
     except (OSError, ValueError, KeyError, tarfile.TarError) as exc:
         parser.exit(1, f"release package failed: {exc}\n")
