@@ -52,5 +52,8 @@ jobs:
           scripts/migrate.sh
           scripts/migrate.sh
 
-      - name: Build Cloud and Web
-        run: scripts/build.sh
+      - name: Build release binaries and both Web targets
+        run: scripts/dev/build-release-linux.sh
+
+      - name: Verify release packaging scripts
+        run: python3 -m unittest scripts.verify.test_package_release_linux scripts.verify.test_stamp_desktop_web -v

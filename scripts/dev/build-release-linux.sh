@@ -10,10 +10,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 mkdir -p bin
 for name in server discovery-scheduler discovery-worker migrate; do
-  # Use the native Linux toolchain, matching the Cloud CI path. Forcing
-  # CGO_ENABLED=0 trips sonic/loader's Go 1.26 linkname check on Linux even
-  # though the same source builds successfully with the runner default.
-  GOOS=linux GOARCH=amd64 go build -trimpath -o "bin/$name" "./cmd/$name"
+  # This runs only on a native Linux amd64 runner. Keep the Go invocation the
+  # same as the tested Cloud build path: linker flags can change how sonic's
+  # runtime linkname is treated by the current Go toolchain.
+  go build -o "bin/$name" "./cmd/$name"
   test -x "bin/$name"
 done
 
