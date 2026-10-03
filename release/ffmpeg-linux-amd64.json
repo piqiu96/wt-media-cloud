@@ -1,0 +1,5 @@
+{
+  "source_url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-01-13-06/ffmpeg-n8.1.3-14-g330caae0c1-linux64-gpl-8.1.tar.xz",
+  "archive_sha256": "89cca03b81002bef5a48c2e983afa6100e52904052c1c75dfd2090b09b57efee",
+  "license": "GPL build; inspect ffmpeg -L before production distribution"
+}

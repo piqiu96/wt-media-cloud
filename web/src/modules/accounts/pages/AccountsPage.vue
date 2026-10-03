@@ -5,6 +5,7 @@ import { createProfileBindingClient } from "../../../shared/api/profileBindings.
 import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
+import { cloudBaseUrl } from "../../../apps/desktop/features/local-agent/init.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
@@ -489,14 +490,6 @@ function localTrustMessage(e) {
   return message || "本机操作失败，请查看 Agent 日志。"
 }
 
-function cloudBaseUrl() {
-  if (typeof window === "undefined") return "http://127.0.0.1:18080"
-  const origin = window.location?.origin || "http://127.0.0.1:18080"
-  // Packaged Desktop runs on http://tauri.localhost, which is NOT the Cloud
-  // API host; the local Cloud server is always the API base.
-  return origin.startsWith("http://127.0.0.1:18080") ? origin : "http://127.0.0.1:18080"
-}
-
 async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
     throw new Error("账号检查只能在 Desktop 客户端执行")
@@ -511,7 +504,7 @@ async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
   }
   const localStatus = await service.status()
   try {
-    const refreshed = await service.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
+    const refreshed = await service.refreshRuntime({ cloudBaseUrl: await cloudBaseUrl() })
     lastRuntimeStatus = refreshed
     lastRuntimeRefreshAt = now
     return refreshed
@@ -534,7 +527,7 @@ async function runSingleAccountCheck(account, service) {
   }
   const start = await accountClient.check(account.id, { nodeId })
   const localResult = await service.accountCheck({
-    cloudBaseUrl: cloudBaseUrl(),
+    cloudBaseUrl: await cloudBaseUrl(),
     taskId: start.task_id,
     bitProfileId: start.bit_profile_id,
     platform: start.platform,
@@ -564,7 +557,7 @@ async function readProfileCookieFor(account) {
     if (!nodeId) throw new Error("当前电脑尚未完成可信绑定，请先到「环境检测」页重新检测并绑定。")
     const start = await accountClient.startCookieReadSync(target.id, { nodeId })
     const localResult = await service.cookieRead({
-      cloudBaseUrl: cloudBaseUrl(),
+      cloudBaseUrl: await cloudBaseUrl(),
       taskId: start.task_id,
       bitProfileId: start.bit_profile_id,
     })

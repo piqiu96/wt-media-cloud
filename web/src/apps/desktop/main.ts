@@ -4,7 +4,8 @@ import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
 import App from "./App.vue"
 import { canUseDesktop } from "../../utils.js"
-import { startDesktopLocalAgent } from "./features/local-agent/init.js"
+import { cloudBaseUrl, startDesktopLocalAgent } from "./features/local-agent/init.js"
+import { setDesktopCloudOrigin } from "../../shared/api/http.js"
 import { installWebviewErrorReporting } from "./webviewErrors.js"
 import "tdesign-vue-next/es/style/index.css"
 import "../../shared/styles/layout.css"
@@ -60,4 +61,10 @@ router.beforeEach(async (to, from, next) => {
   }
 })
 
-app.mount("#app")
+// Resolve the Cloud origin from the bundled native config before the router or
+// any API client makes its first request. An unavailable config remains empty;
+// the HTTP client then reports that fact instead of guessing a loopback server.
+void cloudBaseUrl().then((origin) => {
+  setDesktopCloudOrigin(origin)
+  app.mount("#app")
+})

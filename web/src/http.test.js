@@ -1,10 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createApiClient } from './shared/api/http.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApiClient, setDesktopCloudOrigin } from './shared/api/http.js'
 
 describe('createApiClient', () => {
   const originalWindow = globalThis.window
 
+  beforeEach(() => {
+    setDesktopCloudOrigin('https://wt.longyanyue.cn')
+  })
+
   afterEach(() => {
+    setDesktopCloudOrigin('')
     if (originalWindow === undefined) {
       delete globalThis.window
     } else {
@@ -25,7 +30,7 @@ describe('createApiClient', () => {
     })
   })
 
-  it('uses the local Cloud API origin when packaged Desktop runs outside the dev server', async () => {
+  it('uses the native Cloud origin when packaged Desktop runs outside the dev server', async () => {
     globalThis.window = {
       __WT_MEDIA_APP__: 'desktop',
       location: { protocol: 'tauri:', port: '', pathname: '/login', search: '' },
@@ -36,12 +41,25 @@ describe('createApiClient', () => {
       json: async () => ({ errcode: 0, data: { status: 'ok' } }),
     }))
     const client = createApiClient({ fetchImpl: fetch })
+    setDesktopCloudOrigin('https://wt.longyanyue.cn')
 
     await client.get('/auth/me')
 
-    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:18080/api/v1/auth/me', expect.objectContaining({
+    expect(fetch).toHaveBeenCalledWith('https://wt.longyanyue.cn/api/v1/auth/me', expect.objectContaining({
       credentials: 'include',
     }))
+  })
+
+  it('refuses a packaged Desktop request before its Cloud address is available', async () => {
+    setDesktopCloudOrigin('')
+    globalThis.window = {
+      __WT_MEDIA_APP__: 'desktop',
+      location: { protocol: 'tauri:', port: '', pathname: '/login', search: '' },
+    }
+    const fetch = vi.fn()
+    const client = createApiClient({ fetchImpl: fetch })
+    await expect(client.get('/auth/me')).rejects.toThrow('Cloud 地址尚未就绪')
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('keeps the relative API path for Desktop dev server proxy', async () => {

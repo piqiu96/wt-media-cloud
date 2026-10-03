@@ -47,7 +47,7 @@ async function parseResponse(response) {
 }
 
 // Session token for the packaged Desktop WebView. The Desktop page runs on
-// http://tauri.localhost, cross-site to the local Cloud API, so the WebView does
+// http://tauri.localhost, cross-site to the configured Cloud API, so the WebView does
 // not round-trip the HttpOnly session cookie; the token is carried in the
 // X-Session-Token header instead. Cloud Web keeps the cookie path (token empty).
 //
@@ -81,18 +81,24 @@ if (isDesktopApp()) {
   }
 }
 
+let desktopCloudOrigin = ''
+
+export function setDesktopCloudOrigin(origin) {
+  desktopCloudOrigin = typeof origin === 'string' ? origin.trim().replace(/\/$/, '') : ''
+}
+
 function defaultApiBase(base) {
   if (base !== '/api/v1') return base
   const win = typeof window !== 'undefined' ? window : null
   if (win?.__WT_MEDIA_APP__ !== 'desktop') return base
   if (win.location?.port === '5174') return base
-  return 'http://127.0.0.1:18080/api/v1'
+  if (!desktopCloudOrigin) throw new Error('Cloud 地址尚未就绪，请重新启动客户端或检查本机配置')
+  return `${desktopCloudOrigin}/api/v1`
 }
 
 export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch } = {}) {
-  const apiBase = defaultApiBase(base)
-
   async function request(path, { method = 'GET', body, params } = {}) {
+    const apiBase = defaultApiBase(base)
     let url = `${apiBase}${path}`
     if (params) {
       const q = new URLSearchParams()

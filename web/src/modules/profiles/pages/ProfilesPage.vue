@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
+import { cloudBaseUrl } from "../../../apps/desktop/features/local-agent/init.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createProxyClient } from "../../../shared/api/proxy.js"
@@ -204,14 +205,6 @@ async function desktopLocalAgentService() {
   return createLocalAgentService({ invoke })
 }
 
-function cloudBaseUrl() {
-  if (typeof window === "undefined") return "http://127.0.0.1:18080"
-  const origin = window.location?.origin || "http://127.0.0.1:18080"
-  // Packaged Desktop runs on http://tauri.localhost, which is NOT the Cloud
-  // API host; the local Cloud server is always the API base.
-  return origin.startsWith("http://127.0.0.1:18080") ? origin : "http://127.0.0.1:18080"
-}
-
 async function currentLocalNodeId() {
   const service = await desktopLocalAgentService()
   const status = await refreshRuntimeWithCooldown(service)
@@ -225,7 +218,7 @@ async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
   }
   const localStatus = await service.status()
   try {
-    const refreshed = await service.refreshRuntime({ cloudBaseUrl: cloudBaseUrl() })
+    const refreshed = await service.refreshRuntime({ cloudBaseUrl: await cloudBaseUrl() })
     lastRuntimeStatus = refreshed
     lastRuntimeRefreshAt = now
     return refreshed

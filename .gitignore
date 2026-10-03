@@ -17,6 +17,7 @@ logs/
 /server
 .env.local
 .pytest_cache/
+__pycache__/
 # The object-storage key pair is supplied by whoever runs the acceptance and is
 # never committed. The `.example` templates beside these paths are committed and
 # carry no values; see `config/README.md` for why this credential differs from
