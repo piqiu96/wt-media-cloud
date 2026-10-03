@@ -150,6 +150,7 @@ class DeploymentPackageTest(unittest.TestCase):
                 str(first / "deploy" / "install.sh"),
                 "--install-root", str(install_root),
                 "--release", "v1",
+                "--service-user", os.environ["USER"],
             ]
         )
         self.assertNotEqual(duplicate.returncode, 0)
