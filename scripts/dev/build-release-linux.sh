@@ -9,7 +9,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 mkdir -p bin
-for name in server discovery-scheduler discovery-worker migrate; do
+for name in server discovery-scheduler discovery-worker migrate config-check; do
   # This runs only on a native Linux amd64 runner. Keep the Go invocation the
   # same as the tested Cloud build path: linker flags can change how sonic's
   # runtime linkname is treated by the current Go toolchain.

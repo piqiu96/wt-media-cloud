@@ -34,7 +34,7 @@
 - 保持 Go 模块化单体；`internal/bootstrap/` 统一负责基础资源装配和生命周期。
 - Handler 负责协议层，Service 负责业务规则，Repository 负责数据访问；跨模块通过 Service 边界协作。
 - Repository 延续现有 `*gorm.DB` 和显式 SQL 模式；Handler 与 Service 不直接执行 SQL。
-- 外部 HTTP Client 收敛到 `internal/infra/client/`；运行配置从 `config/` 读取，`config_online/` 仅作为发布替换源。
+- 外部 HTTP Client 收敛到 `internal/infra/client/`；运行配置从 `config/` 读取，`config_online/` 是版本自包含制品的配置模板源，部署时按环境渲染并校验。
 - 对外 HTTP 响应保持 `errcode`、`message`、`data`、`logid`。
 - 可独立执行和恢复的长任务走 Scheduler / Worker / Job；Vue 业务源码只在 `web/` 维护。
 

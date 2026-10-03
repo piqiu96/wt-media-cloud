@@ -1,9 +1,12 @@
 # Configuration
 
-Runtime code always reads `./config`. `config_online/` is a release-time drop-in
-replacement for this directory, not a second runtime source; the two trees must
-keep the same file layout, and a file present in only one of them is a packaging
-bug. `internal/config` loads each file by an explicit path — nothing here is
+Runtime code always reads `./config`. `config_online/` is the release template
+source, not a second runtime source. Its runtime paths must correspond one-to-one
+with this directory: fixed files remain `.toml`, while environment values become
+`{{VARIABLE}}` placeholders in `.toml.tpl`. Packaging copies `config_online/` to
+the artifact as template-state `config/`; deployment renders it, validates it
+with `bin/config-check`, and only then replaces that release's private `config/`.
+`internal/config` loads each runtime file by an explicit path — nothing here is
 discovered by scanning — so a new file has to be added to `LoadFromDir` as well
 as to both trees.
 
@@ -23,9 +26,11 @@ in. It is required in both trees.
 
 ## Credentials
 
-`agent.toml` and `douyin.toml` are tracked. **`object_storage.toml` is not**: it
-is listed in `.gitignore`, and only a value-less `object_storage.toml.example`
-is committed.
+`agent.toml` and `douyin.toml` are tracked locally. **`object_storage.toml` is
+not**: it is listed in `.gitignore`, and the local tree ships only a value-less
+`object_storage.toml.example`. The release template for every credential is
+`config_online/credentials/*.toml.tpl`; real values arrive only through the
+server-specific variables file.
 
 This is a deliberate difference from the other two, which were confirmed
 tracked under the stage policy recorded as A-03 in
@@ -43,8 +48,9 @@ fresh checkout and `go test ./...` working without a secret. A file with only on
 of the two values is a startup error — half a pair is an unfinished edit, and it
 would otherwise appear as an authentication failure on the first request.
 
-To use the remote endpoint, copy the template next to it as
-`object_storage.toml` and fill in `access_key` and `secret_key`.
+To use the remote endpoint locally, copy the example next to it as
+`object_storage.toml` and fill in `access_key` and `secret_key`. Release builds
+do not read that local file.
 
 `bucket` currently reads `REPLACE_WITH_BUCKET` in both trees: the endpoint was
 confirmed but the bucket name was not, and a sentinel keeps the tree loadable

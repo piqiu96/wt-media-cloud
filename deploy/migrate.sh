@@ -9,7 +9,7 @@ usage() {
 Usage: deploy/migrate.sh [--dry-run]
 
 Runs the release's migration executable against the explicitly configured
-database. The production database and account must already exist; this entry
+database. The target database and account must already exist; this entry
 always passes ---create-database=false.
 MSG
 }

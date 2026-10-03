@@ -2,9 +2,9 @@ name = "agent"
 timeout = "7s"
 
 [endpoint]
-scheme = "http"
-host = "127.0.0.1"
-port = 8765
+scheme = {{WT_AGENT_API_SCHEME}}
+host = {{WT_AGENT_API_HOST}}
+port = {{WT_AGENT_API_PORT}}
 
 [connection]
 dial_timeout = "2s"

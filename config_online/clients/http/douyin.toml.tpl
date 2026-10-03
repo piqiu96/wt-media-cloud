@@ -2,9 +2,9 @@ name = "douyin"
 timeout = "30s"
 
 [endpoint]
-scheme = "https"
-host = "api.itfaba.com"
-port = 443
+scheme = {{WT_DOUYIN_API_SCHEME}}
+host = {{WT_DOUYIN_API_HOST}}
+port = {{WT_DOUYIN_API_PORT}}
 
 [connection]
 dial_timeout = "5s"

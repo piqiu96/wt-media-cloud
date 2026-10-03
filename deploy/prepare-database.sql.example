@@ -2,7 +2,7 @@
 -- and execute it as a MySQL administrator before Cloud migration.
 --
 -- The defaults match deploy/init-config.sh. Cloud itself never creates the
--- production database when deploy/migrate.sh is used.
+-- target database when deploy/migrate.sh is used.
 
 CREATE DATABASE IF NOT EXISTS `wt_media_cloud`
   CHARACTER SET utf8mb4

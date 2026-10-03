@@ -11,7 +11,7 @@ WT Media Cloud is a Go + CloudWeGo Hertz modular monolith. It owns Cloud APIs, b
 
 ## Configuration
 
-Runtime code always reads `./config`. The `config_online` directory is a release-time drop-in replacement for `config`.
+Runtime code always reads `./config`. `config_online/` is the release template source: fixed `.toml` files stay unchanged and environment values use `{{...}}` placeholders in `.toml.tpl`. Packaging copies it to the artifact as template-state `config/`; the deployment renderer calls `bin/config-check` before atomically replacing that release's private `config/`.
 
 Important files:
 

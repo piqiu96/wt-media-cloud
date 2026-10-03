@@ -1,0 +1,6 @@
+bucket = {{WT_OBJECT_STORAGE_BUCKET}}
+endpoint = {{WT_OBJECT_STORAGE_ENDPOINT}}
+prefix = {{WT_OBJECT_STORAGE_PREFIX}}
+presign_ttl = '15m'
+region = {{WT_OBJECT_STORAGE_REGION}}
+use_ssl = {{WT_OBJECT_STORAGE_USE_SSL}}

@@ -47,9 +47,9 @@ func TestLoadFromDirReadsServerFromAppTOML(t *testing.T) {
 	}
 }
 
-func TestLoadFromDirAcceptsReleaseConfigTree(t *testing.T) {
-	if _, err := LoadFromDir("../../config_online"); err != nil {
-		t.Fatalf("LoadFromDir(config_online) error = %v", err)
+func TestLoadFromDirAcceptsShippedRuntimeConfigTree(t *testing.T) {
+	if _, err := LoadFromDir("../../config"); err != nil {
+		t.Fatalf("LoadFromDir(config) error = %v", err)
 	}
 }
 

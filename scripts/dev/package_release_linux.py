@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import tarfile
@@ -14,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 
-BINARIES = ("server", "discovery-scheduler", "discovery-worker", "migrate")
+BINARIES = ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check")
 TAG = re.compile(r"^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$")
 
 
@@ -25,6 +26,37 @@ def sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+
+
+
+def normalized_config_paths(directory: Path, label: str) -> dict[str, str]:
+    """Map local/template files to their runtime TOML paths."""
+    paths: dict[str, str] = {}
+    for item in directory.rglob("*"):
+        if item.is_symlink():
+            raise ValueError(
+                f"config layout mismatch: {label} contains a symlink: "
+                f"{item.relative_to(directory)}"
+            )
+        if not item.is_file():
+            continue
+        relative = item.relative_to(directory)
+        if relative.suffix == ".md":
+            continue
+        name = relative.name
+        if name.endswith(".toml.tpl"):
+            runtime = relative.with_name(name[: -len(".tpl")])
+        elif name.endswith(".toml.example"):
+            runtime = relative.with_name(name[: -len(".example")])
+        elif name.endswith(".toml"):
+            runtime = relative
+        else:
+            continue
+        key = runtime.as_posix()
+        if key in paths:
+            raise ValueError(f"config layout mismatch: {label} has multiple files for {key}")
+        paths[key] = item.relative_to(directory).as_posix()
+    return paths
 
 def require_elf(path: Path) -> None:
     if not path.is_file() or path.stat().st_size < 5:
@@ -71,15 +103,34 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
         raise ValueError(f"invalid product Tag: {tag}")
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise ValueError("source commit must be a full Git SHA-1 value")
+    local_config_paths = normalized_config_paths(root / "config", "config")
+    online_config_paths = normalized_config_paths(root / "config_online", "config_online")
+    if local_config_paths.keys() != online_config_paths.keys():
+        missing_online = sorted(local_config_paths.keys() - online_config_paths.keys())
+        missing_local = sorted(online_config_paths.keys() - local_config_paths.keys())
+        details = []
+        if missing_online:
+            details.append("missing in config_online: " + ", ".join(missing_online))
+        if missing_local:
+            details.append("missing in config: " + ", ".join(missing_local))
+        raise ValueError("config layout mismatch; " + "; ".join(details))
     required_deployment_paths = (
         root / "deploy" / "DEPLOYMENT.md",
-        root / "deploy" / "config-template" / "app.toml",
-        root / "deploy" / "config-template" / "database" / "primary.toml",
+        root / "deploy" / "init-config.sh",
+        root / "deploy" / "render-config.py",
+        root / "deploy" / "install.sh",
+        root / "deploy" / "activate.sh",
+        root / "deploy" / "rollback.sh",
         root / "deploy" / "migrate.sh",
-        root / "deploy" / "nginx-site-locations.conf.example",
+        root / "deploy" / "verify-package.sh",
+        root / "deploy" / "verify-database.sh",
+        root / "deploy" / "verify-runtime.sh",
+        root / "deploy" / "prepare-database.sql.example",
     )
     if any(not path.is_file() for path in required_deployment_paths):
         raise ValueError("deployment scripts/templates are required")
+    if any(not os.access(path, os.X_OK) for path in required_deployment_paths if path.suffix in {".sh", ".py"}):
+        raise ValueError("deployment scripts must be executable")
     if not any((root / "migrations").glob("*.sql")):
         raise ValueError("SQL migrations are required")
     for name in BINARIES:
@@ -107,7 +158,12 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
         (staged / "ffmpeg-source.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
         shutil.copytree(cloud_web, staged / "web")
         shutil.copytree(root / "migrations", staged / "migrations")
-        shutil.copytree(root / "deploy", staged / "deploy")
+        shutil.copytree(
+            root / "deploy",
+            staged / "deploy",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        shutil.copytree(root / "config_online", staged / "config")
         release_info = {
             "schema_version": 1,
             "product_tag": tag,
@@ -115,6 +171,7 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
             "processes": ("server", "discovery-scheduler", "discovery-worker"),
             "web_targets": ("cloud", "desktop"),
             "database_migration": "migrations",
+            "configuration": "template-state config/ rendered by deploy/init-config.sh",
         }
         (staged / "release-info.json").write_text(
             json.dumps(release_info, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

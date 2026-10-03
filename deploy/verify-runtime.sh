@@ -40,7 +40,7 @@ if $check_login; then
   body_file=$(mktemp)
   trap 'rm -f "$body_file"' EXIT
   printf '%s\0%s\0' "$admin_username" "$admin_password" \
-    | python3 -c 'import json,sys; user,password=sys.stdin.buffer.read().split(b"\0")[:2]; print(json.dumps({"username":user.decode(),"password":password.decode()}))' \
+    | python3 -c 'import json,sys; user,password=sys.stdin.buffer.read().split(b"\0")[:2]; print(json.dumps({"username":user.decode(),"password":password.decode(),"replace_existing":True}))' \
     | curl --silent --show-error --fail -H 'Content-Type: application/json' \
       --data-binary @- "$base_url/api/v1/auth/login" >"$body_file"
   python3 - "$body_file" "$admin_username" <<'PY'

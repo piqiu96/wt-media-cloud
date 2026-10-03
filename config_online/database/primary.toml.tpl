@@ -1,12 +1,12 @@
 charset = 'utf8mb4'
-database = 'wt_media'
-host = '127.0.0.1'
+database = {{WT_DB_NAME}}
+host = {{WT_DB_HOST}}
 location = 'Local'
 name = 'primary'
 parse_time = true
-password = ''
-port = 3306
-username = 'root'
+password = {{WT_DB_PASSWORD}}
+port = {{WT_DB_PORT}}
+username = {{WT_DB_USERNAME}}
 
 [pool]
 max_idle = 10

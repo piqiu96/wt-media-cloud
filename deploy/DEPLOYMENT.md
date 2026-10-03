@@ -1,10 +1,10 @@
-# WT Media Cloud Linux 部署手册
+# WT Media Cloud Linux 宝塔部署手册
 
-本手册面向宝塔/Linux 服务器预发布部署。Cloud 包是只读程序；数据库密码、对象存储密钥和平台凭据只写入服务器 `shared/config`。本次仅演练预发布，不把 RC 包公开为正式版。
+本手册用于当前 `online` 环境。Cloud 包是版本自包含的只读程序；数据库密码、对象存储密钥和平台凭据只存在于服务器当前版本的私有 `config/`。`pre` 环境未来使用另一套打包产物和 `wt-media/vars/cloud/pre.json`，不要与本次 online 部署混用。
 
 ## 1. 下载与校验
 
-1. 在对应产品 Tag 的 GitHub Actions Run 下载 `cloud-linux-amd64` Artifact，核对 Run 的 Cloud 组件 Tag 和 Commit。
+1. 在产品 Tag 的 GitHub Actions Run 下载 `cloud-linux-amd64` Artifact，核对 Cloud 组件 Tag 和 Commit。
 2. 解开 Artifact ZIP，得到 Cloud tar.gz、Desktop Web tar.gz 和 `SHA256SUMS`。
 3. 校验并解压 Cloud 包：
 
@@ -16,128 +16,151 @@ cd wt-media-cloud_<tag>_linux-amd64
 cat release-info.json
 ```
 
-## 2. 创建数据库与专用账号
+包内 `config/` 是模板状态：固定文件保留 `.toml`，需注入的值使用 `.toml.tpl`。本地开发 `config/`、`config_test/` 和真实凭据不会进入制品。
 
-复制 `deploy/prepare-database.sql.example`，在服务器上替换库名、账号和密码，然后以 MySQL 管理员执行。默认值为：
+## 2. 准备 MySQL
 
-- 数据库：`wt_media_cloud`
-- 账号：`wt_media_cloud`@`127.0.0.1`，与 Cloud 配置的 TCP 地址一致
-- Cloud 应用密码：由你设置，不写入 Git
+复制 `deploy/prepare-database.sql.example`，在 MySQL 管理员会话中替换库名、账号和密码后执行。当前 online 环境建议：
 
-如需远程部署，请同时调整 SQL 的账号 Host 和 `init-config.sh --db-host`。
+- 数据库：`wt_media_online`
+- 账号：`wt_media_online` 或专用 `wt_media_cloud` 账号
+- Host：与 Cloud 服务器访问路径一致，同机默认 `127.0.0.1`
 
-已有部署升级前，先在宝塔显示维护提示，停止 Server、Scheduler、Worker，并分别备份 MySQL 与对象存储；记录备份位置和恢复步骤。迁移前在数据副本演练，因为部分 MySQL DDL 无法通过切换程序版本撤销。
+Cloud 部署脚本固定 `--create-database=false`，不会替操作者猜测或创建生产库。
 
-## 3. 安装固定版本
+## 3. 安装新版本
 
-默认安装到 `/www/wt-media-cloud`：
+在解压出的包目录执行：
 
 ```bash
-sudo ./deploy/install.sh --install-root /www/wt-media-cloud --release <tag> --service-user www
+sudo ./deploy/install.sh \
+  --install-root /www/wt-media-cloud \
+  --release <tag> \
+  --service-user www
 ```
 
-安装产物：
+产物：
 
-- `/www/wt-media-cloud/releases/<tag>/`：本次程序
-- `/www/wt-media-cloud/shared/config/`：私有配置
-- `/www/wt-media-cloud/shared/logs/`：日志
-- `/www/wt-media-cloud/shared/data/tmp/`：媒体处理临时文件，三个进程共用稳定的 `TMPDIR`；按服务器容量定期清理
-- `/www/wt-media-cloud/current`：验收后才指向新版本的软链
+- `/www/wt-media-cloud/releases/<tag>/`：程序、Web、Migration 和部署脚本
+- `/www/wt-media-cloud/releases/<tag>/config/`：模板态私有配置
+- `/www/wt-media-cloud/releases/<tag>/logs/`
+- `/www/wt-media-cloud/releases/<tag>/data/tmp/`
+- `/www/wt-media-cloud/current`：仅在迁移验收后切换
 
-## 4. 生成服务器配置
+安装脚本不会覆盖同名版本，也不会改变 `current`。
 
-首次部署执行；脚本会在终端提示输入第 2 步的应用账号密码：
+## 4. 拉取并渲染 online 变量表
+
+变量对象由部署操作者在本地上传，当前 online 固定使用：
+
+```text
+wt-media/vars/cloud/online.json
+```
+
+未来预发布环境才使用：
+
+```text
+wt-media/vars/cloud/pre.json
+```
+
+在服务器执行：
 
 ```bash
 sudo /www/wt-media-cloud/releases/<tag>/deploy/init-config.sh \
-  --config /www/wt-media-cloud/shared/config \
-  --db-host 127.0.0.1 --db-port 3306 \
-  --db-name wt_media_cloud --db-user wt_media_cloud \
-  --admin-username admin \
-  --owner www
+  --config /www/wt-media-cloud/releases/<tag>/config \
+  --environment online \
+  --variables-url '<有效期内的私有变量表URL>'
 ```
 
-`init-config.sh` 只接受空目录，避免覆盖已有私有配置。第二次终端提示输入已裁定的 RC 初始管理员密码。生成后检查：
+脚本会下载数据 JSON、渲染 `.toml.tpl`、检查缺失/未知变量和 TOML 语法，并调用包内 `bin/config-check` 使用 Cloud 配置规则校验。全部通过后才原子替换该版本的 `config/`，并写入只含环境与变量表摘要的 `.render-info.json`。任何失败都不能迁移或切换版本。
 
-- `database/primary.toml`
-- `credentials/agent.toml`
-- `credentials/douyin.toml`
-- 如使用对象存储，复制 `credentials/object_storage.toml.example` 为 `object_storage.toml` 并填入密钥
-- 检查 `storage/object_storage.toml` 的 `bucket` 和 `prefix`；RC 模板默认 `staging/` 前缀，正式环境须单独指定，避免和开发、生产文件混用
+如使用本地恢复文件，可将 `--variables-url` 换成 `--variables-file <online.json>`。
 
 ## 5. 迁移数据库
 
-必须先完成数据库备份。然后在维护窗口执行：
+维护状态下备份 MySQL 和需要保护的对象存储数据后执行：
 
 ```bash
 cd /www/wt-media-cloud/releases/<tag>
-# deploy/migrate.sh 内部固定执行 bin/migrate -dir migrations --create-database=false
 sudo -u www ./deploy/migrate.sh
 sudo -u www ./deploy/migrate.sh
 ```
 
-重复执行 `migrate.sh` 应报告 0 个新 applied；任何迁移失败都不得启动任何新进程。
+重复执行应显示 0 个新 applied。迁移失败不得启动新版本。
 
-迁移成功并核对目标库后，切换当前版本。升级时先确认三个旧进程已停止：
+## 6. 配置宝塔进程
+
+三个进程都以 `www` 用户运行，工作目录都是 `/www/wt-media-cloud/current`。
+
+### Server：宝塔 Go 项目
+
+- 项目目录：`/www/wt-media-cloud/current`
+- 启动文件：`/www/wt-media-cloud/current/bin/server`
+- 运行用户：`www`
+- HTTP 地址：来自 `config/app.toml`，当前建议 `127.0.0.1:8080`
+
+Cloud Server 已提供 Cloud Web 静态文件、Vue history 回退、API 和健康路由。宝塔网站将域名反向代理到该 Go 服务，不需要单独配置 Nginx 静态根目录。
+
+### Scheduler：宝塔进程管理器
+
+- 名称：`wt-media-cloud-scheduler`
+- 启动文件：`/www/wt-media-cloud/current/bin/discovery-scheduler`
+- 工作目录：`/www/wt-media-cloud/current`
+- 运行用户：`www`
+- 不配置监听端口
+
+### Worker：宝塔进程管理器
+
+- 名称：`wt-media-cloud-worker`
+- 启动文件：`/www/wt-media-cloud/current/bin/discovery-worker`
+- 工作目录：`/www/wt-media-cloud/current`
+- 运行用户：`www`
+- 不配置监听端口
+
+首次部署先启动 Server 并验收，再启动 Scheduler 和 Worker。升级切换前先停止 Scheduler、Worker、Server；切换后先启动 Server，再启动 Worker 和 Scheduler。
+
+## 7. 切换与验收
+
+确认配置和迁移通过后切换：
 
 ```bash
 sudo ./deploy/activate.sh --install-root /www/wt-media-cloud --to <tag>
 ```
 
-> `schema_migrations` 只证明数据库结构已应用；`admin` 是 Server 首次启动时按配置初始化的，所以在第 6 步先启动并验证 Server，再执行数据库验收。
-
-## 6. 配置宝塔 HTTPS 站点并启动三个进程
-
-Cloud 的 Go Server 只提供 API 与健康接口，不负责静态 Web。宝塔站点必须同时提供两条路径：
-
-1. 静态站点根目录设为 `/www/wt-media-cloud/current/web`，默认首页设为 `index.cloud.html`。Cloud Web 使用 history 路由，刷新 `/login` 等页面要回退到 `index.cloud.html`。
-2. 在宝塔当前域名的 HTTPS Nginx `server` 块里，按 `deploy/nginx-site-locations.conf.example` 设置 `/api/` 与 `/healthz` 到 `127.0.0.1:8080` 的代理，并设置静态站点 `location /`。不要把整个域名都代理到 Go Server；它没有首页路由。
-
-宝塔原有的 `root`、`index`、`location /` 如果已存在，应替换对应项，避免重复配置。TLS 证书、域名和维护提示继续由宝塔管理。保存配置后先执行宝塔的 Nginx 配置检查，再重载 Nginx。
-
-systemd 模板在 `deploy/systemd/`。按服务器实际安装路径检查后复制：
-
-```bash
-sudo cp deploy/systemd/*.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now wt-media-cloud-server.service
-```
-
-先完成第 7 节的健康、登录和数据库验收，再启动后台进程：
-
-```bash
-sudo systemctl enable --now wt-media-cloud-scheduler.service
-sudo systemctl enable --now wt-media-cloud-worker.service
-```
-
-Server 默认监听 `127.0.0.1:8080`。宝塔只将 `/api/` 与 `/healthz` 转发到该地址，不要把 3306 或 8080 直接暴露公网。
-
-## 7. 验收
+启动 Server 后执行：
 
 ```bash
 sudo /www/wt-media-cloud/current/deploy/verify-runtime.sh \
-  --base-url http://127.0.0.1:8080 --login-admin
+  --base-url http://127.0.0.1:8080 \
+  --login-admin
 ```
 
-预期：`runtime verified: health=ok login=admin`。再执行：
+预期：
 
-```bash
-sudo ./deploy/verify-database.sh --database wt_media_cloud --user wt_media_cloud
-```
+- `/healthz` 正常
+- `/api/v1/health` 正常
+- `/` 返回 Cloud Web
+- `/login` 返回 Cloud Web
+- 未知 `/api/...` 保持 API 404，不回退成 HTML
+- `admin / admin123` 登录成功
 
-预期：`database verified: migrations=50 initial_admin=admin/enabled`。然后从服务器之外检查 `https://wt.longyanyue.cn/`、`https://wt.longyanyue.cn/login` 都能返回 Cloud Web 页面，`https://wt.longyanyue.cn/api/v1/health` 返回 JSON 健康结果；浏览器使用已裁定的初始管理员密码登录，并立即修改密码。
+再按变量表中的 MySQL 值执行数据库验收，确认 `schema_migrations` 数量与包内 SQL 数一致且 `admin` 为 enabled。随后从外部验证 `https://wt.longyanyue.cn/`、`/login` 和 `/api/v1/health`。
 
 ## 8. 回退
 
 1. 停止 Scheduler、Worker、Server。
-2. 若迁移不兼容或数据异常，不要只切程序；保持维护模式并按备份恢复 MySQL/对象存储。
-3. 兼容回退才可执行：
+2. 数据库或外部数据不兼容时，不能只切程序；保持维护模式并按备份恢复。
+3. 仅兼容回退才执行：
 
 ```bash
 sudo /www/wt-media-cloud/releases/<old-tag>/deploy/rollback.sh \
   --install-root /www/wt-media-cloud --to <old-tag>
 ```
 
+4. 从 `current` 重新启动旧版本三进程并重复验收。
+
+每个旧版本保留自己的配置和日志。密钥轮换后，要同步更新仍具备回退资格的旧版本配置，或取消其回退资格。
+
 ## 9. 边界
 
-本预发布验收不证明 BitBrowser、真实业务发布、对象存储生产写入或正式稳定版上线通过。
+本次 online 部署不证明 BitBrowser、真实业务发布、对象存储生产写入或正式稳定版全量验收通过。

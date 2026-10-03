@@ -17,7 +17,9 @@ done
 [[ -n "$target" && ! "$target" =~ [/[:space:]] ]] || { echo "valid --to is required" >&2; exit 2; }
 destination="$install_root/releases/$target"
 [[ -d "$destination" && -f "$destination/release-info.json" ]] || { echo "unknown release: $destination" >&2; exit 1; }
-[[ -f "$destination/config/database/primary.toml" ]] || { echo "private config is missing" >&2; exit 1; }
+[[ -f "$destination/config/database/primary.toml" ]] || { echo "rendered private config is missing" >&2; exit 1; }
+[[ -f "$destination/config/.render-info.json" ]] || { echo "configuration render record is missing" >&2; exit 1; }
+[[ -d "$destination/logs" && -d "$destination/data/tmp" ]] || { echo "release runtime directories are missing" >&2; exit 1; }
 
 python3 - "$destination/release-info.json" "$target" <<'PY'
 import json

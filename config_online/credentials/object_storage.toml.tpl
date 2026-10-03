@@ -1,0 +1,2 @@
+access_key = {{WT_OBJECT_STORAGE_ACCESS_KEY}}
+secret_key = {{WT_OBJECT_STORAGE_SECRET_KEY}}
