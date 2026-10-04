@@ -53,6 +53,13 @@ web/                 unified business Web source
 Deployment is controlled by `bin/wtmctl`. It does not start, stop, or restart
 Cloud processes; BaoTa manages Server, Worker, and Scheduler.
 
+The three processes resolve their release root from `$WT_MEDIA_CLOUD_HOME`, then
+from the running binary's `<home>/bin/<binary>` location, then from the working
+directory. Sub-paths default to `<home>/config`, `<home>/logs`, `<home>/web` and
+can be overridden with `WT_MEDIA_CLOUD_CONFIG_PATH`, `WT_MEDIA_CLOUD_LOG_PATH`,
+and `WT_MEDIA_CLOUD_WEB_PATH`. Starting the binary from `<home>/bin` therefore
+still finds `config/`, `web/`, and `logs/`.
+
 ### Prepare
 
 ```bash

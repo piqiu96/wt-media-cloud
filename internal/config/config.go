@@ -186,9 +186,36 @@ func Get() Config {
 	return clone(current.config)
 }
 
-// Load always reads the runtime configuration directory ./config.
+// Load reads the runtime configuration from ConfigDir and anchors relative
+// logger paths to LogDir, so the process does not depend on its working
+// directory. See Home for how the release root is resolved.
 func Load() (Config, error) {
-	return LoadFromDir(configDirectory)
+	cfg, err := LoadFromDir(ConfigDir())
+	if err != nil {
+		return Config{}, err
+	}
+	resolveRelativeLoggerPaths(&cfg, LogDir())
+	return cfg, nil
+}
+
+// resolveRelativeLoggerPaths anchors relative logger paths to the configured
+// log directory so logs always land under <home>/logs (or $WT_MEDIA_CLOUD_LOG_PATH)
+// regardless of the process working directory.
+func resolveRelativeLoggerPaths(cfg *Config, logDir string) {
+	for _, logger := range []*LoggerConfig{
+		&cfg.Loggers.App,
+		&cfg.Loggers.Access,
+		&cfg.Loggers.Job,
+		&cfg.Loggers.External,
+		&cfg.Loggers.Audit,
+		&cfg.Loggers.Panic,
+	} {
+		path := strings.TrimSpace(logger.Path)
+		if path == "" || filepath.IsAbs(path) {
+			continue
+		}
+		logger.Path = filepath.Join(logDir, path)
+	}
 }
 
 // LoadFromDir loads and validates a configuration tree rooted at root.

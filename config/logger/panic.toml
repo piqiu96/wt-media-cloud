@@ -1,6 +1,6 @@
 format = 'json'
 level = 'info'
-path = 'logs/panic.log'
+path = 'panic.log'
 
 [rotation]
 max_size = 500

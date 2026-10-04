@@ -258,12 +258,12 @@ func TestLoadFromDirLoadsSixLoggerConfigs(t *testing.T) {
 		cfg.Loggers.Panic.Path,
 	}
 	want := []string{
-		"logs/app.log",
-		"logs/access.log",
-		"logs/job.log",
-		"logs/external.log",
-		"logs/audit.log",
-		"logs/panic.log",
+		"app.log",
+		"access.log",
+		"job.log",
+		"external.log",
+		"audit.log",
+		"panic.log",
 	}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("logger paths = %#v, want %#v", paths, want)
@@ -419,7 +419,7 @@ func writeValidConfig(t *testing.T, root string) {
 	writeConfigFile(t, root, "app.toml", validAppTOML("wt-media-cloud"))
 	writeDatabaseConfig(t, root, "primary.toml", "primary")
 	for _, category := range []string{"app", "access", "job", "external", "audit", "panic"} {
-		writeConfigFile(t, root, "logger/"+category+".toml", "path = \"logs/"+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
+		writeConfigFile(t, root, "logger/"+category+".toml", "path = \""+category+".log\"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	}
 	writeHTTPClient(t, root, "agent", "http", "127.0.0.1", 8765, "7s")
 	writeHTTPClient(t, root, "douyin", "https", "api.itfaba.com", 443, "30s")

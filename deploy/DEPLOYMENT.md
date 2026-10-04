@@ -137,7 +137,27 @@ sudo ./bin/wtmctl deploy apply \
 
 三个进程的路径都指向 `current`，只需配置一次。
 
+### 路径解析与环境变量
+
+三个进程不再依赖启动时的工作目录。程序按以下顺序解析 Cloud 根目录（`ENV_PATH`）：
+
+1. `WT_MEDIA_CLOUD_HOME`；
+2. 可执行文件所在目录的上级（`<home>/bin/<二进制>`）；
+3. 当前工作目录（本地开发）。
+
+各子路径默认由根目录派生，并可单独覆盖：
+
+| 用途 | 环境变量 | 默认值 |
+| --- | --- | --- |
+| Cloud 根目录（ENV_PATH） | `WT_MEDIA_CLOUD_HOME` | 可执行文件上级目录 |
+| 配置目录 | `WT_MEDIA_CLOUD_CONFIG_PATH` | `<home>/config` |
+| 日志目录 | `WT_MEDIA_CLOUD_LOG_PATH` | `<home>/logs` |
+| Web 目录 | `WT_MEDIA_CLOUD_WEB_PATH` | `<home>/web` |
+
+日志配置里的相对 `path`（例如 `app.log`）会被锚定到日志目录。因此宝塔即使从 `<home>/bin` 启动，也能找到 `config/`、`web/`、`logs/`；迁移安装目录时只需改 `WT_MEDIA_CLOUD_HOME`，或保持 `<home>/bin/<二进制>` 结构、什么都不用设。
+
 ### Server：宝塔 Go 项目
+
 
 ```text
 项目名称：wt-media-cloud-server

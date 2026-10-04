@@ -1,6 +1,6 @@
 format = 'json'
 level = 'info'
-path = 'logs/access.log'
+path = 'access.log'
 
 [rotation]
 max_size = 500

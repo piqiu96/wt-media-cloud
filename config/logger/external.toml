@@ -1,6 +1,6 @@
 format = 'json'
 level = 'info'
-path = 'logs/external.log'
+path = 'external.log'
 
 [rotation]
 max_size = 500

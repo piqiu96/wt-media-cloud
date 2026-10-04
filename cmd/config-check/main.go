@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	configDir := flag.String("config-dir", "config", "configuration directory to validate")
+	configDir := flag.String("config-dir", config.ConfigDir(), "configuration directory to validate")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "config-check does not accept positional arguments")

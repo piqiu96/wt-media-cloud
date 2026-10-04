@@ -35,7 +35,7 @@ func registerRoutes(engine *server.Hertz) error {
 		return err
 	}
 	registerModuleRoutes(engine)
-	return registerCloudWeb(engine, "web")
+	return registerCloudWeb(engine, config.WebDir())
 }
 
 // registerModuleRoutes installs every module's HTTP surface, and nothing else.
