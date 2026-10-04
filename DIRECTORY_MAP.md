@@ -7,7 +7,7 @@
 | 位置 | 主要内容 | 适用任务 |
 | --- | --- | --- |
 | `cmd/server/`、`internal/bootstrap/` | 进程入口、路由装配、资源初始化与生命周期 | 启动流程、依赖装配、服务初始化 |
-| `internal/config/`、`cmd/config-check/`、`config/`、`config_online/`、`deploy/render-config.py` | 配置加载、运行配置、发布模板、环境渲染与校验 | 配置读取、默认值、发布配置 |
+| `internal/config/`、`cmd/config-check/`、`config/`、`config_online/`、`cmd/wtmctl/`、`internal/deploy/` | 配置加载、运行配置、发布模板、环境渲染与校验 | 配置读取、默认值、发布配置 |
 | `internal/infra/` | 数据库、外部客户端、日志、指标、追踪等基础能力 | 外部连接、基础设施、可观测性 |
 | `internal/scheduler/`、`internal/jobs/` | Cloud 调度与后台任务执行 | 定时调度、Worker、Job、内容发现等后台任务 |
 | `internal/modules/` | 按业务域组织的 Router、Handler、Service、Repository、Model | 业务规则、API、状态和数据访问 |

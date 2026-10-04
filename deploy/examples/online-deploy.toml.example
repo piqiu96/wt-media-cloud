@@ -1,0 +1,13 @@
+schema_version = 1
+
+[deploy]
+install_root = "/home/www/wt-media-cloud"
+output_dir = "/home/www/wt-media-cloud/output"
+package_root = "/home/www/wt-media-cloud/output/wt-media-cloud_v0.1.0-rc.12_linux-amd64"
+release = "v0.1.0-rc.12"
+environment = "online"
+service_user = "www"
+process_manager = "baota"
+variables_url_file = "/home/www/wt-media-cloud/output/online.url"
+variables_file = "/home/www/wt-media-cloud/output/online.toml"
+health_url = "http://127.0.0.1:8188"

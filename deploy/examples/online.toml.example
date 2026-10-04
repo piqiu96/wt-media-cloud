@@ -1,0 +1,21 @@
+# WT Media Cloud online deployment variables.
+# Copy outside the repository, fill secret values, and upload with the local helper.
+
+WT_PRIMARY_DB_HOST = "127.0.0.1"
+WT_PRIMARY_DB_PORT = 3306
+
+# Online database name and application account.
+WT_PRIMARY_DB_NAME = "wt_media_online"
+WT_PRIMARY_DB_USERNAME = "wt_media_cloud"
+WT_PRIMARY_DB_PASSWORD = "<REPLACE_WITH_DATABASE_PASSWORD>"
+
+# The current test environment has no Agent auth token.
+WT_AGENT_AUTH_TOKEN = ""
+
+WT_DOUYIN_API_KEY = "<REPLACE_WITH_DOUYIN_API_KEY>"
+WT_DOUYIN_COOKIE = "<REPLACE_WITH_DOUYIN_COOKIE>"
+
+# Runtime business-object prefix. Pre uses wt_media/pre/.
+WT_OBJECT_STORAGE_PREFIX = "wt_media/online/"
+WT_OBJECT_STORAGE_ACCESS_KEY = "<REPLACE_WITH_OBJECT_STORAGE_ACCESS_KEY>"
+WT_OBJECT_STORAGE_SECRET_KEY = "<REPLACE_WITH_OBJECT_STORAGE_SECRET_KEY>"

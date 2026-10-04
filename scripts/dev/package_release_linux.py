@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 
-BINARIES = ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check")
+BINARIES = ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl")
 TAG = re.compile(r"^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$")
 
 
@@ -116,21 +116,13 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
         raise ValueError("config layout mismatch; " + "; ".join(details))
     required_deployment_paths = (
         root / "deploy" / "DEPLOYMENT.md",
-        root / "deploy" / "init-config.sh",
-        root / "deploy" / "render-config.py",
-        root / "deploy" / "install.sh",
-        root / "deploy" / "activate.sh",
-        root / "deploy" / "rollback.sh",
-        root / "deploy" / "migrate.sh",
-        root / "deploy" / "verify-package.sh",
-        root / "deploy" / "verify-database.sh",
-        root / "deploy" / "verify-runtime.sh",
+        root / "deploy" / "config-variable-schema.toml",
         root / "deploy" / "prepare-database.sql.example",
+        root / "deploy" / "examples" / "online.toml.example",
+        root / "deploy" / "examples" / "online-deploy.toml.example",
     )
     if any(not path.is_file() for path in required_deployment_paths):
-        raise ValueError("deployment scripts/templates are required")
-    if any(not os.access(path, os.X_OK) for path in required_deployment_paths if path.suffix in {".sh", ".py"}):
-        raise ValueError("deployment scripts must be executable")
+        raise ValueError("deployment schema/templates are required")
     if not any((root / "migrations").glob("*.sql")):
         raise ValueError("SQL migrations are required")
     for name in BINARIES:
@@ -171,15 +163,14 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
             "processes": ("server", "discovery-scheduler", "discovery-worker"),
             "web_targets": ("cloud", "desktop"),
             "database_migration": "migrations",
-            "configuration": "template-state config/ rendered by deploy/init-config.sh",
+            "configuration": "template-state config/ rendered by wtmctl",
         }
         (staged / "release-info.json").write_text(
             json.dumps(release_info, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         (staged / "DEPLOYMENT.txt").write_text(
-            "Read deploy/DEPLOYMENT.md. Inject this environment's private config/ on the server "
-            "before migration or startup. No live database, object-storage, or platform "
-            "credentials are shipped.\n",
+            "Read deploy/DEPLOYMENT.md. Use bin/wtmctl to verify, render configuration, migrate, "
+            "install, and activate this release. No live credentials are shipped.\n",
             encoding="utf-8",
         )
         with tarfile.open(cloud_archive, "w:gz") as archive:

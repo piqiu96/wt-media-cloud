@@ -1,0 +1,68 @@
+schema_version = 1
+
+[[variables]]
+name = "WT_PRIMARY_DB_HOST"
+type = "string"
+required = true
+secret = false
+
+[[variables]]
+name = "WT_PRIMARY_DB_PORT"
+type = "integer"
+required = true
+secret = false
+
+[[variables]]
+name = "WT_PRIMARY_DB_NAME"
+type = "string"
+required = true
+secret = false
+
+[[variables]]
+name = "WT_PRIMARY_DB_USERNAME"
+type = "string"
+required = true
+secret = false
+
+[[variables]]
+name = "WT_PRIMARY_DB_PASSWORD"
+type = "string"
+required = true
+secret = true
+
+[[variables]]
+name = "WT_AGENT_AUTH_TOKEN"
+type = "string"
+required = false
+secret = true
+allow_empty = true
+
+[[variables]]
+name = "WT_DOUYIN_API_KEY"
+type = "string"
+required = true
+secret = true
+
+[[variables]]
+name = "WT_DOUYIN_COOKIE"
+type = "string"
+required = true
+secret = true
+
+[[variables]]
+name = "WT_OBJECT_STORAGE_PREFIX"
+type = "string"
+required = true
+secret = false
+
+[[variables]]
+name = "WT_OBJECT_STORAGE_ACCESS_KEY"
+type = "string"
+required = true
+secret = true
+
+[[variables]]
+name = "WT_OBJECT_STORAGE_SECRET_KEY"
+type = "string"
+required = true
+secret = true

@@ -1,4 +1,4 @@
-"""The Linux release contains only the intended, verified Cloud payload."""
+"""The Linux release contains the wtmctl deployment payload and no Python runtime."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "dev" / "package_release_linux.py"
 
 
@@ -21,7 +20,7 @@ class PackageReleaseLinuxTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name) / "cloud"
-        for name in ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check"):
+        for name in ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl"):
             path = self.root / "bin" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"\x7fELF" + name.encode())
@@ -32,45 +31,51 @@ class PackageReleaseLinuxTest(unittest.TestCase):
             path.write_text("<html>ready</html>", encoding="utf-8")
         (self.root / "web" / "dist-desktop" / "index.html").write_text("<html>ready</html>", encoding="utf-8")
         (self.root / "web" / "dist-desktop" / "frontend-build.json").write_text("{}", encoding="utf-8")
-        local_config = self.root / "config"
-        (local_config / "database").mkdir(parents=True)
-        (local_config / "app.toml").write_text("name = 'local-only'\n", encoding="utf-8")
-        (local_config / "database" / "primary.toml").write_text(
-            "password = 'local-only-secret'\n", encoding="utf-8"
-        )
-        online_config = self.root / "config_online"
-        (online_config / "database").mkdir(parents=True)
-        (online_config / "app.toml").write_text("name = 'wt-media-cloud'\n", encoding="utf-8")
-        (online_config / "database" / "primary.toml.tpl").write_text(
-            "password = {{WT_PRIMARY_DB_PASSWORD}}\n", encoding="utf-8"
-        )
+
+        local = self.root / "config"
+        (local / "database").mkdir(parents=True)
+        (local / "clients" / "http").mkdir(parents=True)
+        (local / "storage").mkdir(parents=True)
+        (local / "credentials").mkdir(parents=True)
+        (local / "app.toml").write_text("name = 'local-only'\n", encoding="utf-8")
+        (local / "clients" / "http" / "agent.toml").write_text("host = '127.0.0.1'\n", encoding="utf-8")
+        (local / "clients" / "http" / "douyin.toml").write_text("host = 'api.itfaba.com'\n", encoding="utf-8")
+        (local / "database" / "primary.toml").write_text("password = 'local-only-secret'\n", encoding="utf-8")
+        (local / "storage" / "object_storage.toml").write_text("prefix = 'local/'\n", encoding="utf-8")
+        (local / "credentials" / "agent.toml").write_text("auth_token = ''\n", encoding="utf-8")
+        (local / "credentials" / "douyin.toml").write_text("api_key = ''\n", encoding="utf-8")
+        (local / "credentials" / "object_storage.toml").write_text("access_key = ''\n", encoding="utf-8")
+
+        online = self.root / "config_online"
+        (online / "database").mkdir(parents=True)
+        (online / "clients" / "http").mkdir(parents=True)
+        (online / "storage").mkdir(parents=True)
+        (online / "credentials").mkdir(parents=True)
+        (online / "app.toml").write_text("name = 'wt-media-cloud'\n", encoding="utf-8")
+        (online / "clients" / "http" / "agent.toml").write_text("host = '127.0.0.1'\n", encoding="utf-8")
+        (online / "clients" / "http" / "douyin.toml").write_text("host = 'api.itfaba.com'\n", encoding="utf-8")
+        (online / "database" / "primary.toml.tpl").write_text("password = {{WT_PRIMARY_DB_PASSWORD}}\n", encoding="utf-8")
+        (online / "storage" / "object_storage.toml.tpl").write_text("prefix = {{WT_OBJECT_STORAGE_PREFIX}}\n", encoding="utf-8")
+        (online / "credentials" / "agent.toml.tpl").write_text("auth_token = {{WT_AGENT_AUTH_TOKEN}}\n", encoding="utf-8")
+        (online / "credentials" / "douyin.toml.tpl").write_text("api_key = {{WT_DOUYIN_API_KEY}}\n", encoding="utf-8")
+        (online / "credentials" / "object_storage.toml.tpl").write_text("access_key = {{WT_OBJECT_STORAGE_ACCESS_KEY}}\n", encoding="utf-8")
+
         (self.root / "migrations").mkdir()
-        (self.root / "migrations" / "001_identity.sql").write_text(
-            "CREATE TABLE users (id INT PRIMARY KEY);\n", encoding="utf-8"
-        )
+        (self.root / "migrations" / "001_identity.sql").write_text("CREATE TABLE users (id INT);\n", encoding="utf-8")
         deploy = self.root / "deploy"
-        deploy.mkdir(parents=True)
+        (deploy / "examples").mkdir(parents=True)
         (deploy / "DEPLOYMENT.md").write_text("# Deployment\n", encoding="utf-8")
-        shell_names = (
-            "init-config.sh",
-            "install.sh",
-            "activate.sh",
-            "rollback.sh",
-            "migrate.sh",
-            "verify-package.sh",
-            "verify-database.sh",
-            "verify-runtime.sh",
-        )
-        for name in shell_names:
-            script = deploy / name
-            script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
-            script.chmod(0o755)
+        (deploy / "config-variable-schema.toml").write_text("schema_version = 1\n", encoding="utf-8")
         (deploy / "prepare-database.sql.example").write_text("-- prepare\n", encoding="utf-8")
-        render_script = deploy / "render-config.py"
-        render_script.write_text(
-            "#!/usr/bin/env python3\n", encoding="utf-8"
-        )
-        render_script.chmod(0o755)
+        (deploy / "examples" / "online.toml.example").write_text("# online\n", encoding="utf-8")
+        (deploy / "examples" / "online-deploy.toml.example").write_text("# profile\n", encoding="utf-8")
+        (self.root / "release-info.json").write_text(json.dumps({
+            "schema_version": 1,
+            "product_tag": "v0.1.0-rc.1",
+            "source_commit": "a" * 40,
+            "configuration": "template-state config/ rendered by wtmctl",
+        }), encoding="utf-8")
+
         self.archive = Path(self.tmp.name) / "ffmpeg.tar.xz"
         with tarfile.open(self.archive, "w:xz") as tar:
             for name in ("ffmpeg", "ffprobe"):
@@ -99,41 +104,22 @@ class PackageReleaseLinuxTest(unittest.TestCase):
             "--output-dir", str(Path(self.tmp.name) / "out"),
         ], text=True, capture_output=True)
 
-    def test_package_contains_binaries_web_and_provenance_without_credentials(self) -> None:
+    def test_package_contains_wtmctl_schema_and_no_python(self) -> None:
         result = self.package()
         self.assertEqual(result.returncode, 0, result.stderr)
         archive = Path(self.tmp.name) / "out" / "wt-media-cloud_v0.1.0-rc.1_linux-amd64.tar.gz"
         with tarfile.open(archive, "r:gz") as tar:
             names = set(tar.getnames())
-            for name in ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "ffmpeg", "ffprobe"):
-                self.assertIn(f"wt-media-cloud_v0.1.0-rc.1_linux-amd64/bin/{name}", names)
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/web/index.cloud.html", names)
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/ffmpeg-source.json", names)
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/migrations/001_identity.sql", names)
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/deploy/DEPLOYMENT.md", names)
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/app.toml", names)
-            self.assertIn(
-                "wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/database/primary.toml.tpl", names
-            )
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/deploy/render-config.py", names)
+            root = "wt-media-cloud_v0.1.0-rc.1_linux-amd64/"
+            for name in ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl", "ffmpeg", "ffprobe"):
+                self.assertIn(root + "bin/" + name, names)
+            self.assertIn(root + "deploy/config-variable-schema.toml", names)
+            self.assertIn(root + "deploy/examples/online.toml.example", names)
+            self.assertIn(root + "config/database/primary.toml.tpl", names)
+            self.assertFalse(any(name.endswith(".py") for name in names))
+            self.assertFalse(any(name.endswith(".sh") for name in names))
             self.assertFalse(any("config_online" in name for name in names))
-            self.assertFalse(any(name.endswith("/deploy/systemd/") for name in names))
-            self.assertFalse(any(name.endswith("nginx-site-locations.conf.example") for name in names))
-            self.assertFalse(any(name.endswith("/deploy/config-template/") for name in names))
-            self.assertFalse(any("config_test" in name for name in names))
-            template = tar.extractfile(
-                "wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/database/primary.toml.tpl"
-            ).read().decode("utf-8")  # type: ignore[union-attr]
-            self.assertIn("{{WT_PRIMARY_DB_PASSWORD}}", template)
-            self.assertNotIn("local-only-secret", template)
-            release_info = json.loads(
-                tar.extractfile(
-                    "wt-media-cloud_v0.1.0-rc.1_linux-amd64/release-info.json"
-                ).read().decode("utf-8")  # type: ignore[union-attr]
-            )
-            self.assertEqual(release_info["source_commit"], "a" * 40)
-            self.assertEqual(release_info["product_tag"], "v0.1.0-rc.1")
-            self.assertEqual(release_info["database_migration"], "migrations")
+            self.assertFalse(any("local-only-secret" in (tar.extractfile(member).read().decode("utf-8") if tar.extractfile(member) else "") for member in tar.getmembers() if member.isfile()))
         self.assertTrue((Path(self.tmp.name) / "out" / "desktop-web_v0.1.0-rc.1.tar.gz").is_file())
 
     def test_rejects_unexpected_ffmpeg_archive_digest(self) -> None:

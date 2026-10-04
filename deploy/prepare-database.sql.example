@@ -1,8 +1,8 @@
 -- Copy this file on the MySQL server, replace both quoted identifiers/password,
 -- and execute it as a MySQL administrator before Cloud migration.
 --
--- The defaults match deploy/init-config.sh. Cloud itself never creates the
--- target database when deploy/migrate.sh is used.
+-- The defaults match deploy/examples/online.toml.example. Cloud's wtmctl
+-- never creates the target database; run this as a MySQL administrator first.
 
 CREATE DATABASE IF NOT EXISTS `wt_media_cloud`
   CHARACTER SET utf8mb4

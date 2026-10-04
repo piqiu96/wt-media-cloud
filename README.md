@@ -47,6 +47,59 @@ contracts/           Cloud-owned contracts
 web/                 unified business Web source
 ```
 
+
+## BaoTa Deployment
+
+Deployment is controlled by `bin/wtmctl`. It does not start, stop, or restart
+Cloud processes; BaoTa manages Server, Worker, and Scheduler.
+
+### Prepare
+
+```bash
+cd /home/www/wt-media-cloud/output/wt-media-cloud_v0.1.0-rc.12_linux-amd64
+./bin/wtmctl artifact verify --profile /home/www/wt-media-cloud/output/online-deploy.toml
+./bin/wtmctl doctor --profile /home/www/wt-media-cloud/output/online-deploy.toml
+./bin/wtmctl deploy plan --profile /home/www/wt-media-cloud/output/online-deploy.toml
+```
+
+`deploy plan` pulls the remote TOML variables into a temporary file and checks
+the package, variable schema, required values, and rendered configuration
+without changing `current`.
+
+### One-command deploy
+
+Stop Server, Worker, and Scheduler in BaoTa first. Then run:
+
+```bash
+sudo ./bin/wtmctl deploy apply   --profile /home/www/wt-media-cloud/output/online-deploy.toml
+```
+
+This verifies the package, pulls `online.toml`, validates all required values,
+renders the private configuration, runs migrations, installs the release, and
+atomically switches `current`. Service restart remains a separate BaoTa action.
+
+### Verify
+
+```bash
+sudo /home/www/wt-media-cloud/current/bin/wtmctl deploy verify   --profile /home/www/wt-media-cloud/output/online-deploy.toml
+```
+
+### Roll back
+
+Stop all three BaoTa processes before switching `current`:
+
+```bash
+sudo /home/www/wt-media-cloud/current/bin/wtmctl release rollback   --profile /home/www/wt-media-cloud/output/online-deploy.toml   --to <old-tag>   --services-stopped
+```
+
+### Process ownership
+
+| Process | Manager |
+| --- | --- |
+| Server | BaoTa Go project |
+| Worker | BaoTa Process Manager |
+| Scheduler | BaoTa Process Manager |
+
 ## Verification
 
 The module requires Go 1.24.0 or newer; the current local verification toolchain is Go 1.26.5.
