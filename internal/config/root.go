@@ -45,7 +45,10 @@ func Home() string {
 			return candidate
 		}
 	}
-	return "."
+	if workingDirectory, err := os.Getwd(); err == nil {
+		return workingDirectory
+	}
+	return "/"
 }
 
 // ConfigDir returns the runtime configuration directory.
@@ -63,13 +66,23 @@ func WebDir() string {
 	return pathEnv(WebPathEnvVar, filepath.Join(Home(), "web"))
 }
 
-// pathEnv returns a cleaned environment override, or fallback when it is unset.
+// pathEnv returns an absolute environment override, or the absolute fallback
+// when the variable is unset. Every resolved path is absolute so the processes
+// behave the same no matter where they are started from.
 func pathEnv(name string, fallback ...string) string {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-		return filepath.Clean(value)
+		return absolutePath(value)
 	}
 	if len(fallback) > 0 {
-		return fallback[0]
+		return absolutePath(fallback[0])
 	}
 	return ""
+}
+
+func absolutePath(value string) string {
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return filepath.Clean(value)
+	}
+	return absolute
 }

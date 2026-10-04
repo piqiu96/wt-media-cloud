@@ -118,17 +118,22 @@ func TestLoadKeepsAbsoluteLoggerPaths(t *testing.T) {
 }
 
 // Without an override and without an executable-relative config tree, the
-// working directory stays the release root so local development is unchanged.
+// working directory becomes the release root so local development is unchanged,
+// but every derived path is absolute.
 func TestHomeFallsBackToWorkingDirectory(t *testing.T) {
 	home := t.TempDir()
 	writeValidConfig(t, filepath.Join(home, "config"))
 	t.Chdir(home)
 	t.Setenv(HomeEnvVar, "")
 
-	if got, want := Home(), "."; got != want {
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if got, want := Home(), workingDirectory; got != want {
 		t.Fatalf("Home() = %q, want %q", got, want)
 	}
-	if got, want := ConfigDir(), "config"; got != want {
+	if got, want := ConfigDir(), filepath.Join(workingDirectory, "config"); got != want {
 		t.Fatalf("ConfigDir() = %q, want %q", got, want)
 	}
 }

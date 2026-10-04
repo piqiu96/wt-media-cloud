@@ -174,7 +174,7 @@ func makePackageFixture(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	for _, binary := range []string{"server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl", "ffmpeg", "ffprobe"} {
+	for _, binary := range []string{"wt-media-cloud", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl", "ffmpeg", "ffprobe"} {
 		write("bin/"+binary, "#!/bin/sh\n", 0o755)
 	}
 	write("web/index.cloud.html", "<html></html>\n", 0o644)

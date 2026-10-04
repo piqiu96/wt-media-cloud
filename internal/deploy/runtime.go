@@ -97,7 +97,7 @@ func CheckServiceProcesses(profile Profile) (map[string]bool, error) {
 		return nil, fmt.Errorf("read /proc: %w", err)
 	}
 	wanted := map[string]string{
-		"server":    filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "server"),
+		"server":    filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "wt-media-cloud"),
 		"worker":    filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "discovery-worker"),
 		"scheduler": filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "discovery-scheduler"),
 	}

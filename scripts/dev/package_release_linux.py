@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 
-BINARIES = ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl")
+BINARIES = ("wt-media-cloud", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl")
 TAG = re.compile(r"^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$")
 
 
@@ -160,7 +160,7 @@ def package(root: Path, tag: str, source_commit: str, lock: Path, output: Path) 
             "schema_version": 1,
             "product_tag": tag,
             "source_commit": source_commit,
-            "processes": ("server", "discovery-scheduler", "discovery-worker"),
+            "processes": ("wt-media-cloud", "discovery-scheduler", "discovery-worker"),
             "web_targets": ("cloud", "desktop"),
             "database_migration": "migrations",
             "configuration": "template-state config/ rendered by wtmctl",

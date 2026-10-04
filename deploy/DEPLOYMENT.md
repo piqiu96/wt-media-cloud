@@ -162,7 +162,7 @@ sudo ./bin/wtmctl deploy apply \
 ```text
 项目名称：wt-media-cloud-server
 项目目录：/home/www/wt-media-cloud/current
-启动文件：/home/www/wt-media-cloud/current/bin/server
+启动文件：/home/www/wt-media-cloud/current/bin/wt-media-cloud
 运行用户：www
 监听地址：127.0.0.1:8188
 ```

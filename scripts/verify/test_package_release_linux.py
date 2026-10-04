@@ -20,7 +20,7 @@ class PackageReleaseLinuxTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name) / "cloud"
-        for name in ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl"):
+        for name in ("wt-media-cloud", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl"):
             path = self.root / "bin" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"\x7fELF" + name.encode())
@@ -111,7 +111,7 @@ class PackageReleaseLinuxTest(unittest.TestCase):
         with tarfile.open(archive, "r:gz") as tar:
             names = set(tar.getnames())
             root = "wt-media-cloud_v0.1.0-rc.1_linux-amd64/"
-            for name in ("server", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl", "ffmpeg", "ffprobe"):
+            for name in ("wt-media-cloud", "discovery-scheduler", "discovery-worker", "migrate", "config-check", "wtmctl", "ffmpeg", "ffprobe"):
                 self.assertIn(root + "bin/" + name, names)
             self.assertIn(root + "deploy/config-variable-schema.toml", names)
             self.assertIn(root + "deploy/examples/online.toml.example", names)

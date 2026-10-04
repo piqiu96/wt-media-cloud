@@ -38,7 +38,7 @@ func VerifyPackage(root, release string) (ReleaseInfo, error) {
 		return ReleaseInfo{}, errors.New("release-info configuration marker differs from wtmctl")
 	}
 	required := []string{
-		"bin/server", "bin/discovery-scheduler", "bin/discovery-worker", "bin/migrate", "bin/config-check", "bin/wtmctl", "bin/ffmpeg", "bin/ffprobe",
+		"bin/wt-media-cloud", "bin/discovery-scheduler", "bin/discovery-worker", "bin/migrate", "bin/config-check", "bin/wtmctl", "bin/ffmpeg", "bin/ffprobe",
 		"web/index.cloud.html",
 		"config/app.toml",
 		"config/clients/http/agent.toml",
