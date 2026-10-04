@@ -18,7 +18,11 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", "migrations", "directory containing .sql migration files")
+	paths, err := config.ResolveRuntimePaths()
+	if err != nil {
+		log.Fatal(err)
+	}
+	dir := flag.String("dir", paths.Migrations, "directory containing .sql migration files")
 	createDatabase := flag.Bool("create-database", true, "create the configured database if it does not exist")
 	flag.Parse()
 

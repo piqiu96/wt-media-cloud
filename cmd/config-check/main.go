@@ -9,7 +9,12 @@ import (
 )
 
 func main() {
-	configDir := flag.String("config-dir", config.ConfigDir(), "configuration directory to validate")
+	paths, err := config.ResolveRuntimePaths()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve runtime paths: %v\n", err)
+		os.Exit(1)
+	}
+	configDir := flag.String("config-dir", paths.Config, "configuration directory to validate")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "config-check does not accept positional arguments")

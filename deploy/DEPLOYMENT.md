@@ -143,8 +143,8 @@ sudo ./bin/wtmctl deploy apply \
 
 三个进程不再依赖启动时的工作目录。程序按以下顺序解析 Cloud 根目录（`ENV_PATH`）：
 
-1. `WT_MEDIA_CLOUD_HOME`；
-2. 可执行文件所在目录的上级（`<home>/bin/<二进制>`）；
+1. 绝对路径 `WT_MEDIA_CLOUD_HOME`；
+2. 可执行文件所在目录的上级（`<home>/bin/<二进制>`，即使配置文件缺失也保持此根路径）；
 3. 当前工作目录（本地开发）。
 
 各子路径默认由根目录派生，并可单独覆盖：
@@ -156,7 +156,9 @@ sudo ./bin/wtmctl deploy apply \
 | 日志目录 | `WT_MEDIA_CLOUD_LOG_PATH` | `<home>/logs` |
 | Web 目录 | `WT_MEDIA_CLOUD_WEB_PATH` | `<home>/web` |
 
-日志配置里的相对 `path`（例如 `app.log`）会被锚定到日志目录。因此宝塔即使从 `<home>/bin` 启动，也能找到 `config/`、`web/`、`logs/`；迁移安装目录时只需改 `WT_MEDIA_CLOUD_HOME`，或保持 `<home>/bin/<二进制>` 结构、什么都不用设。
+`WT_MEDIA_CLOUD_HOME` 如有设置必须是绝对路径；三个子路径覆盖值可使用绝对路径，或使用相对 Cloud 根目录的路径，不按进程工作目录解析。迁移命令的默认目录是 `<home>/migrations`。日志配置里的相对 `path`（例如 `app.log`）会被锚定到日志目录。因此宝塔即使从 `<home>/bin` 启动，也能找到 `config/`、`web/`、`logs/`；迁移安装目录时只需改 `WT_MEDIA_CLOUD_HOME`，或保持 `<home>/bin/<二进制>` 结构、什么都不用设。
+
+启动时解析出的根、配置、日志、Web 和 Migration 路径，以及配置、日志、数据库等初始化错误，写入宝塔对应进程的标准输出/错误日志。Logger 初始化后，应用事件、登录结果和鉴权拒绝写入版本目录的 `logs/app.log`（或 `WT_MEDIA_CLOUD_LOG_PATH` 指向的目录）；启动失败时应先查看宝塔 Go 项目的 `/www/wwwlogs/go/server.log`。日志不得包含口令或 Session Token。
 
 ### Server：宝塔 Go 项目
 

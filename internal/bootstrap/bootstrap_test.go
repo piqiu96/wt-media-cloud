@@ -1,11 +1,15 @@
 package bootstrap
 
 import (
+	"bytes"
 	"errors"
+	"log"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/wt-media/wt-media-cloud/internal/config"
 
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
@@ -65,10 +69,37 @@ func TestInitializeServerRollsBackInReverseOrder(t *testing.T) {
 	if err == nil || !errors.Is(err, errForcedFailure) {
 		t.Fatalf("initializeServer() error = %v, want forced failure", err)
 	}
+	if !strings.Contains(err.Error(), "third") {
+		t.Fatalf("initializeServer() error = %v, want failing resource name", err)
+	}
 	if engine != nil || closer != nil {
 		t.Fatal("initializeServer() returned engine or closer, want nil")
 	}
 	assertOrder(t, order, []string{"open:first", "open:second", "open:third", "close:second", "close:first"})
+}
+
+func TestConfigStartupLogsResolvedPathsBeforeConfigLoadFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(config.HomeEnvVar, home)
+	previous := log.Writer()
+	var recorded bytes.Buffer
+	log.SetOutput(&recorded)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	_, err := configResource().open()
+	if err == nil {
+		t.Fatal("configResource().open() unexpectedly succeeded without config")
+	}
+	for _, path := range []string{
+		home,
+		filepath.Join(home, "config"),
+		filepath.Join(home, "logs"),
+		filepath.Join(home, "web"),
+	} {
+		if !strings.Contains(recorded.String(), path) {
+			t.Errorf("startup log %q does not contain resolved path %q", recorded.String(), path)
+		}
+	}
 }
 
 func TestInitializeWorkerInitializesOnlyDouyinHTTPClient(t *testing.T) {

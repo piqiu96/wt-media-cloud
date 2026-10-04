@@ -1,88 +1,80 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// Path environment variables. Every value is optional; each one falls back to a
-// path derived from the release root, so moving the install directory only
-// requires changing WT_MEDIA_CLOUD_HOME (or nothing at all when the binary runs
-// from <root>/bin).
 const (
-	// HomeEnvVar sets the Cloud release root (ENV_PATH).
+	// HomeEnvVar sets the Cloud release root. It must be absolute.
 	HomeEnvVar = "WT_MEDIA_CLOUD_HOME"
-	// ConfigPathEnvVar sets the runtime configuration directory, default <home>/config.
+	// ConfigPathEnvVar overrides <home>/config.
 	ConfigPathEnvVar = "WT_MEDIA_CLOUD_CONFIG_PATH"
-	// LogPathEnvVar sets the runtime log directory, default <home>/logs.
+	// LogPathEnvVar overrides <home>/logs.
 	LogPathEnvVar = "WT_MEDIA_CLOUD_LOG_PATH"
-	// WebPathEnvVar sets the Cloud Web asset directory, default <home>/web.
+	// WebPathEnvVar overrides <home>/web.
 	WebPathEnvVar = "WT_MEDIA_CLOUD_WEB_PATH"
 )
 
-// Home returns the Cloud release root.
-//
-// Precedence:
-//  1. $WT_MEDIA_CLOUD_HOME when set;
-//  2. the parent of the directory holding the running binary when it contains
-//     config/app.toml (a released <home>/bin/<binary> layout);
-//  3. the current working directory (local development).
-//
-// Resolving from the binary lets a process manager (for example BaoTa, which
-// starts the server from <home>/bin) launch the binary without forcing a
-// working directory.
-func Home() string {
-	if override := pathEnv(HomeEnvVar); override != "" {
-		return override
+// RuntimePaths contains the absolute paths needed by all Cloud processes.
+// Relative child overrides are anchored to Home, never to the process cwd.
+type RuntimePaths struct {
+	Home       string
+	Config     string
+	Logs       string
+	Web        string
+	Migrations string
+}
+
+// ResolveRuntimePaths uses the explicit home, a released <home>/bin/<binary>
+// layout, then cwd for local development. The released layout wins even when
+// config/app.toml is missing, so errors identify the actual release directory.
+func ResolveRuntimePaths() (RuntimePaths, error) {
+	home, err := resolveHome()
+	if err != nil {
+		return RuntimePaths{}, err
+	}
+	return RuntimePaths{
+		Home:       home,
+		Config:     childPath(home, ConfigPathEnvVar, "config"),
+		Logs:       childPath(home, LogPathEnvVar, "logs"),
+		Web:        childPath(home, WebPathEnvVar, "web"),
+		Migrations: filepath.Join(home, "migrations"),
+	}, nil
+}
+
+func resolveHome() (string, error) {
+	if value := strings.TrimSpace(os.Getenv(HomeEnvVar)); value != "" {
+		if !filepath.IsAbs(value) {
+			return "", fmt.Errorf("%s must be an absolute path, got %q", HomeEnvVar, value)
+		}
+		return filepath.Clean(value), nil
 	}
 	if executable, err := os.Executable(); err == nil {
 		if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 			executable = resolved
 		}
-		candidate := filepath.Dir(filepath.Dir(executable))
-		if _, err := os.Stat(filepath.Join(candidate, configDirectory, "app.toml")); err == nil {
-			return candidate
+		bin := filepath.Dir(executable)
+		if filepath.Base(bin) == "bin" {
+			return filepath.Dir(bin), nil
 		}
 	}
-	if workingDirectory, err := os.Getwd(); err == nil {
-		return workingDirectory
-	}
-	return "/"
-}
-
-// ConfigDir returns the runtime configuration directory.
-func ConfigDir() string {
-	return pathEnv(ConfigPathEnvVar, filepath.Join(Home(), configDirectory))
-}
-
-// LogDir returns the directory that relative logger paths are anchored to.
-func LogDir() string {
-	return pathEnv(LogPathEnvVar, filepath.Join(Home(), "logs"))
-}
-
-// WebDir returns the Cloud Web asset directory.
-func WebDir() string {
-	return pathEnv(WebPathEnvVar, filepath.Join(Home(), "web"))
-}
-
-// pathEnv returns an absolute environment override, or the absolute fallback
-// when the variable is unset. Every resolved path is absolute so the processes
-// behave the same no matter where they are started from.
-func pathEnv(name string, fallback ...string) string {
-	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-		return absolutePath(value)
-	}
-	if len(fallback) > 0 {
-		return absolutePath(fallback[0])
-	}
-	return ""
-}
-
-func absolutePath(value string) string {
-	absolute, err := filepath.Abs(value)
+	workingDirectory, err := os.Getwd()
 	if err != nil {
+		return "", fmt.Errorf("resolve Cloud root from working directory: %w", err)
+	}
+	return workingDirectory, nil
+}
+
+func childPath(home, variable, suffix string) string {
+	value := strings.TrimSpace(os.Getenv(variable))
+	if value == "" {
+		value = suffix
+	}
+	if filepath.IsAbs(value) {
 		return filepath.Clean(value)
 	}
-	return absolute
+	return filepath.Join(home, value)
 }

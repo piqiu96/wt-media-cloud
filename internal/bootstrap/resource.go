@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -80,8 +81,12 @@ func initializeResources(steps []resourceStep) (func() error, error) {
 	for _, step := range steps {
 		closer, err := step.open()
 		if err != nil {
-			rollbackResources(closers)
-			return nil, err
+			log.Printf("event=cloud_bootstrap_failed step=%s error=%v", step.name, err)
+			failure := fmt.Errorf("initialize %s: %w", step.name, err)
+			if rollbackErr := rollbackResources(closers); rollbackErr != nil {
+				failure = errors.Join(failure, fmt.Errorf("rollback resources: %w", rollbackErr))
+			}
+			return nil, failure
 		}
 		if closer != nil {
 			closers = append(closers, closer)
@@ -117,6 +122,14 @@ func configResource() resourceStep {
 	return resourceStep{
 		name: "config",
 		open: func() (func() error, error) {
+			paths, err := config.ResolveRuntimePaths()
+			if err != nil {
+				return nil, err
+			}
+			log.Printf(
+				"event=cloud_runtime_paths home=%q config=%q logs=%q web=%q migrations=%q",
+				paths.Home, paths.Config, paths.Logs, paths.Web, paths.Migrations,
+			)
 			if err := config.Initialize(); err != nil {
 				return nil, err
 			}
@@ -130,10 +143,18 @@ func loggerResource() resourceStep {
 		name: "logger",
 		open: func() (func() error, error) {
 			cfg := config.Get()
+			paths, err := config.ResolveRuntimePaths()
+			if err != nil {
+				return nil, err
+			}
 			if err := logger.Initialize(cfg.Loggers); err != nil {
 				return nil, err
 			}
 			installHertzLoggers()
+			hlog.Infof(
+				"event=cloud_logger_ready home=%q config=%q logs=%q web=%q app_log=%q",
+				paths.Home, paths.Config, paths.Logs, paths.Web, cfg.Loggers.App.Path,
+			)
 			return logger.Close, nil
 		},
 	}
