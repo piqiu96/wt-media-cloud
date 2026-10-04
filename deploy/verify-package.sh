@@ -9,7 +9,8 @@ required_files=(
   deploy/migrate.sh deploy/verify-package.sh deploy/verify-database.sh deploy/verify-runtime.sh
   deploy/prepare-database.sql.example deploy/DEPLOYMENT.md
   release-info.json web/index.cloud.html
-  config/app.toml.tpl config/database/primary.toml.tpl
+  config/app.toml config/clients/http/agent.toml config/clients/http/douyin.toml
+  config/database/primary.toml.tpl
   config/credentials/object_storage.toml.tpl config/storage/object_storage.toml.tpl
 )
 for path in "${required_files[@]}"; do

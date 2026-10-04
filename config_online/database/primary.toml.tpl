@@ -1,12 +1,12 @@
 charset = 'utf8mb4'
-database = {{WT_DB_NAME}}
-host = {{WT_DB_HOST}}
+database = {{WT_PRIMARY_DB_NAME}}
+host = {{WT_PRIMARY_DB_HOST}}
 location = 'Local'
 name = 'primary'
 parse_time = true
-password = {{WT_DB_PASSWORD}}
-port = {{WT_DB_PORT}}
-username = {{WT_DB_USERNAME}}
+password = {{WT_PRIMARY_DB_PASSWORD}}
+port = {{WT_PRIMARY_DB_PORT}}
+username = {{WT_PRIMARY_DB_USERNAME}}
 
 [pool]
 max_idle = 10

@@ -40,11 +40,9 @@ class PackageReleaseLinuxTest(unittest.TestCase):
         )
         online_config = self.root / "config_online"
         (online_config / "database").mkdir(parents=True)
-        (online_config / "app.toml.tpl").write_text(
-            "name = {{WT_APP_NAME}}\n", encoding="utf-8"
-        )
+        (online_config / "app.toml").write_text("name = 'wt-media-cloud'\n", encoding="utf-8")
         (online_config / "database" / "primary.toml.tpl").write_text(
-            "password = {{WT_DB_PASSWORD}}\n", encoding="utf-8"
+            "password = {{WT_PRIMARY_DB_PASSWORD}}\n", encoding="utf-8"
         )
         (self.root / "migrations").mkdir()
         (self.root / "migrations" / "001_identity.sql").write_text(
@@ -113,7 +111,7 @@ class PackageReleaseLinuxTest(unittest.TestCase):
             self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/ffmpeg-source.json", names)
             self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/migrations/001_identity.sql", names)
             self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/deploy/DEPLOYMENT.md", names)
-            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/app.toml.tpl", names)
+            self.assertIn("wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/app.toml", names)
             self.assertIn(
                 "wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/database/primary.toml.tpl", names
             )
@@ -126,7 +124,7 @@ class PackageReleaseLinuxTest(unittest.TestCase):
             template = tar.extractfile(
                 "wt-media-cloud_v0.1.0-rc.1_linux-amd64/config/database/primary.toml.tpl"
             ).read().decode("utf-8")  # type: ignore[union-attr]
-            self.assertIn("{{WT_DB_PASSWORD}}", template)
+            self.assertIn("{{WT_PRIMARY_DB_PASSWORD}}", template)
             self.assertNotIn("local-only-secret", template)
             release_info = json.loads(
                 tar.extractfile(

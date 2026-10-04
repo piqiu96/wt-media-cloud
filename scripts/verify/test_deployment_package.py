@@ -59,29 +59,15 @@ class DeploymentPackageTest(unittest.TestCase):
     def write_variables(self, name: str, *, database: str, prefix: str) -> Path:
         path = self.root / name
         path.write_text(json.dumps({
-            "WT_INITIAL_ADMIN_USERNAME": "admin",
-            "WT_INITIAL_ADMIN_PASSWORD": "admin123",
-            "WT_HTTP_ADDR": "127.0.0.1:8080",
-            "WT_SESSION_COOKIE_SECURE": True,
-            "WT_DB_HOST": "127.0.0.1",
-            "WT_DB_PORT": 3306,
-            "WT_DB_NAME": database,
-            "WT_DB_USERNAME": "wt_media_cloud",
-            "WT_DB_PASSWORD": "db-'pass",
-            "WT_AGENT_API_SCHEME": "http",
-            "WT_AGENT_API_HOST": "127.0.0.1",
-            "WT_AGENT_API_PORT": 8765,
-            "WT_DOUYIN_API_SCHEME": "https",
-            "WT_DOUYIN_API_HOST": "api.itfaba.com",
-            "WT_DOUYIN_API_PORT": 443,
+            "WT_PRIMARY_DB_HOST": "127.0.0.1",
+            "WT_PRIMARY_DB_PORT": 3306,
+            "WT_PRIMARY_DB_NAME": database,
+            "WT_PRIMARY_DB_USERNAME": "wt_media_cloud",
+            "WT_PRIMARY_DB_PASSWORD": "db-'pass",
             "WT_AGENT_AUTH_TOKEN": "agent-token",
             "WT_DOUYIN_API_KEY": "douyin-key",
             "WT_DOUYIN_COOKIE": "douyin-cookie",
-            "WT_OBJECT_STORAGE_ENDPOINT": "s3.example.test",
-            "WT_OBJECT_STORAGE_BUCKET": "media",
-            "WT_OBJECT_STORAGE_REGION": "garage",
             "WT_OBJECT_STORAGE_PREFIX": prefix,
-            "WT_OBJECT_STORAGE_USE_SSL": True,
             "WT_OBJECT_STORAGE_ACCESS_KEY": "access-key",
             "WT_OBJECT_STORAGE_SECRET_KEY": "secret-key",
         }, ensure_ascii=False), encoding="utf-8")
@@ -136,7 +122,7 @@ class DeploymentPackageTest(unittest.TestCase):
         destination = release / "config"
         variables = self.write_variables("broken.json", database="wt_media_online", prefix="online/")
         values = json.loads(variables.read_text(encoding="utf-8"))
-        del values["WT_DB_PASSWORD"]
+        del values["WT_PRIMARY_DB_PASSWORD"]
         values["WT_UNUSED"] = "unexpected"
         variables.write_text(json.dumps(values), encoding="utf-8")
         result = self.run_script(
@@ -168,8 +154,8 @@ class DeploymentPackageTest(unittest.TestCase):
         ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("configuration rejected", result.stderr)
-        self.assertTrue((release / "config" / "app.toml.tpl").is_file())
-        self.assertFalse((release / "config" / "app.toml").is_file())
+        self.assertTrue((release / "config" / "database" / "primary.toml.tpl").is_file())
+        self.assertFalse((release / "config" / "database" / "primary.toml").is_file())
 
     def test_install_verify_migrate_and_rollback_paths(self) -> None:
         install_root = self.root / "wt-media-cloud"
