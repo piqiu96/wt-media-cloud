@@ -3,8 +3,10 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
@@ -52,14 +54,47 @@ func AuthenticateRequestContext(c *hertzapp.RequestContext) (service.AuthContext
 			return authContext, true
 		}
 	}
-	authContext, err := service.AuthenticateContext(sessionToken(c))
+	token := sessionToken(c)
+	authContext, err := service.AuthenticateContext(token)
 	if err != nil {
+		logAuthenticationFailure(c, token != "", err)
 		writeAuthenticationError(c, err)
 		return service.AuthContext{}, false
 	}
 	c.Set(identityContextKey, authContext)
 	c.Set("user_id", int64(authContext.User.ID))
 	return authContext, true
+}
+
+// logAuthenticationFailure records why a protected request was rejected so a
+// 401 can be diagnosed from the online logs. It never records the session token
+// itself, only whether one was presented.
+func logAuthenticationFailure(c *hertzapp.RequestContext, credentialPresent bool, err error) {
+	reason := authenticationFailureReason(credentialPresent, err)
+	fields := fmt.Sprintf(
+		"module=auth result=denied method=%s path=%s credential_present=%t ip=%s origin=%q reason=%s",
+		string(c.Method()), string(c.Path()), credentialPresent, c.ClientIP(), string(c.GetHeader("Origin")), reason,
+	)
+	if reason == "internal_error" {
+		hlog.Errorf("%s error=%v", fields, err)
+		return
+	}
+	hlog.Warnf("%s", fields)
+}
+
+func authenticationFailureReason(credentialPresent bool, err error) string {
+	switch {
+	case !credentialPresent:
+		return "missing_credential"
+	case errors.Is(err, service.ErrAuthenticationFailed):
+		return "authentication_failed"
+	case errors.Is(err, service.ErrSessionInvalid):
+		return "session_invalid"
+	case errors.Is(err, service.ErrForbidden):
+		return "forbidden"
+	default:
+		return "internal_error"
+	}
 }
 
 func sessionToken(c *hertzapp.RequestContext) string {

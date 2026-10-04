@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
@@ -96,9 +97,12 @@ type passwordResetResult struct {
 func Login(ctx context.Context, c *hertzapp.RequestContext) {
 	var req loginRequest
 	if !api.DecodeJSON(c, &req) {
+		hlog.CtxWarnf(ctx, "module=identity action=login result=bad_request ip=%s path=%s", c.ClientIP(), string(c.Path()))
 		return
 	}
-	if context, err := identityservice.AuthenticateContext(sessionToken(c)); err == nil && context.User.Username == strings.TrimSpace(req.Username) {
+	username := strings.TrimSpace(req.Username)
+	if context, err := identityservice.AuthenticateContext(sessionToken(c)); err == nil && context.User.Username == username {
+		hlog.CtxInfof(ctx, "module=identity action=login result=already_authenticated username=%q user_id=%d ip=%s", username, context.User.ID, c.ClientIP())
 		api.Success(c, context.User)
 		return
 	}
@@ -109,11 +113,21 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 	if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
 		clientType = identityservice.ClientTypeDesktop
 	}
-	result, err := identityservice.LoginWithOptions(req.Username, req.Password, identityservice.LoginOptions{ReplaceExisting: req.ReplaceExisting, ClientType: clientType})
+	result, err := identityservice.LoginWithOptions(username, req.Password, identityservice.LoginOptions{ReplaceExisting: req.ReplaceExisting, ClientType: clientType})
 	if err != nil {
+		hlog.CtxWarnf(
+			ctx,
+			"module=identity action=login result=failed username=%q client_type=%s replace_existing=%t origin=%q ip=%s reason=%s error=%v",
+			username, clientType, req.ReplaceExisting, string(c.GetHeader("Origin")), c.ClientIP(), loginFailureReason(err), err,
+		)
 		writeIdentityError(c, err)
 		return
 	}
+	hlog.CtxInfof(
+		ctx,
+		"module=identity action=login result=ok username=%q user_id=%d client_type=%s origin=%q ip=%s",
+		username, result.User.ID, clientType, string(c.GetHeader("Origin")), c.ClientIP(),
+	)
 	sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), config.Get().App.Server.SessionCookieSecure)
 	c.SetCookie(middleware.SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
 	if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
@@ -518,6 +532,21 @@ func sessionToken(c *hertzapp.RequestContext) string {
 	return string(c.GetHeader("X-Session-Token"))
 }
 
+// loginFailureReason maps a login error to a stable, greppable token for logs.
+// It is server-side only; the HTTP response keeps the credential-neutral error.
+func loginFailureReason(err error) string {
+	switch {
+	case errors.Is(err, identityservice.ErrAuthenticationFailed):
+		return "invalid_credentials"
+	case errors.Is(err, identityservice.ErrSessionReplaceNeeded):
+		return "session_replace_needed"
+	case errors.Is(err, identityservice.ErrForbidden):
+		return "forbidden"
+	default:
+		return "internal_error"
+	}
+}
+
 func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, identityservice.ErrAuthenticationFailed), errors.Is(err, identityservice.ErrSessionInvalid):
@@ -547,6 +576,10 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, identityservice.ErrInvalidInput), errors.Is(err, identityservice.ErrBootstrapUnavailable):
 		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、分组、游戏ID或状态")
 	default:
+		hlog.Errorf(
+			"module=identity result=error path=%s method=%s ip=%s reason=internal error=%v",
+			string(c.Path()), string(c.Method()), c.ClientIP(), err,
+		)
 		api.InternalError(c, "用户服务内部错误")
 	}
 }
