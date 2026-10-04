@@ -59,9 +59,9 @@ func (p *Profile) Validate() error {
 	if !filepath.IsAbs(p.Deploy.OutputDir) {
 		return errors.New("deploy.output_dir must be an absolute path")
 	}
-	if strings.TrimSpace(p.Deploy.Release) == "" {
-		return errors.New("deploy.release is required")
-	}
+	// deploy.release is optional. Package commands derive it from the
+	// extracted package's release-info.json; installed-release commands derive
+	// it from the `current` symlink. A set value is always verified.
 	if p.Deploy.Environment != "pre" && p.Deploy.Environment != "online" {
 		return errors.New("deploy.environment must be pre or online")
 	}

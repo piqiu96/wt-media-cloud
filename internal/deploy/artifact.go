@@ -19,7 +19,8 @@ type ReleaseInfo struct {
 	Configuration string `json:"configuration"`
 }
 
-func VerifyPackage(root, release string) (ReleaseInfo, error) {
+// ReadReleaseInfo reads the package identity from an extracted Cloud package.
+func ReadReleaseInfo(root string) (ReleaseInfo, error) {
 	raw, err := os.ReadFile(filepath.Join(root, "release-info.json"))
 	if err != nil {
 		return ReleaseInfo{}, fmt.Errorf("read release-info.json: %w", err)
@@ -28,7 +29,21 @@ func VerifyPackage(root, release string) (ReleaseInfo, error) {
 	if err := json.Unmarshal(raw, &info); err != nil {
 		return ReleaseInfo{}, fmt.Errorf("parse release-info.json: %w", err)
 	}
-	if info.SchemaVersion != 1 || info.ProductTag != release {
+	if info.SchemaVersion != 1 {
+		return ReleaseInfo{}, errors.New("release-info schema_version must be 1")
+	}
+	if strings.TrimSpace(info.ProductTag) == "" {
+		return ReleaseInfo{}, errors.New("release-info product_tag is required")
+	}
+	return info, nil
+}
+
+func VerifyPackage(root, release string) (ReleaseInfo, error) {
+	info, err := ReadReleaseInfo(root)
+	if err != nil {
+		return ReleaseInfo{}, err
+	}
+	if release != "" && info.ProductTag != release {
 		return ReleaseInfo{}, errors.New("release-info product tag differs from deployment profile")
 	}
 	if !commitPattern.MatchString(info.SourceCommit) {

@@ -218,3 +218,53 @@ secret = false
 	write("release-info.json", `{"schema_version":1,"product_tag":"v0.1.0-rc.1","source_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","configuration":"template-state config/ rendered by wtmctl"}`+"\n", 0o644)
 	return root
 }
+
+func TestResolvePackageReleaseDerivesFromPackage(t *testing.T) {
+	root := makePackageFixture(t)
+	profile := Profile{
+		SchemaVersion: 1,
+		Deploy: ProfileDeploy{
+			InstallRoot: t.TempDir(),
+			Environment: "online",
+			ServiceUser: "www",
+		},
+	}
+
+	resolved, err := resolvePackageRelease(profile, root)
+	if err != nil {
+		t.Fatalf("resolvePackageRelease() error = %v", err)
+	}
+	if got, want := resolved.Deploy.Release, "v0.1.0-rc.1"; got != want {
+		t.Fatalf("derived release = %q, want %q", got, want)
+	}
+
+	profile.Deploy.Release = "v0.1.0-rc.1"
+	if _, err := resolvePackageRelease(profile, root); err != nil {
+		t.Fatalf("matching release rejected: %v", err)
+	}
+
+	profile.Deploy.Release = "v0.1.0-rc.2"
+	if _, err := resolvePackageRelease(profile, root); err == nil {
+		t.Fatal("mismatched release accepted, want error")
+	}
+}
+
+func TestResolveInstalledReleaseFallsBackToCurrent(t *testing.T) {
+	installRoot := t.TempDir()
+	releaseRoot := filepath.Join(installRoot, "releases", "v0.1.0-rc.1")
+	if err := os.MkdirAll(releaseRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "v0.1.0-rc.1"), filepath.Join(installRoot, "current")); err != nil {
+		t.Fatal(err)
+	}
+	profile := Profile{SchemaVersion: 1, Deploy: ProfileDeploy{InstallRoot: installRoot, Environment: "online", ServiceUser: "www"}}
+
+	resolved, err := resolveInstalledRelease(profile)
+	if err != nil {
+		t.Fatalf("resolveInstalledRelease() error = %v", err)
+	}
+	if got, want := resolved.Deploy.Release, "v0.1.0-rc.1"; got != want {
+		t.Fatalf("release = %q, want %q", got, want)
+	}
+}

@@ -93,6 +93,38 @@ func loadProfile(common commonFlags) (Profile, error) {
 	return LoadProfile(common.profile)
 }
 
+// resolvePackageRelease fills deploy.release from the extracted package's
+// release-info.json when the profile omits it, so operators never edit a
+// version-specific value. A configured release must still match the package.
+func resolvePackageRelease(profile Profile, packageRoot string) (Profile, error) {
+	info, err := ReadReleaseInfo(packageRoot)
+	if err != nil {
+		return profile, err
+	}
+	if strings.TrimSpace(profile.Deploy.Release) == "" {
+		profile.Deploy.Release = info.ProductTag
+		return profile, nil
+	}
+	if profile.Deploy.Release != info.ProductTag {
+		return profile, errors.New("release-info product tag differs from deployment profile")
+	}
+	return profile, nil
+}
+
+// resolveInstalledRelease fills deploy.release from the `current` symlink when
+// the profile omits it, for commands that operate on an installed release.
+func resolveInstalledRelease(profile Profile) (Profile, error) {
+	if strings.TrimSpace(profile.Deploy.Release) != "" {
+		return profile, nil
+	}
+	current, err := CurrentRelease(profile)
+	if err != nil {
+		return profile, errors.New("deploy.release is required when current is unavailable")
+	}
+	profile.Deploy.Release = current
+	return profile, nil
+}
+
 func resolveSchemaPath(profile Profile, packageRoot, explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, nil
@@ -227,6 +259,10 @@ func (r Runner) artifact(args []string) error {
 	if err != nil {
 		return err
 	}
+	profile, err = resolvePackageRelease(profile, root)
+	if err != nil {
+		return err
+	}
 	info, err := VerifyPackage(root, profile.Deploy.Release)
 	if err != nil {
 		return err
@@ -250,6 +286,10 @@ func (r Runner) config(args []string) error {
 		return err
 	}
 	profile, err := loadProfile(common)
+	if err != nil {
+		return err
+	}
+	profile, err = resolveInstalledRelease(profile)
 	if err != nil {
 		return err
 	}
@@ -304,6 +344,10 @@ func (r Runner) db(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	profile, err = resolveInstalledRelease(profile)
+	if err != nil {
+		return err
+	}
 	root := profile.ReleaseRoot()
 	switch args[0] {
 	case "migrate":
@@ -350,6 +394,10 @@ func (r Runner) deploy(ctx context.Context, args []string) error {
 	case "plan", "apply":
 		return r.deployPlanOrApply(ctx, profile, common, *variablesFile, *variablesURL, *variablesURLFile, args[0] == "apply")
 	case "verify":
+		profile, err = resolveInstalledRelease(profile)
+		if err != nil {
+			return err
+		}
 		result, err := VerifyDatabase(ctx, profile.ReleaseRoot(), true)
 		if err != nil {
 			return err
@@ -375,6 +423,10 @@ func (r Runner) deploy(ctx context.Context, args []string) error {
 
 func (r Runner) deployPlanOrApply(ctx context.Context, profile Profile, common commonFlags, variablesFile, variablesURL, variablesURLFile string, apply bool) error {
 	packageRoot, err := ResolvePackageRoot(profile, common.packageRoot)
+	if err != nil {
+		return err
+	}
+	profile, err = resolvePackageRelease(profile, packageRoot)
 	if err != nil {
 		return err
 	}
@@ -522,6 +574,9 @@ func (r Runner) status(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if resolved, resolveErr := resolveInstalledRelease(profile); resolveErr == nil {
+		profile = resolved
+	}
 	current, currentErr := CurrentRelease(profile)
 	fmt.Fprintf(r.Stdout, "profile_release=%s\nenvironment=%s\ninstall_root=%s\noutput_dir=%s\n", profile.Deploy.Release, profile.Deploy.Environment, profile.Deploy.InstallRoot, profile.Deploy.OutputDir)
 	if currentErr != nil {
@@ -568,10 +623,14 @@ func (r Runner) doctor(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	profile, err = resolvePackageRelease(profile, root)
+	if err != nil {
+		return err
+	}
 	if _, err := VerifyPackage(root, profile.Deploy.Release); err != nil {
 		return err
 	}
-	fmt.Fprintf(r.Stdout, "doctor=ok\nos=%s\ninstall_root=%s\noutput_dir=%s\nprocess_manager=baota\n", "linux/amd64", profile.Deploy.InstallRoot, profile.Deploy.OutputDir)
+	fmt.Fprintf(r.Stdout, "doctor=ok\nos=%s\ninstall_root=%s\noutput_dir=%s\nrelease=%s\nprocess_manager=baota\n", "linux/amd64", profile.Deploy.InstallRoot, profile.Deploy.OutputDir, profile.Deploy.Release)
 	return nil
 }
 

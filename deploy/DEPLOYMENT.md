@@ -10,12 +10,14 @@
 │   ├── online.toml
 │   ├── online.url
 │   ├── online-deploy.toml
-│   └── wt-media-cloud_v0.1.0-rc.12_linux-amd64/
+│   └── wt-media-cloud_<product-tag>_linux-amd64/
 ├── releases/
-│   ├── v0.1.0-rc.11/
-│   └── v0.1.0-rc.12/
-└── current -> releases/v0.1.0-rc.12
+│   ├── v0.1.0-rc.12/
+│   └── v0.1.0-rc.13/
+└── current -> releases/v0.1.0-rc.13
 ```
+
+`<product-tag>` 是本产品 RC 的 Tag（例如 `v0.1.0-rc.13`）。
 
 ## 2. TOML 变量
 
@@ -67,8 +69,6 @@ schema_version = 1
 [deploy]
 install_root = "/home/www/wt-media-cloud"
 output_dir = "/home/www/wt-media-cloud/output"
-package_root = "/home/www/wt-media-cloud/output/wt-media-cloud_v0.1.0-rc.12_linux-amd64"
-release = "v0.1.0-rc.12"
 environment = "online"
 service_user = "www"
 process_manager = "baota"
@@ -77,12 +77,14 @@ variables_file = "/home/www/wt-media-cloud/output/online.toml"
 health_url = "http://127.0.0.1:8188"
 ```
 
+`package_root` 和 `release` **不用填**：在解压包内执行 `bin/wtmctl` 时，它会从 `release-info.json` 和自身所在的 `bin/` 目录推导。只有覆盖默认位置时才需要显式设置，且必须与包一致。
+
 ## 4. 部署预检
 
 进入解压后的 Cloud 包：
 
 ```bash
-cd /home/www/wt-media-cloud/output/wt-media-cloud_v0.1.0-rc.12_linux-amd64
+cd /home/www/wt-media-cloud/output/wt-media-cloud_<product-tag>_linux-amd64
 ```
 
 校验 Artifact：
