@@ -1,9 +1,12 @@
 package config
 
 import (
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -17,18 +20,20 @@ func mkdirForTest(t *testing.T, dir string) {
 func TestHomeHonoursReleaseHomeOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(HomeEnvVar, home)
-
-	if got, want := Home(), home; got != want {
-		t.Fatalf("Home() = %q, want %q", got, want)
+	paths, err := ResolveRuntimePaths()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := ConfigDir(), filepath.Join(home, "config"); got != want {
-		t.Fatalf("ConfigDir() = %q, want %q", got, want)
-	}
-	if got, want := LogDir(), filepath.Join(home, "logs"); got != want {
-		t.Fatalf("LogDir() = %q, want %q", got, want)
-	}
-	if got, want := WebDir(), filepath.Join(home, "web"); got != want {
-		t.Fatalf("WebDir() = %q, want %q", got, want)
+	for _, check := range []struct{ name, got, want string }{
+		{"home", paths.Home, home},
+		{"config", paths.Config, filepath.Join(home, "config")},
+		{"logs", paths.Logs, filepath.Join(home, "logs")},
+		{"web", paths.Web, filepath.Join(home, "web")},
+		{"migrations", paths.Migrations, filepath.Join(home, "migrations")},
+	} {
+		if check.got != check.want {
+			t.Errorf("%s path = %q, want %q", check.name, check.got, check.want)
+		}
 	}
 }
 
@@ -42,14 +47,12 @@ func TestHomePathsHonourIndividualOverrides(t *testing.T) {
 	t.Setenv(LogPathEnvVar, logs)
 	t.Setenv(WebPathEnvVar, web)
 
-	if got := ConfigDir(); got != config {
-		t.Fatalf("ConfigDir() = %q, want %q", got, config)
+	paths, err := ResolveRuntimePaths()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := LogDir(); got != logs {
-		t.Fatalf("LogDir() = %q, want %q", got, logs)
-	}
-	if got := WebDir(); got != web {
-		t.Fatalf("WebDir() = %q, want %q", got, web)
+	if paths.Config != config || paths.Logs != logs || paths.Web != web {
+		t.Fatalf("runtime paths = %+v, want config=%q logs=%q web=%q", paths, config, logs, web)
 	}
 }
 
@@ -130,10 +133,90 @@ func TestHomeFallsBackToWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if got, want := Home(), workingDirectory; got != want {
-		t.Fatalf("Home() = %q, want %q", got, want)
+	paths, err := ResolveRuntimePaths()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := ConfigDir(), filepath.Join(workingDirectory, "config"); got != want {
-		t.Fatalf("ConfigDir() = %q, want %q", got, want)
+	if paths.Home != workingDirectory || paths.Config != filepath.Join(workingDirectory, "config") {
+		t.Fatalf("runtime paths = %+v, want cwd home and config", paths)
+	}
+}
+
+// A released process must keep its root when config is absent, so the missing
+// file error identifies the release instead of an arbitrary process-manager cwd.
+func TestHomeUsesReleasedBinaryRootEvenWhenConfigIsMissing(t *testing.T) {
+	if os.Getenv("WT_MEDIA_TEST_RELEASE_BINARY_CHILD") == "1" {
+		paths, err := ResolveRuntimePaths()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := paths.Home, os.Getenv("WT_MEDIA_TEST_RELEASE_HOME"); got != want {
+			t.Fatalf("Home() = %q, want released binary root %q", got, want)
+		}
+		return
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	bin := filepath.Join(home, "bin")
+	mkdirForTest(t, bin)
+	source, err := os.Open(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	released := filepath.Join(bin, "cloud-test")
+	target, err := os.OpenFile(released, os.O_CREATE|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(target, source); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+	resolvedHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(released, "-test.run=^TestHomeUsesReleasedBinaryRootEvenWhenConfigIsMissing$")
+	command.Dir = t.TempDir()
+	command.Env = append(os.Environ(), HomeEnvVar+"=", "WT_MEDIA_TEST_RELEASE_BINARY_CHILD=1", "WT_MEDIA_TEST_RELEASE_HOME="+resolvedHome)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("released binary from unrelated cwd: %v\n%s", err, output)
+	}
+}
+
+func TestRelativeChildPathOverridesFollowHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(HomeEnvVar, home)
+	t.Setenv(ConfigPathEnvVar, "private/config")
+	t.Setenv(LogPathEnvVar, "private/logs")
+	t.Setenv(WebPathEnvVar, "assets/web")
+	t.Chdir(t.TempDir())
+	paths, err := ResolveRuntimePaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct{ name, got, want string }{
+		{"config", paths.Config, filepath.Join(home, "private/config")},
+		{"logs", paths.Logs, filepath.Join(home, "private/logs")},
+		{"web", paths.Web, filepath.Join(home, "assets/web")},
+	} {
+		if check.got != check.want {
+			t.Errorf("%s path = %q, want %q", check.name, check.got, check.want)
+		}
+	}
+}
+
+func TestLoadRejectsRelativeHomeOverride(t *testing.T) {
+	t.Setenv(HomeEnvVar, "relative-release")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), HomeEnvVar) || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("Load() error = %v, want absolute-path error for %s", err, HomeEnvVar)
 	}
 }
