@@ -82,6 +82,14 @@ class DeploymentPackageTest(unittest.TestCase):
             result = self.run_script(["bash", "-n", str(script)])
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_renderer_runs_on_system_python_39(self) -> None:
+        python39 = Path("/usr/bin/python3")
+        if not python39.is_file():
+            self.skipTest("system python3 is unavailable")
+        result = self.run_script([str(python39), str(DEPLOY / "render-config.py"), "--help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("tomllib", result.stderr)
+
     def test_init_config_renders_environment_and_validates_configuration(self) -> None:
         release = self.make_release("v1")
         destination = release / "config"

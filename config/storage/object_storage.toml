@@ -1,6 +1,6 @@
 bucket = 'data'
 endpoint = 's3.oss.longyanyue.cn'
-prefix = 'dev/'
+prefix = 'wt_media/dev/'
 presign_ttl = '15m'
 region = 'garage'
 use_ssl = true

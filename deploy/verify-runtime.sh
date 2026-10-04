@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-base_url=http://127.0.0.1:8080
+base_url=http://127.0.0.1:8188
 check_login=false
 admin_username=admin
 admin_password="${WT_MEDIA_ADMIN_PASSWORD:-}"

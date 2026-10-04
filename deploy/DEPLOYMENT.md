@@ -97,7 +97,7 @@ sudo -u www ./deploy/migrate.sh
 - 项目目录：`/www/wt-media-cloud/current`
 - 启动文件：`/www/wt-media-cloud/current/bin/server`
 - 运行用户：`www`
-- HTTP 地址：来自 `config/app.toml`，当前建议 `127.0.0.1:8080`
+- HTTP 地址：来自 `config/app.toml`，当前建议 `127.0.0.1:8188`
 
 Cloud Server 已提供 Cloud Web 静态文件、Vue history 回退、API 和健康路由。宝塔网站将域名反向代理到该 Go 服务，不需要单独配置 Nginx 静态根目录。
 
@@ -131,7 +131,7 @@ sudo ./deploy/activate.sh --install-root /www/wt-media-cloud --to <tag>
 
 ```bash
 sudo /www/wt-media-cloud/current/deploy/verify-runtime.sh \
-  --base-url http://127.0.0.1:8080 \
+  --base-url http://127.0.0.1:8188 \
   --login-admin
 ```
 

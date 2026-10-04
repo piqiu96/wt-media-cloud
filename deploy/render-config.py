@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -94,12 +93,6 @@ def render_tree(source: Path, destination: Path, variables: dict[str, Any]) -> N
     unknown = sorted(variables.keys() - used)
     if unknown:
         raise ValueError("unknown variables: " + ", ".join(unknown))
-    for generated in destination.rglob("*.toml"):
-        try:
-            with generated.open("rb") as source_file:
-                tomllib.load(source_file)
-        except tomllib.TOMLDecodeError as exc:
-            raise ValueError(f"rendered TOML is invalid: {generated.relative_to(destination)}: {exc}") from exc
 
 
 def render_atomic(config_dir: Path, environment: str, variables: dict[str, Any], digest: str, validator: Path) -> None:
