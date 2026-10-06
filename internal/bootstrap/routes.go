@@ -35,10 +35,7 @@ func registerRoutes(engine *server.Hertz) error {
 		return err
 	}
 	registerModuleRoutes(engine)
-	paths, err := config.ResolveRuntimePaths()
-	if err != nil {
-		return err
-	}
+	paths := config.GetRuntimePaths()
 	return registerCloudWeb(engine, paths.Web)
 }
 

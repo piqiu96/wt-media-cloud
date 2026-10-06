@@ -9,11 +9,8 @@ import (
 )
 
 func main() {
-	paths, err := config.ResolveRuntimePaths()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "resolve runtime paths: %v\n", err)
-		os.Exit(1)
-	}
+	config.MustInitializeRuntimePaths()
+	paths := config.GetRuntimePaths()
 	configDir := flag.String("config-dir", paths.Config, "configuration directory to validate")
 	flag.Parse()
 	if flag.NArg() != 0 {

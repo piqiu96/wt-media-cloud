@@ -6,9 +6,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 )
+
+func resetRuntimePathsForTest(t *testing.T) {
+	t.Helper()
+	runtimePaths.Lock()
+	previousValue, previousInitialized := runtimePaths.value, runtimePaths.initialized
+	runtimePaths.value, runtimePaths.initialized = RuntimePaths{}, false
+	runtimePaths.Unlock()
+	t.Cleanup(func() {
+		runtimePaths.Lock()
+		runtimePaths.value, runtimePaths.initialized = previousValue, previousInitialized
+		runtimePaths.Unlock()
+	})
+}
+
+func initializeRuntimePathsForTest(t *testing.T) {
+	t.Helper()
+	resetRuntimePathsForTest(t)
+	MustInitializeRuntimePaths()
+}
 
 func mkdirForTest(t *testing.T, dir string) {
 	t.Helper()
@@ -20,7 +38,7 @@ func mkdirForTest(t *testing.T, dir string) {
 func TestHomeHonoursReleaseHomeOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(HomeEnvVar, home)
-	paths, err := ResolveRuntimePaths()
+	paths, err := resolveRuntimePaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +65,7 @@ func TestHomePathsHonourIndividualOverrides(t *testing.T) {
 	t.Setenv(LogPathEnvVar, logs)
 	t.Setenv(WebPathEnvVar, web)
 
-	paths, err := ResolveRuntimePaths()
+	paths, err := resolveRuntimePaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +82,7 @@ func TestLoadReadsConfigFromReleaseHomeRegardlessOfWorkingDirectory(t *testing.T
 	mkdirForTest(t, filepath.Join(home, "bin"))
 	t.Setenv(HomeEnvVar, home)
 	t.Chdir(filepath.Join(home, "bin"))
+	initializeRuntimePathsForTest(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -82,6 +101,7 @@ func TestLoadAnchorsRelativeLoggerPathsToLogDir(t *testing.T) {
 	t.Setenv(HomeEnvVar, home)
 	t.Setenv(LogPathEnvVar, logs)
 	t.Chdir(filepath.Join(home, "bin"))
+	initializeRuntimePathsForTest(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -110,6 +130,7 @@ func TestLoadKeepsAbsoluteLoggerPaths(t *testing.T) {
 	writeConfigFile(t, filepath.Join(home, "config"), "logger/app.toml",
 		"path = "+strconv.Quote(absolute)+"\nlevel = \"info\"\nformat = \"json\"\n\n[rotation]\nmax_size = 500\nmax_age = 30\nmax_backups = 10\ncompress = true\nlocal_time = true\n")
 	t.Setenv(HomeEnvVar, home)
+	initializeRuntimePathsForTest(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -133,7 +154,7 @@ func TestHomeFallsBackToWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	paths, err := ResolveRuntimePaths()
+	paths, err := resolveRuntimePaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +167,7 @@ func TestHomeFallsBackToWorkingDirectory(t *testing.T) {
 // file error identifies the release instead of an arbitrary process-manager cwd.
 func TestHomeUsesReleasedBinaryRootEvenWhenConfigIsMissing(t *testing.T) {
 	if os.Getenv("WT_MEDIA_TEST_RELEASE_BINARY_CHILD") == "1" {
-		paths, err := ResolveRuntimePaths()
+		paths, err := resolveRuntimePaths()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +219,7 @@ func TestRelativeChildPathOverridesFollowHome(t *testing.T) {
 	t.Setenv(LogPathEnvVar, "private/logs")
 	t.Setenv(WebPathEnvVar, "assets/web")
 	t.Chdir(t.TempDir())
-	paths, err := ResolveRuntimePaths()
+	paths, err := resolveRuntimePaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,10 +234,8 @@ func TestRelativeChildPathOverridesFollowHome(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsRelativeHomeOverride(t *testing.T) {
+func TestPathInitializationRejectsRelativeHomeOverride(t *testing.T) {
 	t.Setenv(HomeEnvVar, "relative-release")
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), HomeEnvVar) || !strings.Contains(err.Error(), "absolute") {
-		t.Fatalf("Load() error = %v, want absolute-path error for %s", err, HomeEnvVar)
-	}
+	resetRuntimePathsForTest(t)
+	assertPathPanic(t, HomeEnvVar, MustInitializeRuntimePaths)
 }
