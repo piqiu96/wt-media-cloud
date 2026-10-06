@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const (
@@ -28,10 +29,43 @@ type RuntimePaths struct {
 	Migrations string
 }
 
-// ResolveRuntimePaths uses the explicit home, a released <home>/bin/<binary>
+var runtimePaths struct {
+	sync.RWMutex
+	value       RuntimePaths
+	initialized bool
+}
+
+// MustInitializeRuntimePaths resolves and publishes paths once per process.
+// A bad release root is a startup failure, so initialization panics.
+func MustInitializeRuntimePaths() {
+	runtimePaths.Lock()
+	defer runtimePaths.Unlock()
+	if runtimePaths.initialized {
+		return
+	}
+	paths, err := resolveRuntimePaths()
+	if err != nil {
+		panic(fmt.Errorf("initialize Cloud runtime paths: %w", err))
+	}
+	runtimePaths.value = paths
+	runtimePaths.initialized = true
+}
+
+// GetRuntimePaths returns the paths published during startup.
+// Reading them before initialization is a programming error.
+func GetRuntimePaths() RuntimePaths {
+	runtimePaths.RLock()
+	defer runtimePaths.RUnlock()
+	if !runtimePaths.initialized {
+		panic("config: GetRuntimePaths called before initialization")
+	}
+	return runtimePaths.value
+}
+
+// resolveRuntimePaths uses the explicit home, a released <home>/bin/<binary>
 // layout, then cwd for local development. The released layout wins even when
 // config/app.toml is missing, so errors identify the actual release directory.
-func ResolveRuntimePaths() (RuntimePaths, error) {
+func resolveRuntimePaths() (RuntimePaths, error) {
 	home, err := resolveHome()
 	if err != nil {
 		return RuntimePaths{}, err

@@ -56,7 +56,10 @@ Cloud processes; BaoTa manages Server, Worker, and Scheduler.
 The three processes resolve one absolute release root from
 `$WT_MEDIA_CLOUD_HOME`, then from the running binary's
 `<home>/bin/<binary>` location, then from the working directory for local
-development. `WT_MEDIA_CLOUD_HOME` must be absolute when set. The config,
+development. Startup initializes these paths once; runtime code reads them
+through `config.GetRuntimePaths()`. Reading before initialization or failing
+to resolve the root stops startup with a panic. `WT_MEDIA_CLOUD_HOME` must be
+absolute when set. The config,
 log, and Web paths default to `<home>/config`, `<home>/logs`, and `<home>/web`.
 Their `WT_MEDIA_CLOUD_CONFIG_PATH`, `WT_MEDIA_CLOUD_LOG_PATH`, and
 `WT_MEDIA_CLOUD_WEB_PATH` overrides may be absolute or relative to the release

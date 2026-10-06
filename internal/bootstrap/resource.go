@@ -122,10 +122,8 @@ func configResource() resourceStep {
 	return resourceStep{
 		name: "config",
 		open: func() (func() error, error) {
-			paths, err := config.ResolveRuntimePaths()
-			if err != nil {
-				return nil, err
-			}
+			config.MustInitializeRuntimePaths()
+			paths := config.GetRuntimePaths()
 			log.Printf(
 				"event=cloud_runtime_paths home=%q config=%q logs=%q web=%q migrations=%q",
 				paths.Home, paths.Config, paths.Logs, paths.Web, paths.Migrations,
@@ -143,10 +141,7 @@ func loggerResource() resourceStep {
 		name: "logger",
 		open: func() (func() error, error) {
 			cfg := config.Get()
-			paths, err := config.ResolveRuntimePaths()
-			if err != nil {
-				return nil, err
-			}
+			paths := config.GetRuntimePaths()
 			if err := logger.Initialize(cfg.Loggers); err != nil {
 				return nil, err
 			}

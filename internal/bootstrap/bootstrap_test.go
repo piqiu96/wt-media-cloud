@@ -3,7 +3,10 @@ package bootstrap
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"log"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,6 +102,28 @@ func TestConfigStartupLogsResolvedPathsBeforeConfigLoadFails(t *testing.T) {
 		if !strings.Contains(recorded.String(), path) {
 			t.Errorf("startup log %q does not contain resolved path %q", recorded.String(), path)
 		}
+	}
+}
+
+func TestConfigResourcePanicsOnBadRuntimeHome(t *testing.T) {
+	if os.Getenv("WT_MEDIA_TEST_BAD_RUNTIME_HOME") == "1" {
+		defer func() {
+			failure := recover()
+			if failure == nil || !strings.Contains(fmt.Sprint(failure), config.HomeEnvVar) {
+				t.Errorf("panic = %v, want invalid %s", failure, config.HomeEnvVar)
+			}
+		}()
+		_, _ = configResource().open()
+		return
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(executable, "-test.run=^TestConfigResourcePanicsOnBadRuntimeHome$")
+	command.Env = append(os.Environ(), "WT_MEDIA_TEST_BAD_RUNTIME_HOME=1", config.HomeEnvVar+"=relative-release")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("bad-home startup child process: %v\n%s", err, output)
 	}
 }
 
