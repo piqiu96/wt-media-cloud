@@ -309,7 +309,7 @@ onMounted(reload)
     <div class="settings-page">
       <t-card title="保存位置" :bordered="true">
         <template #description>
-          素材下载与成片的保存位置。留空表示未设置，由任务自行决定。
+          请先选择下载目录
         </template>
         <div class="field">
           <t-input

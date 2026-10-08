@@ -131,6 +131,15 @@ describe('the 本机设置 route', () => {
   })
 })
 
+describe('the 本机设置 save-location prompt', () => {
+  it('tells the operator to choose a download directory before leaving it empty', () => {
+    const page = read('./apps/desktop/features/local-settings/LocalSettingsPage.vue')
+
+    expect(page).toContain('请先选择下载目录')
+    expect(page).not.toContain('留空表示未设置，由任务自行决定')
+  })
+})
+
 /**
  * Every name a desktop page imports from a sibling module is really exported.
  *
