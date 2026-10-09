@@ -106,7 +106,6 @@ async function login(options = {}) {
       <section class="login-layout">
         <div class="login-story">
           <div class="story-copy">
-            <h1>敢想，真干。</h1>
             <p class="story-subtitle">下次起飞，从一个想法开始。</p>
             <p class="story-description">找内容、管素材、做生产、发内容、看数据，让内容运营简单一点。</p>
           </div>
@@ -155,7 +154,6 @@ async function login(options = {}) {
 .version-pill { display: inline-block; border: 1px solid #b9d8ff; border-radius: 100px; padding: 4px 12px; color: #126bf0; background: #e9f5ffb8; font-size: 13px; font-weight: 700; }
 .login-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 450px); gap: 5%; align-items: start; flex: 1; padding: 48px 5.5% 70px; }
 .login-story { padding-top: 18px; }
-.story-copy h1 { margin: 0 0 3px; color: #10284a; font-size: clamp(52px, 5.7vw, 84px); font-weight: 900; letter-spacing: .02em; line-height: 1.1; }
 .story-subtitle { margin: 0; color: #5979a6; font-size: clamp(28px, 3.2vw, 46px); font-weight: 700; letter-spacing: .02em; }
 .story-description { margin: 17px 0 0; color: #5f789a; font-size: clamp(14px, 1.3vw, 18px); }
 .story-features { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 12px; max-width: 620px; margin-top: 33px; }
@@ -204,5 +202,5 @@ async function login(options = {}) {
 .login-footer { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 14px; color: #839ab8; font-size: 13px; }
 .login-footer span { display: block; width: 40px; height: 1px; background: #b7cfe8; }
 @media (max-width: 1000px) { .login-layout { grid-template-columns: 1fr 390px; gap: 20px; }.story-features { grid-template-columns: repeat(2, minmax(100px, 1fr)); max-width: 320px; } }
-@media (max-width: 760px) { .login-shell::before { opacity: .47; background-size: auto 55%; }.login-topbar { padding: 22px 20px 0; }.login-layout { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 30px 20px 30px; }.login-story { width: min(100%, 450px); padding: 0; }.story-copy h1 { font-size: 43px; }.story-subtitle { font-size: 25px; }.story-description, .story-features { display: none; }.login-card { max-width: 450px; padding: 26px 24px; }.card-brand { margin-bottom: 16px; }.login-footer { margin-top: auto; } }
+@media (max-width: 760px) { .login-shell::before { opacity: .47; background-size: auto 55%; }.login-topbar { padding: 22px 20px 0; }.login-layout { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 30px 20px 30px; }.login-story { width: min(100%, 450px); padding: 0; }.story-subtitle { font-size: 25px; }.story-description, .story-features { display: none; }.login-card { max-width: 450px; padding: 26px 24px; }.card-brand { margin-bottom: 16px; }.login-footer { margin-top: auto; } }
 </style>
