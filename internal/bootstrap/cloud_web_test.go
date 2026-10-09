@@ -15,6 +15,7 @@ func TestCloudWebServesEntryAssetAndHistoryRoute(t *testing.T) {
 	root := t.TempDir()
 	writeCloudWebFile(t, root, "index.cloud.html", "<html>cloud-entry</html>")
 	writeCloudWebFile(t, root, "assets/app.js", "console.log('asset')")
+	writeCloudWebFile(t, root, "desktop-downloads.json", `{"schema_version":1,"version":"v0.1.0"}`)
 
 	engine := server.New()
 	if err := registerCloudWeb(engine, root); err != nil {
@@ -28,6 +29,8 @@ func TestCloudWebServesEntryAssetAndHistoryRoute(t *testing.T) {
 		{"/", "cloud-entry"},
 		{"/assets/app.js", "console.log('asset')"},
 		{"/login", "cloud-entry"},
+		{"/home", "cloud-entry"},
+		{"/desktop-downloads.json", `"version":"v0.1.0"`},
 	} {
 		response := ut.PerformRequest(engine.Engine, consts.MethodGet, testCase.path, nil)
 		if response.Result().StatusCode() != consts.StatusOK {

@@ -10,6 +10,7 @@ import { createRouter, createWebHistory } from "vue-router"
 // 而在此之前没有任何东西会发现。
 export const cloudRoutes = [
   { path: "/login", name: "Login", component: () => import("../../modules/auth/pages/LoginPage.vue") },
+  { path: "/home", name: "PublicHome", component: () => import("../../modules/public/pages/HomePage.vue") },
   {
     path: "/",
     component: () => import("../../layout/AppLayout.vue"),
