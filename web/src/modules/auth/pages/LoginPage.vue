@@ -177,7 +177,7 @@ async function login(options = {}) {
 
 .login-button{position:relative;width:100%;height:76px;border:1px solid transparent;border-radius:12px;font-size:18px;font-weight:600;cursor:pointer;transition:filter .18s}
 .login-button:disabled{cursor:not-allowed;opacity:.7}
-.login-button.primary{margin-top:6px;background:var(--wt-brand-cta-gradient);color:#fff}
+.login-button.primary{margin-top:6px;border:0;background:var(--wt-brand-cta-gradient);color:#fff}
 .login-button.primary:hover:not(:disabled){filter:brightness(.98)}
 .login-button.primary:active:not(:disabled){filter:brightness(.94)}
 .login-button.outline{height:46px;background:#fff;border-color:#C8DCF0;color:#34547C;font-size:15px;font-weight:500}
@@ -192,15 +192,20 @@ async function login(options = {}) {
 @media(max-width:1180px){.login-layout{grid-template-columns:minmax(0,1.35fr) minmax(370px,.95fr);gap:2%}.login-story{padding-left:0}.login-card{max-width:470px;padding:44px 34px 32px}}
 @media(max-width:760px){.login-topbar{padding:19px 20px 0}.login-layout{display:flex;flex-direction:column;gap:18px;width:calc(100% - 38px);padding:14px 0 80px}.login-story{width:100%;padding-left:0}.story-copy h1{font-size:clamp(40px,10vw,66px)}.story-description{margin-top:14px;font-size:15px}.login-card{width:100%;max-width:520px;min-height:auto;padding:34px 24px 26px}.login-card h2{font-size:29px}.login-intro{margin:6px 0 26px;font-size:15px}.login-form{gap:16px}.login-field{height:52px}.login-field input{font-size:16px}.login-button{height:54px;font-size:17px}.login-help{margin-top:26px;padding-top:20px}.login-wave{height:190px}.wave-one{bottom:-110px}.wave-two{bottom:-130px}.wave-three{bottom:-150px}}
 
-/* 桌面按已确认的视觉图落地；真实表单覆盖画稿中的表单区域，交互仍由 Vue 处理。 */
+/* 桌面插画独立于文字和表单，避免把视觉稿中的文字作为位图拉伸。 */
 @media(min-width:761px){
-  .login-shell{height:100vh;min-height:700px;background:#dceeff url('/login-page-reference.png') center / 100% 100% no-repeat}
+  .login-shell{height:100vh;min-height:700px;background:#dceeff url('/login-visual-backdrop.png') center / 100% 100% no-repeat}
   .login-topbar{position:absolute;inset:0 0 auto;z-index:4}
-  .login-topbar :deep(.brand-logo){opacity:0}
+  .login-topbar :deep(.brand-logo){gap:10px}
+  .login-topbar :deep(.brand-logo__mark){width:50px;height:50px}
+  .login-topbar :deep(.brand-logo__copy strong){font-size:31px;line-height:1}
+  .login-topbar :deep(.brand-logo__copy small){margin-top:4px;font-size:13px;letter-spacing:.04em}
   .version-pill{position:absolute;top:26px;right:3.5%;height:31px;background:#e8f4ff}
   .login-layout{position:absolute;inset:0;display:block;width:100%;margin:0;padding:0}
-  .login-story{position:absolute;left:0;top:0;width:1px;height:1px;padding:0}
-  .story-copy{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .login-story{position:absolute;left:6.95%;top:17.2%;width:54%;padding:0}
+  .story-copy h1{font-size:clamp(42px,5.55vw,96px);line-height:1.18;letter-spacing:-.055em}
+  .story-copy h1 i{bottom:-4px;right:1%;width:48%;border-bottom-width:6px}
+  .story-description{margin-top:12px;font-size:clamp(12px,1.56vw,27px);line-height:1.45;white-space:nowrap}
   .login-wave{display:none}
   .login-card{position:absolute;left:63.58%;top:14.67%;width:32.96%;height:69.61%;min-height:0;max-width:none;padding:0;border:0;border-radius:26px;background:#fff;box-shadow:none;backdrop-filter:none}
   .login-card.has-feedback{height:calc(69.61% + 110px)}
