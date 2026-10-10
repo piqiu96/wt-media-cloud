@@ -195,6 +195,7 @@ async function login(options = {}) {
 /* 桌面插画独立于文字和表单，避免把视觉稿中的文字作为位图拉伸。 */
 @media(min-width:761px){
   .login-shell{height:100vh;min-height:700px;background:#dceeff url('/login-visual-backdrop.png') center / 100% 100% no-repeat}
+  .login-shell::before{content:"";position:absolute;z-index:1;left:3%;top:34.7%;width:min(max(57.5vw,100vh),82vw);aspect-ratio:1812/868;background:url('/login-visual-art.png') center / contain no-repeat;pointer-events:none}
   .login-topbar{position:absolute;inset:0 0 auto;z-index:4}
   .login-topbar :deep(.brand-logo){gap:10px}
   .login-topbar :deep(.brand-logo__mark){width:50px;height:50px}
