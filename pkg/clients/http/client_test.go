@@ -184,5 +184,5 @@ func TestDoAppliesWholeRequestTimeout(t *testing.T) {
 }
 
 func testEndpoint() EndpointConfig {
-	return EndpointConfig{Scheme: "http", Host: "127.0.0.1", Port: 18080}
+	return EndpointConfig{Scheme: "http", Host: "127.0.0.1", Port: 8188}
 }

@@ -6,7 +6,7 @@
 # migrations or explicit acceptance data updates.
 
 # Script health-probe address only; the server listen address comes from config/app.toml.
-export WT_MEDIA_CLOUD_HTTP_ADDR="${WT_MEDIA_CLOUD_HTTP_ADDR:-127.0.0.1:18080}"
+export WT_MEDIA_CLOUD_HTTP_ADDR="${WT_MEDIA_CLOUD_HTTP_ADDR:-127.0.0.1:8188}"
 
 # Load repository-local dotenv values without evaluating them as shell code.
 # Cookies commonly contain spaces, semicolons, and other shell metacharacters.

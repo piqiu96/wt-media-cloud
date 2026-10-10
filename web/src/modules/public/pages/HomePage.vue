@@ -2,11 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import BrandLogo from '../../../shared/ui/BrandLogo.vue'
 import { loadDownloadManifest } from '../downloadManifest.js'
+import { BOTTOM_ZONE, HOME_NAV_SECTIONS, resolveActiveNav } from '../scrollSpy.js'
 
 const manifest = ref(null)
 const error = ref('')
 const activeNav = ref('product')
-const sectionIds = ['hero', 'product', 'download', 'pricing', 'contact']
+const sectionIds = HOME_NAV_SECTIONS.map((section) => section.id)
 const navItems = [
   { id: 'product', label: '产品' },
   { id: 'download', label: '下载' },
@@ -31,38 +32,51 @@ const downloads = computed(() => platforms.map((platform) => ({
 
 let sectionObserver
 
+// 点击只改变滚动位置;activeNav 一律由 updateActiveNav 按真实位置推导。
 function scrollToSection(id) {
   const section = document.getElementById(id)
   if (!section) return
   const maxScroll = document.documentElement.scrollHeight - window.innerHeight
   const desiredTop = section.getBoundingClientRect().top + window.scrollY - 110
-  if (id === 'pricing' && desiredTop > maxScroll - 60) {
-    window.scrollTo({ top: Math.max(0, maxScroll - 60), behavior: 'smooth' })
+  if (id === 'pricing' && desiredTop > maxScroll - BOTTOM_ZONE) {
+    window.scrollTo({ top: Math.max(0, maxScroll - BOTTOM_ZONE), behavior: 'smooth' })
   } else {
     section.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
-  activeNav.value = id === 'hero' ? 'product' : id
 }
 
 function scrollToTop() {
   window.scrollTo({ top: 0, behavior: 'smooth' })
-  activeNav.value = 'product'
 }
 
 function updateActiveNav() {
-  const maxScroll = document.documentElement.scrollHeight - window.innerHeight
-  const marker = window.scrollY >= maxScroll - 180
-    ? window.innerHeight * 0.67
-    : Math.min(window.innerHeight * 0.38, 360)
-  let current = 'product'
-  for (const id of sectionIds.slice(2)) {
-    if (document.getElementById(id)?.getBoundingClientRect().top <= marker) current = id
-  }
-  if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2) current = 'contact'
-  activeNav.value = current
+  activeNav.value = resolveActiveNav({
+    scrollY: window.scrollY,
+    viewportHeight: window.innerHeight,
+    scrollHeight: document.documentElement.scrollHeight,
+    sectionTops: sectionIds.map((id) => {
+      const section = document.getElementById(id)
+      return { id, top: section ? section.getBoundingClientRect().top + window.scrollY : Number.POSITIVE_INFINITY }
+    }),
+  })
+}
+
+// IO 只在 intersection 跨越时回调;拖滚动条到绝对底部后可能不再跨越任何阈值,
+// scroll 事件兜底,rAF 去重,每帧一次只读判定。
+let scrollTick = false
+function onScroll() {
+  if (scrollTick) return
+  scrollTick = true
+  requestAnimationFrame(() => {
+    scrollTick = false
+    updateActiveNav()
+  })
 }
 
 onMounted(async () => {
+  // layout.css 让 body 不滚动(滚动发生在 AppLayout 内容区);/home 不套 AppLayout,
+  // 在场期间把视口还给原生滚动,卸载时归还。
+  document.body.classList.add('public-home-scroll')
   await nextTick()
   sectionObserver = new IntersectionObserver(updateActiveNav, {
     rootMargin: '-110px 0px -20% 0px',
@@ -73,6 +87,7 @@ onMounted(async () => {
     if (section) sectionObserver.observe(section)
   })
   window.addEventListener('resize', updateActiveNav)
+  window.addEventListener('scroll', onScroll, { passive: true })
   updateActiveNav()
   try {
     manifest.value = await loadDownloadManifest()
@@ -84,6 +99,8 @@ onMounted(async () => {
 onUnmounted(() => {
   sectionObserver?.disconnect()
   window.removeEventListener('resize', updateActiveNav)
+  window.removeEventListener('scroll', onScroll)
+  document.body.classList.remove('public-home-scroll')
 })
 </script>
 
@@ -321,4 +338,10 @@ onUnmounted(() => {
   .hero-notes { font-size: 10px; }
   .feature-card { padding: 14px; }
 }
+</style>
+
+<style>
+/* class 由本组件挂载/卸载增删(见 onMounted/onUnmounted);规则常驻注入但无
+   class 时零命中,不影响其它路由。height:100% 无需覆盖:内容溢出即构成文档滚动区。 */
+body.public-home-scroll { overflow: auto; }
 </style>

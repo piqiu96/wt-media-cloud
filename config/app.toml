@@ -5,5 +5,5 @@ password = ''
 username = ''
 
 [server]
-http_addr = '127.0.0.1:18080'
+http_addr = '127.0.0.1:8188'
 session_cookie_secure = false

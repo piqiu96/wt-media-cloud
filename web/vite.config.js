@@ -15,8 +15,13 @@ export default defineConfig({
     }),
   ],
   server: {
+    // 显式写出：harness 等这个端口，且没有 strictPort 时 Vite 被占就静默换端口，
+    // harness 探到的会是别人的服务；隐式绑定还只绑 [::1]，127.0.0.1 连不上。
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:18080',
+      '/api': 'http://127.0.0.1:8188',
     },
   },
   test: {

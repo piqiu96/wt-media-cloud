@@ -26,7 +26,7 @@ npm run build:cloud --prefix web
 npm run build:desktop --prefix web
 test -s web/dist-cloud/index.cloud.html
 test -s web/dist-desktop/index.desktop.html
-if rg -q '127\.0\.0\.1:18080' web/dist-desktop; then
+if rg -q '127\.0\.0\.1:8188' web/dist-desktop; then
   echo "packaged Desktop Web still contains a hard-coded local Cloud address" >&2
   exit 1
 fi
