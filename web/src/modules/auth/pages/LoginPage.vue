@@ -99,8 +99,6 @@ async function login(options = {}) {
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <main class="login-shell">
-      <div class="login-glow login-glow-left" aria-hidden="true"></div>
-      <div class="login-glow login-glow-right" aria-hidden="true"></div>
       <header class="login-topbar">
         <router-link v-if="!isDesktop()" to="/home" class="brand-link" aria-label="起飞官网"><BrandLogo /></router-link>
         <BrandLogo v-else />
@@ -113,13 +111,59 @@ async function login(options = {}) {
             <h1>让流量<span>跑起来</span><i aria-hidden="true"></i></h1>
             <p class="story-description">找内容、管素材、发内容、看数据，让内容运营超轻松！</p>
           </div>
+
+          <!-- 中央主视觉：抽象流量轨迹（内容进入 → 流动 → 分发 → 增长）。不再使用完整品牌标。 -->
           <div class="story-art" aria-hidden="true">
-            <div class="story-orbit orbit-one"></div><div class="story-orbit orbit-two"></div>
+            <div class="story-orbit orbit-one"></div>
+            <div class="story-orbit orbit-two"></div>
+
+            <div class="story-core"></div>
+            <svg class="story-flow" viewBox="0 0 690 460" role="presentation" focusable="false">
+                <defs>
+                  <linearGradient id="wtqFlowMain" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#126EF5" stop-opacity="0.12" />
+                    <stop offset="36%" stop-color="#126EF5" stop-opacity="1" />
+                    <stop offset="100%" stop-color="#00C4DC" stop-opacity="1" />
+                  </linearGradient>
+                  <linearGradient id="wtqFlowAux" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#479DFF" stop-opacity="0.12" />
+                    <stop offset="45%" stop-color="#479DFF" stop-opacity="0.45" />
+                    <stop offset="100%" stop-color="#00C4DC" stop-opacity="0.45" />
+                  </linearGradient>
+                  <linearGradient id="wtqFlowSoft" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#51D4E2" stop-opacity="0.06" />
+                    <stop offset="100%" stop-color="#51D4E2" stop-opacity="0.3" />
+                  </linearGradient>
+                  <radialGradient id="wtqNodeBlue" cx="34%" cy="30%" r="74%">
+                    <stop offset="0%" stop-color="#8ACBFF" />
+                    <stop offset="100%" stop-color="#126EF5" />
+                  </radialGradient>
+                  <radialGradient id="wtqNodeCyan" cx="34%" cy="30%" r="74%">
+                    <stop offset="0%" stop-color="#8CEDF8" />
+                    <stop offset="100%" stop-color="#00B6D4" />
+                  </radialGradient>
+                </defs>
+
+                <path class="flow-line flow-soft" d="M 70 280 C 190 300 265 253 350 200 S 505 124 560 106" />
+                <path class="flow-line flow-aux" d="M 115 354 C 235 354 320 314 415 250 S 552 180 618 149" />
+                <path class="flow-line flow-main" d="M 80 322 C 190 336 280 300 370 252 S 535 163 594 120" />
+                <path class="flow-tip" d="M 608 110 L 585 119 L 600 135 Z" />
+
+                <circle class="flow-node" cx="150" cy="325" r="7" fill="url(#wtqNodeCyan)" />
+                <circle class="flow-node" cx="368" cy="252" r="21" fill="url(#wtqNodeBlue)" />
+                <circle class="flow-node" cx="458" cy="204" r="11" fill="url(#wtqNodeCyan)" />
+                <circle class="flow-node" cx="546" cy="146" r="7" fill="url(#wtqNodeCyan)" />
+            </svg>
+
             <div class="story-mini-card story-media"><t-icon name="image" /></div>
             <div class="story-mini-card story-chart"><t-icon name="chart-bar" /></div>
             <div class="story-mini-card story-play"><t-icon name="play-circle" /></div>
-            <div class="story-emblem"></div>
-            <span class="story-spark spark-one">✦</span><span class="story-spark spark-two">✦</span>
+
+            <span class="story-spark spark-one">✦</span>
+            <span class="story-spark spark-two">✦</span>
+            <span class="story-dot dot-one"></span>
+            <span class="story-dot dot-two"></span>
+            <span class="story-dot dot-three"></span>
           </div>
         </div>
 
@@ -140,20 +184,92 @@ async function login(options = {}) {
           <p class="login-help">账号由管理员创建与维护，如需开通请联系管理员。</p>
         </section>
       </section>
-      <div class="login-wave wave-one" aria-hidden="true"></div><div class="login-wave wave-two" aria-hidden="true"></div>
+
+      <div class="login-wave wave-one" aria-hidden="true"></div>
+      <div class="login-wave wave-two" aria-hidden="true"></div>
+      <div class="login-wave wave-three" aria-hidden="true"></div>
     </main>
   </t-loading>
 </template>
 
 <style scoped>
-.login-shell{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:100vh;overflow:hidden;background:linear-gradient(135deg,#f9fdff 0%,#edf8ff 45%,#cfeaff 79%,#f8fcff 100%);color:#071b50;font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
-.login-glow{position:absolute;z-index:-1;pointer-events:none;border-radius:50%;filter:blur(22px)}.login-glow-left{width:70vw;height:37vw;left:-28vw;top:-17vw;background:#fff}.login-glow-right{width:68vw;height:49vw;right:-27vw;top:-22vw;background:#a6d6ffb8}
-.login-topbar,.login-layout{position:relative;z-index:2}.login-topbar{display:flex;align-items:center;justify-content:space-between;padding:26px 4% 0}.brand-link{text-decoration:none}.version-pill{display:inline-block;padding:4px 11px;border:1px solid #b9d8ff;border-radius:100px;background:#e9f5ffb8;color:#126bf0;font-size:12px;font-weight:700}
-.login-layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(370px,.9fr);align-items:center;gap:4%;flex:1;width:min(1600px,92%);margin:0 auto;padding:12px 0 75px}.login-story{position:relative;min-height:630px}.story-copy{position:relative;z-index:2;padding:52px 0 0 9%}.story-copy h1{position:relative;width:max-content;max-width:100%;margin:0;font-size:clamp(58px,5.7vw,104px);font-weight:950;letter-spacing:-.07em;line-height:1.15;white-space:nowrap}.story-copy h1 span{background:linear-gradient(105deg,#057cf1,#01c6e8 63%,#1264f9);-webkit-background-clip:text;background-clip:text;color:transparent}.story-copy h1 i{position:absolute;bottom:-4px;right:3%;width:47%;height:18px;border-bottom:7px solid #09d0e8;border-radius:50%;transform:rotate(-5deg)}.story-description{margin:15px 0 0;color:#415e8b;font-size:clamp(16px,1.6vw,24px);line-height:1.6;white-space:nowrap}
-.story-art{position:absolute;inset:175px 0 0 0}.story-orbit{position:absolute;border:3px solid #ffffffe3;border-radius:50%;box-shadow:0 0 30px #7acfff,inset 0 0 25px #fff}.orbit-one{width:86%;height:56%;left:5%;top:19%;transform:rotate(-18deg)}.orbit-two{width:79%;height:50%;left:9%;top:24%;border-color:#adf1ff;transform:rotate(15deg)}.story-emblem{position:absolute;z-index:1;width:350px;height:350px;left:calc(50% - 175px);top:17px;border-radius:50%;background:#fff url('/qifei-reference-logo.png') center 54% / 110% no-repeat;box-shadow:0 0 0 12px #edffffad,0 21px 65px #62aee85e}.story-mini-card{position:absolute;z-index:2;display:grid;place-items:center;width:100px;height:85px;border:3px solid #fff;border-radius:18px;background:#effaffaf;box-shadow:0 12px 31px #49a7e68c;color:#33a8f8;font-size:48px}.story-media{left:4%;top:17%;transform:rotate(-10deg)}.story-chart{right:5%;top:19%;transform:rotate(7deg)}.story-play{left:10%;bottom:10%;width:77px;height:65px;font-size:37px;transform:rotate(-9deg)}.story-spark{position:absolute;z-index:2;color:#fff;font-size:42px;text-shadow:0 0 15px #11bfe5}.spark-one{right:12%;bottom:8%}.spark-two{left:0;top:45%}
-.login-card{box-sizing:border-box;width:100%;max-width:520px;min-height:570px;padding:65px 44px 38px;border:1px solid #fff;border-radius:23px;background:#ffffffed;box-shadow:0 22px 67px #61a3d237;backdrop-filter:blur(14px);text-align:center}.login-card h2{margin:0;color:#081848;font-size:38px;letter-spacing:.08em}.login-intro{margin:10px 0 42px;color:#7589a8;font-size:18px}.login-form{display:flex;flex-direction:column;gap:21px;text-align:left}.field-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.login-field{display:flex;align-items:center;gap:13px;height:59px;padding:0 18px;border:1px solid #d4e0f1;border-radius:10px;background:#fbfcff;color:#8295b6;font-size:23px;transition:border-color .2s,box-shadow .2s}.login-field:focus-within{border-color:#247fff;box-shadow:0 0 0 3px #247fff1f}.login-field input{min-width:0;width:100%;height:100%;border:0;outline:0;background:transparent;color:#183557;font-size:18px}.login-field input::placeholder{color:#8295b6}.password-toggle{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;background:transparent;color:#8295b6;font-size:21px;cursor:pointer}.password-toggle:hover{color:#126ff4}
-.login-button{position:relative;width:100%;height:66px;border:1px solid transparent;border-radius:11px;font-size:22px;font-weight:700;cursor:pointer}.login-button:disabled{cursor:not-allowed;opacity:.7}.login-button.primary{margin-top:2px;background:linear-gradient(100deg,#0868f8,#06c6e3);box-shadow:0 12px 24px #168be43c;color:#fff}.login-button.primary:hover:not(:disabled){filter:brightness(1.04)}.login-button.outline{height:45px;background:#fff;border-color:#c8dcf0;color:#34547c;font-size:15px}.login-help{margin:33px 0 0;padding-top:26px;border-top:1px solid #d9e6f4;color:#748bad;font-size:14px;line-height:1.7}
-.login-wave{position:absolute;z-index:1;bottom:-160px;left:-6%;width:112%;height:330px;border-radius:45% 55% 0 0 / 38% 45% 0 0;pointer-events:none}.wave-one{background:#90cbff8c;transform:rotate(-3deg)}.wave-two{bottom:-199px;background:#ffffffb0;transform:rotate(4deg)}
-@media(max-width:1100px){.login-layout{grid-template-columns:minmax(0,1fr) minmax(340px,430px);gap:2%}.login-story{min-height:560px}.story-copy{padding-left:0}.story-copy h1{font-size:clamp(45px,5.1vw,68px)}.story-description{font-size:15px;white-space:normal}.story-art{inset:175px 0 0}.story-emblem{width:260px;height:260px;left:calc(50% - 130px)}.login-card{min-height:540px;padding:55px 30px 30px}}
-@media(max-width:760px){.login-topbar{padding:19px 20px 0}.login-layout{display:flex;flex-direction:column;gap:18px;width:calc(100% - 38px);padding:14px 0 80px}.login-story{width:100%;min-height:160px}.story-copy{padding:14px 0}.story-copy h1{font-size:clamp(40px,10vw,66px)}.story-description{margin-top:10px;font-size:14px}.story-art{display:none}.login-card{max-width:520px;min-height:auto;padding:33px 24px 26px}.login-card h2{font-size:29px}.login-intro{margin:6px 0 24px;font-size:15px}.login-form{gap:14px}.login-field{height:52px}.login-field input{font-size:16px}.login-button{height:54px;font-size:18px}.login-help{margin-top:22px;padding-top:20px}.login-wave{height:190px;bottom:-110px}.wave-two{bottom:-130px}}
+/* 官网品牌色、渐变与卡片样式从共享 Token 读取。 */
+.login-shell{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:100vh;overflow:hidden;background:var(--wt-brand-surface);color:var(--wt-brand-ink);font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
+
+.login-topbar,.login-layout{position:relative;z-index:2}
+.login-topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 2% 0}
+.brand-link{text-decoration:none}
+.login-topbar :deep(.brand-logo__mark){width:40px;height:40px}
+.login-topbar :deep(.brand-logo__copy small){font-size:12px}
+.version-pill{display:inline-flex;align-items:center;height:29px;padding:0 12px;border-radius:999px;background:#E8F3FF;color:var(--wt-brand-primary);font-size:13px;font-weight:600}
+
+.login-layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(400px,.95fr);align-items:center;gap:3%;flex:1;width:min(1800px,96%);margin:0 auto;padding:12px 0 72px}
+
+/* 左侧品牌区 */
+.login-story{position:relative;display:flex;flex-direction:column;min-width:0;padding-left:4%}
+.story-copy{position:relative;z-index:2}
+.story-copy h1{position:relative;width:max-content;max-width:100%;margin:0;color:var(--wt-brand-dark);font-size:clamp(52px,4.4vw,84px);font-weight:800;letter-spacing:-.02em;line-height:1.08;white-space:nowrap}
+.story-copy h1 span{background:var(--wt-brand-gradient);-webkit-background-clip:text;background-clip:text;color:transparent}
+.story-copy h1 i{position:absolute;bottom:-8px;right:3%;width:48%;height:18px;border-bottom:6px solid var(--wt-brand-underline);border-radius:50%;transform:rotate(-5deg)}
+.story-description{margin:26px 0 0;color:var(--wt-ink-muted);font-size:clamp(16px,1.3vw,21px);font-weight:500;line-height:1.6}
+
+/* 中央主视觉 */
+.story-art{position:relative;width:min(760px,100%);height:460px;margin:28px auto 0}
+.story-orbit{position:absolute;left:50%;top:50%;border-radius:50%;pointer-events:none}
+.orbit-one{width:94%;height:52%;transform:translate(-50%,-50%) rotate(-16deg);border:1.5px solid rgba(255,255,255,.78)}
+.orbit-two{width:86%;height:46%;transform:translate(-50%,-50%) rotate(14deg);border:1.5px solid rgba(0,190,220,.25)}
+
+.story-core{position:absolute;left:50%;top:50%;z-index:1;width:min(450px,62%);aspect-ratio:1/1;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.8);border-radius:50%;background:rgba(255,255,255,.72);box-shadow:0 16px 60px rgba(63,150,220,.08)}
+.story-flow{position:absolute;inset:0;z-index:2;width:100%;height:100%;overflow:visible;pointer-events:none}
+.flow-line{fill:none;stroke-linecap:round}
+.flow-main{stroke:url(#wtqFlowMain);stroke-width:17px}
+.flow-aux{stroke:url(#wtqFlowAux);stroke-width:9px}
+.flow-soft{stroke:url(#wtqFlowSoft);stroke-width:6px}
+.flow-tip{fill:#04B9DB}
+.flow-node{stroke:rgba(255,255,255,.85);stroke-width:1.5px}
+
+.story-mini-card{position:absolute;z-index:3;display:grid;place-items:center;width:92px;height:92px;border:1px solid rgba(255,255,255,.9);border-radius:var(--wt-card-radius);background:rgba(255,255,255,.82);box-shadow:var(--wt-card-shadow-soft);color:var(--wt-brand-primary);font-size:38px}
+.story-media{left:0;top:12%}
+.story-play{left:5%;bottom:9%}
+.story-chart{right:0;top:20%}
+
+.story-spark{position:absolute;z-index:2;color:rgba(120,196,255,.55);font-size:22px;line-height:1}
+.spark-one{right:9%;bottom:12%}
+.spark-two{left:2%;top:32%}
+.story-dot{position:absolute;z-index:2;border-radius:50%;background:rgba(126,201,255,.45)}
+.dot-one{left:14%;top:22%;width:9px;height:9px}
+.dot-two{right:6%;top:46%;width:7px;height:7px}
+.dot-three{left:23%;bottom:15%;width:11px;height:11px}
+
+/* 右侧登录卡 */
+.login-card{box-sizing:border-box;justify-self:end;width:min(33vw,600px);max-width:100%;min-height:650px;padding:76px 48px 40px;border:var(--wt-card-border);border-radius:var(--wt-card-radius);background:var(--wt-card-bg);box-shadow:var(--wt-card-shadow);text-align:center}
+.login-card h2{margin:0;color:var(--wt-brand-dark);font-size:38px;font-weight:700;letter-spacing:.02em}
+.login-intro{margin:10px 0 64px;color:#7286A6;font-size:16px}
+.login-form{display:flex;flex-direction:column;gap:28px;text-align:left}
+.field-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+/* 保持现有输入与密码显隐行为，只调整外框视觉。 */
+.login-field{display:flex;align-items:center;gap:12px;height:64px;padding:0 18px;border:1px solid var(--wt-field-border);border-radius:12px;background:rgba(255,255,255,.86);color:var(--wt-field-icon);font-size:20px;transition:border-color .2s,box-shadow .2s}
+.login-field:hover{border-color:#BBD3FB}
+.login-field:focus-within{border-color:var(--td-brand-color,#0052D9);box-shadow:0 0 0 3px rgba(0,82,217,.07)}
+.login-field input{min-width:0;width:100%;height:100%;border:0;outline:0;background:transparent;color:#183557;font-size:16px}
+.login-field input::placeholder{color:var(--wt-field-placeholder)}
+.password-toggle{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;background:transparent;color:#7890B5;font-size:21px;cursor:pointer;transition:color .2s}
+.password-toggle:hover{color:var(--wt-brand-primary)}
+
+.login-button{position:relative;width:100%;height:76px;border:1px solid transparent;border-radius:12px;font-size:18px;font-weight:600;cursor:pointer;transition:filter .18s}
+.login-button:disabled{cursor:not-allowed;opacity:.7}
+.login-button.primary{margin-top:6px;background:var(--wt-brand-cta-gradient);color:#fff}
+.login-button.primary:hover:not(:disabled){filter:brightness(.98)}
+.login-button.primary:active:not(:disabled){filter:brightness(.94)}
+.login-button.outline{height:46px;background:#fff;border-color:#C8DCF0;color:#34547C;font-size:15px;font-weight:500}
+.login-help{margin:38px 0 0;padding-top:24px;border-top:1px solid var(--wt-divider);color:var(--wt-ink-soft);font-size:14px;line-height:1.7}
+
+.login-wave{position:absolute;z-index:1;left:-15%;width:130%;border-radius:45% 55% 0 0 / 38% 45% 0 0;pointer-events:none}
+.wave-one{bottom:-160px;height:330px;background:#8FC9FF;opacity:.32;transform:rotate(-3deg)}
+.wave-two{bottom:-199px;height:330px;background:#FFFFFF;opacity:.45;transform:rotate(4deg)}
+.wave-three{bottom:-236px;height:300px;background:#BFE3FF;opacity:.25;transform:rotate(-2deg)}
+
+@media(max-width:1400px){.login-layout{grid-template-columns:minmax(0,1.5fr) minmax(400px,.95fr);gap:2.5%}.story-art{height:420px}}
+@media(max-width:1180px){.login-layout{grid-template-columns:minmax(0,1.35fr) minmax(370px,.95fr);gap:2%}.login-story{padding-left:0}.story-art{height:378px;margin-top:28px}.story-mini-card{width:80px;height:80px;font-size:32px}.login-card{max-width:470px;padding:44px 34px 32px}}
+@media(max-width:760px){.login-topbar{padding:19px 20px 0}.login-layout{display:flex;flex-direction:column;gap:18px;width:calc(100% - 38px);padding:14px 0 80px}.login-story{width:100%;padding-left:0}.story-copy h1{font-size:clamp(40px,10vw,66px)}.story-description{margin-top:14px;font-size:15px}.story-art{display:none}.login-card{width:100%;max-width:520px;min-height:auto;padding:34px 24px 26px}.login-card h2{font-size:29px}.login-intro{margin:6px 0 26px;font-size:15px}.login-form{gap:16px}.login-field{height:52px}.login-field input{font-size:16px}.login-button{height:54px;font-size:17px}.login-help{margin-top:26px;padding-top:20px}.login-wave{height:190px}.wave-one{bottom:-110px}.wave-two{bottom:-130px}.wave-three{bottom:-150px}}
 </style>
