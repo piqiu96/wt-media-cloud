@@ -112,62 +112,9 @@ async function login(options = {}) {
             <p class="story-description">找内容、管素材、发内容、看数据，让内容运营超轻松！</p>
           </div>
 
-          <!-- 中央主视觉：抽象流量轨迹（内容进入 → 流动 → 分发 → 增长）。不再使用完整品牌标。 -->
-          <div class="story-art" aria-hidden="true">
-            <div class="story-orbit orbit-one"></div>
-            <div class="story-orbit orbit-two"></div>
-
-            <div class="story-core"></div>
-            <svg class="story-flow" viewBox="0 0 690 460" role="presentation" focusable="false">
-                <defs>
-                  <linearGradient id="wtqFlowMain" x1="0" y1="1" x2="1" y2="0">
-                    <stop offset="0%" stop-color="#126EF5" stop-opacity="0.12" />
-                    <stop offset="36%" stop-color="#126EF5" stop-opacity="1" />
-                    <stop offset="100%" stop-color="#00C4DC" stop-opacity="1" />
-                  </linearGradient>
-                  <linearGradient id="wtqFlowAux" x1="0" y1="1" x2="1" y2="0">
-                    <stop offset="0%" stop-color="#479DFF" stop-opacity="0.12" />
-                    <stop offset="45%" stop-color="#479DFF" stop-opacity="0.45" />
-                    <stop offset="100%" stop-color="#00C4DC" stop-opacity="0.45" />
-                  </linearGradient>
-                  <linearGradient id="wtqFlowSoft" x1="0" y1="1" x2="1" y2="0">
-                    <stop offset="0%" stop-color="#51D4E2" stop-opacity="0.06" />
-                    <stop offset="100%" stop-color="#51D4E2" stop-opacity="0.3" />
-                  </linearGradient>
-                  <radialGradient id="wtqNodeBlue" cx="34%" cy="30%" r="74%">
-                    <stop offset="0%" stop-color="#8ACBFF" />
-                    <stop offset="100%" stop-color="#126EF5" />
-                  </radialGradient>
-                  <radialGradient id="wtqNodeCyan" cx="34%" cy="30%" r="74%">
-                    <stop offset="0%" stop-color="#8CEDF8" />
-                    <stop offset="100%" stop-color="#00B6D4" />
-                  </radialGradient>
-                </defs>
-
-                <path class="flow-line flow-soft" d="M 70 280 C 190 300 265 253 350 200 S 505 124 560 106" />
-                <path class="flow-line flow-aux" d="M 115 354 C 235 354 320 314 415 250 S 552 180 618 149" />
-                <path class="flow-line flow-main" d="M 80 322 C 190 336 280 300 370 252 S 535 163 594 120" />
-                <path class="flow-tip" d="M 608 110 L 585 119 L 600 135 Z" />
-
-                <circle class="flow-node" cx="150" cy="325" r="7" fill="url(#wtqNodeCyan)" />
-                <circle class="flow-node" cx="368" cy="252" r="21" fill="url(#wtqNodeBlue)" />
-                <circle class="flow-node" cx="458" cy="204" r="11" fill="url(#wtqNodeCyan)" />
-                <circle class="flow-node" cx="546" cy="146" r="7" fill="url(#wtqNodeCyan)" />
-            </svg>
-
-            <div class="story-mini-card story-media"><t-icon name="image" /></div>
-            <div class="story-mini-card story-chart"><t-icon name="chart-bar" /></div>
-            <div class="story-mini-card story-play"><t-icon name="play-circle" /></div>
-
-            <span class="story-spark spark-one">✦</span>
-            <span class="story-spark spark-two">✦</span>
-            <span class="story-dot dot-one"></span>
-            <span class="story-dot dot-two"></span>
-            <span class="story-dot dot-three"></span>
-          </div>
         </div>
 
-        <section class="login-card" aria-labelledby="login-heading">
+        <section class="login-card" :class="{ 'has-feedback': error || loginAction || replaceNeeded, 'has-multiple-feedback': replaceNeeded }" aria-labelledby="login-heading">
           <h2 id="login-heading">欢迎登录</h2>
           <p class="login-intro">使用管理员分配的账号登录</p>
           <form class="login-form" @submit.prevent="replaceNeeded ? submitReplacementLogin() : submitLogin()">
@@ -213,34 +160,6 @@ async function login(options = {}) {
 .story-copy h1 i{position:absolute;bottom:-8px;right:3%;width:48%;height:18px;border-bottom:6px solid var(--wt-brand-underline);border-radius:50%;transform:rotate(-5deg)}
 .story-description{margin:26px 0 0;color:var(--wt-ink-muted);font-size:clamp(16px,1.3vw,21px);font-weight:500;line-height:1.6}
 
-/* 中央主视觉 */
-.story-art{position:relative;width:min(760px,100%);height:460px;margin:28px auto 0}
-.story-orbit{position:absolute;left:50%;top:50%;border-radius:50%;pointer-events:none}
-.orbit-one{width:94%;height:52%;transform:translate(-50%,-50%) rotate(-16deg);border:1.5px solid rgba(255,255,255,.78)}
-.orbit-two{width:86%;height:46%;transform:translate(-50%,-50%) rotate(14deg);border:1.5px solid rgba(0,190,220,.25)}
-
-.story-core{position:absolute;left:50%;top:50%;z-index:1;width:min(450px,62%);aspect-ratio:1/1;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.8);border-radius:50%;background:rgba(255,255,255,.72);box-shadow:0 16px 60px rgba(63,150,220,.08)}
-.story-flow{position:absolute;inset:0;z-index:2;width:100%;height:100%;overflow:visible;pointer-events:none}
-.flow-line{fill:none;stroke-linecap:round}
-.flow-main{stroke:url(#wtqFlowMain);stroke-width:17px}
-.flow-aux{stroke:url(#wtqFlowAux);stroke-width:9px}
-.flow-soft{stroke:url(#wtqFlowSoft);stroke-width:6px}
-.flow-tip{fill:#04B9DB}
-.flow-node{stroke:rgba(255,255,255,.85);stroke-width:1.5px}
-
-.story-mini-card{position:absolute;z-index:3;display:grid;place-items:center;width:92px;height:92px;border:1px solid rgba(255,255,255,.9);border-radius:var(--wt-card-radius);background:rgba(255,255,255,.82);box-shadow:var(--wt-card-shadow-soft);color:var(--wt-brand-primary);font-size:38px}
-.story-media{left:0;top:12%}
-.story-play{left:5%;bottom:9%}
-.story-chart{right:0;top:20%}
-
-.story-spark{position:absolute;z-index:2;color:rgba(120,196,255,.55);font-size:22px;line-height:1}
-.spark-one{right:9%;bottom:12%}
-.spark-two{left:2%;top:32%}
-.story-dot{position:absolute;z-index:2;border-radius:50%;background:rgba(126,201,255,.45)}
-.dot-one{left:14%;top:22%;width:9px;height:9px}
-.dot-two{right:6%;top:46%;width:7px;height:7px}
-.dot-three{left:23%;bottom:15%;width:11px;height:11px}
-
 /* 右侧登录卡 */
 .login-card{box-sizing:border-box;justify-self:end;width:min(33vw,600px);max-width:100%;min-height:650px;padding:76px 48px 40px;border:var(--wt-card-border);border-radius:var(--wt-card-radius);background:var(--wt-card-bg);box-shadow:var(--wt-card-shadow);text-align:center}
 .login-card h2{margin:0;color:var(--wt-brand-dark);font-size:38px;font-weight:700;letter-spacing:.02em}
@@ -269,7 +188,30 @@ async function login(options = {}) {
 .wave-two{bottom:-199px;height:330px;background:#FFFFFF;opacity:.45;transform:rotate(4deg)}
 .wave-three{bottom:-236px;height:300px;background:#BFE3FF;opacity:.25;transform:rotate(-2deg)}
 
-@media(max-width:1400px){.login-layout{grid-template-columns:minmax(0,1.5fr) minmax(400px,.95fr);gap:2.5%}.story-art{height:420px}}
-@media(max-width:1180px){.login-layout{grid-template-columns:minmax(0,1.35fr) minmax(370px,.95fr);gap:2%}.login-story{padding-left:0}.story-art{height:378px;margin-top:28px}.story-mini-card{width:80px;height:80px;font-size:32px}.login-card{max-width:470px;padding:44px 34px 32px}}
-@media(max-width:760px){.login-topbar{padding:19px 20px 0}.login-layout{display:flex;flex-direction:column;gap:18px;width:calc(100% - 38px);padding:14px 0 80px}.login-story{width:100%;padding-left:0}.story-copy h1{font-size:clamp(40px,10vw,66px)}.story-description{margin-top:14px;font-size:15px}.story-art{display:none}.login-card{width:100%;max-width:520px;min-height:auto;padding:34px 24px 26px}.login-card h2{font-size:29px}.login-intro{margin:6px 0 26px;font-size:15px}.login-form{gap:16px}.login-field{height:52px}.login-field input{font-size:16px}.login-button{height:54px;font-size:17px}.login-help{margin-top:26px;padding-top:20px}.login-wave{height:190px}.wave-one{bottom:-110px}.wave-two{bottom:-130px}.wave-three{bottom:-150px}}
+@media(max-width:1400px){.login-layout{grid-template-columns:minmax(0,1.5fr) minmax(400px,.95fr);gap:2.5%}}
+@media(max-width:1180px){.login-layout{grid-template-columns:minmax(0,1.35fr) minmax(370px,.95fr);gap:2%}.login-story{padding-left:0}.login-card{max-width:470px;padding:44px 34px 32px}}
+@media(max-width:760px){.login-topbar{padding:19px 20px 0}.login-layout{display:flex;flex-direction:column;gap:18px;width:calc(100% - 38px);padding:14px 0 80px}.login-story{width:100%;padding-left:0}.story-copy h1{font-size:clamp(40px,10vw,66px)}.story-description{margin-top:14px;font-size:15px}.login-card{width:100%;max-width:520px;min-height:auto;padding:34px 24px 26px}.login-card h2{font-size:29px}.login-intro{margin:6px 0 26px;font-size:15px}.login-form{gap:16px}.login-field{height:52px}.login-field input{font-size:16px}.login-button{height:54px;font-size:17px}.login-help{margin-top:26px;padding-top:20px}.login-wave{height:190px}.wave-one{bottom:-110px}.wave-two{bottom:-130px}.wave-three{bottom:-150px}}
+
+/* 桌面按已确认的视觉图落地；真实表单覆盖画稿中的表单区域，交互仍由 Vue 处理。 */
+@media(min-width:761px){
+  .login-shell{height:100vh;min-height:700px;background:#dceeff url('/login-page-reference.png') center / 100% 100% no-repeat}
+  .login-topbar{position:absolute;inset:0 0 auto;z-index:4}
+  .login-topbar :deep(.brand-logo){opacity:0}
+  .version-pill{position:absolute;top:26px;right:3.5%;height:31px;background:#e8f4ff}
+  .login-layout{position:absolute;inset:0;display:block;width:100%;margin:0;padding:0}
+  .login-story{position:absolute;left:0;top:0;width:1px;height:1px;padding:0}
+  .story-copy{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .login-wave{display:none}
+  .login-card{position:absolute;left:63.58%;top:14.67%;width:32.96%;height:69.61%;min-height:0;max-width:none;padding:0;border:0;border-radius:26px;background:#fff;box-shadow:none;backdrop-filter:none}
+  .login-card.has-feedback{height:calc(69.61% + 110px)}
+  .login-card.has-multiple-feedback{height:calc(69.61% + 260px)}
+  .login-shell:has(.login-card.has-feedback){overflow-y:auto}
+  .login-card h2{position:absolute;top:13.1%;right:0;left:0;margin:0;font-size:clamp(30px,2.4vw,46px);line-height:1.3}
+  .login-intro{position:absolute;top:23%;right:0;left:0;margin:0;font-size:clamp(15px,1.2vw,23px);line-height:1.5}
+  .login-form{position:absolute;top:35.3%;right:9.5%;left:9.5%;display:flex;gap:2.45vh}
+  .login-field{height:7.45vh;min-height:52px;padding:0 1.4vw;border-radius:12px;background:#fff;font-size:clamp(20px,1.3vw,24px)}
+  .login-field input{font-size:clamp(16px,1.25vw,22px)}
+  .login-button.primary{height:8.08vh;min-height:58px;margin-top:.4vh;font-size:clamp(18px,1.35vw,25px)}
+  .login-help{position:absolute;top:81.8%;right:9.5%;left:9.5%;margin:0;padding-top:5.5%;font-size:clamp(12px,.95vw,16px)}
+}
 </style>
