@@ -23,6 +23,33 @@ func TestOwnProfileDefaultsAndChoiceSurviveNewLogin(t *testing.T) {
 	if logged.User.Nickname != "小明" || logged.User.AvatarID != "ocean" { t.Fatalf("login user = %+v", logged.User) }
 }
 
+func TestLoginReportsDistinctInputErrorsBeforeCredentialCheck(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	if _, err := service.BootstrapAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatalf("BootstrapAdmin() error = %v", err)
+	}
+	cases := []struct {
+		name     string
+		username string
+		password string
+		want     error
+	}{
+		{"empty username", "", "a-long-initial-password", ErrMissingCredentials},
+		{"empty password", "admin", "", ErrMissingCredentials},
+		{"username over 64 bytes", strings.Repeat("u", 65), "a-long-initial-password", ErrLoginInputInvalid},
+		{"password under 6 bytes", "admin", "12345", ErrLoginInputInvalid},
+		{"password over 72 bytes", "admin", strings.Repeat("p", 73), ErrLoginInputInvalid},
+		{"in-range wrong password", "admin", "a-wrong-but-valid-password", ErrAuthenticationFailed},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := service.LoginWithOptions(testCase.username, testCase.password, LoginOptions{}); !errors.Is(err, testCase.want) {
+				t.Fatalf("LoginWithOptions(%q, %q) error = %v, want %v", testCase.username, testCase.password, err, testCase.want)
+			}
+		})
+	}
+}
+
 func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T) {
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	tokens := []string{"session-first", "session-second"}

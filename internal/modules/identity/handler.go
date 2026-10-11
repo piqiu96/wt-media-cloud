@@ -533,9 +533,15 @@ func sessionToken(c *hertzapp.RequestContext) string {
 }
 
 // loginFailureReason maps a login error to a stable, greppable token for logs.
-// It is server-side only; the HTTP response keeps the credential-neutral error.
+// Credential failures stay combined in the response ("账号或密码不正确") so the
+// API never reveals whether an account exists; only pre-store input checks are
+// reported as distinct client errors.
 func loginFailureReason(err error) string {
 	switch {
+	case errors.Is(err, identityservice.ErrMissingCredentials):
+		return "missing_credentials"
+	case errors.Is(err, identityservice.ErrLoginInputInvalid):
+		return "invalid_login_input"
 	case errors.Is(err, identityservice.ErrAuthenticationFailed):
 		return "invalid_credentials"
 	case errors.Is(err, identityservice.ErrSessionReplaceNeeded):
@@ -549,7 +555,13 @@ func loginFailureReason(err error) string {
 
 func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	switch {
-	case errors.Is(err, identityservice.ErrAuthenticationFailed), errors.Is(err, identityservice.ErrSessionInvalid):
+	case errors.Is(err, identityservice.ErrMissingCredentials):
+		api.BadRequest(c, 10005, "请输入账号和密码")
+	case errors.Is(err, identityservice.ErrLoginInputInvalid):
+		api.BadRequest(c, 10006, "账号最长 64 位，密码需为 6-72 位")
+	case errors.Is(err, identityservice.ErrAuthenticationFailed):
+		api.Unauthorized(c, 11004, "账号或密码不正确")
+	case errors.Is(err, identityservice.ErrSessionInvalid):
 		api.Unauthorized(c, 11001, "请先登录或凭证已过期")
 	case errors.Is(err, identityservice.ErrForbidden):
 		api.Forbidden(c, 11003, "没有权限执行此操作")

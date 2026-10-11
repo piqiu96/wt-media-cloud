@@ -11,6 +11,8 @@ import (
 var (
 	ErrAuthenticationFailed = errors.New("authentication failed")
 	ErrSessionInvalid       = errors.New("session is invalid")
+	ErrMissingCredentials   = errors.New("login username or password is empty")
+	ErrLoginInputInvalid    = errors.New("login username or password violates length limits")
 	ErrForbidden            = errors.New("operation is forbidden")
 	ErrInvalidInput         = errors.New("identity input is invalid")
 	ErrUsernameTaken        = errors.New("username is already in use")

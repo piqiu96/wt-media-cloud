@@ -13,6 +13,8 @@ func TestLoginFailureReasonIsGreppable(t *testing.T) {
 		err  error
 		want string
 	}{
+		{"empty username or password", identityservice.ErrMissingCredentials, "missing_credentials"},
+		{"input outside length bounds", identityservice.ErrLoginInputInvalid, "invalid_login_input"},
 		{"wrong password or unknown user", identityservice.ErrAuthenticationFailed, "invalid_credentials"},
 		{"existing active session", identityservice.ErrSessionReplaceNeeded, "session_replace_needed"},
 		{"forbidden", identityservice.ErrForbidden, "forbidden"},

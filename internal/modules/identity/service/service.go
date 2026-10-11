@@ -62,6 +62,8 @@ const (
 var (
 	ErrAuthenticationFailed = model.ErrAuthenticationFailed
 	ErrSessionInvalid       = model.ErrSessionInvalid
+	ErrMissingCredentials   = model.ErrMissingCredentials
+	ErrLoginInputInvalid    = model.ErrLoginInputInvalid
 	ErrForbidden            = model.ErrForbidden
 	ErrInvalidInput         = model.ErrInvalidInput
 	ErrUsernameTaken        = model.ErrUsernameTaken
@@ -274,7 +276,17 @@ func (s *Service) Login(username, password string) (LoginResult, error) {
 }
 
 func (s *Service) LoginWithOptions(username, password string, options LoginOptions) (LoginResult, error) {
-	user, ok, err := s.store.FindUserByUsername(strings.TrimSpace(username))
+	username = strings.TrimSpace(username)
+	// Bounds mirror account creation (prepareUser: username <= 64, password
+	// 6-72 bytes; 72 is also bcrypt's input limit), so an out-of-range input
+	// can never match and would only surface as a misleading credential error.
+	if username == "" || password == "" {
+		return LoginResult{}, ErrMissingCredentials
+	}
+	if len(username) > 64 || len(password) < 6 || len(password) > 72 {
+		return LoginResult{}, ErrLoginInputInvalid
+	}
+	user, ok, err := s.store.FindUserByUsername(username)
 	if err != nil {
 		return LoginResult{}, err
 	}
