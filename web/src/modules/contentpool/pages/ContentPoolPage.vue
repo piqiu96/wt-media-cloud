@@ -86,20 +86,7 @@ const stats = computed(() => [
   { key: 'ignored', label: '已忽略', value: rows.value.filter((row) => row.status === 'ignored').length, tone: 'neutral' },
 ])
 
-// 每一列都必须声明 width，**不许只写 minWidth**。
-//
-// 实测（从实机截图按表头左边界间距反推，DPR=2）：TDesign 内层 <table> 没有宽度
-// （实测 styleWidth=null、minWidth:0px），表格宽度完全由列声明推导，取
-// col.width ?? col.minWidth。而 minWidth 在 WebKit 的 fixed 布局下**不产生确定列宽**，
-// 这类列于是变成「剩余空间列」，可用宽度不足时全部缺口由它们承担：
-// 「内容」列实测被压到 91.5px（声明 340）、「来源」压到 100px（声明 260），
-// 而所有声明 width 的列逐列精确（平台 110 / 游戏 110 / 作者 140 / 互动 170 / 来源方式 110）。
-// 91.5px 减去单元格内边距 32 只剩 59.5，放不下 88px 封面 + 12px 间距，
-// .title-copy（min-width:0，子元素 nowrap + overflow:hidden）归零 —— 标题与平台 ID 就这样没了。
-//
-// 注意 Chrome 认 minWidth（同一份产物在无头 Chrome 里量出来是 340），所以
-// 既有的 Chrome 模拟台对这种 bug 天然失明，别拿它当判据。静态测试才是闸门。
-// 同页 resultColumns 与另外两个列表页是同一条规则，改动时一并遵守。
+// TDesign 的 fixed 表格布局在 WebKit 中需要明确 width，minWidth 不能保证内容列宽度。
 const columns = [
   { colKey: 'row-select', type: 'multiple', width: 48 },
   { colKey: 'id', title: 'ID', width: 80 },
@@ -107,9 +94,7 @@ const columns = [
   { colKey: 'platform', title: '平台', width: 110 },
   { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'author_name', title: '作者', width: 140 },
-  // 竖排后列宽只由最宽的那一项决定：实测「浏览 9,999,999」在真实字体下
-  // 需要 87px（标签 24 + gap 6 + 数值 57），加 td 左右内边距 16px = 103px。
-  // 取 120px 是给数值到 9 位（含千分位）留余量，不是拍的。
+  // 互动列为较长的带千分位数值留出宽度。
   { colKey: 'interaction', title: '互动', width: 120 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
   { colKey: 'source', title: '来源', width: 260 },
@@ -121,15 +106,7 @@ const columns = [
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
 
-// 表格横向滚动宽度由列宽推导，不再写死。
-//
-// 两个独立的理由，别混为一谈：
-// 1. 写死的 '2060px' 从未生效（TDesign 取列宽合计，实测滚动容器 scrollWidth=2378），
-//    是个「写了但不生效、且不随列宽变化」的漂移源。
-// 2. 现在每列都有确定的 width，合计才是真实地板。之前把 minWidth 也算进合计，
-//    而 fixed 布局根本不认那个下界（见 columns 上方的说明）。
-// 附带说明：这条推导**与「内容列是否被压」无关** —— 那是 minWidth 在 WebKit 下失效
-// 造成的，Chrome 里两侧读数都正常，所以这条推导改不改都看不出区别。
+// 横向滚动宽度与列宽共用一份定义，避免单独维护总宽度。
 const tableScroll = computed(() => ({
   x: `${columns.reduce((sum, col) => sum + (col.width ?? col.minWidth ?? 0), 0)}px`,
 }))
@@ -324,10 +301,7 @@ async function updateStatus(row, nextStatus, auditNote = '', reload = true) {
 
 function viewMaterial(row) {
   if (!row.material_id) return
-  materialFilter.value = String(row.material_id)
-  status.value = ''
   router.push({ path: '/material-library', query: { material_id: String(row.material_id) } })
-  load()
 }
 
 async function batchMaterialize() {
@@ -517,7 +491,7 @@ function openImageViewer(url) {
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
-            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button></div>
+            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><span v-if="!isLibrary && selectedRowKeys.length" class="selection-count">已选 {{ selectedRowKeys.length }} 项</span><t-button v-if="!isLibrary && selectedRowKeys.length" theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button></div>
           </t-space>
         </div>
         <div class="table-scroll-wrap">
@@ -555,10 +529,11 @@ function openImageViewer(url) {
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
                 <t-button v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>
-                <t-button v-if="!isLibrary && row.status !== 'ignored' && row.status !== 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>
+                <t-button v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>
                 <t-button v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>
+                <t-button v-if="!isLibrary && row.status === 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="viewMaterial(row)">素材详情</t-button>
               </t-space>
             </template>
           </t-table>
@@ -626,7 +601,7 @@ function openImageViewer(url) {
               <h4>处理结果</h4>
               <dl>
                 <div><dt>当前状态</dt><dd><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></dd></div>
-                <div><dt>关联素材</dt><dd><t-link v-if="detail.material_id" class="wt-primary-link" theme="primary" @click="viewMaterial(detail)">查看素材</t-link><span v-else>未转换</span></dd></div>
+                <div><dt>关联素材</dt><dd><t-link v-if="detail.material_id" class="wt-primary-link" theme="primary" @click="viewMaterial(detail)">素材详情</t-link><span v-else>未转换</span></dd></div>
                 <div><dt>审核备注</dt><dd>{{ detail.audit_note || '-' }}</dd></div>
                 <div><dt>失败原因</dt><dd :class="{ 'is-danger': detail.failure_reason }">{{ detail.failure_reason || '-' }}</dd></div>
               </dl>
@@ -634,7 +609,7 @@ function openImageViewer(url) {
           </div>
           <div class="detail-actions">
             <a v-if="detail.source_url" class="detail-primary-link" :href="detail.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a>
-            <t-button v-if="detail.material_id" class="wt-secondary-button" variant="outline" @click="viewMaterial(detail)">查看素材</t-button>
+            <t-button v-if="detail.material_id" class="wt-secondary-button" variant="outline" @click="viewMaterial(detail)">素材详情</t-button>
             <template v-if="!reviewMode && !isLibrary && detail.status === 'pending'">
               <t-button theme="primary" @click="materialize(detail)">转素材</t-button>
               <t-button class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'ignored')">忽略</t-button>
@@ -738,22 +713,19 @@ function openImageViewer(url) {
 .title-media { padding: 0; cursor: default; }
 .title-media img { width: 100%; height: 100%; object-fit: cover; }
 .title-media.is-clickable { cursor: zoom-in; }
-/* flex:1 让文字块确定性地吃掉封面之外的剩余宽度。
-   只写 min-width:0 时它靠 flex-basis 的隐式行为定宽，列的可用宽度一旦不足就先归零，
-   标题和平台 ID 会静默消失（minWidth-only 列被压时就是这么没的）。 */
+ /* 文字块占用封面之外的剩余宽度。 */
 .title-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 .review-mode-button.is-active { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); }
 .content-pool-card.is-reviewing { border-color: rgba(37, 99, 235, 0.36); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10); }
-/* 标题有两种渲染分支：有 source_url 时是 <a class="wt-primary-link">，否则是 <span>。
-   省略号必须同时覆盖两者——只写 span 时，有外链的行会整段自由折行，
-   把行高从声明的 56px 撑到 150px 以上。颜色分开写，避免覆盖链接自身的主题色。 */
+ /* 链接和纯文本标题都需截断，保持表格行高稳定。 */
 .title-copy > a,
 .title-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title-copy > span { color: var(--wt-text-primary); font-weight: 600; }
 .title-copy small { overflow: hidden; color: var(--wt-text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .content-pool-page :deep(.wt-resource-actions) { max-width: 360px; }
+.selection-count { color: var(--wt-text-secondary); font-size: 13px; white-space: nowrap; }
 .content-detail-drawer :deep(.t-drawer) { max-width: 1200px; }
 .detail-workspace { display: flex; flex-direction: column; gap: 18px; }
 .review-progress { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid rgba(37, 99, 235, 0.18); border-radius: 10px; background: var(--wt-info-bg); }

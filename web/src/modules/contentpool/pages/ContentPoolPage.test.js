@@ -148,19 +148,26 @@ describe('content pool page', () => {
     expect(source).not.toContain('v-if="detail.cover_url"')
   })
 
-  // 这里原先有一条「素材库只读投影」的用例，钉的是 `/material-library` 由内容池页按
-  // `route.path` 自己渲染成投影的三条字面量。**故意删除**：那个地址现在由
-  // `modules/materials/pages/MaterialLibraryPage.vue` 承担（两张路由表都已改指），
-  // 它钉的是一个不再发生的渲染。
-  //
-  // 它守的行为契约没有消失，只是搬到了实现它的地方：
-  // `MaterialLibraryPage.test.js` 钉 `?material_id=` 深链落到单条接口。
-  // 内容池自己那条「已转素材」的状态仍在，跳转也仍在 —— 下面这条把它钉住。
   it('still links a materialised content row into the material library', () => {
     expect(source).toContain('function viewMaterial(')
     expect(source).toMatch(/router\.push\(\{ path: '\/material-library', query: \{ material_id:/)
-    // 「已转素材」仍是内容池自己的状态，列定义与徽章都还认它。
     expect(source).toContain("material_created: '已转素材'")
+  })
+
+  it('converges row actions by processing status with 详情 as the single label', () => {
+    expect(source).toContain('@click="openDetail(row)">详情</t-button>')
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>`)
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>`)
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>`)
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="viewMaterial(row)">素材详情</t-button>`)
+    expect(source).not.toContain('>查看</t-button>')
+    expect(source).not.toContain('查看素材')
+  })
+
+  it('shows the selection count next to batch actions and hides both when nothing is selected', () => {
+    expect(source).toContain('已选 {{ selectedRowKeys.length }} 项')
+    const guarded = source.match(/v-if="!isLibrary && selectedRowKeys\.length"/g) || []
+    expect(guarded).toHaveLength(4)
   })
 
   it('renders a large content decision workspace instead of a CRUD field table', () => {
@@ -169,7 +176,7 @@ describe('content pool page', () => {
     expect(source).toContain('class="detail-cover"')
     expect(source).toContain('row.strategy_name')
     expect(source).toContain('row.crawl_task_name')
-    expect(source).toContain('查看素材')
+    expect(source).toContain('素材详情')
     expect(source).toContain("router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)")
     expect(source).toContain("router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)")
   })
