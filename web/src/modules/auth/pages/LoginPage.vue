@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { canUseDesktop, isDesktop } from '../../../utils.js'
@@ -17,6 +17,15 @@ const error = ref('')
 const replaceNeeded = ref(false)
 const loginAction = ref('')
 const version = ref('')
+const primaryButton = ref(null)
+
+// 桌面端登录卡是绝对定位布局，提示一出现卡片向下长高、按钮被推出视口，而滚动通道
+// 挂在 `:has()` 上用户发现不了；`nearest` 在按钮本可见时不产生任何滚动。
+watch([error, replaceNeeded], async () => {
+  if (!error.value && !replaceNeeded.value) return
+  await nextTick()
+  primaryButton.value?.scrollIntoView({ block: 'nearest' })
+})
 
 function resetReplacePrompt() {
   replaceNeeded.value = false
@@ -125,7 +134,7 @@ async function login(options = {}) {
             <t-alert v-if="error" :message="error" theme="error" />
             <t-alert v-if="replaceNeeded" message="替换的只是登录会话；任务执行由设备绑定决定，本次操作不改变设备绑定，已绑定电脑的执行不受影响。" theme="warning" />
             <t-alert v-if="loginAction" :message="loginAction" theme="info" />
-            <button type="submit" class="login-button primary" :disabled="submitting">{{ submitting ? loginAction : replaceNeeded ? '替换旧会话并登录' : '登录' }}</button>
+            <button ref="primaryButton" type="submit" class="login-button primary" :disabled="submitting">{{ submitting ? loginAction : replaceNeeded ? '替换旧会话并登录' : '登录' }}</button>
             <button v-if="replaceNeeded" type="button" class="login-button outline" :disabled="submitting" @click="resetReplacePrompt">取消</button>
           </form>
           <p class="login-help">账号由管理员创建与维护，如需开通请联系管理员。</p>
