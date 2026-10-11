@@ -163,8 +163,10 @@ func (d *Duration) UnmarshalText(value []byte) error {
 	return nil
 }
 
-// Initialize loads ./config, validates it, and atomically publishes a copy.
+// Initialize loads the release's configuration, validates it, and atomically
+// publishes a copy.
 func Initialize() error {
+	MustInitializeRuntimePaths()
 	cfg, err := Load()
 	if err != nil {
 		return err
@@ -186,15 +188,15 @@ func Get() Config {
 	return clone(current.config)
 }
 
-// Load reads the runtime configuration from ConfigDir and anchors relative
-// logger paths to LogDir, so the process does not depend on its working
-// directory. See Home for how the release root is resolved.
+// Load reads the runtime configuration from the initialized release paths and
+// anchors relative logger paths to the release log directory.
 func Load() (Config, error) {
-	cfg, err := LoadFromDir(ConfigDir())
+	paths := GetRuntimePaths()
+	cfg, err := LoadFromDir(paths.Config)
 	if err != nil {
-		return Config{}, err
+		return Config{}, fmt.Errorf("load runtime config from %q: %w", paths.Config, err)
 	}
-	resolveRelativeLoggerPaths(&cfg, LogDir())
+	resolveRelativeLoggerPaths(&cfg, paths.Logs)
 	return cfg, nil
 }
 

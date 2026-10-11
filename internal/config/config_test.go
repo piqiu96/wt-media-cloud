@@ -21,6 +21,7 @@ func TestLoadAlwaysUsesConfigDirectory(t *testing.T) {
 	writeConfigFile(t, other, "app.yaml", validAppYAMLIgnored("wrong-app"))
 	t.Setenv("WT_MEDIA_CONFIG_DIR", other)
 	t.Chdir(root)
+	initializeRuntimePathsForTest(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -314,6 +315,7 @@ func TestInitializePublishesValidatedReadOnlyConfig(t *testing.T) {
 	root := t.TempDir()
 	writeValidConfig(t, filepath.Join(root, "config"))
 	t.Chdir(root)
+	resetRuntimePathsForTest(t)
 
 	if err := Initialize(); err != nil {
 		t.Fatalf("Initialize() error = %v", err)
