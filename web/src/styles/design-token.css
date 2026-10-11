@@ -25,3 +25,39 @@
 
   --wt-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
+
+/* 品牌 Token —— 取值即官网 Landing Page（modules/public/pages/HomePage.vue）现有视觉。
+   官网与登录页共用这一组，页面里不再各写一份等价 hex。
+   HomePage 自身的十五处字面量尚未回迁到这里，属独立改动。 */
+:root {
+  --wt-brand-primary: #0877F9;
+  --wt-brand-dark: #08235E;
+  --wt-brand-cyan: #00C2D9;
+  --wt-brand-ink: #071B50;
+
+  /* 官网 Hero「跑起来」文字渐变与下方弧形流线 */
+  --wt-brand-gradient: linear-gradient(105deg, #0978ef, #00bfee 68%, #125af5);
+  --wt-brand-underline: #18CDE6;
+
+  /* 官网「立即下载」CTA 渐变，登录按钮复用同一支 */
+  --wt-brand-cta-gradient: linear-gradient(105deg, #0759f8, #00bfe5);
+
+  /* 浅蓝白品牌页面底：左近白、右略偏蓝，是一条连续渐变，不做左右两块色块 */
+  --wt-brand-surface: linear-gradient(110deg, #FFFFFF 0%, #F8FCFF 32%, #EEF8FF 65%, #DDEFFF 100%);
+
+  /* 卡片语言 */
+  --wt-card-bg: rgba(255, 255, 255, 0.96);
+  --wt-card-border: 1px solid rgba(0, 82, 217, 0.06);
+  --wt-card-radius: 24px;
+  --wt-card-shadow: 0 16px 50px rgba(45, 100, 160, 0.07);
+  --wt-card-shadow-soft: 0 8px 24px rgba(30, 100, 180, 0.06);
+
+  /* 品牌页面文字色 */
+  --wt-ink-strong: #08235E;
+  --wt-ink-muted: #48688F;
+  --wt-ink-soft: #7487A6;
+  --wt-field-border: #D9E5F4;
+  --wt-field-placeholder: #8194B4;
+  --wt-field-icon: #7B91B4;
+  --wt-divider: #E4EDF7;
+}

@@ -193,7 +193,7 @@ func assertDouyinRequest(t *testing.T, r *http.Request, path, apiKey, cookie str
 func newTransport(attempts int) *httpclient.Client {
 	instance, closer, err := httpclient.New(httpclient.Config{
 		Name:       "douyin-test",
-		Endpoint:   endpointForTest("http://127.0.0.1:18080"),
+		Endpoint:   endpointForTest("http://127.0.0.1:8188"),
 		Timeout:    httpclient.Duration{Duration: 5 * time.Second},
 		Connection: httpclient.ConnectionConfig{DialTimeout: httpclient.Duration{Duration: time.Second}},
 		Retry:      httpclient.RetryConfig{Attempts: attempts, Delay: httpclient.Duration{Duration: 0}, Policy: "fixed"},

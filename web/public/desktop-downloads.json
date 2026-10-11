@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "version": "v0.1.0",
+  "downloads": {
+    "windows-x64": {
+      "file_name": "WT-Media_v0.1.0_windows-x64-setup.exe",
+      "url": "https://github.com/piqiu96/wt-media-workspace/releases/download/v0.1.0/WT-Media_v0.1.0_windows-x64-setup.exe"
+    },
+    "macos-x64": {
+      "file_name": "WT-Media_v0.1.0_macos-x64.zip",
+      "url": "https://github.com/piqiu96/wt-media-workspace/releases/download/v0.1.0/WT-Media_v0.1.0_macos-x64.zip"
+    },
+    "macos-arm64": {
+      "file_name": "WT-Media_v0.1.0_macos-arm64.zip",
+      "url": "https://github.com/piqiu96/wt-media-workspace/releases/download/v0.1.0/WT-Media_v0.1.0_macos-arm64.zip"
+    }
+  }
+}

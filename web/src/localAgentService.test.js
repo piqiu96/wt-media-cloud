@@ -107,7 +107,7 @@ describe('local agent desktop service', () => {
       if (command === LOCAL_AGENT_COMMANDS.refreshRuntime) {
         expect(args).toEqual({
           args: {
-            cloud_base_url: 'http://127.0.0.1:18080',
+            cloud_base_url: 'http://127.0.0.1:8188',
           },
         })
         return status
@@ -117,7 +117,7 @@ describe('local agent desktop service', () => {
     const service = createLocalAgentService({ invoke })
 
     await expect(service.refreshRuntime({
-      cloudBaseUrl: 'http://127.0.0.1:18080',
+      cloudBaseUrl: 'http://127.0.0.1:8188',
     })).resolves.toEqual(expect.objectContaining({ node_id: 'node-1' }))
     expect(invoke).toHaveBeenCalledWith('local_agent_refresh_runtime', expect.any(Object))
   })

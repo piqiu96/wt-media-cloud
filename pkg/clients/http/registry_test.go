@@ -67,7 +67,7 @@ func clientConfig(name, timeout string, attempts int) httpclient.Config {
 }
 
 func testEndpoint() httpclient.EndpointConfig {
-	return httpclient.EndpointConfig{Scheme: "http", Host: "127.0.0.1", Port: 18080}
+	return httpclient.EndpointConfig{Scheme: "http", Host: "127.0.0.1", Port: 8188}
 }
 
 func parseDurationForTest(value string) time.Duration {

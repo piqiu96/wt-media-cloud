@@ -16,19 +16,18 @@ describe('Desktop Local Agent boundary', () => {
   /**
    * AC-05: the Local Agent init path carries no hard-coded Cloud address.
    *
-   * `cloudBaseUrl()` here used to answer `http://127.0.0.1:18080` from a literal
-   * (and from `window.location.origin`, which is the same address in the only
-   * case that ever matched). The address now arrives from
-   * `get_public_config`, so the literal has no reason to come back — and this
-   * is what says so permanently, rather than a grep recorded once in a change
-   * record.
+   * `cloudBaseUrl()` here used to answer a hard-coded loopback address (and
+   * `window.location.origin`, which is the same address in the only case that
+   * ever matched). The address now arrives from `get_public_config`, so no
+   * literal has a reason to come back — and this is what says so permanently,
+   * rather than a grep recorded once in a change record.
    *
-   * Three other files still carry an 18080 literal (`AccountsPage.vue`,
-   * `ProfilesPage.vue`, `shared/api/http.js`); they are registered as residual
-   * and outside this change, which is why this rule is scoped to `init.js`.
+   * The pattern names no port on purpose. Pinning the current one would go
+   * vacuous the next time the Cloud port moves, which is the failure this rule
+   * exists to prevent.
    */
   it('carries no hard-coded Cloud address', () => {
-    expect(source).not.toMatch(/18080/)
+    expect(source).not.toMatch(/127\.0\.0\.1:\d+|localhost:\d+/)
   })
 
   /**
@@ -39,10 +38,9 @@ describe('Desktop Local Agent boundary', () => {
    * show, whether the Agent was up or not. It goes through the Local Agent
    * service now, and this is what keeps it there.
    *
-   * Scoped to these two files on purpose: `AccountsPage.vue`,
-   * `ProfilesPage.vue` and `shared/api/http.js` still carry the same shape and
-   * are registered as residual (they are outside this change's scope), so a
-   * whole-tree rule would fail on them today and have to be deleted to pass.
+   * Scoped to this one page: it is the surface that was breaking it. A
+   * tree-wide version needs its own file list, because the tests in this
+   * directory spell out loopback addresses themselves.
    */
   it('does not let the local-logs page reach the Agent port itself', () => {
     const page = read('./apps/desktop/features/local-logs/LocalLogsPage.vue')
