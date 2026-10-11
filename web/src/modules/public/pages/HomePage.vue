@@ -126,7 +126,7 @@ onUnmounted(() => {
           <span><t-icon name="cloud" />本地与云端协同</span>
         </div>
       </div>
-      <div class="hero-art" aria-hidden="true"><img src="/home-landing-reference.png" alt="" /></div>
+      <div class="hero-art" aria-hidden="true"><img src="/images/home/hero.png" alt="" /></div>
     </section>
 
     <section id="product" class="product-section" aria-labelledby="product-heading">
