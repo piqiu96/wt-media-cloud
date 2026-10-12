@@ -15,6 +15,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/ffmpeg"
+	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 )
@@ -71,7 +72,14 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("compose verified: %s duration=%dms\n", output.Path, output.DurationMS)
+	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
+		return err
+	}
+	defer storage.Close()
+	if err := compose.VerifyUpload(ctx, storage.Get(), cfg.Storage.ObjectStorage.PresignTTL.Duration, output.Path, filepath.Base(runDir.Path())); err != nil {
+		return err
+	}
+	fmt.Printf("compose verified: duration=%dms; object storage readback sha256 matched and temporary key removed\n", output.DurationMS)
 	return nil
 }
 
