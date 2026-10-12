@@ -83,13 +83,10 @@ describe('cloud and desktop serve the same pages', () => {
  * （页面内用 `route.path` 判断自己该渲染成素材库），`/my-material` 指向
  * `ComingSoon.vue`。改动若只落在一端，另一端会安静地继续显示旧东西。
  */
-describe('the material and compose strategy pages are real pages on both ends', () => {
+describe('the material pages are real pages on both ends', () => {
   for (const [name, loader] of [
     ['material-library', 'modules/materials/pages/MaterialLibraryPage.vue'],
     ['my-material', 'modules/materials/pages/MyMaterialsPage.vue'],
-    // 合成策略原是两端的 ComingSoon 占位（CHG-20261012-079 T-03）；只换一端的话，
-    // 另一端的运营会继续看到「敬请期待」。
-    ['compose-strategy', 'modules/compose/pages/ComposeStrategyPage.vue'],
   ]) {
     it(`${name} points at ${loader} in both tables`, () => {
       for (const [end, table] of [['cloud', cloudByPath], ['desktop', desktopByPath]]) {
@@ -100,6 +97,12 @@ describe('the material and compose strategy pages are real pages on both ends', 
         expect(source, `${end} ${name}`).not.toContain('ContentPoolPage.vue')
       }
     })
+  }
+})
+
+it('keeps compose strategy unavailable on both ends until a template can execute', () => {
+  for (const [end, table] of [['cloud', cloudByPath], ['desktop', desktopByPath]]) {
+    expect(loaderSource(table.get('compose-strategy')), end).toContain('ComingSoon.vue')
   }
 })
 
