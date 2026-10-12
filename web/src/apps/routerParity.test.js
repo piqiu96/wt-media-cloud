@@ -100,9 +100,18 @@ describe('the material pages are real pages on both ends', () => {
   }
 })
 
-it('keeps compose strategy unavailable on both ends until a template can execute', () => {
+// CHG079 把占位守卫钉在这里，条件是「模板还不能执行」；CHG080 用真实 FFmpeg 验证了
+// `basic_cut` v1，CHG081 的策略页因此翻掉这个占位。与上面素材库两条同型：钉住**已经被
+// 替换掉**，防止只改一端或哪天退回占位页。
+describe('the compose strategy page is a real page on both ends', () => {
+  const loader = 'modules/compose/pages/ComposeStrategyPage.vue'
   for (const [end, table] of [['cloud', cloudByPath], ['desktop', desktopByPath]]) {
-    expect(loaderSource(table.get('compose-strategy')), end).toContain('ComingSoon.vue')
+    it(`${end} compose-strategy points at ${loader}`, () => {
+      const source = loaderSource(table.get('compose-strategy'))
+      expect(source, end).toBeTruthy()
+      expect(source, end).toContain(loader)
+      expect(source, end).not.toContain('ComingSoon.vue')
+    })
   }
 })
 
