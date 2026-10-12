@@ -31,6 +31,13 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 		{consts.MethodGet, "/api/v1/my-materials"},
 		{consts.MethodDelete, "/api/v1/material-usages/5"},
 		{consts.MethodPost, "/api/v1/material-usages/5/restore"},
+		{consts.MethodGet, "/api/v1/compose-templates"},
+		{consts.MethodGet, "/api/v1/compose-strategies"},
+		{consts.MethodPost, "/api/v1/compose-strategies"},
+		{consts.MethodGet, "/api/v1/compose-strategies/5"},
+		{consts.MethodPut, "/api/v1/compose-strategies/5"},
+		{consts.MethodPost, "/api/v1/compose-strategies/5/copy"},
+		{consts.MethodGet, "/api/v1/compose-strategies/5/versions"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {

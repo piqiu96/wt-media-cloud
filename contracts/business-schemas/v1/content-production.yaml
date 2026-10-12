@@ -1,26 +1,54 @@
 schema_version: 1
-revision: "2026.10.01.2"
+revision: "2026.10.12.1"
 
-# 本文件描述 Cloud **实际返回**的 body，不是它打算返回什么。
-#
-# 原先这份文件是按 `change.md` §3.1 的散文写的（「对象存储引用、文件大小、Hash、媒体
-# 摘要及最后错误」），而实现按数据库列名写（`video_size_bytes`、`video_sha256`、
-# `video_prepared_at`）—— 同一批事实被起了两套名字，且**没有任何测试把两边钉在一起**，
-# 于是漂移一直没有声音。CHG-20260924-061 T-05 开工前逐字段核对时发现。
-#
-# 方向是**回写基线**而不是回退实现：实现已提交、已有测试，且 `video_*` 与库列同名
-# （改名会让同一件事在栈里多一层翻译）；本文件因此改为描述线上形态，并在
-# `internal/modules/production/wire_test.go` 补上那份缺失的量具 —— 根因是缺量具，不是缺一次校对。
-#
-# 两处前端必须知道的区别：
-# 1. **body 里没有 `null`**：可选属性在未知时是**整个键不出现**（Go 的 `omitempty`），
-#    不是 `null`。所以行里读出来是 `undefined`；`row.author_name || '-'` 一样的写法，
-#    但「这个键在不在」的判断不一样。别把 `nullable` 写成真。
-# 2. `object_key` **不在 body 里**（见下方 `forbidden_properties`）：存储引用只存不返回。
-#    原先本文件把它列为一条属性，而实现一直是 `json:"-"`。浏览器拿着一个内部对象引用
-#    做不了任何事，却会把存储布局（前缀、内容寻址的键形）变成一个新的对外面。
+# 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
 schemas:
+  ComposeTemplate:
+    type: object
+    required: [key, version, name, video_ratios, allowed_overrides]
+    properties:
+      key: {type: string, enum: [basic_cut]}
+      version: {type: string, enum: ['1.0']}
+      name: {type: string}
+      video_ratios: {type: array, items: {type: string, enum: ['16:9', '9:16']}}
+      allowed_overrides: {type: array, items: {type: string, enum: [video_ratio]}}
+  ComposeStrategyParameters:
+    type: object
+    required: [video_ratio, subtitle, bgm, outro]
+    properties:
+      video_ratio: {type: string, enum: ['16:9', '9:16']}
+      subtitle: {type: boolean, enum: [false]}
+      bgm: {type: boolean, enum: [false]}
+      outro: {type: boolean, enum: [false]}
+  ComposeStrategy:
+    type: object
+    required: [id, team_id, game_id, name, content_type, template_key, template_version, parameters, allowed_overrides, status, current_version, created_by, updated_by, created_at, updated_at]
+    properties:
+      id: {type: integer, format: int64}
+      team_id: {type: integer, format: int64}
+      game_id: {type: string}
+      name: {type: string}
+      content_type: {type: string}
+      template_key: {type: string}
+      template_version: {type: string}
+      parameters: {$ref: '#/schemas/ComposeStrategyParameters'}
+      allowed_overrides: {type: array, items: {type: string}}
+      status: {type: string, enum: [active, inactive]}
+      current_version: {type: integer, minimum: 1}
+      created_by: {type: integer, format: int64}
+      updated_by: {type: integer, format: int64}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
+  ComposeStrategyVersion:
+    type: object
+    required: [strategy_id, version, snapshot, created_by, created_at]
+    properties:
+      strategy_id: {type: integer, format: int64}
+      version: {type: integer, minimum: 1}
+      snapshot: {$ref: '#/schemas/ComposeStrategy'}
+      created_by: {type: integer, format: int64}
+      created_at: {type: string, format: date-time}
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。

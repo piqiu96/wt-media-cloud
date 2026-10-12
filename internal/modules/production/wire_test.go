@@ -14,19 +14,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 )
 
-// The bodies this package serves are pinned to `contracts/business-schemas/v1/content-production.yaml`.
-//
-// This file is the instrument that was missing. The schema and `model.Material` were
-// written from two different sources — the schema from `change.md` §3.1's prose, the
-// struct from the table's column names — and gave the same five facts two sets of
-// names (`file_size_bytes`/`sha256` versus `video_size_bytes`/`video_sha256`). Nothing
-// compared them, so the two were free to disagree and did. The comparison below is the
-// point, not the names it currently happens to accept: a rename on either side has to
-// be a deliberate, visible act.
-//
-// The frontend is written against the contract file, not against this Go type. So the
-// key sets are read out of the contract here rather than repeated, exactly as
-// `filetransfer/dto` does for the transfer bodies.
+// Response bodies must match the Cloud-owned business schema consumed by both frontends.
 
 func readContentProductionSchema(t *testing.T) map[string]struct {
 	Required            []string       `yaml:"required"`
@@ -265,6 +253,27 @@ func TestVideoLinkBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 	}
 	if got := marshalledKeys(t, VideoLink{URL: "https://example.invalid/wt-media/materials/42/x.mp4"}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("a video link marshals to %v, want %v", got, want)
+	}
+}
+
+func TestComposeStrategyBodiesMatchContract(t *testing.T) {
+	schemas := readContentProductionSchema(t)
+	for _, tc := range []struct {
+		name string
+		body any
+	}{
+		{"ComposeTemplate", model.StrategyTemplates()[0]},
+		{"ComposeStrategyParameters", model.StrategyParameters{VideoRatio: "16:9"}},
+		{"ComposeStrategy", model.ComposeStrategy{}},
+		{"ComposeStrategyVersion", model.ComposeStrategyVersion{}},
+	} {
+		schema, ok := schemas[tc.name]
+		if !ok {
+			t.Fatalf("missing %s schema", tc.name)
+		}
+		if got, want := marshalledKeys(t, tc.body), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s keys = %v, contract = %v", tc.name, got, want)
+		}
 	}
 }
 
