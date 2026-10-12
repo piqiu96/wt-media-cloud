@@ -41,6 +41,7 @@ const (
 	composeErrInputInvalid        = "input_invalid"
 	composeErrExecutionFailed     = "execution_failed"
 	composeErrStorageError        = "storage_error"
+	composeErrTaskTimeout         = "task_timeout"
 )
 
 // Compose stage/progress boundaries (change.md §7: stage enum, progress at
@@ -71,8 +72,10 @@ type composeTaskLifecycle interface {
 
 // EnsureInputPrepared asks the transfer domain to start a cloud-side input
 // preparation for a material whose source is not ready yet. It is injectable
-// because the file_transfer_task boundary (spec §4.4) lives in another module.
-type EnsureInputPrepared func(ctx context.Context, materialID int64) error
+// because the file_transfer_task boundary (spec §4.4) lives in another module,
+// and it sees the task because the preparation is requested in the task
+// creator's name — the transfer row's actor comes from it.
+type EnsureInputPrepared func(ctx context.Context, requestor model.ComposeTask, materialID int64) error
 
 // ComposeExecutorDeps carries the collaborators of one attempt. Everything is
 // an interface or a function so the unit tests substitute memory fakes.
@@ -111,8 +114,17 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	}
 	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath})
 	if err != nil {
-		// An FFmpeg or probe failure means the input or the plan is wrong —
-		// spec §5.5 lists it as business failure, never auto-retried.
+		// A run the worker terminated speaks with its context, not with
+		// FFmpeg's last words: a cancel request is a controlled stop, a spent
+		// deadline is transient (the plan was fine, the machine was slow), and
+		// anything else is FFmpeg or probe failing on the input or the plan —
+		// spec §5.5 business failure, never auto-retried.
+		if cancelRequested(deps.Tasks, task.ID) {
+			return ComposeAttemptCancelled
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return transientFailure(deps, task, nodeID, composeErrTaskTimeout, err.Error())
+		}
 		return failTerminal(deps.Tasks, task.ID, nodeID, composeErrExecutionFailed, err.Error())
 	}
 	if cancelRequested(deps.Tasks, task.ID) {
@@ -183,7 +195,7 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 	}
 	if material.VideoStatus != model.VideoReady || material.SourceObjectKey == "" {
 		if deps.EnsureInputPrepared != nil {
-			if err := deps.EnsureInputPrepared(ctx, task.MaterialID); err != nil {
+			if err := deps.EnsureInputPrepared(ctx, task, task.MaterialID); err != nil {
 				return "", transientFailure(deps, task, nodeID, composeErrStorageError, "request input preparation: "+err.Error())
 			}
 		}

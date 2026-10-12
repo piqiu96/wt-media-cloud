@@ -172,6 +172,19 @@ func (r *runnerStub) Run(_ context.Context, runDir *compose.RunDir, request comp
 	return compose.Output{Path: path, DurationMS: 900}, nil
 }
 
+// killedRunner stands in for an FFmpeg process the worker terminated: it runs
+// until the context ends, then reports the context error, which is what the
+// real runner does when the process dies with its context.
+type killedRunner struct{ started chan struct{} }
+
+func (k killedRunner) Run(ctx context.Context, _ *compose.RunDir, _ compose.Request) (compose.Output, error) {
+	if k.started != nil {
+		close(k.started)
+	}
+	<-ctx.Done()
+	return compose.Output{}, ctx.Err()
+}
+
 func attemptFixture(t *testing.T) (ComposeExecutorDeps, *lifecycleFake, *storeFake, *runnerStub, model.ComposeTask, *compose.RunDir) {
 	t.Helper()
 	registry, err := executor.NewRegistry(executor.BasicCutV1())
@@ -260,9 +273,11 @@ func TestAttemptWaitsWhenSourceNotReady(t *testing.T) {
 	deps.Materials = materialsFake{byID: map[int64]model.Material{
 		42: {ID: 42, VideoStatus: model.VideoNotDownloaded},
 	}}
+	var ensureTasks []model.ComposeTask
 	ensure := []int64{}
-	deps.EnsureInputPrepared = func(_ context.Context, materialID int64) error {
+	deps.EnsureInputPrepared = func(_ context.Context, requestor model.ComposeTask, materialID int64) error {
 		ensure = append(ensure, materialID)
+		ensureTasks = append(ensureTasks, requestor)
 		return nil
 	}
 	outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir)
@@ -271,6 +286,9 @@ func TestAttemptWaitsWhenSourceNotReady(t *testing.T) {
 	}
 	if len(ensure) != 1 || ensure[0] != 42 {
 		t.Fatalf("ensure=%v", ensure)
+	}
+	if len(ensureTasks) != 1 || ensureTasks[0].ID != 77 || ensureTasks[0].CreatedBy != 11 {
+		t.Fatalf("the hook must see the task so preparation can be requested in its name: %+v", ensureTasks)
 	}
 	if !strings.Contains(strings.Join(lifecycle.progress, ","), "waiting_input:20") {
 		t.Fatalf("progress=%v", lifecycle.progress)
@@ -404,5 +422,50 @@ func TestAttemptUploadRejectsTamperedReadback(t *testing.T) {
 	}
 	if lifecycle.committed != nil {
 		t.Fatal("unverified bytes must not commit")
+	}
+}
+
+// M4-C5 T-04: a run the worker terminated (cancel request or task timeout)
+// must be classified by why the context died, not by FFmpeg's last words.
+
+func TestAttemptClassifiesTerminatedRunAsCancelledWhenRequested(t *testing.T) {
+	deps, _, _, _, task, runDir := attemptFixture(t)
+	// Find #1 is the pre-cut cancel check (no request yet); Find #2 happens
+	// after the runner died and must see the request that stopped the process.
+	killed := &lifecycleFake{progressOK: true, releaseOK: true, failOK: true, find: []model.ComposeTask{{CancelRequested: false}, {CancelRequested: true}}}
+	deps.Tasks = killed
+	deps.Runner = killedRunner{started: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan ComposeAttemptOutcome, 1)
+	go func() {
+		done <- RunComposeAttempt(ctx, deps, task, 9, runDir)
+	}()
+	select {
+	case <-deps.Runner.(killedRunner).started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner never started")
+	}
+	cancel()
+	if outcome := <-done; outcome != ComposeAttemptCancelled {
+		t.Fatalf("outcome=%s", outcome)
+	}
+	if len(killed.failed) != 0 || len(killed.released) != 0 || killed.committed != nil {
+		t.Fatalf("a cancelled termination is a controlled stop, not a failure: failed=%v released=%v", killed.failed, killed.released)
+	}
+}
+
+func TestAttemptClassifiesTerminatedRunAsTransientTimeout(t *testing.T) {
+	deps, lifecycle, _, _, task, runDir := attemptFixture(t)
+	deps.Runner = killedRunner{started: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if outcome := RunComposeAttempt(ctx, deps, task, 9, runDir); outcome != ComposeAttemptRetry {
+		t.Fatalf("outcome=%s", outcome)
+	}
+	if len(lifecycle.released) != 1 || !strings.HasPrefix(lifecycle.released[0], composeErrTaskTimeout+"|") {
+		t.Fatalf("a timed-out task is transient and requeued: released=%v", lifecycle.released)
+	}
+	if lifecycle.committed != nil || len(lifecycle.failed) != 0 {
+		t.Fatalf("no commit and no business failure on a timeout: committed=%v failed=%v", lifecycle.committed, lifecycle.failed)
 	}
 }

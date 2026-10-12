@@ -327,6 +327,72 @@ func TestLoadFromDirRequiresComposeWorkerConfig(t *testing.T) {
 	}
 }
 
+// M4-C5 T-04: the runtime settings the compose worker loop runs on. LoadFromDir
+// must read every knob, and a value that would make the loop misbehave — an
+// unbounded worker pool, a heartbeat as long as the lease it must beat — must
+// refuse startup instead of degrading (spec §5.2).
+func TestLoadFromDirReadsComposeWorkerRuntimeSettings(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+
+	cfg, err := LoadFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDir() error = %v", err)
+	}
+	worker := cfg.Compose.Worker
+	if worker.NodeID != 1 {
+		t.Fatalf("NodeID = %d, want 1", worker.NodeID)
+	}
+	if worker.Concurrency != 2 {
+		t.Fatalf("Concurrency = %d, want 2", worker.Concurrency)
+	}
+	for name, got := range map[string]time.Duration{
+		"lease":        worker.Lease.Duration,
+		"heartbeat":    worker.HeartbeatInterval.Duration,
+		"task_timeout": worker.TaskTimeout.Duration,
+		"poll":         worker.PollInterval.Duration,
+		"recovery":     worker.RecoveryInterval.Duration,
+	} {
+		if got <= 0 {
+			t.Fatalf("%s = %v, want a positive duration", name, got)
+		}
+	}
+	if worker.Lease.Duration != 5*time.Minute {
+		t.Fatalf("Lease = %v, want 5m", worker.Lease.Duration)
+	}
+}
+
+func TestLoadFromDirRefusesInvalidComposeWorkerSettings(t *testing.T) {
+	cases := []struct {
+		name  string
+		toml  string
+		fails string
+	}{
+		{"missing node id", "node_id = 0\n", "node_id"},
+		{"unbounded concurrency", "concurrency = 0\n", "concurrency"},
+		{"no lease", "lease = \"0s\"\n", "lease"},
+		{"heartbeat not shorter than the lease", "heartbeat_interval = \"5m\"\n", "heartbeat_interval"},
+		{"no task timeout", "task_timeout = \"0s\"\n", "task_timeout"},
+		{"no poll interval", "poll_interval = \"0s\"\n", "poll_interval"},
+		{"no recovery interval", "recovery_interval = \"0s\"\n", "recovery_interval"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeValidConfig(t, dir)
+			writeConfigFile(t, dir, "scheduler/compose.toml", validComposeWorkerTOML()+testCase.toml)
+
+			_, err := LoadFromDir(dir)
+			if err == nil {
+				t.Fatalf("LoadFromDir() = nil error, want a failure for %s", testCase.name)
+			}
+			if !strings.Contains(err.Error(), testCase.fails) {
+				t.Fatalf("LoadFromDir() error = %v, want it to name %s", err, testCase.fails)
+			}
+		})
+	}
+}
+
 // Relative tool paths and the compose workspace anchor to the Cloud home the
 // same way logger paths do, so the tracked tree never embeds a user path and
 // the release tree can say "bin/ffmpeg".
@@ -334,7 +400,7 @@ func TestLoadAnchorsRelativeToolPathsAndWorkspaceToHome(t *testing.T) {
 	root := t.TempDir()
 	writeValidConfig(t, filepath.Join(root, "config"))
 	writeConfigFile(t, filepath.Join(root, "config"), "media/ffmpeg.toml", "ffmpeg_path = \"bin/ffmpeg\"\nffprobe_path = \"bin/ffprobe\"\nversion = \"8.1.2\"\nrequired_encoders = [\"libx264\", \"aac\"]\n")
-	writeConfigFile(t, filepath.Join(root, "config"), "scheduler/compose.toml", "workspace_root = \".compose\"\n")
+	writeConfigFile(t, filepath.Join(root, "config"), "scheduler/compose.toml", strings.ReplaceAll(validComposeWorkerTOML(), "compose-workspace", ".compose"))
 	t.Setenv("WT_MEDIA_CONFIG_DIR", filepath.Join(root, "config"))
 	t.Chdir(root)
 	initializeRuntimePathsForTest(t)
@@ -537,9 +603,22 @@ func writeValidConfig(t *testing.T, root string) {
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
 	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
-	writeConfigFile(t, root, "scheduler/compose.toml", "workspace_root = \"compose-workspace\"\n")
+	writeConfigFile(t, root, "scheduler/compose.toml", validComposeWorkerTOML())
 	writeConfigFile(t, root, "media/ffmpeg.toml", "ffmpeg_path = \"/opt/homebrew/bin/ffmpeg\"\nffprobe_path = \"/opt/homebrew/bin/ffprobe\"\nversion = \"8.1.2\"\nrequired_encoders = [\"libx264\", \"aac\"]\n")
 	writeConfigFile(t, root, "storage/object_storage.toml", validObjectStorageTOML())
+}
+
+// validComposeWorkerTOML gives every §5.2 knob a value: a config tree missing
+// one must refuse to start the worker, so the fixture cannot omit them either.
+func validComposeWorkerTOML() string {
+	return "workspace_root = \"compose-workspace\"\n" +
+		"node_id = 1\n" +
+		"concurrency = 2\n" +
+		"lease = \"5m\"\n" +
+		"heartbeat_interval = \"30s\"\n" +
+		"task_timeout = \"30m\"\n" +
+		"poll_interval = \"2s\"\n" +
+		"recovery_interval = \"30s\"\n"
 }
 
 // validObjectStorageTOML carries no credential: that file is optional, and the

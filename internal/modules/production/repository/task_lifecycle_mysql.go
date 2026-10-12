@@ -203,6 +203,36 @@ func failComposeTask(db *gorm.DB, taskID, nodeID int64, errorCode, message strin
 	return result.RowsAffected == 1, nil
 }
 
+// RequeueExpiredComposeLease takes a dead worker's row back: the UPDATE only
+// lands when the lease has already lapsed under the previous node, so a live
+// worker's row — or one already taken over — cannot be touched by the scan.
+// attempt_count is left alone; the next claim re-reads the cap.
+func (ComposeTaskStore) RequeueExpiredComposeLease(taskID, previousNodeID int64, errorCode, message string) (bool, error) {
+	return requeueExpiredComposeLease(database.DB(), taskID, previousNodeID, errorCode, message, time.Now())
+}
+
+func requeueExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, errorCode, message string, now time.Time) (bool, error) {
+	result := db.Exec(`UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, stage = '', error_code = ?, error_message = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running' AND lease_expires_at < ?`, errorCode, message, now, taskID, previousNodeID, now)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// FailExpiredComposeLease terminalizes a dead worker's row whose attempt
+// budget is spent, under the same lapsed-lease guard as the requeue.
+func (ComposeTaskStore) FailExpiredComposeLease(taskID, previousNodeID int64, errorCode, message string) (bool, error) {
+	return failExpiredComposeLease(database.DB(), taskID, previousNodeID, errorCode, message, time.Now())
+}
+
+func failExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, errorCode, message string, now time.Time) (bool, error) {
+	result := db.Exec(`UPDATE compose_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running' AND lease_expires_at < ?`, errorCode, message, now, now, taskID, previousNodeID, now)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 // FindExpiredComposeLeases lists running tasks whose lease has lapsed — the
 // recovery scan's only input (spec §5.3). It reads; it never mutates.
 func (ComposeTaskStore) FindExpiredComposeLeases() ([]model.ComposeTask, error) {

@@ -162,6 +162,16 @@ type ComposeConfig struct {
 
 type ComposeWorkerConfig struct {
 	WorkspaceRoot string `toml:"workspace_root"`
+	// NodeID names this worker in compose_tasks.claimed_node_id — the value
+	// every conditional lifecycle write is keyed by. A deployment runs one
+	// compose worker, so a stable configured number is the identity.
+	NodeID            int64    `toml:"node_id"`
+	Concurrency       int      `toml:"concurrency"`
+	Lease             Duration `toml:"lease"`
+	HeartbeatInterval Duration `toml:"heartbeat_interval"`
+	TaskTimeout       Duration `toml:"task_timeout"`
+	PollInterval      Duration `toml:"poll_interval"`
+	RecoveryInterval  Duration `toml:"recovery_interval"`
 }
 
 type AgentCredentialConfig struct {
@@ -414,9 +424,34 @@ func validateFFmpegTools(tools FFmpegConfig) error {
 	return nil
 }
 
+// validateComposeWorker refuses any setting whose absence would make the loop
+// degrade instead of run: an unbounded worker pool, a heartbeat that cannot
+// beat the lease it renews, a task without a timeout. Spec §5.2: a config
+// missing or illegal values must stop the process at startup.
 func validateComposeWorker(worker ComposeWorkerConfig) error {
 	if strings.TrimSpace(worker.WorkspaceRoot) == "" {
 		return errors.New("scheduler.compose.workspace_root is required")
+	}
+	if worker.NodeID <= 0 {
+		return errors.New("scheduler.compose.node_id must be a positive number")
+	}
+	if worker.Concurrency <= 0 {
+		return errors.New("scheduler.compose.concurrency must be greater than zero")
+	}
+	if worker.Lease.Duration <= 0 {
+		return errors.New("scheduler.compose.lease must be greater than zero")
+	}
+	if worker.HeartbeatInterval.Duration <= 0 || worker.HeartbeatInterval.Duration >= worker.Lease.Duration {
+		return errors.New("scheduler.compose.heartbeat_interval must be positive and shorter than lease")
+	}
+	if worker.TaskTimeout.Duration <= 0 {
+		return errors.New("scheduler.compose.task_timeout must be greater than zero")
+	}
+	if worker.PollInterval.Duration <= 0 {
+		return errors.New("scheduler.compose.poll_interval must be greater than zero")
+	}
+	if worker.RecoveryInterval.Duration <= 0 {
+		return errors.New("scheduler.compose.recovery_interval must be greater than zero")
 	}
 	return nil
 }

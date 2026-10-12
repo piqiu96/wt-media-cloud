@@ -191,3 +191,37 @@ func TestFindExpiredComposeLeasesReturnsOnlyLapsedRunningRows(t *testing.T) {
 	}
 	assertExpectations(t, mock)
 }
+
+// M4-C5 T-04: the recovery scan's writes. A reaper may only touch a row whose
+// lease has already lapsed under the dead node — a live worker's row is untouchable.
+
+func TestRequeueExpiredComposeLeaseTakesBackTheDeadWorkersRow(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 11, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
+		WithArgs("lease_expired", "worker lease expired", now, int64(77), int64(9), now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	ok, err := requeueExpiredComposeLease(db, 77, 9, "lease_expired", "worker lease expired", now)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").WillReturnResult(sqlmock.NewResult(0, 0))
+	ok, err = requeueExpiredComposeLease(db, 78, 9, "lease_expired", "worker lease expired", now)
+	if err != nil || ok {
+		t.Fatalf("a row without a lapsed lease must not be reaped: ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestFailExpiredComposeLeaseTerminalizesTheDeadWorkersRow(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 12, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'failed'").
+		WithArgs("lease_expired", "attempts exhausted", now, now, int64(77), int64(9), now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	ok, err := failExpiredComposeLease(db, 77, 9, "lease_expired", "attempts exhausted", now)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
