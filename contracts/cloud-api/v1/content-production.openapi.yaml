@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.13.1
+  version: 2026.10.13.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -88,6 +88,63 @@ paths:
         '200': {description: Strategy with updated status.}
         '403': {description: Actor cannot manage this strategy.}
         '404': {description: Strategy absent or outside the actor's scope.}
+  /api/v1/compose-tasks:
+    post:
+      operationId: createComposeTasks
+      summary: Create one queued compose task per material from an active strategy binding.
+      description: >-
+        One command, one task per item, no shared batch row (PRD §5.4.4/§5.6.5).
+        Each item carries a client-generated request_key; a key the server has
+        already stored answers the existing task instead of creating a second
+        one, so a retried submission is safe. A failed item never stops the
+        others — the response splits created from failed per item. The task row
+        freezes strategy_id, template_code, template_version and the merged,
+        schema-validated config_snapshot at creation; later strategy edits and
+        template versions never reach it (ADR-0021).
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateComposeTasks'}
+      responses:
+        '200': {description: '{created: [ComposeTask], failed: [{material_id, request_key, errcode, error, message}]}'}
+        '400': {description: Command body invalid (named compose_task_invalid).}
+        '403': {description: Strategy or a material is outside the actor's scope (named compose_task_forbidden).}
+        '404': {description: Strategy absent or outside the actor's scope (named compose_task_not_found).}
+        '409': {description: The strategy's bound template version is unavailable (named compose_template_unavailable).}
+    get:
+      operationId: listComposeTasks
+      summary: List compose tasks visible in the current user's scope.
+      security: [{sessionCookie: []}]
+      responses:
+        '200': {description: '[ComposeTask] — newest first, optional status and strategy filters.'}
+  /api/v1/compose-tasks/{task_id}:
+    get:
+      operationId: getComposeTask
+      summary: Read one compose task with its snapshot and execution projection.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: ComposeTask.}
+        '403': {description: Task is outside the actor's scope.}
+        '404': {description: Task absent or outside the actor's scope.}
+  /api/v1/compose-tasks/{task_id}/cancel:
+    post:
+      operationId: cancelComposeTask
+      summary: Cancel a compose task that has not started executing.
+      description: >-
+        M4-C3 cancels pending tasks only — the row flips to cancelled in one
+        write and no worker has claimed it, so there is no process to stop.
+        Cancelling a running task arrives with M4-C5; until then a non-pending
+        task answers 409 rather than pretending.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: ComposeTask with status cancelled.}
+        '403': {description: Task is outside the actor's scope.}
+        '404': {description: Task absent or outside the actor's scope.}
+        '409': {description: Task is not pending (named compose_task_not_cancellable).}
   /api/v1/materials:
     get:
       operationId: listMaterials
@@ -251,9 +308,57 @@ components:
       required: [status]
       properties:
         status: {type: string, enum: [active, inactive]}
+    CreateComposeTasks:
+      type: object
+      additionalProperties: false
+      required: [strategy_id, items]
+      properties:
+        strategy_id: {type: integer, format: int64}
+        config_override:
+          type: object
+          description: >-
+            Optional per-command parameter overrides, merged over the strategy
+            config and validated against the bound template version's schema;
+            the merge, not the override alone, is what the snapshot stores.
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {$ref: '#/components/schemas/CreateComposeTaskItem'}
+    CreateComposeTaskItem:
+      type: object
+      additionalProperties: false
+      required: [material_id, request_key]
+      properties:
+        material_id: {type: integer, format: int64}
+        request_key: {type: string, minLength: 8, maxLength: 64, description: Client-generated idempotency key; globally unique once stored.}
+    ComposeTask:
+      type: object
+      required: [id, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
+      properties:
+        id: {type: integer, format: int64}
+        team_id: {type: integer, format: int64}
+        game_id: {type: string}
+        trigger_type: {type: string, enum: [manual, scheduled]}
+        material_id: {type: integer, format: int64}
+        material_usage_id: {type: integer, format: int64}
+        compose_strategy_id: {type: integer, format: int64}
+        template_code: {type: string}
+        template_version: {type: integer, minimum: 1}
+        config_snapshot: {type: object}
+        status: {type: string, enum: [pending, running, success, failed, cancelled]}
+        stage: {type: string, description: Execution phase projection; a pending task reads 等待源素材, never a fabricated later phase.}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        error_code: {type: string}
+        error_message: {type: string}
+        attempt_count: {type: integer, minimum: 0}
+        created_by: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:
     MaterialID: {in: path, name: material_id, required: true, schema: {type: integer, format: int64}}
     UsageID: {in: path, name: usage_id, required: true, schema: {type: integer, format: int64}}
     StrategyID: {in: path, name: strategy_id, required: true, schema: {type: integer, format: int64}}
+    TaskID: {in: path, name: task_id, required: true, schema: {type: integer, format: int64}}
