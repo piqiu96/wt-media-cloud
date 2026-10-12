@@ -27,6 +27,10 @@ type Plan interface {
 	// FFmpegArguments is the whole command for the run: a fixed construction,
 	// not a starting point the caller may extend.
 	FFmpegArguments(inputPath, outputPath string) []string
+	// SegmentMS reports the output window the parameters ask for. The pipeline
+	// uses it to check the input covers the window and the output approximates
+	// it; it is a fact about the plan, not a knob the caller may move.
+	SegmentMS() (startMS, endMS int64)
 }
 
 // An Executor is the code released with one template version.

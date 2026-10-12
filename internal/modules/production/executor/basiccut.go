@@ -97,6 +97,11 @@ func integerParam(raw json.RawMessage, name string) (int64, error) {
 	return value, nil
 }
 
+// SegmentMS reports the window the cut asks for, in milliseconds.
+func (p cutPlan) SegmentMS() (int64, int64) {
+	return p.startSeconds * 1000, p.endSeconds * 1000
+}
+
 // FFmpegArguments is the fixed command for a cut run. It is the entire command:
 // input seeking on the input timeline, a re-encode to H.264/AAC, and a
 // faststart MP4. No filter graph, no script, no caller-supplied tokens.

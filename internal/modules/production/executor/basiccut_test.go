@@ -68,6 +68,21 @@ func TestBasicCutV1RejectsParamsOutsideTheSchema(t *testing.T) {
 	}
 }
 
+// The plan reports the window it asks for so the pipeline can check the input
+// covers it and the output approximates it.
+func TestBasicCutV1ReportsItsSegmentWindow(t *testing.T) {
+	definition := BasicCutV1()
+	plan, err := definition.Executor.ValidateParams(json.RawMessage(`{"start_seconds": 5, "end_seconds": 12}`))
+	if err != nil {
+		t.Fatalf("ValidateParams() error = %v", err)
+	}
+
+	startMS, endMS := plan.SegmentMS()
+	if startMS != 5000 || endMS != 12000 {
+		t.Fatalf("SegmentMS() = (%d, %d), want (5000, 12000)", startMS, endMS)
+	}
+}
+
 // The command is a fixed construction: the whole argument slice is asserted,
 // so no future edit can quietly widen what the executor runs.
 func TestBasicCutV1BuildsTheFixedFFmpegCommand(t *testing.T) {
