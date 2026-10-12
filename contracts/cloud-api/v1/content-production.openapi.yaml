@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.12.2
+  version: 2026.10.12.3
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -10,8 +10,84 @@ paths:
       summary: Read published active compose template versions.
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: Active template versions, empty until executor-backed templates are published.}
+        '200': {description: Published active template versions.}
         '403': {description: Actor cannot read the template catalog.}
+  /api/v1/compose-strategies:
+    get:
+      operationId: listComposeStrategies
+      summary: List strategies in the actor's team and game scope; operators see only active strategies.
+      security: [{sessionCookie: []}]
+      responses:
+        '200': {description: Visible strategies with their fixed template version and current config.}
+    post:
+      operationId: createComposeStrategy
+      summary: Senior operator creates a strategy bound to one active template version.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateComposeStrategy'}
+      responses:
+        '201': {description: Created strategy, read back from storage.}
+        '400': {description: Invalid input or config outside the bound template schema.}
+        '403': {description: Actor cannot manage the target team or game.}
+        '409': {description: Template version is inactive or not executable.}
+  /api/v1/compose-strategies/{strategy_id}:
+    get:
+      operationId: getComposeStrategy
+      summary: Read one visible strategy.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200': {description: Strategy in the actor's scope.}
+        '404': {description: Strategy absent or outside the actor's scope.}
+    put:
+      operationId: updateComposeStrategy
+      summary: Senior operator updates the current config without changing the bound template version.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateComposeStrategy'}
+      responses:
+        '200': {description: Updated current strategy.}
+        '400': {description: Invalid input or config outside the bound template schema.}
+        '403': {description: Actor cannot manage this strategy.}
+        '404': {description: Strategy absent or outside the actor's scope.}
+  /api/v1/compose-strategies/{strategy_id}/copy:
+    post:
+      operationId: copyComposeStrategy
+      summary: Senior operator copies a strategy while retaining its template binding and config.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CopyComposeStrategy'}
+      responses:
+        '201': {description: New independent strategy.}
+        '403': {description: Actor cannot manage this strategy.}
+        '404': {description: Strategy absent or outside the actor's scope.}
+        '409': {description: Bound template version is no longer active.}
+  /api/v1/compose-strategies/{strategy_id}/status:
+    patch:
+      operationId: setComposeStrategyStatus
+      summary: Senior operator enables or disables a strategy.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ComposeStrategyStatusChange'}
+      responses:
+        '200': {description: Strategy with updated status.}
+        '403': {description: Actor cannot manage this strategy.}
+        '404': {description: Strategy absent or outside the actor's scope.}
   /api/v1/materials:
     get:
       operationId: listMaterials
@@ -124,8 +200,63 @@ components:
         version: {type: integer, minimum: 1}
         schema: {type: object}
         status: {type: string, enum: [active, inactive]}
+    BasicCutV1Config:
+      type: object
+      additionalProperties: false
+      required: [start_seconds, end_seconds]
+      properties:
+        start_seconds: {type: integer, minimum: 0}
+        end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
+    ComposeStrategy:
+      type: object
+      required: [id, team_id, game_id, name, content_type, compose_template_id, compose_template_version, config, status, created_at, updated_at]
+      properties:
+        id: {type: integer, format: int64}
+        team_id: {type: integer, format: int64}
+        game_id: {type: string}
+        name: {type: string}
+        content_type: {type: string}
+        compose_template_id: {type: integer, format: int64}
+        compose_template_version: {type: integer, minimum: 1}
+        config: {$ref: '#/components/schemas/BasicCutV1Config'}
+        status: {type: string, enum: [active, inactive]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateComposeStrategy:
+      type: object
+      additionalProperties: false
+      required: [game_id, name, content_type, compose_template_id, compose_template_version, config]
+      properties:
+        team_id: {type: integer, format: int64, description: Required for administrators; senior operators use their own team.}
+        game_id: {type: string}
+        name: {type: string}
+        content_type: {type: string}
+        compose_template_id: {type: integer, format: int64}
+        compose_template_version: {type: integer, minimum: 1}
+        config: {$ref: '#/components/schemas/BasicCutV1Config'}
+    UpdateComposeStrategy:
+      type: object
+      additionalProperties: false
+      required: [name, content_type, config]
+      properties:
+        name: {type: string}
+        content_type: {type: string}
+        config: {$ref: '#/components/schemas/BasicCutV1Config'}
+    CopyComposeStrategy:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string}
+    ComposeStrategyStatusChange:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, enum: [active, inactive]}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:
     MaterialID: {in: path, name: material_id, required: true, schema: {type: integer, format: int64}}
     UsageID: {in: path, name: usage_id, required: true, schema: {type: integer, format: int64}}
+    StrategyID: {in: path, name: strategy_id, required: true, schema: {type: integer, format: int64}}

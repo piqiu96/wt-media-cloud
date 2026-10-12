@@ -1,6 +1,7 @@
 schema_version: 1
-revision: "2026.10.12.2"
+revision: "2026.10.12.3"
 
 video_statuses: [not_downloaded, downloading, ready, failed]
 material_usage_statuses: [active, removed]
 compose_template_statuses: [active, inactive]
+compose_strategy_statuses: [active, inactive]

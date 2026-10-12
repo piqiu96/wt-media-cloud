@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.12.2"
+revision: "2026.10.12.3"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -14,6 +14,28 @@ schemas:
       version: {type: integer, minimum: 1}
       schema: {type: object}
       status: {type: string, enum: [active, inactive]}
+  BasicCutV1Config:
+    type: object
+    required: [start_seconds, end_seconds]
+    additionalProperties: false
+    properties:
+      start_seconds: {type: integer, minimum: 0}
+      end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
+  ComposeStrategy:
+    type: object
+    required: [id, team_id, game_id, name, content_type, compose_template_id, compose_template_version, config, status, created_at, updated_at]
+    properties:
+      id: {type: integer, format: int64}
+      team_id: {type: integer, format: int64}
+      game_id: {type: string}
+      name: {type: string}
+      content_type: {type: string}
+      compose_template_id: {type: integer, format: int64}
+      compose_template_version: {type: integer, minimum: 1}
+      config: {ref: BasicCutV1Config}
+      status: {type: string, enum: [active, inactive]}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。
