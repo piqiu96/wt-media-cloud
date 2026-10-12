@@ -132,16 +132,19 @@ paths:
   /api/v1/compose-tasks/{task_id}/cancel:
     post:
       operationId: cancelComposeTask
-      summary: Cancel a compose task that has not started executing.
+      summary: Cancel a queued task now, or request cancellation of a running one.
       description: >-
-        M4-C3 cancels pending tasks only — the row flips to cancelled in one
-        write and no worker has claimed it, so there is no process to stop.
-        Cancelling a running task arrives with M4-C5; until then a non-pending
-        task answers 409 rather than pretending.
+        A pending task flips to cancelled in one write — no worker has claimed
+        it, so there is no process to stop. A running task answers 200 with
+        cancel_requested set: the worker terminates FFmpeg in a controlled
+        stop and disposes temp files before the row becomes cancelled
+        (spec §5.4); until then the task keeps reporting running. Only
+        success, failed and cancelled tasks answer 409 (named
+        compose_task_not_cancellable).
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       responses:
-        '200': {description: ComposeTask with status cancelled.}
+        '200': {description: ComposeTask — status cancelled, or status running with cancel_requested true.}
         '403': {description: Task is outside the actor's scope.}
         '404': {description: Task absent or outside the actor's scope.}
         '409': {description: Task is not pending (named compose_task_not_cancellable).}
@@ -347,6 +350,7 @@ components:
         template_version: {type: integer, minimum: 1}
         config_snapshot: {type: object}
         status: {type: string, enum: [pending, running, success, failed, cancelled]}
+        cancel_requested: {type: boolean, description: A cancel was requested while running; the task stays running until the worker confirms the controlled stop.}
         stage: {type: string, description: Execution phase projection; a pending task reads 等待源素材, never a fabricated later phase.}
         progress: {type: integer, minimum: 0, maximum: 100}
         error_code: {type: string}
