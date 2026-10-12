@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.02.1"
+revision: "2026.10.13.1"
 
 schemas:
   FileTransferTask:
@@ -7,7 +7,10 @@ schemas:
     required: [id, asset_type, asset_id, asset_title, purpose, execution_scope, status, total_bytes, completed_bytes, attempt_count, created_at, updated_at]
     properties:
       id: {type: string}
-      asset_type: {type: string, const: material}
+      # 2026.10.13（CHG-20261013-085）：`const material` 放宽为枚举——成片与原素材共用
+      # 同一张传输表（DB CHECK 自迁移 039 已允许 composite_output），同一次加宽覆盖
+      # LocalLease（cloud-agent 契约）与两侧消费方（Agent 租约门、web 下载中心）。
+      asset_type: {type: string, enum: [composite_output, material]}
       asset_id: {type: integer, format: int64}
       asset_title:
         type: string

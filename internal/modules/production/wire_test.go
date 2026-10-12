@@ -378,3 +378,42 @@ func TestTheComposeOutputDetailMatchesTheOpenAPISchema(t *testing.T) {
 		t.Errorf("ComposeOutputTrace keys = %v, contract = %v", got, want)
 	}
 }
+
+// CHG-20261013-085 (M4-C7 T-01): the output download endpoint mirrors the
+// material one — a session POST that queues a local-agent user-download task
+// and refuses an out-of-scope output with the same 404 shape the page reads.
+func TestTheOutputDownloadEndpointIsInTheContract(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read content-production openapi: %v", err)
+	}
+	var parsed struct {
+		Paths map[string]struct {
+			Post struct {
+				OperationID string `yaml:"operationId"`
+				Responses   map[string]yaml.Node
+			} `yaml:"post"`
+		} `yaml:"paths"`
+		Components struct {
+			Parameters map[string]yaml.Node `yaml:"parameters"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse content-production openapi: %v", err)
+	}
+	path, ok := parsed.Paths["/api/v1/compose-outputs/{output_id}/downloads"]
+	if !ok {
+		t.Fatal("the output download path is not declared")
+	}
+	if path.Post.OperationID != "createOutputDownload" {
+		t.Fatalf("operationId = %q", path.Post.OperationID)
+	}
+	for _, status := range []string{"202", "404"} {
+		if _, ok := path.Post.Responses[status]; !ok {
+			t.Fatalf("missing %s response on the output download endpoint", status)
+		}
+	}
+	if _, ok := parsed.Components.Parameters["OutputID"]; !ok {
+		t.Fatal("contract declares no OutputID parameter")
+	}
+}

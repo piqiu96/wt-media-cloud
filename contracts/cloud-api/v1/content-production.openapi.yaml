@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.13.3
+  version: 2026.10.13.4
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -211,6 +211,22 @@ paths:
         '200': {description: '{url: string} — a signed address, valid for the configured grant lifetime.'}
         '403': {description: Output is outside the actor's scope (named compose_output_forbidden).}
         '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
+  /api/v1/compose-outputs/{output_id}/downloads:
+    post:
+      operationId: createOutputDownload
+      summary: Create one current-session Local Agent user-download transfer task for a compose output.
+      description: >-
+        Same queue and Drawer as the material download (CHG-20261013-085): one
+        `file_transfer_task` row with `asset_type=composite_output`, assigned to the
+        actor's trusted Local Agent node. An output always has a verified object behind
+        it, so unlike the material there is no cloud-prepare dependency. The scope gate
+        is the page's own — absent and out-of-scope both answer the 404.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/OutputID'}]
+      responses:
+        '202': {description: A pending local-agent file transfer task.}
+        '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
+        '409': {description: No bound Local Agent node is available.}
   /api/v1/materials:
     get:
       operationId: listMaterials

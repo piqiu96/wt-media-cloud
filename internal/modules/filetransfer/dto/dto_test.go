@@ -226,3 +226,59 @@ func TestClaimResultAnswersNoTaskAsAnExplicitNull(t *testing.T) {
 		t.Fatalf("ClaimResult = %s, want {\"task\":null}", data)
 	}
 }
+
+// CHG-20261013-085 (M4-C7 T-01): the transfer contracts widen `asset_type`
+// from a `const material` to an enum that admits `composite_output`. The DB
+// CHECK has admitted the pair since migration 039; these documents were the
+// last place the second asset type was illegal, and both consumers (the
+// Agent's lease gate and the web drawer) are updated inside this CHG.
+func TestTheTransferContractsAdmitCompositeOutputAssets(t *testing.T) {
+	var business struct {
+		Schemas map[string]struct {
+			Properties map[string]struct {
+				Const any      `yaml:"const"`
+				Enum  []string `yaml:"enum"`
+			} `yaml:"properties"`
+		} `yaml:"schemas"`
+	}
+	if err := yaml.Unmarshal(readContract(t, "contracts/business-schemas/v1/file-transfer.yaml"), &business); err != nil {
+		t.Fatalf("parse business schema: %v", err)
+	}
+	task, ok := business.Schemas["FileTransferTask"]
+	if !ok {
+		t.Fatal("contract has no FileTransferTask schema")
+	}
+	assetType, ok := task.Properties["asset_type"]
+	if !ok {
+		t.Fatal("FileTransferTask declares no asset_type")
+	}
+	if assetType.Const != nil {
+		t.Fatalf("asset_type must not stay a const: %v", assetType.Const)
+	}
+	if len(assetType.Enum) != 2 || assetType.Enum[0] != "composite_output" || assetType.Enum[1] != "material" {
+		t.Fatalf("asset_type enum = %v, want [composite_output material]", assetType.Enum)
+	}
+
+	leaseSchemas := readCloudAgentSchemas(t)
+	lease, ok := leaseSchemas["LocalLease"]
+	if !ok {
+		t.Fatal("cloud-agent contract has no LocalLease schema")
+	}
+	var leaseAssetType struct {
+		Const any      `yaml:"const"`
+		Enum  []string `yaml:"enum"`
+	}
+	raw, err := yaml.Marshal(lease.Properties["asset_type"])
+	if err != nil {
+		t.Fatalf("re-marshal lease asset_type: %v", err)
+	}
+	if err := yaml.Unmarshal(raw, &leaseAssetType); err != nil {
+		t.Fatalf("parse lease asset_type: %v", err)
+	}
+	if leaseAssetType.Const != nil {
+		t.Fatalf("lease asset_type must not stay a const: %v", leaseAssetType.Const)
+	}
+	if len(leaseAssetType.Enum) != 2 || leaseAssetType.Enum[0] != "composite_output" || leaseAssetType.Enum[1] != "material" {
+		t.Fatalf("lease asset_type enum = %v, want [composite_output material]", leaseAssetType.Enum)
+	}
+}
