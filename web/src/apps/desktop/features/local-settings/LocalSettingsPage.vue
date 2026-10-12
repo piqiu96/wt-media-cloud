@@ -1,4 +1,5 @@
 <script setup>
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from "vue"
 // Static import, as in `AccountsPage.vue` and `LocalLogsPage.vue`: a dynamic
 // import() of a bare specifier does not resolve in the packaged Tauri WebView
@@ -389,7 +390,7 @@ onMounted(reload)
         <p class="hint">
           添加查找位置只影响「去哪儿找」：那个目录里的旧文件会重新被找到，「打开文件」也能打开它们。以后的下载仍然保存到上面的位置。
         </p>
-        <t-alert
+        <FeedbackAlert
           v-if="pushNote"
           :message="pushNote.text"
           :theme="pushNote.theme"
@@ -470,7 +471,7 @@ onMounted(reload)
         </div>
       </t-card>
 
-      <t-alert
+      <FeedbackAlert
         v-if="outcome"
         :message="outcome.text"
         :theme="outcome.theme"
@@ -479,8 +480,8 @@ onMounted(reload)
         <template v-if="outcome.detail" #description>
           <pre class="detail">{{ outcome.detail }}</pre>
         </template>
-      </t-alert>
-      <t-alert v-if="failure" :message="failure" theme="error" class="mt" />
+      </FeedbackAlert>
+      <FeedbackAlert v-if="failure" :message="failure" theme="error" class="mt" />
     </div>
 
     <!--
@@ -497,16 +498,16 @@ onMounted(reload)
       :close-on-overlay-click="false"
     >
       <t-loading :loading="migrationLoading" :show-overlay="true">
-        <t-alert v-if="migrationError" theme="error" :message="migrationError" />
+        <FeedbackAlert v-if="migrationError" theme="error" :message="migrationError" />
         <p v-else-if="migrationEmpty" class="hint">
           这台机器还没有下载过文件，没有可搬运的。换位置后新发起的下载会直接落到新位置。
         </p>
         <template v-else-if="migrationSummary">
-          <t-alert :theme="migrationSummary.theme" :message="migrationSummary.text">
+          <FeedbackAlert :theme="migrationSummary.theme" :message="migrationSummary.text">
             <template #description>
               <pre class="detail">{{ migrationSummary.detail }}</pre>
             </template>
-          </t-alert>
+          </FeedbackAlert>
           <t-table
             v-if="migrationRowsFor.length"
             :data="migrationRowsFor"

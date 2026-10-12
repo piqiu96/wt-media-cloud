@@ -1,6 +1,7 @@
 <script setup>
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
@@ -117,7 +118,7 @@ async function retry(row) {
   try {
     await client.retryFailed(row.id)
     await load()
-    MessagePlugin.success('已重新执行，成功数据会自动跳过')
+    feedback.toast.success('已重新执行，成功数据会自动跳过')
     visible.value = false
   } catch (e) {
     error.value = e.message || '重新执行失败'
@@ -301,7 +302,7 @@ function hasFailed(task) {
 <template>
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page task-page">
-      <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
+      <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题">
         <template #actions>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>

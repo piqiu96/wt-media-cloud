@@ -1,10 +1,14 @@
 <script setup>
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { canUseDesktop, isDesktop } from '../../../utils.js'
 import { resolveAppVersion } from '../../../shared/utils/appVersion.js'
 import BrandLogo from '../../../shared/ui/BrandLogo.vue'
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
+import FeedbackDialog from '../../../shared/ui/feedback/FeedbackDialog.vue'
+import FormError from '../../../shared/ui/feedback/FormError.vue'
 
 const router = useRouter()
 const sessionClient = createSessionClient()
@@ -13,19 +17,12 @@ const password = ref('')
 const showPassword = ref(false)
 const loading = ref(true)
 const submitting = ref(false)
-const error = ref('')
+const pageError = ref('')
+const usernameError = ref('')
+const passwordError = ref('')
 const replaceNeeded = ref(false)
 const loginAction = ref('')
 const version = ref('')
-const primaryButton = ref(null)
-
-// 桌面端登录卡是绝对定位布局，提示一出现卡片向下长高、按钮被推出视口，而滚动通道
-// 挂在 `:has()` 上用户发现不了；`nearest` 在按钮本可见时不产生任何滚动。
-watch([error, replaceNeeded], async () => {
-  if (!error.value && !replaceNeeded.value) return
-  await nextTick()
-  primaryButton.value?.scrollIntoView({ block: 'nearest' })
-})
 
 function resetReplacePrompt() {
   replaceNeeded.value = false
@@ -35,6 +32,9 @@ function resetReplacePrompt() {
 }
 
 function submitLogin() {
+  usernameError.value = username.value.trim() ? '' : '请输入用户名'
+  passwordError.value = password.value ? '' : '请输入密码'
+  if (usernameError.value || passwordError.value) return
   return login({ replaceExisting: false })
 }
 
@@ -45,7 +45,7 @@ function submitReplacementLogin() {
 onMounted(async () => {
   version.value = await resolveAppVersion()
   if (isDesktop() && new URLSearchParams(window.location.search).has('desktop_role_forbidden')) {
-    error.value = '当前角色不能登录 Desktop，请使用 Cloud Web 管理。'
+    pageError.value = '当前角色不能登录 Desktop，请使用 Cloud Web 管理。'
     loading.value = false
     return
   }
@@ -53,7 +53,7 @@ onMounted(async () => {
     const user = await sessionClient.me()
     if (isDesktop() && !canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
-      error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+      pageError.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
       return
     }
     router.push('/')
@@ -73,7 +73,7 @@ async function login(options = {}) {
   const replaceExisting = options?.replaceExisting === true
   submitting.value = true
   loginAction.value = replaceExisting ? '正在替换旧会话并登录…' : '正在登录…'
-  error.value = ''
+  pageError.value = ''
   if (!replaceExisting) {
     resetReplacePrompt()
   }
@@ -83,7 +83,7 @@ async function login(options = {}) {
     })
     if (isDesktop() && !canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
-      error.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+      pageError.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
       return
     }
     router.push('/')
@@ -94,10 +94,10 @@ async function login(options = {}) {
   } catch (e) {
     if (e.errcode === 20010) {
       replaceNeeded.value = true
-      error.value = '当前账号已有进行中的桌面端登录，再次登录将替换旧会话。'
       return
     }
-    error.value = e.message
+    replaceNeeded.value = false
+    feedback.toast.error(e?.message || '登录失败，请重试')
   } finally {
     submitting.value = false
     loginAction.value = ''
@@ -123,19 +123,22 @@ async function login(options = {}) {
 
         </div>
 
-        <section class="login-card" :class="{ 'has-feedback': error || loginAction || replaceNeeded, 'has-multiple-feedback': replaceNeeded }" aria-labelledby="login-heading">
+        <section class="login-card" aria-labelledby="login-heading">
           <h2 id="login-heading">欢迎登录</h2>
           <p class="login-intro">使用管理员分配的账号登录</p>
-          <form class="login-form" @submit.prevent="replaceNeeded ? submitReplacementLogin() : submitLogin()">
-            <label class="field-label" for="login-username">用户名</label>
-            <div class="login-field"><t-icon name="user" /><input id="login-username" v-model="username" autocomplete="username" placeholder="用户名" @input="resetReplacePrompt" /></div>
-            <label class="field-label" for="login-password">密码</label>
-            <div class="login-field"><t-icon name="lock-on" /><input id="login-password" v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="密码" @input="resetReplacePrompt" /><button type="button" class="password-toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><t-icon :name="showPassword ? 'browse-off' : 'browse'" /></button></div>
-            <t-alert v-if="error" :message="error" theme="error" />
-            <t-alert v-if="replaceNeeded" message="替换的只是登录会话；任务执行由设备绑定决定，本次操作不改变设备绑定，已绑定电脑的执行不受影响。" theme="warning" />
-            <t-alert v-if="loginAction" :message="loginAction" theme="info" />
-            <button ref="primaryButton" type="submit" class="login-button primary" :disabled="submitting">{{ submitting ? loginAction : replaceNeeded ? '替换旧会话并登录' : '登录' }}</button>
-            <button v-if="replaceNeeded" type="button" class="login-button outline" :disabled="submitting" @click="resetReplacePrompt">取消</button>
+          <FeedbackAlert v-if="pageError" class="login-page-error" :message="pageError" theme="error" />
+          <form class="login-form" @submit.prevent="submitLogin">
+            <div class="login-field-group">
+              <label class="field-label" for="login-username">用户名</label>
+              <div class="login-field" :class="{ 'has-error': usernameError }"><t-icon name="user" /><input id="login-username" v-model="username" autocomplete="username" placeholder="用户名" :aria-invalid="!!usernameError" :aria-describedby="usernameError ? 'login-username-error' : undefined" @input="usernameError = ''; resetReplacePrompt()" /></div>
+              <FormError id="login-username-error" :message="usernameError" />
+            </div>
+            <div class="login-field-group">
+              <label class="field-label" for="login-password">密码</label>
+              <div class="login-field" :class="{ 'has-error': passwordError }"><t-icon name="lock-on" /><input id="login-password" v-model="password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="密码" :aria-invalid="!!passwordError" :aria-describedby="passwordError ? 'login-password-error' : undefined" @input="passwordError = ''; resetReplacePrompt()" /><button type="button" class="password-toggle" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><t-icon :name="showPassword ? 'browse-off' : 'browse'" /></button></div>
+              <FormError id="login-password-error" :message="passwordError" />
+            </div>
+            <button type="submit" class="login-button primary" :disabled="submitting">{{ submitting ? loginAction : '登录' }}</button>
           </form>
           <p class="login-help">账号由管理员创建与维护，如需开通请联系管理员。</p>
         </section>
@@ -145,6 +148,14 @@ async function login(options = {}) {
       <div class="login-wave wave-two" aria-hidden="true"></div>
       <div class="login-wave wave-three" aria-hidden="true"></div>
     </main>
+    <FeedbackDialog
+      v-model:visible="replaceNeeded"
+      title="当前账号已有桌面端登录"
+      message="继续登录将替换旧会话。设备绑定和已绑定电脑的任务执行不受影响。"
+      confirm-text="继续登录"
+      :pending="submitting"
+      @confirm="submitReplacementLogin"
+    />
   </t-loading>
 </template>
 
@@ -179,6 +190,9 @@ async function login(options = {}) {
 .login-field{display:flex;align-items:center;gap:12px;height:64px;padding:0 18px;border:1px solid var(--wt-field-border);border-radius:12px;background:rgba(255,255,255,.86);color:var(--wt-field-icon);font-size:20px;transition:border-color .2s,box-shadow .2s}
 .login-field:hover{border-color:#BBD3FB}
 .login-field:focus-within{border-color:var(--td-brand-color,#0052D9);box-shadow:0 0 0 3px rgba(0,82,217,.07)}
+.login-field.has-error{border-color:var(--wt-feedback-error)}
+.login-field-group{position:relative}
+.login-page-error{margin:0 0 16px}
 .login-field input{min-width:0;width:100%;height:100%;border:0;outline:0;background:transparent;color:#183557;font-size:16px}
 .login-field input::placeholder{color:var(--wt-field-placeholder)}
 .password-toggle{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;background:transparent;color:#7890B5;font-size:21px;cursor:pointer;transition:color .2s}
@@ -203,7 +217,7 @@ async function login(options = {}) {
 
 /* 桌面插画独立于文字和表单，避免把视觉稿中的文字作为位图拉伸。 */
 @media(min-width:761px){
-  .login-shell{height:100vh;min-height:700px;background:#dceeff url('/images/login/backdrop.png') center / 100% 100% no-repeat}
+  .login-shell{height:100vh;min-height:700px;overflow-y:auto;background:#dceeff url('/images/login/backdrop.png') center / 100% 100% no-repeat}
   .login-shell::before{content:"";position:absolute;z-index:1;left:3%;top:34.7%;width:min(max(57.5vw,100vh),82vw);aspect-ratio:1812/868;background:url('/images/login/illustration.png') center / contain no-repeat;pointer-events:none}
   .login-topbar{position:absolute;inset:0 0 auto;z-index:4}
   .login-topbar :deep(.brand-logo){gap:10px}
@@ -217,16 +231,14 @@ async function login(options = {}) {
   .story-copy h1 i{bottom:-4px;right:1%;width:48%;border-bottom-width:6px}
   .story-description{margin-top:12px;font-size:clamp(12px,1.56vw,27px);line-height:1.45;white-space:nowrap}
   .login-wave{display:none}
-  .login-card{position:absolute;left:63.58%;top:14.67%;width:32.96%;height:69.61%;min-height:0;max-width:none;padding:0;border:0;border-radius:26px;background:#fff;box-shadow:none;backdrop-filter:none}
-  .login-card.has-feedback{height:calc(69.61% + 110px)}
-  .login-card.has-multiple-feedback{height:calc(69.61% + 260px)}
-  .login-shell:has(.login-card.has-feedback){overflow-y:auto}
-  .login-card h2{position:absolute;top:13.1%;right:0;left:0;margin:0;font-size:clamp(30px,2.4vw,46px);line-height:1.3}
-  .login-intro{position:absolute;top:23%;right:0;left:0;margin:0;font-size:clamp(15px,1.2vw,23px);line-height:1.5}
-  .login-form{position:absolute;top:35.3%;right:9.5%;left:9.5%;display:flex;gap:2.45vh}
+  .login-card{position:absolute;left:63.58%;top:14.67%;width:32.96%;min-height:69.61%;max-width:none;padding:clamp(40px,6vh,80px) 3.1% 32px;border:0;border-radius:26px;background:#fff;box-shadow:none;backdrop-filter:none}
+  .login-card h2{margin:0;font-size:clamp(30px,2.4vw,46px);line-height:1.3}
+  .login-intro{margin:10px 0 clamp(34px,6vh,64px);font-size:clamp(15px,1.2vw,23px);line-height:1.5}
+  .login-form{display:flex;gap:clamp(20px,2.45vh,30px)}
+  .login-page-error{margin:0 0 16px}
   .login-field{height:7.45vh;min-height:52px;padding:0 1.4vw;border-radius:12px;background:#fff;font-size:clamp(20px,1.3vw,24px)}
   .login-field input{font-size:clamp(16px,1.25vw,22px)}
   .login-button.primary{height:8.08vh;min-height:58px;margin-top:.4vh;font-size:clamp(18px,1.35vw,25px)}
-  .login-help{position:absolute;top:81.8%;right:9.5%;left:9.5%;margin:0;padding-top:5.5%;font-size:clamp(12px,.95vw,16px)}
+  .login-help{margin:clamp(26px,4vh,44px) 0 0;padding-top:22px;font-size:clamp(12px,.95vw,16px)}
 }
 </style>

@@ -1,4 +1,6 @@
 <script setup>
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
+import { feedback } from '../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from "vue"
 import { createProxyClient } from "../../../shared/api/proxy.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
@@ -11,11 +13,9 @@ const proxyClient = createProxyClient()
 const proxies = ref([])
 const loading = ref(true)
 const error = ref("")
-const taskNotice = ref("")
 const failedCheckProxy = ref(null)
 const selectedRowKeys = ref([])
 const batchChecking = ref(false)
-const batchCheckResult = ref("")
 const pagination = ref({ current: 1, pageSize: 50, total: 0 })
 
 // Search
@@ -90,7 +90,7 @@ async function deleteProxy(proxy) {
 		error.value = `该代理仍关联 ${proxy.assigned_profile_count} 个浏览器窗口，请先到浏览器窗口页解绑或更换。`
 		return
 	}
-  if (!confirm(`确定删除代理 ${proxy.host}:${proxy.port}？`)) return
+  if (!await feedback.confirmWarning({ title: '删除代理', message: `确定删除代理 ${proxy.host}:${proxy.port}？`, confirmText: '删除', danger: true })) return
   try {
     await proxyClient.delete(proxy.id)
     await loadProxies()
@@ -165,7 +165,7 @@ async function previewExtract(form) {
   }
   try {
     applyParsedAddress(form, await proxyClient.previewExtract({ extract_url: form.extract_url.trim(), proxy_protocol: form.proxy_protocol }))
-    taskNotice.value = "已提取一条代理地址；确认创建后才会写入台账。"
+    feedback.toast.info("已提取一条代理地址；确认创建后才会写入台账。")
   } catch (e) {
     error.value = e.message || "动态代理提取失败"
   }
@@ -195,9 +195,9 @@ async function saveEdit() {
 	try {
 		await proxyClient.update(editProxy.value.id, { ...editForm.value, host: editForm.value.host.trim(), port: Number(editForm.value.port) })
 		const bound = editProxy.value.assigned_profile_count || 0
-		taskNotice.value = bound > 0
+		feedback.toast.info(bound > 0
 			? `代理已更新；${bound} 个关联窗口的代理配置待同步，请到浏览器窗口页重新写入并读回验证。`
-			: "代理已更新，检测结果已清空，请重新检测后再绑定窗口。"
+			: "代理已更新，检测结果已清空，请重新检测后再绑定窗口。")
 		editVisible.value = false
 		await loadProxies()
 	} catch (e) {
@@ -215,7 +215,7 @@ async function createProxy() {
   creating.value = true
   try {
     await proxyClient.create({ ...createForm.value, host: createForm.value.host.trim(), port: Number(createForm.value.port) })
-    taskNotice.value = "代理台账已创建；请到浏览器窗口页绑定并同步到 BitBrowser。"
+    feedback.toast.info("代理台账已创建；请到浏览器窗口页绑定并同步到 BitBrowser。")
     showCreate.value = false
     await loadProxies()
   } catch (e) {
@@ -244,7 +244,7 @@ async function triggerCheck(proxy) {
   try {
     const result = await proxyClient.check(proxy.id)
     failedCheckProxy.value = null
-    taskNotice.value = `代理检测完成：${result.last_check_result || "未知"}`
+    feedback.toast.info(`代理检测完成：${result.last_check_result || "未知"}`)
     await loadProxies()
   } catch (e) {
     error.value = e.message
@@ -255,7 +255,7 @@ async function triggerCheck(proxy) {
 async function refreshDynamicProxy(proxy) {
   try {
     await proxyClient.refreshDynamic(proxy.id)
-    taskNotice.value = (proxy.assigned_profile_count || 0) > 0 ? "动态代理已提取并检测；关联窗口待到浏览器窗口页重新同步。" : "动态代理已提取并检测。"
+    feedback.toast.info((proxy.assigned_profile_count || 0) > 0 ? "动态代理已提取并检测；关联窗口待到浏览器窗口页重新同步。" : "动态代理已提取并检测。")
     await loadProxies()
     await openDetail(proxy)
   } catch (e) {
@@ -267,7 +267,6 @@ async function batchCheck() {
 	const targets = proxies.value.filter((proxy) => selectedRowKeys.value.includes(proxy.id))
 	if (!targets.length) return
 	batchChecking.value = true
-	batchCheckResult.value = ""
 	let passed = 0
 	let failed = 0
 	for (const proxy of targets) {
@@ -281,7 +280,7 @@ async function batchCheck() {
 	}
 	selectedRowKeys.value = []
 	batchChecking.value = false
-	batchCheckResult.value = `批量检测完成：${passed} 条正常，${failed} 条失败。`
+	feedback.toast.info(`批量检测完成：${passed} 条正常，${failed} 条失败。`)
 	await loadProxies()
 }
 
@@ -289,7 +288,7 @@ async function queueBackgroundCheck() {
   if (!failedCheckProxy.value) return
   try {
     const task = await proxyClient.backgroundCheck(failedCheckProxy.value.id)
-    taskNotice.value = `已创建后台检测任务（${task.task_id || "待执行"}），可稍后刷新代理列表查看结果。`
+    feedback.toast.info(`已创建后台检测任务（${task.task_id || "待执行"}），可稍后刷新代理列表查看结果。`)
     failedCheckProxy.value = null
   } catch (e) {
     error.value = e.message
@@ -345,13 +344,11 @@ function formatTime(t) {
       </template>
     </ResourcePageHeader>
     <ResourceStatGrid :items="proxyStatItems" />
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <t-alert v-if="failedCheckProxy" theme="warning" style="margin-bottom:16px">
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert v-if="failedCheckProxy" theme="warning" style="margin-bottom:16px">
       同步检测失败时才需要后台任务：
       <t-button size="small" variant="text" @click="queueBackgroundCheck">后台重试</t-button>
-    </t-alert>
-    <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
-		<t-alert v-if="batchCheckResult" :message="batchCheckResult" theme="info" style="margin-bottom:16px" closable @close="batchCheckResult=''" />
+    </FeedbackAlert>
 
     <ResourceCard class="proxy-resource-card">
     <!-- 搜索/过滤栏 -->
@@ -451,7 +448,7 @@ function formatTime(t) {
     </t-dialog>
 
     <t-dialog v-model:visible="editVisible" header="编辑代理" :confirm-btn="{ loading: editing, content: '保存' }" @confirm="saveEdit">
-      <t-alert v-if="(editProxy?.assigned_profile_count || 0) > 0" theme="warning" style="margin-bottom:12px">保存不会自动改写 BitBrowser；{{ editProxy.assigned_profile_count }} 个关联窗口将标记为代理配置待同步，请到浏览器窗口页重新写入并读回。</t-alert>
+      <FeedbackAlert v-if="(editProxy?.assigned_profile_count || 0) > 0" theme="warning" style="margin-bottom:12px">保存不会自动改写 BitBrowser；{{ editProxy.assigned_profile_count }} 个关联窗口将标记为代理配置待同步，请到浏览器窗口页重新写入并读回。</FeedbackAlert>
       <t-form label-width="84px">
         <t-form-item label="协议"><t-select v-model="editForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
         <t-form-item label="地址"><t-input v-model="editForm.host" placeholder="例如 127.0.0.1（不含协议、账号和端口）" /></t-form-item>

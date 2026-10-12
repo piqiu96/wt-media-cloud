@@ -1,4 +1,5 @@
 <script setup>
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 // 顶栏常驻的工作环境状态胶囊。设计原则：用户只关心正常/不正常——
 // 正常时安静（绿点 + 短文案），异常才变色并展开面板看「哪一项坏了、为什么、怎么修」。
 //
@@ -155,7 +156,7 @@ onBeforeUnmount(() => {
             <li v-for="(reason, i) in env.blockers" :key="i">{{ reason }}</li>
           </ul>
         </template>
-        <t-alert v-if="error" :message="error" theme="error" style="margin-top:10px" />
+        <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-top:10px" />
       </div>
     </template>
   </t-popup>

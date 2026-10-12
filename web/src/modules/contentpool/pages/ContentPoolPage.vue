@@ -1,6 +1,7 @@
 <script setup>
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { createContentPoolClient } from '../../../shared/api/contentPool.js'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
@@ -192,7 +193,7 @@ async function searchManual(reset = false) {
   manualLoading.value = true
   try {
     if (!isDirectSearch && !(form.keywords || []).length) {
-      MessagePlugin.warning('请至少添加一个关键词')
+      feedback.toast.error('请至少添加一个关键词')
       return
     }
     const result = await discovery.search(isDirectSearch ? {
@@ -213,7 +214,7 @@ async function searchManual(reset = false) {
       hasMore: Boolean(result?.has_more),
     }
   } catch (e) {
-    error.value = e.message || '搜索失败'
+    feedback.toast.error(e.message || '搜索失败')
   } finally {
     manualLoading.value = false
   }
@@ -222,7 +223,7 @@ async function searchManual(reset = false) {
 function parseSearchTargets() {
   const targets = [...new Set((manualForm.value.idList || []).map((value) => String(value).trim()).filter(Boolean))]
   if (!targets.length) {
-    MessagePlugin.warning('请输入至少一个视频 ID 或链接')
+    feedback.toast.error('请输入至少一个视频 ID 或链接')
     return []
   }
   const valid = targets.every((target) => (
@@ -231,7 +232,7 @@ function parseSearchTargets() {
     || /^https?:\/\/v\.douyin\.com\/[^\s]+$/.test(target)
   ))
   if (!valid) {
-    MessagePlugin.warning('仅支持抖音视频 ID、视频链接或分享短链接')
+    feedback.toast.error('仅支持抖音视频 ID、视频链接或分享短链接')
     return []
   }
   return targets
@@ -243,7 +244,7 @@ async function confirmManual() {
     return
   }
   if (!selectedTeamID()) {
-    MessagePlugin.warning('请选择运营团队')
+    feedback.toast.error('请选择运营团队')
     return
   }
   await confirmSelected()
@@ -251,7 +252,7 @@ async function confirmManual() {
 
 async function confirmSelected() {
   if (!selectedResultKeys.value.length) {
-    MessagePlugin.warning('请至少选择一条内容')
+    feedback.toast.error('请至少选择一条内容')
     return
   }
   manualLoading.value = true
@@ -260,8 +261,8 @@ async function confirmSelected() {
     const result = await discovery.importResults({ platform: manualForm.value.platform, team_id: selectedTeamID(), game_id: manualGameId.value || null, source_type: 'search', items: selected })
     manualVisible.value = false
     await load()
-    MessagePlugin.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
-  } catch (e) { error.value = e.message || '内容入池失败' } finally { manualLoading.value = false }
+    feedback.toast.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
+  } catch (e) { feedback.toast.error(e.message || '内容入池失败') } finally { manualLoading.value = false }
 }
 
 async function openDetail(row) {
@@ -270,7 +271,7 @@ async function openDetail(row) {
     detailVisible.value = true
     return true
   } catch (e) {
-    error.value = e.message || '内容详情加载失败'
+    feedback.toast.error(e.message || '内容详情加载失败')
     return false
   }
 }
@@ -279,10 +280,10 @@ async function materialize(row, reload = true) {
   try {
     await client.materialize(row.id)
     if (reload) await load()
-    MessagePlugin.success('已转为素材，来源关系已保留')
+    feedback.toast.success('已转为素材，来源关系已保留')
     return true
   } catch (e) {
-    error.value = e.message || '转素材失败'
+    feedback.toast.error(e.message || '转素材失败')
     return false
   }
 }
@@ -291,10 +292,10 @@ async function updateStatus(row, nextStatus, auditNote = '', reload = true) {
   try {
     await client.setStatus(row.id, nextStatus, nextStatus === 'ignored' ? '人工忽略' : '', auditNote)
     if (reload) await load()
-    MessagePlugin.success(nextStatus === 'ignored' ? '内容已忽略' : '内容已恢复待处理')
+    feedback.toast.success(nextStatus === 'ignored' ? '内容已忽略' : '内容已恢复待处理')
     return true
   } catch (e) {
-    error.value = e.message || '状态更新失败'
+    feedback.toast.error(e.message || '状态更新失败')
     return false
   }
 }
@@ -311,9 +312,9 @@ async function batchMaterialize() {
     const result = await client.batchMaterialize(selectedRowKeys.value.map(Number))
     selectedRowKeys.value = []
     await load()
-    MessagePlugin.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+    feedback.toast.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
   } catch (e) {
-    error.value = e.message || '批量转素材失败'
+    feedback.toast.error(e.message || '批量转素材失败')
   } finally {
     batchLoading.value = false
   }
@@ -326,9 +327,9 @@ async function batchSetStatus(nextStatus, reason) {
     const result = await client.batchSetStatus(selectedRowKeys.value.map(Number), nextStatus, reason, reviewNote.value)
     selectedRowKeys.value = []
     await load()
-    MessagePlugin.success(`处理成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+    feedback.toast.success(`处理成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
   } catch (e) {
-    error.value = e.message || '批量处理失败'
+    feedback.toast.error(e.message || '批量处理失败')
   } finally {
     batchLoading.value = false
   }
@@ -340,7 +341,7 @@ async function enterReviewMode() {
   const pending = rows.value.filter((row) => row.status === 'pending')
   if (!pending.length) {
     reviewMode.value = false
-    MessagePlugin.info('当前没有待处理内容')
+    feedback.toast.info('当前没有待处理内容')
     return
   }
   reviewQueue.value = pending
@@ -401,7 +402,7 @@ async function advanceReview() {
   if (reviewIndex.value >= reviewQueue.value.length - 1) {
     exitReviewMode(false)
     await load()
-    MessagePlugin.success('待处理内容已审核完成')
+    feedback.toast.success('待处理内容已审核完成')
     return
   }
   reviewIndex.value += 1
@@ -461,7 +462,7 @@ function openImageViewer(url) {
 <template>
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page content-pool-page">
-      <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
+      <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader :title="isLibrary ? '素材库' : '内容池'" :description="isLibrary ? '查看已从内容池沉淀的素材及其来源关系' : '统一管理人工发现与自动挖掘进入系统的外部内容'">
         <template #actions>
           <t-dropdown v-if="!isLibrary" trigger="click">
@@ -619,7 +620,7 @@ function openImageViewer(url) {
         </div>
         <template #footer>
           <div v-if="reviewMode" class="review-footer">
-            <t-alert v-if="reviewError" theme="error" :message="reviewError" />
+            <FeedbackAlert v-if="reviewError" theme="error" :message="reviewError" />
             <t-textarea v-model="reviewNote" :rows="3" placeholder="审核备注（可选）" />
             <div class="review-actions">
               <t-button theme="primary" :loading="reviewProcessing" @click="reviewAction('materialize')">转素材并下一条</t-button>
@@ -656,7 +657,7 @@ function openImageViewer(url) {
             <KeywordTags v-else v-model="manualForm.keywords" :max="100" placeholder="输入关键词，按回车添加" />
           </div>
 
-          <t-alert v-if="manualSearched" theme="info" :message="`搜索完成，发现 ${manualResults.length} 条，已选 ${selectedResultKeys.length} 条，可加入内容池`" />
+          <p v-if="manualSearched" class="discover-counter">发现 {{ manualResults.length }} 条，已选 {{ selectedResultKeys.length }} 条</p>
           <div v-if="manualResults.length" class="discover-results">
             <div class="discover-section__title">结果预览<small>仅所选内容会加入内容池</small></div>
             <t-table v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
@@ -687,8 +688,6 @@ function openImageViewer(url) {
               <t-button variant="outline" :loading="manualLoading" :disabled="!manualPagination.hasMore" @click="searchManual()">下一页</t-button>
             </div>
           </div>
-
-          <t-alert theme="info" message="小提示：发现的内容将在结果页中进行预览和筛选，确认后可一键加入内容池。" />
 
           <div class="discover-footer">
             <t-button variant="outline" @click="manualVisible = false">取消</t-button>

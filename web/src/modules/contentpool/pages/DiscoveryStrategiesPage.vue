@@ -1,7 +1,9 @@
 <script setup>
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin } from 'tdesign-vue-next'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
@@ -204,11 +206,11 @@ function openCopy(row) {
 
 async function save() {
   if (!String(form.value.name || '').trim()) {
-    MessagePlugin.warning('请输入策略名称')
+    feedback.toast.error('请输入策略名称')
     return
   }
   if (form.value.config.auto_material && Number(form.value.config.like_threshold) <= 0 && Number(form.value.config.favorite_threshold) <= 0) {
-    MessagePlugin.warning('开启自动转素材后，至少设置一个正数阈值')
+    feedback.toast.error('开启自动转素材后，至少设置一个正数阈值')
     return
   }
   saving.value = true
@@ -221,11 +223,11 @@ async function save() {
       favorite_threshold: Number(form.value.config.favorite_threshold || 0),
     }
     if (!String(form.value.game_id || '').trim()) {
-      MessagePlugin.warning('请选择所属游戏')
+      feedback.toast.error('请选择所属游戏')
       return
     }
     if (!String(form.value.platform || '').trim()) {
-      MessagePlugin.warning('请选择平台')
+      feedback.toast.error('请选择平台')
       return
     }
     form.value.schedule = scheduleMode.value === 'manual' ? 'manual' : `daily ${scheduleTime.value}`
@@ -236,7 +238,7 @@ async function save() {
     else await client.createStrategy(payload)
     visible.value = false
     await load()
-    MessagePlugin.success(editingID.value ? '策略已更新' : '策略已保存')
+    feedback.toast.success(editingID.value ? '策略已更新' : '策略已保存')
   } catch (e) {
     error.value = e.message || '策略保存失败'
   } finally {
@@ -256,7 +258,7 @@ async function toggle(row) {
 async function run(row) {
   try {
     await client.runStrategy(row.id)
-    MessagePlugin.success('已创建挖掘任务')
+    feedback.toast.success('已创建挖掘任务')
     await load()
   } catch (e) {
     error.value = e.message || '任务创建失败'
@@ -272,7 +274,7 @@ function remove(row) {
       try {
         await client.deleteStrategy(row.id)
         await load()
-        MessagePlugin.success('策略已删除')
+        feedback.toast.success('策略已删除')
       } catch (e) {
         error.value = e.message || '策略删除失败'
       }
@@ -379,7 +381,7 @@ function latestStats(row) {
 <template>
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page strategy-page">
-      <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
+      <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘策略" description="配置内容发现规则，让系统自动帮你找到优质内容">
         <template #actions>
           <t-button theme="primary" @click="openCreate">新增策略</t-button>

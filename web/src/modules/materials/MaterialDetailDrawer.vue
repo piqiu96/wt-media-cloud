@@ -1,9 +1,9 @@
 <script setup>
+import { feedback } from '../../shared/ui/feedback/index.js'
 // 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
 // 其余在这里；云端视频地址不随素材 body 返回，是签名地址、会过期，故点「打开云端视频」
 // 时才向详情链接接口要一次。
 import { computed, ref, watch } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 import { downloadedFileName, isTerminal } from '../transfer/downloadFacts.js'
@@ -139,7 +139,7 @@ function openCloudVideo() {
     client,
     materialId: props.material.id,
     desktop: isDesktopRuntime(),
-    reportError: (message) => MessagePlugin.error(message),
+    reportError: (message) => feedback.toast.error(message),
   })
 }
 
@@ -192,7 +192,7 @@ async function cancelDownload() {
     // 变，所以要让页面知道该重读了。
     emit('cancel')
   } catch (e) {
-    MessagePlugin.error(e?.message || '取消失败')
+    feedback.toast.error(e?.message || '取消失败')
   }
 }
 
@@ -207,7 +207,7 @@ async function openDirectory() {
   } catch (e) {
     // Tauri 的 invoke 拒绝时给的是字符串而不是 Error，两条路都要接住，
     // 否则界面上会出现一个空的错误提示。
-    MessagePlugin.error(e?.message || String(e))
+    feedback.toast.error(e?.message || String(e))
   }
 }
 </script>

@@ -1,4 +1,6 @@
 <script setup>
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
+import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
 
@@ -92,7 +94,7 @@ async function deleteTeam(team) {
     error.value = `该分组下还有 ${team.user_count} 个用户，不能删除，请先转移用户`
     return
   }
-  if (!window.confirm(`确定删除运营分组 ${team.name}？只有空分组可以删除。`)) return
+  if (!await feedback.confirmWarning({ title: '删除运营分组', message: `确定删除运营分组 ${team.name}？只有空分组可以删除。`, confirmText: '删除', danger: true })) return
   try {
     await client.deleteTeam(team.id)
     await loadAll()
@@ -104,7 +106,7 @@ async function deleteTeam(team) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-card title="运营分组" :bordered="true">
       <template #actions>
         <t-button theme="primary" size="small" @click="openCreate">新建分组</t-button>

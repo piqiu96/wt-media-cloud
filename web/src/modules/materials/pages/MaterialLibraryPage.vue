@@ -1,6 +1,8 @@
 <script setup>
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, h, onMounted, ref } from 'vue'
-import { Button as TButton, MessagePlugin } from 'tdesign-vue-next'
+import { Button as TButton } from 'tdesign-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
@@ -149,7 +151,7 @@ async function openFromQuery() {
   try {
     detail.value = await client.get(Number(raw))
   } catch (e) {
-    MessagePlugin.error(e?.message || '打开素材失败')
+    feedback.toast.error(e?.message || '打开素材失败')
     detailVisible.value = false
   } finally {
     detailLoading.value = false
@@ -162,7 +164,7 @@ async function openDetail(row) {
   try {
     detail.value = await client.get(row.id)
   } catch (e) {
-    MessagePlugin.error(e?.message || '打开素材失败')
+    feedback.toast.error(e?.message || '打开素材失败')
   } finally {
     detailLoading.value = false
   }
@@ -188,7 +190,7 @@ function notifyAdded(row) {
   actions.push(h(TButton, {
     size: 'small', theme: 'primary', variant: 'text', onClick: goToMyMaterials,
   }, '去我的素材'))
-  MessagePlugin.success({
+  feedback.toast.success({
     content: () => h('div', { class: 'material-added-toast' }, actions),
     duration: 5000,
   })
@@ -197,9 +199,9 @@ function notifyAdded(row) {
 async function downloadNow(row) {
   try {
     await client.createDownload(row.id)
-    MessagePlugin.success('已开始下载')
+    feedback.toast.success('已开始下载')
   } catch (e) {
-    MessagePlugin.error(createDownloadFailureMessage(e))
+    feedback.toast.error(createDownloadFailureMessage(e))
   }
 }
 
@@ -214,7 +216,7 @@ async function addToMine(row) {
     mineIds.value.add(row.id)
     notifyAdded(row)
   } catch (e) {
-    MessagePlugin.error(e?.message || '加入我的素材失败')
+    feedback.toast.error(e?.message || '加入我的素材失败')
   }
 }
 
@@ -240,7 +242,7 @@ onMounted(() => {
 <template>
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page material-library-page">
-      <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
+      <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="素材库" description="云端的原素材：加入我的素材后即可下载到本机">
         <template #actions>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>

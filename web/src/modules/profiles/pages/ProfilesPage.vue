@@ -1,4 +1,5 @@
 <script setup>
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { cloudBaseUrl } from "../../../apps/desktop/features/local-agent/init.js"
@@ -950,10 +951,10 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
   <div class="wt-resource-page">
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <t-alert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
-    <t-alert v-if="identityError" :message="identityError" theme="warning" style="margin-bottom:16px" closable @close="identityError=''" />
-    <t-alert
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert v-if="taskNotice" :message="taskNotice" theme="info" style="margin-bottom:16px" closable @close="taskNotice=''" />
+    <FeedbackAlert v-if="identityError" :message="identityError" theme="warning" style="margin-bottom:16px" closable @close="identityError=''" />
+    <FeedbackAlert
       v-if="!isDesktopClient"
       message="当前为Cloud Web：仅展示Cloud已保存的浏览器窗口信息。扫描、Diff处理、打开/关闭和创建窗口请在Desktop客户端执行。"
       theme="info"
@@ -1060,7 +1061,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
 
     <!-- 新建窗口 -->
     <t-dialog v-model:visible="showCreate" header="新建BitBrowser窗口" @confirm="createProfile" :confirm-btn="{ loading: creating, theme: 'primary', content: '创建并同步' }">
-      <t-alert
+      <FeedbackAlert
         message="新建窗口会先调用本机BitBrowser创建，创建成功后立即读回并同步Cloud镜像；不会只创建Cloud假记录。"
         theme="info"
         style="margin-bottom:12px"
@@ -1083,12 +1084,12 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           <t-input v-model="newProfile.remark" placeholder="可选，写入BitBrowser备注" />
         </t-form-item>
       </t-form>
-      <t-alert v-if="createError" :message="createError" theme="error" style="margin-top:12px" />
+      <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-top:12px" />
     </t-dialog>
 
     <t-dialog v-model:visible="proxyDialogVisible" header="绑定代理并同步 BitBrowser" @confirm="confirmProxyBinding" :confirm-btn="{ loading: proxyBinding, theme: 'primary', content: '写入并读回验证' }">
-      <t-alert theme="info" style="margin-bottom:12px">选择代理后会写入当前窗口的 BitBrowser 配置；只有协议、地址和端口读回一致，Cloud 才更新正式关联与配额。</t-alert>
-		<t-alert v-if="proxyBindingHint" :message="proxyBindingHint" theme="warning" style="margin-bottom:12px" />
+      <FeedbackAlert theme="info" style="margin-bottom:12px">选择代理后会写入当前窗口的 BitBrowser 配置；只有协议、地址和端口读回一致，Cloud 才更新正式关联与配额。</FeedbackAlert>
+		<FeedbackAlert v-if="proxyBindingHint" :message="proxyBindingHint" theme="warning" style="margin-bottom:12px" />
       <t-form label-width="84px">
         <t-form-item label="窗口"><span>{{ proxyProfile?.name || proxyProfile?.bit_profile_id }}</span></t-form-item>
         <t-form-item label="代理">
@@ -1101,8 +1102,8 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
     </t-dialog>
 
     <t-dialog v-model:visible="batchProxyDialogVisible" header="批量绑定代理并同步 BitBrowser" @confirm="confirmBatchProxyBinding" :confirm-btn="{ loading: batchProxyBinding, theme: 'primary', content: '确认逐项写入并读回' }">
-      <t-alert theme="info" style="margin-bottom:12px">系统先按已启用、检测正常、未过期及总剩余配额推荐代理。确认后逐窗口执行写入与读回；失败窗口不会建立Cloud正式关联。</t-alert>
-      <t-alert v-if="batchProxyBindingHint" :message="batchProxyBindingHint" :theme="batchProxyCandidates.length ? 'info' : 'warning'" style="margin-bottom:12px" />
+      <FeedbackAlert theme="info" style="margin-bottom:12px">系统先按已启用、检测正常、未过期及总剩余配额推荐代理。确认后逐窗口执行写入与读回；失败窗口不会建立Cloud正式关联。</FeedbackAlert>
+      <FeedbackAlert v-if="batchProxyBindingHint" :message="batchProxyBindingHint" :theme="batchProxyCandidates.length ? 'info' : 'warning'" style="margin-bottom:12px" />
       <t-form label-width="84px">
         <t-form-item label="已选窗口"><span>{{ batchProxyTargets.length }} 个</span></t-form-item>
         <t-form-item label="代理">
@@ -1116,7 +1117,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
 
     <!-- 编辑窗口 -->
     <t-dialog v-model:visible="showEdit" header="编辑浏览器窗口" @confirm="saveEdit" :confirm-btn="{ loading: editing, theme: 'primary', content: '保存' }">
-      <t-alert
+      <FeedbackAlert
         message="仅更新Cloud窗口备注（扫描不会覆盖备注）；BitBrowser侧窗口配置（名称/分组/代理）的编辑为后续能力。"
         theme="info"
         style="margin-bottom:12px"
@@ -1129,7 +1130,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
           <t-input v-model="editRemark" placeholder="窗口Cloud备注" />
         </t-form-item>
       </t-form>
-      <t-alert v-if="editError" :message="editError" theme="error" style="margin-top:12px" />
+      <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-top:12px" />
     </t-dialog>
 
     <!-- 详情抽屉 -->
@@ -1162,7 +1163,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       :confirm-btn="{ loading: assigning, theme: 'primary' }"
       @confirm="assignOwner"
     >
-      <t-alert
+      <FeedbackAlert
         message="只更新Cloud窗口授权关系，不操作本机BitBrowser。已绑定媒体账号的窗口不能直接分配。"
         theme="warning"
         style="margin-bottom:12px"
@@ -1182,14 +1183,14 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
          TDesign 连页脚容器一起不渲染，否则会留下一道空条。 -->
     <t-drawer :close-btn="true" v-model:visible="scanDetailVisible" header="本机扫描结果" :size="'700px'" destroy-on-close :footer="scanAcceptsChanges">
       <div v-if="currentScan">
-        <t-alert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
-        <t-alert
+        <FeedbackAlert :message="'状态: ' + currentScan.status + ' | 时间: ' + formatTime(currentScan.created_at)" theme="info" style="margin-bottom:16px" />
+        <FeedbackAlert
           v-if="hasDiff(currentScan)"
           message="接受本地变化后，会更新Cloud窗口镜像中的名称、分组、代理摘要、BitBrowser备注等允许字段；不会覆盖授权用户、媒体账号绑定、游戏、标签、Cloud备注、Cookie 和业务状态。"
           theme="warning"
           style="margin-bottom:16px"
         />
-        <t-alert
+        <FeedbackAlert
           v-else
           message="本机窗口与Cloud记录一致，无需处理。"
           theme="success"
@@ -1251,7 +1252,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       :cancel-btn="{ disabled: acceptingScan }"
       @confirm="confirmAcceptLocalChanges"
     >
-      <t-alert
+      <FeedbackAlert
         theme="warning"
         message="接受后只更新Cloud窗口镜像中的允许字段（含BitBrowser备注），不会覆盖授权用户、媒体账号绑定、游戏、标签、Cloud备注、Cookie和业务状态。"
         style="margin-bottom:12px"
@@ -1266,7 +1267,7 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       :cancel-btn="{ disabled: restoringCloud }"
       @confirm="confirmRestoreCloudConfig"
     >
-      <t-alert
+      <FeedbackAlert
         theme="warning"
         message="恢复会把Cloud已保存的窗口配置写回本机BitBrowser，并在写回后重新扫描验证；不会写入账号、Cookie、授权用户或业务状态。"
         style="margin-bottom:12px"

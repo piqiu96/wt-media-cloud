@@ -1,4 +1,6 @@
 <script setup>
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
+import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
 
@@ -130,7 +132,7 @@ async function deleteGame(game) {
     error.value = '该游戏仍有关联，请先查看关联详情并解除用户授权或媒体账号引用'
     return
   }
-  if (!window.confirm(`确定删除游戏 ${game.name}？已有用户或业务引用时不能删除。`)) return
+  if (!await feedback.confirmWarning({ title: '删除游戏', message: `确定删除游戏 ${game.name}？已有用户或业务引用时不能删除。`, confirmText: '删除', danger: true })) return
   try {
     await client.deleteGame(game.id)
     await loadGames()
@@ -142,7 +144,7 @@ async function deleteGame(game) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <t-card title="游戏管理" :bordered="true">
       <template #actions>
         <t-button theme="primary" size="small" @click="openCreate">新建游戏</t-button>

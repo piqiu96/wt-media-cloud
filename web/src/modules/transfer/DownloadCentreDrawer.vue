@@ -1,6 +1,7 @@
 <script setup>
+import { feedback } from '../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 // 「重新下载」走的是**发起下载那个入口**（`POST /materials/{id}/downloads`），不是
 // transfer 自己的路由 —— 所以它挂在素材的 client 上。把它塞进 `fileTransfer.js` 会
@@ -230,7 +231,7 @@ async function cancel(task) {
     }
     await load()
   } catch (e) {
-    MessagePlugin.error(e?.message || '取消失败')
+    feedback.toast.error(e?.message || '取消失败')
   }
 }
 
@@ -247,7 +248,7 @@ async function redownload(task) {
     // 新任务要出现在这张列表里 —— 不刷新的话画面停在旧行上，看起来像没反应。
     await load()
   } catch (e) {
-    MessagePlugin.error(createDownloadFailureMessage(e))
+    feedback.toast.error(createDownloadFailureMessage(e))
   }
 }
 
@@ -270,7 +271,7 @@ async function retake(task) {
     await materials.createDownload(task.asset_id)
     await load()
   } catch (e) {
-    MessagePlugin.error(createDownloadFailureMessage(e))
+    feedback.toast.error(createDownloadFailureMessage(e))
   }
 }
 
@@ -280,7 +281,7 @@ async function open(task) {
   } catch (e) {
     // Tauri 的 invoke 拒绝时给的是字符串而不是 Error，两条路都要接住，
     // 否则界面上会出现一个空的错误提示。
-    MessagePlugin.error(e?.message || String(e))
+    feedback.toast.error(e?.message || String(e))
   }
 }
 
@@ -290,7 +291,7 @@ async function openDetail(row) {
     detail.value = await materials.get(row.task.asset_id)
     detailVisible.value = true
   } catch (e) {
-    MessagePlugin.error(e?.message || '打开素材失败')
+    feedback.toast.error(e?.message || '打开素材失败')
   } finally {
     detailLoading.value = false
   }
@@ -300,7 +301,7 @@ async function openDetail(row) {
 <template>
   <t-drawer :close-btn="true" v-model:visible="visible" class="download-centre-drawer" header="下载中心" size="min(62vw, 880px)" :footer="false" destroy-on-close @close="close">
     <t-loading :loading="loading" :show-overlay="true">
-      <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:12px" @close="error=''" />
+      <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:12px" @close="error=''" />
       <t-tabs v-model="activeTab" class="transfer-tabs">
         <t-tab-panel value="active" :label="activeLabel" />
         <t-tab-panel value="failed" :label="failedLabel" />

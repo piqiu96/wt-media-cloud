@@ -23,7 +23,7 @@ describe('my materials page', () => {
   // 移出是真 204（api.NoContentEmpty），http.js 对 204 返回 null。解引用它就会崩，
   // 而在浏览器里那是一个「移出失败」的提示，看不出真正的原因。
   it('treats the remove response as empty and reloads instead of reading it', () => {
-    expect(source).toMatch(/await client\.removeUsage\(row\.usage_id\)\s*\n\s*MessagePlugin\.success/)
+    expect(source).toMatch(/await client\.removeUsage\(row\.usage_id\)\s*\n\s*feedback\.toast\.success/)
     expect(source).not.toMatch(/const \w+ = await client\.removeUsage/)
   })
 

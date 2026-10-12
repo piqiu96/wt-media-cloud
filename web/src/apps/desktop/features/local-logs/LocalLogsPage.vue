@@ -1,27 +1,17 @@
 <script setup>
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
+import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref, watch } from "vue"
-// Static import, as in `AccountsPage.vue`: a dynamic import() of a bare
-// specifier does not resolve in the packaged Tauri WebView ("Module name ...
-// does not resolve to a valid file"). It is inert in Cloud Web, which never
-// reaches the code that calls it.
+// Tauri WebView 需要可解析的静态模块路径。
 import { invoke } from "@tauri-apps/api/core"
 import {
   createLocalSettingsService,
   DEFAULT_TAIL_LINES,
 } from "../local-settings/service.js"
-// `formatModified` and `logKindLabel` both live in the settings view module:
-// they describe a stored setting and a listed file, and the log viewer renders
-// both. They were looked for in `local-logs-view.js` first, which the unit suite
-// cannot notice — it never compiles a `.vue` file, so a wrong specifier is a
-// build error and nothing else. `localSettingsWiring.test.js` now checks every
-// named import of every desktop page against the module's real exports.
 import { formatModified, logKindLabel } from "../local-settings/local-settings-view.js"
 import { createLocalLogsPage, NO_LEVEL } from "./local-logs-view.js"
 
-// The whole viewer goes through the Rust bridge. It does **not** fetch the
-// Agent's loopback port: the window's CSP blocks that, so the only message a
-// direct request could ever produce was 「Agent 不可达」, whether an Agent was
-// running or not. `localAgentBoundary.test.js` is what keeps that true.
+// 日志读取通过 Rust Bridge；WebView CSP 不允许直接请求 Agent 回环端口。
 const service = createLocalSettingsService({ invoke })
 
 const loading = ref(true)
@@ -32,7 +22,6 @@ const name = ref("")
 const tail = ref(null)
 const level = ref(NO_LEVEL)
 const failure = ref("")
-const openedPath = ref("")
 
 const page = computed(() =>
   createLocalLogsPage({
@@ -63,7 +52,9 @@ async function run(key, work) {
   try {
     return await work()
   } catch (error) {
-    failure.value = error?.message || String(error) || "操作失败"
+    const message = error?.message || String(error) || "操作失败"
+    if (key === 'open') feedback.toast.error(message)
+    else failure.value = message
     return null
   } finally {
     busy.value = ""
@@ -152,7 +143,7 @@ async function openFolder() {
   // being read.
   const opened = await run("open", () => service.openPlace(place))
   if (opened) {
-    openedPath.value = opened
+    feedback.toast.success(`已打开 ${opened}`)
   }
 }
 
@@ -189,7 +180,7 @@ onMounted(reloadAll)
           </t-button>
         </div>
 
-        <t-alert
+        <FeedbackAlert
           v-if="page.appliedFilterText !== '未筛选'"
           theme="info"
           class="mt-sm"
@@ -239,13 +230,13 @@ onMounted(reloadAll)
             <span v-if="page.selectedDirectory" class="muted">{{ page.selectedDirectory }}</span>
           </div>
 
-          <t-alert
+          <FeedbackAlert
             v-if="page.hiddenNotice"
             theme="info"
             class="mt-sm"
             :message="page.hiddenNotice"
           />
-          <t-alert
+          <FeedbackAlert
             v-if="page.truncatedNotice"
             theme="warning"
             class="mt-sm"
@@ -271,8 +262,7 @@ onMounted(reloadAll)
         </t-card>
       </div>
 
-      <t-alert v-if="openedPath" theme="success" class="mt-sm" :message="`已打开 ${openedPath}`" />
-      <t-alert v-if="failure" theme="error" class="mt-sm" :message="failure" />
+      <FeedbackAlert v-if="failure" theme="error" class="mt-sm" :message="failure" />
     </div>
   </t-loading>
 </template>

@@ -1,6 +1,7 @@
 <script setup>
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
@@ -153,7 +154,7 @@ async function openDetail(row) {
       added_at: row.added_at,
     }
   } catch (e) {
-    MessagePlugin.error(e?.message || '打开素材失败')
+    feedback.toast.error(e?.message || '打开素材失败')
   } finally {
     detailLoading.value = false
   }
@@ -163,10 +164,10 @@ async function giveUp(row) {
   try {
     // 真 204：http.js 对 204 直接返回 null，所以这里没有 body 可读，也不该去读。
     await client.removeUsage(row.usage_id)
-    MessagePlugin.success('已放弃使用')
+    feedback.toast.success('已放弃使用')
     await load()
   } catch (e) {
-    MessagePlugin.error(e?.message || '放弃使用失败')
+    feedback.toast.error(e?.message || '放弃使用失败')
   }
 }
 
@@ -174,10 +175,10 @@ async function giveUp(row) {
 async function restore(row) {
   try {
     await client.restoreUsage(row.usage_id)
-    MessagePlugin.success('已恢复使用')
+    feedback.toast.success('已恢复使用')
     await load()
   } catch (e) {
-    MessagePlugin.error(e?.message || '恢复使用失败')
+    feedback.toast.error(e?.message || '恢复使用失败')
   }
 }
 
@@ -191,12 +192,12 @@ function goToCompose() {
 async function download(row) {
   try {
     await client.createDownload(row.id)
-    MessagePlugin.success('已开始下载，可在下载中心查看进度')
+    feedback.toast.success('已开始下载，可在下载中心查看进度')
     // 重读一次：这一行的「文件状态」和按钮都按使用记录算，不重读就停在上一帧，看起来像没反应。
     await load()
     downloadCentre.open()
   } catch (e) {
-    MessagePlugin.error(createDownloadFailureMessage(e))
+    feedback.toast.error(createDownloadFailureMessage(e))
   }
 }
 
@@ -210,7 +211,7 @@ onMounted(() => {
     detailLoading.value = true
     client.get(Number(raw))
       .then((data) => { detail.value = data })
-      .catch((e) => { MessagePlugin.error(e?.message || '打开素材失败'); detailVisible.value = false })
+      .catch((e) => { feedback.toast.error(e?.message || '打开素材失败'); detailVisible.value = false })
       .finally(() => { detailLoading.value = false })
   }
 })
@@ -219,7 +220,7 @@ onMounted(() => {
 <template>
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page my-materials-page">
-      <t-alert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
+      <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、补充文件并进入后续生产">
         <template #actions>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>

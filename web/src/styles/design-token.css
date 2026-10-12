@@ -1,4 +1,8 @@
 :root {
+  --wt-feedback-error: #F56C6C;
+  --wt-feedback-warning: #E6A23C;
+  --wt-feedback-success: #67C23A;
+  --wt-feedback-info: #409EFF;
   --wt-primary: #2563EB;
   --wt-primary-hover: #1D4ED8;
 
@@ -26,9 +30,12 @@
   --wt-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-/* 品牌 Token —— 取值即官网 Landing Page（modules/public/pages/HomePage.vue）现有视觉。
-   官网与登录页共用这一组，页面里不再各写一份等价 hex。
-   HomePage 自身的十五处字面量尚未回迁到这里，属独立改动。 */
+.t-message.t-is-error { --td-error-color: var(--wt-feedback-error); }
+.t-message.t-is-success { --td-success-color: var(--wt-feedback-success); }
+.t-message.t-is-info { --td-brand-color: var(--wt-feedback-info); }
+.t-dialog .t-icon.t-is-warning { color: var(--wt-feedback-warning); }
+
+/* 官网与登录页共用的品牌色。 */
 :root {
   --wt-brand-primary: #0877F9;
   --wt-brand-dark: #08235E;

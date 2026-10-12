@@ -44,7 +44,7 @@ describe('download centre drawer', () => {
     expect(source).toContain("if (task.status === 'pending') {")
     expect(source).toContain('await client.cancelTask(task.id)')
     expect(source).toContain('await materials.createDownload(task.asset_id)')
-    expect(source).toContain('MessagePlugin.error(createDownloadFailureMessage(e))')
+    expect(source).toContain('feedback.toast.error(createDownloadFailureMessage(e))')
   })
 
   // 新任务要出现在这张列表里，重取之后同样要刷新（与「重新下载」同一条理由）。
@@ -93,7 +93,7 @@ describe('download centre drawer', () => {
   it('re-downloads through the download entry point', () => {
     expect(source).toContain('await materials.createDownload(task.asset_id)')
     // 失败的话术取自发起下载那份词表（`error.type` 是冻结的名字），不是任务行的 error_code。
-    expect(source).toContain('MessagePlugin.error(createDownloadFailureMessage(e))')
+    expect(source).toContain('feedback.toast.error(createDownloadFailureMessage(e))')
   })
 
   // 新任务要出现在这张列表里。不刷新的话画面停在旧行上，同一个素材看起来像没被重新下载过。

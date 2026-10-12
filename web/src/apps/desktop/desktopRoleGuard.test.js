@@ -14,7 +14,8 @@ describe('desktop role guard', () => {
   })
 
   it('uses a native form submit for session replacement login', () => {
-    expect(loginPage).toContain('<form class="login-form" @submit.prevent="replaceNeeded ? submitReplacementLogin() : submitLogin()">')
+    expect(loginPage).toContain('<form class="login-form" @submit.prevent="submitLogin">')
+    expect(loginPage).toContain('@confirm="submitReplacementLogin"')
     expect(loginPage).toContain('login-button primary')
     expect(loginPage).not.toContain('<t-form @submit="login">')
     expect(loginPage).not.toContain('@click.stop.prevent="login({ replaceExisting: true })"')

@@ -140,7 +140,7 @@ describe('material library page', () => {
   // 未就绪时那颗按钮必然换来一个 409，而不是一次下载。
   it('offers 立即下载 and 去我的素材 on the add-success toast', () => {
     const toast = sliceBetween(source, 'function notifyAdded(', '\n}')
-    expect(toast).toContain('MessagePlugin.success')
+    expect(toast).toContain('feedback.toast.success')
     expect(toast).toContain('已加入我的素材')
     expect(toast).toContain('立即下载')
     expect(toast).toContain('去我的素材')

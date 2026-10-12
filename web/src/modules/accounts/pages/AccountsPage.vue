@@ -1,4 +1,6 @@
 <script setup>
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from "vue"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
@@ -16,7 +18,6 @@ import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge
 // valid file"). invoke is only called inside __TAURI_INTERNALS__-guarded code,
 // so importing it is inert in Cloud Web.
 import { invoke } from "@tauri-apps/api/core"
-import { MessagePlugin } from "tdesign-vue-next"
 import { useRouter } from "vue-router"
 
 const accountClient = createMediaAccountClient()
@@ -53,7 +54,6 @@ const checkNotice = ref("")
 const checkFailure = ref("")
 const checkFailureEnv = ref(false)
 const readingCookie = ref(false)
-const cookieNotice = ref("")
 const showCookieDialog = ref(false)
 const cookieDialog = ref(null)
 const editVisible = ref(false)
@@ -211,9 +211,9 @@ async function copyAccountId(account) {
   if (!account?.id) return
   try {
     await navigator.clipboard.writeText(account.id)
-    MessagePlugin.success("已复制系统账号 ID")
+    feedback.toast.success("已复制系统账号 ID")
   } catch (e) {
-    MessagePlugin.error("复制失败，请手动选择")
+    feedback.toast.error("复制失败，请手动选择")
   }
 }
 
@@ -248,13 +248,13 @@ async function toggleWindow(account) {
       profileOpenMap.value[profile.bit_profile_id] = true
     }
   } catch (e) {
-    MessagePlugin.error(e.message || "窗口操作失败")
+    feedback.toast.error(e.message || "窗口操作失败")
   }
 }
 
 async function checkFromRow(account) {
   if (!canCheckAccount(account)) {
-    MessagePlugin.warning(executableText(account))
+    feedback.toast.info(executableText(account))
     return
   }
   currentCheckingId.value = account.id
@@ -263,7 +263,7 @@ async function checkFromRow(account) {
     const updated = await runSingleAccountCheck(account, service)
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
-    MessagePlugin.success(`检查完成：${loginStatusText(updated.login_status)}`)
+    feedback.toast.success(`检查完成：${loginStatusText(updated.login_status)}`)
     await loadAccounts()
   } catch (e) {
     // 单账号检查失败：行状态置「检查失败」+ 打开详情展示失败原因（不使用页面级横幅）
@@ -330,7 +330,7 @@ async function toggleBizStatus(account) {
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
   } catch (e) {
-    MessagePlugin.error(e.message || "状态切换失败")
+    feedback.toast.error(e.message || "状态切换失败")
   }
 }
 
@@ -548,7 +548,6 @@ async function readProfileCookieFor(account) {
   const target = account || cookieDialog.value?.account
   if (!target?.id || !target.browser_profile_id) return
   readingCookie.value = true
-  cookieNotice.value = ""
   error.value = ""
   try {
     const service = await desktopLocalAgentService()
@@ -571,9 +570,9 @@ async function readProfileCookieFor(account) {
     if (cookieDialog.value?.account?.id === target.id) {
       cookieDialog.value = { ...cookieDialog.value, ...updated, account: { ...cookieDialog.value.account, ...updated } }
     }
-    cookieNotice.value = `已从 Profile 读回 ${cookies.length} 条真实 Cookie 并更新 active_cookie`
+    feedback.toast.success(`已从 Profile 读回 ${cookies.length} 条真实 Cookie 并更新 active_cookie`)
   } catch (e) {
-    MessagePlugin.error(e.message || "读取 Cookie 失败")
+    feedback.toast.error(e.message || "读取 Cookie 失败")
   } finally {
     readingCookie.value = false
   }
@@ -590,21 +589,21 @@ async function openCookieDialog(account) {
     }
     showCookieDialog.value = true
   } catch (e) {
-    MessagePlugin.error(e.message || "获取 Cookie 失败")
+    feedback.toast.error(e.message || "获取 Cookie 失败")
   }
 }
 
 async function copyCookie(field) {
   const value = cookieDialog.value?.[field]
   if (!value) {
-    MessagePlugin.warning("当前 Cookie 为空，无可复制内容")
+    feedback.toast.info("当前 Cookie 为空，无可复制内容")
     return
   }
   try {
     await navigator.clipboard.writeText(value)
-    MessagePlugin.success(`已复制 ${field === "active_cookie" ? "Active" : "原始"} Cookie 到剪贴板`)
+    feedback.toast.success(`已复制 ${field === "active_cookie" ? "Active" : "原始"} Cookie 到剪贴板`)
   } catch (e) {
-    MessagePlugin.error("复制失败，请手动选择复制")
+    feedback.toast.error("复制失败，请手动选择复制")
   }
 }
 
@@ -633,7 +632,7 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     ? batchResults.value.filter(item => item.status === "failed").map(item => item.account)
     : selectedAccounts()
   if (!candidates.length) {
-    MessagePlugin.warning("请先勾选要检查的账号")
+    feedback.toast.error("请先勾选要检查的账号")
     return
   }
   batchChecking.value = true
@@ -666,13 +665,13 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     }
     const stats = batchStats()
     if (stats.failed > 0) {
-      MessagePlugin.warning(`批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}`)
+      feedback.toast.info(`批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}`)
     } else {
-      MessagePlugin.success(`批量检查完成：成功 ${stats.success}，跳过 ${stats.skipped}`)
+      feedback.toast.success(`批量检查完成：成功 ${stats.success}，跳过 ${stats.skipped}`)
     }
     await loadAccounts()
   } catch (e) {
-    MessagePlugin.error(e.message || "批量检查失败")
+    feedback.toast.error(e.message || "批量检查失败")
   } finally {
     batchChecking.value = false
   }
@@ -683,16 +682,16 @@ async function openAccountProfile(account) {
   if (!canOperateBoundWindow(account)) return
   const bitProfileId = String(profile.bit_profile_id || "").trim()
   if (!bitProfileId) {
-    MessagePlugin.error("打开绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。")
+    feedback.toast.error("打开绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。")
     return
   }
   operatingProfileId.value = `open:${bitProfileId}`
   try {
     const service = await desktopLocalAgentService()
     const result = await service.profileOpen(bitProfileId)
-    MessagePlugin.success(`已打开绑定窗口：${profile.name || result.bit_profile_id}`)
+    feedback.toast.success(`已打开绑定窗口：${profile.name || result.bit_profile_id}`)
   } catch (e) {
-    MessagePlugin.error(localTrustMessage(e))
+    feedback.toast.error(localTrustMessage(e))
   } finally {
     operatingProfileId.value = ""
   }
@@ -703,16 +702,16 @@ async function closeAccountProfile(account) {
   if (!canOperateBoundWindow(account)) return
   const bitProfileId = String(profile.bit_profile_id || "").trim()
   if (!bitProfileId) {
-    MessagePlugin.error("关闭绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。")
+    feedback.toast.error("关闭绑定窗口失败：Cloud记录缺少BitBrowser窗口ID，请先扫描并同步本机窗口。")
     return
   }
   operatingProfileId.value = `close:${bitProfileId}`
   try {
     const service = await desktopLocalAgentService()
     const result = await service.profileClose(bitProfileId)
-    MessagePlugin.success(`已关闭绑定窗口：${profile.name || result.bit_profile_id}`)
+    feedback.toast.success(`已关闭绑定窗口：${profile.name || result.bit_profile_id}`)
   } catch (e) {
-    MessagePlugin.error(localTrustMessage(e))
+    feedback.toast.error(localTrustMessage(e))
   } finally {
     operatingProfileId.value = ""
   }
@@ -803,8 +802,8 @@ const columns = [
         <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </template>
     </ResourcePageHeader>
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <t-alert
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert
       v-if="!isDesktop"
         message="Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息；打开/关闭窗口、绑定/换绑和检查/同步账号信息请在 Desktop 端完成。"
       theme="info"
@@ -981,7 +980,7 @@ const columns = [
     </t-dialog>
 
     <t-dialog v-model:visible="showCreate" header="新增账号" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
-      <t-alert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
+      <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
       <t-form @submit.prevent="createAccount">
         <div class="form-section">基本信息</div>
         <t-form-item v-if="user?.role === 'admin'" label="归属用户 UID">
@@ -1037,7 +1036,7 @@ const columns = [
 
     <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
     <t-dialog v-model:visible="editVisible" header="编辑账号" :confirm-btn="{ content: '保存', loading: savingEdit, theme: 'primary' }" @confirm="saveEdit">
-      <t-alert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
+      <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
       <t-form v-if="editAccount" label-width="90px">
         <div class="form-section">基本信息</div>
         <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount.platform) }}）</t-form-item>
@@ -1122,13 +1121,13 @@ const columns = [
           <span v-if="item.message" class="check-item-msg">{{ item.message }}</span>
         </div>
       </div>
-      <t-alert v-if="checkNotice" :message="checkNotice" theme="success" style="margin-top:12px" />
-      <t-alert v-if="checkFailure" theme="error" style="margin-top:12px">
+      <FeedbackAlert v-if="checkNotice" :message="checkNotice" theme="info" style="margin-top:12px" />
+      <FeedbackAlert v-if="checkFailure" theme="error" style="margin-top:12px">
         <template #message>{{ checkFailure }}</template>
         <template #operation>
           <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/personal-info')">前往个人中心检查设备</t-button>
         </template>
-      </t-alert>
+      </FeedbackAlert>
     </t-drawer>
 
     <t-dialog v-model:visible="showCookieDialog" header="账号 Cookie（敏感数据）" :footer="false">
@@ -1138,7 +1137,6 @@ const columns = [
       <p><strong>当前真实 Cookie（active）：</strong></p>
       <pre class="cookie-box">{{ cookieDialog?.active_cookie || '（空）' }}</pre>
       <div class="form-tip">Cookie 为敏感数据，请勿泄露。复制后建议及时清理剪贴板；导出仅用于授权用途。</div>
-      <t-alert v-if="cookieNotice" :message="cookieNotice" theme="success" style="margin-top:8px" />
       <t-space style="margin-top:8px">
         <t-button v-if="isDesktop && canOperateBoundWindow(cookieDialog?.account)" size="small" :loading="readingCookie" @click="readProfileCookieFor(cookieDialog.account)">从 Profile 读真实 Cookie</t-button>
         <t-button size="small" @click="copyCookie('active_cookie')">复制 Active Cookie</t-button>

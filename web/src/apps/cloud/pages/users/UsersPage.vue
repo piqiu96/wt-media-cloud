@@ -1,4 +1,6 @@
 <script setup>
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
+import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
 
@@ -153,7 +155,7 @@ async function toggleUser(user) {
 }
 
 async function deleteUser(user) {
-  if (!window.confirm(`确定删除用户 ${user.username}？有历史记录的用户将被阻止删除。`)) return
+  if (!await feedback.confirmWarning({ title: '删除用户', message: `确定删除用户 ${user.username}？有历史记录的用户将被阻止删除。`, confirmText: '删除', danger: true })) return
   try {
     await client.deleteUser(user.id)
     await loadAll()
@@ -209,7 +211,7 @@ function gameScopeText(gameIds) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
 
     <t-card title="用户管理" :bordered="true">
       <template #actions>
@@ -284,7 +286,7 @@ function gameScopeText(gameIds) {
     </t-dialog>
 
     <t-dialog :visible="!!oneTimePassword" header="一次性密码" :cancel-btn="null" @confirm="clearOneTimePassword" @close="clearOneTimePassword">
-      <t-alert theme="warning" message="该密码仅本次显示，关闭后无法再次查看。" style="margin-bottom:12px" />
+      <FeedbackAlert theme="warning" message="该密码仅本次显示，关闭后无法再次查看。" style="margin-bottom:12px" />
       <t-input :value="oneTimePassword" readonly>
         <template #suffix><t-button size="small" variant="text" @click="copyPassword">复制</t-button></template>
       </t-input>

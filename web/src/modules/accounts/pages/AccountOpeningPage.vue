@@ -1,4 +1,6 @@
 <script setup>
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
+import { feedback } from '../../../shared/ui/feedback/index.js'
 import { ref, computed } from "vue"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProxyClient } from "../../../shared/api/proxy.js"
@@ -49,18 +51,14 @@ async function previewOpening() {
 }
 
 async function executeOpening() {
-  executing.value = true
   error.value = ""
 
-  // Check proxy capacity before starting
   if (proxies.value.length < openingRows.value.length) {
-    const ok = confirm(`活跃代理数量 (${proxies.value.length}) 不足待开户数量 (${openingRows.value.length})。继续执行后部分账号将无代理可用，是否继续？`)
-    if (!ok) {
-      executing.value = false
-      return
-    }
+    const ok = await feedback.confirmWarning({ title: '代理数量不足', message: `活跃代理数量 (${proxies.value.length}) 不足待开户数量 (${openingRows.value.length})。继续执行后部分账号将无代理可用，是否继续？`, confirmText: '继续执行' })
+    if (!ok) return
   }
 
+  executing.value = true
   for (const row of openingRows.value) {
     row.status = "creating"
     try {
@@ -116,7 +114,7 @@ const stats = computed(() => {
 
 <template>
   <t-loading :loading="executing" :show-overlay="true" size="large">
-    <t-alert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
 
     <t-steps :current="step - 1" style="margin-bottom:24px">
       <t-step-item title="导入 Cookie" />
