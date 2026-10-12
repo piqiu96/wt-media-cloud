@@ -43,7 +43,7 @@ describe('download centre drawer', () => {
   it('re-takes through the download entry point, cancelling a suspended task first', () => {
     expect(source).toContain("if (task.status === 'pending') {")
     expect(source).toContain('await client.cancelTask(task.id)')
-    expect(source).toContain('await materials.createDownload(task.asset_id)')
+    expect(source).toContain('await createDownloadFor(task)')
     expect(source).toContain('feedback.toast.error(createDownloadFailureMessage(e))')
   })
 
@@ -88,12 +88,37 @@ describe('download centre drawer', () => {
   })
 
   /**
-   * 「重新下载」是**新建一条任务**，所以它必须走发起下载那个入口。
+   * 「重新下载」是**新建一条任务**，所以它必须走发起下载那个入口 —— 而入口由行的
+   * asset_type 决定（CHG-20261013-085）：成片行走成片下载端点，素材行照旧走素材端点。
+   * 两条路都汇进同一个入口函数，重取与重新下载共用它。
    */
-  it('re-downloads through the download entry point', () => {
-    expect(source).toContain('await materials.createDownload(task.asset_id)')
+  it('re-downloads through the entry point the row names', () => {
+    expect(source).toContain('await createDownloadFor(task)')
+    const fn = sliceBetween(source, 'function createDownloadFor(task) {', '\n}')
+    expect(fn).toContain("task.asset_type === 'composite_output'")
+    expect(fn).toContain('compose.createOutputDownload(task.asset_id)')
+    expect(fn).toContain('materials.createDownload(task.asset_id)')
     // 失败的话术取自发起下载那份词表（`error.type` 是冻结的名字），不是任务行的 error_code。
     expect(source).toContain('feedback.toast.error(createDownloadFailureMessage(e))')
+  })
+
+  /**
+   * 成片行没有可打开的素材详情（CHG-20261013-085 裁定）：详情入口指向「我的成片」页，
+   * 而不是把一个成片 id 塞给 MaterialDetailDrawer 去查素材表。
+   */
+  it('sends a composite-output detail to the my-outputs page, not the material drawer', () => {
+    const fn = sliceBetween(source, 'async function openDetail(row) {', '\n}')
+    expect(fn).toContain("row.task.asset_type === 'composite_output'")
+    expect(fn).toContain("name: 'FinishedMedia'")
+    expect(fn).toContain('materials.get(row.task.asset_id)')
+  })
+
+  /**
+   * 标题兜底跟着资产类型走：成片行的兜底是「成片 #id」，模板里不再有写死的「素材 #id」。
+   */
+  it('falls the row title back to the asset kind, not always a material', () => {
+    expect(source).toContain('assetFallbackTitle(row.task)')
+    expect(source).not.toContain('`素材 #${row.task.asset_id}`')
   })
 
   // 新任务要出现在这张列表里。不刷新的话画面停在旧行上，同一个素材看起来像没被重新下载过。

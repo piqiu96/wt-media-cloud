@@ -96,12 +96,14 @@ describe('compose api client', () => {
       .mockResolvedValueOnce(ok({ output: {}, trace: {} }))
       .mockResolvedValueOnce(ok({ id: 5, publish_status: 'archived' }))
       .mockResolvedValueOnce(ok({ url: 'https://signed.example/x' }))
+      .mockResolvedValueOnce(ok({ id: 'transfer-1', status: 'pending' }, 202))
     const client = createComposeClient({ fetch })
 
     await client.listComposeOutputs({ publish_status: 'pending_publish' })
     await client.getComposeOutput(5)
     await client.archiveComposeOutput(5)
     await client.getComposeOutputVideoUrl(5)
+    await client.createOutputDownload(5)
 
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-outputs?publish_status=pending_publish')
     expect(fetch.mock.calls[0][1].method).toBe('GET')
@@ -111,4 +113,8 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[2][1].method).toBe('POST')
     expect(fetch.mock.calls[3][0]).toBe('/api/v1/compose-outputs/5/video-url')
     expect(fetch.mock.calls[3][1].method).toBe('GET')
+    // CHG-20261013-085：成片下载与素材 createDownload 同一个 202 语义 —— 此刻还没有
+    // 任何字节被下载，下一次诚实的进度来源是 GET /file-transfer-tasks。
+    expect(fetch.mock.calls[4][0]).toBe('/api/v1/compose-outputs/5/downloads')
+    expect(fetch.mock.calls[4][1].method).toBe('POST')
   })

@@ -364,3 +364,25 @@ describe('the local copy of one material', () => {
 
 // 文案用例全在 `downloadErrors.test.js`：这个文件钉的是「事实」，措辞跟着词表走，
 // 两处各写一份必然分叉。
+
+// CHG-20261013-085：成片与素材共用同一张传输表与同一个下载中心。文件名投影、重新下载、
+// 重取三个门都按类型放行——漏一个，成片行就在界面上少一块功能；而 prepare 这类中间产物
+// 仍然进不来。
+describe('composite output rows share the material projections', () => {
+  it('projects a finished output file name like a material one', () => {
+    const output = task({ asset_type: 'composite_output', asset_id: 5, status: 'success', purpose: 'user_download', file_name: '20261013/未分类-5-成片-5.mp4' })
+    expect(downloadedFileName([output], 5)).toBe('20261013/未分类-5-成片-5.mp4')
+    // 门放宽不等于门拆掉：素材门没因此松到别的类型上，成功门对成片照旧。
+    // 阴性对照都带齐其余事实，让类型/状态成为唯一的判别字段。
+    expect(downloadedFileName([task({ asset_type: 'video', status: 'success', purpose: 'user_download', file_name: 'x.mp4' })], 42)).toBeNull()
+    expect(downloadedFileName([task({ asset_type: 'composite_output', status: 'failed', purpose: 'user_download', file_name: 'x.mp4' })], 5)).toBeNull()
+  })
+
+  it('lets a failed or cancelled output row re-download and re-take', () => {
+    expect(canRedownload(task({ asset_type: 'composite_output', asset_id: 5, status: 'failed' }))).toBe(true)
+    // 重取的行来源是解绑遗留（换机重投递），与素材同一套事实。
+    expect(canRetake(task({ asset_type: 'composite_output', asset_id: 5, status: 'cancelled', error_code: 'device_unbound' }), null)).toBe(true)
+    // 终态规则对两种类型一视同仁：成功行仍然不给重新下载。
+    expect(canRedownload(task({ asset_type: 'composite_output', asset_id: 5, status: 'success' }))).toBe(false)
+  })
+})

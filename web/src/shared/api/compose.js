@@ -1,4 +1,5 @@
 import { createApiClient } from './http.js'
+import { isDesktop } from '../../utils.js'
 
 export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
@@ -25,5 +26,15 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     getComposeOutput(id) { return api.get(`/compose-outputs/${id}`) },
     archiveComposeOutput(id) { return api.post(`/compose-outputs/${id}/archive`) },
     getComposeOutputVideoUrl(id) { return api.get(`/compose-outputs/${id}/video-url`) },
+    // 成片下载（CHG-20261013-085）：与素材 createDownload 同一个 202 语义与同一个
+    // Desktop 前置（本机 Agent 必须可信）。挂在 compose client 上是因为路由在
+    // /compose-outputs 下；下一次诚实的进度来源同样是 GET /file-transfer-tasks。
+    async createOutputDownload(id) {
+      if (isDesktop()) {
+        const { ensureTrustedLocalAgent } = await import('../../apps/desktop/features/local-agent/init.js')
+        await ensureTrustedLocalAgent()
+      }
+      return api.post(`/compose-outputs/${id}/downloads`, {})
+    },
   }
 }

@@ -2,24 +2,29 @@
 import { feedback } from '../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
-// 「重新下载」走的是**发起下载那个入口**（`POST /materials/{id}/downloads`），不是
-// transfer 自己的路由 —— 所以它挂在素材的 client 上。把它塞进 `fileTransfer.js` 会
-// 让那个模块开始持有素材路由，而它存在的理由恰恰是「任务是执行器中立的」。同一棵树
-// 里的素材页面就是这么调的（`await client.createDownload(row.id)`），这里不发明第二种。
+// 「重新下载」走的是**发起下载那个入口**，不是 transfer 自己的路由 —— 素材行走
+// `POST /materials/{id}/downloads`（挂在素材的 client 上，`fileTransfer.js` 存在的
+// 理由恰恰是「任务是执行器中立的」），成片行走 `POST /compose-outputs/{id}/downloads`
+// （CHG-20261013-085，同一个 202 语义、同一张传输表）。入口由行的 asset_type 决定，
+// 汇进下面同一个 `createDownloadFor`。
 import { createMaterialsClient } from '../../shared/api/materials.js'
+import { createComposeClient } from '../../shared/api/compose.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import MaterialDetailDrawer from '../materials/MaterialDetailDrawer.vue'
 import { isDesktop } from '../../utils.js'
 import { invoke } from '@tauri-apps/api/core'
 import { isDesktopRuntime, openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
-import { hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
+import { assetFallbackTitle, hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
 import { transferRows } from './transferRows.js'
 
 const client = createFileTransferClient()
 const materials = createMaterialsClient()
+const compose = createComposeClient()
+const router = useRouter()
 const { visible, close } = useDownloadCentre()
 const tasks = ref([])
 const loading = ref(false)
@@ -236,6 +241,16 @@ async function cancel(task) {
 }
 
 /**
+ * 发起下载的**唯一入口**：按行的 asset_type 分派到对应的创建端点（CHG-20261013-085）。
+ * 成片与素材共用一张传输表与同一套行投影，差别的只有创建 URL —— 所以分支只在这里出现
+ * 一次，重新下载与重取都汇到它，谁也不发明第二种发起方式。
+ */
+function createDownloadFor(task) {
+  if (task.asset_type === 'composite_output') return compose.createOutputDownload(task.asset_id)
+  return materials.createDownload(task.asset_id)
+}
+
+/**
  * 失败 / 已取消行重新发起下载。
  *
  * 这是**新建一条任务**：服务端去重键的 generation 把终态算作已结束，所以重新点击会得到
@@ -244,7 +259,7 @@ async function cancel(task) {
  */
 async function redownload(task) {
   try {
-    await materials.createDownload(task.asset_id)
+    await createDownloadFor(task)
     // 新任务要出现在这张列表里 —— 不刷新的话画面停在旧行上，看起来像没反应。
     await load()
   } catch (e) {
@@ -258,7 +273,7 @@ async function redownload(task) {
  * 悬置行先取消 —— pending 没有执行器，取消是立即终态（契约「cancelled when it had no
  * executor」）；再重新发起下载，去重键的 generation 把刚取消的那条算作已结束，新任务于是
  * 落在**当前**可信节点上，而不是仍指着已被替换的旧节点。可重取行已是终态，直接发起。
- * 两条都走与第一次点击**完全相同**的入口（`materials.createDownload`），设备维度的去重
+ * 两条都走与第一次点击**完全相同**的入口（`createDownloadFor`），设备维度的去重
  * 保证不会重复造任务。
  */
 async function retake(task) {
@@ -268,7 +283,7 @@ async function retake(task) {
       // 原行，不会造出重复任务。
       try { await client.cancelTask(task.id) } catch { /* 继续重取 */ }
     }
-    await materials.createDownload(task.asset_id)
+    await createDownloadFor(task)
     await load()
   } catch (e) {
     feedback.toast.error(createDownloadFailureMessage(e))
@@ -286,6 +301,13 @@ async function open(task) {
 }
 
 async function openDetail(row) {
+  // 成片行没有可打开的素材详情（CHG-20261013-085 裁定）：把成片 id 塞给
+  // MaterialDetailDrawer 去查素材表只会 404 —— 详情入口指向「我的成片」页。
+  if (row.task.asset_type === 'composite_output') {
+    router.push({ name: 'FinishedMedia' })
+    close()
+    return
+  }
   detailLoading.value = true
   try {
     detail.value = await materials.get(row.task.asset_id)
@@ -313,7 +335,7 @@ async function openDetail(row) {
         <ul v-if="activeTab === 'active'" class="transfer-list">
           <li v-for="row in visibleRows" :key="row.task.id" class="transfer-item">
             <div class="transfer-item__head">
-              <span class="transfer-item__title" :title="row.task.asset_title">{{ row.task.asset_title || `素材 #${row.task.asset_id}` }}</span>
+              <span class="transfer-item__title" :title="row.task.asset_title">{{ row.task.asset_title || assetFallbackTitle(row.task) }}</span>
               <ResourceStatusBadge :tone="row.state.tone" :label="row.state.label" />
             </div>
 
@@ -366,7 +388,7 @@ async function openDetail(row) {
         <ul v-else-if="activeTab === 'failed'" class="transfer-list">
           <li v-for="row in visibleRows" :key="row.task.id" class="transfer-item">
             <div class="transfer-item__head">
-              <span class="transfer-item__title" :title="row.task.asset_title">{{ row.task.asset_title || `素材 #${row.task.asset_id}` }}</span>
+              <span class="transfer-item__title" :title="row.task.asset_title">{{ row.task.asset_title || assetFallbackTitle(row.task) }}</span>
               <ResourceStatusBadge :tone="row.state.tone" :label="row.state.label" />
             </div>
             <p class="transfer-item__error">{{ row.errorText }}</p>
@@ -385,7 +407,7 @@ async function openDetail(row) {
              其余已取消/失败给「重新下载」。已成功的素材不重下（走查裁定）。 -->
         <t-table v-else class="transfer-table" :data="visibleRows" :columns="historyColumns" :row-key="(row) => row.task.id" size="small" :scroll="{ x: 640 }">
           <template #title="{ row }">
-            <span class="transfer-table__title" :title="row.task.asset_title">{{ row.task.asset_title || `素材 #${row.task.asset_id}` }}</span>
+            <span class="transfer-table__title" :title="row.task.asset_title">{{ row.task.asset_title || assetFallbackTitle(row.task) }}</span>
           </template>
           <template #size="{ row }">{{ row.sizeText }}</template>
           <template #finished_at="{ row }">{{ row.finishedText || row.createdText }}</template>

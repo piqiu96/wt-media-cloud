@@ -7,6 +7,13 @@
 
 export const TERMINAL_STATUSES = ['success', 'failed', 'cancelled']
 
+/**
+ * 下载中心放行的资产类型（CHG-20261013-085）：成片与素材共用同一张传输表、同一个
+ * 执行器与同一套行投影，所以文件名投影、重新下载与重取三个门都按这份名单放行。
+ * `compose_input_prepare` 这类中间产物仍然进不来 —— 它们的 id 是别的东西的 id。
+ */
+export const DOWNLOADABLE_ASSET_TYPES = ['material', 'composite_output']
+
 export function isTerminal(task) {
   return TERMINAL_STATUSES.includes(task?.status)
 }
@@ -145,7 +152,7 @@ export function downloadedFileName(tasks, assetId) {
   const wanted = Number(assetId)
   if (!Number.isFinite(wanted)) return null
   for (const task of Array.isArray(tasks) ? tasks : []) {
-    if (task?.asset_type !== 'material') continue
+    if (!DOWNLOADABLE_ASSET_TYPES.includes(task?.asset_type)) continue
     if (Number(task?.asset_id) !== wanted) continue
     if (task?.execution_scope !== 'local_agent') continue
     if (task?.purpose !== 'user_download') continue
@@ -203,8 +210,17 @@ export function canOpenFile(task, presence = FILE_PRESENCE.unknown) {
  * 找不到了」另开一个口子。
  */
 export function canRedownload(task) {
-  if (task?.asset_type !== 'material' || !task?.asset_id) return false
+  if (!DOWNLOADABLE_ASSET_TYPES.includes(task?.asset_type) || !task?.asset_id) return false
   return task?.status === 'failed' || task?.status === 'cancelled'
+}
+
+/**
+ * 标题兜底跟着资产类型走：素材行「素材 #id」，成片行「成片 #id」。任务行**有**
+ * `asset_title`（创建时写死，见契约），这里只在它缺席时兜 —— 兜底写成什么类型，
+ * 得看这行是什么，而不是默认所有行都是素材。
+ */
+export function assetFallbackTitle(task) {
+  return task?.asset_type === 'composite_output' ? `成片 #${task.asset_id}` : `素材 #${task.asset_id}`
 }
 
 /**
@@ -240,7 +256,7 @@ export function isReclaimableAfterUnbind(task) {
  * 这台机器执行的下载还悬着/还躺在上家机器那里，把它重新驱动起来」。
  */
 export function canRetake(task, localDeviceId) {
-  if (task?.asset_type !== 'material' || !task?.asset_id) return false
+  if (!DOWNLOADABLE_ASSET_TYPES.includes(task?.asset_type) || !task?.asset_id) return false
   return isSuspendedOnDevice(task, localDeviceId) || isReclaimableAfterUnbind(task)
 }
 
