@@ -120,12 +120,8 @@ func runWorker(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("compose worker config: %w", err)
 	}
-	if cfg.Credentials.ObjectStorage.AccessKey == "" || cfg.Credentials.ObjectStorage.SecretKey == "" {
-		return errors.New("compose worker: object storage credentials are not configured")
-	}
-	tools := cfg.Media.FFmpeg
-	if err := ffmpeg.Verify(ctx, ffmpeg.Tools{FFmpegPath: tools.FFmpegPath, FFprobePath: tools.FFprobePath, Version: tools.Version, RequiredEncoders: tools.RequiredEncoders, FFmpegSHA256: tools.FFmpegSHA256, FFprobeSHA256: tools.FFprobeSHA256}); err != nil {
-		return fmt.Errorf("compose worker tools: %w", err)
+	if err := verifyWorkerEnvironment(ctx, cfg); err != nil {
+		return err
 	}
 	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
 		return fmt.Errorf("compose worker object storage: %w", err)
@@ -196,6 +192,21 @@ func runWorker(ctx context.Context) error {
 		return err
 	}
 	logger.Job().Infof("compose worker stopped node_id=%d", settings.NodeID)
+	return nil
+}
+
+// verifyWorkerEnvironment refuses to start when the worker's own environment
+// is incomplete — no storage credentials, or an ffmpeg pair the config names
+// that is not usable on this host. A worker that cannot serve the tasks it
+// claims would spend attempts on that missing environment.
+func verifyWorkerEnvironment(ctx context.Context, cfg config.Config) error {
+	if cfg.Credentials.ObjectStorage.AccessKey == "" || cfg.Credentials.ObjectStorage.SecretKey == "" {
+		return errors.New("compose worker: object storage credentials are not configured")
+	}
+	tools := cfg.Media.FFmpeg
+	if err := ffmpeg.Verify(ctx, ffmpeg.Tools{FFmpegPath: tools.FFmpegPath, FFprobePath: tools.FFprobePath, Version: tools.Version, RequiredEncoders: tools.RequiredEncoders, FFmpegSHA256: tools.FFmpegSHA256, FFprobeSHA256: tools.FFprobeSHA256}); err != nil {
+		return fmt.Errorf("compose worker tools: %w", err)
+	}
 	return nil
 }
 

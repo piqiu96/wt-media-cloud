@@ -1,4 +1,12 @@
 # Compose worker operational settings, matching the tracked tree: the workspace
-# root anchors to the installed Cloud home.
+# root anchors to the installed Cloud home, and node_id names this worker in
+# compose_tasks.claimed_node_id (unique per running worker).
 
 workspace_root = '.compose'
+node_id = 1
+concurrency = 2
+lease = '5m'
+heartbeat_interval = '30s'
+task_timeout = '30m'
+poll_interval = '2s'
+recovery_interval = '30s'
