@@ -34,17 +34,8 @@ func (ComposeTaskStore) CreateAudited(item model.ComposeTask, action string) (mo
 // transaction. The snapshot columns ride on the insert — the caller has
 // already merged and validated config, so nothing here recomputes it.
 func createComposeTaskAudited(db *gorm.DB, item model.ComposeTask, action string, now time.Time) (model.ComposeTask, error) {
-	item.CreatedAt, item.UpdatedAt = now, now
-	// GORM writes every column explicitly, so the column DEFAULT 3 would never
-	// fire and a zero MaxAttempts would be persisted as "no retries allowed".
-	if item.MaxAttempts <= 0 {
-		item.MaxAttempts = 3
-	}
 	err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&item).Error; err != nil {
-			return err
-		}
-		return appendComposeTaskAudit(tx, item, action, now)
+		return composeTaskInsertWithAudit(tx, &item, action, item.CreatedBy, now)
 	})
 	if err != nil {
 		return model.ComposeTask{}, err
@@ -59,7 +50,7 @@ func createComposeTaskAudited(db *gorm.DB, item model.ComposeTask, action string
 	return stored, nil
 }
 
-func appendComposeTaskAudit(tx *gorm.DB, item model.ComposeTask, action string, now time.Time) error {
+func appendComposeTaskAudit(tx *gorm.DB, item model.ComposeTask, action string, actorID int64, now time.Time) error {
 	summary, err := json.Marshal(map[string]any{
 		"team_id": item.TeamID, "game_id": item.GameID, "status": item.Status,
 		"material_id": item.MaterialID, "template_code": item.TemplateCode, "template_version": item.TemplateVersion,
@@ -67,11 +58,85 @@ func appendComposeTaskAudit(tx *gorm.DB, item model.ComposeTask, action string, 
 	if err != nil {
 		return err
 	}
-	return tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, 'compose_task', ?, ?, ?)`, id.NewID("audit"), item.CreatedBy, action, fmt.Sprint(item.ID), summary, now).Error
+	return tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, 'compose_task', ?, ?, ?)`, id.NewID("audit"), actorID, action, fmt.Sprint(item.ID), summary, now).Error
+}
+
+// composeTaskInsertWithAudit writes the task row and its audit entry on the
+// given handle without managing the transaction, so callers that need the
+// insert inside a larger transaction (CreateForUsage) share the same shape.
+// It takes a pointer because GORM fills the generated ID back into the row.
+func composeTaskInsertWithAudit(tx *gorm.DB, item *model.ComposeTask, action string, actorID int64, now time.Time) error {
+	// GORM writes every column explicitly, so the column DEFAULT 3 would never
+	// fire and a zero MaxAttempts would be persisted as "no retries allowed".
+	if item.MaxAttempts <= 0 {
+		item.MaxAttempts = 3
+	}
+	item.CreatedAt, item.UpdatedAt = now, now
+	if err := tx.Create(item).Error; err != nil {
+		return err
+	}
+	return appendComposeTaskAudit(tx, *item, action, actorID, now)
 }
 
 func (ComposeTaskStore) Find(id int64) (model.ComposeTask, bool, error) {
 	return findComposeTask(database.DB(), id)
+}
+
+func (ComposeTaskStore) FindByRequestKey(key string) (model.ComposeTask, bool, error) {
+	return findComposeTaskByKey(database.DB(), key)
+}
+
+func findComposeTaskByKey(db *gorm.DB, key string) (model.ComposeTask, bool, error) {
+	if key == "" {
+		return model.ComposeTask{}, false, nil
+	}
+	item, err := scanComposeTask(db.Raw(`SELECT `+composeTaskColumns+` FROM compose_tasks WHERE request_key = ?`, key).Row())
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.ComposeTask{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+// CreateForUsage checks the actor's active usage and writes the task in one
+// transaction, so a usage removed mid-command cannot slip a task past §5.4.5's
+// "no new tasks on a removed relation" rule. found=false means nothing was
+// written; the caller names it as a per-item failure.
+func (ComposeTaskStore) CreateForUsage(item model.ComposeTask, action string) (model.ComposeTask, bool, error) {
+	return createForUsage(database.DB(), item, action, time.Now())
+}
+
+func createForUsage(db *gorm.DB, item model.ComposeTask, action string, now time.Time) (model.ComposeTask, bool, error) {
+	written := false
+	err := db.Transaction(func(tx *gorm.DB) error {
+		usage, found, err := findActiveUsage(tx, item.CreatedBy, item.MaterialID)
+		if err != nil || !found {
+			return err
+		}
+		item.MaterialUsageID = usage.ID
+		if err := composeTaskInsertWithAudit(tx, &item, action, item.CreatedBy, now); err != nil {
+			return err
+		}
+		written = true
+		return nil
+	})
+	if err != nil {
+		return model.ComposeTask{}, false, err
+	}
+	if !written {
+		return model.ComposeTask{}, false, nil
+	}
+	stored, found, err := findComposeTask(db, item.ID)
+	if err != nil {
+		return model.ComposeTask{}, false, err
+	}
+	if !found {
+		return model.ComposeTask{}, false, fmt.Errorf("created compose task %d cannot be read", item.ID)
+	}
+	return stored, true, nil
+}
+
+func (ComposeTaskStore) CancelAudited(item model.ComposeTask, actorID int64, action string) (bool, error) {
+	return cancelComposeTaskAudited(database.DB(), item, actorID, action, time.Now())
 }
 
 func findComposeTask(db *gorm.DB, id int64) (model.ComposeTask, bool, error) {
@@ -131,16 +196,30 @@ func listComposeTasks(db *gorm.DB, filter ComposeTaskFilter) ([]model.ComposeTas
 	return items, rows.Err()
 }
 
-// cancelPendingComposeTask flips a task that has not been claimed to
-// cancelled. M4-C3 scope: pending only, so one conditional UPDATE is the whole
-// operation — a running task has a process behind it and waits for M4-C5.
-// Rows-affected 0 means "not pending (or gone)"; the caller reloads to name it.
-func cancelPendingComposeTask(db *gorm.DB, id int64, now time.Time) (bool, error) {
-	result := db.Exec(`UPDATE compose_tasks SET status = 'cancelled', finished_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`, now, now, id)
-	if result.Error != nil {
-		return false, result.Error
+// cancelComposeTaskAudited flips a pending task to cancelled and records the
+// cancel in one transaction — change.md requires the audit trail on both the
+// create and the cancel. M4-C3 scope: pending only, so one conditional UPDATE
+// is the whole operation — a running task has a process behind it and waits
+// for M4-C5. Rows-affected 0 (already claimed, finished, or gone) writes
+// nothing and returns false; the caller reloads to name the outcome.
+func cancelComposeTaskAudited(db *gorm.DB, item model.ComposeTask, actorID int64, action string, now time.Time) (bool, error) {
+	ok := false
+	err := db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'cancelled', finished_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`, now, now, item.ID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		ok = true
+		item.Status = model.ComposeTaskCancelled
+		return appendComposeTaskAudit(tx, item, action, actorID, now)
+	})
+	if err != nil {
+		return false, err
 	}
-	return result.RowsAffected == 1, nil
+	return ok, nil
 }
 
 type composeTaskScanner interface{ Scan(...any) error }
