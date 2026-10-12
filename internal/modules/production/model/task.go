@@ -33,6 +33,7 @@ type ComposeTask struct {
 	TemplateVersion uint32            `json:"template_version" gorm:"column:template_version"`
 	ConfigSnapshot  json.RawMessage   `json:"config_snapshot" gorm:"column:config_snapshot_json;type:json"`
 	Status          ComposeTaskStatus `json:"status"`
+	CancelRequested bool              `json:"cancel_requested" gorm:"column:cancel_requested"`
 	RequestKey      string            `json:"-" gorm:"column:request_key"`
 	CreatedBy       int64             `json:"created_by"`
 	ClaimedNodeID   *int64            `json:"-" gorm:"column:claimed_node_id"`
@@ -53,3 +54,35 @@ type ComposeTask struct {
 }
 
 func (ComposeTask) TableName() string { return "compose_tasks" }
+
+// CompositeOutput is the verified-output asset (engineering spec §3.5). The
+// worker writes it inside the same transaction that marks the task success —
+// a row here always has a verified object behind it. Publish facts live in
+// the M6 publication domain; PublishStatus is only this row's projection.
+type CompositeOutput struct {
+	ID              int64           `json:"id"`
+	TeamID          int64           `json:"team_id"`
+	GameID          string          `json:"game_id"`
+	MaterialID      int64           `json:"material_id"`
+	MaterialUsageID int64           `json:"material_usage_id" gorm:"column:material_usage_id"`
+	TaskID          int64           `json:"compose_task_id" gorm:"column:compose_task_id"`
+	StrategyID      int64           `json:"compose_strategy_id" gorm:"column:compose_strategy_id"`
+	TemplateCode    string          `json:"template_code" gorm:"column:template_code"`
+	TemplateVersion uint32          `json:"template_version" gorm:"column:template_version"`
+	ObjectKey       string          `json:"object_key" gorm:"column:object_key"`
+	FileSizeBytes   int64           `json:"file_size_bytes" gorm:"column:file_size_bytes"`
+	SHA256          string          `json:"sha256" gorm:"column:sha256"`
+	Media           json.RawMessage `json:"media" gorm:"column:media_json;type:json"`
+	PublishStatus   string          `json:"publish_status" gorm:"column:publish_status"`
+	CreatedBy       int64           `json:"created_by"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+func (CompositeOutput) TableName() string { return "composite_outputs" }
+
+// ComposeOutputCommit reports the ids written by the success transaction.
+type ComposeOutputCommit struct {
+	OutputID int64
+	TaskID   int64
+}
