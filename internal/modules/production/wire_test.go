@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 )
 
 // Response bodies must match the Cloud-owned business schema consumed by both frontends.
@@ -339,5 +340,41 @@ func TestTheComposeOutputResponseMatchesTheOpenAPISchema(t *testing.T) {
 	}
 	if got, want := marshalledKeys(t, model.CompositeOutput{}), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
 		t.Errorf("ComposeOutput keys = %v, contract = %v", got, want)
+	}
+}
+
+func TestTheComposeOutputDetailMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read compose output openapi: %v", err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas struct {
+				Detail struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeOutputDetail"`
+				Trace struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeOutputTrace"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse compose output openapi: %v", err)
+	}
+	detail := parsed.Components.Schemas.Detail.Properties
+	if len(detail) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeOutputDetail properties")
+	}
+	if got, want := marshalledKeys(t, productionservice.ComposeOutputDetail{}), schemaPropertyNames(detail); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeOutputDetail keys = %v, contract = %v", got, want)
+	}
+	trace := parsed.Components.Schemas.Trace.Properties
+	if len(trace) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeOutputTrace properties")
+	}
+	if got, want := marshalledKeys(t, productionservice.ComposeOutputTrace{}), schemaPropertyNames(trace); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeOutputTrace keys = %v, contract = %v", got, want)
 	}
 }

@@ -381,3 +381,22 @@ func TestComposeTaskFailurePayloadsCarryTheFrozenErrcodes(t *testing.T) {
 		t.Fatalf("failed[1] = %+v", body.Data.Failed[1])
 	}
 }
+
+func TestComposeOutputRoutesRequireAuthentication(t *testing.T) {
+	engine := server.New()
+	RegisterRoutes(engine)
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{consts.MethodGet, "/api/v1/compose-outputs"},
+		{consts.MethodGet, "/api/v1/compose-outputs/5"},
+		{consts.MethodPost, "/api/v1/compose-outputs/5/archive"},
+		{consts.MethodGet, "/api/v1/compose-outputs/5/video-url"},
+	} {
+		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
+		if response.Result().StatusCode() != consts.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", request.method, request.path, response.Result().StatusCode())
+		}
+	}
+}

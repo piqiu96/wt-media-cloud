@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	ErrComposeOutputInvalid       = errors.New("compose output input is invalid")
 	ErrComposeOutputForbidden     = errors.New("compose output operation is forbidden")
 	ErrComposeOutputNotFound      = errors.New("compose output not found")
 	ErrComposeOutputNotArchivable = errors.New("compose output is not archivable")
@@ -139,7 +140,7 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 		case "pending_publish", "published", "archived":
 			filter.PublishStatus = input.PublishStatus
 		default:
-			return nil, fmt.Errorf("%w: unknown publish_status %s", ErrComposeOutputForbidden, input.PublishStatus)
+			return nil, fmt.Errorf("%w: unknown publish_status %s", ErrComposeOutputInvalid, input.PublishStatus)
 		}
 	}
 	if actor.Role != identity.RoleAdmin {
