@@ -79,6 +79,9 @@ func run(ctx context.Context, args []string) error {
 	if err := compose.VerifyUpload(ctx, storage.Get(), cfg.Storage.ObjectStorage.PresignTTL.Duration, output.Path, filepath.Base(runDir.Path())); err != nil {
 		return err
 	}
+	if err := runDir.Release(); err != nil {
+		return fmt.Errorf("clean compose run directory: %w", err)
+	}
 	fmt.Printf("compose verified: duration=%dms; object storage readback sha256 matched and temporary key removed\n", output.DurationMS)
 	return nil
 }
