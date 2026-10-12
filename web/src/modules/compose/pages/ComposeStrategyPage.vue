@@ -118,15 +118,16 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    // 先拿到当前用户再决定要不要取团队列表：只有管理员的创建表单用得上它。
+    // 团队列表所有角色都可读（服务端仅要求登录），编辑/详情要把 team_id 映射成分组名；
+    // 管理员的创建表单另用它选目标团队。
     currentUser.value = await sessionClient.me()
-    const requests = [client.listStrategies(), client.listTemplates(), client.listGames()]
-    if (isAdmin.value) requests.push(client.listTeams())
-    const [strategyRows, templateRows, gameRows, teamRows] = await Promise.all(requests)
+    const [strategyRows, templateRows, gameRows, teamRows] = await Promise.all([
+      client.listStrategies(), client.listTemplates(), client.listGames(), client.listTeams().catch(() => []),
+    ])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
     templates.value = Array.isArray(templateRows) ? templateRows : []
     games.value = Array.isArray(gameRows) ? gameRows : []
-    if (Array.isArray(teamRows)) teams.value = teamRows
+    teams.value = Array.isArray(teamRows) ? teamRows : []
   } catch (e) {
     error.value = e.message || '合成策略加载失败'
   } finally {
@@ -301,6 +302,10 @@ function gameName(id) {
   return games.value.find((game) => game.id === id)?.name || id
 }
 
+function teamName(id) {
+  return teams.value.find((team) => team.id === id)?.name || `分组 #${id}`
+}
+
 function templateLabel(id) {
   const template = templates.value.find((item) => item.id === id)
   return template ? `${template.name} v${template.version}` : `模板 #${id}`
@@ -380,6 +385,11 @@ function cutLabel(config) {
               </t-select>
             </t-form-item>
           </template>
+          <!-- 编辑时归属不可改（服务端 Update 不动 team/game），但要展示出来让人知道策略挂在哪。 -->
+          <template v-else>
+            <t-form-item label="所属团队"><t-input :value="teamName(form.team_id)" disabled /></t-form-item>
+            <t-form-item label="所属游戏"><t-input :value="gameName(form.game_id)" disabled /></t-form-item>
+          </template>
           <t-form-item label="合成模板" required-mark>
             <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange">
               <t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" />
@@ -420,6 +430,7 @@ function cutLabel(config) {
       <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="460px" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>所属团队</span><strong>{{ teamName(detailRow.team_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>所属游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>合成模板</span><strong>{{ templateLabel(detailRow.compose_template_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>模板版本</span><strong>v{{ detailRow.compose_template_version }}</strong></div>
