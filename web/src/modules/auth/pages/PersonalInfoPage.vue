@@ -6,12 +6,17 @@ import { invoke } from '@tauri-apps/api/core'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { createDeviceBindingClient } from '../../../shared/api/deviceBinding.js'
 import { createProfileBindingClient } from '../../../shared/api/profileBindings.js'
+import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import { bitAccountDiffers as computeBitAccountDiffers, maskBitAccountId } from '../../../apps/desktop/features/local-agent/work-env-status.js'
 import { avatarOptions } from '../../../shared/ui/systemAvatars.js'
 import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
 const session = createSessionClient()
 const devices = createDeviceBindingClient()
+// 分组/游戏范围只做展示，取与素材库页同一个 games 端点把游戏 ID 映射成名称；
+// 拉不到时退化为显示 ID，不阻塞整页加载。
+const usersClient = createUsersClient()
+const games = ref([])
 const user = ref(null)
 const nickname = ref('')
 const avatarId = ref('sky')
@@ -31,6 +36,13 @@ const error = ref('')
 const inDesktop = typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
 const deviceMatches = computed(() => !!binding.value?.bound && !!localDevice.value?.device_id && binding.value.device_id === localDevice.value.device_id)
 const deviceConflicts = computed(() => !!binding.value?.bound && !!localDevice.value?.device_id && !deviceMatches.value)
+// 管理员不受分组/游戏限制；运营展示自己被授权的游戏名称（找不到名称时退化为 ID）。
+const gameScopeLabel = computed(() => {
+  if (user.value?.role === 'admin') return '全部游戏'
+  const ids = user.value?.game_ids || []
+  if (!ids.length) return '—'
+  return ids.map((id) => games.value.find((game) => game.id === id)?.name || id).join('、')
+})
 // 本机 Agent 就绪 = 空闲或运行中（Agent 无事可做时报 idle，不是不可用）。
 const localAgentReady = computed(() => ['idle', 'running'].includes(localAgent.value?.status))
 // 本机账号与绑定账号一致时没有可绑定的东西，入口不出现；不一致才是
@@ -48,10 +60,11 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [currentUser, currentBinding] = await Promise.all([session.me(), devices.get()])
+    const [currentUser, currentBinding, gameRows] = await Promise.all([session.me(), devices.get(), usersClient.listGames({ status: 'enabled' }).catch(() => [])])
     user.value = currentUser
     nickname.value = currentUser.nickname || currentUser.username
     avatarId.value = currentUser.avatar_id || 'sky'
+    games.value = Array.isArray(gameRows) ? gameRows : []
     binding.value = currentBinding
     if (inDesktop) {
       try { localDevice.value = await invoke('local_device_identity') }
@@ -137,7 +150,7 @@ async function takeCurrentEnvironmentAsAuthoritative() {
         <section class="profile-card">
           <h2>基本信息</h2>
           <div class="identity-summary"><SystemAvatar :avatar-id="avatarId" :size="64" /><div><strong>{{ user?.nickname || user?.username }}</strong><span>用户 UID {{ user?.id || '—' }}</span></div></div>
-          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong></div>
+          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong><span>所属分组</span><strong>{{ user?.team_name || '—' }}</strong><span>游戏范围</span><strong>{{ gameScopeLabel }}</strong></div>
           <label class="form-label" for="profile-nickname">昵称</label>
           <t-input id="profile-nickname" v-model="nickname" maxlength="64" placeholder="请输入昵称" />
           <p class="field-help">默认与用户名一致，可随时修改。</p>
