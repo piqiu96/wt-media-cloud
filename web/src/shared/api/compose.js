@@ -19,5 +19,11 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     listComposeTasks(params) { return api.get('/compose-tasks', params) },
     getComposeTask(id) { return api.get(`/compose-tasks/${id}`) },
     cancelComposeTask(id) { return api.post(`/compose-tasks/${id}/cancel`) },
+    // 我的成片（CHG-20261013-084）：publish_status 筛选由服务端读 query；video-url
+    // 是短时预签名，每次预览现取，客户端不做缓存。
+    listComposeOutputs(params) { return api.get('/compose-outputs', params) },
+    getComposeOutput(id) { return api.get(`/compose-outputs/${id}`) },
+    archiveComposeOutput(id) { return api.post(`/compose-outputs/${id}/archive`) },
+    getComposeOutputVideoUrl(id) { return api.get(`/compose-outputs/${id}/video-url`) },
   }
 }

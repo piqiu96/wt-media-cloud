@@ -127,6 +127,20 @@ describe('the compose strategy page is a real page on both ends', () => {
   }
 })
 
+// CHG-20261013-084 把成片管理从占位页换成「我的成片」真实页面。与上面素材库两条
+// 同型：钉住**已经被替换掉**，防止只改一端或哪天退回占位页。
+describe('the my outputs page is a real page on both ends', () => {
+  const loader = 'modules/compose/pages/MyOutputsPage.vue'
+  for (const [end, table] of [['cloud', cloudByPath], ['desktop', desktopByPath]]) {
+    it(`${end} finished-media points at ${loader}`, () => {
+      const source = loaderSource(table.get('finished-media'))
+      expect(source, end).toBeTruthy()
+      expect(source, end).toContain(loader)
+      expect(source, end).not.toContain('ComingSoon.vue')
+    })
+  }
+})
+
 /**
  * 两端各自不该有的页面。这两条原先也只是注释（「不包含 /logs, /settings」「不包含 /users」）。
  * 一个地址在错的树上存在，不会报错：它会渲染出一个那个端根本进不到的服务器的页面，

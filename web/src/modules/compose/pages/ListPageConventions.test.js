@@ -9,11 +9,12 @@ import {
 // 合成两页与素材/内容池页受同一条列表规范约束：列宽显式、滚动宽推导、时间无秒。
 const read = pageReader(import.meta.url)
 
-const FILES = ['ComposeStrategyPage.vue', 'ComposeTasksPage.vue']
+const FILES = ['ComposeStrategyPage.vue', 'ComposeTasksPage.vue', 'MyOutputsPage.vue']
 
 const TABLES = [
   { file: 'ComposeStrategyPage.vue', name: 'columns', count: 8 },
   { file: 'ComposeTasksPage.vue', name: 'columns', count: 9 },
+  { file: 'MyOutputsPage.vue', name: 'columns', count: 8 },
 ]
 
 describe('compose list page conventions', () => {

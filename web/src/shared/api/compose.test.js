@@ -87,3 +87,28 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[3][0]).toBe('/api/v1/compose-tasks/9/cancel')
     expect(fetch.mock.calls[3][1].method).toBe('POST')
   })
+
+  // CHG-20261013-084：成片四条命令与 production/router.go 一一对应。列表的
+  // publish_status 筛选由服务端读 query；video-url 每次预览现取，客户端不做缓存。
+  it('maps the compose output commands to the contract paths', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok({ output: {}, trace: {} }))
+      .mockResolvedValueOnce(ok({ id: 5, publish_status: 'archived' }))
+      .mockResolvedValueOnce(ok({ url: 'https://signed.example/x' }))
+    const client = createComposeClient({ fetch })
+
+    await client.listComposeOutputs({ publish_status: 'pending_publish' })
+    await client.getComposeOutput(5)
+    await client.archiveComposeOutput(5)
+    await client.getComposeOutputVideoUrl(5)
+
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-outputs?publish_status=pending_publish')
+    expect(fetch.mock.calls[0][1].method).toBe('GET')
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-outputs/5')
+    expect(fetch.mock.calls[1][1].method).toBe('GET')
+    expect(fetch.mock.calls[2][0]).toBe('/api/v1/compose-outputs/5/archive')
+    expect(fetch.mock.calls[2][1].method).toBe('POST')
+    expect(fetch.mock.calls[3][0]).toBe('/api/v1/compose-outputs/5/video-url')
+    expect(fetch.mock.calls[3][1].method).toBe('GET')
+  })
