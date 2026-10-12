@@ -242,6 +242,115 @@ func TestValidateRejectsAnEmptyObjectStorageField(t *testing.T) {
 	}
 }
 
+func TestLoadFromDirReadsFFmpegToolConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+
+	cfg, err := LoadFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDir() error = %v", err)
+	}
+	tools := cfg.Media.FFmpeg
+	if got, want := tools.FFmpegPath, "/opt/homebrew/bin/ffmpeg"; got != want {
+		t.Fatalf("Media.FFmpeg.FFmpegPath = %q, want %q", got, want)
+	}
+	if got, want := tools.FFprobePath, "/opt/homebrew/bin/ffprobe"; got != want {
+		t.Fatalf("Media.FFmpeg.FFprobePath = %q, want %q", got, want)
+	}
+	if got, want := tools.Version, "8.1.2"; got != want {
+		t.Fatalf("Media.FFmpeg.Version = %q, want %q", got, want)
+	}
+	if got, want := tools.RequiredEncoders, []string{"libx264", "aac"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Media.FFmpeg.RequiredEncoders = %v, want %v", got, want)
+	}
+	if tools.FFmpegSHA256 != "" || tools.FFprobeSHA256 != "" {
+		t.Fatalf("Media.FFmpeg sha pins = %q/%q, want both empty in the dev tree", tools.FFmpegSHA256, tools.FFprobeSHA256)
+	}
+}
+
+// A tree without tool configuration must fail to load rather than start a
+// compose run that would discover a missing binary mid-flight.
+func TestLoadFromDirRequiresFFmpegToolConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+	if err := os.Remove(filepath.Join(dir, "media", "ffmpeg.toml")); err != nil {
+		t.Fatalf("remove ffmpeg tool config: %v", err)
+	}
+
+	_, err := LoadFromDir(dir)
+	if err == nil {
+		t.Fatal("LoadFromDir() = nil error, want a failure when media/ffmpeg.toml is absent")
+	}
+	if !strings.Contains(err.Error(), "media/ffmpeg.toml") {
+		t.Fatalf("LoadFromDir() error = %v, want it to name the missing file", err)
+	}
+}
+
+func TestValidateRejectsAnEmptyFFmpegToolField(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+	writeConfigFile(t, dir, "media/ffmpeg.toml", "ffmpeg_path = \"/opt/homebrew/bin/ffmpeg\"\nffprobe_path = \"/opt/homebrew/bin/ffprobe\"\nversion = \"\"\nrequired_encoders = [\"libx264\"]\n")
+
+	if _, err := LoadFromDir(dir); err == nil {
+		t.Fatal("LoadFromDir() = nil error, want a failure for an empty tool version")
+	} else if !strings.Contains(err.Error(), "version") {
+		t.Fatalf("LoadFromDir() error = %v, want it to name the empty field", err)
+	}
+}
+
+func TestLoadFromDirReadsComposeWorkerConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+
+	cfg, err := LoadFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDir() error = %v", err)
+	}
+	if got, want := cfg.Compose.Worker.WorkspaceRoot, "compose-workspace"; got != want {
+		t.Fatalf("Compose.Worker.WorkspaceRoot = %q, want %q", got, want)
+	}
+}
+
+func TestLoadFromDirRequiresComposeWorkerConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+	if err := os.Remove(filepath.Join(dir, "scheduler", "compose.toml")); err != nil {
+		t.Fatalf("remove compose worker config: %v", err)
+	}
+
+	_, err := LoadFromDir(dir)
+	if err == nil {
+		t.Fatal("LoadFromDir() = nil error, want a failure when scheduler/compose.toml is absent")
+	}
+	if !strings.Contains(err.Error(), "scheduler/compose.toml") {
+		t.Fatalf("LoadFromDir() error = %v, want it to name the missing file", err)
+	}
+}
+
+// Relative tool paths and the compose workspace anchor to the Cloud home the
+// same way logger paths do, so the tracked tree never embeds a user path and
+// the release tree can say "bin/ffmpeg".
+func TestLoadAnchorsRelativeToolPathsAndWorkspaceToHome(t *testing.T) {
+	root := t.TempDir()
+	writeValidConfig(t, filepath.Join(root, "config"))
+	writeConfigFile(t, filepath.Join(root, "config"), "media/ffmpeg.toml", "ffmpeg_path = \"bin/ffmpeg\"\nffprobe_path = \"bin/ffprobe\"\nversion = \"8.1.2\"\nrequired_encoders = [\"libx264\", \"aac\"]\n")
+	writeConfigFile(t, filepath.Join(root, "config"), "scheduler/compose.toml", "workspace_root = \".compose\"\n")
+	t.Setenv("WT_MEDIA_CONFIG_DIR", filepath.Join(root, "config"))
+	t.Chdir(root)
+	initializeRuntimePathsForTest(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Media.FFmpeg.FFmpegPath; !filepath.IsAbs(got) || !strings.HasSuffix(got, "bin/ffmpeg") {
+		t.Fatalf("Media.FFmpeg.FFmpegPath = %q, want an absolute path ending in bin/ffmpeg", got)
+	}
+	if got := cfg.Compose.Worker.WorkspaceRoot; !filepath.IsAbs(got) || !strings.HasSuffix(got, ".compose") {
+		t.Fatalf("Compose.Worker.WorkspaceRoot = %q, want an absolute path ending in .compose", got)
+	}
+}
+
 func TestLoadFromDirLoadsSixLoggerConfigs(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
@@ -428,6 +537,8 @@ func writeValidConfig(t *testing.T, root string) {
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
 	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
+	writeConfigFile(t, root, "scheduler/compose.toml", "workspace_root = \"compose-workspace\"\n")
+	writeConfigFile(t, root, "media/ffmpeg.toml", "ffmpeg_path = \"/opt/homebrew/bin/ffmpeg\"\nffprobe_path = \"/opt/homebrew/bin/ffprobe\"\nversion = \"8.1.2\"\nrequired_encoders = [\"libx264\", \"aac\"]\n")
 	writeConfigFile(t, root, "storage/object_storage.toml", validObjectStorageTOML())
 }
 

@@ -1,0 +1,13 @@
+# Video-processing binaries the compose worker shells out to (M4-C4, CHG-20261012-080).
+# Paths are the tools this development machine installed; the release tree says
+# `bin/ffmpeg` and anchors to its own root. `version` is the token both binaries
+# print on their first `-version` line, so one value covers the pair the way one
+# archive ships them. The sha pins stay empty here and are filled by a controlled
+# deployment from its ffmpeg-source.json.
+
+ffmpeg_path = '/opt/homebrew/bin/ffmpeg'
+ffprobe_path = '/opt/homebrew/bin/ffprobe'
+version = '8.1.2'
+required_encoders = ['libx264', 'aac']
+ffmpeg_sha256 = ''
+ffprobe_sha256 = ''

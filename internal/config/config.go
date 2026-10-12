@@ -34,6 +34,8 @@ type Config struct {
 	Credentials CredentialsConfig
 	Scheduler   SchedulerConfig
 	Storage     StorageConfig
+	Media       MediaConfig
+	Compose     ComposeConfig
 }
 
 type AppConfig struct {
@@ -131,6 +133,37 @@ type StorageConfig struct {
 	ObjectStorage ObjectStorageConfig
 }
 
+// MediaConfig groups the external media tooling Cloud shells out to.
+type MediaConfig struct {
+	FFmpeg FFmpegConfig
+}
+
+// FFmpegConfig names the video-processing binaries the compose worker depends
+// on and the facts they must report at startup. Paths may be relative; Load
+// anchors them to the Cloud home so the release tree can say `bin/ffmpeg`
+// without embedding a deployment path. The sha pins are optional in both
+// directions like the object-storage credential: a development tree runs the
+// tools its platform installed, a controlled deployment pins the shipped bytes.
+type FFmpegConfig struct {
+	FFmpegPath       string   `toml:"ffmpeg_path"`
+	FFprobePath      string   `toml:"ffprobe_path"`
+	Version          string   `toml:"version"`
+	RequiredEncoders []string `toml:"required_encoders"`
+	FFmpegSHA256     string   `toml:"ffmpeg_sha256"`
+	FFprobeSHA256    string   `toml:"ffprobe_sha256"`
+}
+
+// ComposeConfig groups the compose worker's operational settings. Lease and
+// concurrency settings join here in M4-C5; the workspace root is the one the
+// M4-C4 verification runs already need.
+type ComposeConfig struct {
+	Worker ComposeWorkerConfig
+}
+
+type ComposeWorkerConfig struct {
+	WorkspaceRoot string `toml:"workspace_root"`
+}
+
 type AgentCredentialConfig struct {
 	AuthToken string `toml:"auth_token"`
 }
@@ -197,6 +230,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load runtime config from %q: %w", paths.Config, err)
 	}
 	resolveRelativeLoggerPaths(&cfg, paths.Logs)
+	resolveRelativeMediaAndComposePaths(&cfg, paths.Home)
 	return cfg, nil
 }
 
@@ -217,6 +251,23 @@ func resolveRelativeLoggerPaths(cfg *Config, logDir string) {
 			continue
 		}
 		logger.Path = filepath.Join(logDir, path)
+	}
+}
+
+// resolveRelativeMediaAndComposePaths anchors relative ffmpeg/ffprobe paths and
+// the compose workspace root to the Cloud home, for the same reason logger
+// paths anchor to the logs directory: the tracked tree and the release tree
+// state locations relative to the installation, and the process working
+// directory must never decide where a binary or a workspace lives.
+func resolveRelativeMediaAndComposePaths(cfg *Config, home string) {
+	if path := strings.TrimSpace(cfg.Media.FFmpeg.FFmpegPath); path != "" && !filepath.IsAbs(path) {
+		cfg.Media.FFmpeg.FFmpegPath = filepath.Join(home, path)
+	}
+	if path := strings.TrimSpace(cfg.Media.FFmpeg.FFprobePath); path != "" && !filepath.IsAbs(path) {
+		cfg.Media.FFmpeg.FFprobePath = filepath.Join(home, path)
+	}
+	if path := strings.TrimSpace(cfg.Compose.Worker.WorkspaceRoot); path != "" && !filepath.IsAbs(path) {
+		cfg.Compose.Worker.WorkspaceRoot = filepath.Join(home, path)
 	}
 }
 
@@ -261,6 +312,12 @@ func LoadFromDir(root string) (Config, error) {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "scheduler", "scheduler.toml"), &cfg.Scheduler); err != nil {
+		return Config{}, err
+	}
+	if err := requiredTOML(filepath.Join(root, "scheduler", "compose.toml"), &cfg.Compose.Worker); err != nil {
+		return Config{}, err
+	}
+	if err := requiredTOML(filepath.Join(root, "media", "ffmpeg.toml"), &cfg.Media.FFmpeg); err != nil {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "storage", "object_storage.toml"), &cfg.Storage.ObjectStorage); err != nil {
@@ -327,6 +384,39 @@ func (c Config) Validate() error {
 	}
 	if err := validateObjectStorage(c.Storage.ObjectStorage, c.Credentials.ObjectStorage); err != nil {
 		return err
+	}
+	if err := validateFFmpegTools(c.Media.FFmpeg); err != nil {
+		return err
+	}
+	if err := validateComposeWorker(c.Compose.Worker); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateFFmpegTools requires the tool facts the compose worker cannot run
+// without. Unlike the storage credential, these are not secrets and there is no
+// tree that ships without them: a deployment that has not decided which ffmpeg
+// it runs must fail at startup, not at the first compose run.
+func validateFFmpegTools(tools FFmpegConfig) error {
+	if strings.TrimSpace(tools.FFmpegPath) == "" {
+		return errors.New("media.ffmpeg.ffmpeg_path is required")
+	}
+	if strings.TrimSpace(tools.FFprobePath) == "" {
+		return errors.New("media.ffmpeg.ffprobe_path is required")
+	}
+	if strings.TrimSpace(tools.Version) == "" {
+		return errors.New("media.ffmpeg.version is required")
+	}
+	if len(tools.RequiredEncoders) == 0 {
+		return errors.New("media.ffmpeg.required_encoders must name at least one encoder")
+	}
+	return nil
+}
+
+func validateComposeWorker(worker ComposeWorkerConfig) error {
+	if strings.TrimSpace(worker.WorkspaceRoot) == "" {
+		return errors.New("scheduler.compose.workspace_root is required")
 	}
 	return nil
 }
@@ -516,6 +606,7 @@ func clone(source Config) Config {
 	cloned.Databases = append([]DatabaseConfig(nil), source.Databases...)
 	cloned.Clients.HTTP = cloneHTTPClients(source.Clients.HTTP)
 	cloned.Credentials.Douyin.Headers = cloneStringMap(source.Credentials.Douyin.Headers)
+	cloned.Media.FFmpeg.RequiredEncoders = append([]string(nil), source.Media.FFmpeg.RequiredEncoders...)
 	return cloned
 }
 

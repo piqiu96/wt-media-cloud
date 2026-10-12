@@ -1,0 +1,4 @@
+# Compose worker operational settings, matching the tracked tree: the workspace
+# root anchors to the installed Cloud home.
+
+workspace_root = '.compose'

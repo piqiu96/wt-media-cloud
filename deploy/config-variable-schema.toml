@@ -66,3 +66,23 @@ name = "WT_OBJECT_STORAGE_SECRET_KEY"
 type = "string"
 required = true
 secret = true
+
+[[variables]]
+name = "WT_FFMPEG_VERSION"
+type = "string"
+required = true
+secret = false
+
+[[variables]]
+name = "WT_FFMPEG_SHA256"
+type = "string"
+required = false
+secret = false
+allow_empty = true
+
+[[variables]]
+name = "WT_FFPROBE_SHA256"
+type = "string"
+required = false
+secret = false
+allow_empty = true

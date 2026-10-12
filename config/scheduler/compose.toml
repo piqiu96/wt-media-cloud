@@ -1,0 +1,5 @@
+# Compose worker operational settings. The workspace root is where each compose
+# run builds its isolated per-run directory; a relative value anchors to the
+# Cloud home. Lease and concurrency settings join here in M4-C5.
+
+workspace_root = '.compose'
