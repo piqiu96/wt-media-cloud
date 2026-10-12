@@ -34,6 +34,11 @@ const form = ref(defaultForm())
 // 模板参数区由所选模板的 schema 驱动：需要哪些字段、叫什么名字、什么类型都来自
 // schema（执行器 BasicCutV1() 发布），页面不写死字段清单。
 const templateParams = ref({})
+// 校验就近提示（AdminUI 规范 §5.6）：错误挂在字段旁边，不再只靠 toast。
+const paramErrors = ref({})
+const nameError = ref('')
+// 打开编辑器时的快照，关闭时比对判断「有未保存内容」，决定要不要二次提示。
+const savedSnapshot = ref('')
 
 const copyVisible = ref(false)
 const copySaving = ref(false)
@@ -153,6 +158,9 @@ function openCreate() {
   editingID.value = null
   form.value = defaultForm()
   templateParams.value = {}
+  clearParamErrors()
+  nameError.value = ''
+  beginSnapshot()
   visible.value = true
 }
 
@@ -166,7 +174,22 @@ function openEdit(row) {
     configFallback: templates.value.some((item) => item.id === row.compose_template_id) ? null : row.config,
   }
   templateParams.value = Object.assign({}, row.config || {})
+  clearParamErrors()
+  nameError.value = ''
+  beginSnapshot()
   visible.value = true
+}
+
+function beginSnapshot() {
+  savedSnapshot.value = editorState()
+}
+
+function editorState() {
+  return JSON.stringify([editingID.value, form.value, templateParams.value])
+}
+
+function editorDirty() {
+  return editorState() !== savedSnapshot.value
 }
 
 // 选了模板（或换模板）后按该模板 schema 重置参数区：整数字段给 schema 下限（无下限给 0），
@@ -229,17 +252,40 @@ function toggleStatus(row, nextEnabled) {
   })
 }
 
-async function save() {
-  const name = String(form.value.name || '').trim()
-  if (!name) {
-    feedback.toast.error('请输入策略名称')
+function clearParamErrors() {
+  paramErrors.value = {}
+}
+
+// 关闭编辑器：内容没动直接关；动过就按规范二次提示（X 和「取消」同一条路径）。
+function requestCloseEditor() {
+  if (!editorDirty()) {
+    visible.value = false
     return
   }
-  const fields = formSchemaFields.value
+  const dialog = DialogPlugin.confirm({
+    header: '放弃未保存的修改？',
+    body: '编辑内容尚未保存，关闭后将丢失。',
+    confirmBtn: { content: '不保存', theme: 'danger' },
+    onConfirm: () => {
+      dialog.hide()
+      visible.value = false
+    },
+  })
+}
+
+async function save() {
+  nameError.value = ''
+  clearParamErrors()
+  const name = String(form.value.name || '').trim()
+  if (!name) {
+    nameError.value = '请输入策略名称'
+    return
+  }
   if (!editingID.value && !form.value.compose_template_id) {
     feedback.toast.error('请选择合成模板')
     return
   }
+  const fields = formSchemaFields.value
   if (!fields.length) {
     feedback.toast.error('模板参数未就绪，请重新选择合成模板')
     return
@@ -247,18 +293,21 @@ async function save() {
   // 按模板 schema 的字段集组装 config：整数字段强制取整并套 schema 下限，
   // 必填字段缺值直接拦在前端；schema 外的值不会出现，因为表单就是按 schema 渲染的。
   const config = {}
+  let invalid = ''
   for (const field of fields) {
     const raw = templateParams.value[field.key]
     if (field.type === 'integer') {
       // t-input-number 清空后给 null，Number(null) 是 0，会静默变成合法下限值——先拦。
       if (raw === null || raw === undefined || raw === '') {
-        feedback.toast.error(`请填写${field.label}`)
-        return
+        paramErrors.value[field.key] = `请填写${field.label}`
+        invalid = invalid || field.label
+        continue
       }
       const value = Number(raw)
       if (!Number.isInteger(value) || (field.minimum !== undefined && value < field.minimum)) {
-        feedback.toast.error(`${field.label}必须是不小于 ${field.minimum ?? 0} 的整数`)
-        return
+        paramErrors.value[field.key] = `必须是不小于 ${field.minimum ?? 0} 的整数`
+        invalid = invalid || field.label
+        continue
       }
       config[field.key] = value
     } else if (field.type === 'boolean') {
@@ -266,12 +315,14 @@ async function save() {
     } else {
       const value = String(raw ?? '').trim()
       if (field.required && !value) {
-        feedback.toast.error(`请输入${field.label}`)
-        return
+        paramErrors.value[field.key] = `请输入${field.label}`
+        invalid = invalid || field.label
+        continue
       }
       config[field.key] = value
     }
   }
+  if (invalid) return
   saving.value = true
   try {
     if (editingID.value) {
@@ -330,18 +381,23 @@ function cutLabel(config) {
 
       <ResourceStatGrid :items="stats" />
 
+      <!-- 筛选区与内容池同构：filter-bar + wt-filter-field / wt-filter-actions（AdminUI 规范 §2.1） -->
       <ResourceCard class="strategy-filter-card">
-        <div class="filter-row">
-          <label class="filter-field"><span>策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" style="width:200px" @enter="load" /></label>
-          <label class="filter-field"><span>游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部" style="width:150px">
-            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
-          </t-select></label>
-          <label class="filter-field"><span>状态</span><t-select v-model="filters.status" clearable placeholder="全部" style="width:120px">
-            <t-option value="active" label="启用" />
-            <t-option value="inactive" label="停用" />
-          </t-select></label>
-          <t-button theme="primary" @click="load">查询</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+        <div class="filter-bar">
+          <t-space wrap>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" @enter="load" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
+              <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+            </t-select></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
+              <t-option value="active" label="启用" />
+              <t-option value="inactive" label="停用" />
+            </t-select></label>
+            <div class="wt-filter-actions">
+              <t-button theme="primary" @click="load">查询</t-button>
+              <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+            </div>
+          </t-space>
         </div>
       </ResourceCard>
 
@@ -369,10 +425,16 @@ function cutLabel(config) {
         </div>
       </ResourceCard>
 
-      <t-dialog v-model:visible="visible" :header="editingID ? '编辑合成策略' : '新增合成策略'" width="640px" :footer="false">
-        <t-form label-width="96px">
-          <div class="strategy-form-section">基础信息</div>
-          <t-form-item label="策略名称" required-mark><t-input v-model="form.name" :maxlength="120" placeholder="例如：王者荣耀高光切片" /></t-form-item>
+      <!-- 策略编辑带模板参数分组，字段随模板增长——按规范用 Drawer + 分组，底部 取消/保存。 -->
+      <t-drawer :visible="visible" :header="editingID ? '编辑合成策略' : '新增合成策略'" size="520px" :close-btn="true" :footer="false" @close="requestCloseEditor">
+        <t-form label-width="96px" class="strategy-form">
+          <div class="strategy-form-section">① 基础信息</div>
+          <t-form-item label="策略名称" required-mark>
+            <div class="strategy-field">
+              <t-input v-model="form.name" :maxlength="120" placeholder="例如：王者荣耀高光切片" :status="nameError ? 'error' : undefined" />
+              <p v-if="nameError" class="strategy-field-error">{{ nameError }}</p>
+            </div>
+          </t-form-item>
           <template v-if="!editingID">
             <t-form-item v-if="isAdmin" label="所属团队" required-mark>
               <t-select v-model="form.team_id" clearable placeholder="选择团队">
@@ -397,24 +459,28 @@ function cutLabel(config) {
             <t-input v-else :value="templateLabel(form.compose_template_id)" disabled />
           </t-form-item>
 
-          <div class="strategy-form-section">模板参数</div>
+          <div class="strategy-form-section">② 模板参数</div>
           <div v-if="!editingID && !form.compose_template_id" class="strategy-bind-hint strategy-form-hint">先选择合成模板，需要填写哪些参数由模板决定。</div>
           <template v-else>
             <t-form-item v-for="field in formSchemaFields" :key="field.key" :label="field.label" :required-mark="field.required">
-              <t-input-number v-if="field.type === 'integer'" v-model="templateParams[field.key]" :min="field.minimum ?? 0" theme="column" style="width:160px" />
-              <t-switch v-else-if="field.type === 'boolean'" v-model="templateParams[field.key]" />
-              <t-input v-else v-model="templateParams[field.key]" :placeholder="`请输入${field.label}`" />
+              <div class="strategy-field">
+                <t-input-number v-if="field.type === 'integer'" v-model="templateParams[field.key]" :min="field.minimum ?? 0" theme="column" style="width:160px" :status="paramErrors[field.key] ? 'error' : undefined" />
+                <t-switch v-else-if="field.type === 'boolean'" v-model="templateParams[field.key]" />
+                <t-input v-else v-model="templateParams[field.key]" :placeholder="`请输入${field.label}`" :status="paramErrors[field.key] ? 'error' : undefined" />
+                <p v-if="paramErrors[field.key]" class="strategy-field-error">{{ paramErrors[field.key] }}</p>
+              </div>
             </t-form-item>
             <t-form-item v-if="!editingID" label="">
               <div class="strategy-bind-hint">模板版本创建后固定；模板停用后不能新建绑定，已保存的策略不受影响。</div>
             </t-form-item>
           </template>
         </t-form>
+        <!-- 取消在左、保存在右（AdminUI 规范：底部动作固定次序，主按钮突出主要动作）。 -->
         <div class="strategy-editor__footer">
-          <t-button variant="outline" @click="visible = false">取消</t-button>
+          <t-button variant="outline" @click="requestCloseEditor">取消</t-button>
           <t-button theme="primary" :loading="saving" @click="save">保存</t-button>
         </div>
-      </t-dialog>
+      </t-drawer>
 
       <t-dialog v-model:visible="copyVisible" header="复制合成策略" width="480px" :footer="false">
         <t-form label-width="96px">
@@ -427,15 +493,20 @@ function cutLabel(config) {
         </div>
       </t-dialog>
 
+      <!-- 只读详情：按规范分区展示，仅保留右上角 X，不放任何提交按钮。 -->
       <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="460px" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
+          <div class="strategy-detail-section">基础信息</div>
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>所属团队</span><strong>{{ teamName(detailRow.team_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>所属游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>合成模板</span><strong>{{ templateLabel(detailRow.compose_template_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>模板版本</span><strong>v{{ detailRow.compose_template_version }}</strong></div>
+          <div class="strategy-detail-section">状态信息</div>
+          <div class="strategy-drawer__field"><span>当前状态</span><ResourceStatusBadge :tone="detailRow.status === 'active' ? 'success' : 'neutral'" :label="detailRow.status === 'active' ? '启用' : '停用'" /></div>
+          <div class="strategy-detail-section">模板参数</div>
           <div class="strategy-drawer__field"><span>切片区间</span><strong>{{ cutLabel(detailRow.config) }}</strong></div>
-          <div class="strategy-drawer__field"><span>状态</span><strong>{{ detailRow.status === 'active' ? '启用' : '停用' }}</strong></div>
+          <div class="strategy-detail-section">时间信息</div>
           <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
           <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ formatDateTime(detailRow.updated_at) }}</strong></div>
         </div>
@@ -447,14 +518,17 @@ function cutLabel(config) {
 <style scoped>
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
 .strategy-filter-card { padding: 14px 20px; }
-.filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
-.strategy-form-section { margin: 4px 0 14px; padding-left: 8px; border-left: 3px solid var(--wt-brand, var(--wt-border)); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.strategy-form { padding-top: 4px; }
+.strategy-form-section { margin: 8px 0 14px; padding-left: 8px; border-left: 3px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.4; }
 .strategy-form-hint { padding-left: 8px; }
+.strategy-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.strategy-field-error { margin: 0; color: var(--td-error-color, #d54941); font-size: 12px; line-height: 1.4; }
 .strategy-bind-hint { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
-.strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.strategy-drawer { display: flex; flex-direction: column; gap: 10px; }
-.strategy-drawer__field { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
+.strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.strategy-detail-section { margin: 16px 0 8px; padding-left: 8px; border-left: 3px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.4; }
+.strategy-detail-section:first-child { margin-top: 0; }
+.strategy-drawer { display: flex; flex-direction: column; gap: 8px; }
+.strategy-drawer__field { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
 .strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
 .strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
 </style>
