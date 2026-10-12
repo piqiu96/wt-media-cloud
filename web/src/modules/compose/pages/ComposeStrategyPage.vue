@@ -9,6 +9,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { schemaFields } from '../schemaFields.js'
 
 const client = createComposeClient()
 const sessionClient = createSessionClient()
@@ -104,18 +105,6 @@ const formSchemaFields = computed(() => {
   return schemaFields(schema)
 })
 
-function schemaFields(schema) {
-  const properties = schema?.properties
-  if (!properties || typeof properties !== 'object') return []
-  const required = Array.isArray(schema.required) ? schema.required : []
-  return Object.entries(properties).map(([key, def]) => ({
-    key,
-    label: def.title || key,
-    type: def.type || 'string',
-    minimum: def.minimum,
-    required: required.includes(key),
-  }))
-}
 
 onMounted(load)
 

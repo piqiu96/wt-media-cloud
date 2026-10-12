@@ -82,11 +82,12 @@ describe('my materials page', () => {
     // 已放弃：只有「恢复使用」，不再给必然空转的下载。
     expect(op).toContain("row.usage_status === 'removed'")
     expect(op).toContain('@click="restore(row)">恢复使用</t-button>')
-    // 使用中：主操作由 download_status 驱动 —— 已下载给「加入合成」，下载中不给主操作
-    //（文件已经在准备了，再点还是同一条命令），未下载/失败给「下载/重新下载」。
+    // 使用中：主操作由 download_status 驱动 —— 已下载给「加入合成」（CHG-20261013-082
+    // 起打开创建对话框），下载中不给主操作（文件已经在准备了，再点还是同一条命令），
+    // 未下载/失败给「下载/重新下载」。
     expect(op).toContain("row.download_status === 'downloaded'")
     expect(op).toContain("row.download_status !== 'downloading'")
-    expect(op).toContain('@click="goToCompose()">加入合成</t-button>')
+    expect(op).toContain('@click="openCreate([row])">加入合成</t-button>')
     expect(op).toContain('downloadActionLabel(row.download_status)')
     expect(op).toContain('@click="giveUp(row)">放弃使用</t-button>')
     // 矩阵判据从 video_status 切走：行内不再碰云端源文件态。
@@ -152,7 +153,9 @@ describe('my materials page', () => {
   // 「加入合成」在这条 CHG 里没有后端端点：`/compose` 今天指向 ComingSoon。它是一个
   // **跳转**，不是一次假装成功的提交——点了会看见那一页的真实状态，而不是一个说
   // 「已加入合成」的 toast，然后在合成页里找不到这条素材。
-  it('routes 加入合成 to the compose page instead of faking a submission', () => {
+  // 详情抽屉的「合成」仍是浏览动作（带运营去合成任务页）；行内按钮现在打开创建
+  // 对话框，由上面的用例钉住。
+  it('routes the drawer 合成 action to the compose page instead of faking a submission', () => {
     expect(source).toContain("{ name: 'Compose' }")
     // 只看模板：脚本里那句「发一个『已加入合成』的提示才是伪造」是这条决定本身的记录。
     const template = source.slice(source.indexOf('<template>'))
@@ -229,3 +232,37 @@ describe('my materials page', () => {
     expect(source).toContain('@cancel="load"')
   })
 })
+
+  // CHG-20261013-082：创建合成任务从「跳占位页」变成打开创建对话框；表格加了
+  // 勾选列支持多选批量创建。钉住三处会静默失效的接线。
+  describe('compose task creation (CHG-20261013-082)', () => {
+    // 勾选只对使用中的关系开放：已放弃的关系不允许新建任务（PRD §5.4.5），
+    // 这条必须落在勾选项的 disabled 上，而不是选完再悄悄过滤。
+    it('offers row selection limited to in-use relations', () => {
+      expect(source).toContain("colKey: 'row-select'")
+      expect(source).toContain("row.usage_status !== 'active'")
+    })
+
+    it('opens the shared create dialog from the row and the toolbar batch button', () => {
+      expect(source).toContain('@click="openCreate([row])">加入合成</t-button>')
+      expect(source).not.toContain('@click="goToCompose()">加入合成')
+      expect(source).toContain('@click="createSelected"')
+      expect(source).toContain('<ComposeTaskCreateDialog')
+      expect(source).toContain(':materials="createMaterials"')
+      expect(source).toContain('@created="onCreated"')
+    })
+
+    // request_key 是幂等键：生成时机在对话框打开那一刻、并在对话框存续期间稳定，
+    // 保存按钮的双击/重试才会命中服务端的唯一键幂等，而不是造出两批任务。
+    it('generates stable request keys inside the create dialog', () => {
+      const dialog = readFileSync(new URL('../../compose/components/ComposeTaskCreateDialog.vue', import.meta.url), 'utf8')
+      expect(dialog).toContain('crypto.randomUUID()')
+      expect(dialog).toMatch(/requestKeys\.value = generateKeys\(props\.materials\)/)
+    })
+
+    it('splits the created count from the failed reasons after creation', () => {
+      expect(source).toMatch(/result\.failed/)
+      expect(source).toMatch(/result\.created/)
+      expect(source).toContain('await load()')
+    })
+  })

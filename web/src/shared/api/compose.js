@@ -14,5 +14,10 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     updateStrategy(id, data) { return api.put(`/compose-strategies/${id}`, data) },
     copyStrategy(id, name) { return api.post(`/compose-strategies/${id}/copy`, { name }) },
     setStrategyStatus(id, status) { return api.patch(`/compose-strategies/${id}/status`, { status }) },
+    // 合成任务（CHG-20261013-082）：列表筛选（status / compose_strategy_id）由服务端读 query。
+    createComposeTasks(data) { return api.post('/compose-tasks', data) },
+    listComposeTasks(params) { return api.get('/compose-tasks', params) },
+    getComposeTask(id) { return api.get(`/compose-tasks/${id}`) },
+    cancelComposeTask(id) { return api.post(`/compose-tasks/${id}/cancel`) },
   }
 }

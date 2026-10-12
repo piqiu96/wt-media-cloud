@@ -24,6 +24,7 @@ import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
+import ComposeTaskCreateDialog from '../../compose/components/ComposeTaskCreateDialog.vue'
 
 const client = createMaterialsClient()
 const users = createUsersClient()
@@ -42,13 +43,46 @@ const detail = ref(null)
 const detailLoading = ref(false)
 const pagination = ref({ current: 1, pageSize: 20 })
 
+// 创建合成任务（CHG-20261013-082）：勾选多行或行内「加入合成」都打开同一个创建
+// 对话框；批次里只带对话框需要的事实（素材 id 与标题），request_key 由对话框生成。
+const selectedRowKeys = ref([])
+const createVisible = ref(false)
+const createMaterials = ref([])
+
+function openCreate(rowsToCreate) {
+  createMaterials.value = rowsToCreate.map((row) => ({ id: row.id, title: row.title }))
+  createVisible.value = true
+}
+
+function createSelected() {
+  openCreate(rows.value.filter((row) => selectedRowKeys.value.includes(row.usage_id)))
+}
+
+async function onCreated(result) {
+  selectedRowKeys.value = []
+  const created = result.created || []
+  const failed = result.failed || []
+  if (failed.length > 0) {
+    feedback.toast.warning(`已创建 ${created.length} 个任务，${failed.length} 个失败：${failed.map((item) => item.message).join('；')}`)
+  } else {
+    feedback.toast.success(`已创建 ${created.length} 个合成任务`)
+  }
+  await load()
+}
+
 // 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
 // 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
 //
 // 走查七轮：游戏不再独立成列，收进「素材」格的副行（与作者同格），腾出的位置给
 // 「使用状态」——这一页第一次同时有两个状态维度要并排（规范 §7.2）。使用状态是
 // 关系自己的状态，文件状态是素材的，两者不合并。
+// 勾选列只对使用中的关系开放（PRD §5.4.5：已放弃的关系不允许新建任务），
+// disabled 落在勾选项上，而不是选完再悄悄过滤。判据提成具名函数，列声明
+// 里保持一层花括号（列表规范的列宽量具按顶层花括号数分列）。
+const selectionDisabled = ({ row }) => ({ disabled: row.usage_status !== 'active' })
+
 const columns = [
+  { colKey: 'row-select', type: 'multiple', width: 46, checkProps: selectionDisabled },
   { colKey: 'id', title: '素材 ID', width: 90 },
   { colKey: 'material', title: '素材', width: 380 },
   { colKey: 'video_status', title: '文件状态', width: 100 },
@@ -182,9 +216,7 @@ async function restore(row) {
   }
 }
 
-// 合成还没有后端端点（M4-C2 未启动），`/compose` 今天指向 ComingSoon。这里做的是
-// **跳转**：点了会看见那一页的真实状态。发一个「已加入合成」的提示才是伪造——运营会
-// 回合成页里找这条素材，而那里什么都没有。
+// 详情抽屉里的「合成」是浏览动作：带运营去合成任务页看全局，不在抽屉里替他选素材。
 function goToCompose() {
   router.push({ name: 'Compose' })
 }
@@ -223,6 +255,7 @@ onMounted(() => {
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、补充文件并进入后续生产">
         <template #actions>
+          <t-button theme="primary" :disabled="selectedRowKeys.length === 0" @click="createSelected">创建合成任务</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
@@ -270,7 +303,7 @@ onMounted(() => {
                   <t-button size="small" theme="primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="row.download_status === 'downloaded'" size="small" theme="primary" @click="goToCompose()">加入合成</t-button>
+                  <t-button v-if="row.download_status === 'downloaded'" size="small" theme="primary" @click="openCreate([row])">加入合成</t-button>
                   <t-button v-else-if="row.download_status !== 'downloading'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
                   <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="giveUp(row)">放弃使用</t-button>
                 </template>
@@ -293,6 +326,12 @@ onMounted(() => {
         @give-up="giveUp"
         @restore="restore"
         @compose="goToCompose"
+      />
+
+      <ComposeTaskCreateDialog
+        v-model:visible="createVisible"
+        :materials="createMaterials"
+        @created="onCreated"
       />
     </div>
   </t-loading>

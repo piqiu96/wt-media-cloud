@@ -61,3 +61,29 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[0][1].method).toBe('GET')
   })
 })
+
+  // CHG-20261013-082：合成任务四条命令与 production/router.go 一一对应。列表的
+  // 筛选参数（status / compose_strategy_id）由服务端读 query，客户端只负责拼 URL。
+  it('maps the compose task commands to the contract paths', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(ok({ created: [], failed: [] }))
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok({ id: 9, status: 'pending' }))
+      .mockResolvedValueOnce(ok({ id: 9, status: 'cancelled' }))
+    const client = createComposeClient({ fetch })
+
+    await client.createComposeTasks({ strategy_id: 5, items: [{ material_id: 42, request_key: 'rk-a' }] })
+    await client.listComposeTasks({ status: 'pending', compose_strategy_id: '3' })
+    await client.getComposeTask(9)
+    await client.cancelComposeTask(9)
+
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-tasks')
+    expect(fetch.mock.calls[0][1].method).toBe('POST')
+    expect(fetch.mock.calls[0][1].body).toBe(JSON.stringify({ strategy_id: 5, items: [{ material_id: 42, request_key: 'rk-a' }] }))
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-tasks?status=pending&compose_strategy_id=3')
+    expect(fetch.mock.calls[1][1].method).toBe('GET')
+    expect(fetch.mock.calls[2][0]).toBe('/api/v1/compose-tasks/9')
+    expect(fetch.mock.calls[2][1].method).toBe('GET')
+    expect(fetch.mock.calls[3][0]).toBe('/api/v1/compose-tasks/9/cancel')
+    expect(fetch.mock.calls[3][1].method).toBe('POST')
+  })
