@@ -171,6 +171,50 @@ func TestTheDownloadConflictNamesAreTheFrozenOnes(t *testing.T) {
 	}
 }
 
+// The output download route shares `writeComposeOutputError` with the read and
+// archive routes, so its two refusals must survive that sharing: the node
+// conflict keeps the same frozen name the material download answers with, and
+// an out-of-scope output keeps the compose-output not-found shape. Driven
+// directly for the same reason the material mapping is — the route itself needs
+// a live session and MySQL.
+func TestWriteComposeOutputErrorKeepsTheDownloadRefusalsStraight(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		err     error
+		status  int
+		errcode int
+		want    string
+	}{
+		{"no local node", productionservice.ErrLocalNodeUnavailable, consts.StatusConflict, 15105, "local_transfer_node_unavailable"},
+		{"out-of-scope output", productionservice.ErrComposeOutputNotFound, consts.StatusNotFound, 15216, "compose_output_not_found"},
+	} {
+		engine := server.New()
+		engine.POST("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+			writeComposeOutputError(c, testCase.err)
+		})
+		result := ut.PerformRequest(engine.Engine, consts.MethodPost, "/probe", nil)
+
+		if got := result.Result().StatusCode(); got != testCase.status {
+			t.Fatalf("%s: status = %d, want %d", testCase.name, got, testCase.status)
+		}
+		var body struct {
+			ErrCode int `json:"errcode"`
+			Error   *struct {
+				Type string `json:"type"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(result.Result().Body(), &body); err != nil {
+			t.Fatalf("%s: decode response: %v", testCase.name, err)
+		}
+		if body.ErrCode != testCase.errcode {
+			t.Fatalf("%s: errcode = %d, want %d", testCase.name, body.ErrCode, testCase.errcode)
+		}
+		if body.Error == nil || body.Error.Type != testCase.want {
+			t.Fatalf("%s: error.type = %+v, want %q", testCase.name, body.Error, testCase.want)
+		}
+	}
+}
+
 // The delete route must answer through the empty-204 helper, and this is a source
 // assertion because no unit test can reach it: `RemoveMaterialUsage` authenticates
 // through `actor(c)` and then calls the service, which goes to MySQL. What the
@@ -393,6 +437,7 @@ func TestComposeOutputRoutesRequireAuthentication(t *testing.T) {
 		{consts.MethodGet, "/api/v1/compose-outputs/5"},
 		{consts.MethodPost, "/api/v1/compose-outputs/5/archive"},
 		{consts.MethodGet, "/api/v1/compose-outputs/5/video-url"},
+		{consts.MethodPost, "/api/v1/compose-outputs/5/downloads"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {

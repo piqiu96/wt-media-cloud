@@ -680,7 +680,7 @@ func TestMaterialSourcePrepareKeyIgnoresTheUser(t *testing.T) {
 	if materialSourcePrepareDedupeKey(42, 1) == materialSourcePrepareDedupeKey(42, 2) {
 		t.Fatal("a retry after a failed preparation reuses the finished generation's key")
 	}
-	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(42, identity.UserID(9), "device-1", 1)} {
+	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 1)} {
 		if len(key) != 64 {
 			t.Fatalf("dedupe key %q is %d characters, but the column is CHAR(64) and a longer key is truncated into a collision", key, len(key))
 		}
@@ -970,7 +970,9 @@ func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing
 	// computed by the same function that computes the argument would agree with
 	// itself no matter which generation the code picked. They also freeze the
 	// digest's input format, so changing the tuple or its separator is a visible
-	// edit rather than a silent re-key of every future download.
+	// edit rather than a silent re-key of every future download. CHG-20261013-085
+	// is that visible edit: `asset_type` joined the digest, so every material
+	// literal below was recomputed from `user_download|material|42|9|device-1|<gen>`.
 	for _, testCase := range []struct {
 		name     string
 		finished int64
@@ -979,12 +981,12 @@ func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing
 		{
 			name:     "nothing finished yet",
 			finished: 0,
-			wantKey:  "497e9d3c44e07831b5c5e8a33b3a8e11bf73d399338c0ffdc1c43716078374c7",
+			wantKey:  "d1ac526d8bf1a50361a212679e801ae9da2758279c8ac85e8c5e275d87861353",
 		},
 		{
 			name:     "one download already finished",
 			finished: 1,
-			wantKey:  "a765abb582b22d32bf09d5ee9745aaa2b599f59faeaaebc43a4f8eca877fed80",
+			wantKey:  "29bcc7e76963da5edc9b2d0ae4717988dc6c24a9b105c43e0668dabe9187f640",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1045,8 +1047,8 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 		// new task is the third generation. The literal is the same kind of frozen
 		// value the table above uses.
 		expectUserDownloadCount(mock, 2)
-		expectUserDownloadInsert(mock, "transfer-1", "1c1003eca3973120a239b813628406c6081ecaa0ced97715683b9953c9a5278a")
-		expectTaskByDedupeKey(mock, "1c1003eca3973120a239b813628406c6081ecaa0ced97715683b9953c9a5278a", testNow, nil)
+		expectUserDownloadInsert(mock, "transfer-1", "c6efed4c109719bb7db98a03992113104b317b5e4043c936c1c62951d7ea6ad2")
+		expectTaskByDedupeKey(mock, "c6efed4c109719bb7db98a03992113104b317b5e4043c936c1c62951d7ea6ad2", testNow, nil)
 		mock.ExpectCommit()
 
 		if _, err := createUserDownloadTask(db, validUserDownloadInput(), testNow); err != nil {
@@ -1080,7 +1082,7 @@ func TestCreateUserDownloadTaskADeviceSwitchIsANewDestination(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
 		WithArgs("material", int64(42), "user_download", int64(9), "device-2").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	const deviceSwitchKey = "d02308e31a3e068d35ed49e90a7d2085ebd1506cb1a6c1654ed1a164bb8e8df3"
+	const deviceSwitchKey = "83989f26b734dab93f7aaa8587457fb5a59705508a043a1b319f4e2713b3d90a"
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
 		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-2", "device-2", nil, deviceSwitchKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1105,26 +1107,73 @@ func TestCreateUserDownloadTaskADeviceSwitchIsANewDestination(t *testing.T) {
 // tasks — the failure the unique index exists to prevent — and it would do so
 // only under timing, so no other test here would see it.
 func TestUserDownloadDedupeKeyIsAFunctionOfTheTupleAlone(t *testing.T) {
-	base := userDownloadDedupeKey(42, identity.UserID(9), "device-1", 1)
-	if base != userDownloadDedupeKey(42, identity.UserID(9), "device-1", 1) {
+	base := userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 1)
+	if base != userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 1) {
 		t.Fatal("the same tuple must produce the same key, or a repeat click creates a second task")
 	}
 	if len(base) != 64 {
 		t.Fatalf("key length = %d, want 64 for the CHAR(64) column", len(base))
 	}
 	for _, other := range []string{
-		userDownloadDedupeKey(43, identity.UserID(9), "device-1", 1),
-		userDownloadDedupeKey(42, identity.UserID(10), "device-1", 1),
+		userDownloadDedupeKey(model.AssetMaterial, 43, identity.UserID(9), "device-1", 1),
+		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(10), "device-1", 1),
 		// A device switch is the whole point of the dimension change: the new
 		// device's click must be a different key even at the same generation,
 		// or unbind→rebind would be swallowed by the old device's task.
-		userDownloadDedupeKey(42, identity.UserID(9), "device-2", 1),
-		userDownloadDedupeKey(42, identity.UserID(9), "device-1", 2),
+		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-2", 1),
+		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 2),
+		// And the asset type is a tuple member too (CHG-20261013-085): output 5
+		// and material 5 must never share a key.
+		userDownloadDedupeKey(model.AssetCompositeOutput, 42, identity.UserID(9), "device-1", 1),
 	} {
 		if other == base {
 			t.Fatalf("the tuple is not discriminating: %s collides with %s", other, base)
 		}
 	}
+}
+
+// CHG-20261013-085 T-02: a composite output rides the same table, the same
+// lifecycle and the same dedupe as a material. The type has to travel into
+// every scope these statements name and into the digest itself — without it,
+// output 5 and material 5 for one user on one device would collapse onto a
+// single key, and the second asset's click would be answered with the first
+// asset's row. The scope args are asserted on every statement for the same
+// reason the device/user/purpose args are: a filter that dropped the type
+// would answer a click with the other asset kind's row and refuse a download
+// that never happened.
+func TestCreateUserDownloadTaskCarriesTheAssetType(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
+		WithArgs("composite_output", int64(42), "user_download", int64(9), "device-1").
+		WillReturnRows(sqlmock.NewRows(taskColumns()))
+	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
+		WithArgs("composite_output", int64(42), "user_download", int64(9), "device-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	// The key is a literal computed from the frozen digest input
+	// `user_download|composite_output|42|9|device-1|1` — the same rule as the
+	// generation table above, so putting the type into the digest is a visible
+	// edit, and the material key at this generation (frozen in the test above)
+	// is a different value by construction.
+	const outputKey = "d5046b7b7f23b2e6b7124ae853141b77dee6afc0aea830eb82bb3075195966c1"
+	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+		WithArgs("transfer-1", int64(7), "composite_output", int64(42), "成片-42", nil, nil, "compose-outputs/55/output.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, outputKey, int64(100), testSHA256, 3, testNow, testNow).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectTaskByDedupeKey(mock, outputKey, testNow, nil)
+	mock.ExpectCommit()
+
+	input := validUserDownloadInput()
+	input.AssetType = model.AssetCompositeOutput
+	input.AssetTitle = "成片-42"
+	input.SourceObjectKey = "compose-outputs/55/output.mp4"
+	task, err := createUserDownloadTask(db, input, testNow)
+	if err != nil {
+		t.Fatalf("createUserDownloadTask() error = %v", err)
+	}
+	if task.ID == "" || task.Status != model.StatusPending {
+		t.Fatalf("task = %+v, want a fresh pending row for the output", task)
+	}
+	assertExpectations(t, mock)
 }
 
 // A download without a node has nowhere to go, and a task row with an empty

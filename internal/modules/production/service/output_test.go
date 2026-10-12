@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	transfermodel "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
+	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 // CHG-20261013-084 (M4-C6 T-02): the my-outputs service — the scope gate the
@@ -90,7 +93,22 @@ func outputFixture(id int64) model.CompositeOutput {
 }
 
 func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks *outputTaskFake, linker *outputLinkerFake) *ComposeOutputService {
-	return NewComposeOutputService(store, traces, traces, traces, tasks, linker)
+	return NewComposeOutputService(store, traces, traces, traces, tasks, linker, &stubNodes{}, &stubTransfers{})
+}
+
+// newOutputDownloadService builds the service for the download path alone. The
+// node stub refuses by default and the transfer stub records what it is handed,
+// so a test that expects a task has to say which machine it goes to, and one
+// that expects facts on the task can read them back.
+func newOutputDownloadService(store *outputMemoryStore, nodes *stubNodes, transfers *stubTransfers) *ComposeOutputService {
+	svc := NewComposeOutputService(store, &outputTraceFakes{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{}, nodes, transfers)
+	svc.resolveGame = func(gameID string) (string, bool, error) {
+		if gameID == "delta" {
+			return "三角洲行动", true, nil
+		}
+		return "", false, nil
+	}
+	return svc
 }
 
 func TestListComposeOutputsScopesLikeTheTaskPage(t *testing.T) {
@@ -224,5 +242,91 @@ func TestComposeOutputVideoURLSignsTheOutputKey(t *testing.T) {
 	}
 	if url == "" {
 		t.Fatal("empty url")
+	}
+}
+
+// CHG-20261013-085 T-02: the download of a finished output is the material
+// download's sibling, so the same facts are asserted the same way — the task
+// carries everything an executor on another machine needs and nothing it has to
+// derive, and a refusal happens before the transfer module is asked for
+// anything.
+func TestCreateOutputDownloadQueuesTheOutputForTheActor(t *testing.T) {
+	team := identity.TeamID(7)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
+	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-1", DeviceID: "device-1"}}
+	transfers := &stubTransfers{}
+	svc := newOutputDownloadService(store, nodes, transfers)
+
+	task, err := svc.CreateOutputDownload(operator, 5)
+	if err != nil {
+		t.Fatalf("CreateOutputDownload() error = %v", err)
+	}
+	if task.ID != "transfer-1" {
+		t.Fatalf("task = %+v, want the queued one back", task)
+	}
+	if transfers.count != 1 || transfers.prepareCount != 0 {
+		t.Fatalf("transfer calls = %d/%d, want exactly one download and no preparation", transfers.count, transfers.prepareCount)
+	}
+	input := transfers.last
+	if input.AssetType != transfermodel.AssetCompositeOutput {
+		t.Fatalf("asset type = %q, want composite_output", input.AssetType)
+	}
+	if input.AssetID != 5 || input.TeamID != 7 || input.RequestedBy != 9 {
+		t.Fatalf("identity = %+v", input)
+	}
+	// The row has no title of its own, so the cloud resolves the display name
+	// the executor will name its file from — the executor never derives one
+	// from the id.
+	if input.AssetTitle != "成片-5" {
+		t.Fatalf("title = %q, want the resolved output name", input.AssetTitle)
+	}
+	if input.GameName != "三角洲行动" {
+		t.Fatalf("game name = %q, want the resolved game", input.GameName)
+	}
+	if input.SourceObjectKey != "compose-outputs/55/output.mp4" || input.TotalBytes != 1024 || input.ExpectedSHA256 != "abc" {
+		t.Fatalf("object facts = %+v, want the row's verified object", input)
+	}
+	if input.AssignedNodeID != "node-1" || input.AssignedDeviceID != "device-1" {
+		t.Fatalf("destination = %+v", input)
+	}
+	// An output has no publish time and no preparation, and both absences are
+	// part of the shape: a published_at on the lease would name a segment of
+	// the file that does not mean anything for an output, and a dependency
+	// would hold a claimable task behind a cloud step that never runs.
+	if input.PublishedAt != nil || input.DependencyTaskID != "" {
+		t.Fatalf("output-specific absences = published:%v dependency:%q", input.PublishedAt, input.DependencyTaskID)
+	}
+}
+
+func TestCreateOutputDownloadRefusesAnOutputOutsideTheActorsScope(t *testing.T) {
+	team := identity.TeamID(8)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
+	transfers := &stubTransfers{}
+	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-1", DeviceID: "device-1"}}
+	svc := newOutputDownloadService(store, nodes, transfers)
+
+	if _, err := svc.CreateOutputDownload(operator, 5); !errors.Is(err, ErrComposeOutputNotFound) {
+		t.Fatalf("error = %v, want the same not-found the detail drawer answers with", err)
+	}
+	if transfers.count != 0 {
+		t.Fatal("a refused download still reached the transfer module")
+	}
+}
+
+func TestCreateOutputDownloadRefusesToQueueWithoutAFreshNode(t *testing.T) {
+	team := identity.TeamID(7)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
+	transfers := &stubTransfers{}
+	nodes := &stubNodes{err: errors.New("no fresh node")}
+	svc := newOutputDownloadService(store, nodes, transfers)
+
+	if _, err := svc.CreateOutputDownload(operator, 5); !errors.Is(err, ErrLocalNodeUnavailable) {
+		t.Fatalf("error = %v, want the node-unavailable conflict", err)
+	}
+	if transfers.count != 0 {
+		t.Fatal("a download with no destination still reached the transfer module")
 	}
 }

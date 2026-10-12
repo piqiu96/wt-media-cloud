@@ -88,9 +88,13 @@ type FailureInput struct {
 // purpose/scope pair are this function's to decide, and a caller that supplied
 // them could supply them inconsistently.
 type CreateUserDownloadInput struct {
-	ID         string
-	TeamID     identity.TeamID
-	AssetID    int64
+	ID      string
+	TeamID  identity.TeamID
+	AssetID int64
+	// AssetType names what is being downloaded. Empty means `material`: the
+	// material download predates the field, and every caller that does not know
+	// about composite outputs must keep meaning what it always meant.
+	AssetType  model.AssetType
 	AssetTitle string
 	GameName   string
 	// PublishedAt is when the material was published, copied onto the task like
@@ -173,9 +177,18 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 || strings.TrimSpace(input.AssignedDeviceID) == "" {
 		return model.Task{}, fmt.Errorf("invalid user download input")
 	}
+	// The type the caller names, or the one every pre-CHG-085 caller meant. The
+	// resolution happens once, here, so the latest-task read, the generation
+	// count and the dedupe key below can never disagree about what is being
+	// downloaded — a count scoped to one type and a key digesting another would
+	// hand the second asset's click the first asset's row.
+	assetType := input.AssetType
+	if assetType == "" {
+		assetType = model.AssetMaterial
+	}
 	var task model.Task
 	err := db.Transaction(func(tx *gorm.DB) error {
-		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID)
+		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
@@ -184,13 +197,13 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			return nil
 		}
 		var finished int64
-		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? AND status IN ('success', 'failed', 'cancelled')`, model.AssetMaterial, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID).Row().Scan(&finished); err != nil {
+		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? AND status IN ('success', 'failed', 'cancelled')`, assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID).Row().Scan(&finished); err != nil {
 			return err
 		}
 		task, err = createTask(tx, CreateTaskInput{
 			ID:               input.ID,
 			TeamID:           input.TeamID,
-			AssetType:        model.AssetMaterial,
+			AssetType:        assetType,
 			AssetID:          input.AssetID,
 			AssetTitle:       input.AssetTitle,
 			GameName:         input.GameName,
@@ -202,7 +215,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			AssignedNodeID:   input.AssignedNodeID,
 			AssignedDeviceID: input.AssignedDeviceID,
 			DependencyTaskID: input.DependencyTaskID,
-			DedupeKey:        userDownloadDedupeKey(input.AssetID, input.RequestedBy, input.AssignedDeviceID, finished+1),
+			DedupeKey:        userDownloadDedupeKey(assetType, input.AssetID, input.RequestedBy, input.AssignedDeviceID, finished+1),
 			TotalBytes:       input.TotalBytes,
 			ExpectedSHA256:   input.ExpectedSHA256,
 			MaxAttempts:      input.MaxAttempts,
@@ -215,10 +228,13 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	return task, nil
 }
 
-// userDownloadDedupeKey binds a download to the user, the material, **the
-// device** and the generation.
+// userDownloadDedupeKey binds a download to **the asset type**, the asset, the
+// user, **the device** and the generation.
 //
-// The device is in the key because it is the stable destination. The node was
+// The type is in the key because a material and a composite output are
+// different assets even at the same numeric id: without it, output 5 and
+// material 5 for one user on one device would share a key, and the second
+// click would be answered with the first asset's row. The device is in the key because it is the stable destination. The node was
 // in the key before stage 3, but a node is a registration instance: renewal and
 // supersede mint a new node id, and unbind replaces the device's node entirely,
 // so the node dimension was not stable across a device's lifetime. Two devices
@@ -234,8 +250,8 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 // truncation with a collision between two different downloads. The generation is
 // part of the digest, so the key is still exactly as discriminating as the tuple
 // — it is just no longer readable in a row dump.
-func userDownloadDedupeKey(assetID int64, userID identity.UserID, deviceID string, generation int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%d|%d|%s|%d", assetID, userID, strings.TrimSpace(deviceID), generation)))
+func userDownloadDedupeKey(assetType model.AssetType, assetID int64, userID identity.UserID, deviceID string, generation int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%s|%d|%d|%s|%d", assetType, assetID, userID, strings.TrimSpace(deviceID), generation)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -890,7 +906,7 @@ func validateCreateInput(input CreateTaskInput) error {
 	if strings.TrimSpace(input.ID) == "" || input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 || strings.TrimSpace(input.DedupeKey) == "" || input.MaxAttempts <= 0 {
 		return fmt.Errorf("invalid file transfer task")
 	}
-	if input.AssetType != model.AssetMaterial {
+	if input.AssetType != model.AssetMaterial && input.AssetType != model.AssetCompositeOutput {
 		return fmt.Errorf("unsupported transfer asset type")
 	}
 	if (input.Purpose == model.PurposeComposeInputPrepare && input.ExecutionScope != model.ExecutionCloud) || (input.Purpose == model.PurposeUserDownload && input.ExecutionScope != model.ExecutionLocalAgent) {

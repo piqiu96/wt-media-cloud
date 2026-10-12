@@ -119,7 +119,7 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 		return s.createResult, nil
 	}
 	return Task{
-		ID: input.ID, TeamID: input.TeamID, AssetType: model.AssetMaterial, AssetID: input.AssetID,
+		ID: input.ID, TeamID: input.TeamID, AssetType: input.AssetType, AssetID: input.AssetID,
 		AssetTitle: input.AssetTitle, GameName: input.GameName, PublishedAt: input.PublishedAt,
 		SourceObjectKey: input.SourceObjectKey,
 		Purpose:         model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
@@ -1330,6 +1330,76 @@ func TestCreateUserDownloadCarriesThePreparationItWaitsFor(t *testing.T) {
 	}
 	if task.Status != string(model.StatusPending) {
 		t.Fatalf("status = %s, want pending", task.Status)
+	}
+}
+
+// CHG-20261013-085 T-02: the type is the caller's fact, not the service's — the
+// service only refuses the ones no agent could lease. It travels to the store
+// untouched, because the dedupe and the lease both branch on it and a default
+// applied at the far end would silently re-key nothing but surprises.
+func TestCreateUserDownloadCarriesTheAssetType(t *testing.T) {
+	store := newMemoryStore()
+	svc := testService(store, workingNode())
+
+	_, err := svc.CreateUserDownload(CreateUserDownloadInput{
+		TeamID:           7,
+		AssetType:        model.AssetCompositeOutput,
+		AssetID:          5,
+		AssetTitle:       "成片-5",
+		SourceObjectKey:  "compose-outputs/55/output.mp4",
+		RequestedBy:      9,
+		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
+		TotalBytes:       1024,
+		ExpectedSHA256:   strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatalf("CreateUserDownload() error = %v", err)
+	}
+	if store.lastDownload.AssetType != model.AssetCompositeOutput {
+		t.Fatalf("asset type = %q, want the composite output the caller named", store.lastDownload.AssetType)
+	}
+}
+
+// Empty means `material` — the meaning every pre-CHG-085 caller already relies
+// on — and anything that is not one of the two known types is refused before
+// the store is reached: a task with an unknown type is one no executor ever
+// claims, so the refusal has to happen while the caller can still be told.
+func TestCreateUserDownloadDefaultsAndRefusesTheAssetType(t *testing.T) {
+	store := newMemoryStore()
+	_, err := testService(store, workingNode()).CreateUserDownload(CreateUserDownloadInput{
+		TeamID:           7,
+		AssetID:          42,
+		AssetTitle:       "示例视频",
+		SourceObjectKey:  "materials/42/abc.mp4",
+		RequestedBy:      9,
+		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
+		TotalBytes:       1024,
+		ExpectedSHA256:   strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatalf("CreateUserDownload() error = %v", err)
+	}
+	if store.lastDownload.AssetType != model.AssetMaterial {
+		t.Fatalf("asset type = %q, want the material default for an empty type", store.lastDownload.AssetType)
+	}
+
+	refused := newMemoryStore()
+	_, err = testService(refused, workingNode()).CreateUserDownload(CreateUserDownloadInput{
+		TeamID:           7,
+		AssetType:        model.AssetType("recipe"),
+		AssetID:          42,
+		AssetTitle:       "示例视频",
+		RequestedBy:      9,
+		AssignedNodeID:   "node-1",
+		AssignedDeviceID: "device-1",
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown asset type: error = %v, want ErrInvalidInput", err)
+	}
+	if refused.counts["createDownload"] != 0 {
+		t.Fatal("a refused asset type still reached the store")
 	}
 }
 

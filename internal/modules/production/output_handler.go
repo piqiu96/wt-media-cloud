@@ -33,6 +33,12 @@ func writeComposeOutputError(c *hertzapp.RequestContext, err error) {
 		api.FailureNamed(c, consts.StatusNotFound, 15216, "成片不存在", "compose_output_not_found")
 	case errors.Is(err, productionservice.ErrComposeOutputNotArchivable):
 		api.FailureNamed(c, consts.StatusConflict, 15218, "成片已发布或已归档，不能归档", "compose_output_not_archivable")
+	// The download route's own conflict, the same frozen name the material
+	// download answers with: the client branches on the name, not the errcode.
+	case errors.Is(err, productionservice.ErrLocalNodeUnavailable):
+		api.ConflictNamed(c, 15105, "本机没有可用的下载节点", "local_transfer_node_unavailable")
+	case errors.Is(err, productionservice.ErrInvalidInput):
+		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片请求参数无效："+err.Error(), "compose_output_invalid")
 	default:
 		api.InternalError(c, "成片服务内部错误")
 	}
@@ -100,4 +106,25 @@ func GetComposeOutputVideoURL(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	api.Success(c, VideoLink{URL: url})
+}
+
+// CreateOutputDownload queues a download of a finished compose output to the
+// actor's own Local Agent, and answers 202 for the same reason the material
+// download does: nothing has been downloaded yet, and the client's next honest
+// source of progress is `GET /api/v1/file-transfer-tasks`.
+func CreateOutputDownload(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := outputID(c)
+	if !ok {
+		return
+	}
+	task, err := productionservice.CreateOutputDownload(current, id)
+	if err != nil {
+		writeComposeOutputError(c, err)
+		return
+	}
+	api.Accepted(c, task)
 }

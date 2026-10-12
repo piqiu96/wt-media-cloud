@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"time"
 
+	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
+	transfermodel "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
+	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
@@ -99,15 +102,38 @@ type ComposeOutputService struct {
 	strategies composeOutputTraceStrategySource
 	tasks      composeOutputTraceTaskSource
 	links      composeOutputLinker
-	now        func() time.Time
+	// nodes and transfers are the download path's two dependencies. They are
+	// consumer-side interfaces in the same shapes the material download uses
+	// (LocalNodeResolver, TransferCreator), narrowed to the one call each — an
+	// output is never prepared in the cloud, so this service has no reason to
+	// name the preparation half of TransferCreator.
+	nodes     LocalNodeResolver
+	transfers outputTransferCreator
+	// resolveGame names the game a download is filed under, stubbed by the
+	// unit tests the same way the material download's is.
+	resolveGame func(gameID string) (string, bool, error)
+	now         func() time.Time
 }
 
-func NewComposeOutputService(outputs ComposeOutputRepository, materials composeOutputTraceMaterialSource, usages composeOutputTraceUsageSource, strategies composeOutputTraceStrategySource, tasks composeOutputTraceTaskSource, links composeOutputLinker) *ComposeOutputService {
-	return &ComposeOutputService{outputs: outputs, materials: materials, usages: usages, strategies: strategies, tasks: tasks, links: links, now: time.Now}
+// outputTransferCreator is the slice of TransferCreator a download of an
+// already-verified object needs: queue the task, nothing else.
+type outputTransferCreator interface {
+	CreateUserDownload(transferservice.CreateUserDownloadInput) (transferdto.Task, error)
+}
+
+func NewComposeOutputService(outputs ComposeOutputRepository, materials composeOutputTraceMaterialSource, usages composeOutputTraceUsageSource, strategies composeOutputTraceStrategySource, tasks composeOutputTraceTaskSource, links composeOutputLinker, nodes LocalNodeResolver, transfers outputTransferCreator) *ComposeOutputService {
+	return &ComposeOutputService{
+		outputs: outputs, materials: materials, usages: usages, strategies: strategies, tasks: tasks, links: links,
+		nodes: nodes, transfers: transfers, now: time.Now,
+		resolveGame: func(gameID string) (string, bool, error) {
+			game, ok, err := identity.ResolveGame(gameID)
+			return game.Name, ok, err
+		},
+	}
 }
 
 func wiredComposeOutputService() *ComposeOutputService {
-	return NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{})
+	return NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{}, runtimeNodeResolver{}, productionTransferCreator{})
 }
 
 func ListComposeOutputs(actor identity.PublicUser, input ListComposeOutputsInput) ([]model.CompositeOutput, error) {
@@ -124,6 +150,10 @@ func ArchiveComposeOutput(actor identity.PublicUser, id int64) (model.CompositeO
 
 func ComposeOutputVideoURL(ctx context.Context, actor identity.PublicUser, id int64) (string, error) {
 	return wiredComposeOutputService().VideoURL(ctx, actor, id)
+}
+
+func CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task, error) {
+	return wiredComposeOutputService().CreateOutputDownload(actor, id)
 }
 
 // List scopes the page exactly like the compose-task list — admins everything,
@@ -229,6 +259,63 @@ func (s *ComposeOutputService) VideoURL(ctx context.Context, actor identity.Publ
 		return "", err
 	}
 	return s.links.PresignObjectURL(ctx, output.ObjectKey)
+}
+
+// CreateOutputDownload queues the actor's download of one finished compose
+// output onto their own Local Agent — the same `user_download` task a material
+// download queues, with `composite_output` as the type.
+//
+// Unlike the material download there is no preparation arm: an output row only
+// exists once the compose success transaction wrote a verified object behind
+// it, so the object key, the size and the hash are facts of the row rather than
+// facts to be produced. That is also why the title is resolved here — the row
+// has no title of its own, and the executor names its file from what the task
+// carries.
+//
+// The refusals mirror the material download's: the scope gate answers not-found
+// for an output the actor cannot see, and the download is never queued without
+// a node, because an executor claims on its own credential and a task with no
+// assignee would land on whichever machine polled first.
+func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task, error) {
+	output, err := s.readable(actor, id)
+	if err != nil {
+		return transferdto.Task{}, err
+	}
+	node, err := s.nodes.ResolveTrustedLocalNode(actor.ID)
+	if err != nil {
+		// Everything the resolver refuses means the same thing here, including a
+		// store failure: from this route's side there is no node to download to.
+		// The distinction is kept in the log, not in the response.
+		return transferdto.Task{}, ErrLocalNodeUnavailable
+	}
+	gameName := ""
+	if output.GameID != "" {
+		// Same swallow as the material path's `gameNameOf`: a game that cannot be
+		// resolved names no file rather than failing the download.
+		if name, ok, err := s.resolveGame(output.GameID); err == nil && ok {
+			gameName = name
+		}
+	}
+	task, err := s.transfers.CreateUserDownload(transferservice.CreateUserDownloadInput{
+		TeamID:           identity.TeamID(output.TeamID),
+		AssetType:        transfermodel.AssetCompositeOutput,
+		AssetID:          output.ID,
+		AssetTitle:       fmt.Sprintf("成片-%d", output.ID),
+		GameName:         gameName,
+		SourceObjectKey:  output.ObjectKey,
+		RequestedBy:      actor.ID,
+		AssignedNodeID:   node.ID,
+		AssignedDeviceID: node.DeviceID,
+		TotalBytes:       output.FileSizeBytes,
+		ExpectedSHA256:   output.SHA256,
+	})
+	if err != nil {
+		if errors.Is(err, transferservice.ErrInvalidInput) {
+			return transferdto.Task{}, ErrInvalidInput
+		}
+		return transferdto.Task{}, fmt.Errorf("queue user download for compose output %d: %w", output.ID, err)
+	}
+	return task, nil
 }
 
 // readable is the one scope gate every route shares, with the compose-task

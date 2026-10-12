@@ -11,6 +11,10 @@ type AssetType string
 
 const (
 	AssetMaterial AssetType = "material"
+	// AssetCompositeOutput rides the same transfer table as a material (the DB
+	// CHECK has allowed it since migration 039), so downloading a finished
+	// compose output needs no second lifecycle — only a distinct type on the row.
+	AssetCompositeOutput AssetType = "composite_output"
 )
 
 type Purpose string

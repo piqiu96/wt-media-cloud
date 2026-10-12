@@ -294,9 +294,21 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
 		return dto.Task{}, ErrInvalidInput
 	}
+	// Empty keeps the meaning every caller before CHG-085 relied on; anything
+	// else must be a type an executor can lease. Refusing here rather than at
+	// the store is the difference between an error the caller's route can
+	// answer with and a task row nobody will ever claim.
+	assetType := input.AssetType
+	if assetType == "" {
+		assetType = model.AssetMaterial
+	}
+	if assetType != model.AssetMaterial && assetType != model.AssetCompositeOutput {
+		return dto.Task{}, ErrInvalidInput
+	}
 	task, err := s.store.CreateUserDownloadTask(repository.CreateUserDownloadInput{
 		ID:               id.NewID("transfer"),
 		TeamID:           input.TeamID,
+		AssetType:        assetType,
 		AssetID:          input.AssetID,
 		AssetTitle:       input.AssetTitle,
 		GameName:         input.GameName,
@@ -320,8 +332,13 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 // identity of its own: who is downloading and which machine it goes to are
 // fields, so a caller cannot omit them and have a task created for somebody.
 type CreateUserDownloadInput struct {
-	TeamID     identityservice.TeamID
-	AssetID    int64
+	TeamID  identityservice.TeamID
+	AssetID int64
+	// AssetType names what is being downloaded: a material or a composite
+	// output. Empty means `material`, and anything else must be one of the two
+	// known types — the executor leases by type, so an unknown one here would be
+	// a task no agent ever claims.
+	AssetType  model.AssetType
 	AssetTitle string
 	// GameName is what the executor files the download under, when the material
 	// has a game. Empty is a legal value: the executor falls back to a fixed
