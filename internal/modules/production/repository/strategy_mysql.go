@@ -10,6 +10,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"gorm.io/gorm"
 )
 
@@ -23,13 +24,37 @@ type StrategyFilter struct {
 
 type StrategyStore struct{}
 
-func (StrategyStore) Create(item model.ComposeStrategy) (model.ComposeStrategy, error) {
-	return createComposeStrategy(database.DB(), item, time.Now())
+func (StrategyStore) FindTemplate(templateID int64, version uint32) (model.ComposeTemplate, bool, error) {
+	var item model.ComposeTemplate
+	var schema []byte
+	err := database.DB().Raw(`SELECT id, code, name, version, schema_json, executor, status FROM compose_templates WHERE id = ? AND version = ?`, templateID, version).
+		Row().Scan(&item.ID, &item.Code, &item.Name, &item.Version, &schema, &item.ExecutorID, &item.Status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.ComposeTemplate{}, false, nil
+	}
+	if err != nil {
+		return model.ComposeTemplate{}, false, err
+	}
+	if !json.Valid(schema) {
+		return model.ComposeTemplate{}, false, fmt.Errorf("template %d has invalid schema_json", templateID)
+	}
+	item.Schema = append(json.RawMessage(nil), schema...)
+	return item, true, nil
 }
 
-func createComposeStrategy(db *gorm.DB, item model.ComposeStrategy, now time.Time) (model.ComposeStrategy, error) {
+func (StrategyStore) CreateAudited(item model.ComposeStrategy, action string) (model.ComposeStrategy, error) {
+	return createComposeStrategyAudited(database.DB(), item, action, time.Now())
+}
+
+func createComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, action string, now time.Time) (model.ComposeStrategy, error) {
 	item.CreatedAt, item.UpdatedAt = now, now
-	if err := db.Create(&item).Error; err != nil {
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&item).Error; err != nil {
+			return err
+		}
+		return appendStrategyAudit(tx, item, action, now)
+	})
+	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
 	stored, found, err := findComposeStrategy(db, item.ID)
@@ -40,6 +65,43 @@ func createComposeStrategy(db *gorm.DB, item model.ComposeStrategy, now time.Tim
 		return model.ComposeStrategy{}, fmt.Errorf("created strategy %d cannot be read", item.ID)
 	}
 	return stored, nil
+}
+
+func (StrategyStore) UpdateAudited(item model.ComposeStrategy, action string) (model.ComposeStrategy, error) {
+	return updateComposeStrategyAudited(database.DB(), item, action, time.Now())
+}
+
+func updateComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, action string, now time.Time) (model.ComposeStrategy, error) {
+	item.UpdatedAt = now
+	err := db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Exec(`UPDATE compose_strategies SET name = ?, content_type = ?, config_json = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND game_id = ?`, item.Name, item.ContentType, item.Config, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.GameID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrNotFound
+		}
+		return appendStrategyAudit(tx, item, action, now)
+	})
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	stored, found, err := findComposeStrategy(db, item.ID)
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	if !found {
+		return model.ComposeStrategy{}, fmt.Errorf("updated strategy %d cannot be read", item.ID)
+	}
+	return stored, nil
+}
+
+func appendStrategyAudit(tx *gorm.DB, item model.ComposeStrategy, action string, now time.Time) error {
+	summary, err := json.Marshal(map[string]any{"team_id": item.TeamID, "game_id": item.GameID, "status": item.Status})
+	if err != nil {
+		return err
+	}
+	return tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, 'compose_strategy', ?, ?, ?)`, id.NewID("audit"), item.UpdatedBy, action, fmt.Sprint(item.ID), summary, now).Error
 }
 
 func (StrategyStore) Find(id int64) (model.ComposeStrategy, bool, error) {
