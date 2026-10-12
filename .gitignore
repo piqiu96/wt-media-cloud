@@ -13,6 +13,7 @@ web/dist-desktop/
 web/node_modules/
 *.log
 logs/
+.compose/
 *.pid
 /server
 .env.local
