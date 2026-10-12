@@ -497,7 +497,7 @@ function cutLabel(config) {
         </div>
         <!-- 取消在左、保存在右（AdminUI 规范：底部动作固定次序，主按钮突出主要动作）。 -->
         <div class="strategy-editor__footer">
-          <t-button variant="outline" @click="requestCloseEditor">取消</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="requestCloseEditor">取消</t-button>
           <t-button theme="primary" :loading="saving" @click="save">保存</t-button>
         </div>
       </t-dialog>
@@ -508,7 +508,7 @@ function cutLabel(config) {
           <t-form-item v-if="copyTarget" label="模板"><t-input :value="templateLabel(copyTarget.compose_template_id)" disabled /></t-form-item>
         </t-form>
         <div class="strategy-editor__footer">
-          <t-button variant="outline" @click="copyVisible = false">取消</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="copyVisible = false">取消</t-button>
           <t-button theme="primary" :loading="copySaving" @click="submitCopy">复制</t-button>
         </div>
       </t-dialog>

@@ -501,7 +501,7 @@ function latestStats(row) {
           </div>
         </div>
         <div class="strategy-editor__footer">
-          <t-button variant="outline" @click="visible = false">取消</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="visible = false">取消</t-button>
           <t-button theme="primary" :loading="saving" @click="save">保存</t-button>
         </div>
       </t-dialog>
