@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.12.3
+  version: 2026.10.13.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -209,13 +209,12 @@ components:
         end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
     ComposeStrategy:
       type: object
-      required: [id, team_id, game_id, name, content_type, compose_template_id, compose_template_version, config, status, created_at, updated_at]
+      required: [id, team_id, game_id, name, compose_template_id, compose_template_version, config, status, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
         game_id: {type: string}
         name: {type: string}
-        content_type: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
         config: {$ref: '#/components/schemas/BasicCutV1Config'}
@@ -225,22 +224,20 @@ components:
     CreateComposeStrategy:
       type: object
       additionalProperties: false
-      required: [game_id, name, content_type, compose_template_id, compose_template_version, config]
+      required: [game_id, name, compose_template_id, compose_template_version, config]
       properties:
         team_id: {type: integer, format: int64, description: Required for administrators; senior operators use their own team.}
         game_id: {type: string}
         name: {type: string}
-        content_type: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
         config: {$ref: '#/components/schemas/BasicCutV1Config'}
     UpdateComposeStrategy:
       type: object
       additionalProperties: false
-      required: [name, content_type, config]
+      required: [name, config]
       properties:
         name: {type: string}
-        content_type: {type: string}
         config: {$ref: '#/components/schemas/BasicCutV1Config'}
     CopyComposeStrategy:
       type: object

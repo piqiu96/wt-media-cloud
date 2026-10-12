@@ -25,16 +25,14 @@ type CreateStrategyInput struct {
 	TeamID          int64           `json:"team_id"`
 	GameID          string          `json:"game_id"`
 	Name            string          `json:"name"`
-	ContentType     string          `json:"content_type"`
 	TemplateID      int64           `json:"compose_template_id"`
 	TemplateVersion uint32          `json:"compose_template_version"`
 	Config          json.RawMessage `json:"config"`
 }
 
 type UpdateStrategyInput struct {
-	Name        string          `json:"name"`
-	ContentType string          `json:"content_type"`
-	Config      json.RawMessage `json:"config"`
+	Name   string          `json:"name"`
+	Config json.RawMessage `json:"config"`
 }
 
 type StrategyRepository interface {
@@ -131,7 +129,7 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 	if !inGameScope(actor, teamID, input.GameID) {
 		return model.ComposeStrategy{}, ErrStrategyForbidden
 	}
-	if err := validateStrategyFields(input.Name, input.ContentType); err != nil {
+	if err := validateStrategyFields(input.Name); err != nil {
 		return model.ComposeStrategy{}, err
 	}
 	game, found, err := s.resolveGame(input.GameID)
@@ -144,7 +142,7 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 	if err := s.validateConfig(input.TemplateID, input.TemplateVersion, input.Config, true); err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	return s.store.CreateAudited(model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), ContentType: strings.TrimSpace(input.ContentType), Config: append(json.RawMessage(nil), input.Config...), Status: "active", CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}, "compose_strategy.create")
+	return s.store.CreateAudited(model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), Status: "active", CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}, "compose_strategy.create")
 }
 
 func (s *StrategyService) Update(actor identity.PublicUser, id int64, input UpdateStrategyInput) (model.ComposeStrategy, error) {
@@ -152,13 +150,13 @@ func (s *StrategyService) Update(actor identity.PublicUser, id int64, input Upda
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	if err := validateStrategyFields(input.Name, input.ContentType); err != nil {
+	if err := validateStrategyFields(input.Name); err != nil {
 		return model.ComposeStrategy{}, err
 	}
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, input.Config, false); err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	item.Name, item.ContentType, item.Config, item.UpdatedBy = strings.TrimSpace(input.Name), strings.TrimSpace(input.ContentType), append(json.RawMessage(nil), input.Config...), int64(actor.ID)
+	item.Name, item.Config, item.UpdatedBy = strings.TrimSpace(input.Name), append(json.RawMessage(nil), input.Config...), int64(actor.ID)
 	return s.store.UpdateAudited(item, "compose_strategy.update")
 }
 
@@ -167,7 +165,7 @@ func (s *StrategyService) Copy(actor identity.PublicUser, id int64, name string)
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	if err := validateStrategyFields(name, item.ContentType); err != nil {
+	if err := validateStrategyFields(name); err != nil {
 		return model.ComposeStrategy{}, err
 	}
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, item.Config, true); err != nil {
@@ -240,12 +238,9 @@ func canReadStrategy(actor identity.PublicUser, item model.ComposeStrategy) bool
 	return actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleAdmin
 }
 
-func validateStrategyFields(name, contentType string) error {
+func validateStrategyFields(name string) error {
 	if n := utf8.RuneCountInString(strings.TrimSpace(name)); n == 0 || n > 120 {
 		return fmt.Errorf("%w: name must contain 1-120 characters", ErrStrategyInvalid)
-	}
-	if n := utf8.RuneCountInString(strings.TrimSpace(contentType)); n == 0 || n > 64 {
-		return fmt.Errorf("%w: content_type must contain 1-64 characters", ErrStrategyInvalid)
 	}
 	return nil
 }

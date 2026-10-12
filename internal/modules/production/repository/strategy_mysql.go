@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const strategyColumns = `id, team_id, game_id, compose_template_id, compose_template_version, name, content_type, config_json, status, created_by, updated_by, created_at, updated_at`
+const strategyColumns = `id, team_id, game_id, compose_template_id, compose_template_version, name, config_json, status, created_by, updated_by, created_at, updated_at`
 
 type StrategyFilter struct {
 	TeamID     int64
@@ -74,7 +74,7 @@ func (StrategyStore) UpdateAudited(item model.ComposeStrategy, action string) (m
 func updateComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, action string, now time.Time) (model.ComposeStrategy, error) {
 	item.UpdatedAt = now
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_strategies SET name = ?, content_type = ?, config_json = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND game_id = ?`, item.Name, item.ContentType, item.Config, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.GameID)
+		result := tx.Exec(`UPDATE compose_strategies SET name = ?, config_json = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND game_id = ?`, item.Name, item.Config, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.GameID)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -124,7 +124,7 @@ func (StrategyStore) List(filter StrategyFilter) ([]model.ComposeStrategy, error
 }
 
 func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeStrategy, error) {
-	query := `SELECT s.id, s.team_id, s.game_id, s.compose_template_id, s.compose_template_version, s.name, s.content_type, s.config_json, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
+	query := `SELECT s.id, s.team_id, s.game_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
 	args := make([]any, 0, len(filter.GameIDs)+2)
 	if filter.TeamID > 0 {
 		query += ` AND s.team_id = ?`
@@ -162,7 +162,7 @@ type strategyScanner interface{ Scan(...any) error }
 func scanComposeStrategy(row strategyScanner) (model.ComposeStrategy, error) {
 	var item model.ComposeStrategy
 	var config []byte
-	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &item.TemplateID, &item.TemplateVersion, &item.Name, &item.ContentType, &config, &item.Status, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &item.TemplateID, &item.TemplateVersion, &item.Name, &config, &item.Status, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}

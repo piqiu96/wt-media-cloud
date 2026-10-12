@@ -12,7 +12,6 @@ type ComposeStrategy struct {
 	TemplateID      int64           `json:"compose_template_id" gorm:"column:compose_template_id"`
 	TemplateVersion uint32          `json:"compose_template_version" gorm:"column:compose_template_version"`
 	Name            string          `json:"name"`
-	ContentType     string          `json:"content_type"`
 	Config          json.RawMessage `json:"config" gorm:"column:config_json;type:json"`
 	Status          string          `json:"status"`
 	CreatedBy       int64           `json:"-"`

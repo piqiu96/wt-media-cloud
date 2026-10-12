@@ -63,7 +63,7 @@ func strategyFixture() (*StrategyService, *strategyMemoryStore, identity.PublicU
 
 func TestStrategyCreateRejectsUnknownConfigAndInactiveTemplate(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	input := CreateStrategyInput{GameID: "delta", Name: "切段", ContentType: "video", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12,"bgm":"x"}`)}
+	input := CreateStrategyInput{GameID: "delta", Name: "切段", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12,"bgm":"x"}`)}
 	if _, err := svc.Create(actor, input); !errors.Is(err, ErrStrategyInvalid) {
 		t.Fatalf("unknown config error = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestStrategyOperatorReadsAvailableTeamStrategyButCannotWrite(t *testing.T) 
 
 func TestStrategySeniorCannotWriteOutsideGame(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	_, err := svc.Create(actor, CreateStrategyInput{GameID: "other", Name: "x", ContentType: "video", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`)})
+	_, err := svc.Create(actor, CreateStrategyInput{GameID: "other", Name: "x", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`)})
 	if !errors.Is(err, ErrStrategyForbidden) || store.writes != 0 {
 		t.Fatalf("error=%v writes=%d", err, store.writes)
 	}
@@ -101,8 +101,8 @@ func TestStrategySeniorCannotWriteOutsideGame(t *testing.T) {
 
 func TestStrategyUpdateKeepsBindingAndCopyRequiresActiveTemplate(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "原策略", ContentType: "video", Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), Status: "active", CreatedBy: 99}}
-	updated, err := svc.Update(actor, 4, UpdateStrategyInput{Name: "新策略", ContentType: "video", Config: json.RawMessage(`{"start_seconds":6,"end_seconds":12}`)})
+	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "原策略", Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), Status: "active", CreatedBy: 99}}
+	updated, err := svc.Update(actor, 4, UpdateStrategyInput{Name: "新策略", Config: json.RawMessage(`{"start_seconds":6,"end_seconds":12}`)})
 	if err != nil || updated.TemplateID != 3 || updated.TemplateVersion != 1 || updated.CreatedBy != 99 || updated.Name != "新策略" {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}

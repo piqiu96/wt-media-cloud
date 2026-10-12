@@ -11,11 +11,15 @@ import (
 // the two parameters v1 can execute; asset keys (intro, outro, bgm) belong to
 // later template versions, after their resource contracts and execution
 // capabilities exist (ADR-0021 ruling 5).
+//
+// Per-property `title` is the display label the shared strategy page renders
+// its template-parameters section from — the form fields are whatever the
+// bound template's schema declares, never a fixed field list.
 const basicCutSchema = `{
 	"type": "object",
 	"properties": {
-		"start_seconds": {"type": "integer", "minimum": 0},
-		"end_seconds": {"type": "integer", "minimum": 1}
+		"start_seconds": {"type": "integer", "minimum": 0, "title": "开始秒数"},
+		"end_seconds": {"type": "integer", "minimum": 1, "title": "结束秒数"}
 	},
 	"required": ["start_seconds", "end_seconds"],
 	"additionalProperties": false
