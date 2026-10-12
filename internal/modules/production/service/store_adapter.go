@@ -31,6 +31,10 @@ func (mysqlStore) ListUsages(userID identityservice.UserID) ([]model.MaterialUsa
 	return repository.ListUsages(userID)
 }
 
+func (mysqlStore) FindUsage(usageID int64) (model.MaterialUsage, bool, error) {
+	return repository.FindUsage(usageID)
+}
+
 func (mysqlStore) FindUsageForUser(usageID int64, userID identityservice.UserID) (model.MaterialUsage, bool, error) {
 	return repository.FindUsageForUser(usageID, userID)
 }

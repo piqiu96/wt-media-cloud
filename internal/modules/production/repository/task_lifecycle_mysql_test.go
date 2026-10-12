@@ -225,3 +225,27 @@ func TestFailExpiredComposeLeaseTerminalizesTheDeadWorkersRow(t *testing.T) {
 	}
 	assertExpectations(t, mock)
 }
+
+func TestArchiveComposeOutputFlipsOnlyPendingPublishAndAudits(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 8, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE composite_outputs SET publish_status = 'archived', updated_at = \\? WHERE id = \\? AND publish_status = 'pending_publish'").
+		WithArgs(now, int64(55)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	ok, err := archiveComposeOutput(db, 55, 9, now)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	// A published or already-archived row matches nothing: no write, no audit.
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE composite_outputs SET publish_status = 'archived'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	ok, err = archiveComposeOutput(db, 55, 9, now)
+	if err != nil || ok {
+		t.Fatalf("refused archive: ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}

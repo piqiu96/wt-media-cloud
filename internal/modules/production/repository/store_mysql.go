@@ -232,6 +232,21 @@ func findUsageForUser(db *gorm.DB, usageID int64, userID identity.UserID) (model
 	return usage, err == nil, err
 }
 
+// FindUsage is the unscoped, historical read the compose-output trace needs:
+// the usage a task was created from is a fact about that task, not a relation
+// the reading actor holds.
+func FindUsage(usageID int64) (model.MaterialUsage, bool, error) {
+	if usageID <= 0 {
+		return model.MaterialUsage{}, false, nil
+	}
+	var usage model.MaterialUsage
+	err := scanUsage(database.DB().Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE id = ?`, usageID).Row(), &usage)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.MaterialUsage{}, false, nil
+	}
+	return usage, err == nil, err
+}
+
 func RemoveUsageByID(usageID int64, userID identity.UserID, now time.Time) (bool, error) {
 	return removeUsageByID(database.DB(), usageID, userID, now)
 }
