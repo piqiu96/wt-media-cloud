@@ -5,6 +5,10 @@ import "github.com/cloudwego/hertz/pkg/app/server"
 
 func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/compose-templates", ListComposeTemplates)
+	h.GET("/api/v1/compose-tasks", ListComposeTasks)
+	h.POST("/api/v1/compose-tasks", CreateComposeTasks)
+	h.GET("/api/v1/compose-tasks/:task_id", GetComposeTask)
+	h.POST("/api/v1/compose-tasks/:task_id/cancel", CancelComposeTask)
 	h.GET("/api/v1/compose-strategies", ListComposeStrategies)
 	h.POST("/api/v1/compose-strategies", CreateComposeStrategy)
 	h.GET("/api/v1/compose-strategies/:strategy_id", GetComposeStrategy)

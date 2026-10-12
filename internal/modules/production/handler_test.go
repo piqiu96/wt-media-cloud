@@ -3,6 +3,7 @@ package production
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
+	model "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 )
 
@@ -244,5 +246,138 @@ func TestWriteUsageAddedKeepsTheTwoSuccessStatusesApart(t *testing.T) {
 		if result.Result().StatusCode() != testCase.want {
 			t.Fatalf("%s: status = %d body=%s, want %d", testCase.name, result.Result().StatusCode(), result.Result().Body(), testCase.want)
 		}
+	}
+}
+
+func TestComposeTaskRoutesRequireAuthentication(t *testing.T) {
+	engine := server.New()
+	RegisterRoutes(engine)
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{consts.MethodGet, "/api/v1/compose-tasks"},
+		{consts.MethodPost, "/api/v1/compose-tasks"},
+		{consts.MethodGet, "/api/v1/compose-tasks/5"},
+		{consts.MethodPost, "/api/v1/compose-tasks/5/cancel"},
+	} {
+		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
+		if response.Result().StatusCode() != consts.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", request.method, request.path, response.Result().StatusCode())
+		}
+	}
+}
+
+// Every pair below is frozen by contracts/cloud-error-codes/v1/content-production.yaml
+// and the OpenAPI file's named responses; a swap in either field is what the
+// frontend branches on, so both are asserted on a real response.
+func TestComposeTaskErrorCarriesTheFrozenPairs(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		err     error
+		status  int
+		errcode int
+		want    string
+	}{
+		{"invalid", productionservice.ErrComposeTaskInvalid, consts.StatusBadRequest, 15214, "compose_task_invalid"},
+		{"forbidden", productionservice.ErrComposeTaskForbidden, consts.StatusForbidden, 15215, "compose_task_forbidden"},
+		{"missing", productionservice.ErrComposeTaskNotFound, consts.StatusNotFound, 15216, "compose_task_not_found"},
+		{"not cancellable", productionservice.ErrComposeTaskNotCancellable, consts.StatusConflict, 15217, "compose_task_not_cancellable"},
+		{"template unavailable", productionservice.ErrStrategyTemplateUnavailable, consts.StatusConflict, 15213, "compose_template_unavailable"},
+	} {
+		engine := server.New()
+		engine.GET("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+			writeComposeTaskError(c, testCase.err)
+		})
+		result := ut.PerformRequest(engine.Engine, consts.MethodGet, "/probe", nil)
+		if got := result.Result().StatusCode(); got != testCase.status {
+			t.Fatalf("%s: status = %d, want %d", testCase.name, got, testCase.status)
+		}
+		var body struct {
+			ErrCode int `json:"errcode"`
+			Error   *struct {
+				Type string `json:"type"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(result.Result().Body(), &body); err != nil {
+			t.Fatalf("%s: decode response: %v", testCase.name, err)
+		}
+		if body.ErrCode != testCase.errcode {
+			t.Fatalf("%s: errcode = %d, want %d", testCase.name, body.ErrCode, testCase.errcode)
+		}
+		if body.Error == nil || body.Error.Type != testCase.want {
+			t.Fatalf("%s: error.type = %+v, want %q", testCase.name, body.Error, testCase.want)
+		}
+	}
+}
+
+// The names above are copies of the frozen file; this reads it so a rename
+// there fails here instead of in a client.
+func TestTheComposeTaskNamesAreTheFrozenOnes(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-error-codes", "v1", "content-production.yaml"))
+	if err != nil {
+		t.Fatalf("read frozen error codes: %v", err)
+	}
+	for _, frozen := range []struct {
+		name   string
+		status int
+	}{
+		{"compose_task_invalid", consts.StatusBadRequest},
+		{"compose_task_forbidden", consts.StatusForbidden},
+		{"compose_task_not_found", consts.StatusNotFound},
+		{"compose_task_not_cancellable", consts.StatusConflict},
+	} {
+		declared := fmt.Sprintf("%s: {http_status: %d}", frozen.name, frozen.status)
+		if !strings.Contains(string(content), declared) {
+			t.Errorf("content-production.yaml does not declare %q", declared)
+		}
+	}
+}
+
+func TestComposeTaskFailurePayloadsCarryTheFrozenErrcodes(t *testing.T) {
+	result := productionservice.CreateComposeTasksResult{
+		Created: []model.ComposeTask{{ID: 77, Status: model.ComposeTaskPending}},
+		Failed: []productionservice.CreateComposeTaskFailure{
+			{MaterialID: 42, RequestKey: "rk-usage-001", Err: productionservice.ErrComposeTaskInvalid, Message: "素材不在我的素材或已移出"},
+			{MaterialID: 43, RequestKey: "rk-scope-001", Err: productionservice.ErrComposeTaskForbidden, Message: "素材不在你的团队范围内"},
+		},
+	}
+	engine := server.New()
+	engine.GET("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+		writeComposeTaskCreated(c, result)
+	})
+	response := ut.PerformRequest(engine.Engine, consts.MethodGet, "/probe", nil)
+	if response.Result().StatusCode() != consts.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Result().StatusCode())
+	}
+	var body struct {
+		Data struct {
+			Created []struct {
+				ID     int64  `json:"id"`
+				Status string `json:"status"`
+			} `json:"created"`
+			Failed []struct {
+				MaterialID int64  `json:"material_id"`
+				RequestKey string `json:"request_key"`
+				Errcode    int    `json:"errcode"`
+				Error      string `json:"error"`
+				Message    string `json:"message"`
+			} `json:"failed"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Result().Body(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Data.Created) != 1 || body.Data.Created[0].ID != 77 || body.Data.Created[0].Status != "pending" {
+		t.Fatalf("created = %+v", body.Data.Created)
+	}
+	if len(body.Data.Failed) != 2 {
+		t.Fatalf("failed = %+v", body.Data.Failed)
+	}
+	if body.Data.Failed[0].Errcode != 15214 || body.Data.Failed[0].Error != "compose_task_invalid" || body.Data.Failed[0].Message != "素材不在我的素材或已移出" || body.Data.Failed[0].RequestKey != "rk-usage-001" {
+		t.Fatalf("failed[0] = %+v", body.Data.Failed[0])
+	}
+	if body.Data.Failed[1].Errcode != 15215 || body.Data.Failed[1].Error != "compose_task_forbidden" {
+		t.Fatalf("failed[1] = %+v", body.Data.Failed[1])
 	}
 }
