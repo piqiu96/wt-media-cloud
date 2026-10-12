@@ -1,87 +1,17 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.12.1
+  version: 2026.10.12.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
     get:
       operationId: listComposeTemplates
-      summary: Read the Cloud-maintained versioned template catalog.
+      summary: Read published active compose template versions.
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: Supported templates and parameter choices.}
-  /api/v1/compose-strategies:
-    get:
-      operationId: listComposeStrategies
-      summary: List active strategies in the actor's team and game scope; senior operators also see inactive strategies.
-      security: [{sessionCookie: []}]
-      responses:
-        '200': {description: Visible strategies.}
-    post:
-      operationId: createComposeStrategy
-      summary: Create a strategy and immutable version 1 in one transaction.
-      security: [{sessionCookie: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/ComposeStrategyInput'}
-      responses:
-        '201': {description: Created strategy.}
-        '400': {description: Invalid template, parameters, or scope.}
-        '403': {description: Actor cannot manage this team and game.}
-  /api/v1/compose-strategies/{strategy_id}:
-    get:
-      operationId: getComposeStrategy
-      summary: Read one visible strategy.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/StrategyID'}]
-      responses:
-        '200': {description: Strategy at its current version.}
-        '404': {description: Missing or outside actor scope.}
-    put:
-      operationId: updateComposeStrategy
-      summary: Replace editable fields and append an immutable version; expected_version prevents lost updates.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/StrategyID'}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/ComposeStrategyUpdate'}
-      responses:
-        '200': {description: Updated strategy and new version.}
-        '403': {description: Actor cannot manage this strategy.}
-        '409': {description: Strategy changed since expected_version.}
-  /api/v1/compose-strategies/{strategy_id}/copy:
-    post:
-      operationId: copyComposeStrategy
-      summary: Copy a visible strategy into a new independent strategy at version 1.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/StrategyID'}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [name]
-              properties: {name: {type: string, minLength: 1, maxLength: 120}}
-      responses:
-        '201': {description: Independent copied strategy.}
-        '403': {description: Actor cannot manage strategies.}
-        '404': {description: Source missing or outside actor scope.}
-  /api/v1/compose-strategies/{strategy_id}/versions:
-    get:
-      operationId: listComposeStrategyVersions
-      summary: Read immutable versions of a visible strategy.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/StrategyID'}]
-      responses:
-        '200': {description: Historical snapshots, newest first.}
-        '404': {description: Strategy missing or outside actor scope.}
+        '200': {description: Active template versions, empty until executor-backed templates are published.}
+        '403': {description: Actor cannot read the template catalog.}
   /api/v1/materials:
     get:
       operationId: listMaterials
@@ -183,38 +113,19 @@ paths:
         '409': {description: No bound Local Agent node is available.}
 components:
   schemas:
-    ComposeStrategyInput:
+    ComposeTemplate:
       type: object
       additionalProperties: false
-      required: [team_id, game_id, name, content_type, template_key, template_version, parameters, status]
+      required: [id, code, name, version, schema, status]
       properties:
-        team_id: {type: integer, format: int64}
-        game_id: {type: string}
-        name: {type: string, minLength: 1, maxLength: 120}
-        content_type: {type: string, minLength: 1, maxLength: 64}
-        template_key: {type: string, enum: [basic_cut]}
-        template_version: {type: string, enum: ['1.0']}
-        parameters:
-          type: object
-          additionalProperties: false
-          required: [video_ratio]
-          properties:
-            video_ratio: {type: string, enum: ['16:9', '9:16']}
-            subtitle: {type: boolean, enum: [false]}
-            bgm: {type: boolean, enum: [false]}
-            outro: {type: boolean, enum: [false]}
-        allowed_overrides: {type: array, items: {type: string, enum: [video_ratio]}}
+        id: {type: integer, format: int64}
+        code: {type: string}
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+        schema: {type: object}
         status: {type: string, enum: [active, inactive]}
-    ComposeStrategyUpdate:
-      type: object
-      additionalProperties: false
-      required: [expected_version, strategy]
-      properties:
-        expected_version: {type: integer, minimum: 1}
-        strategy: {$ref: '#/components/schemas/ComposeStrategyInput'}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:
-    StrategyID: {in: path, name: strategy_id, required: true, schema: {type: integer, format: int64}}
     MaterialID: {in: path, name: material_id, required: true, schema: {type: integer, format: int64}}
     UsageID: {in: path, name: usage_id, required: true, schema: {type: integer, format: int64}}

@@ -32,6 +32,21 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 		{consts.MethodDelete, "/api/v1/material-usages/5"},
 		{consts.MethodPost, "/api/v1/material-usages/5/restore"},
 		{consts.MethodGet, "/api/v1/compose-templates"},
+	} {
+		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
+		if response.Result().StatusCode() != consts.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", request.method, request.path, response.Result().StatusCode())
+		}
+	}
+}
+
+func TestUnpublishedStrategyRoutesAreAbsent(t *testing.T) {
+	engine := server.New()
+	RegisterRoutes(engine)
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
 		{consts.MethodGet, "/api/v1/compose-strategies"},
 		{consts.MethodPost, "/api/v1/compose-strategies"},
 		{consts.MethodGet, "/api/v1/compose-strategies/5"},
@@ -40,8 +55,8 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 		{consts.MethodGet, "/api/v1/compose-strategies/5/versions"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
-		if response.Result().StatusCode() != consts.StatusUnauthorized {
-			t.Fatalf("%s %s status = %d, want 401", request.method, request.path, response.Result().StatusCode())
+		if response.Result().StatusCode() != consts.StatusNotFound {
+			t.Fatalf("%s %s status = %d, want 404", request.method, request.path, response.Result().StatusCode())
 		}
 	}
 }

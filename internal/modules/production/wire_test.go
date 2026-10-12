@@ -256,24 +256,14 @@ func TestVideoLinkBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 	}
 }
 
-func TestComposeStrategyBodiesMatchContract(t *testing.T) {
+func TestComposeTemplateBodyMatchesContract(t *testing.T) {
 	schemas := readContentProductionSchema(t)
-	for _, tc := range []struct {
-		name string
-		body any
-	}{
-		{"ComposeTemplate", model.StrategyTemplates()[0]},
-		{"ComposeStrategyParameters", model.StrategyParameters{VideoRatio: "16:9"}},
-		{"ComposeStrategy", model.ComposeStrategy{}},
-		{"ComposeStrategyVersion", model.ComposeStrategyVersion{}},
-	} {
-		schema, ok := schemas[tc.name]
-		if !ok {
-			t.Fatalf("missing %s schema", tc.name)
-		}
-		if got, want := marshalledKeys(t, tc.body), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s keys = %v, contract = %v", tc.name, got, want)
-		}
+	schema, ok := schemas["ComposeTemplate"]
+	if !ok {
+		t.Fatal("missing ComposeTemplate schema")
+	}
+	if got, want := marshalledKeys(t, model.ComposeTemplate{}), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeTemplate keys = %v, contract = %v", got, want)
 	}
 }
 
