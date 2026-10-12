@@ -57,3 +57,15 @@ func TestContentProductionM4BMigrationsFollowTheFourLayerRework(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeStrategyConfigurationHasOneSchemaOwnedSource(t *testing.T) {
+	correction := readMigration(t, "20261012_051_compose_strategy_config.sql")
+	for _, fragment := range []string{
+		"RENAME COLUMN parameters_json TO config_json",
+		"DROP COLUMN allowed_overrides_json",
+	} {
+		if !strings.Contains(correction, fragment) {
+			t.Errorf("051 missing %q", fragment)
+		}
+	}
+}
