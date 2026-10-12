@@ -200,6 +200,15 @@ func runComposeTask(ctx context.Context, deps ComposeWorkerDeps, settings Compos
 		case productionservice.ComposeAttemptSuccess, productionservice.ComposeAttemptFailed, productionservice.ComposeAttemptLeaseLost:
 			confirmIfCancelSeen(deps, settings, task, cancelSeen)
 		case productionservice.ComposeAttemptCancelled:
+			// The flag can already be on the row when this attempt started —
+			// it rode through a transient release and the watcher has not
+			// polled yet. The row, not the watcher, is what says a stop is
+			// still being asked for.
+			if !cancelSeen.get() {
+				if row, found, err := deps.Tasks.Find(task.ID); err == nil && found && row.CancelRequested {
+					cancelSeen.set()
+				}
+			}
 			confirmIfCancelSeen(deps, settings, task, cancelSeen)
 		case productionservice.ComposeAttemptRetry:
 			// The row is pending again; the slot's pause before the next

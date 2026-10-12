@@ -321,6 +321,32 @@ func TestComposeWorkerConfirmsACancelItTerminated(t *testing.T) {
 	}
 }
 
+// A cancel request can already sit on the row when a claim starts — it rides
+// through a transient release (the flag is never cleared). The attempt then
+// returns Cancelled before the watcher has polled once, so the confirmation
+// must come from the row: otherwise the row stays running with the flag set,
+// unclaimable, until the lease expires.
+func TestComposeWorkerConfirmsACancelFlagThatRodeTheClaim(t *testing.T) {
+	fake := &workerTasksFake{claims: []model.ComposeTask{claimedTask(83)}, findRow: model.ComposeTask{CancelRequested: true}}
+	spy := &attemptSpy{outcomes: []productionservice.ComposeAttemptOutcome{productionservice.ComposeAttemptCancelled}}
+	workspace, err := compose.NewWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	settings := workerSettings()
+	settings.PollInterval = time.Hour
+	deps := ComposeWorkerDeps{Tasks: fake, Workspace: workspace, Attempt: spy.attempt}
+	cancel, done := startWorker(t, deps, settings)
+
+	waitFor(t, func() bool { return len(fake.confirmedIDs()) == 1 }, "the ridden cancel flag to be confirmed")
+	if err := stopWorker(cancel, done); err != nil {
+		t.Fatalf("RunComposeWorker: %v", err)
+	}
+	if released := fake.releasedCodes(); len(released) != 0 {
+		t.Fatalf("a cancelled task must not be requeued: %v", released)
+	}
+}
+
 func TestComposeWorkerStopsWithoutConfirmingWhenTheLeaseIsLost(t *testing.T) {
 	fake := &workerTasksFake{claims: []model.ComposeTask{claimedTask(77)}, renewLost: true}
 	spy := &attemptSpy{outcomes: []productionservice.ComposeAttemptOutcome{productionservice.ComposeAttemptLeaseLost}, blocks: make(chan struct{})}
