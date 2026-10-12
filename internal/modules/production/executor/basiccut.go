@@ -29,10 +29,11 @@ type BasicCut struct{}
 // schema published with it, and this code as its executor.
 func BasicCutV1() Definition {
 	return Definition{
-		Code:     "basic_cut",
-		Version:  1,
-		Schema:   json.RawMessage(basicCutSchema),
-		Executor: BasicCut{},
+		Code:       "basic_cut",
+		Version:    1,
+		Schema:     json.RawMessage(basicCutSchema),
+		ExecutorID: "basic_cut_v1",
+		Executor:   BasicCut{},
 	}
 }
 

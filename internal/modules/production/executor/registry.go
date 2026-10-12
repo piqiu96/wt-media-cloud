@@ -44,10 +44,11 @@ type Executor interface {
 // A Definition is one template version: the identity, the schema published
 // with it, and the code that executes it.
 type Definition struct {
-	Code     string
-	Version  uint32
-	Schema   json.RawMessage
-	Executor Executor
+	Code       string
+	Version    uint32
+	Schema     json.RawMessage
+	ExecutorID string
+	Executor   Executor
 }
 
 // A Registry answers which executor code a template version maps to.

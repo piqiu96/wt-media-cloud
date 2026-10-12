@@ -25,6 +25,9 @@ func TestRegistryLookupReturnsTheDefinitionItWasBuiltWith(t *testing.T) {
 	if len(definition.Schema) == 0 {
 		t.Fatal("Lookup().Schema is empty, want the schema published with the version")
 	}
+	if definition.ExecutorID != "basic_cut_v1" {
+		t.Fatalf("Lookup().ExecutorID = %q, want basic_cut_v1", definition.ExecutorID)
+	}
 }
 
 func TestRegistryRejectsDuplicateTemplateVersions(t *testing.T) {
