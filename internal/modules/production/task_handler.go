@@ -60,7 +60,7 @@ func composeTaskErrorFor(err error) (composeTaskErrorShape, bool) {
 	case errors.Is(err, productionservice.ErrComposeTaskNotFound), errors.Is(err, repository.ErrNotFound):
 		return composeTaskErrorShape{consts.StatusNotFound, 15216, "compose_task_not_found", "合成任务不存在"}, true
 	case errors.Is(err, productionservice.ErrComposeTaskNotCancellable):
-		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_cancellable", "合成任务已开始执行，不能取消"}, true
+		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_cancellable", "合成任务已结束，不能取消"}, true
 	case errors.Is(err, productionservice.ErrStrategyTemplateUnavailable):
 		return composeTaskErrorShape{consts.StatusConflict, 15213, "compose_template_unavailable", "合成模板版本不可用"}, true
 	}

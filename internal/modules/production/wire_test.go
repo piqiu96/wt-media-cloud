@@ -64,7 +64,7 @@ func sortedCopy(values []string) []string {
 	return out
 }
 
-func schemaPropertyNames(properties map[string]any) []string {
+func schemaPropertyNames[T any](properties map[string]T) []string {
 	names := make([]string, 0, len(properties))
 	for name := range properties {
 		names = append(names, name)
@@ -280,4 +280,36 @@ func union(left, right []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// The ComposeTask the API returns is the model's own JSON; the OpenAPI file is
+// the contract both frontends code against. This reads the schema and asserts
+// the two key sets are equal, so a projection the worker starts writing — or a
+// schema line someone adds — fails here instead of drifting in a client.
+// The ComposeTask lives only in the OpenAPI file (M4-C5), not the business
+// schema, so it is read from there directly.
+func TestTheComposeTaskResponseMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read compose task openapi: %v", err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas struct {
+				ComposeTask struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeTask"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse compose task openapi: %v", err)
+	}
+	schema := parsed.Components.Schemas.ComposeTask.Properties
+	if len(schema) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeTask properties")
+	}
+	if got, want := marshalledKeys(t, model.ComposeTask{}), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeTask keys = %v, contract = %v", got, want)
+	}
 }

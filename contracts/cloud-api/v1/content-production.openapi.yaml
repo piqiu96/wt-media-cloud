@@ -147,7 +147,7 @@ paths:
         '200': {description: ComposeTask — status cancelled, or status running with cancel_requested true.}
         '403': {description: Task is outside the actor's scope.}
         '404': {description: Task absent or outside the actor's scope.}
-        '409': {description: Task is not pending (named compose_task_not_cancellable).}
+        '409': {description: Task is terminal (success, failed or cancelled; named compose_task_not_cancellable).}
   /api/v1/materials:
     get:
       operationId: listMaterials
@@ -351,7 +351,7 @@ components:
         config_snapshot: {type: object}
         status: {type: string, enum: [pending, running, success, failed, cancelled]}
         cancel_requested: {type: boolean, description: A cancel was requested while running; the task stays running until the worker confirms the controlled stop.}
-        stage: {type: string, description: Execution phase projection; a pending task reads 等待源素材, never a fabricated later phase.}
+        stage: {type: string, description: Worker phase projection from the bounded set validating_input, waiting_input, cutting, uploading, committing; a pending task carries an empty stage.}
         progress: {type: integer, minimum: 0, maximum: 100}
         error_code: {type: string}
         error_message: {type: string}

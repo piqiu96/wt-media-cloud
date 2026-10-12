@@ -56,6 +56,7 @@ type ComposeTaskRepository interface {
 	List(repository.ComposeTaskFilter) ([]model.ComposeTask, error)
 	CreateForUsage(model.ComposeTask, string) (model.ComposeTask, bool, error)
 	CancelAudited(model.ComposeTask, int64, string) (bool, error)
+	RequestComposeCancel(taskID, actorID int64, action string) (bool, error)
 }
 
 type composeTaskStrategySource interface {
@@ -228,10 +229,13 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 	return s.tasks.List(filter)
 }
 
-// Cancel flips a pending task to cancelled. Reading and cancelling share the
-// visibility gate — pending cancel needs no separate permission. When the
-// conditional update writes nothing the task is reloaded and named by what it
-// is now: gone answers not-found, anything non-pending answers not-cancellable.
+// Cancel flips a pending task to cancelled, and asks the worker's controlled
+// stop for a running one (spec §5.4): the running row keeps answering running
+// with cancel_requested set until the worker has stopped FFmpeg and disposed
+// its temp files. Reading and cancelling share the visibility gate — cancel
+// needs no separate permission. When a conditional update writes nothing the
+// task is reloaded and named by what it is now: gone answers not-found, a
+// terminal row answers not-cancellable.
 func (s *ComposeTaskService) Cancel(actor identity.PublicUser, id int64) (model.ComposeTask, error) {
 	item, found, err := s.tasks.Find(id)
 	if err != nil {
@@ -240,24 +244,44 @@ func (s *ComposeTaskService) Cancel(actor identity.PublicUser, id int64) (model.
 	if !found || !canReadComposeTask(actor, item) {
 		return model.ComposeTask{}, ErrComposeTaskNotFound
 	}
-	if item.Status != model.ComposeTaskPending {
-		return model.ComposeTask{}, ErrComposeTaskNotCancellable
+	switch item.Status {
+	case model.ComposeTaskPending:
+		ok, err := s.tasks.CancelAudited(item, int64(actor.ID), "compose_task.cancel")
+		if err != nil {
+			return model.ComposeTask{}, err
+		}
+		stored, found, err := s.tasks.Find(id)
+		if err != nil {
+			return model.ComposeTask{}, err
+		}
+		if !found {
+			return model.ComposeTask{}, ErrComposeTaskNotFound
+		}
+		if !ok && stored.Status != model.ComposeTaskCancelled {
+			return model.ComposeTask{}, ErrComposeTaskNotCancellable
+		}
+		return stored, nil
+	case model.ComposeTaskRunning:
+		requested, err := s.tasks.RequestComposeCancel(id, int64(actor.ID), "compose_task.cancel")
+		if err != nil {
+			return model.ComposeTask{}, err
+		}
+		stored, found, err := s.tasks.Find(id)
+		if err != nil {
+			return model.ComposeTask{}, err
+		}
+		if !found {
+			return model.ComposeTask{}, ErrComposeTaskNotFound
+		}
+		// The request writes nothing when the flag is already set (answered
+		// by the reload) or the worker finished the row in between (terminal,
+		// refused below). A running row without the flag after a refused
+		// request is a state nothing should be able to produce.
+		if stored.Status == model.ComposeTaskRunning && (requested || stored.CancelRequested) {
+			return stored, nil
+		}
 	}
-	ok, err := s.tasks.CancelAudited(item, int64(actor.ID), "compose_task.cancel")
-	if err != nil {
-		return model.ComposeTask{}, err
-	}
-	stored, found, err := s.tasks.Find(id)
-	if err != nil {
-		return model.ComposeTask{}, err
-	}
-	if !found {
-		return model.ComposeTask{}, ErrComposeTaskNotFound
-	}
-	if !ok && stored.Status != model.ComposeTaskCancelled {
-		return model.ComposeTask{}, ErrComposeTaskNotCancellable
-	}
-	return stored, nil
+	return model.ComposeTask{}, ErrComposeTaskNotCancellable
 }
 
 // canReadComposeTask scopes the page: admins see everything, seniors see

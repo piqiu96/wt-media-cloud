@@ -12,13 +12,15 @@ import (
 )
 
 type taskMemoryStore struct {
-	tasks         []model.ComposeTask
-	usages        []model.MaterialUsage
-	nextID        int64
-	creates       int
-	cancels       int
-	cancelBlocked bool
-	lastFilter    repository.ComposeTaskFilter
+	tasks          []model.ComposeTask
+	usages         []model.MaterialUsage
+	nextID         int64
+	creates        int
+	cancels        int
+	cancelBlocked  bool
+	requests       int
+	requestBlocked bool
+	lastFilter     repository.ComposeTaskFilter
 }
 
 func (s *taskMemoryStore) Find(id int64) (model.ComposeTask, bool, error) {
@@ -68,6 +70,23 @@ func (s *taskMemoryStore) CancelAudited(item model.ComposeTask, _ int64, _ strin
 	for i := range s.tasks {
 		if s.tasks[i].ID == item.ID && s.tasks[i].Status == model.ComposeTaskPending {
 			s.tasks[i].Status = model.ComposeTaskCancelled
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// RequestComposeCancel mirrors the repository contract: only a running row
+// without a flag yet accepts the request, and the flag lands on the row. The
+// counter is writes, not calls — a refused request must leave no trace.
+func (s *taskMemoryStore) RequestComposeCancel(taskID, _ int64, _ string) (bool, error) {
+	if s.requestBlocked {
+		return false, nil
+	}
+	for i := range s.tasks {
+		if s.tasks[i].ID == taskID && s.tasks[i].Status == model.ComposeTaskRunning && !s.tasks[i].CancelRequested {
+			s.tasks[i].CancelRequested = true
+			s.requests++
 			return true, nil
 		}
 	}
@@ -356,6 +375,74 @@ func TestCancelComposeTaskLostRaceReloadsToNotCancellable(t *testing.T) {
 	if tasks.cancels != 1 {
 		t.Fatalf("cancels = %d", tasks.cancels)
 	}
+}
+
+// M4-C5 T-05: a running task is not refused — cancelling it requests the
+// worker's controlled stop and keeps answering running until the worker
+// confirms. Only a terminal row is not cancellable.
+func TestCancelComposeTaskRunningRequestsControlledStop(t *testing.T) {
+	svc, tasks, _, _, actor := composeTaskFixture()
+	running := model.ComposeTask{ID: 502, TeamID: 7, GameID: "delta", Status: model.ComposeTaskRunning, CreatedBy: 9}
+	tasks.tasks = append(tasks.tasks, running)
+
+	stored, err := svc.Cancel(actor, 502)
+	if err != nil {
+		t.Fatalf("running cancel error = %v", err)
+	}
+	if stored.Status != model.ComposeTaskRunning || !stored.CancelRequested {
+		t.Fatalf("the row must stay running with the flag set: %+v", stored)
+	}
+	if tasks.requests != 1 || tasks.cancels != 0 {
+		t.Fatalf("a running cancel must request, not flip: requests=%d cancels=%d", tasks.requests, tasks.cancels)
+	}
+
+	again, err := svc.Cancel(actor, 502)
+	if err != nil || !again.CancelRequested {
+		t.Fatalf("a repeated request is answered by the flag, not an error: %+v err=%v", again, err)
+	}
+	if tasks.requests != 1 {
+		t.Fatalf("a second request must write nothing: %d", tasks.requests)
+	}
+}
+
+func TestCancelComposeTaskTerminalRowsAreNamed(t *testing.T) {
+	svc, tasks, _, _, actor := composeTaskFixture()
+	for _, status := range []model.ComposeTaskStatus{model.ComposeTaskSuccess, model.ComposeTaskFailed, model.ComposeTaskCancelled} {
+		id := 503 + int64(statusIndex(status))
+		tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: id, TeamID: 7, GameID: "delta", Status: status, CreatedBy: 9})
+		if _, err := svc.Cancel(actor, id); !errors.Is(err, ErrComposeTaskNotCancellable) {
+			t.Fatalf("%s cancel error = %v", status, err)
+		}
+	}
+	if tasks.requests != 0 || tasks.cancels != 0 {
+		t.Fatalf("terminal rows must not be written: requests=%d cancels=%d", tasks.requests, tasks.cancels)
+	}
+}
+
+func TestCancelComposeTaskLostRequestOnTerminalRowRefuses(t *testing.T) {
+	svc, tasks, _, _, actor := composeTaskFixture()
+	// The worker finished the task between the service's read and the flag
+	// write: the request lands on nothing and the reloaded row is terminal.
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 506, TeamID: 7, GameID: "delta", Status: model.ComposeTaskRunning, CreatedBy: 9})
+	tasks.requestBlocked = true
+	if _, err := svc.Cancel(actor, 506); !errors.Is(err, ErrComposeTaskNotCancellable) {
+		t.Fatalf("lost-race running cancel error = %v", err)
+	}
+	if tasks.requests != 0 {
+		t.Fatalf("a refused request must write nothing: %d", tasks.requests)
+	}
+}
+
+func statusIndex(status model.ComposeTaskStatus) int {
+	switch status {
+	case model.ComposeTaskSuccess:
+		return 0
+	case model.ComposeTaskFailed:
+		return 1
+	case model.ComposeTaskCancelled:
+		return 2
+	}
+	return 3
 }
 
 func TestListComposeTasksScopesByRole(t *testing.T) {
