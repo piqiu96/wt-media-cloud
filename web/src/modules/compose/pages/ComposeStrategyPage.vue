@@ -7,7 +7,6 @@ import { createComposeClient } from '../../../shared/api/compose.js'
 import { createSessionClient } from '../../../shared/api/session.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
-import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 
@@ -48,7 +47,8 @@ const copyName = ref('')
 const detailVisible = ref(false)
 const detailRow = ref(null)
 
-const filters = ref({ name: '', game_id: '', status: '' })
+const filters = ref({ name: '', game_id: '', template_id: '', status: '' })
+const pagination = ref({ current: 1, pageSize: 20 })
 
 // 每一列都必须声明 width，不许只写 minWidth（WebKit fixed 布局下 minWidth 不产生确定列宽，
 // 会被压成剩余空间列；见 ContentPoolPage.vue 里 columns 上方的完整说明）。
@@ -71,15 +71,15 @@ const tableScroll = computed(() => ({
 const filteredRows = computed(() => rows.value.filter((row) => {
   if (filters.value.name && !String(row.name || '').toLowerCase().includes(filters.value.name.trim().toLowerCase())) return false
   if (filters.value.game_id && row.game_id !== filters.value.game_id) return false
+  if (filters.value.template_id && row.compose_template_id !== filters.value.template_id) return false
   if (filters.value.status && row.status !== filters.value.status) return false
   return true
 }))
 
-const stats = computed(() => [
-  { key: 'total', label: '策略总数', value: rows.value.length, tone: 'info' },
-  { key: 'active', label: '启用中', value: rows.value.filter((row) => row.status === 'active').length, tone: 'success' },
-  { key: 'inactive', label: '已停用', value: rows.value.filter((row) => row.status === 'inactive').length, tone: 'neutral' },
-])
+const pagedRows = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return filteredRows.value.slice(start, start + pagination.value.pageSize)
+})
 
 const templateOptions = computed(() => templates.value.map((template) => ({
   label: `${template.name} v${template.version}`,
@@ -133,6 +133,7 @@ async function load() {
     templates.value = Array.isArray(templateRows) ? templateRows : []
     games.value = Array.isArray(gameRows) ? gameRows : []
     teams.value = Array.isArray(teamRows) ? teamRows : []
+    pagination.value.current = 1
   } catch (e) {
     error.value = e.message || '合成策略加载失败'
   } finally {
@@ -151,7 +152,8 @@ function defaultForm() {
 }
 
 function resetFilters() {
-  filters.value = { name: '', game_id: '', status: '' }
+  filters.value = { name: '', game_id: '', template_id: '', status: '' }
+  pagination.value.current = 1
 }
 
 function openCreate() {
@@ -379,15 +381,16 @@ function cutLabel(config) {
         </template>
       </ResourcePageHeader>
 
-      <ResourceStatGrid :items="stats" />
-
-      <!-- 筛选区与内容池同构：filter-bar + wt-filter-field / wt-filter-actions（AdminUI 规范 §2.1） -->
-      <ResourceCard class="strategy-filter-card">
+      <!-- 筛选区与表格同卡（与内容池一致）：filter-bar 自带分隔线，下方接表格与分页。 -->
+      <ResourceCard class="strategy-card">
         <div class="filter-bar">
           <t-space wrap>
             <label class="wt-filter-field"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" @enter="load" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
               <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+            </t-select></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
+              <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
             </t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
               <t-option value="active" label="启用" />
@@ -399,11 +402,8 @@ function cutLabel(config) {
             </div>
           </t-space>
         </div>
-      </ResourceCard>
-
-      <ResourceCard class="strategy-card">
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无合成策略">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无合成策略">
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #template="{ row }">{{ templateLabel(row.compose_template_id) }}</template>
             <template #config="{ row }">{{ cutLabel(row.config) }}</template>
@@ -413,7 +413,7 @@ function cutLabel(config) {
               <ResourceStatusBadge v-else :tone="row.status === 'active' ? 'success' : 'neutral'" :label="row.status === 'active' ? '启用' : '停用'" />
             </template>
             <template #op="{ row }">
-              <t-space size="small">
+              <t-space size="small" class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="detailRow = row; detailVisible = true">详情</t-button>
                 <template v-if="canManage">
                   <t-button size="small" theme="primary" @click="openEdit(row)">编辑</t-button>
@@ -423,64 +423,84 @@ function cutLabel(config) {
             </template>
           </t-table>
         </div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="filteredRows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <!-- 策略编辑带模板参数分组，字段随模板增长——按规范用 Drawer + 分组，底部 取消/保存。 -->
-      <t-drawer :visible="visible" :header="editingID ? '编辑合成策略' : '新增合成策略'" size="520px" :close-btn="true" :footer="false" @close="requestCloseEditor">
-        <t-form label-width="96px" class="strategy-form">
-          <div class="strategy-form-section">① 基础信息</div>
-          <t-form-item label="策略名称" required-mark>
-            <div class="strategy-field">
-              <t-input v-model="form.name" :maxlength="120" placeholder="例如：王者荣耀高光切片" :status="nameError ? 'error' : undefined" />
-              <p v-if="nameError" class="strategy-field-error">{{ nameError }}</p>
+      <!-- 新增/编辑与挖掘策略弹窗同构：左侧分组卡片表单 + 右侧配置说明，底部 取消/保存。 -->
+      <t-dialog :visible="visible" :header="editingID ? '编辑合成策略' : '新增合成策略'" width="880px" :footer="false" @close="requestCloseEditor">
+        <div class="strategy-editor">
+          <div class="strategy-editor__form">
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">①</span>基础信息<small>配置策略基本属性和内容归属，用于管理和数据统计</small></div>
+              <t-form label-width="88px">
+                <t-form-item label="策略名称" required-mark>
+                  <div class="strategy-field">
+                    <t-input v-model="form.name" :maxlength="120" placeholder="例如：王者荣耀高光切片" :status="nameError ? 'error' : undefined" />
+                    <p v-if="nameError" class="strategy-field-error">{{ nameError }}</p>
+                  </div>
+                </t-form-item>
+                <template v-if="!editingID">
+                  <t-form-item v-if="isAdmin" label="所属团队" required-mark>
+                    <t-select v-model="form.team_id" clearable placeholder="选择团队">
+                      <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
+                    </t-select>
+                  </t-form-item>
+                  <t-form-item label="所属游戏" required-mark>
+                    <t-select v-model="form.game_id" clearable placeholder="选择游戏">
+                      <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+                    </t-select>
+                  </t-form-item>
+                </template>
+                <!-- 编辑时归属不可改（服务端 Update 不动 team/game），但要展示出来让人知道策略挂在哪。 -->
+                <template v-else>
+                  <t-form-item label="所属团队"><t-input :value="teamName(form.team_id)" disabled /></t-form-item>
+                  <t-form-item label="所属游戏"><t-input :value="gameName(form.game_id)" disabled /></t-form-item>
+                </template>
+                <t-form-item label="合成模板" required-mark>
+                  <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange">
+                    <t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" />
+                  </t-select>
+                  <t-input v-else :value="templateLabel(form.compose_template_id)" disabled />
+                </t-form-item>
+              </t-form>
             </div>
-          </t-form-item>
-          <template v-if="!editingID">
-            <t-form-item v-if="isAdmin" label="所属团队" required-mark>
-              <t-select v-model="form.team_id" clearable placeholder="选择团队">
-                <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-              </t-select>
-            </t-form-item>
-            <t-form-item label="所属游戏" required-mark>
-              <t-select v-model="form.game_id" clearable placeholder="选择游戏">
-                <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
-              </t-select>
-            </t-form-item>
-          </template>
-          <!-- 编辑时归属不可改（服务端 Update 不动 team/game），但要展示出来让人知道策略挂在哪。 -->
-          <template v-else>
-            <t-form-item label="所属团队"><t-input :value="teamName(form.team_id)" disabled /></t-form-item>
-            <t-form-item label="所属游戏"><t-input :value="gameName(form.game_id)" disabled /></t-form-item>
-          </template>
-          <t-form-item label="合成模板" required-mark>
-            <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange">
-              <t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" />
-            </t-select>
-            <t-input v-else :value="templateLabel(form.compose_template_id)" disabled />
-          </t-form-item>
 
-          <div class="strategy-form-section">② 模板参数</div>
-          <div v-if="!editingID && !form.compose_template_id" class="strategy-bind-hint strategy-form-hint">先选择合成模板，需要填写哪些参数由模板决定。</div>
-          <template v-else>
-            <t-form-item v-for="field in formSchemaFields" :key="field.key" :label="field.label" :required-mark="field.required">
-              <div class="strategy-field">
-                <t-input-number v-if="field.type === 'integer'" v-model="templateParams[field.key]" :min="field.minimum ?? 0" theme="column" style="width:160px" :status="paramErrors[field.key] ? 'error' : undefined" />
-                <t-switch v-else-if="field.type === 'boolean'" v-model="templateParams[field.key]" />
-                <t-input v-else v-model="templateParams[field.key]" :placeholder="`请输入${field.label}`" :status="paramErrors[field.key] ? 'error' : undefined" />
-                <p v-if="paramErrors[field.key]" class="strategy-field-error">{{ paramErrors[field.key] }}</p>
-              </div>
-            </t-form-item>
-            <t-form-item v-if="!editingID" label="">
-              <div class="strategy-bind-hint">模板版本创建后固定；模板停用后不能新建绑定，已保存的策略不受影响。</div>
-            </t-form-item>
-          </template>
-        </t-form>
+            <div class="strategy-section">
+              <div class="strategy-section__title"><span class="strategy-no">②</span>模板参数<small>需要填写哪些参数由所选合成模板决定</small></div>
+              <t-form label-width="88px">
+                <t-form-item v-if="!editingID && !form.compose_template_id" label=""><div class="strategy-bind-hint">先选择合成模板，需要填写哪些参数由模板决定。</div></t-form-item>
+                <template v-else>
+                  <t-form-item v-for="field in formSchemaFields" :key="field.key" :label="field.label" :required-mark="field.required">
+                    <div class="strategy-field">
+                      <t-input-number v-if="field.type === 'integer'" v-model="templateParams[field.key]" :min="field.minimum ?? 0" theme="column" style="width:160px" :status="paramErrors[field.key] ? 'error' : undefined" />
+                      <t-switch v-else-if="field.type === 'boolean'" v-model="templateParams[field.key]" />
+                      <t-input v-else v-model="templateParams[field.key]" :placeholder="`请输入${field.label}`" :status="paramErrors[field.key] ? 'error' : undefined" />
+                      <p v-if="paramErrors[field.key]" class="strategy-field-error">{{ paramErrors[field.key] }}</p>
+                    </div>
+                  </t-form-item>
+                  <t-form-item v-if="!editingID" label="">
+                    <div class="strategy-bind-hint">模板版本创建后固定；模板停用后不能新建绑定，已保存的策略不受影响。</div>
+                  </t-form-item>
+                </template>
+              </t-form>
+            </div>
+          </div>
+
+          <div class="strategy-editor__aside">
+            <div class="strategy-aside">
+              <div class="strategy-aside__title">配置说明</div>
+              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略；所属团队与游戏决定普通运营的可见范围。</span></div>
+              <div class="strategy-aside__item"><strong>② 模板参数</strong><span>参数由合成模板定义（如基础切段的开始/结束秒数），保存时按模板 schema 校验。</span></div>
+              <div class="strategy-aside__tip">小提示：模板版本创建后固定，模板停用不影响已保存的策略。</div>
+            </div>
+          </div>
+        </div>
         <!-- 取消在左、保存在右（AdminUI 规范：底部动作固定次序，主按钮突出主要动作）。 -->
         <div class="strategy-editor__footer">
           <t-button variant="outline" @click="requestCloseEditor">取消</t-button>
           <t-button theme="primary" :loading="saving" @click="save">保存</t-button>
         </div>
-      </t-drawer>
+      </t-dialog>
 
       <t-dialog v-model:visible="copyVisible" header="复制合成策略" width="480px" :footer="false">
         <t-form label-width="96px">
@@ -517,14 +537,24 @@ function cutLabel(config) {
 
 <style scoped>
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
-.strategy-filter-card { padding: 14px 20px; }
-.strategy-form { padding-top: 4px; }
-.strategy-form-section { margin: 8px 0 14px; padding-left: 8px; border-left: 3px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.4; }
-.strategy-form-hint { padding-left: 8px; }
+/* 结构与样式类复用 DiscoveryStrategiesPage 的编辑弹窗；此处仅承载本页字段。 */
+.strategy-editor { display: grid; grid-template-columns: 1fr 260px; gap: 18px; }
+.strategy-editor__form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.strategy-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }
+.strategy-section__title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.strategy-section__title small { color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; }
+.strategy-no { color: var(--wt-primary); font-weight: 700; }
+.strategy-editor__aside { min-width: 0; }
+.strategy-aside { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-page); }
+.strategy-aside__title { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.strategy-aside__item { display: flex; flex-direction: column; gap: 3px; }
+.strategy-aside__item strong { color: var(--wt-text-primary); font-size: 13px; }
+.strategy-aside__item span { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
+.strategy-aside__tip { margin-top: 4px; padding: 10px; border-radius: 8px; background: var(--wt-info-bg); color: var(--wt-primary); font-size: 12px; line-height: 1.55; }
+.strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .strategy-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .strategy-field-error { margin: 0; color: var(--td-error-color, #d54941); font-size: 12px; line-height: 1.4; }
 .strategy-bind-hint { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
-.strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .strategy-detail-section { margin: 16px 0 8px; padding-left: 8px; border-left: 3px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.4; }
 .strategy-detail-section:first-child { margin-top: 0; }
 .strategy-drawer { display: flex; flex-direction: column; gap: 8px; }
