@@ -69,7 +69,7 @@ type CompositeOutput struct {
 	StrategyID      int64           `json:"compose_strategy_id" gorm:"column:compose_strategy_id"`
 	TemplateCode    string          `json:"template_code" gorm:"column:template_code"`
 	TemplateVersion uint32          `json:"template_version" gorm:"column:template_version"`
-	ObjectKey       string          `json:"object_key" gorm:"column:object_key"`
+	ObjectKey       string          `json:"-" gorm:"column:object_key"`
 	FileSizeBytes   int64           `json:"file_size_bytes" gorm:"column:file_size_bytes"`
 	SHA256          string          `json:"sha256" gorm:"column:sha256"`
 	Media           json.RawMessage `json:"media" gorm:"column:media_json;type:json"`

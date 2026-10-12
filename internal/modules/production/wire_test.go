@@ -313,3 +313,31 @@ func TestTheComposeTaskResponseMatchesTheOpenAPISchema(t *testing.T) {
 		t.Errorf("ComposeTask keys = %v, contract = %v", got, want)
 	}
 }
+
+// The compose output projection must never carry the object key — the address
+// stays server-side and previews go through the presigned video-url endpoint.
+func TestTheComposeOutputResponseMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read compose output openapi: %v", err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas struct {
+				ComposeOutput struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeOutput"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse compose output openapi: %v", err)
+	}
+	schema := parsed.Components.Schemas.ComposeOutput.Properties
+	if len(schema) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeOutput properties")
+	}
+	if got, want := marshalledKeys(t, model.CompositeOutput{}), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeOutput keys = %v, contract = %v", got, want)
+	}
+}
