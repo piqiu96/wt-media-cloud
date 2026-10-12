@@ -40,7 +40,7 @@ func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
 	}
 }
 
-func TestUnpublishedStrategyRoutesAreAbsent(t *testing.T) {
+func TestComposeStrategyRoutesRequireAuthentication(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)
 	for _, request := range []struct {
@@ -52,12 +52,16 @@ func TestUnpublishedStrategyRoutesAreAbsent(t *testing.T) {
 		{consts.MethodGet, "/api/v1/compose-strategies/5"},
 		{consts.MethodPut, "/api/v1/compose-strategies/5"},
 		{consts.MethodPost, "/api/v1/compose-strategies/5/copy"},
-		{consts.MethodGet, "/api/v1/compose-strategies/5/versions"},
+		{consts.MethodPatch, "/api/v1/compose-strategies/5/status"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
-		if response.Result().StatusCode() != consts.StatusNotFound {
-			t.Fatalf("%s %s status = %d, want 404", request.method, request.path, response.Result().StatusCode())
+		if response.Result().StatusCode() != consts.StatusUnauthorized {
+			t.Fatalf("%s %s status = %d, want 401", request.method, request.path, response.Result().StatusCode())
 		}
+	}
+	response := ut.PerformRequest(engine.Engine, consts.MethodGet, "/api/v1/compose-strategies/5/versions", nil)
+	if response.Result().StatusCode() != consts.StatusNotFound {
+		t.Fatalf("legacy version route status = %d, want 404", response.Result().StatusCode())
 	}
 }
 
