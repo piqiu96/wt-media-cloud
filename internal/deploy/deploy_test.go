@@ -21,6 +21,9 @@ WT_DOUYIN_COOKIE = "douyin-cookie"
 WT_OBJECT_STORAGE_PREFIX = "wt_media/online/"
 WT_OBJECT_STORAGE_ACCESS_KEY = "access-key"
 WT_OBJECT_STORAGE_SECRET_KEY = "secret-key"
+WT_FFMPEG_VERSION = "8.1.2"
+WT_FFMPEG_SHA256 = ""
+WT_FFPROBE_SHA256 = ""
 `
 
 func TestSchemaMatchesRepositoryTemplates(t *testing.T) {
@@ -108,7 +111,7 @@ func TestPullVariablesWithHTTPS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(digest) != 64 || count != 11 {
+	if len(digest) != 64 || count != 14 {
 		t.Fatalf("digest=%q count=%d", digest, count)
 	}
 	mode, err := os.Stat(target)
