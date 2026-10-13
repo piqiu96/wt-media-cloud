@@ -313,6 +313,8 @@ function clearRecord(task) {
       clearingID.value = task.id
       try {
         await client.hideTask(task.id)
+        tasks.value = tasks.value.filter((item) => !(item.purpose === 'user_download'
+          && item.asset_type === task.asset_type && item.asset_id === task.asset_id && isTerminal(item)))
         await load()
         feedback.toast.success('已清理显示记录')
       } catch (e) {
