@@ -48,12 +48,34 @@ type ComposeTask struct {
 	ErrorCode       string            `json:"error_code"`
 	ErrorMessage    string            `json:"error_message"`
 	OutputObjectKey string            `json:"-" gorm:"column:output_object_key"`
-	CompositeOutput *int64            `json:"-" gorm:"column:composite_output_id"`
+	CompositeOutput *int64            `json:"composite_output_id" gorm:"column:composite_output_id"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 func (ComposeTask) TableName() string { return "compose_tasks" }
+
+// ComposeTaskAttempt is one execution attempt of a compose task (M4-G). A
+// manual retry opens its row at authorization time — source 'manual',
+// outcome 'pending' — and the worker's claim transaction stamps started_at;
+// the terminal paths (success, failure, requeue, cancel) close it. The
+// (task_id, attempt) unique key lets the claim INSERT rely on absence.
+type ComposeTaskAttempt struct {
+	ID           int64      `json:"id"`
+	TaskID       int64      `json:"compose_task_id" gorm:"column:task_id"`
+	Attempt      int        `json:"attempt" gorm:"column:attempt"`
+	Source       string     `json:"source" gorm:"column:source"`
+	StartedAt    *time.Time `json:"started_at" gorm:"column:started_at"`
+	FinishedAt   *time.Time `json:"finished_at" gorm:"column:finished_at"`
+	Outcome      string     `json:"outcome" gorm:"column:outcome"`
+	Stage        string     `json:"stage" gorm:"column:stage"`
+	ErrorCode    string     `json:"error_code" gorm:"column:error_code"`
+	ErrorMessage string     `json:"error_message" gorm:"column:error_message"`
+	CreatedAt    time.Time  `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" gorm:"column:updated_at"`
+}
+
+func (ComposeTaskAttempt) TableName() string { return "compose_task_attempts" }
 
 // CompositeOutput is the verified-output asset (engineering spec §3.5). The
 // worker writes it inside the same transaction that marks the task success —

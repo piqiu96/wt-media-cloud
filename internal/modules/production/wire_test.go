@@ -289,6 +289,32 @@ func union(left, right []string) []string {
 // schema line someone adds — fails here instead of drifting in a client.
 // The ComposeTask lives only in the OpenAPI file (M4-C5), not the business
 // schema, so it is read from there directly.
+func TestTheComposeTaskAttemptResponseMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read compose task attempt openapi: %v", err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas struct {
+				ComposeTaskAttempt struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeTaskAttempt"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse compose task attempt openapi: %v", err)
+	}
+	schema := parsed.Components.Schemas.ComposeTaskAttempt.Properties
+	if len(schema) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeTaskAttempt properties")
+	}
+	if got, want := marshalledKeys(t, model.ComposeTaskAttempt{}), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeTaskAttempt keys = %v, contract = %v", got, want)
+	}
+}
+
 func TestTheComposeTaskResponseMatchesTheOpenAPISchema(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
 	if err != nil {

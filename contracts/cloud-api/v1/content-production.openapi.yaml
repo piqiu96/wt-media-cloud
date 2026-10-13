@@ -135,6 +135,36 @@ paths:
         '200': {description: ComposeTask.}
         '403': {description: Task is outside the actor's scope.}
         '404': {description: Task absent or outside the actor's scope.}
+  /api/v1/compose-tasks/{task_id}/attempts:
+    get:
+      operationId: listComposeTaskAttempts
+      summary: Read one compose task's per-attempt execution records, oldest first.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: '[ComposeTaskAttempt] — one row per attempt, newest last.'}
+        '403': {description: Task is outside the actor's scope.}
+        '404': {description: Task absent or outside the actor's scope.}
+  /api/v1/compose-tasks/{task_id}/retry:
+    post:
+      operationId: retryComposeTask
+      summary: Requeue one failed compose task for another execution attempt.
+      description: >-
+        Senior operators and admins only. The task keeps its creation-time
+        snapshot and attempt history: status returns to pending, attempt_count
+        is preserved and max_attempts grows by one, an audit record is
+        written, and a source=manual attempt row is opened. Retryable
+        error codes are storage_error and task_timeout; execution_failed is
+        left to operator judgment. input_missing, input_invalid and
+        template_unavailable answer 409 — those failures need a new task
+        (PRD §5.8.4/§5.8.5).
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: ComposeTask — status pending again.}
+        '403': {description: Task outside the actor's scope, or the actor is not a senior operator (named compose_task_forbidden).}
+        '404': {description: Task absent or outside the actor's scope.}
+        '409': {description: Task is not failed, or its error code is not retryable (named compose_task_not_retryable).}
   /api/v1/compose-tasks/{task_id}/cancel:
     post:
       operationId: cancelComposeTask
@@ -485,7 +515,24 @@ components:
         attempt_count: {type: integer, minimum: 0}
         started_at: {type: string, format: date-time, nullable: true, description: Null until execution starts.}
         finished_at: {type: string, format: date-time, nullable: true, description: Null until the terminal transition.}
+        composite_output_id: {type: integer, format: int64, nullable: true, description: Set only after the success transaction commits a verified output; never an object address.}
         created_by: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ComposeTaskAttempt:
+      type: object
+      required: [id, compose_task_id, attempt, source, started_at, outcome, stage, error_code, error_message, created_at, updated_at]
+      properties:
+        id: {type: integer, format: int64}
+        compose_task_id: {type: integer, format: int64}
+        attempt: {type: integer, minimum: 1, description: Matches the task's attempt_count for that run.}
+        source: {type: string, enum: [auto, manual], description: auto — the worker's own transient retry; manual — a senior operator's retry.}
+        started_at: {type: string, format: date-time, nullable: true, description: Null until the worker claims the attempt.}
+        finished_at: {type: string, format: date-time, nullable: true, description: Null while the attempt is pending or running.}
+        outcome: {type: string, enum: [pending, running, success, failed, cancelled]}
+        stage: {type: string, description: Last projected phase of the attempt; empty until the worker reports progress.}
+        error_code: {type: string}
+        error_message: {type: string}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
   securitySchemes:
