@@ -20,6 +20,10 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     listComposeTasks(params) { return api.get('/compose-tasks', params) },
     getComposeTask(id) { return api.get(`/compose-tasks/${id}`) },
     cancelComposeTask(id) { return api.post(`/compose-tasks/${id}/cancel`) },
+    // 执行记录与人工重试（CHG-20261013-089）：attempts 沿任务 scope 读，retry 只认
+    // failed 终态；非重试错误码由服务端 409 compose_task_not_retryable 拒绝。
+    listComposeTaskAttempts(id) { return api.get(`/compose-tasks/${id}/attempts`) },
+    retryComposeTask(id) { return api.post(`/compose-tasks/${id}/retry`) },
     // 我的成片（CHG-20261013-084）：publish_status 筛选由服务端读 query；video-url
     // 是短时预签名，每次预览现取，客户端不做缓存。
     listComposeOutputs(params) { return api.get('/compose-outputs', params) },

@@ -88,6 +88,24 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[3][1].method).toBe('POST')
   })
 
+  // CHG-20261013-089：执行记录与人工重试两条命令与 production/router.go 一一对应。
+  // retry 只认 failed 终态，非重试错误码由服务端 409 拒绝——客户端不带分类参数，
+  // 分类规则钉在服务端，页面只按错误码藏入口。
+  it('maps the attempts and retry commands to the contract paths', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok({ id: 9, status: 'pending' }))
+    const client = createComposeClient({ fetch })
+
+    await client.listComposeTaskAttempts(9)
+    await client.retryComposeTask(9)
+
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-tasks/9/attempts')
+    expect(fetch.mock.calls[0][1].method).toBe('GET')
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-tasks/9/retry')
+    expect(fetch.mock.calls[1][1].method).toBe('POST')
+  })
+
   // CHG-20261013-084：成片四条命令与 production/router.go 一一对应。列表的
   // publish_status 筛选由服务端读 query；video-url 每次预览现取，客户端不做缓存。
   it('maps the compose output commands to the contract paths', async () => {

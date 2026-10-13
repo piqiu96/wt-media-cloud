@@ -2,8 +2,10 @@
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
+import { createSessionClient } from '../../../shared/api/session.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -12,6 +14,8 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createdRangeParams } from '../createdRange.js'
 
 const client = createComposeClient()
+const sessionClient = createSessionClient()
+const router = useRouter()
 
 const rows = ref([])
 const strategies = ref([])
@@ -101,16 +105,82 @@ async function loadStrategies() {
 
 const detailVisible = ref(false)
 const detail = ref(null)
+const attempts = ref([])
+const attemptsError = ref('')
+// 与 ComposeStrategyPage 同一规则：页面据此藏重试入口；真正的授权判定在服务层，
+// 藏按钮只是少一次必失败请求。
+const currentUser = ref(null)
+const canRetry = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))
+
+// 重试分类（change.md 决定 2，服务端 error_code IN 同一张表）：storage_error/task_timeout
+// 环境类可直接重试；execution_failed 属人工判断，按钮照给，是否重试由运营看错误信息定；
+// input_missing/input_invalid/template_unavailable 不可重试，页面不给入口只引导新建任务。
+const retryableCodes = new Set(['storage_error', 'task_timeout', 'execution_failed'])
+const newTaskCodes = new Set(['input_missing', 'input_invalid', 'template_unavailable'])
+
+// 尝试行的词表（M4-G）：source 区分自动重试与人工重试，outcome 是该次尝试自己的结局，
+// 与任务行的 status 不是一回事。
+const sourceLabels = { auto: '自动', manual: '人工' }
+const outcomeLabels = { pending: '等待执行', running: '执行中', success: '已成功', failed: '失败', cancelled: '已取消' }
+const outcomeTones = { pending: 'warning', running: 'info', success: 'success', failed: 'danger', cancelled: 'neutral' }
 
 async function openDetail(row) {
   detailVisible.value = true
+  detail.value = null
+  attempts.value = []
+  attemptsError.value = ''
   try {
     // 按 id 重取：详情里的快照必须是库里存的那份，不是列表加载那一刻的副本。
+    // 执行记录一起取：详情要按「任务状态 → 快照 → 执行记录 → 成片」组织，逐次记录
+    // 不能拿任务摘要冒充。
     detail.value = await client.getComposeTask(row.id)
+    attempts.value = []
+    attemptsError.value = ''
+    attempts.value = await client.listComposeTaskAttempts(row.id)
   } catch (e) {
-    feedback.toast.error(e?.message || '打开任务失败')
-    detailVisible.value = false
+    // 任务读不到才关弹窗；执行记录读不到走 attemptsError 就地提示，不掀桌子。
+    if (!detail.value) {
+      feedback.toast.error(e?.message || '打开任务失败')
+      detailVisible.value = false
+      return
+    }
+    attemptsError.value = e?.message || '执行记录读取失败'
   }
+}
+
+// 重试成败都重读详情与记录：409（状态已变、不可重试）也只有重读才看得出任务现在
+// 真实的样子，不能让对话框停在重试前的旧快照上。
+async function reloadDetail(id) {
+  try {
+    detail.value = await client.getComposeTask(id)
+    attemptsError.value = ''
+    attempts.value = await client.listComposeTaskAttempts(id)
+  } catch (e) {
+    attemptsError.value = e?.message || '执行记录读取失败'
+  }
+}
+
+function retry(item) {
+  const dialog = DialogPlugin.confirm({
+    header: '重试失败任务',
+    body: `确认重试任务 #${item.id}？任务将回到排队中，按创建时的策略快照重新执行。`,
+    confirmBtn: { content: '重试', theme: 'primary' },
+    onConfirm: async () => {
+      dialog.destroy()
+      try {
+        await client.retryComposeTask(item.id)
+        feedback.toast.success('已重新排队')
+      } catch (e) {
+        feedback.toast.error(e?.message || '重试失败')
+      }
+      await load()
+      await reloadDetail(item.id)
+    },
+  })
+}
+
+function goOutput() {
+  router.push({ name: 'FinishedMedia' })
 }
 
 function cancel(row) {
@@ -135,6 +205,8 @@ function cancel(row) {
 onMounted(() => {
   load()
   loadStrategies()
+  // 只为藏/显重试按钮；读失败不拦页面，角色判定由服务端兜底。
+  sessionClient.me().then((me) => { currentUser.value = me }).catch(() => {})
 })
 </script>
 
@@ -183,22 +255,51 @@ onMounted(() => {
             <div class="compose-detail__grid">
               <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
               <div><span class="compose-detail__label">状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusLabels[detail.status] || detail.status" /></div>
-              <div><span class="compose-detail__label">合成策略</span><span>#{{ detail.compose_strategy_id }}</span></div>
-              <div><span class="compose-detail__label">模板</span><span>{{ templateText(detail) }}</span></div>
-              <div><span class="compose-detail__label">素材 ID</span><span>{{ detail.material_id }}</span></div>
               <div><span class="compose-detail__label">阶段</span><span>{{ stageText(detail) }}</span></div>
+              <div><span class="compose-detail__label">进度</span><span>{{ detail.progress }}%</span></div>
               <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
               <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
-              <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
               <div v-if="detail.started_at"><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
               <div v-if="detail.finished_at"><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
             </div>
             <template v-if="detail.error_code || detail.error_message">
               <h4 class="compose-detail__title">失败信息</h4>
               <t-alert theme="error" :message="detail.error_message || detail.error_code" />
+              <div v-if="detail.status === 'failed'" class="compose-detail__retry">
+                <template v-if="canRetry && retryableCodes.has(detail.error_code)">
+                  <t-button size="small" theme="primary" @click="retry(detail)">重试此任务</t-button>
+                  <span v-if="detail.error_code === 'execution_failed'" class="compose-detail__hint">该失败属执行错误，请根据上方错误信息判断是否重试。</span>
+                </template>
+                <span v-else-if="newTaskCodes.has(detail.error_code)" class="compose-detail__hint">该失败不能重试，请修正后新建任务。</span>
+              </div>
             </template>
-            <h4 class="compose-detail__title">参数快照（创建当时，不可变）</h4>
+            <h4 class="compose-detail__title">素材与策略快照（创建当时，不可变）</h4>
+            <div class="compose-detail__grid">
+              <div><span class="compose-detail__label">合成策略</span><span>#{{ detail.compose_strategy_id }}</span></div>
+              <div><span class="compose-detail__label">模板</span><span>{{ templateText(detail) }}</span></div>
+              <div><span class="compose-detail__label">素材 ID</span><span>{{ detail.material_id }}</span></div>
+              <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
+            </div>
             <pre class="compose-detail__snapshot">{{ JSON.stringify(detail.config_snapshot, null, 2) }}</pre>
+            <h4 class="compose-detail__title">执行记录</h4>
+            <t-alert v-if="attemptsError" theme="warning" :message="attemptsError" />
+            <template v-else>
+              <p v-if="!attempts.length" class="compose-detail__empty">还没有执行记录。</p>
+              <div v-for="attempt in attempts" :key="attempt.attempt" class="compose-detail__attempt">
+                <span class="compose-detail__attempt-no">第 {{ attempt.attempt }} 次</span>
+                <span class="compose-detail__attempt-source">{{ sourceLabels[attempt.source] || attempt.source }}发起</span>
+                <ResourceStatusBadge :tone="outcomeTones[attempt.outcome] || 'neutral'" :label="outcomeLabels[attempt.outcome] || attempt.outcome" />
+                <span class="compose-detail__attempt-time">{{ formatDateTime(attempt.started_at) }} ~ {{ formatDateTime(attempt.finished_at) }}</span>
+                <span v-if="attempt.stage" class="compose-detail__attempt-stage">{{ attempt.stage }}</span>
+                <span v-if="attempt.error_code || attempt.error_message" class="compose-detail__attempt-err">{{ attempt.error_message || attempt.error_code }}</span>
+              </div>
+            </template>
+            <h4 class="compose-detail__title">成片结果</h4>
+            <div v-if="detail.status === 'success' && detail.composite_output_id" class="compose-detail__output">
+              <span>成片 #{{ detail.composite_output_id }}</span>
+              <t-link theme="primary" @click="goOutput">前往我的成片查看</t-link>
+            </div>
+            <p v-else class="compose-detail__empty">任务完成后成片会显示在这里。</p>
           </div>
         </t-loading>
       </t-dialog>
@@ -216,4 +317,13 @@ onMounted(() => {
 .compose-detail__label { color: var(--wt-text-secondary); min-width: 64px; }
 .compose-detail__title { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--wt-text-primary); }
 .compose-detail__snapshot { margin: 0; padding: 12px; background: var(--wt-bg-secondary, #f5f6f8); border-radius: 6px; font-size: 12px; overflow: auto; max-height: 220px; }
+.compose-detail__retry { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+.compose-detail__hint { color: var(--wt-text-secondary); font-size: 12px; }
+.compose-detail__empty { margin: 0; color: var(--wt-text-secondary); font-size: 12px; }
+.compose-detail__attempt { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--wt-border-light, #eceef1); font-size: 12px; }
+.compose-detail__attempt-no { font-weight: 600; color: var(--wt-text-primary); }
+.compose-detail__attempt-source { color: var(--wt-text-secondary); }
+.compose-detail__attempt-stage { color: var(--wt-text-secondary); }
+.compose-detail__attempt-err { color: var(--wt-text-danger, #d54941); }
+.compose-detail__output { display: flex; gap: 12px; align-items: center; font-size: 13px; }
 </style>
