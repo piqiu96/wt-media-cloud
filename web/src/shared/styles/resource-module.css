@@ -92,8 +92,12 @@
   flex: 0 0 auto;
 }
 
-.wt-resource-page .wt-filter-field > .t-input,
-.wt-resource-page .wt-filter-field > .t-select {
+/* t-input / t-select 渲染出来的根元素是 .t-input__wrap / .t-select__wrap（.t-input /
+   .t-select 类挂在内层，`> .t-input`、`> .t-select` 匹配不到任何真实 DOM）。TDesign 只给
+   这两个根 width:100%、不给收缩许可：字段基准宽扣掉标签后小于 input 的 min-content 时
+   整个控件溢出字段，盖住右边字段的标签。控件根必须允许收缩到剩余空间。 */
+.wt-resource-page .wt-filter-field > .t-input__wrap,
+.wt-resource-page .wt-filter-field > .t-select__wrap {
   flex: 1 1 auto;
   width: 100% !important;
   min-width: 0;

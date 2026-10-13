@@ -55,4 +55,18 @@ describe('operation resource design primitives', () => {
     expect(styles).toMatch(/\.filter-bar > \.wt-filter-field--wide \{[^}]*flex: 1 1 280px/)
     expect(styles).toMatch(/\.filter-bar > \.wt-filter-actions \{[^}]*margin-left: auto/)
   })
+
+  // t-input / t-select 渲染出来的根元素是 .t-input__wrap / .t-select__wrap——挂在组件上的
+  // .t-input / .t-select 类在内层，`> .t-input` 这类直接子选择器永远匹配不到。TDesign 只给
+  // 这两个根 width:100%，不给收缩许可：字段基准宽扣掉标签后小于 input 的 min-content 时，
+  // 整个控件会溢出字段、盖住右边字段的标签（合成策略页筛选栏实测）。控件根必须能缩。
+  it('lets the real tdesign control roots shrink inside a filter field', () => {
+    const styles = read('../../styles/resource-module.css')
+
+    expect(styles).toMatch(/\.wt-filter-field > \.t-input__wrap,\s*\n\.wt-resource-page \.wt-filter-field > \.t-select__wrap \{[^}]*flex: 1 1 auto/)
+    expect(styles).toMatch(/\.wt-filter-field > \.t-input__wrap,\s*\n\.wt-resource-page \.wt-filter-field > \.t-select__wrap \{[^}]*min-width: 0/)
+    // 死选择器（匹配不到任何真实 DOM）不留着误导下一个人。
+    expect(styles).not.toMatch(/\.wt-filter-field > \.t-input \{/)
+    expect(styles).not.toMatch(/\.wt-filter-field > \.t-select \{/)
+  })
 })
