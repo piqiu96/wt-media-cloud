@@ -36,4 +36,21 @@ describe('compose tasks page', () => {
     expect(source).toContain('client.getComposeTask(row.id)')
     expect(source).toContain('config_snapshot')
   })
+
+  // 操作列宽按行里最多会出现的按钮清单推导（排队中的行才有 取消），不再写死 130。
+  it('derives the op column width from the buttons a pending row can show', () => {
+    expect(source).toContain("opColumnWidth(['详情', '取消'])")
+    expect(source).not.toContain("width: 130, fixed: 'right'")
+  })
+
+  // 高频条件在前：状态是排查任务时最先动的那个；策略名长，给它宽位。
+  it('puts the status filter first and gives the strategy select the wide slot', () => {
+    const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
+    expect(bar).not.toContain('<t-space')
+    expect(bar.indexOf('状态')).toBeGreaterThanOrEqual(0)
+    expect(bar.indexOf('状态')).toBeLessThan(bar.indexOf('合成策略'))
+    const fields = bar.match(/wt-filter-field[^"]*"/g) || []
+    expect(fields.filter((entry) => entry.includes('wt-filter-field--wide'))).toHaveLength(1)
+    expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
+  })
 })

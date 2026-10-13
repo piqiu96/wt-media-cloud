@@ -20,9 +20,11 @@ export function pageReader(base) {
   return (name) => readFileSync(new URL(`./${name}`, base), 'utf8')
 }
 
-// 取出 `const <name> = [ ... ]` 的数组字面量内容，按方括号配平（列声明里没有嵌套数组）。
+// 取出 `const <name> = [ ... ]` 或 `const <name> = computed(() => [ ... ])` 的数组字面量内容，
+// 按方括号配平（列声明里没有嵌套数组）。computed 形态出现在操作列宽度随角色/行态变化的页面。
 export function arrayLiteral(source, name) {
-  const start = source.indexOf(`const ${name} = [`)
+  let start = source.indexOf(`const ${name} = [`)
+  if (start === -1) start = source.indexOf(`const ${name} = computed(() => [`)
   if (start === -1) return null
   const open = source.indexOf('[', start)
   let depth = 0
@@ -44,9 +46,25 @@ export function fnBody(source, name) {
   return end === -1 ? null : source.slice(start, end)
 }
 
-/** 列声明里的每个 `{...}` 条目（列声明里没有嵌套对象）。 */
+/** 列声明里的每个顶层 `{...}` 条目。按方括号同款的花括号配平抽：op 列的
+    width 现在可以是 `opColumnWidth([...], { loading: true })`，条目里有嵌套对象。 */
 export function columnEntries(block) {
-  return [...block.matchAll(/\{[^{}]*\}/g)].map((m) => m[0])
+  const entries = []
+  let depth = 0
+  let start = -1
+  for (let i = 0; i < block.length; i += 1) {
+    if (block[i] === '{') {
+      if (depth === 0) start = i
+      depth += 1
+    } else if (block[i] === '}') {
+      depth -= 1
+      if (depth === 0 && start !== -1) {
+        entries.push(block.slice(start, i + 1))
+        start = -1
+      }
+    }
+  }
+  return entries
 }
 
 // 这是本类 bug 唯一的闸门，理由见下。
@@ -68,7 +86,9 @@ export function expectExplicitColumnWidths(read, tables) {
     // 分母可见：列数对不上说明正则没抽对，立刻失败而不是空转。
     expect(entries, `${file} ${name}`).toHaveLength(count)
 
-    const missing = entries.filter((entry) => !/\bwidth:\s*\d+/.test(entry))
+    // width 只允许两种写法：像素数字，或 opColumnWidth(...)（操作列按按钮清单推导，
+    // 推导本身由 opColumnWidth.test.js 钉住）。其余表达式一律不放行。
+    const missing = entries.filter((entry) => !/\bwidth:\s*(\d+|opColumnWidth\()/.test(entry))
     expect(missing, `${file} ${name} 有列没写 width`).toEqual([])
     // minWidth 写了也不生效，留着只会误导下一个人。
     expect(block, `${file} ${name}`).not.toContain('minWidth:')

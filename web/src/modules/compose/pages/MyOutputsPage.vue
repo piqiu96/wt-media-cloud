@@ -8,6 +8,7 @@ import { createComposeClient } from '../../../shared/api/compose.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { formatBytes } from '../../../shared/utils/units.js'
 import { usageStatusLabel } from '../../materials/labels.js'
@@ -33,7 +34,9 @@ const statusTones = { pending_publish: 'warning', published: 'success', archived
 const taskStatusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
 
 // 每一列显式 width（规范 §6.2，WebKit fixed 布局下 minWidth 不产生确定列宽）。
-const columns = [
+// 操作列宽按待发布行的按钮清单推导（常驻 下载/详情，待发布多 去发布/归档；
+// 下载 loading 时多一个 spinner），非待发布行只是留白更多。
+const columns = computed(() => [
   { colKey: 'id', title: '成片 ID', width: 90 },
   { colKey: 'material_id', title: '素材 ID', width: 90 },
   { colKey: 'strategy', title: '策略', width: 180 },
@@ -41,12 +44,12 @@ const columns = [
   { colKey: 'size', title: '大小', width: 100 },
   { colKey: 'publish_status', title: '状态', width: 100 },
   { colKey: 'created_at', title: '生成时间', width: 150 },
-  { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
-]
+  { colKey: 'op', title: '操作', width: opColumnWidth(['下载', '详情', '去发布', '归档'], { loading: true }), fixed: 'right' },
+])
 
 // 横向滚动宽度由列宽推导，不写死。
 const tableScroll = computed(() => ({
-  x: `${columns.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
+  x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
 const pagedRows = computed(() => {

@@ -40,10 +40,26 @@
 }
 
 .wt-resource-page .filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--wt-border);
 }
+
+/* 自适应筛选栏（AdminUI 规范 §2.1）：字段是 .filter-bar 的直接子元素（不经过 t-space
+   等宽网格），按「高频条件在前、主条件更宽」排布，查询/重置固定次序并居右；
+   窗口变窄靠 flex-wrap 自然换行。--wide 给主搜索/长文本条件。 */
+.wt-resource-page .filter-bar > .wt-filter-field { flex: 0 1 200px; }
+
+.wt-resource-page .filter-bar > .wt-filter-field--wide {
+  flex: 1 1 280px;
+  max-width: 400px;
+}
+
+.wt-resource-page .filter-bar > .wt-filter-actions { margin-left: auto; }
 
 /* All resource filters share the browser-window layout: no more than four
    controls in one row, then a natural wrap as the available workspace narrows. */

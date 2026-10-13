@@ -43,4 +43,16 @@ describe('operation resource design primitives', () => {
     expect(styles).toContain('width: max-content')
     expect(styles).toContain('.t-table__fixed-right')
   })
+
+  // 自适应筛选栏：字段是 .filter-bar 直接子元素时的布局规则——主条件（--wide）
+  // 可伸可缩，普通条件固定基准宽，动作组居右；t-space 网格只留给未改造的旧页面。
+  it('provides the adaptive filter-bar layout for direct-child filter fields', () => {
+    const styles = read('../../styles/resource-module.css')
+
+    expect(styles).toMatch(/\.filter-bar \{[^}]*display: flex/)
+    expect(styles).toMatch(/\.filter-bar \{[^}]*flex-wrap: wrap/)
+    expect(styles).toMatch(/\.filter-bar > \.wt-filter-field \{[^}]*flex: 0 1 200px/)
+    expect(styles).toMatch(/\.filter-bar > \.wt-filter-field--wide \{[^}]*flex: 1 1 280px/)
+    expect(styles).toMatch(/\.filter-bar > \.wt-filter-actions \{[^}]*margin-left: auto/)
+  })
 })

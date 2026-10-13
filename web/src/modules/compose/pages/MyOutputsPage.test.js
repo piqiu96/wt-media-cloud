@@ -47,4 +47,16 @@ describe('my outputs page', () => {
 	  expect(source).toContain('feedback.toast.info(')
 	  expect(source).toContain('@click="download(row)"')
 	})
+
+  // 操作列宽按待发布行最多的按钮清单推导（下载 loading 态多一个 spinner），不再写死 290。
+  it('derives the op column width from the four pending-publish actions', () => {
+    expect(source).toContain("opColumnWidth(['下载', '详情', '去发布', '归档'], { loading: true })")
+    expect(source).not.toContain("width: 290, fixed: 'right'")
+  })
+
+  it('keeps its single status filter out of the equal-width grid with actions last', () => {
+    const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
+    expect(bar).not.toContain('<t-space')
+    expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
+  })
 })

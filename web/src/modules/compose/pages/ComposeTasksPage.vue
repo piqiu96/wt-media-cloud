@@ -7,6 +7,7 @@ import { createComposeClient } from '../../../shared/api/compose.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 
 // CHG-20261013-082：合成任务页。列表/详情/取消，筛选（状态、策略）走服务端。
@@ -28,7 +29,8 @@ const statusTones = { pending: 'warning', running: 'info', success: 'success', f
 const stageLabels = { pending: '等待源素材' }
 
 // 每一列显式 width（规范 §6.2，WebKit fixed 布局下 minWidth 不产生确定列宽）。
-const columns = [
+// 操作列宽按行里最多会出现的按钮清单推导：排队中的行才有 取消。
+const columns = computed(() => [
   { colKey: 'id', title: '任务 ID', width: 80 },
   { colKey: 'strategy', title: '合成策略', width: 180 },
   { colKey: 'template', title: '模板', width: 130 },
@@ -37,12 +39,12 @@ const columns = [
   { colKey: 'stage', title: '阶段', width: 120 },
   { colKey: 'progress', title: '进度', width: 80 },
   { colKey: 'created_at', title: '创建时间', width: 150 },
-  { colKey: 'op', title: '操作', width: 130, fixed: 'right' },
-]
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消']), fixed: 'right' },
+])
 
 // 横向滚动宽度由列宽推导，不写死。
 const tableScroll = computed(() => ({
-  x: `${columns.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
+  x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
 const pagedRows = computed(() => {
@@ -149,7 +151,7 @@ onMounted(() => {
       <ResourceCard class="compose-tasks-card">
         <div class="filter-bar">
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="load">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>

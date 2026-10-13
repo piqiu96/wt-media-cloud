@@ -8,6 +8,7 @@ import { createSessionClient } from '../../../shared/api/session.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { schemaFields } from '../schemaFields.js'
 
@@ -53,7 +54,8 @@ const pagination = ref({ current: 1, pageSize: 20 })
 
 // 每一列都必须声明 width，不许只写 minWidth（WebKit fixed 布局下 minWidth 不产生确定列宽，
 // 会被压成剩余空间列；见 ContentPoolPage.vue 里 columns 上方的完整说明）。
-const columns = [
+// 操作列是 computed：宽度跟角色实际点得到的按钮数走（普通运营只有详情）。
+const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', width: 220 },
   { colKey: 'game', title: '游戏', width: 130 },
@@ -61,12 +63,12 @@ const columns = [
   { colKey: 'config', title: '切片区间', width: 140 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },
-  { colKey: 'op', title: '操作', width: 170, fixed: 'right' },
-]
+  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '复制'] : ['详情']), fixed: 'right' },
+])
 
 // 横向滚动宽度由列宽推导，不写死（写死值与列宽合计无关，是个漂移源）。
 const tableScroll = computed(() => ({
-  x: `${columns.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
+  x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
 const filteredRows = computed(() => rows.value.filter((row) => {
@@ -373,23 +375,21 @@ function cutLabel(config) {
       <!-- 筛选区与表格同卡（与内容池一致）：filter-bar 自带分隔线，下方接表格与分页。 -->
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
-          <t-space wrap>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" @enter="load" /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
-              <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
-            </t-select></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
-              <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
-            </t-select></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
-              <t-option value="active" label="启用" />
-              <t-option value="inactive" label="停用" />
-            </t-select></label>
-            <div class="wt-filter-actions">
-              <t-button theme="primary" @click="load">查询</t-button>
-              <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-            </div>
-          </t-space>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
+            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+          </t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
+            <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
+          </t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
+            <t-option value="active" label="启用" />
+            <t-option value="inactive" label="停用" />
+          </t-select></label>
+          <div class="wt-filter-actions">
+            <t-button theme="primary" @click="load">查询</t-button>
+            <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+          </div>
         </div>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无合成策略">

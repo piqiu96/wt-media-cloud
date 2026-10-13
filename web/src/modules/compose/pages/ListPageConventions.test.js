@@ -29,4 +29,12 @@ describe('compose list page conventions', () => {
   it('drops seconds from every list timestamp', () => {
     expectMinuteResolutionTimestamps(read, FILES)
   })
+
+  // t-space 等宽网格分不出主次；这三页的筛选栏走自适应布局（AdminUI 规范 §2.1
+  // 高频条件优先），字段是 .filter-bar 的直接子元素，宽度由修饰类定。
+  it('lays every filter bar out adaptively instead of the equal-width t-space grid', () => {
+    for (const file of FILES) {
+      expect(read(file), file).not.toMatch(/filter-bar"[^>]*>\s*<t-space/)
+    }
+  })
 })
