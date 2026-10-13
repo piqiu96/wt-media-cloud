@@ -68,6 +68,11 @@ type memoryStore struct {
 		team   identityservice.TeamID
 		user   identityservice.UserID
 	}
+	lastHide struct {
+		user      identityservice.UserID
+		assetType model.AssetType
+		assetID   int64
+	}
 	lastDependents struct {
 		prepareID string
 		code      string
@@ -79,6 +84,40 @@ type memoryStore struct {
 		lease  time.Duration
 	}
 	counts map[string]int
+}
+
+func (s *memoryStore) HideUserDownloadHistory(user identityservice.UserID, assetType model.AssetType, assetID int64, now time.Time) error {
+	s.counts["hide"]++
+	s.lastHide.user, s.lastHide.assetType, s.lastHide.assetID = user, assetType, assetID
+	return nil
+}
+
+func TestHideDownloadHistoryRequiresOwnTerminalUserDownload(t *testing.T) {
+	actor := identityservice.PublicUser{ID: 9, Status: identityservice.UserStatusEnabled}
+	cases := []struct {
+		name   string
+		task   Task
+		want   error
+		writes int
+	}{
+		{"success", Task{ID: "t", RequestedBy: 9, AssetType: model.AssetCompositeOutput, AssetID: 7, Purpose: model.PurposeUserDownload, Status: model.StatusSuccess}, nil, 1},
+		{"running", Task{ID: "t", RequestedBy: 9, AssetType: model.AssetCompositeOutput, AssetID: 7, Purpose: model.PurposeUserDownload, Status: model.StatusRunning}, ErrTaskConflict, 0},
+		{"cloud prepare", Task{ID: "t", RequestedBy: 9, AssetType: model.AssetMaterial, AssetID: 7, Purpose: model.PurposeComposeInputPrepare, Status: model.StatusFailed}, ErrTaskConflict, 0},
+		{"other user", Task{ID: "t", RequestedBy: 8, AssetType: model.AssetCompositeOutput, AssetID: 7, Purpose: model.PurposeUserDownload, Status: model.StatusSuccess}, ErrTaskForbidden, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMemoryStore(tc.task)
+			svc := NewService(store, nil)
+			err := svc.HideDownloadHistory(actor, "t")
+			if !errors.Is(err, tc.want) || store.count("hide") != tc.writes {
+				t.Fatalf("err=%v writes=%d", err, store.count("hide"))
+			}
+			if tc.writes == 1 && (store.lastHide.user != 9 || store.lastHide.assetType != model.AssetCompositeOutput || store.lastHide.assetID != 7) {
+				t.Fatalf("scope=%+v", store.lastHide)
+			}
+		})
+	}
 }
 
 func newMemoryStore(tasks ...Task) *memoryStore {

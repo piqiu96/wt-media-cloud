@@ -26,6 +26,9 @@ func (mysqlStore) GetTask(taskID string) (model.Task, error) { return repository
 func (mysqlStore) ListTasks(filter repository.TaskFilter) ([]model.Task, error) {
 	return repository.ListTasks(filter)
 }
+func (mysqlStore) HideUserDownloadHistory(userID identityservice.UserID, assetType model.AssetType, assetID int64, now time.Time) error {
+	return repository.HideUserDownloadHistory(userID, assetType, assetID, now)
+}
 func (mysqlStore) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
 	return repository.LatestUserDownloadStatuses(userID, materialIDs)
 }

@@ -15,6 +15,29 @@ import (
 
 var testNow = time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
 
+func TestHideDownloadHistoryUpdatesOnlyFinishedRowsForOneUserAndAssetType(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET hidden_at = ? WHERE requested_by = ? AND asset_type = ? AND asset_id = ? AND purpose = 'user_download' AND status IN ('success', 'failed', 'cancelled') AND hidden_at IS NULL")).
+		WithArgs(testNow, int64(9), model.AssetCompositeOutput, int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	if err := hideUserDownloadHistory(db, 9, model.AssetCompositeOutput, 7, testNow); err != nil {
+		t.Fatal(err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestVisibleTaskListExcludesHiddenRowsAtQueryBoundary(t *testing.T) {
+	db, mock := newMockGORM(t)
+	user := identity.UserID(9)
+	mock.ExpectQuery("SELECT .* FROM file_transfer_tasks WHERE requested_by = \\? AND hidden_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 200").WithArgs(user).
+		WillReturnRows(sqlmock.NewRows(strings.Split(taskColumnList, ", ")))
+	items, err := listTasks(db, TaskFilter{RequestedBy: &user, VisibleOnly: true})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
+}
+
 const testSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {

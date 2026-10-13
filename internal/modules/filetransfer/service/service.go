@@ -111,6 +111,7 @@ type Store interface {
 	CreateMaterialSourcePrepareTask(repository.CreateMaterialSourcePrepareInput, time.Time) (model.Task, error)
 	GetTask(string) (model.Task, error)
 	ListTasks(repository.TaskFilter) ([]model.Task, error)
+	HideUserDownloadHistory(identityservice.UserID, model.AssetType, int64, time.Time) error
 	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
 	NextLocalTask(string, time.Time) (model.Task, bool, error)
 	ClaimLocalTask(string, string, time.Time, time.Duration) (model.Task, bool, error)
@@ -433,6 +434,7 @@ func (s *Service) ListTasks(actor identityservice.PublicUser, opts TaskListOptio
 	}
 	tasks, err := s.store.ListTasks(repository.TaskFilter{
 		RequestedBy:   &requestedBy,
+		VisibleOnly:   true,
 		Statuses:      statuses,
 		FinishedAfter: opts.FinishedAfter,
 		Limit:         limit,
@@ -445,6 +447,23 @@ func (s *Service) ListTasks(actor identityservice.PublicUser, opts TaskListOptio
 		items = append(items, taskBody(task))
 	}
 	return items, nil
+}
+
+func (s *Service) HideDownloadHistory(actor identityservice.PublicUser, taskID string) error {
+	if actor.ID <= 0 || strings.TrimSpace(taskID) == "" {
+		return ErrInvalidInput
+	}
+	task, err := s.store.GetTask(taskID)
+	if err != nil {
+		return missingOr(err)
+	}
+	if task.RequestedBy != actor.ID {
+		return ErrTaskForbidden
+	}
+	if task.Purpose != model.PurposeUserDownload || (task.Status != model.StatusSuccess && task.Status != model.StatusFailed && task.Status != model.StatusCancelled) {
+		return ErrTaskConflict
+	}
+	return s.store.HideUserDownloadHistory(actor.ID, task.AssetType, task.AssetID, s.now().UTC())
 }
 
 // validateStatuses maps wire status strings onto the task status enum. Unknown

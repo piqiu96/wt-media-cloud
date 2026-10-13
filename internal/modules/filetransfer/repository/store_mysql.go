@@ -51,6 +51,7 @@ type CreateTaskInput struct {
 // boundary must set one.
 type TaskFilter struct {
 	RequestedBy   *identity.UserID
+	VisibleOnly   bool
 	AssetID       *int64
 	Statuses      []model.Status
 	Purposes      []model.Purpose
@@ -450,12 +451,23 @@ func ListTasks(filter TaskFilter) ([]model.Task, error) {
 	return listTasks(database.DB(), filter)
 }
 
+func HideUserDownloadHistory(userID identity.UserID, assetType model.AssetType, assetID int64, now time.Time) error {
+	return hideUserDownloadHistory(database.DB(), userID, assetType, assetID, now)
+}
+
+func hideUserDownloadHistory(db *gorm.DB, userID identity.UserID, assetType model.AssetType, assetID int64, now time.Time) error {
+	return db.Exec(`UPDATE file_transfer_tasks SET hidden_at = ? WHERE requested_by = ? AND asset_type = ? AND asset_id = ? AND purpose = 'user_download' AND status IN ('success', 'failed', 'cancelled') AND hidden_at IS NULL`, now, userID, assetType, assetID).Error
+}
+
 func listTasks(db *gorm.DB, filter TaskFilter) ([]model.Task, error) {
 	conditions := make([]string, 0, 4)
 	args := make([]any, 0, 8)
 	if filter.RequestedBy != nil {
 		conditions = append(conditions, "requested_by = ?")
 		args = append(args, *filter.RequestedBy)
+	}
+	if filter.VisibleOnly {
+		conditions = append(conditions, "hidden_at IS NULL")
 	}
 	if filter.AssetID != nil {
 		conditions = append(conditions, "asset_id = ?")

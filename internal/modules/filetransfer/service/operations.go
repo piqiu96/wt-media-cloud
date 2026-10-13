@@ -33,6 +33,10 @@ func ListTasks(actor identityservice.PublicUser, opts TaskListOptions) ([]dto.Ta
 	return newWiredService().ListTasks(actor, opts)
 }
 
+func HideDownloadHistory(actor identityservice.PublicUser, taskID string) error {
+	return newWiredService().HideDownloadHistory(actor, taskID)
+}
+
 func LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
 	return newWiredService().LatestUserDownloadStatuses(userID, materialIDs)
 }

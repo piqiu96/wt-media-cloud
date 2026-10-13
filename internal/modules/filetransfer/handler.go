@@ -97,6 +97,18 @@ func CancelTask(_ context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, task)
 }
 
+func HideDownloadHistory(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	if err := transferservice.HideDownloadHistory(current, c.Param("task_id")); err != nil {
+		writeTransferError(c, err)
+		return
+	}
+	api.NoContent(c)
+}
+
 // ClaimTask leases one task to the node the bearer credential identifies, or
 // answers with a null task.
 //
