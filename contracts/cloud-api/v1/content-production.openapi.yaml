@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.13.4
+  version: 2026.10.14.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -88,6 +88,23 @@ paths:
         '200': {description: Strategy with updated status.}
         '403': {description: Actor cannot manage this strategy.}
         '404': {description: Strategy absent or outside the actor's scope.}
+  /api/v1/compose-strategies/{strategy_id}/schedule:
+    put:
+      operationId: setComposeStrategySchedule
+      summary: Save the strategy's independent automatic plan without creating tasks.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ComposeSchedule'}
+      responses:
+        '200': {description: Strategy with persisted plan and next_run_at.}
+        '400': {description: Invalid schedule fields.}
+        '403': {description: Actor cannot manage this strategy.}
+        '404': {description: Strategy absent or outside the actor's scope.}
+        '409': {description: Bound template cannot be used for an enabled plan.}
   /api/v1/compose-tasks:
     post:
       operationId: createComposeTasks
@@ -389,7 +406,7 @@ components:
         end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
     ComposeStrategy:
       type: object
-      required: [id, team_id, game_id, name, compose_template_id, compose_template_version, config, status, created_at, updated_at]
+      required: [id, team_id, game_id, name, compose_template_id, compose_template_version, config, schedule, next_run_at, status, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
@@ -398,9 +415,27 @@ components:
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
         config: {$ref: '#/components/schemas/BasicCutV1Config'}
+        schedule:
+          oneOf:
+            - {$ref: '#/components/schemas/ComposeSchedule'}
+            - {type: 'null'}
+        next_run_at: {type: [string, 'null'], format: date-time, description: UTC time; null when no active enabled plan exists.}
         status: {type: string, enum: [active, inactive]}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    ComposeSchedule:
+      type: object
+      additionalProperties: false
+      required: [enabled, mode, timezone, per_run_limit, daily_limit, material_scope]
+      properties:
+        enabled: {type: boolean}
+        mode: {type: string, enum: [manual, interval, daily]}
+        interval_minutes: {type: integer, minimum: 1, maximum: 1440, description: Required for interval mode; absent for other modes.}
+        daily_time: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: Required for daily mode; absent for other modes.}
+        timezone: {type: string, description: IANA timezone, default Asia/Shanghai in the editor.}
+        per_run_limit: {type: integer, minimum: 1, maximum: 100}
+        daily_limit: {type: integer, minimum: 1, maximum: 1000}
+        material_scope: {type: string, enum: [creator_usages], description: Active materials in the strategy creator's My Materials within the strategy team and game.}
     CreateComposeStrategy:
       type: object
       additionalProperties: false

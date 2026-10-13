@@ -8,7 +8,7 @@ const source = readFileSync(new URL('./ComposeStrategyPage.vue', import.meta.url
 describe('compose strategy page', () => {
   // 普通运营只有 详情；管理角色（canManage）多 编辑/复制 两个。列宽跟着这份清单走。
   it('derives the op column width from the buttons the current role can see', () => {
-    expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '复制'] : ['详情'])")
+    expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '复制', '计划'] : ['详情'])")
     expect(source).not.toContain("width: 170, fixed: 'right'")
   })
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -46,10 +47,11 @@ type StrategyRepository interface {
 type StrategyService struct {
 	store       StrategyRepository
 	resolveGame func(string) (identity.OperationGame, bool, error)
+	now         func() time.Time
 }
 
 func NewStrategyService(store StrategyRepository, resolveGame func(string) (identity.OperationGame, bool, error)) *StrategyService {
-	return &StrategyService{store: store, resolveGame: resolveGame}
+	return &StrategyService{store: store, resolveGame: resolveGame, now: time.Now}
 }
 
 func wiredStrategyService() *StrategyService {
@@ -172,6 +174,7 @@ func (s *StrategyService) Copy(actor identity.PublicUser, id int64, name string)
 		return model.ComposeStrategy{}, err
 	}
 	item.ID, item.Name, item.Status, item.CreatedBy, item.UpdatedBy = 0, strings.TrimSpace(name), "active", int64(actor.ID), int64(actor.ID)
+	item.Schedule, item.NextRunAt = nil, nil
 	return s.store.CreateAudited(item, "compose_strategy.copy")
 }
 
@@ -189,6 +192,10 @@ func (s *StrategyService) SetStatus(actor identity.PublicUser, id int64, status 
 		}
 	}
 	item.Status, item.UpdatedBy = status, int64(actor.ID)
+	item.NextRunAt, err = nextRunForStrategy(item, s.now())
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
 	return s.store.UpdateAudited(item, "compose_strategy.status")
 }
 

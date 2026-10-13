@@ -11,6 +11,8 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { schemaFields } from '../schemaFields.js'
+import { scheduleLabel } from '../scheduleForm.js'
+import ComposeScheduleDialog from '../components/ComposeScheduleDialog.vue'
 
 const client = createComposeClient()
 const sessionClient = createSessionClient()
@@ -48,6 +50,7 @@ const copyName = ref('')
 
 const detailVisible = ref(false)
 const detailRow = ref(null)
+const scheduleRow = ref(null)
 
 const filters = ref({ name: '', game_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
@@ -56,11 +59,13 @@ const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', width: 220 },
   { colKey: 'status', title: '状态', width: 100 },
+  { colKey: 'schedule', title: '自动执行', width: 150 },
+  { colKey: 'next_run_at', title: '下次执行', width: 160 },
   { colKey: 'game', title: '游戏', width: 130 },
   { colKey: 'template', title: '模板', width: 180 },
   { colKey: 'config', title: '切片区间', width: 120 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },
-  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '复制'] : ['详情']), fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '复制', '计划'] : ['详情']), fixed: 'right' },
 ])
 
 // 横向滚动宽度由列宽推导，不写死（写死值与列宽合计无关，是个漂移源）。
@@ -218,6 +223,18 @@ async function submitCopy() {
   } finally {
     copySaving.value = false
   }
+}
+
+async function scheduleSaved(item) {
+  scheduleRow.value = null
+  if (detailRow.value?.id === item.id) detailRow.value = item
+  await load()
+}
+
+function scheduleState(row) {
+  if (!row.schedule || row.schedule.mode === 'manual') return '手动'
+  if (!row.schedule.enabled) return '已暂停'
+  return row.status === 'active' ? '已启用' : '策略停用'
 }
 
 // 启停开关在列表行上（走查修订第 3 条）。开关受控于 row.status，确认后才真正变更；
@@ -410,12 +427,15 @@ function cutLabel(config) {
               <t-switch v-if="canManage" :value="row.status === 'active'" :label="['启用', '停用']" @change="(value) => toggleStatus(row, value)" />
               <ResourceStatusBadge v-else :tone="row.status === 'active' ? 'success' : 'neutral'" :label="row.status === 'active' ? '启用' : '停用'" />
             </template>
+            <template #schedule="{ row }"><div class="strategy-schedule-cell"><ResourceStatusBadge :tone="row.schedule?.enabled && row.status === 'active' ? 'success' : 'neutral'" :label="scheduleState(row)" /><span>{{ scheduleLabel(row.schedule) }}</span></div></template>
+            <template #next_run_at="{ row }">{{ row.next_run_at ? formatDateTime(row.next_run_at) : '—' }}</template>
             <template #op="{ row }">
               <t-space size="small" class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="detailRow = row; detailVisible = true">详情</t-button>
                 <template v-if="canManage">
                   <t-button size="small" theme="primary" @click="openEdit(row)">编辑</t-button>
                   <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCopy(row)">复制</t-button>
+                  <t-button size="small" class="wt-secondary-button" variant="outline" @click="scheduleRow = row">计划</t-button>
                 </template>
               </t-space>
             </template>
@@ -499,6 +519,8 @@ function cutLabel(config) {
         </div>
       </t-dialog>
 
+      <ComposeScheduleDialog :strategy="scheduleRow" @close="scheduleRow = null" @saved="scheduleSaved" />
+
       <t-dialog v-model:visible="copyVisible" header="复制合成策略" width="480px" :footer="false">
         <t-form label-width="96px">
           <t-form-item label="新策略名称" required-mark><t-input v-model="copyName" :maxlength="120" placeholder="输入新策略名称" @enter="submitCopy" /></t-form-item>
@@ -520,6 +542,13 @@ function cutLabel(config) {
           <div class="strategy-drawer__field"><span>合成模板</span><strong>{{ templateLabel(detailRow.compose_template_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>模板版本</span><strong>v{{ detailRow.compose_template_version }}</strong></div>
           <div class="strategy-drawer__field"><span>切片区间</span><strong>{{ cutLabel(detailRow.config) }}</strong></div>
+          <h4 class="strategy-detail-section">自动执行计划</h4>
+          <div class="strategy-drawer__field"><span>自动执行</span><strong>{{ scheduleState(detailRow) }}</strong></div>
+          <div class="strategy-drawer__field"><span>周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>
+          <div class="strategy-drawer__field"><span>时区</span><strong>{{ detailRow.schedule?.timezone || 'Asia/Shanghai' }}</strong></div>
+          <div class="strategy-drawer__field"><span>素材范围</span><strong>创建人的“我的素材”（当前团队与游戏）</strong></div>
+          <div class="strategy-drawer__field"><span>单次／每日上限</span><strong>{{ detailRow.schedule ? `${detailRow.schedule.per_run_limit}／${detailRow.schedule.daily_limit}` : '未设置' }}</strong></div>
+          <div class="strategy-drawer__field"><span>下次执行</span><strong>{{ detailRow.next_run_at ? formatDateTime(detailRow.next_run_at) : '—' }}</strong></div>
           <h4 class="strategy-detail-section">记录时间</h4>
           <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
           <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ formatDateTime(detailRow.updated_at) }}</strong></div>
@@ -537,6 +566,7 @@ function cutLabel(config) {
 .strategy-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .strategy-name-cell__main { overflow: hidden; color: var(--wt-text-primary); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .strategy-name-cell__sub { color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-schedule-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-editor { display: grid; grid-template-columns: 1fr 260px; gap: 18px; }
 .strategy-editor__form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .strategy-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }

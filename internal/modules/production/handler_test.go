@@ -55,6 +55,7 @@ func TestComposeStrategyRoutesRequireAuthentication(t *testing.T) {
 		{consts.MethodPut, "/api/v1/compose-strategies/5"},
 		{consts.MethodPost, "/api/v1/compose-strategies/5/copy"},
 		{consts.MethodPatch, "/api/v1/compose-strategies/5/status"},
+		{consts.MethodPut, "/api/v1/compose-strategies/5/schedule"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {

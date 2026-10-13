@@ -10,6 +10,7 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
@@ -145,6 +146,27 @@ func SetComposeStrategyStatus(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	item, err := productionservice.SetComposeStrategyStatus(current, id, input.Status)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, item)
+}
+
+func SetComposeStrategySchedule(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	var input model.ComposeSchedule
+	if !decodeStrategyBody(c, &input) {
+		return
+	}
+	item, err := productionservice.SetComposeStrategySchedule(current, id, input)
 	if err != nil {
 		writeStrategyError(c, err)
 		return
