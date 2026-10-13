@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud File Transfer API
-  version: 2026.10.02.1
+  version: 2026.10.13.1
   description: >-
     Executor-neutral transfer task API. Asset domains may create tasks but do not own the transfer
     lifecycle. Every response uses the Cloud errcode/message/data/logid envelope, and every task body is a
@@ -33,6 +33,21 @@ paths:
         '403': {description: 'Task belongs to another user (`transfer_task_forbidden`).'}
         '404': {description: 'Task does not exist (`transfer_task_not_found`).'}
         '409': {description: 'Task is already terminal (`transfer_task_conflict`).'}
+  /api/v1/file-transfer-tasks/{task_id}/hide:
+    post:
+      operationId: hideFileTransferTask
+      summary: Hide the current user's finished download history for the task's asset from the download centre.
+      description: >-
+        Only a terminal user_download may be hidden. The operation hides the current user's finished
+        download rows for the same asset type and asset ID so an older row does not reappear. Task facts,
+        asset facts, local files, and download-status projections remain unchanged. Repeating the call is safe.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: 'Display history hidden; response data is null.'}
+        '403': {description: 'Task belongs to another user (`transfer_task_forbidden`).'}
+        '404': {description: 'Task does not exist (`transfer_task_not_found`).'}
+        '409': {description: 'Task is not a terminal user download (`transfer_task_conflict`).'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
