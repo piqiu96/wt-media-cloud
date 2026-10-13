@@ -14,10 +14,7 @@ import { usageStatusLabel } from '../../materials/labels.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 
-// CHG-20261013-084：我的成片页。列表/详情/预览/归档/去发布入口，发布状态筛选走服务端。
-// 第五章只有 pending_publish 与 archived 真实可达（published 属第六章）——词表一次给全，
-// 行里出现哪种画哪种；「去发布」只把成片带入发布流程，不在这里记录任何发布事实
-// （PRD §5.9.12：下载、预览和归档均不等于发布）。
+// 发布状态由服务端筛选；下载、预览和归档不改变发布状态。
 const client = createComposeClient()
 const router = useRouter()
 const downloadCentre = useDownloadCentre()

@@ -3,9 +3,8 @@ import { createApiClient } from './http.js'
 /**
  * 下载中心的 API client。
  *
- * 单独一个文件而不是并进 `materials.js`：`file_transfer_task` 是执行器中立的，
- * 日后还要承载 `compose_input_prepare` 这类非素材任务，把它挂进素材的 client 会把
- * 平台级关注点写成素材功能的一部分。
+ * `file_transfer_task` 同时承载素材、成片下载和云端准备任务，
+ * 因此会话操作独立于素材 API。
  *
  * `cancel` 的响应体是**刷新后的任务，可能仍是 running**：取消只是请求，running 的
  * 执行器才有权做终态迁移。所以调用方拿到 200 之后仍然要按任务自己的 status 渲染，

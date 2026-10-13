@@ -203,7 +203,7 @@ describe('download centre drawer tabs', () => {
     expect(source).not.toContain('recent')
   })
 
-  // 不再三栏各查各的：一次拉回全部任务，分栏与窗口都在客户端做（每个素材一行之后）。
+  // 一次拉回任务，分栏与窗口在客户端处理。
   // 不带 `status`/`finished_after` —— `finished_after` 会把 `finished_at` 为 null 的
   // 非终态行滤掉，而「进行中」正需要它们。
   it('loads the task list once instead of querying per tab', () => {
@@ -214,8 +214,8 @@ describe('download centre drawer tabs', () => {
     expect(source).not.toContain('watch(activeTab, () => { if (visible.value) load() })')
   })
 
-  // 每个素材一行 = 该素材最新那条任务：服务端用 `created_at DESC, id DESC` 返回，首见即最新。
-  it('keeps one row per material, taking the newest task the server returned', () => {
+  // 每类资产的每个 ID 保留服务端返回的最新任务。
+  it('keeps the newest task for each asset', () => {
     const block = sliceBetween(source, 'const rows = computed', 'const liveDownloads')
     expect(block).toContain('transferRows(tasks.value, {')
     expect(block).toContain(".filter((row) => row.task.purpose === 'user_download')")
