@@ -14,12 +14,15 @@ import (
 type taskMemoryStore struct {
 	tasks          []model.ComposeTask
 	usages         []model.MaterialUsage
+	attempts       []model.ComposeTaskAttempt
 	nextID         int64
 	creates        int
 	cancels        int
 	cancelBlocked  bool
 	requests       int
 	requestBlocked bool
+	retryBlocked   bool
+	retriedBy      int64
 	lastFilter     repository.ComposeTaskFilter
 }
 
@@ -91,6 +94,35 @@ func (s *taskMemoryStore) RequestComposeCancel(taskID, _ int64, _ string) (bool,
 		}
 	}
 	return false, nil
+}
+
+// RetryFailed mirrors the repository contract: only a failed task outside the
+// refusals is requeued — the fake flips status pending, keeps attempt_count
+// and grows max_attempts, and records the actor for the audit assertion.
+func (s *taskMemoryStore) RetryFailed(item model.ComposeTask, actorID int64, _ string) (bool, error) {
+	if s.retryBlocked {
+		return false, nil
+	}
+	for i := range s.tasks {
+		if s.tasks[i].ID != item.ID || s.tasks[i].Status != model.ComposeTaskFailed {
+			continue
+		}
+		switch s.tasks[i].ErrorCode {
+		case "storage_error", "task_timeout", "execution_failed":
+			s.tasks[i].Status = model.ComposeTaskPending
+			s.tasks[i].MaxAttempts++
+			s.tasks[i].Stage = ""
+			s.tasks[i].Progress = 0
+			s.retriedBy = actorID
+			return true, nil
+		}
+		return false, nil
+	}
+	return false, nil
+}
+
+func (s *taskMemoryStore) ListAttempts(taskID int64) ([]model.ComposeTaskAttempt, error) {
+	return s.attempts, nil
 }
 
 type taskMaterialMemoryStore struct {
@@ -443,6 +475,57 @@ func statusIndex(status model.ComposeTaskStatus) int {
 		return 2
 	}
 	return 3
+}
+
+// M4-G: retry is senior-or-admin only, scoped by canRead, and refuses
+// error codes outside the retryable set with the named error.
+func TestRetryComposeTaskRequiresSeniorRoleAndRetryableCode(t *testing.T) {
+	svc, tasks, _, _, operator := composeTaskFixture()
+	team := identity.TeamID(7)
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	failed := func(id int64, code string) model.ComposeTask {
+		return model.ComposeTask{ID: id, TeamID: 7, GameID: "delta", Status: model.ComposeTaskFailed, ErrorCode: code, CreatedBy: 9}
+	}
+
+	// A plain operator who can read the task is forbidden, not 404.
+	tasks.tasks = append(tasks.tasks, failed(510, "storage_error"))
+	if _, err := svc.Retry(operator, 510); !errors.Is(err, ErrComposeTaskForbidden) {
+		t.Fatalf("operator retry error = %v", err)
+	}
+
+	// A senior retrying a non-retryable code is named, and the row stays failed.
+	tasks.tasks[0].ErrorCode = "input_missing"
+	if _, err := svc.Retry(senior, 510); !errors.Is(err, ErrComposeTaskNotRetryable) {
+		t.Fatalf("input_missing retry error = %v", err)
+	}
+	if tasks.tasks[0].Status != model.ComposeTaskFailed {
+		t.Fatalf("refused retry must not move the row: %+v", tasks.tasks[0])
+	}
+
+	// A retryable code requeues the row and records who authorized it.
+	tasks.tasks[0].ErrorCode = "storage_error"
+	tasks.retryBlocked = true
+	if _, err := svc.Retry(senior, 510); !errors.Is(err, ErrComposeTaskNotRetryable) {
+		t.Fatalf("blocked retry error = %v", err)
+	}
+	tasks.retryBlocked = false
+	stored, err := svc.Retry(senior, 510)
+	if err != nil || stored.Status != model.ComposeTaskPending || tasks.retriedBy != 11 {
+		t.Fatalf("stored=%+v retriedBy=%d err=%v", stored, tasks.retriedBy, err)
+	}
+
+	// A task the senior cannot read is 404, same as the list scope.
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 511, TeamID: 7, GameID: "delta", Status: model.ComposeTaskFailed, ErrorCode: "storage_error", CreatedBy: 10})
+	if _, err := svc.Retry(operator, 511); !errors.Is(err, ErrComposeTaskNotFound) {
+		t.Fatalf("foreign retry error = %v", err)
+	}
+}
+
+func TestListComposeTaskAttemptsFollowsTheTaskScope(t *testing.T) {
+	svc, _, _, _, actor := composeTaskFixture()
+	if _, err := svc.ListAttempts(actor, 404); !errors.Is(err, ErrComposeTaskNotFound) {
+		t.Fatalf("missing task attempts error = %v", err)
+	}
 }
 
 func TestListComposeTasksScopesByRole(t *testing.T) {

@@ -61,6 +61,8 @@ func composeTaskErrorFor(err error) (composeTaskErrorShape, bool) {
 		return composeTaskErrorShape{consts.StatusNotFound, 15216, "compose_task_not_found", "合成任务不存在"}, true
 	case errors.Is(err, productionservice.ErrComposeTaskNotCancellable):
 		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_cancellable", "合成任务已结束，不能取消"}, true
+	case errors.Is(err, productionservice.ErrComposeTaskNotRetryable):
+		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_retryable", "该失败不能重试，请修改后新建任务"}, true
 	case errors.Is(err, productionservice.ErrStrategyTemplateUnavailable):
 		return composeTaskErrorShape{consts.StatusConflict, 15213, "compose_template_unavailable", "合成模板版本不可用"}, true
 	}
@@ -162,6 +164,40 @@ func GetComposeTask(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	item, err := productionservice.GetComposeTask(current, id)
+	if err != nil {
+		writeComposeTaskError(c, err)
+		return
+	}
+	api.Success(c, item)
+}
+
+func ListComposeTaskAttempts(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := taskID(c)
+	if !ok {
+		return
+	}
+	items, err := productionservice.ListComposeTaskAttempts(current, id)
+	if err != nil {
+		writeComposeTaskError(c, err)
+		return
+	}
+	api.Success(c, items)
+}
+
+func RetryComposeTask(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := taskID(c)
+	if !ok {
+		return
+	}
+	item, err := productionservice.RetryComposeTask(current, id)
 	if err != nil {
 		writeComposeTaskError(c, err)
 		return

@@ -13,6 +13,8 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/compose-outputs/:output_id/video-url", GetComposeOutputVideoURL)
 	h.POST("/api/v1/compose-outputs/:output_id/downloads", CreateOutputDownload)
 	h.GET("/api/v1/compose-tasks/:task_id", GetComposeTask)
+	h.GET("/api/v1/compose-tasks/:task_id/attempts", ListComposeTaskAttempts)
+	h.POST("/api/v1/compose-tasks/:task_id/retry", RetryComposeTask)
 	h.POST("/api/v1/compose-tasks/:task_id/cancel", CancelComposeTask)
 	h.GET("/api/v1/compose-strategies", ListComposeStrategies)
 	h.POST("/api/v1/compose-strategies", CreateComposeStrategy)

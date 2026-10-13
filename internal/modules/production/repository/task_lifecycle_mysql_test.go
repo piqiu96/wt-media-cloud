@@ -39,6 +39,9 @@ func TestClaimNextComposeTaskFlipsPendingToRunning(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).
 		WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "running", now)...))
+	mock.ExpectExec("INSERT INTO compose_task_attempts").
+		WithArgs(int64(77), 0, now, now, now).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	claimed, found, err := claimNextComposeTask(db, 9, lease, now)
 	if err != nil || !found {
@@ -132,6 +135,8 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").
 		WithArgs("outputs/final", int64(55), now, now, int64(77), int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	commit, err := commitComposeOutput(db, out, "outputs/final", 9, now)
 	if err != nil || commit.OutputID != 55 || commit.TaskID != 77 {
@@ -156,9 +161,19 @@ func TestCommitComposeOutputRollsBackWhenTheTaskRowIsGone(t *testing.T) {
 func TestReleaseComposeForRetryRequeuesWithoutErasingAttempts(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 8, 0, 0, time.UTC)
+	// The stage and attempt number are captured before the requeue clears
+	// them, and the closed attempt row keeps the phase the run reached.
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks WHERE id = \\? AND claimed_node_id = \\? AND status = 'running'").
+		WithArgs(int64(77), int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}).AddRow("uploading", 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
 		WithArgs("storage_flaky", "object storage timeout", now, int64(77), int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE compose_task_attempts SET outcome").
+		WithArgs("failed", "storage_flaky", "object storage timeout", now, "uploading", now, int64(77), int64(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	ok, err := releaseComposeForRetry(db, 77, 9, "storage_flaky", "object storage timeout", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
@@ -169,12 +184,57 @@ func TestReleaseComposeForRetryRequeuesWithoutErasingAttempts(t *testing.T) {
 func TestFailComposeTaskWritesTheTerminalError(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 9, 0, 0, time.UTC)
+	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'failed'").
 		WithArgs("input_missing", "source video is gone", now, now, int64(77), int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	ok, err := failComposeTask(db, 77, 9, "input_missing", "source video is gone", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// CHG-20261013-089 (M4-G): a manual retry is one transaction — guarded task
+// requeue, manual attempt row, audit. A refusal (not failed, or an error code
+// outside the retryable set) writes nothing.
+func TestRetryFailedComposeTaskOpensTheManualAttempt(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 13, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
+		WithArgs(now, int64(77)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).
+		WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "pending", now)...))
+	mock.ExpectExec("INSERT INTO compose_task_attempts").
+		WithArgs(int64(77), 1, now, now).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	ok, err := retryFailedComposeTask(db, 77, 5, "compose_task.retry", now)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestRetryFailedComposeTaskWritesNothingWhenRefused(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 13, 30, 0, time.UTC)
+	for _, taskID := range []int64{77, 78} {
+		mock.ExpectBegin()
+		mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
+			WithArgs(now, taskID).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectCommit()
+		ok, err := retryFailedComposeTask(db, taskID, 5, "compose_task.retry", now)
+		if err != nil || ok {
+			t.Fatalf("refused retry must write nothing: ok=%v err=%v", ok, err)
+		}
 	}
 	assertExpectations(t, mock)
 }
@@ -198,14 +258,27 @@ func TestFindExpiredComposeLeasesReturnsOnlyLapsedRunningRows(t *testing.T) {
 func TestRequeueExpiredComposeLeaseTakesBackTheDeadWorkersRow(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 11, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks").
+		WithArgs(int64(77), int64(9), now).
+		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}).AddRow("cutting", 2))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
 		WithArgs("lease_expired", "worker lease expired", now, int64(77), int64(9), now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE compose_task_attempts SET outcome").
+		WithArgs("failed", "lease_expired", "worker lease expired", now, "cutting", now, int64(77), int64(2)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	ok, err := requeueExpiredComposeLease(db, 77, 9, "lease_expired", "worker lease expired", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
-	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").WillReturnResult(sqlmock.NewResult(0, 0))
+	// A row whose lease has not lapsed reads as no rows in the guarded scan.
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks").
+		WithArgs(int64(78), int64(9), now).
+		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}))
+	mock.ExpectCommit()
 	ok, err = requeueExpiredComposeLease(db, 78, 9, "lease_expired", "worker lease expired", now)
 	if err != nil || ok {
 		t.Fatalf("a row without a lapsed lease must not be reaped: ok=%v err=%v", ok, err)
@@ -216,12 +289,37 @@ func TestRequeueExpiredComposeLeaseTakesBackTheDeadWorkersRow(t *testing.T) {
 func TestFailExpiredComposeLeaseTerminalizesTheDeadWorkersRow(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 12, 0, 0, time.UTC)
+	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'failed'").
 		WithArgs("lease_expired", "attempts exhausted", now, now, int64(77), int64(9), now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	ok, err := failExpiredComposeLease(db, 77, 9, "lease_expired", "attempts exhausted", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// M4-G: the attempts read is oldest first — one row per attempt, the manual
+// retry's pending row before the worker's claimed rows.
+func TestListComposeTaskAttemptsReadsOldestFirst(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 14, 0, 0, time.UTC)
+	attemptColumns := []string{"id", "task_id", "attempt", "source", "started_at", "finished_at", "outcome", "stage", "error_code", "error_message", "created_at", "updated_at"}
+	mock.ExpectQuery("SELECT .* FROM compose_task_attempts WHERE task_id = \\? ORDER BY attempt ASC").
+		WithArgs(int64(77)).
+		WillReturnRows(sqlmock.NewRows(attemptColumns).
+			AddRow(int64(1), int64(77), 1, "manual", nil, now, "failed", "uploading", "storage_error", "boom", now, now).
+			AddRow(int64(2), int64(77), 2, "auto", now, nil, "running", "cutting", "", "", now, now))
+	items, err := listComposeTaskAttempts(db, 77)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if items[0].Source != "manual" || items[0].StartedAt != nil || items[0].FinishedAt == nil || items[1].StartedAt == nil || items[1].FinishedAt != nil {
+		t.Fatalf("attempt rows = %+v", items)
 	}
 	assertExpectations(t, mock)
 }

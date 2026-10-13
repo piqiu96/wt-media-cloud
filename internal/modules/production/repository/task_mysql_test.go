@@ -139,6 +139,7 @@ func TestCancelComposeTaskAuditedWritesAuditOnlyWhenPending(t *testing.T) {
 	item := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", Status: model.ComposeTaskPending, CreatedBy: 11}
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'cancelled'").WithArgs(now, now, int64(77)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE compose_task_attempts SET outcome = 'cancelled'").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	ok, err := cancelComposeTaskAudited(db, item, 9, "compose_task.cancel", now)

@@ -103,6 +103,37 @@ func findComposeTaskByKey(db *gorm.DB, key string) (model.ComposeTask, bool, err
 // transaction, so a usage removed mid-command cannot slip a task past §5.4.5's
 // "no new tasks on a removed relation" rule. found=false means nothing was
 // written; the caller names it as a per-item failure.
+// ListAttempts reads one task's per-attempt execution records, oldest first
+// (M4-G). Visibility is the task's own: the service resolves and scopes the
+// task before calling this.
+func (ComposeTaskStore) ListAttempts(taskID int64) ([]model.ComposeTaskAttempt, error) {
+	return listComposeTaskAttempts(database.DB(), taskID)
+}
+
+func listComposeTaskAttempts(db *gorm.DB, taskID int64) ([]model.ComposeTaskAttempt, error) {
+	rows, err := db.Raw(`SELECT id, task_id, attempt, source, started_at, finished_at, outcome, stage, error_code, error_message, created_at, updated_at FROM compose_task_attempts WHERE task_id = ? ORDER BY attempt ASC`, taskID).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]model.ComposeTaskAttempt, 0)
+	for rows.Next() {
+		var item model.ComposeTaskAttempt
+		var started, finished sql.NullTime
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.Attempt, &item.Source, &started, &finished, &item.Outcome, &item.Stage, &item.ErrorCode, &item.ErrorMessage, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if started.Valid {
+			item.StartedAt = &started.Time
+		}
+		if finished.Valid {
+			item.FinishedAt = &finished.Time
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (ComposeTaskStore) CreateForUsage(item model.ComposeTask, action string) (model.ComposeTask, bool, error) {
 	return createForUsage(database.DB(), item, action, time.Now())
 }
@@ -223,6 +254,12 @@ func cancelComposeTaskAudited(db *gorm.DB, item model.ComposeTask, actorID int64
 			return nil
 		}
 		ok = true
+		// A manual retry opens its attempt row before any claim; cancelling
+		// the still-pending task closes it so no authorized attempt is left
+		// open (M4-G).
+		if err := tx.Exec(`UPDATE compose_task_attempts SET outcome = 'cancelled', finished_at = ?, updated_at = ? WHERE task_id = ? AND outcome = 'pending' AND finished_at IS NULL`, now, now, item.ID).Error; err != nil {
+			return err
+		}
 		item.Status = model.ComposeTaskCancelled
 		return appendComposeTaskAudit(tx, item, action, actorID, now)
 	})

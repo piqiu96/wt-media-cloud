@@ -18,6 +18,7 @@ var (
 	ErrComposeTaskForbidden      = errors.New("compose task operation is forbidden")
 	ErrComposeTaskNotFound       = errors.New("compose task not found")
 	ErrComposeTaskNotCancellable = errors.New("compose task is not cancellable")
+	ErrComposeTaskNotRetryable   = errors.New("compose task is not retryable")
 )
 
 type CreateComposeTaskItemInput struct {
@@ -60,6 +61,8 @@ type ComposeTaskRepository interface {
 	CreateForUsage(model.ComposeTask, string) (model.ComposeTask, bool, error)
 	CancelAudited(model.ComposeTask, int64, string) (bool, error)
 	RequestComposeCancel(taskID, actorID int64, action string) (bool, error)
+	RetryFailed(model.ComposeTask, int64, string) (bool, error)
+	ListAttempts(int64) ([]model.ComposeTaskAttempt, error)
 }
 
 type composeTaskStrategySource interface {
@@ -99,6 +102,55 @@ func CreateComposeTasks(actor identity.PublicUser, input CreateComposeTasksInput
 
 func CancelComposeTask(actor identity.PublicUser, id int64) (model.ComposeTask, error) {
 	return wiredComposeTaskService().Cancel(actor, id)
+}
+
+// Retry requeues one failed task for another attempt (M4-G, PRD §5.8.5):
+// visibility first, then the senior-operator gate — retry is a §5.10.3
+// senior capability, a plain operator only reads. The repository's guarded
+// update refuses a non-failed row or an error code outside the retryable
+// set; either refusal answers compose_task_not_retryable. The snapshot never
+// changes — operators who need different parameters create a new task.
+func (s *ComposeTaskService) Retry(actor identity.PublicUser, id int64) (model.ComposeTask, error) {
+	item, found, err := s.tasks.Find(id)
+	if err != nil {
+		return model.ComposeTask{}, err
+	}
+	if !found || !canReadComposeTask(actor, item) {
+		return model.ComposeTask{}, ErrComposeTaskNotFound
+	}
+	if actor.Role != identity.RoleAdmin && actor.Role != identity.RoleSeniorOperator {
+		return model.ComposeTask{}, ErrComposeTaskForbidden
+	}
+	ok, err := s.tasks.RetryFailed(item, int64(actor.ID), "compose_task.retry")
+	if err != nil {
+		return model.ComposeTask{}, err
+	}
+	stored, found, err := s.tasks.Find(id)
+	if err != nil {
+		return model.ComposeTask{}, err
+	}
+	if !found {
+		return model.ComposeTask{}, ErrComposeTaskNotFound
+	}
+	if !ok && stored.Status != model.ComposeTaskPending {
+		return model.ComposeTask{}, ErrComposeTaskNotRetryable
+	}
+	return stored, nil
+}
+
+func (s *ComposeTaskService) ListAttempts(actor identity.PublicUser, id int64) ([]model.ComposeTaskAttempt, error) {
+	if _, err := s.Get(actor, id); err != nil {
+		return nil, err
+	}
+	return s.tasks.ListAttempts(id)
+}
+
+func RetryComposeTask(actor identity.PublicUser, id int64) (model.ComposeTask, error) {
+	return wiredComposeTaskService().Retry(actor, id)
+}
+
+func ListComposeTaskAttempts(actor identity.PublicUser, id int64) ([]model.ComposeTaskAttempt, error) {
+	return wiredComposeTaskService().ListAttempts(actor, id)
 }
 
 // Create runs the command-level gate once — strategy readable and active,
