@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ type ComposeOutputFilter struct {
 	GameIDs       []string
 	CreatedBy     int64
 	PublishStatus string
+	Source        string
+	CreatedFrom   time.Time
+	CreatedBefore time.Time
 }
 
 const composeOutputColumns = `id, team_id, game_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at`
@@ -63,6 +67,24 @@ func listComposeOutputs(db *gorm.DB, filter ComposeOutputFilter) ([]model.Compos
 	if filter.PublishStatus != "" {
 		query += ` AND publish_status = ?`
 		args = append(args, filter.PublishStatus)
+	}
+	if filter.Source != "" {
+		title := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(filter.Source) + "%"
+		if sourceID, err := strconv.ParseInt(filter.Source, 10, 64); err == nil && sourceID > 0 {
+			query += ` AND (material_id = ? OR EXISTS (SELECT 1 FROM materials m WHERE m.id = composite_outputs.material_id AND m.title LIKE ? ESCAPE '!'))`
+			args = append(args, sourceID, title)
+		} else {
+			query += ` AND EXISTS (SELECT 1 FROM materials m WHERE m.id = composite_outputs.material_id AND m.title LIKE ? ESCAPE '!')`
+			args = append(args, title)
+		}
+	}
+	if !filter.CreatedFrom.IsZero() {
+		query += ` AND created_at >= ?`
+		args = append(args, filter.CreatedFrom)
+	}
+	if !filter.CreatedBefore.IsZero() {
+		query += ` AND created_at < ?`
+		args = append(args, filter.CreatedBefore)
 	}
 	query += ` ORDER BY id DESC`
 	rows, err := db.Raw(query, args...).Rows()

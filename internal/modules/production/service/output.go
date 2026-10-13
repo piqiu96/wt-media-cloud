@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
@@ -23,7 +24,10 @@ var (
 )
 
 type ListComposeOutputsInput struct {
-	PublishStatus string `json:"publish_status"`
+	PublishStatus string    `json:"publish_status"`
+	Source        string    `json:"source"`
+	CreatedFrom   time.Time `json:"created_from"`
+	CreatedBefore time.Time `json:"created_before"`
 }
 
 // ComposeOutputRepository is the my-outputs read and the one actor-facing
@@ -164,7 +168,11 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 	if actor.Status != identity.UserStatusEnabled {
 		return nil, ErrComposeOutputForbidden
 	}
-	filter := repository.ComposeOutputFilter{}
+	source := strings.TrimSpace(input.Source)
+	if len([]rune(source)) > 100 {
+		return nil, fmt.Errorf("%w: source is too long", ErrComposeOutputInvalid)
+	}
+	filter := repository.ComposeOutputFilter{Source: source, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
 	if input.PublishStatus != "" {
 		switch input.PublishStatus {
 		case "pending_publish", "published", "archived":

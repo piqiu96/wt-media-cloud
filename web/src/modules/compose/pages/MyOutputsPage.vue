@@ -10,6 +10,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { createdRangeParams } from '../createdRange.js'
 import { formatBytes } from '../../../shared/utils/units.js'
 import { usageStatusLabel } from '../../materials/labels.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
@@ -25,7 +26,7 @@ const rows = ref([])
 const strategies = ref([])
 const loading = ref(false)
 const error = ref('')
-const filters = ref({ publish_status: '' })
+const filters = ref({ publish_status: '', source: '', created_range: [] })
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const statusLabels = { pending_publish: '待发布', published: '已发布', archived: '已归档' }
@@ -81,6 +82,8 @@ async function load() {
   try {
     const params = {}
     if (filters.value.publish_status) params.publish_status = filters.value.publish_status
+    if (filters.value.source.trim()) params.source = filters.value.source.trim()
+    Object.assign(params, createdRangeParams(filters.value.created_range))
     const data = await client.listComposeOutputs(params)
     rows.value = Array.isArray(data) ? data : []
     pagination.value.current = 1
@@ -92,7 +95,7 @@ async function load() {
 }
 
 function reset() {
-  filters.value = { publish_status: '' }
+  filters.value = { publish_status: '', source: '', created_range: [] }
   load()
 }
 
@@ -123,7 +126,7 @@ async function openDetail(row) {
     ])
     detail.value = data
     previewUrl.value = link?.url || ''
-    if (!link) feedback.toast.warning('预览地址获取失败，可稍后重开详情')
+    if (!previewUrl.value) feedback.toast.error('预览地址获取失败，可稍后重开详情')
   } catch (e) {
     feedback.toast.error(e?.message || '打开成片失败')
     detailVisible.value = false
@@ -194,6 +197,8 @@ onMounted(() => {
       <ResourceCard class="my-outputs-card">
         <div class="filter-bar">
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.publish_status" :options="statusOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">来源素材</span><t-input v-model="filters.source" :maxlength="100" clearable placeholder="素材 ID 或名称" /></label>
+          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="load">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
@@ -269,6 +274,8 @@ onMounted(() => {
 
 <style scoped>
 .my-outputs-card { padding: 14px 20px 18px; }
+.filter-bar > .compose-date-filter { flex-basis: 300px; }
+.compose-date-filter :deep(.t-date-range-picker) { min-width: 0; width: 100%; }
 .output-detail__title { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--wt-text-primary); }
 .output-detail__title:first-child { margin-top: 0; }
 .output-detail__video { width: 100%; border-radius: 6px; background: #000; max-height: 280px; }

@@ -14,6 +14,8 @@ describe('compose tasks page', () => {
     expect(source).toContain('if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id')
     expect(source).toContain('v-model="filters.status"')
     expect(source).toContain('v-model="filters.compose_strategy_id"')
+    expect(source).toContain('createdRangeParams(filters.value.created_range)')
+    expect(source).toContain('v-model="filters.created_range"')
   })
 
   it('renders the five task statuses and the pending stage as 等待源素材', () => {

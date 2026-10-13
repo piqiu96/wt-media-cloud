@@ -1,0 +1,34 @@
+package repository
+
+import (
+	"database/sql/driver"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+)
+
+var outputRowColumns = []string{"id", "team_id", "game_id", "material_id", "material_usage_id", "compose_task_id", "compose_strategy_id", "template_code", "template_version", "object_key", "file_size_bytes", "sha256", "media_json", "publish_status", "created_by", "created_at", "updated_at"}
+
+func TestListComposeOutputsScopesSourceAndDateInSQL(t *testing.T) {
+	from := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	before := from.Add(24 * time.Hour)
+	for _, item := range []struct {
+		name, source, pattern string
+		args                  []driver.Value
+	}{
+		{"material id", "42", "material_id = .*m.title LIKE", []driver.Value{int64(7), "delta", int64(42), "%42%", from, before}},
+		{"material title", "海光_片", "m.title LIKE", []driver.Value{int64(7), "delta", "%海光!_片%", from, before}},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			db, mock := newMockGORM(t)
+			mock.ExpectQuery("FROM composite_outputs.*" + item.pattern + ".*created_at >= \\? AND created_at < \\?").
+				WithArgs(item.args...).WillReturnRows(sqlmock.NewRows(outputRowColumns))
+			items, err := listComposeOutputs(db, ComposeOutputFilter{TeamID: 7, GameIDs: []string{"delta"}, Source: item.source, CreatedFrom: from, CreatedBefore: before})
+			if err != nil || len(items) != 0 {
+				t.Fatalf("items=%v err=%v", items, err)
+			}
+			assertExpectations(t, mock)
+		})
+	}
+}

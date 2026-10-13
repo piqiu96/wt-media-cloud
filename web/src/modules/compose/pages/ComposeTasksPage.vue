@@ -9,17 +9,15 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { createdRangeParams } from '../createdRange.js'
 
-// CHG-20261013-082：合成任务页。列表/详情/取消，筛选（状态、策略）走服务端。
-// M4-C3 只有 pending/cancelled 两个状态真实流转，running/success/failed 由
-// M4-C5 接管——状态词表一次给全，行里出现哪种画哪种。
 const client = createComposeClient()
 
 const rows = ref([])
 const strategies = ref([])
 const loading = ref(false)
 const error = ref('')
-const filters = ref({ status: '', compose_strategy_id: '' })
+const filters = ref({ status: '', compose_strategy_id: '', created_range: [] })
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const statusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
@@ -76,6 +74,7 @@ async function load() {
     const params = {}
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id
+    Object.assign(params, createdRangeParams(filters.value.created_range))
     const data = await client.listComposeTasks(params)
     rows.value = Array.isArray(data) ? data : []
     pagination.value.current = 1
@@ -87,7 +86,7 @@ async function load() {
 }
 
 function reset() {
-  filters.value = { status: '', compose_strategy_id: '' }
+  filters.value = { status: '', compose_strategy_id: '', created_range: [] }
   load()
 }
 
@@ -152,6 +151,7 @@ onMounted(() => {
         <div class="filter-bar">
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="load">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
@@ -173,6 +173,7 @@ onMounted(() => {
             </template>
           </t-table>
         </div>
+        <p v-if="rows.length === 200" class="compose-list-limit">仅展示当前条件下最新的 200 条任务，请缩小时间范围继续查找。</p>
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
@@ -187,6 +188,9 @@ onMounted(() => {
               <div><span class="compose-detail__label">素材 ID</span><span>{{ detail.material_id }}</span></div>
               <div><span class="compose-detail__label">阶段</span><span>{{ stageText(detail) }}</span></div>
               <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
+              <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
+              <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
+              <div v-if="detail.started_at"><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
               <div v-if="detail.finished_at"><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
             </div>
             <template v-if="detail.error_code || detail.error_message">
@@ -204,6 +208,9 @@ onMounted(() => {
 
 <style scoped>
 .compose-tasks-card { padding: 14px 20px 18px; }
+.filter-bar > .compose-date-filter { flex-basis: 300px; }
+.compose-date-filter :deep(.t-date-range-picker) { min-width: 0; width: 100%; }
+.compose-list-limit { margin: 8px 0 0; color: var(--wt-text-secondary); font-size: 12px; }
 .compose-detail__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; font-size: 13px; }
 .compose-detail__grid > div { display: flex; gap: 8px; align-items: center; }
 .compose-detail__label { color: var(--wt-text-secondary); min-width: 64px; }

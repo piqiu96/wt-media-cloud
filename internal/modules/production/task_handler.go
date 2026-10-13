@@ -113,6 +113,12 @@ func ListComposeTasks(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	input := productionservice.ListComposeTasksInput{Status: strings.TrimSpace(c.Query("status"))}
+	from, before, err := parseComposeCreatedRange(strings.TrimSpace(c.Query("created_from")), strings.TrimSpace(c.Query("created_before")))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15214, "合成任务时间范围无效", "compose_task_invalid")
+		return
+	}
+	input.CreatedFrom, input.CreatedBefore = from, before
 	if raw := strings.TrimSpace(c.Query("compose_strategy_id")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || value <= 0 {

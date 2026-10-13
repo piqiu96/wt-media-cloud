@@ -117,8 +117,14 @@ paths:
       operationId: listComposeTasks
       summary: List compose tasks visible in the current user's scope.
       security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
+        - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
+        - {$ref: '#/components/parameters/CreatedFrom'}
+        - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
-        '200': {description: '[ComposeTask] — newest first, optional status and strategy filters.'}
+        '200': {description: '[ComposeTask] — newest first, at most 200 matches after scoped filters.'}
+        '400': {description: Invalid filter (named compose_task_invalid).}
   /api/v1/compose-tasks/{task_id}:
     get:
       operationId: getComposeTask
@@ -158,9 +164,14 @@ paths:
         outputs they created. The response never carries an object address;
         previews go through the video-url endpoint.
       security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/OutputStatus'}]
+      parameters:
+        - {$ref: '#/components/parameters/OutputStatus'}
+        - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
+        - {$ref: '#/components/parameters/CreatedFrom'}
+        - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
-        '200': {description: '[ComposeOutput] — newest first, optional publish_status filter.'}
+        '200': {description: '[ComposeOutput] — newest first, optional source and time filters.'}
+        '400': {description: Invalid filter (named compose_output_invalid).}
   /api/v1/compose-outputs/{output_id}:
     get:
       operationId: getComposeOutput
@@ -472,6 +483,8 @@ components:
         error_code: {type: string}
         error_message: {type: string}
         attempt_count: {type: integer, minimum: 0}
+        started_at: {type: string, format: date-time, nullable: true, description: Null until execution starts.}
+        finished_at: {type: string, format: date-time, nullable: true, description: Null until the terminal transition.}
         created_by: {type: integer, format: int64}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -484,3 +497,5 @@ components:
     TaskID: {in: path, name: task_id, required: true, schema: {type: integer, format: int64}}
     OutputID: {in: path, name: output_id, required: true, schema: {type: integer, format: int64}}
     OutputStatus: {in: query, name: publish_status, required: false, schema: {type: string, enum: [pending_publish, published, archived]}}
+    CreatedFrom: {in: query, name: created_from, required: false, description: Inclusive RFC3339 timestamp., schema: {type: string, format: date-time}}
+    CreatedBefore: {in: query, name: created_before, required: false, description: Exclusive RFC3339 timestamp; must follow created_from., schema: {type: string, format: date-time}}

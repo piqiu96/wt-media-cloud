@@ -71,6 +71,20 @@ func TestListComposeTasksAppliesScopeInSQL(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+func TestListComposeTasksFiltersDateBeforeLimit(t *testing.T) {
+	db, mock := newMockGORM(t)
+	from := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	before := from.Add(24 * time.Hour)
+	mock.ExpectQuery("created_at >= \\? AND created_at < \\? ORDER BY id DESC LIMIT 200").
+		WithArgs(int64(7), "delta", from, before).
+		WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "pending", from)...))
+	items, err := listComposeTasks(db, ComposeTaskFilter{TeamID: 7, GameIDs: []string{"delta"}, CreatedFrom: from, CreatedBefore: before})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
+}
+
 func TestFindActiveUsageForTaskCreation(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)

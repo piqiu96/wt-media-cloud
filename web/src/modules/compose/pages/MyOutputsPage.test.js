@@ -11,6 +11,10 @@ describe('my outputs page', () => {
     expect(source).toContain('client.listComposeOutputs(params)')
     expect(source).toContain('if (filters.value.publish_status) params.publish_status = filters.value.publish_status')
     expect(source).toContain('v-model="filters.publish_status"')
+    expect(source).toContain('params.source = filters.value.source.trim()')
+    expect(source).toContain('createdRangeParams(filters.value.created_range)')
+    expect(source).toContain('v-model="filters.source"')
+    expect(source).toContain('v-model="filters.created_range"')
   })
 
   it('renders the three publish statuses the contract names', () => {
@@ -31,6 +35,8 @@ describe('my outputs page', () => {
     expect(source).toContain('client.getComposeOutputVideoUrl(')
     // 详情整体按 id 重取（列表行是加载那一刻的副本），预览地址跟着这次打开走。
     expect(source).toContain('client.getComposeOutput(')
+    expect(source).toContain("feedback.toast.error('预览地址获取失败")
+    expect(source).not.toContain('feedback.toast.warning')
   })
 
   // 第五章的「去发布」只把成片带入发布流程：不建 publication、不写发布事实，

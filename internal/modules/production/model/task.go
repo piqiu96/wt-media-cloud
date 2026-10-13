@@ -41,8 +41,8 @@ type ComposeTask struct {
 	HeartbeatAt     *time.Time        `json:"-" gorm:"column:heartbeat_at"`
 	AttemptCount    int               `json:"attempt_count" gorm:"column:attempt_count"`
 	MaxAttempts     int               `json:"-" gorm:"column:max_attempts"`
-	StartedAt       *time.Time        `json:"-" gorm:"column:started_at"`
-	FinishedAt      *time.Time        `json:"-" gorm:"column:finished_at"`
+	StartedAt       *time.Time        `json:"started_at" gorm:"column:started_at"`
+	FinishedAt      *time.Time        `json:"finished_at" gorm:"column:finished_at"`
 	Stage           string            `json:"stage"`
 	Progress        int               `json:"progress"`
 	ErrorCode       string            `json:"error_code"`

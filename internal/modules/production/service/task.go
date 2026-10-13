@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
@@ -31,8 +32,10 @@ type CreateComposeTasksInput struct {
 }
 
 type ListComposeTasksInput struct {
-	Status     string `json:"status"`
-	StrategyID int64  `json:"compose_strategy_id"`
+	Status        string    `json:"status"`
+	StrategyID    int64     `json:"compose_strategy_id"`
+	CreatedFrom   time.Time `json:"created_from"`
+	CreatedBefore time.Time `json:"created_before"`
 }
 
 // CreateComposeTaskFailure is one rejected item of a batch command. Err is one
@@ -203,7 +206,7 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 	if actor.Status != identity.UserStatusEnabled {
 		return nil, ErrComposeTaskForbidden
 	}
-	filter := repository.ComposeTaskFilter{StrategyID: input.StrategyID}
+	filter := repository.ComposeTaskFilter{StrategyID: input.StrategyID, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
 	if input.Status != "" {
 		status := model.ComposeTaskStatus(input.Status)
 		switch status {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -49,7 +50,15 @@ func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	items, err := productionservice.ListComposeOutputs(current, productionservice.ListComposeOutputsInput{PublishStatus: c.Query("publish_status")})
+	from, before, err := parseComposeCreatedRange(strings.TrimSpace(c.Query("created_from")), strings.TrimSpace(c.Query("created_before")))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片时间范围无效", "compose_output_invalid")
+		return
+	}
+	items, err := productionservice.ListComposeOutputs(current, productionservice.ListComposeOutputsInput{
+		PublishStatus: c.Query("publish_status"), Source: strings.TrimSpace(c.Query("source")),
+		CreatedFrom: from, CreatedBefore: before,
+	})
 	if err != nil {
 		writeComposeOutputError(c, err)
 		return

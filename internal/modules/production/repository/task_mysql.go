@@ -17,11 +17,13 @@ import (
 const composeTaskColumns = `id, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
 
 type ComposeTaskFilter struct {
-	TeamID     int64
-	GameIDs    []string
-	Status     model.ComposeTaskStatus
-	StrategyID int64
-	CreatedBy  int64
+	TeamID        int64
+	GameIDs       []string
+	Status        model.ComposeTaskStatus
+	StrategyID    int64
+	CreatedBy     int64
+	CreatedFrom   time.Time
+	CreatedBefore time.Time
 }
 
 type ComposeTaskStore struct{}
@@ -178,6 +180,14 @@ func listComposeTasks(db *gorm.DB, filter ComposeTaskFilter) ([]model.ComposeTas
 	if filter.CreatedBy > 0 {
 		query += ` AND created_by = ?`
 		args = append(args, filter.CreatedBy)
+	}
+	if !filter.CreatedFrom.IsZero() {
+		query += ` AND created_at >= ?`
+		args = append(args, filter.CreatedFrom)
+	}
+	if !filter.CreatedBefore.IsZero() {
+		query += ` AND created_at < ?`
+		args = append(args, filter.CreatedBefore)
 	}
 	query += ` ORDER BY id DESC LIMIT 200`
 	rows, err := db.Raw(query, args...).Rows()
