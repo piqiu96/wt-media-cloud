@@ -52,16 +52,13 @@ const detailRow = ref(null)
 const filters = ref({ name: '', game_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 
-// 每一列都必须声明 width，不许只写 minWidth（WebKit fixed 布局下 minWidth 不产生确定列宽，
-// 会被压成剩余空间列；见 ContentPoolPage.vue 里 columns 上方的完整说明）。
-// 操作列是 computed：宽度跟角色实际点得到的按钮数走（普通运营只有详情）。
 const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', width: 220 },
+  { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'game', title: '游戏', width: 130 },
   { colKey: 'template', title: '模板', width: 180 },
-  { colKey: 'config', title: '切片区间', width: 140 },
-  { colKey: 'status', title: '状态', width: 100 },
+  { colKey: 'config', title: '切片区间', width: 120 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '复制'] : ['详情']), fixed: 'right' },
 ])
@@ -83,6 +80,7 @@ const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
   return filteredRows.value.slice(start, start + pagination.value.pageSize)
 })
+const activeCount = computed(() => filteredRows.value.filter((row) => row.status === 'active').length)
 
 const templateOptions = computed(() => templates.value.map((template) => ({
   label: `${template.name} v${template.version}`,
@@ -391,8 +389,19 @@ function cutLabel(config) {
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
           </div>
         </div>
+        <div class="strategy-list-summary" aria-live="polite">
+          <span>当前结果 <strong>{{ filteredRows.length }}</strong> 条</span>
+          <span>已启用 <strong>{{ activeCount }}</strong></span>
+        </div>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无合成策略">
+            <template #id="{ row }"><span class="strategy-id">{{ row.id }}</span></template>
+            <template #name="{ row }">
+              <div class="strategy-name-cell">
+                <span class="strategy-name-cell__main" :title="row.name">{{ row.name }}</span>
+                <span class="strategy-name-cell__sub">{{ teamName(row.team_id) }}</span>
+              </div>
+            </template>
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #template="{ row }">{{ templateLabel(row.compose_template_id) }}</template>
             <template #config="{ row }">{{ cutLabel(row.config) }}</template>
@@ -415,7 +424,6 @@ function cutLabel(config) {
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="filteredRows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <!-- 新增/编辑与挖掘策略弹窗同构：左侧分组卡片表单 + 右侧配置说明，底部 取消/保存。 -->
       <t-dialog :visible="visible" :header="editingID ? '编辑合成策略' : '新增合成策略'" width="880px" :footer="false" @close="requestCloseEditor">
         <div class="strategy-editor">
           <div class="strategy-editor__form">
@@ -502,20 +510,17 @@ function cutLabel(config) {
         </div>
       </t-dialog>
 
-      <!-- 只读详情：按规范分区展示，仅保留右上角 X，不放任何提交按钮。 -->
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="460px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="560px" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
-          <div class="strategy-detail-section">基础信息</div>
-          <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
+          <div class="strategy-drawer__hero"><div><span>策略 ID {{ detailRow.id }}</span><h3>{{ detailRow.name || '-' }}</h3><p>{{ gameName(detailRow.game_id) }} · {{ teamName(detailRow.team_id) }}</p></div><ResourceStatusBadge :tone="detailRow.status === 'active' ? 'success' : 'neutral'" :label="detailRow.status === 'active' ? '启用' : '停用'" /></div>
+          <h4 class="strategy-detail-section">使用范围</h4>
           <div class="strategy-drawer__field"><span>所属团队</span><strong>{{ teamName(detailRow.team_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>所属游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
+          <h4 class="strategy-detail-section">合成配置</h4>
           <div class="strategy-drawer__field"><span>合成模板</span><strong>{{ templateLabel(detailRow.compose_template_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>模板版本</span><strong>v{{ detailRow.compose_template_version }}</strong></div>
-          <div class="strategy-detail-section">状态信息</div>
-          <div class="strategy-drawer__field"><span>当前状态</span><ResourceStatusBadge :tone="detailRow.status === 'active' ? 'success' : 'neutral'" :label="detailRow.status === 'active' ? '启用' : '停用'" /></div>
-          <div class="strategy-detail-section">模板参数</div>
           <div class="strategy-drawer__field"><span>切片区间</span><strong>{{ cutLabel(detailRow.config) }}</strong></div>
-          <div class="strategy-detail-section">时间信息</div>
+          <h4 class="strategy-detail-section">记录时间</h4>
           <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
           <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ formatDateTime(detailRow.updated_at) }}</strong></div>
         </div>
@@ -526,7 +531,12 @@ function cutLabel(config) {
 
 <style scoped>
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
-/* 结构与样式类复用 DiscoveryStrategiesPage 的编辑弹窗；此处仅承载本页字段。 */
+.strategy-list-summary { display: flex; gap: 20px; align-items: center; padding: 0 0 12px; color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-list-summary strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.strategy-id { color: var(--wt-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.strategy-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.strategy-name-cell__main { overflow: hidden; color: var(--wt-text-primary); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.strategy-name-cell__sub { color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-editor { display: grid; grid-template-columns: 1fr 260px; gap: 18px; }
 .strategy-editor__form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .strategy-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }
@@ -544,10 +554,11 @@ function cutLabel(config) {
 .strategy-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .strategy-field-error { margin: 0; color: var(--td-error-color, #d54941); font-size: 12px; line-height: 1.4; }
 .strategy-bind-hint { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
-.strategy-detail-section { margin: 16px 0 8px; padding-left: 8px; border-left: 3px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.4; }
-.strategy-detail-section:first-child { margin-top: 0; }
-.strategy-drawer { display: flex; flex-direction: column; gap: 8px; }
-.strategy-drawer__field { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
-.strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
-.strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
+.strategy-detail-section { margin: 24px 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.strategy-drawer__hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 4px 0 16px; }
+.strategy-drawer__hero span, .strategy-drawer__hero p { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-drawer__hero h3 { margin: 4px 0; color: var(--wt-text-primary); font-size: 20px; }
+.strategy-drawer__field { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 0; }
+.strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 </style>

@@ -43,14 +43,13 @@ const detail = ref(null)
 const detailLoading = ref(false)
 const pagination = ref({ current: 1, pageSize: 20 })
 
-// 创建合成任务（CHG-20261013-082）：勾选多行或行内「加入合成」都打开同一个创建
-// 对话框；批次里只带对话框需要的事实（素材 id 与标题），request_key 由对话框生成。
+// 勾选多行或行内「加入合成」共用创建对话框；request_key 由对话框生成。
 const selectedRowKeys = ref([])
 const createVisible = ref(false)
 const createMaterials = ref([])
 
 function openCreate(rowsToCreate) {
-  createMaterials.value = rowsToCreate.map((row) => ({ id: row.id, title: row.title }))
+  createMaterials.value = rowsToCreate.map((row) => ({ id: row.id, title: row.title, cover_url: row.cover_url }))
   createVisible.value = true
 }
 
@@ -63,7 +62,7 @@ async function onCreated(result) {
   const created = result.created || []
   const failed = result.failed || []
   if (failed.length > 0) {
-    feedback.toast.warning(`已创建 ${created.length} 个任务，${failed.length} 个失败：${failed.map((item) => item.message).join('；')}`)
+    feedback.toast.error(`已创建 ${created.length} 个任务，${failed.length} 个失败：${failed.map((item) => item.message).join('；')}`)
   } else {
     feedback.toast.success(`已创建 ${created.length} 个合成任务`)
   }

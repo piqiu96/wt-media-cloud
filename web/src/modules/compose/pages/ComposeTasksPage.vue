@@ -26,25 +26,25 @@ const pagination = ref({ current: 1, pageSize: 20 })
 
 const statusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
 const statusTones = { pending: 'warning', running: 'info', success: 'success', failed: 'danger', cancelled: 'neutral' }
-// 阶段是执行投影的词表；M4-C3 的 pending 还没有执行阶段，显示名钉在合同里：
-// 等待源素材（源视频未就绪时任务保持 pending 并等待，PRD §5.4.4）。
-const stageLabels = { pending: '等待源素材' }
+const stageLabels = {
+  pending: '等待源素材',
+  validating_input: '校验素材',
+  waiting_input: '等待素材准备',
+  cutting: '视频合成中',
+  uploading: '上传成片',
+  committing: '保存成片',
+}
 
-// 每一列显式 width（规范 §6.2，WebKit fixed 布局下 minWidth 不产生确定列宽）。
-// 操作列宽按行里最多会出现的按钮清单推导：排队中的行才有 取消。
 const columns = computed(() => [
   { colKey: 'id', title: '任务 ID', width: 80 },
-  { colKey: 'strategy', title: '合成策略', width: 180 },
-  { colKey: 'template', title: '模板', width: 130 },
-  { colKey: 'material_id', title: '素材 ID', width: 90 },
   { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'stage', title: '阶段', width: 120 },
-  { colKey: 'progress', title: '进度', width: 80 },
+  { colKey: 'progress', title: '执行进度', width: 180 },
+  { colKey: 'material_id', title: '关联素材', width: 130 },
+  { colKey: 'strategy', title: '合成策略', width: 220 },
   { colKey: 'created_at', title: '创建时间', width: 150 },
   { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消']), fixed: 'right' },
 ])
 
-// 横向滚动宽度由列宽推导，不写死。
 const tableScroll = computed(() => ({
   x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
@@ -56,6 +56,9 @@ const pagedRows = computed(() => {
 
 const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }))
 const strategyOptions = computed(() => strategies.value.map((item) => ({ value: String(item.id), label: item.name })))
+const visibleCount = computed(() => rows.value.length)
+const runningCount = computed(() => rows.value.filter((row) => row.status === 'running').length)
+const failedCount = computed(() => rows.value.filter((row) => row.status === 'failed').length)
 
 function strategyName(row) {
   const found = strategies.value.find((item) => item.id === row.compose_strategy_id)
@@ -67,7 +70,10 @@ function templateText(row) {
 }
 
 function stageText(row) {
-  if (row.stage) return stageLabels[row.stage] || row.stage
+  if (row.status === 'success') return '已完成'
+  if (row.status === 'failed') return '执行失败'
+  if (row.status === 'cancelled') return '已取消'
+  if (row.stage) return stageLabels[row.stage] || '执行中'
   return row.status === 'pending' ? stageLabels.pending : '—'
 }
 
@@ -105,6 +111,7 @@ async function loadStrategies() {
 
 const detailVisible = ref(false)
 const detail = ref(null)
+const detailTab = ref('overview')
 const attempts = ref([])
 const attemptsError = ref('')
 // 与 ComposeStrategyPage 同一规则：页面据此藏重试入口；真正的授权判定在服务层，
@@ -126,6 +133,7 @@ const outcomeTones = { pending: 'warning', running: 'info', success: 'success', 
 
 async function openDetail(row) {
   detailVisible.value = true
+  detailTab.value = 'overview'
   detail.value = null
   attempts.value = []
   attemptsError.value = ''
@@ -229,13 +237,28 @@ onMounted(() => {
             <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
           </div>
         </div>
+        <div class="compose-list-summary" aria-live="polite">
+          <span>当前结果 <strong>{{ visibleCount }}</strong> 条</span>
+          <span>执行中 <strong>{{ runningCount }}</strong></span>
+          <span>失败 <strong>{{ failedCount }}</strong></span>
+        </div>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="还没有合成任务">
-            <template #strategy="{ row }">{{ strategyName(row) }}</template>
-            <template #template="{ row }">{{ templateText(row) }}</template>
+            <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusLabels[row.status] || row.status" /></template>
-            <template #stage="{ row }">{{ stageText(row) }}</template>
-            <template #progress="{ row }">{{ row.progress }}%</template>
+            <template #progress="{ row }">
+              <div class="compose-progress">
+                <div class="compose-progress__top"><span>{{ stageText(row) }}</span><strong>{{ row.progress }}%</strong></div>
+                <t-progress :percentage="row.progress" :label="false" :status="row.status === 'failed' ? 'error' : row.status === 'success' ? 'success' : 'active'" size="small" />
+              </div>
+            </template>
+            <template #material_id="{ row }"><span class="compose-object-ref">素材 {{ row.material_id }}</span></template>
+            <template #strategy="{ row }">
+              <div class="compose-related-cell">
+                <span class="compose-related-cell__main" :title="strategyName(row)">{{ strategyName(row) }}</span>
+                <span class="compose-related-cell__sub">{{ templateText(row) }}</span>
+              </div>
+            </template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
@@ -249,60 +272,79 @@ onMounted(() => {
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <t-dialog v-model:visible="detailVisible" header="任务详情" width="640px" :footer="false">
+      <t-drawer v-model:visible="detailVisible" header="任务详情" size="720px" :close-btn="true" :footer="false">
         <t-loading :loading="!detail" :show-overlay="true">
           <div v-if="detail" class="compose-detail">
-            <div class="compose-detail__grid">
-              <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
-              <div><span class="compose-detail__label">状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusLabels[detail.status] || detail.status" /></div>
-              <div><span class="compose-detail__label">阶段</span><span>{{ stageText(detail) }}</span></div>
-              <div><span class="compose-detail__label">进度</span><span>{{ detail.progress }}%</span></div>
-              <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
-              <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
-              <div v-if="detail.started_at"><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
-              <div v-if="detail.finished_at"><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
-            </div>
-            <template v-if="detail.error_code || detail.error_message">
-              <h4 class="compose-detail__title">失败信息</h4>
-              <t-alert theme="error" :message="detail.error_message || detail.error_code" />
-              <div v-if="detail.status === 'failed'" class="compose-detail__retry">
-                <template v-if="canRetry && retryableCodes.has(detail.error_code)">
-                  <t-button size="small" theme="primary" @click="retry(detail)">重试此任务</t-button>
-                  <span v-if="detail.error_code === 'execution_failed'" class="compose-detail__hint">该失败属执行错误，请根据上方错误信息判断是否重试。</span>
-                </template>
-                <span v-else-if="newTaskCodes.has(detail.error_code)" class="compose-detail__hint">该失败不能重试，请修正后新建任务。</span>
+            <div class="compose-detail__hero">
+              <div class="compose-detail__identity">
+                <div><strong>任务 {{ detail.id }}</strong><span>创建于 {{ formatDateTime(detail.created_at) }}</span></div>
+                <ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusLabels[detail.status] || detail.status" />
               </div>
-            </template>
-            <h4 class="compose-detail__title">素材与策略快照（创建当时，不可变）</h4>
-            <div class="compose-detail__grid">
-              <div><span class="compose-detail__label">合成策略</span><span>#{{ detail.compose_strategy_id }}</span></div>
-              <div><span class="compose-detail__label">模板</span><span>{{ templateText(detail) }}</span></div>
-              <div><span class="compose-detail__label">素材 ID</span><span>{{ detail.material_id }}</span></div>
-              <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
+              <div class="compose-detail__progress"><span>{{ stageText(detail) }}</span><strong>{{ detail.progress }}%</strong></div>
+              <t-progress :percentage="detail.progress" :label="false" :status="detail.status === 'failed' ? 'error' : detail.status === 'success' ? 'success' : 'active'" size="small" />
             </div>
-            <pre class="compose-detail__snapshot">{{ JSON.stringify(detail.config_snapshot, null, 2) }}</pre>
-            <h4 class="compose-detail__title">执行记录</h4>
-            <t-alert v-if="attemptsError" theme="warning" :message="attemptsError" />
-            <template v-else>
-              <p v-if="!attempts.length" class="compose-detail__empty">还没有执行记录。</p>
-              <div v-for="attempt in attempts" :key="attempt.attempt" class="compose-detail__attempt">
-                <span class="compose-detail__attempt-no">第 {{ attempt.attempt }} 次</span>
-                <span class="compose-detail__attempt-source">{{ sourceLabels[attempt.source] || attempt.source }}发起</span>
-                <ResourceStatusBadge :tone="outcomeTones[attempt.outcome] || 'neutral'" :label="outcomeLabels[attempt.outcome] || attempt.outcome" />
-                <span class="compose-detail__attempt-time">{{ formatDateTime(attempt.started_at) }} ~ {{ formatDateTime(attempt.finished_at) }}</span>
-                <span v-if="attempt.stage" class="compose-detail__attempt-stage">{{ attempt.stage }}</span>
-                <span v-if="attempt.error_code || attempt.error_message" class="compose-detail__attempt-err">{{ attempt.error_message || attempt.error_code }}</span>
-              </div>
-            </template>
-            <h4 class="compose-detail__title">成片结果</h4>
-            <div v-if="detail.status === 'success' && detail.composite_output_id" class="compose-detail__output">
-              <span>成片 #{{ detail.composite_output_id }}</span>
-              <t-link theme="primary" @click="goOutput">前往我的成片查看</t-link>
-            </div>
-            <p v-else class="compose-detail__empty">任务完成后成片会显示在这里。</p>
+            <t-tabs v-model="detailTab" class="compose-detail__tabs">
+              <t-tab-panel value="overview" label="概览">
+                <div class="compose-detail__section">
+                  <h4>基本信息</h4>
+                  <div class="compose-detail__grid">
+                    <div><span class="compose-detail__label">关联素材</span><span>素材 {{ detail.material_id }}</span></div>
+                    <div><span class="compose-detail__label">合成策略</span><span>{{ strategyName(detail) }}</span></div>
+                    <div><span class="compose-detail__label">合成模板</span><span>{{ templateText(detail) }}</span></div>
+                    <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
+                    <div><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
+                    <div><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
+                    <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
+                  </div>
+                </div>
+                <div v-if="detail.error_code || detail.error_message" class="compose-detail__section">
+                  <h4>失败原因</h4>
+                  <FeedbackAlert theme="error" :message="detail.error_message || detail.error_code" />
+                  <div v-if="detail.status === 'failed'" class="compose-detail__retry">
+                    <template v-if="canRetry && retryableCodes.has(detail.error_code)">
+                      <t-button theme="primary" @click="retry(detail)">重试</t-button>
+                      <span v-if="detail.error_code === 'execution_failed'" class="compose-detail__hint">请根据失败原因判断是否重新执行。</span>
+                    </template>
+                    <span v-else-if="newTaskCodes.has(detail.error_code)" class="compose-detail__hint">该失败不能重试，请修正后新建任务。</span>
+                  </div>
+                </div>
+              </t-tab-panel>
+              <t-tab-panel value="attempts" label="执行记录">
+                <div class="compose-detail__section">
+                  <FeedbackAlert v-if="attemptsError" theme="error" :message="attemptsError" />
+                  <template v-else>
+                    <p v-if="!attempts.length" class="compose-detail__empty">还没有执行记录。</p>
+                    <div v-for="attempt in attempts" :key="attempt.attempt" class="compose-detail__attempt">
+                      <div class="compose-detail__attempt-head">
+                        <strong>第 {{ attempt.attempt }} 次 · {{ sourceLabels[attempt.source] || '未知来源' }}发起</strong>
+                        <ResourceStatusBadge :tone="outcomeTones[attempt.outcome] || 'neutral'" :label="outcomeLabels[attempt.outcome] || '状态未知'" />
+                      </div>
+                      <div class="compose-detail__attempt-meta">{{ formatDateTime(attempt.started_at) }} — {{ formatDateTime(attempt.finished_at) }}<span v-if="attempt.stage"> · {{ stageText(attempt) }}</span></div>
+                      <p v-if="attempt.error_code || attempt.error_message" class="compose-detail__attempt-err">{{ attempt.error_message || attempt.error_code }}</p>
+                    </div>
+                  </template>
+                </div>
+              </t-tab-panel>
+              <t-tab-panel value="snapshot" label="参数快照">
+                <div class="compose-detail__section">
+                  <h4>创建时的生效配置</h4>
+                  <p class="compose-detail__hint">任务始终按这份配置执行，后续策略修改不会影响它。</p>
+                  <pre class="compose-detail__snapshot">{{ JSON.stringify(detail.config_snapshot, null, 2) }}</pre>
+                </div>
+              </t-tab-panel>
+              <t-tab-panel value="output" label="成片结果">
+                <div class="compose-detail__section">
+                  <div v-if="detail.status === 'success' && detail.composite_output_id" class="compose-detail__output">
+                    <strong>成片 #{{ detail.composite_output_id }}</strong>
+                    <t-link theme="primary" @click="goOutput">前往我的成片查看</t-link>
+                  </div>
+                  <p v-else class="compose-detail__empty">当前任务没有关联成片。</p>
+                </div>
+              </t-tab-panel>
+            </t-tabs>
           </div>
         </t-loading>
-      </t-dialog>
+      </t-drawer>
     </div>
   </t-loading>
 </template>
@@ -311,19 +353,41 @@ onMounted(() => {
 .compose-tasks-card { padding: 14px 20px 18px; }
 .filter-bar > .compose-date-filter { flex-basis: 300px; }
 .compose-date-filter :deep(.t-date-range-picker) { min-width: 0; width: 100%; }
+.compose-list-summary { display: flex; gap: 20px; align-items: center; padding: 0 0 12px; color: var(--wt-text-tertiary); font-size: 12px; }
+.compose-list-summary strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.compose-task-id { color: var(--wt-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.compose-object-ref { color: var(--wt-text-secondary); font-weight: 500; }
+.compose-related-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.compose-related-cell__main { overflow: hidden; color: var(--wt-text-primary); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.compose-related-cell__sub { color: var(--wt-text-tertiary); font-size: 12px; }
+.compose-progress { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.compose-progress__top { display: flex; justify-content: space-between; gap: 8px; color: var(--wt-text-secondary); font-size: 12px; }
+.compose-progress__top strong { color: var(--wt-text-primary); font-variant-numeric: tabular-nums; }
 .compose-list-limit { margin: 8px 0 0; color: var(--wt-text-secondary); font-size: 12px; }
-.compose-detail__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; font-size: 13px; }
-.compose-detail__grid > div { display: flex; gap: 8px; align-items: center; }
-.compose-detail__label { color: var(--wt-text-secondary); min-width: 64px; }
-.compose-detail__title { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--wt-text-primary); }
-.compose-detail__snapshot { margin: 0; padding: 12px; background: var(--wt-bg-secondary, #f5f6f8); border-radius: 6px; font-size: 12px; overflow: auto; max-height: 220px; }
-.compose-detail__retry { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
-.compose-detail__hint { color: var(--wt-text-secondary); font-size: 12px; }
-.compose-detail__empty { margin: 0; color: var(--wt-text-secondary); font-size: 12px; }
-.compose-detail__attempt { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--wt-border-light, #eceef1); font-size: 12px; }
-.compose-detail__attempt-no { font-weight: 600; color: var(--wt-text-primary); }
-.compose-detail__attempt-source { color: var(--wt-text-secondary); }
-.compose-detail__attempt-stage { color: var(--wt-text-secondary); }
-.compose-detail__attempt-err { color: var(--wt-text-danger, #d54941); }
-.compose-detail__output { display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.compose-detail { min-height: 320px; }
+.compose-detail__hero { padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-page); }
+.compose-detail__identity { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.compose-detail__identity > div { display: flex; flex-direction: column; gap: 3px; }
+.compose-detail__identity strong { color: var(--wt-text-primary); font-size: 18px; }
+.compose-detail__identity span { color: var(--wt-text-tertiary); font-size: 12px; }
+.compose-detail__progress { display: flex; justify-content: space-between; margin: 16px 0 6px; color: var(--wt-text-secondary); font-size: 13px; }
+.compose-detail__progress strong { color: var(--wt-text-primary); font-variant-numeric: tabular-nums; }
+.compose-detail__tabs { margin-top: 12px; }
+.compose-detail__section { padding: 16px 2px; }
+.compose-detail__section h4 { margin: 0 0 14px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.compose-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; font-size: 13px; }
+.compose-detail__grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--wt-text-primary); }
+.compose-detail__label { color: var(--wt-text-tertiary); font-size: 12px; }
+.compose-detail__snapshot { margin: 12px 0 0; padding: 14px; background: var(--wt-bg-page); border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); font-size: 12px; overflow: auto; max-height: 420px; }
+.compose-detail__retry { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+.compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; }
+.compose-detail__empty { margin: 0; color: var(--wt-text-secondary); font-size: 13px; }
+.compose-detail__attempt { padding: 14px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); margin-bottom: 10px; }
+.compose-detail__attempt-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.compose-detail__attempt-head strong { color: var(--wt-text-primary); font-size: 13px; }
+.compose-detail__attempt-meta { margin-top: 8px; color: var(--wt-text-secondary); font-size: 12px; }
+.compose-detail__attempt-err { margin: 8px 0 0; color: var(--wt-status-error); font-size: 12px; }
+.compose-detail__output { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; font-size: 14px; }
+.compose-detail__output strong { color: var(--wt-text-primary); }
+@media (max-width: 760px) { .compose-detail__grid { grid-template-columns: 1fr; } }
 </style>

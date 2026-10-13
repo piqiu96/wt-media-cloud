@@ -33,7 +33,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
-  /* The column grows only to the actual action content, up to six controls. */
+  /* The column grows to the visible action content. */
   width: max-content;
   max-width: 520px;
   white-space: nowrap;

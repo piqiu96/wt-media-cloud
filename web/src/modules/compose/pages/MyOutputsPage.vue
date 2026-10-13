@@ -34,16 +34,13 @@ const statusTones = { pending_publish: 'warning', published: 'success', archived
 // 任务状态是来源追踪里的投影，词表与合成任务页一致。
 const taskStatusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
 
-// 每一列显式 width（规范 §6.2，WebKit fixed 布局下 minWidth 不产生确定列宽）。
-// 操作列宽按待发布行的按钮清单推导（常驻 下载/详情，待发布多 去发布/归档；
-// 下载 loading 时多一个 spinner），非待发布行只是留白更多。
 const columns = computed(() => [
   { colKey: 'id', title: '成片 ID', width: 90 },
-  { colKey: 'material_id', title: '素材 ID', width: 90 },
-  { colKey: 'strategy', title: '策略', width: 180 },
-  { colKey: 'template', title: '模板', width: 140 },
-  { colKey: 'size', title: '大小', width: 100 },
   { colKey: 'publish_status', title: '状态', width: 100 },
+  { colKey: 'material_id', title: '来源素材', width: 130 },
+  { colKey: 'strategy', title: '生产策略', width: 180 },
+  { colKey: 'duration', title: '时长', width: 80 },
+  { colKey: 'size', title: '大小', width: 90 },
   { colKey: 'created_at', title: '生成时间', width: 150 },
   { colKey: 'op', title: '操作', width: opColumnWidth(['下载', '详情', '去发布', '归档'], { loading: true }), fixed: 'right' },
 ])
@@ -59,6 +56,9 @@ const pagedRows = computed(() => {
 })
 
 const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }))
+const visibleCount = computed(() => rows.value.length)
+const pendingCount = computed(() => rows.value.filter((row) => row.publish_status === 'pending_publish').length)
+const archivedCount = computed(() => rows.value.filter((row) => row.publish_status === 'archived').length)
 
 function strategyName(row) {
   const found = strategies.value.find((item) => item.id === row.compose_strategy_id)
@@ -110,10 +110,13 @@ async function loadStrategies() {
 
 const detailVisible = ref(false)
 const detail = ref(null)
+const detailTab = ref('basic')
 const previewUrl = ref('')
+const previewLoading = ref(false)
 
 async function openDetail(row) {
   detailVisible.value = true
+  detailTab.value = 'basic'
   detail.value = null
   previewUrl.value = ''
   try {
@@ -126,10 +129,24 @@ async function openDetail(row) {
     ])
     detail.value = data
     previewUrl.value = link?.url || ''
-    if (!previewUrl.value) feedback.toast.error('预览地址获取失败，可稍后重开详情')
+    if (!previewUrl.value) feedback.toast.error('预览地址获取失败，可在预览区重试')
   } catch (e) {
     feedback.toast.error(e?.message || '打开成片失败')
     detailVisible.value = false
+  }
+}
+
+async function retryPreview() {
+  if (!detail.value || previewLoading.value) return
+  previewLoading.value = true
+  try {
+    const link = await client.getComposeOutputVideoUrl(detail.value.output.id)
+    previewUrl.value = link?.url || ''
+    if (!previewUrl.value) feedback.toast.error('预览地址获取失败，请稍后重试')
+  } catch (e) {
+    feedback.toast.error(e?.message || '预览地址获取失败，请稍后重试')
+  } finally {
+    previewLoading.value = false
   }
 }
 
@@ -204,10 +221,22 @@ onMounted(() => {
             <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
           </div>
         </div>
+        <div class="output-list-summary" aria-live="polite">
+          <span>当前结果 <strong>{{ visibleCount }}</strong> 条</span>
+          <span>待发布 <strong>{{ pendingCount }}</strong></span>
+          <span>已归档 <strong>{{ archivedCount }}</strong></span>
+        </div>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="还没有成片">
-            <template #strategy="{ row }">{{ strategyName(row) }}</template>
-            <template #template="{ row }">{{ templateText(row) }}</template>
+            <template #id="{ row }"><span class="output-id">{{ row.id }}</span></template>
+            <template #material_id="{ row }"><span class="output-source-ref">素材 {{ row.material_id }}</span></template>
+            <template #strategy="{ row }">
+              <div class="output-related-cell">
+                <span class="output-related-cell__main" :title="strategyName(row)">{{ strategyName(row) }}</span>
+                <span class="output-related-cell__sub">{{ templateText(row) }}</span>
+              </div>
+            </template>
+            <template #duration="{ row }">{{ durationText(row) }}</template>
             <template #size="{ row }">{{ formatBytes(row.file_size_bytes) }}</template>
             <template #publish_status="{ row }"><ResourceStatusBadge :tone="statusTones[row.publish_status] || 'default'" :label="statusLabels[row.publish_status] || row.publish_status" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
@@ -226,7 +255,7 @@ onMounted(() => {
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="成片详情" size="560px">
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="成片详情" size="680px">
         <template #footer>
           <t-space v-if="detail" class="wt-resource-actions">
             <t-button theme="primary" :loading="downloadingID === detail.output.id" @click="download(detail.output)">下载</t-button>
@@ -238,33 +267,43 @@ onMounted(() => {
         </template>
         <t-loading :loading="!detail" :show-overlay="true">
           <div v-if="detail" class="output-detail">
-            <h4 class="output-detail__title">预览</h4>
-            <video v-if="previewUrl" :src="previewUrl" controls preload="metadata" class="output-detail__video">当前环境不支持视频预览</video>
-            <p v-else class="output-detail__hint">预览地址获取失败，可关闭后重开详情</p>
-
-            <h4 class="output-detail__title">文件信息</h4>
-            <div class="output-detail__grid">
-              <div><span class="output-detail__label">成片 ID</span><span>{{ detail.output.id }}</span></div>
-              <div><span class="output-detail__label">状态</span><ResourceStatusBadge :tone="statusTones[detail.output.publish_status] || 'neutral'" :label="statusLabels[detail.output.publish_status] || detail.output.publish_status" /></div>
-              <div><span class="output-detail__label">大小</span><span>{{ formatBytes(detail.output.file_size_bytes) }}</span></div>
-              <div><span class="output-detail__label">时长</span><span>{{ durationText(detail.output) }}</span></div>
-              <div><span class="output-detail__label">生成时间</span><span>{{ formatDateTime(detail.output.created_at) }}</span></div>
+            <div class="output-detail__hero">
+              <div><span class="output-detail__eyebrow">成片 ID {{ detail.output.id }}</span><h3>成片 #{{ detail.output.id }}</h3><p>生成于 {{ formatDateTime(detail.output.created_at) }}</p></div>
+              <ResourceStatusBadge :tone="statusTones[detail.output.publish_status] || 'neutral'" :label="statusLabels[detail.output.publish_status] || detail.output.publish_status" />
             </div>
-            <div class="output-detail__hash"><span class="output-detail__label">SHA-256</span><span>{{ detail.output.sha256 || '—' }}</span></div>
-
-            <h4 class="output-detail__title">来源追踪</h4>
-            <div class="output-detail__grid">
-              <div><span class="output-detail__label">素材</span><span>#{{ detail.trace.material.id }} {{ detail.trace.material.title }}</span></div>
-              <div><span class="output-detail__label">素材使用</span><span>#{{ detail.trace.material_usage.id }} {{ usageStatusLabel(detail.trace.material_usage.status) || detail.trace.material_usage.status || '—' }}</span></div>
-              <div><span class="output-detail__label">策略</span><span>#{{ detail.trace.strategy.id }} {{ detail.trace.strategy.name || '—' }}</span></div>
-              <div><span class="output-detail__label">模板</span><span>{{ detail.trace.strategy.template_code }} v{{ detail.trace.strategy.template_version }}</span></div>
-              <div><span class="output-detail__label">任务</span><span>#{{ detail.trace.compose_task.id }} {{ taskStatusLabels[detail.trace.compose_task.status] || detail.trace.compose_task.status || '—' }}</span></div>
-              <div><span class="output-detail__label">任务创建时间</span><span>{{ formatDateTime(detail.trace.compose_task.created_at) }}</span></div>
-            </div>
-            <h4 class="output-detail__title">任务参数快照（创建当时，不可变）</h4>
-            <pre class="output-detail__snapshot">{{ JSON.stringify(detail.trace.compose_task.config_snapshot, null, 2) }}</pre>
-            <h4 class="output-detail__title">策略当前配置</h4>
-            <pre class="output-detail__snapshot">{{ JSON.stringify(detail.trace.strategy.config_snapshot, null, 2) }}</pre>
+            <t-tabs v-model="detailTab" class="output-detail__tabs">
+              <t-tab-panel value="basic" label="基本信息">
+                <div class="output-detail__panel">
+                  <video v-if="previewUrl" :src="previewUrl" controls preload="metadata" class="output-detail__video">当前环境不支持视频预览</video>
+                  <div v-else class="output-detail__preview-empty"><span>暂时无法预览此成片</span><t-button class="wt-secondary-button" variant="outline" size="small" :loading="previewLoading" @click="retryPreview">重试预览</t-button></div>
+                  <h4 class="output-detail__title">文件信息</h4>
+                  <div class="output-detail__grid">
+                    <div><span class="output-detail__label">文件大小</span><strong>{{ formatBytes(detail.output.file_size_bytes) }}</strong></div>
+                    <div><span class="output-detail__label">视频时长</span><strong>{{ durationText(detail.output) }}</strong></div>
+                    <div><span class="output-detail__label">生成时间</span><strong>{{ formatDateTime(detail.output.created_at) }}</strong></div>
+                  </div>
+                  <div class="output-detail__hash"><span class="output-detail__label">SHA-256</span><span>{{ detail.output.sha256 || '—' }}</span></div>
+                </div>
+              </t-tab-panel>
+              <t-tab-panel value="source" label="来源追踪">
+                <div class="output-detail__panel output-detail__grid">
+                  <div><span class="output-detail__label">素材</span><strong>#{{ detail.trace.material.id }} {{ detail.trace.material.title }}</strong></div>
+                  <div><span class="output-detail__label">素材使用</span><strong>#{{ detail.trace.material_usage.id }} {{ usageStatusLabel(detail.trace.material_usage.status) || detail.trace.material_usage.status || '—' }}</strong></div>
+                  <div><span class="output-detail__label">策略</span><strong>#{{ detail.trace.strategy.id }} {{ detail.trace.strategy.name || '—' }}</strong></div>
+                  <div><span class="output-detail__label">模板</span><strong>{{ detail.trace.strategy.template_code }} v{{ detail.trace.strategy.template_version }}</strong></div>
+                  <div><span class="output-detail__label">合成任务</span><strong>#{{ detail.trace.compose_task.id }} {{ taskStatusLabels[detail.trace.compose_task.status] || detail.trace.compose_task.status || '—' }}</strong></div>
+                  <div><span class="output-detail__label">任务创建</span><strong>{{ formatDateTime(detail.trace.compose_task.created_at) }}</strong></div>
+                </div>
+              </t-tab-panel>
+              <t-tab-panel value="snapshot" label="配置快照">
+                <div class="output-detail__panel">
+                  <h4 class="output-detail__title">任务参数快照（创建当时）</h4>
+                  <pre class="output-detail__snapshot">{{ JSON.stringify(detail.trace.compose_task.config_snapshot, null, 2) }}</pre>
+                  <h4 class="output-detail__title">策略当前配置</h4>
+                  <pre class="output-detail__snapshot">{{ JSON.stringify(detail.trace.strategy.config_snapshot, null, 2) }}</pre>
+                </div>
+              </t-tab-panel>
+            </t-tabs>
           </div>
         </t-loading>
       </t-drawer>
@@ -276,14 +315,27 @@ onMounted(() => {
 .my-outputs-card { padding: 14px 20px 18px; }
 .filter-bar > .compose-date-filter { flex-basis: 300px; }
 .compose-date-filter :deep(.t-date-range-picker) { min-width: 0; width: 100%; }
-.output-detail__title { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--wt-text-primary); }
+.output-list-summary { display: flex; gap: 20px; align-items: center; padding: 0 0 12px; color: var(--wt-text-tertiary); font-size: 12px; }
+.output-list-summary strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
+.output-id { color: var(--wt-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.output-source-ref { color: var(--wt-text-secondary); font-weight: 500; }
+.output-related-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.output-related-cell__main { overflow: hidden; color: var(--wt-text-primary); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.output-related-cell__sub { color: var(--wt-text-tertiary); font-size: 12px; }
+.output-detail__hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 4px 0 20px; }
+.output-detail__hero h3 { margin: 4px 0; color: var(--wt-text-primary); font-size: 20px; }
+.output-detail__hero p, .output-detail__eyebrow { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
+.output-detail__panel { padding: 20px 0; }
+.output-detail__title { margin: 20px 0 12px; font-size: 14px; font-weight: 600; color: var(--wt-text-primary); }
 .output-detail__title:first-child { margin-top: 0; }
-.output-detail__video { width: 100%; border-radius: 6px; background: #000; max-height: 280px; }
-.output-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 13px; }
-.output-detail__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; font-size: 13px; }
-.output-detail__grid > div { display: flex; gap: 8px; align-items: center; }
-.output-detail__label { color: var(--wt-text-secondary); min-width: 72px; flex: none; }
+.output-detail__video { width: 100%; border-radius: 8px; background: #000; max-height: 340px; }
+.output-detail__preview-empty { min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border: 1px dashed var(--wt-border); border-radius: 8px; color: var(--wt-text-secondary); font-size: 13px; }
+.output-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; font-size: 13px; }
+.output-detail__grid > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.output-detail__grid strong { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
+.output-detail__label { color: var(--wt-text-tertiary); font-size: 12px; }
 .output-detail__hash { display: flex; gap: 8px; align-items: baseline; margin-top: 10px; font-size: 12px; }
 .output-detail__hash span:last-child { word-break: break-all; color: var(--wt-text-primary); }
 .output-detail__snapshot { margin: 0; padding: 12px; background: var(--wt-bg-secondary, #f5f6f8); border-radius: 6px; font-size: 12px; overflow: auto; max-height: 220px; }
+@media (max-width: 700px) { .output-detail__grid { grid-template-columns: 1fr; } }
 </style>

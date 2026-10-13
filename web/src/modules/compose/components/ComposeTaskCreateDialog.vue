@@ -2,10 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import { schemaFields } from '../schemaFields.js'
+import { feedback } from '../../../shared/ui/feedback/index.js'
+import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
+import FormError from '../../../shared/ui/feedback/FormError.vue'
+import MaterialCover from '../../materials/components/MaterialCover.vue'
 
-// CHG-20261013-082：从「我的素材」勾选或行内「加入合成」打开的批量创建对话框。
-// 职责只有三件：选一个可用策略、按模板 schema 渲染可覆盖参数（全部可选，留空即
-// 用策略里的值）、为每条素材生成幂等键。素材范围由调用方决定，这里不改选。
+// 素材范围由调用方决定；每条素材使用独立幂等键，参数留空时使用策略值。
 const props = defineProps({
   visible: { type: Boolean, default: false },
   materials: { type: Array, default: () => [] },
@@ -18,11 +20,10 @@ const templates = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
+const strategyError = ref('')
 const strategyId = ref(null)
 const overrides = ref({})
-// request_key 在对话框打开那一刻逐素材生成，并在对话框存续期间保持不变：
-// 保存的双击与网络重试复用同一批 key，服务端按 uq_compose_tasks_request_key
-// 幂等返回既有任务，不会造出第二批。关了再开才算一次新请求。
+// 对话框存续期间复用同一批 request_key，关闭后重新打开才生成新的一批。
 const requestKeys = ref({})
 
 const strategyOptions = computed(() => strategies.value
@@ -47,6 +48,7 @@ function generateKeys(materials) {
 watch(() => props.visible, (visible) => {
   if (!visible) return
   error.value = ''
+  strategyError.value = ''
   strategyId.value = null
   overrides.value = {}
   requestKeys.value = generateKeys(props.materials)
@@ -79,12 +81,13 @@ const overridePayload = computed(() => {
 })
 
 async function submit() {
+  if (saving.value || !props.materials.length) return
   if (!strategyId.value) {
-    error.value = '请选择合成策略'
+    strategyError.value = '请选择合成策略'
     return
   }
   saving.value = true
-  error.value = ''
+  strategyError.value = ''
   try {
     const body = {
       strategy_id: strategyId.value,
@@ -95,7 +98,7 @@ async function submit() {
     emit('created', result || { created: [], failed: [] })
     emit('update:visible', false)
   } catch (e) {
-    error.value = e?.message || '创建合成任务失败'
+    feedback.toast.error(e?.message || '创建合成任务失败')
   } finally {
     saving.value = false
   }
@@ -110,7 +113,7 @@ function close() {
   <t-dialog
     :visible="visible"
     header="创建合成任务"
-    width="640px"
+    width="760px"
     :confirm-btn="{ content: '创建合成任务', theme: 'primary', loading: saving }"
     :cancel-btn="{ content: '取消', class: 'wt-secondary-button', variant: 'outline' }"
     :close-on-overlay-click="false"
@@ -119,16 +122,27 @@ function close() {
   >
     <t-loading :loading="loading" :show-overlay="true">
       <div class="compose-create">
-        <t-alert v-if="error" theme="error" :message="error" style="margin-bottom: 12px" />
+        <FeedbackAlert v-if="error" theme="error" :message="error" class="compose-create__load-error" />
         <p v-if="materials.length === 0" class="compose-create__empty">没有选择素材，请回到列表勾选后重试。</p>
         <template v-else>
           <section class="compose-create__section">
-            <h4 class="compose-create__title">① 合成策略</h4>
-            <t-select v-model="strategyId" :options="strategyOptions" clearable placeholder="选择要使用的合成策略" />
+            <div class="compose-create__heading"><h4 class="compose-create__title"><span>1</span> 已选素材</h4><strong>{{ materials.length }} 条</strong></div>
+            <p class="compose-create__hint">每条素材独立生成一条合成任务。</p>
+            <ul class="compose-create__materials">
+              <li v-for="material in materials" :key="material.id">
+                <MaterialCover :url="material.cover_url" />
+                <span class="compose-create__material-text"><strong>{{ material.title || '未命名素材' }}</strong><small>素材 ID {{ material.id }}</small></span>
+              </li>
+            </ul>
+          </section>
+          <section class="compose-create__section">
+            <h4 class="compose-create__title"><span>2</span> 合成策略</h4>
+            <t-select v-model="strategyId" :options="strategyOptions" clearable placeholder="选择要使用的合成策略" :status="strategyError ? 'error' : undefined" aria-describedby="compose-create-strategy-error" @change="strategyError = ''" />
+            <FormError id="compose-create-strategy-error" :message="strategyError" />
             <p class="compose-create__hint">只有启用中的策略可选；参数留空即使用策略里保存的值。</p>
           </section>
           <section v-if="fields.length > 0" class="compose-create__section">
-            <h4 class="compose-create__title">② 覆盖参数（可选）</h4>
+            <h4 class="compose-create__title"><span>3</span> 覆盖参数（可选）</h4>
             <div class="compose-create__params">
               <label v-for="field in fields" :key="field.key" class="compose-create__field">
                 <span>{{ field.label }}</span>
@@ -144,15 +158,6 @@ function close() {
               </label>
             </div>
           </section>
-          <section class="compose-create__section">
-            <h4 class="compose-create__title">③ 所选素材（{{ materials.length }}）</h4>
-            <ul class="compose-create__materials">
-              <li v-for="material in materials" :key="material.id">
-                <span class="compose-create__material-id">{{ material.id }}</span>
-                <span class="compose-create__material-title">{{ material.title || '未命名素材' }}</span>
-              </li>
-            </ul>
-          </section>
         </template>
       </div>
     </t-loading>
@@ -161,13 +166,18 @@ function close() {
 
 <style scoped>
 .compose-create__empty { color: var(--wt-text-secondary); }
-.compose-create__section { margin-bottom: 16px; }
-.compose-create__title { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--wt-text-primary); }
+.compose-create__load-error { margin-bottom: 12px; }
+.compose-create__section { margin-bottom: 16px; padding: 16px; border: 1px solid var(--wt-border); border-radius: 10px; }
+.compose-create__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.compose-create__heading strong { color: var(--wt-text-secondary); font-size: 12px; }
+.compose-create__title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--wt-text-primary); }
+.compose-create__title span { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; background: var(--wt-primary); color: #fff; font-size: 12px; }
 .compose-create__hint { margin: 8px 0 0; font-size: 12px; color: var(--wt-text-tertiary); }
 .compose-create__params { display: flex; flex-wrap: wrap; gap: 12px; }
 .compose-create__field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; }
-.compose-create__materials { margin: 0; padding: 0; list-style: none; max-height: 180px; overflow: auto; }
-.compose-create__materials li { display: flex; gap: 10px; padding: 4px 0; font-size: 13px; }
-.compose-create__material-id { color: var(--wt-text-tertiary); min-width: 48px; }
-.compose-create__material-title { color: var(--wt-text-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.compose-create__materials { margin: 12px 0 0; padding: 0; list-style: none; max-height: 176px; overflow: auto; }
+.compose-create__materials li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--wt-border); font-size: 13px; }
+.compose-create__material-text { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.compose-create__material-text strong { color: var(--wt-text-primary); font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.compose-create__material-text small { color: var(--wt-text-tertiary); font-size: 12px; }
 </style>
