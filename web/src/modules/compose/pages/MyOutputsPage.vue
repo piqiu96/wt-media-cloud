@@ -11,6 +11,8 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { formatBytes } from '../../../shared/utils/units.js'
 import { usageStatusLabel } from '../../materials/labels.js'
+import { useDownloadCentre } from '../../transfer/downloadCentre.js'
+import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 
 // CHG-20261013-084：我的成片页。列表/详情/预览/归档/去发布入口，发布状态筛选走服务端。
 // 第五章只有 pending_publish 与 archived 真实可达（published 属第六章）——词表一次给全，
@@ -18,6 +20,8 @@ import { usageStatusLabel } from '../../materials/labels.js'
 // （PRD §5.9.12：下载、预览和归档均不等于发布）。
 const client = createComposeClient()
 const router = useRouter()
+const downloadCentre = useDownloadCentre()
+const downloadingID = ref(null)
 
 const rows = ref([])
 const strategies = ref([])
@@ -40,7 +44,7 @@ const columns = [
   { colKey: 'size', title: '大小', width: 100 },
   { colKey: 'publish_status', title: '状态', width: 100 },
   { colKey: 'created_at', title: '生成时间', width: 150 },
-  { colKey: 'op', title: '操作', width: 190, fixed: 'right' },
+  { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
 
 // 横向滚动宽度由列宽推导，不写死。
@@ -158,6 +162,20 @@ function publish(row) {
   })
 }
 
+async function download(row) {
+  if (downloadingID.value !== null) return
+  downloadingID.value = row.id
+  try {
+    await client.createOutputDownload(row.id)
+    feedback.toast.info('下载任务已提交，可在下载中心查看进度')
+    downloadCentre.open()
+  } catch (e) {
+    feedback.toast.error(createDownloadFailureMessage(e))
+  } finally {
+    downloadingID.value = null
+  }
+}
+
 onMounted(() => {
   load()
   loadStrategies()
@@ -168,7 +186,7 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page my-outputs-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="我的成片" description="合成完成的成片，在这里预览、追溯来源并归档或去发布">
+      <ResourcePageHeader title="我的成片" description="合成完成的成片，在这里下载、预览、追溯来源并归档或去发布">
         <template #actions>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
@@ -190,9 +208,10 @@ onMounted(() => {
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
+                <t-button size="small" theme="primary" :loading="downloadingID === row.id" @click="download(row)">下载</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
                 <template v-if="row.publish_status === 'pending_publish'">
-                  <t-button size="small" theme="primary" @click="publish(row)">去发布</t-button>
+                  <t-button size="small" class="wt-secondary-button" variant="outline" @click="publish(row)">去发布</t-button>
                   <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="archive(row)">归档</t-button>
                 </template>
               </t-space>
@@ -204,9 +223,12 @@ onMounted(() => {
 
       <t-drawer :close-btn="true" v-model:visible="detailVisible" header="成片详情" size="560px">
         <template #footer>
-          <t-space v-if="detail && detail.output.publish_status === 'pending_publish'" class="wt-resource-actions">
-            <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="archive(detail.output)">归档</t-button>
-            <t-button theme="primary" @click="publish(detail.output)">去发布</t-button>
+          <t-space v-if="detail" class="wt-resource-actions">
+            <t-button theme="primary" :loading="downloadingID === detail.output.id" @click="download(detail.output)">下载</t-button>
+            <template v-if="detail.output.publish_status === 'pending_publish'">
+              <t-button class="wt-secondary-button" variant="outline" @click="publish(detail.output)">去发布</t-button>
+              <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="archive(detail.output)">归档</t-button>
+            </template>
           </t-space>
         </template>
         <t-loading :loading="!detail" :show-overlay="true">

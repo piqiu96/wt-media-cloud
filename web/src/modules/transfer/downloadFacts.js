@@ -14,6 +14,10 @@ export const TERMINAL_STATUSES = ['success', 'failed', 'cancelled']
  */
 export const DOWNLOADABLE_ASSET_TYPES = ['material', 'composite_output']
 
+export function downloadAssetKey(task) {
+  return task?.asset_type && task?.asset_id ? `${task.asset_type}:${task.asset_id}` : `task:${task?.id}`
+}
+
 export function isTerminal(task) {
   return TERMINAL_STATUSES.includes(task?.status)
 }

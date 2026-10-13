@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetake, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isReclaimableAfterUnbind, isSuspendedOnDevice, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetake, downloadAssetKey, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isReclaimableAfterUnbind, isSuspendedOnDevice, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -16,6 +16,10 @@ const task = (over = {}) => ({
 })
 
 describe('transfer terminal states', () => {
+  it('keeps material and output rows separate when their numeric IDs match', () => {
+    expect(downloadAssetKey(task({ asset_type: 'material', asset_id: 7 }))).not.toBe(downloadAssetKey(task({ asset_type: 'composite_output', asset_id: 7 })))
+    expect(downloadAssetKey(task({ asset_type: 'material', asset_id: 7 }))).toBe(downloadAssetKey(task({ asset_type: 'material', asset_id: 7, id: 't-2' })))
+  })
   it('knows exactly which statuses end a task', () => {
     expect(['success', 'failed', 'cancelled'].every((status) => isTerminal(task({ status })))).toBe(true)
     expect(['pending', 'running'].some((status) => isTerminal(task({ status })))).toBe(false)

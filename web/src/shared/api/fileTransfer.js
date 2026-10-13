@@ -16,5 +16,6 @@ export function createFileTransferClient({ base = '/api/v1', fetch = globalThis.
   return {
     listTasks(params) { return api.get('/file-transfer-tasks', params) },
     cancelTask(taskId) { return api.post(`/file-transfer-tasks/${taskId}/cancel`, {}) },
+    hideTask(taskId) { return api.post(`/file-transfer-tasks/${taskId}/hide`, {}) },
   }
 }

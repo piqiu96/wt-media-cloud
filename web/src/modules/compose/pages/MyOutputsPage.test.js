@@ -40,4 +40,11 @@ describe('my outputs page', () => {
     expect(source).not.toContain('publishComposeOutput')
     expect(source).not.toContain("publish_status = 'published'")
   })
+
+  it('starts the first output download and opens the shared download centre', () => {
+	  expect(source).toContain('await client.createOutputDownload(row.id)')
+	  expect(source).toContain('downloadCentre.open()')
+	  expect(source).toContain('feedback.toast.info(')
+	  expect(source).toContain('@click="download(row)"')
+	})
 })

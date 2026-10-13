@@ -3,6 +3,7 @@ import { feedback } from '../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { DialogPlugin } from 'tdesign-vue-next'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 // 「重新下载」走的是**发起下载那个入口**，不是 transfer 自己的路由 —— 素材行走
 // `POST /materials/{id}/downloads`（挂在素材的 client 上，`fileTransfer.js` 存在的
@@ -17,7 +18,7 @@ import { isDesktop } from '../../utils.js'
 import { invoke } from '@tauri-apps/api/core'
 import { isDesktopRuntime, openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
-import { assetFallbackTitle, hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
+import { assetFallbackTitle, downloadAssetKey, hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
 import { transferRows } from './transferRows.js'
 
@@ -29,6 +30,7 @@ const { visible, close } = useDownloadCentre()
 const tasks = ref([])
 const loading = ref(false)
 const error = ref('')
+const clearingID = ref(null)
 // 本机记忆：我按过取消的那几条。冻结的任务体没有 cancel_requested_at，取消一个
 // running 任务后它仍然报 running（终态只能由执行器写），所以「正在取消」推不出来，
 // 只能记。刷新出终态后这条记录就不再有意义，由 taskState 的终态分支盖住。
@@ -58,8 +60,8 @@ const activeTab = ref('active')
 // 「等待云端准备」，所以在 `transferRows` 之后才滤 —— 在它之前滤会把那条徽标退化成
 // 「排队中」。DB 两行不动，这里只是展示层合并。
 //
-// **每个素材一行**（走查修正）：同一素材的失败/成功/取消各是一次执行，记录都还在库里；
-// 这张表是传输观察面，不是执行流水账，所以按素材收敛到**最新那一条**任务。服务端按
+// 每类资产每个 ID 一行：同一资产的失败/成功/取消各是一次执行，记录都还在库里；
+// 这张表是传输观察面，所以收敛到最新任务。服务端按
 // `created_at DESC, id DESC` 返回，首见即最新 —— 与「我的素材」的 `download_status` 从
 // 最新一条 user_download 派生是同一个口径。
 const rows = computed(() => {
@@ -70,7 +72,7 @@ const rows = computed(() => {
     localDeviceId: localDeviceId.value,
   }).filter((row) => row.task.purpose === 'user_download')
     .filter((row) => {
-      const key = row.task.asset_id || `task:${row.task.id}`
+      const key = downloadAssetKey(row.task)
       if (seen.has(key)) return false
       seen.add(key)
       return true
@@ -105,7 +107,7 @@ const historyColumns = [
   { colKey: 'size', title: '大小', width: 90 },
   { colKey: 'finished_at', title: '完成时间', width: 140 },
   { colKey: 'status', title: '状态', width: 90 },
-  { colKey: 'op', title: '操作', width: 180, fixed: 'right' },
+  { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
 
 // 失败行的「详情」：打开这条素材的详情抽屉。传输动作（重新下载）在下载中心里，详情只
@@ -300,6 +302,28 @@ async function open(task) {
   }
 }
 
+function clearRecord(task) {
+  const dialog = DialogPlugin.confirm({
+    header: '清理显示记录',
+    body: '清理后，这项资产已结束的下载记录将从下载中心隐藏。云端资产、本地文件和任务事实不会删除；新下载任务仍会显示。',
+    confirmBtn: { content: '清理记录', theme: 'danger' },
+    onConfirm: async () => {
+      dialog.destroy()
+      if (clearingID.value !== null) return
+      clearingID.value = task.id
+      try {
+        await client.hideTask(task.id)
+        await load()
+        feedback.toast.success('已清理显示记录')
+      } catch (e) {
+        feedback.toast.error(e?.message || '清理显示记录失败')
+      } finally {
+        clearingID.value = null
+      }
+    },
+  })
+}
+
 async function openDetail(row) {
   // 成片行没有可打开的素材详情（CHG-20261013-085 裁定）：把成片 id 塞给
   // MaterialDetailDrawer 去查素材表只会 404 —— 详情入口指向「我的成片」页。
@@ -397,6 +421,7 @@ async function openDetail(row) {
               <div class="transfer-item__actions">
                 <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" :loading="clearingID === row.task.id" @click="clearRecord(row.task)">清理记录</t-button>
               </div>
             </div>
           </li>
@@ -419,6 +444,7 @@ async function openDetail(row) {
                    的入口，重取会为当前设备建一条新任务。其余已取消/失败的行照旧「重新下载」。 -->
               <t-button v-if="row.canRetake" size="small" theme="primary" @click="retake(row.task)">重取</t-button>
               <t-button v-else-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
+              <t-button size="small" class="wt-secondary-button" variant="outline" :loading="clearingID === row.task.id" @click="clearRecord(row.task)">清理记录</t-button>
             </t-space>
           </template>
         </t-table>

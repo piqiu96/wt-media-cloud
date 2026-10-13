@@ -17,6 +17,12 @@ function sliceBetween(text, start, end) {
  * 一个算对了却没人在模板里读的字段，在界面上和不存在的区别是零。
  */
 describe('download centre drawer', () => {
+	 it('hides terminal display records through the session API without deleting files', () => {
+	   expect(source).toContain('await client.hideTask(task.id)')
+	   expect(source).toContain('清理记录')
+	   expect(source).toContain('DialogPlugin.confirm')
+	   expect(source).toContain('downloadAssetKey(row.task)')
+	 })
   it('shows the re-download button under the fact the row computed', () => {
     expect(source).toContain('v-if="row.canRedownload"')
     expect(source).toContain('@click="redownload(row.task)"')
