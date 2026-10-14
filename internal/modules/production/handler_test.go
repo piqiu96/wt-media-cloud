@@ -71,6 +71,17 @@ func TestComposeStrategyRoutesRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestUncertainReviewRoutesRequireAuthentication(t *testing.T) {
+	engine := server.New()
+	RegisterRoutes(engine)
+	for _, method := range []string{consts.MethodGet, consts.MethodPost} {
+		response := ut.PerformRequest(engine.Engine, method, "/api/v1/compose-tasks/42/uncertain-review", nil)
+		if response.Result().StatusCode() != consts.StatusUnauthorized {
+			t.Fatalf("%s uncertain-review status = %d, want 401", method, response.Result().StatusCode())
+		}
+	}
+}
+
 // The two "not found" outcomes in this module are different answers to the user,
 // and this mapping is the only place that decides which errcode carries them.
 //

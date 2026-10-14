@@ -483,3 +483,36 @@ func TestUncertainReviewContractRequiresExplicitHumanVerification(t *testing.T) 
 		t.Fatalf("verification fields = %v, want %v", got, want)
 	}
 }
+
+func TestUncertainReviewBodiesMatchTheCloudContract(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]yaml.Node `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		name  string
+		value any
+	}{
+		{"ResolveComposeUncertainInput", productionservice.ResolveComposeUncertainInput{}},
+		{"ComposeUncertainReview", model.ComposeUncertainReview{}},
+		{"ComposeUncertainResolution", productionservice.ComposeUncertainResolution{}},
+	} {
+		schema, ok := parsed.Components.Schemas[item.name]
+		if !ok || len(schema.Properties) == 0 {
+			t.Fatalf("%s schema missing", item.name)
+		}
+		if got, want := marshalledKeys(t, item.value), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s body keys = %v, contract = %v", item.name, got, want)
+		}
+	}
+}

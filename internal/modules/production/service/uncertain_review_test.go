@@ -47,6 +47,9 @@ func TestUncertainReviewRequiresAdminAndExplicitEvidence(t *testing.T) {
 	if _, err := svc.Resolve(senior, 77, input); !errors.Is(err, ErrComposeTaskForbidden) {
 		t.Fatalf("senior review: %v", err)
 	}
+	if _, err := svc.List(senior, 77); !errors.Is(err, ErrComposeTaskForbidden) {
+		t.Fatalf("senior review history: %v", err)
+	}
 	for _, invalid := range []ResolveComposeUncertainInput{
 		{NoOutputCommitted: true, Evidence: input.Evidence},
 		{OldExecutionStopped: true, Evidence: input.Evidence},
@@ -66,5 +69,9 @@ func TestUncertainReviewRequiresAdminAndExplicitEvidence(t *testing.T) {
 	}
 	if _, err := svc.Resolve(admin, 77, input); !errors.Is(err, ErrComposeTaskNotRetryable) || store.called != 2 {
 		t.Fatalf("duplicate review: called=%d err=%v", store.called, err)
+	}
+	reviews, err := svc.List(admin, 77)
+	if err != nil || len(reviews) != 1 || reviews[0].Evidence != input.Evidence {
+		t.Fatalf("admin history=%+v err=%v", reviews, err)
 	}
 }

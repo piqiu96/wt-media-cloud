@@ -87,4 +87,14 @@ describe('compose tasks page', () => {
     expect(source).toContain('成片 #{{ detail.composite_output_id }}')
     expect(source).toContain("router.push({ name: 'FinishedMedia' })")
   })
+
+  it('shows uncertain execution as pending administrator review and records explicit verification', () => {
+    expect(source).toContain("detail.error_code === 'execution_uncertain'")
+    expect(source).toContain('旧 FFmpeg 已停止')
+    expect(source).toContain('没有已提交成片')
+    expect(source).toContain('reviewReady(')
+    expect(source).toContain('client.resolveComposeUncertain(')
+    expect(source).toContain('client.listComposeUncertainReviews(')
+    expect(source).toContain('diagnosticSummary(attempt)')
+  })
 })

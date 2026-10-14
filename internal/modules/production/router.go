@@ -14,6 +14,8 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/compose-outputs/:output_id/downloads", CreateOutputDownload)
 	h.GET("/api/v1/compose-tasks/:task_id", GetComposeTask)
 	h.GET("/api/v1/compose-tasks/:task_id/attempts", ListComposeTaskAttempts)
+	h.GET("/api/v1/compose-tasks/:task_id/uncertain-review", ListComposeUncertainReviews)
+	h.POST("/api/v1/compose-tasks/:task_id/uncertain-review", ResolveComposeUncertain)
 	h.POST("/api/v1/compose-tasks/:task_id/retry", RetryComposeTask)
 	h.POST("/api/v1/compose-tasks/:task_id/cancel", CancelComposeTask)
 	h.GET("/api/v1/compose-strategies", ListComposeStrategies)

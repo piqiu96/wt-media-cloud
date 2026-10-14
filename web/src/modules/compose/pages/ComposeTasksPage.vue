@@ -12,6 +12,7 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createdRangeParams } from '../createdRange.js'
+import { diagnosticSummary, reviewReady, safeComposeError } from '../uncertainReview.js'
 
 const client = createComposeClient()
 const sessionClient = createSessionClient()
@@ -120,6 +121,24 @@ const attemptsError = ref('')
 // 藏按钮只是少一次必失败请求。
 const currentUser = ref(null)
 const canRetry = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))
+const canReviewUncertain = computed(() => currentUser.value?.role === 'admin')
+const reviews = ref([])
+const reviewsError = ref('')
+const reviewBusy = ref(false)
+const reviewInput = ref({ oldExecutionStopped: false, noOutputCommitted: false, evidence: '' })
+const reviewValid = computed(() => reviewReady(reviewInput.value))
+
+async function loadReviews(id) {
+  reviews.value = []
+  reviewsError.value = ''
+  if (!canReviewUncertain.value) return
+  try {
+    const data = await client.listComposeUncertainReviews(id)
+    reviews.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    reviewsError.value = e?.message || '核对记录读取失败'
+  }
+}
 
 // 重试分类（change.md 决定 2，服务端 error_code IN 同一张表）：storage_error/task_timeout
 // 环境类可直接重试；execution_failed 属人工判断，按钮照给，是否重试由运营看错误信息定；
@@ -139,6 +158,9 @@ async function openDetail(row) {
   detail.value = null
   attempts.value = []
   attemptsError.value = ''
+  reviews.value = []
+  reviewsError.value = ''
+  reviewInput.value = { oldExecutionStopped: false, noOutputCommitted: false, evidence: '' }
   try {
     // 按 id 重取：详情里的快照必须是库里存的那份，不是列表加载那一刻的副本。
     // 执行记录一起取：详情要按「任务状态 → 快照 → 执行记录 → 成片」组织，逐次记录
@@ -147,6 +169,7 @@ async function openDetail(row) {
     attempts.value = []
     attemptsError.value = ''
     attempts.value = await client.listComposeTaskAttempts(row.id)
+    await loadReviews(row.id)
   } catch (e) {
     // 任务读不到才关弹窗；执行记录读不到走 attemptsError 就地提示，不掀桌子。
     if (!detail.value) {
@@ -165,8 +188,30 @@ async function reloadDetail(id) {
     detail.value = await client.getComposeTask(id)
     attemptsError.value = ''
     attempts.value = await client.listComposeTaskAttempts(id)
+    await loadReviews(id)
   } catch (e) {
     attemptsError.value = e?.message || '执行记录读取失败'
+  }
+}
+
+async function resolveUncertain() {
+  if (!detail.value || !canReviewUncertain.value || !reviewValid.value || reviewBusy.value) return
+  const id = detail.value.id
+  reviewBusy.value = true
+  try {
+    await client.resolveComposeUncertain(id, {
+      old_execution_stopped: reviewInput.value.oldExecutionStopped,
+      no_output_committed: reviewInput.value.noOutputCommitted,
+      evidence: reviewInput.value.evidence.trim(),
+    })
+    feedback.toast.success('核对依据已记录，任务已重新排队')
+    reviewInput.value = { oldExecutionStopped: false, noOutputCommitted: false, evidence: '' }
+  } catch (e) {
+    feedback.toast.error(e?.message || '核对处置失败，请刷新任务状态')
+  } finally {
+    await load()
+    await reloadDetail(id)
+    reviewBusy.value = false
   }
 }
 
@@ -216,7 +261,10 @@ onMounted(() => {
   load()
   loadStrategies()
   // 只为藏/显重试按钮；读失败不拦页面，角色判定由服务端兜底。
-  sessionClient.me().then((me) => { currentUser.value = me }).catch(() => {})
+  sessionClient.me().then((me) => {
+    currentUser.value = me
+    if (detail.value) loadReviews(detail.value.id)
+  }).catch(() => {})
 })
 </script>
 
@@ -304,7 +352,7 @@ onMounted(() => {
                 </div>
                 <div v-if="detail.error_code || detail.error_message" class="compose-detail__section">
                   <h4>失败原因</h4>
-                  <FeedbackAlert theme="error" :message="detail.error_message || detail.error_code" />
+                  <FeedbackAlert theme="error" :message="detail.error_code === 'execution_uncertain' ? '上次执行结果不明确，等待管理员核对。系统尚未确认旧进程已经停止。' : safeComposeError(detail.error_code)" />
                   <div v-if="detail.status === 'failed'" class="compose-detail__retry">
                     <template v-if="canRetry && retryableCodes.has(detail.error_code)">
                       <t-button theme="primary" @click="retry(detail)">重试</t-button>
@@ -312,6 +360,18 @@ onMounted(() => {
                     </template>
                     <span v-else-if="newTaskCodes.has(detail.error_code)" class="compose-detail__hint">该失败不能重试，请修正后新建任务。</span>
                   </div>
+                </div>
+                <div v-if="detail.status === 'failed' && detail.error_code === 'execution_uncertain'" class="compose-detail__section compose-detail__review">
+                  <h4>待管理员核对</h4>
+                  <p class="compose-detail__hint">租约过期不代表进程已停止。请在原 Worker 节点和成片记录中人工核查；无法确认时保持当前失败状态。</p>
+                  <template v-if="canReviewUncertain">
+                    <t-checkbox v-model="reviewInput.oldExecutionStopped">我已核实旧 FFmpeg 已停止</t-checkbox>
+                    <t-checkbox v-model="reviewInput.noOutputCommitted">我已核实没有已提交成片</t-checkbox>
+                    <t-textarea v-model="reviewInput.evidence" :maxlength="2000" placeholder="记录核对依据（至少 20 字，不要填写凭据或签名链接）" />
+                    <t-button theme="primary" :disabled="!reviewValid || reviewBusy" :loading="reviewBusy" @click="resolveUncertain">记录核对并人工重试</t-button>
+                    <p class="compose-detail__hint">此操作记录管理员声明并重新排队；系统无法自动证明旧进程已停止。</p>
+                  </template>
+                  <p v-else class="compose-detail__hint">请联系管理员核对，当前任务不会自动重试。</p>
                 </div>
               </t-tab-panel>
               <t-tab-panel value="attempts" label="执行记录">
@@ -325,8 +385,17 @@ onMounted(() => {
                         <ResourceStatusBadge :tone="outcomeTones[attempt.outcome] || 'neutral'" :label="outcomeLabels[attempt.outcome] || '状态未知'" />
                       </div>
                       <div class="compose-detail__attempt-meta">{{ formatDateTime(attempt.started_at) }} — {{ formatDateTime(attempt.finished_at) }}<span v-if="attempt.stage"> · {{ stageText(attempt) }}</span></div>
-                      <p v-if="attempt.error_code || attempt.error_message" class="compose-detail__attempt-err">{{ attempt.error_message || attempt.error_code }}</p>
+                      <p class="compose-detail__attempt-meta">诊断摘要：{{ diagnosticSummary(attempt) }}</p>
+                      <p v-if="attempt.error_code || attempt.error_message" class="compose-detail__attempt-err">{{ attempt.error_code === 'execution_uncertain' ? '执行结果不明确，需管理员人工核对' : safeComposeError(attempt.error_code) }}</p>
                     </div>
+                    <template v-if="canReviewUncertain">
+                      <FeedbackAlert v-if="reviewsError" theme="error" :message="reviewsError" />
+                      <div v-for="review in reviews" :key="review.id" class="compose-detail__attempt">
+                        <strong>第 {{ review.attempt }} 次结果不明确 · 管理员核对</strong>
+                        <p class="compose-detail__attempt-meta">管理员 {{ review.actor_user_id }} · {{ formatDateTime(review.created_at) }}</p>
+                        <p class="compose-detail__review-evidence">{{ review.evidence }}</p>
+                      </div>
+                    </template>
                   </template>
                 </div>
               </t-tab-panel>
@@ -392,6 +461,9 @@ onMounted(() => {
 .compose-detail__attempt-head strong { color: var(--wt-text-primary); font-size: 13px; }
 .compose-detail__attempt-meta { margin-top: 8px; color: var(--wt-text-secondary); font-size: 12px; }
 .compose-detail__attempt-err { margin: 8px 0 0; color: var(--wt-status-error); font-size: 12px; }
+.compose-detail__review { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.compose-detail__review :deep(.t-textarea) { width: 100%; }
+.compose-detail__review-evidence { margin: 8px 0 0; color: var(--wt-text-primary); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .compose-detail__output { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; font-size: 14px; }
 .compose-detail__output strong { color: var(--wt-text-primary); }
 @media (max-width: 760px) { .compose-detail__grid { grid-template-columns: 1fr; } }

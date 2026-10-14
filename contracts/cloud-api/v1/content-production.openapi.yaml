@@ -252,7 +252,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/ResolveComposeUncertainInput'}
       responses:
-        '200': {description: ComposeUncertainResolution with the pending task and persisted review.}
+        '200': {description: ComposeUncertainResolution with the current task projection and persisted review; a Worker may already have claimed the requeued task.}
         '400': {description: Missing verification declarations or invalid evidence note (named compose_task_invalid).}
         '403': {description: Actor is not an admin (named compose_task_forbidden).}
         '404': {description: Task absent or outside the actor's scope.}
@@ -674,7 +674,7 @@ components:
         id: {type: integer, format: int64}
         compose_task_id: {type: integer, format: int64}
         attempt: {type: integer, minimum: 1, description: Matches the task's attempt_count for that run.}
-        source: {type: string, enum: [auto, manual], description: auto — the worker's own transient retry; manual — a senior operator's retry.}
+        source: {type: string, enum: [auto, manual], description: auto — the worker's own transient retry; manual — an authorized human retry.}
         started_at: {type: string, format: date-time, nullable: true, description: Null until the worker claims the attempt.}
         finished_at: {type: string, format: date-time, nullable: true, description: Null while the attempt is pending or running.}
         outcome: {type: string, enum: [pending, running, success, failed, cancelled]}

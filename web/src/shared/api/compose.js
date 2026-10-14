@@ -30,6 +30,8 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     // failed 终态；非重试错误码由服务端 409 compose_task_not_retryable 拒绝。
     listComposeTaskAttempts(id) { return api.get(`/compose-tasks/${id}/attempts`) },
     retryComposeTask(id) { return api.post(`/compose-tasks/${id}/retry`) },
+    listComposeUncertainReviews(id) { return api.get(`/compose-tasks/${id}/uncertain-review`) },
+    resolveComposeUncertain(id, input) { return api.post(`/compose-tasks/${id}/uncertain-review`, input) },
     // 我的成片（CHG-20261013-084）：publish_status 筛选由服务端读 query；video-url
     // 是短时预签名，每次预览现取，客户端不做缓存。
     listComposeOutputs(params) { return api.get('/compose-outputs', params) },

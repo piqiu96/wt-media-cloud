@@ -188,6 +188,44 @@ func ListComposeTaskAttempts(_ context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, items)
 }
 
+func ListComposeUncertainReviews(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := taskID(c)
+	if !ok {
+		return
+	}
+	items, err := productionservice.ListComposeUncertainReviews(current, id)
+	if err != nil {
+		writeComposeTaskError(c, err)
+		return
+	}
+	api.Success(c, items)
+}
+
+func ResolveComposeUncertain(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := taskID(c)
+	if !ok {
+		return
+	}
+	var input productionservice.ResolveComposeUncertainInput
+	if !decodeTaskBody(c, &input) {
+		return
+	}
+	result, err := productionservice.ResolveComposeUncertain(current, id, input)
+	if err != nil {
+		writeComposeTaskError(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
 func RetryComposeTask(_ context.Context, c *hertzapp.RequestContext) {
 	current, ok := actor(c)
 	if !ok {
