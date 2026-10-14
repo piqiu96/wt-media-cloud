@@ -21,9 +21,9 @@ import (
 // store, and it never classifies an attempt itself — it only acts on the
 // outcome the service reports.
 
-// composeErrLeaseExpired is the error_code the recovery scan writes: the
-// previous worker is gone, so whatever it was doing did not finish here.
-const composeErrLeaseExpired = "lease_expired"
+// An expired lease does not prove the old FFmpeg process has stopped. The
+// task is held for explicit disposition rather than claimed a second time.
+const composeErrExecutionUncertain = "execution_uncertain"
 
 // composeErrTaskTimeoutCode is the code for a wait or run killed by the
 // per-task timeout; the attempt itself classifies FFmpeg deaths, but a wait
@@ -239,8 +239,9 @@ func watchComposeHeartbeat(ctx context.Context, deps ComposeWorkerDeps, settings
 		}
 		ok, err := deps.Tasks.RenewComposeLease(taskID, settings.NodeID, settings.Lease)
 		if err != nil {
-			deps.Log("compose worker lease renewal for task %d failed: %v", taskID, err)
-			continue
+			deps.Log("compose worker lease renewal for task %d failed; stopping the attempt: %v", taskID, err)
+			stopAttempt()
+			return
 		}
 		if !ok {
 			deps.Log("compose worker lost task %d to another owner; stopping the attempt", taskID)
@@ -306,11 +307,8 @@ func confirmIfCancelSeen(deps ComposeWorkerDeps, settings ComposeWorkerSettings,
 	}
 }
 
-// recoverExpiredComposeLeases reaps every lapsed running row: within budget it
-// requeues, past budget it terminalizes. The compose.Lock guarantees a single
-// worker per host, so a lapsed lease means the owning process is gone — there
-// is no live FFmpeg the scan could be racing (spec §5.3), which is what makes
-// an unconditional requeue honest here.
+// recoverExpiredComposeLeases quarantines lapsed running rows. A lease lapse
+// does not prove the old execution stopped, especially across worker hosts.
 func recoverExpiredComposeLeases(tasks composeWorkerTasks, log func(string, ...any)) error {
 	expired, err := tasks.FindExpiredComposeLeases()
 	if err != nil {
@@ -321,15 +319,8 @@ func recoverExpiredComposeLeases(tasks composeWorkerTasks, log func(string, ...a
 		if task.ClaimedNodeID != nil {
 			node = *task.ClaimedNodeID
 		}
-		if task.AttemptCount >= task.MaxAttempts {
-			message := fmt.Sprintf("worker lease expired; attempts exhausted after %d", task.AttemptCount)
-			if ok, err := tasks.FailExpiredComposeLease(task.ID, node, composeErrLeaseExpired, message); err != nil || !ok {
-				log("compose worker could not fail expired task %d: ok=%v err=%v", task.ID, ok, err)
-			}
-			continue
-		}
-		if ok, err := tasks.RequeueExpiredComposeLease(task.ID, node, composeErrLeaseExpired, "worker lease expired; requeued for retry"); err != nil || !ok {
-			log("compose worker could not requeue expired task %d: ok=%v err=%v", task.ID, ok, err)
+		if ok, err := tasks.FailExpiredComposeLease(task.ID, node, composeErrExecutionUncertain, "worker lease expired; previous execution must be checked before retry"); err != nil || !ok {
+			log("compose worker could not quarantine expired task %d: ok=%v err=%v", task.ID, ok, err)
 		}
 	}
 	return nil

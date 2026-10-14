@@ -138,6 +138,9 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return transientFailure(deps, task, nodeID, composeErrTaskTimeout, err.Error())
 		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return ComposeAttemptLeaseLost
+		}
 		return failTerminal(deps.Tasks, task.ID, nodeID, composeErrExecutionFailed, err.Error())
 	}
 	if cancelRequested(deps.Tasks, task.ID) {

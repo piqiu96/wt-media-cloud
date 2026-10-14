@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ type workerTasksFake struct {
 	claims         []model.ComposeTask
 	claimCalls     int
 	renewLost      bool
+	renewError     bool
 	renewed        []int64
 	confirmed      []int64
 	released       []string
@@ -49,7 +51,45 @@ func (f *workerTasksFake) RenewComposeLease(taskID, _ int64, _ time.Duration) (b
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.renewed = append(f.renewed, taskID)
+	if f.renewError {
+		return false, errors.New("database unavailable")
+	}
 	return !f.renewLost, nil
+}
+
+func TestExpiredLeaseDoesNotStartAnUnconfirmedSecondExecution(t *testing.T) {
+	oldNode := int64(9)
+	fake := &workerTasksFake{expired: []model.ComposeTask{{ID: 77, ClaimedNodeID: &oldNode, AttemptCount: 1, MaxAttempts: 3}}}
+	if err := recoverExpiredComposeLeases(fake, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.requeuedIDs(); len(got) != 0 {
+		t.Fatalf("unconfirmed old execution was requeued: %v", got)
+	}
+	if got := fake.failedIDs(); len(got) != 1 || got[0] != 77 {
+		t.Fatalf("expired lease must be quarantined: %v", got)
+	}
+}
+
+func TestHeartbeatDatabaseErrorStopsTheAttempt(t *testing.T) {
+	fake := &workerTasksFake{claims: []model.ComposeTask{claimedTask(77)}, renewError: true}
+	spy := &attemptSpy{outcomes: []productionservice.ComposeAttemptOutcome{productionservice.ComposeAttemptLeaseLost}, blocks: make(chan struct{})}
+	workspace, err := compose.NewWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel, done := startWorker(t, ComposeWorkerDeps{Tasks: fake, Workspace: workspace, Attempt: spy.attempt}, workerSettings())
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for spy.returnedCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	stoppedBeforeShutdown := spy.returnedCount() == 1
+	if err := stopWorker(cancel, done); err != nil {
+		t.Fatal(err)
+	}
+	if !stoppedBeforeShutdown {
+		t.Fatal("attempt kept running after lease renewal became unavailable")
+	}
 }
 
 func (f *workerTasksFake) ConfirmComposeCancel(taskID, _ int64) (bool, error) {
@@ -499,15 +539,15 @@ func TestComposeWorkerRecoversExpiredLeasesAtStartup(t *testing.T) {
 	deps := ComposeWorkerDeps{Tasks: fake, Workspace: workspace, Attempt: (&attemptSpy{}).attempt}
 	cancel, done := startWorker(t, deps, workerSettings())
 
-	waitFor(t, func() bool { return len(fake.requeuedIDs())+len(fake.failedIDs()) == 2 }, "the recovery scan to reap both rows")
+	waitFor(t, func() bool { return len(fake.failedIDs()) == 2 }, "the recovery scan to quarantine both rows")
 	if err := stopWorker(cancel, done); err != nil {
 		t.Fatalf("RunComposeWorker: %v", err)
 	}
-	if requeued := fake.requeuedIDs(); len(requeued) != 1 || requeued[0] != 80 {
-		t.Fatalf("requeued=%v, want the in-budget row requeued", requeued)
+	if requeued := fake.requeuedIDs(); len(requeued) != 0 {
+		t.Fatalf("expired rows cannot be requeued without stop proof: %v", requeued)
 	}
-	if failed := fake.failedIDs(); len(failed) != 1 || failed[0] != 81 {
-		t.Fatalf("failed=%v, want the exhausted row terminalized", failed)
+	if failed := fake.failedIDs(); len(failed) != 2 || failed[0] != 80 || failed[1] != 81 {
+		t.Fatalf("failed=%v, want both rows quarantined", failed)
 	}
 }
 
