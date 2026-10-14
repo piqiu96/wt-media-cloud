@@ -47,7 +47,7 @@ func (f *workerTasksFake) ClaimNextComposeTask(int64, time.Duration) (model.Comp
 	return item, true, nil
 }
 
-func (f *workerTasksFake) RenewComposeLease(taskID, _ int64, _ time.Duration) (bool, error) {
+func (f *workerTasksFake) RenewComposeLease(taskID, _ int64, _ int, _ time.Duration) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.renewed = append(f.renewed, taskID)
@@ -92,21 +92,21 @@ func TestHeartbeatDatabaseErrorStopsTheAttempt(t *testing.T) {
 	}
 }
 
-func (f *workerTasksFake) ConfirmComposeCancel(taskID, _ int64) (bool, error) {
+func (f *workerTasksFake) ConfirmComposeCancel(taskID, _ int64, _ int) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.confirmed = append(f.confirmed, taskID)
 	return true, nil
 }
 
-func (f *workerTasksFake) ReleaseComposeForRetry(taskID, _ int64, code, message string) (bool, error) {
+func (f *workerTasksFake) ReleaseComposeForRetry(taskID, _ int64, _ int, code, message string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.released = append(f.released, code+"|"+message)
 	return true, nil
 }
 
-func (f *workerTasksFake) FailComposeTask(taskID, _ int64, code, message string) (bool, error) {
+func (f *workerTasksFake) FailComposeTask(taskID, _ int64, _ int, code, message string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.terminalFailed = append(f.terminalFailed, taskID)
@@ -128,15 +128,7 @@ func (f *workerTasksFake) FindExpiredComposeLeases() ([]model.ComposeTask, error
 	return append([]model.ComposeTask(nil), f.expired...), nil
 }
 
-func (f *workerTasksFake) RequeueExpiredComposeLease(taskID, _ int64, _, _ string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.requeued = append(f.requeued, taskID)
-	f.signalReap()
-	return true, nil
-}
-
-func (f *workerTasksFake) FailExpiredComposeLease(taskID, _ int64, _, _ string) (bool, error) {
+func (f *workerTasksFake) FailExpiredComposeLease(taskID, _ int64, _ int, _, _ string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failed = append(f.failed, taskID)

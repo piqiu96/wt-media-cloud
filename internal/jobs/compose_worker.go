@@ -34,14 +34,13 @@ const composeErrTaskTimeoutCode = "task_timeout"
 // interface so a test answers the whole loop without a database.
 type composeWorkerTasks interface {
 	ClaimNextComposeTask(nodeID int64, lease time.Duration) (model.ComposeTask, bool, error)
-	RenewComposeLease(taskID, nodeID int64, lease time.Duration) (bool, error)
-	ConfirmComposeCancel(taskID, nodeID int64) (bool, error)
-	ReleaseComposeForRetry(taskID, nodeID int64, errorCode, message string) (bool, error)
+	RenewComposeLease(taskID, nodeID int64, attempt int, lease time.Duration) (bool, error)
+	ConfirmComposeCancel(taskID, nodeID int64, attempt int) (bool, error)
+	ReleaseComposeForRetry(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
 	Find(id int64) (model.ComposeTask, bool, error)
-	FailComposeTask(taskID, nodeID int64, errorCode, message string) (bool, error)
+	FailComposeTask(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
 	FindExpiredComposeLeases() ([]model.ComposeTask, error)
-	RequeueExpiredComposeLease(taskID, previousNodeID int64, errorCode, message string) (bool, error)
-	FailExpiredComposeLease(taskID, previousNodeID int64, errorCode, message string) (bool, error)
+	FailExpiredComposeLease(taskID, previousNodeID int64, attempt int, errorCode, message string) (bool, error)
 }
 
 // ComposeWorkerSettings is the validated slice of config the loop runs on.
@@ -184,7 +183,7 @@ func runComposeTask(ctx context.Context, deps ComposeWorkerDeps, settings Compos
 	guards.Add(2)
 	go func() {
 		defer guards.Done()
-		watchComposeHeartbeat(attemptCtx, deps, settings, task.ID, stopAttempt)
+		watchComposeHeartbeat(attemptCtx, deps, settings, task, stopAttempt)
 	}()
 	go func() {
 		defer guards.Done()
@@ -228,7 +227,7 @@ func runComposeTask(ctx context.Context, deps ComposeWorkerDeps, settings Compos
 // watchComposeHeartbeat renews the lease on its interval. A renewal refused
 // (not errored — a database hiccup is retried on the next tick) means the row
 // is no longer ours, so the attempt's context is cancelled and FFmpeg stops.
-func watchComposeHeartbeat(ctx context.Context, deps ComposeWorkerDeps, settings ComposeWorkerSettings, taskID int64, stopAttempt context.CancelFunc) {
+func watchComposeHeartbeat(ctx context.Context, deps ComposeWorkerDeps, settings ComposeWorkerSettings, task model.ComposeTask, stopAttempt context.CancelFunc) {
 	ticker := time.NewTicker(settings.HeartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -237,14 +236,14 @@ func watchComposeHeartbeat(ctx context.Context, deps ComposeWorkerDeps, settings
 			return
 		case <-ticker.C:
 		}
-		ok, err := deps.Tasks.RenewComposeLease(taskID, settings.NodeID, settings.Lease)
+		ok, err := deps.Tasks.RenewComposeLease(task.ID, settings.NodeID, task.AttemptCount, settings.Lease)
 		if err != nil {
-			deps.Log("compose worker lease renewal for task %d failed; stopping the attempt: %v", taskID, err)
+			deps.Log("compose worker lease renewal for task %d failed; stopping the attempt: %v", task.ID, err)
 			stopAttempt()
 			return
 		}
 		if !ok {
-			deps.Log("compose worker lost task %d to another owner; stopping the attempt", taskID)
+			deps.Log("compose worker lost task %d to another owner; stopping the attempt", task.ID)
 			stopAttempt()
 			return
 		}
@@ -288,12 +287,12 @@ func settleTerminatedWait(deps ComposeWorkerDeps, settings ComposeWorkerSettings
 	message := "input was not ready when the task timeout elapsed"
 	if task.AttemptCount >= task.MaxAttempts {
 		message += fmt.Sprintf(" (attempts exhausted after %d)", task.AttemptCount)
-		if _, err := deps.Tasks.FailComposeTask(task.ID, settings.NodeID, composeErrTaskTimeoutCode, message); err != nil {
+		if _, err := deps.Tasks.FailComposeTask(task.ID, settings.NodeID, task.AttemptCount, composeErrTaskTimeoutCode, message); err != nil {
 			deps.Log("compose worker terminal failure of timed-out task %d failed: %v", task.ID, err)
 		}
 		return
 	}
-	if _, err := deps.Tasks.ReleaseComposeForRetry(task.ID, settings.NodeID, composeErrTaskTimeoutCode, message); err != nil {
+	if _, err := deps.Tasks.ReleaseComposeForRetry(task.ID, settings.NodeID, task.AttemptCount, composeErrTaskTimeoutCode, message); err != nil {
 		deps.Log("compose worker release of timed-out task %d failed: %v", task.ID, err)
 	}
 }
@@ -302,7 +301,7 @@ func confirmIfCancelSeen(deps ComposeWorkerDeps, settings ComposeWorkerSettings,
 	if !cancelSeen.get() {
 		return
 	}
-	if ok, err := deps.Tasks.ConfirmComposeCancel(task.ID, settings.NodeID); err != nil || !ok {
+	if ok, err := deps.Tasks.ConfirmComposeCancel(task.ID, settings.NodeID, task.AttemptCount); err != nil || !ok {
 		deps.Log("compose worker cancel confirmation for task %d did not land (ok=%v err=%v)", task.ID, ok, err)
 	}
 }
@@ -319,7 +318,7 @@ func recoverExpiredComposeLeases(tasks composeWorkerTasks, log func(string, ...a
 		if task.ClaimedNodeID != nil {
 			node = *task.ClaimedNodeID
 		}
-		if ok, err := tasks.FailExpiredComposeLease(task.ID, node, composeErrExecutionUncertain, "worker lease expired; previous execution must be checked before retry"); err != nil || !ok {
+		if ok, err := tasks.FailExpiredComposeLease(task.ID, node, task.AttemptCount, composeErrExecutionUncertain, "worker lease expired; previous execution must be checked before retry"); err != nil || !ok {
 			log("compose worker could not quarantine expired task %d: ok=%v err=%v", task.ID, ok, err)
 		}
 	}

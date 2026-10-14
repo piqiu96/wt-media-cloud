@@ -46,16 +46,16 @@ type lifecycleFake struct {
 	findCalls    int
 }
 
-func (f *lifecycleFake) RenewComposeLease(int64, int64, time.Duration) (bool, error) {
+func (f *lifecycleFake) RenewComposeLease(int64, int64, int, time.Duration) (bool, error) {
 	return true, nil
 }
 
-func (f *lifecycleFake) ReportComposeProgress(_, _ int64, stage string, progress int) (bool, error) {
+func (f *lifecycleFake) ReportComposeProgress(_, _ int64, _ int, stage string, progress int) (bool, error) {
 	f.progress = append(f.progress, fmt.Sprintf("%s:%d", stage, progress))
 	return f.progressOK, nil
 }
 
-func (f *lifecycleFake) CommitComposeOutput(out model.CompositeOutput, key string, _ int64) (model.ComposeOutputCommit, error) {
+func (f *lifecycleFake) CommitComposeOutput(out model.CompositeOutput, key string, _ int64, _ int) (model.ComposeOutputCommit, error) {
 	if f.commitErr != nil {
 		return model.ComposeOutputCommit{}, f.commitErr
 	}
@@ -65,12 +65,12 @@ func (f *lifecycleFake) CommitComposeOutput(out model.CompositeOutput, key strin
 	return model.ComposeOutputCommit{OutputID: 55, TaskID: out.TaskID}, nil
 }
 
-func (f *lifecycleFake) ReleaseComposeForRetry(_, _ int64, code, message string) (bool, error) {
+func (f *lifecycleFake) ReleaseComposeForRetry(_, _ int64, _ int, code, message string) (bool, error) {
 	f.released = append(f.released, code+"|"+message)
 	return f.releaseOK, nil
 }
 
-func (f *lifecycleFake) FailComposeTask(_, _ int64, code, message string) (bool, error) {
+func (f *lifecycleFake) FailComposeTask(_, _ int64, _ int, code, message string) (bool, error) {
 	f.failed = append(f.failed, code+"|"+message)
 	return f.failOK, nil
 }

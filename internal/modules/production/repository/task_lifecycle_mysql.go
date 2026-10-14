@@ -105,12 +105,12 @@ func claimNextComposeTask(db *gorm.DB, nodeID int64, lease time.Duration, now ti
 // RenewComposeLease extends the caller's own running lease; a worker that
 // lost the row (reaped, cancelled, finished) gets false and must stop working
 // on it.
-func (ComposeTaskStore) RenewComposeLease(taskID, nodeID int64, lease time.Duration) (bool, error) {
-	return renewComposeLease(database.DB(), taskID, nodeID, lease, time.Now())
+func (ComposeTaskStore) RenewComposeLease(taskID, nodeID int64, attempt int, lease time.Duration) (bool, error) {
+	return renewComposeLease(database.DB(), taskID, nodeID, attempt, lease, time.Now())
 }
 
-func renewComposeLease(db *gorm.DB, taskID, nodeID int64, lease time.Duration, now time.Time) (bool, error) {
-	result := db.Exec(`UPDATE compose_tasks SET lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running'`, now.Add(lease), now, now, taskID, nodeID)
+func renewComposeLease(db *gorm.DB, taskID, nodeID int64, attempt int, lease time.Duration, now time.Time) (bool, error) {
+	result := db.Exec(`UPDATE compose_tasks SET lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND lease_expires_at > ?`, now.Add(lease), now, now, taskID, nodeID, attempt, now)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -120,12 +120,12 @@ func renewComposeLease(db *gorm.DB, taskID, nodeID int64, lease time.Duration, n
 // ReportComposeProgress writes the stage projection for a task the caller
 // still owns. Progress values are stage boundaries decided by the service —
 // the repository does not compute them.
-func (ComposeTaskStore) ReportComposeProgress(taskID, nodeID int64, stage string, progress int) (bool, error) {
-	return reportComposeProgress(database.DB(), taskID, nodeID, stage, progress, time.Now())
+func (ComposeTaskStore) ReportComposeProgress(taskID, nodeID int64, attempt int, stage string, progress int) (bool, error) {
+	return reportComposeProgress(database.DB(), taskID, nodeID, attempt, stage, progress, time.Now())
 }
 
-func reportComposeProgress(db *gorm.DB, taskID, nodeID int64, stage string, progress int, now time.Time) (bool, error) {
-	result := db.Exec(`UPDATE compose_tasks SET stage = ?, progress = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running'`, stage, progress, now, taskID, nodeID)
+func reportComposeProgress(db *gorm.DB, taskID, nodeID int64, attempt int, stage string, progress int, now time.Time) (bool, error) {
+	result := db.Exec(`UPDATE compose_tasks SET stage = ?, progress = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND lease_expires_at > ?`, stage, progress, now, taskID, nodeID, attempt, now)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -165,14 +165,14 @@ func requestComposeCancel(db *gorm.DB, taskID, actorID int64, action string, now
 // ConfirmComposeCancel is the worker's side of the running-cancel protocol:
 // the row becomes cancelled only once the caller has stopped the process and
 // disposed temp files, and only if a cancel was actually requested.
-func (ComposeTaskStore) ConfirmComposeCancel(taskID, nodeID int64) (bool, error) {
-	return confirmComposeCancel(database.DB(), taskID, nodeID, time.Now())
+func (ComposeTaskStore) ConfirmComposeCancel(taskID, nodeID int64, attempt int) (bool, error) {
+	return confirmComposeCancel(database.DB(), taskID, nodeID, attempt, time.Now())
 }
 
-func confirmComposeCancel(db *gorm.DB, taskID, nodeID int64, now time.Time) (bool, error) {
+func confirmComposeCancel(db *gorm.DB, taskID, nodeID int64, attempt int, now time.Time) (bool, error) {
 	confirmed := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'cancelled', finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running' AND cancel_requested = 1`, now, now, taskID, nodeID)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'cancelled', finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND cancel_requested = 1 AND lease_expires_at > ?`, now, now, taskID, nodeID, attempt, now)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -192,17 +192,17 @@ func confirmComposeCancel(db *gorm.DB, taskID, nodeID int64, now time.Time) (boo
 // one transaction (spec §6.3): the output row exists only if the task row is
 // still running and un-cancelled under the claiming node, and the task is
 // success only if the output row was written.
-func (ComposeTaskStore) CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64) (model.ComposeOutputCommit, error) {
-	return commitComposeOutput(database.DB(), out, outputKey, nodeID, time.Now())
+func (ComposeTaskStore) CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int) (model.ComposeOutputCommit, error) {
+	return commitComposeOutput(database.DB(), out, outputKey, nodeID, attempt, time.Now())
 }
 
-func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey string, nodeID int64, now time.Time) (model.ComposeOutputCommit, error) {
+func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey string, nodeID int64, attempt int, now time.Time) (model.ComposeOutputCommit, error) {
 	err := db.Transaction(func(tx *gorm.DB) error {
 		out.CreatedAt, out.UpdatedAt = now, now
 		if err := tx.Create(&out).Error; err != nil {
 			return err
 		}
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'success', output_object_key = ?, composite_output_id = ?, finished_at = ?, progress = 100, cancel_requested = 0, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running' AND cancel_requested = 0`, outputKey, out.ID, now, now, out.TaskID, nodeID)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'success', output_object_key = ?, composite_output_id = ?, finished_at = ?, progress = 100, cancel_requested = 0, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND cancel_requested = 0 AND lease_expires_at > ?`, outputKey, out.ID, now, now, out.TaskID, nodeID, attempt, now)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -219,23 +219,23 @@ func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey strin
 
 // ReleaseComposeForRetry requeues a transiently failed attempt. attempt_count
 // stays where the claim left it; the next claim re-reads the attempt cap.
-func (ComposeTaskStore) ReleaseComposeForRetry(taskID, nodeID int64, errorCode, message string) (bool, error) {
-	return releaseComposeForRetry(database.DB(), taskID, nodeID, errorCode, message, time.Now())
+func (ComposeTaskStore) ReleaseComposeForRetry(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error) {
+	return releaseComposeForRetry(database.DB(), taskID, nodeID, attempt, errorCode, message, time.Now())
 }
 
-func releaseComposeForRetry(db *gorm.DB, taskID, nodeID int64, errorCode, message string, now time.Time) (bool, error) {
-	return requeueRunningComposeTask(db, taskID, nodeID, false, errorCode, message, now)
+func releaseComposeForRetry(db *gorm.DB, taskID, nodeID int64, attempt int, errorCode, message string, now time.Time) (bool, error) {
+	return requeueRunningComposeTask(db, taskID, nodeID, attempt, false, errorCode, message, now)
 }
 
 // FailComposeTask records the terminal failure of an attempt the caller owns.
-func (ComposeTaskStore) FailComposeTask(taskID, nodeID int64, errorCode, message string) (bool, error) {
-	return failComposeTask(database.DB(), taskID, nodeID, errorCode, message, time.Now())
+func (ComposeTaskStore) FailComposeTask(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error) {
+	return failComposeTask(database.DB(), taskID, nodeID, attempt, errorCode, message, time.Now())
 }
 
-func failComposeTask(db *gorm.DB, taskID, nodeID int64, errorCode, message string, now time.Time) (bool, error) {
+func failComposeTask(db *gorm.DB, taskID, nodeID int64, attempt int, errorCode, message string, now time.Time) (bool, error) {
 	failed := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running'`, errorCode, message, now, now, taskID, nodeID)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND lease_expires_at > ?`, errorCode, message, now, now, taskID, nodeID, attempt, now)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -255,24 +255,24 @@ func failComposeTask(db *gorm.DB, taskID, nodeID int64, errorCode, message strin
 // lands when the lease has already lapsed under the previous node, so a live
 // worker's row — or one already taken over — cannot be touched by the scan.
 // attempt_count is left alone; the next claim re-reads the cap.
-func (ComposeTaskStore) RequeueExpiredComposeLease(taskID, previousNodeID int64, errorCode, message string) (bool, error) {
-	return requeueExpiredComposeLease(database.DB(), taskID, previousNodeID, errorCode, message, time.Now())
+func (ComposeTaskStore) RequeueExpiredComposeLease(taskID, previousNodeID int64, attempt int, errorCode, message string) (bool, error) {
+	return requeueExpiredComposeLease(database.DB(), taskID, previousNodeID, attempt, errorCode, message, time.Now())
 }
 
-func requeueExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, errorCode, message string, now time.Time) (bool, error) {
-	return requeueRunningComposeTask(db, taskID, previousNodeID, true, errorCode, message, now)
+func requeueExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, attempt int, errorCode, message string, now time.Time) (bool, error) {
+	return requeueRunningComposeTask(db, taskID, previousNodeID, attempt, true, errorCode, message, now)
 }
 
 // FailExpiredComposeLease terminalizes a dead worker's row whose attempt
 // budget is spent, under the same lapsed-lease guard as the requeue.
-func (ComposeTaskStore) FailExpiredComposeLease(taskID, previousNodeID int64, errorCode, message string) (bool, error) {
-	return failExpiredComposeLease(database.DB(), taskID, previousNodeID, errorCode, message, time.Now())
+func (ComposeTaskStore) FailExpiredComposeLease(taskID, previousNodeID int64, attempt int, errorCode, message string) (bool, error) {
+	return failExpiredComposeLease(database.DB(), taskID, previousNodeID, attempt, errorCode, message, time.Now())
 }
 
-func failExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, errorCode, message string, now time.Time) (bool, error) {
+func failExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, attempt int, errorCode, message string, now time.Time) (bool, error) {
 	failed := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running' AND lease_expires_at < ?`, errorCode, message, now, now, taskID, previousNodeID, now)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'failed', error_code = ?, error_message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND lease_expires_at < ?`, errorCode, message, now, now, taskID, previousNodeID, attempt, now)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -294,13 +294,16 @@ func failExpiredComposeLease(db *gorm.DB, taskID, previousNodeID int64, errorCod
 // failed, and requeues the task — all in one transaction, so a reader never
 // sees a pending task whose last attempt is still open. A lapsed lease is
 // part of the guard when the caller is the reaper.
-func requeueRunningComposeTask(db *gorm.DB, taskID, nodeID int64, lapsed bool, errorCode, message string, now time.Time) (bool, error) {
+func requeueRunningComposeTask(db *gorm.DB, taskID, nodeID int64, attempt int, lapsed bool, errorCode, message string, now time.Time) (bool, error) {
 	requeued := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		selectSQL := `SELECT stage, attempt_count FROM compose_tasks WHERE id = ? AND claimed_node_id = ? AND status = 'running'`
-		args := []any{taskID, nodeID}
+		selectSQL := `SELECT stage, attempt_count FROM compose_tasks WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running'`
+		args := []any{taskID, nodeID, attempt}
 		if lapsed {
 			selectSQL += ` AND lease_expires_at < ?`
+			args = append(args, now)
+		} else {
+			selectSQL += ` AND lease_expires_at > ?`
 			args = append(args, now)
 		}
 		var stage string
@@ -312,10 +315,13 @@ func requeueRunningComposeTask(db *gorm.DB, taskID, nodeID int64, lapsed bool, e
 		if err != nil {
 			return err
 		}
-		updateSQL := `UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, stage = '', error_code = ?, error_message = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND status = 'running'`
-		updateArgs := []any{errorCode, message, now, taskID, nodeID}
+		updateSQL := `UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, stage = '', error_code = ?, error_message = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running'`
+		updateArgs := []any{errorCode, message, now, taskID, nodeID, attempt}
 		if lapsed {
 			updateSQL += ` AND lease_expires_at < ?`
+			updateArgs = append(updateArgs, now)
+		} else {
+			updateSQL += ` AND lease_expires_at > ?`
 			updateArgs = append(updateArgs, now)
 		}
 		result := tx.Exec(updateSQL, updateArgs...)

@@ -107,16 +107,29 @@ func TestRenewComposeLeaseOnlyExtendsTheCallerOwnRow(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 5, 0, 0, time.UTC)
 	mock.ExpectExec("UPDATE compose_tasks SET lease_expires_at").
-		WithArgs(now.Add(time.Minute), now, now, int64(77), int64(9)).
+		WithArgs(now.Add(time.Minute), now, now, int64(77), int64(9), 1, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	ok, err := renewComposeLease(db, 77, 9, time.Minute, now)
+	ok, err := renewComposeLease(db, 77, 9, 1, time.Minute, now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	mock.ExpectExec("UPDATE compose_tasks SET lease_expires_at").WillReturnResult(sqlmock.NewResult(0, 0))
-	ok, err = renewComposeLease(db, 78, 9, time.Minute, now)
+	ok, err = renewComposeLease(db, 78, 9, 1, time.Minute, now)
 	if err != nil || ok {
 		t.Fatalf("foreign row must not renew: ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestRenewComposeLeaseChecksTheClaimAttempt(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 5, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE compose_tasks SET lease_expires_at.*attempt_count = \\?").
+		WithArgs(now.Add(time.Minute), now, now, int64(77), int64(9), 1, now).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	ok, err := renewComposeLease(db, 77, 9, 1, time.Minute, now)
+	if err != nil || ok {
+		t.Fatalf("old attempt must not renew: ok=%v err=%v", ok, err)
 	}
 	assertExpectations(t, mock)
 }
@@ -155,12 +168,12 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 		WithArgs(int64(7), "delta", int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
 		WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").
-		WithArgs("outputs/final", int64(55), now, now, int64(77), int64(9)).
+		WithArgs("outputs/final", int64(55), now, now, int64(77), int64(9), 1, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	commit, err := commitComposeOutput(db, out, "outputs/final", 9, now)
+	commit, err := commitComposeOutput(db, out, "outputs/final", 9, 1, now)
 	if err != nil || commit.OutputID != 55 || commit.TaskID != 77 {
 		t.Fatalf("commit=%+v err=%v", commit, err)
 	}
@@ -174,7 +187,7 @@ func TestCommitComposeOutputRollsBackWhenTheTaskRowIsGone(t *testing.T) {
 	mock.ExpectExec("INSERT INTO `composite_outputs`").WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
-	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, now); !errors.Is(err, ErrComposeCommitLost) {
+	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, 1, now); !errors.Is(err, ErrComposeCommitLost) {
 		t.Fatalf("want ErrComposeCommitLost, got %v", err)
 	}
 	assertExpectations(t, mock)
@@ -186,17 +199,17 @@ func TestReleaseComposeForRetryRequeuesWithoutErasingAttempts(t *testing.T) {
 	// The stage and attempt number are captured before the requeue clears
 	// them, and the closed attempt row keeps the phase the run reached.
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks WHERE id = \\? AND claimed_node_id = \\? AND status = 'running'").
-		WithArgs(int64(77), int64(9)).
+	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks WHERE id = \\? AND claimed_node_id = \\? AND attempt_count = \\?").
+		WithArgs(int64(77), int64(9), 1, now).
 		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}).AddRow("uploading", 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
-		WithArgs("storage_flaky", "object storage timeout", now, int64(77), int64(9)).
+		WithArgs("storage_flaky", "object storage timeout", now, int64(77), int64(9), 1, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts SET outcome").
 		WithArgs("failed", "storage_flaky", "object storage timeout", now, "uploading", now, int64(77), int64(1)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	ok, err := releaseComposeForRetry(db, 77, 9, "storage_flaky", "object storage timeout", now)
+	ok, err := releaseComposeForRetry(db, 77, 9, 1, "storage_flaky", "object storage timeout", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -208,12 +221,12 @@ func TestFailComposeTaskWritesTheTerminalError(t *testing.T) {
 	now := time.Date(2026, 10, 14, 9, 9, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'failed'").
-		WithArgs("input_missing", "source video is gone", now, now, int64(77), int64(9)).
+		WithArgs("input_missing", "source video is gone", now, now, int64(77), int64(9), 1, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	ok, err := failComposeTask(db, 77, 9, "input_missing", "source video is gone", now)
+	ok, err := failComposeTask(db, 77, 9, 1, "input_missing", "source video is gone", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
@@ -282,26 +295,26 @@ func TestRequeueExpiredComposeLeaseTakesBackTheDeadWorkersRow(t *testing.T) {
 	now := time.Date(2026, 10, 14, 9, 11, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks").
-		WithArgs(int64(77), int64(9), now).
+		WithArgs(int64(77), int64(9), 2, now).
 		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}).AddRow("cutting", 2))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
-		WithArgs("lease_expired", "worker lease expired", now, int64(77), int64(9), now).
+		WithArgs("lease_expired", "worker lease expired", now, int64(77), int64(9), 2, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts SET outcome").
 		WithArgs("failed", "lease_expired", "worker lease expired", now, "cutting", now, int64(77), int64(2)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	ok, err := requeueExpiredComposeLease(db, 77, 9, "lease_expired", "worker lease expired", now)
+	ok, err := requeueExpiredComposeLease(db, 77, 9, 2, "lease_expired", "worker lease expired", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	// A row whose lease has not lapsed reads as no rows in the guarded scan.
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks").
-		WithArgs(int64(78), int64(9), now).
+		WithArgs(int64(78), int64(9), 2, now).
 		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}))
 	mock.ExpectCommit()
-	ok, err = requeueExpiredComposeLease(db, 78, 9, "lease_expired", "worker lease expired", now)
+	ok, err = requeueExpiredComposeLease(db, 78, 9, 2, "lease_expired", "worker lease expired", now)
 	if err != nil || ok {
 		t.Fatalf("a row without a lapsed lease must not be reaped: ok=%v err=%v", ok, err)
 	}
@@ -313,12 +326,12 @@ func TestFailExpiredComposeLeaseTerminalizesTheDeadWorkersRow(t *testing.T) {
 	now := time.Date(2026, 10, 14, 9, 12, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'failed'").
-		WithArgs("lease_expired", "attempts exhausted", now, now, int64(77), int64(9), now).
+		WithArgs("lease_expired", "attempts exhausted", now, now, int64(77), int64(9), 2, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	ok, err := failExpiredComposeLease(db, 77, 9, "lease_expired", "attempts exhausted", now)
+	ok, err := failExpiredComposeLease(db, 77, 9, 2, "lease_expired", "attempts exhausted", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}

@@ -62,11 +62,11 @@ type composeRunner interface {
 
 // composeTaskLifecycle is the slice of the task repository the worker drives.
 type composeTaskLifecycle interface {
-	RenewComposeLease(taskID, nodeID int64, lease time.Duration) (bool, error)
-	ReportComposeProgress(taskID, nodeID int64, stage string, progress int) (bool, error)
-	CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64) (model.ComposeOutputCommit, error)
-	ReleaseComposeForRetry(taskID, nodeID int64, errorCode, message string) (bool, error)
-	FailComposeTask(taskID, nodeID int64, errorCode, message string) (bool, error)
+	RenewComposeLease(taskID, nodeID int64, attempt int, lease time.Duration) (bool, error)
+	ReportComposeProgress(taskID, nodeID int64, attempt int, stage string, progress int) (bool, error)
+	CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int) (model.ComposeOutputCommit, error)
+	ReleaseComposeForRetry(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
+	FailComposeTask(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
 	Find(id int64) (model.ComposeTask, bool, error)
 }
 
@@ -97,12 +97,12 @@ type ComposeExecutorDeps struct {
 // output and the success flip in one transaction. Source facts come only from
 // the task row — the latest strategy config is never read here (ADR-0021).
 func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, runDir *compose.RunDir) ComposeAttemptOutcome {
-	if !ownsProgress(deps.Tasks, task.ID, nodeID, composeStageValidatingInput, 10) {
+	if !ownsProgress(deps.Tasks, task, nodeID, composeStageValidatingInput, 10) {
 		return ComposeAttemptLeaseLost
 	}
 	plan, err := validateSnapshotTemplate(deps.Registry, task)
 	if err != nil {
-		return failTerminal(deps.Tasks, task.ID, nodeID, composeErrTemplateUnavailable, err.Error())
+		return failTerminal(deps.Tasks, task, nodeID, composeErrTemplateUnavailable, err.Error())
 	}
 	inputPath, outcome := prepareInput(ctx, deps, task, nodeID, runDir)
 	if outcome != "" {
@@ -116,13 +116,13 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 			fetch = compose.DownloadGuide
 		}
 		if err := fetch(ctx, guide.GuideURL(), guidePath); err != nil {
-			return failTerminal(deps.Tasks, task.ID, nodeID, composeErrInputInvalid, err.Error())
+			return failTerminal(deps.Tasks, task, nodeID, composeErrInputInvalid, err.Error())
 		}
 	}
 	if cancelRequested(deps.Tasks, task.ID) {
 		return ComposeAttemptCancelled
 	}
-	if !ownsProgress(deps.Tasks, task.ID, nodeID, composeStageCutting, 40) {
+	if !ownsProgress(deps.Tasks, task, nodeID, composeStageCutting, 40) {
 		return ComposeAttemptLeaseLost
 	}
 	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, GuidePath: guidePath})
@@ -141,12 +141,12 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return ComposeAttemptLeaseLost
 		}
-		return failTerminal(deps.Tasks, task.ID, nodeID, composeErrExecutionFailed, err.Error())
+		return failTerminal(deps.Tasks, task, nodeID, composeErrExecutionFailed, err.Error())
 	}
 	if cancelRequested(deps.Tasks, task.ID) {
 		return ComposeAttemptCancelled
 	}
-	if !ownsProgress(deps.Tasks, task.ID, nodeID, composeStageUploading, 80) {
+	if !ownsProgress(deps.Tasks, task, nodeID, composeStageUploading, 80) {
 		return ComposeAttemptLeaseLost
 	}
 	tempKey := "compose-staging/" + strconv.FormatInt(task.ID, 10) + "/output.mp4"
@@ -155,7 +155,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if err != nil {
 		return transientFailure(deps, task, nodeID, composeErrStorageError, err.Error())
 	}
-	if !ownsProgress(deps.Tasks, task.ID, nodeID, composeStageCommitting, 90) {
+	if !ownsProgress(deps.Tasks, task, nodeID, composeStageCommitting, 90) {
 		return ComposeAttemptLeaseLost
 	}
 	if err := deps.Store.Copy(ctx, tempKey, formalKey); err != nil {
@@ -170,7 +170,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		ObjectKey: formalKey, FileSizeBytes: size, SHA256: digest, Media: media,
 		PublishStatus: "pending_publish", CreatedBy: task.CreatedBy,
 	}
-	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID); err != nil {
+	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID, task.AttemptCount); err != nil {
 		// The row is no longer ours (cancelled, reaped, finished): the formal
 		// object is an orphan now and must not survive its dead task.
 		_ = deps.Store.Remove(context.WithoutCancel(ctx), formalKey)
@@ -205,10 +205,10 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 		return "", transientFailure(deps, task, nodeID, composeErrStorageError, "read material: "+err.Error())
 	}
 	if !found {
-		return "", failTerminal(deps.Tasks, task.ID, nodeID, composeErrInputMissing, "material row is gone")
+		return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputMissing, "material row is gone")
 	}
 	if material.VideoStatus == model.VideoFailed {
-		return "", failTerminal(deps.Tasks, task.ID, nodeID, composeErrInputInvalid, "source preparation failed for material "+strconv.FormatInt(task.MaterialID, 10))
+		return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputInvalid, "source preparation failed for material "+strconv.FormatInt(task.MaterialID, 10))
 	}
 	if material.VideoStatus != model.VideoReady || material.SourceObjectKey == "" {
 		if deps.EnsureInputPrepared != nil {
@@ -216,7 +216,7 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 				return "", transientFailure(deps, task, nodeID, composeErrStorageError, "request input preparation: "+err.Error())
 			}
 		}
-		_, _ = deps.Tasks.ReportComposeProgress(task.ID, nodeID, composeStageWaitingInput, 20)
+		_, _ = deps.Tasks.ReportComposeProgress(task.ID, nodeID, task.AttemptCount, composeStageWaitingInput, 20)
 		return "", ComposeAttemptWaitInput
 	}
 	if _, err := deps.Store.Stat(ctx, material.SourceObjectKey); err != nil {
@@ -307,8 +307,8 @@ func downloadInto(ctx context.Context, client *http.Client, url string, sink io.
 	return err
 }
 
-func ownsProgress(tasks composeTaskLifecycle, taskID, nodeID int64, stage string, progress int) bool {
-	ok, _ := tasks.ReportComposeProgress(taskID, nodeID, stage, progress)
+func ownsProgress(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, stage string, progress int) bool {
+	ok, _ := tasks.ReportComposeProgress(task.ID, nodeID, task.AttemptCount, stage, progress)
 	return ok
 }
 
@@ -320,8 +320,8 @@ func cancelRequested(tasks composeTaskLifecycle, taskID int64) bool {
 // failTerminal marks the task failed and reports the outcome; the write is
 // best-effort — a lost lease leaves the row to the recovery scan, which is
 // the honest owner of that situation.
-func failTerminal(tasks composeTaskLifecycle, taskID, nodeID int64, code, message string) ComposeAttemptOutcome {
-	_, _ = tasks.FailComposeTask(taskID, nodeID, code, message)
+func failTerminal(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, code, message string) ComposeAttemptOutcome {
+	_, _ = tasks.FailComposeTask(task.ID, nodeID, task.AttemptCount, code, message)
 	return ComposeAttemptFailed
 }
 
@@ -330,10 +330,10 @@ func failTerminal(tasks composeTaskLifecycle, taskID, nodeID int64, code, messag
 // pending forever with no attempts left.
 func transientFailure(deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, code, message string) ComposeAttemptOutcome {
 	if task.AttemptCount < task.MaxAttempts {
-		if ok, _ := deps.Tasks.ReleaseComposeForRetry(task.ID, nodeID, code, message); ok {
+		if ok, _ := deps.Tasks.ReleaseComposeForRetry(task.ID, nodeID, task.AttemptCount, code, message); ok {
 			return ComposeAttemptRetry
 		}
 		return ComposeAttemptLeaseLost
 	}
-	return failTerminal(deps.Tasks, task.ID, nodeID, code, message+fmt.Sprintf(" (attempts exhausted after %d)", task.AttemptCount))
+	return failTerminal(deps.Tasks, task, nodeID, code, message+fmt.Sprintf(" (attempts exhausted after %d)", task.AttemptCount))
 }
