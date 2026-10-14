@@ -192,6 +192,9 @@ func runWorker(ctx context.Context) error {
 	deps := jobs.ComposeWorkerDeps{
 		Tasks:     repository.ComposeTaskStore{},
 		Workspace: workspace,
+		CleanStaging: func(ctx context.Context) error {
+			return jobs.CleanComposeStaging(ctx, repository.ComposeTaskStore{}, storage.Get().Remove)
+		},
 		Attempt: func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir) productionservice.ComposeAttemptOutcome {
 			return productionservice.RunComposeAttempt(ctx, executorDeps, task, settings.NodeID, runDir)
 		},

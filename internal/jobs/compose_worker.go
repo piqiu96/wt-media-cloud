@@ -66,6 +66,9 @@ type ComposeWorkerDeps struct {
 	Tasks     composeWorkerTasks
 	Workspace *compose.Workspace
 	Attempt   func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir) productionservice.ComposeAttemptOutcome
+	// CleanStaging retries precise per-attempt object deletion after a known
+	// terminal outcome. It is optional for isolated loop tests.
+	CleanStaging func(context.Context) error
 	// DiskFree reports the free bytes on the volume holding dir. Real wiring
 	// uses the host filesystem; tests answer with a fake.
 	DiskFree func(dir string) (int64, error)
@@ -90,6 +93,11 @@ func RunComposeWorker(ctx context.Context, deps ComposeWorkerDeps, settings Comp
 	if err := recoverExpiredComposeLeases(deps.Tasks, deps.Log); err != nil {
 		return fmt.Errorf("compose worker startup recovery: %w", err)
 	}
+	if deps.CleanStaging != nil {
+		if err := deps.CleanStaging(ctx); err != nil {
+			deps.Log("compose staging startup cleanup: %v", err)
+		}
+	}
 	loopCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	var recovery sync.WaitGroup
@@ -105,6 +113,11 @@ func RunComposeWorker(ctx context.Context, deps ComposeWorkerDeps, settings Comp
 			case <-ticker.C:
 				if err := recoverExpiredComposeLeases(deps.Tasks, deps.Log); err != nil {
 					deps.Log("compose worker recovery scan failed: %v", err)
+				}
+				if deps.CleanStaging != nil {
+					if err := deps.CleanStaging(loopCtx); err != nil {
+						deps.Log("compose staging cleanup failed: %v", err)
+					}
 				}
 			}
 		}

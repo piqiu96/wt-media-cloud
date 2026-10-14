@@ -104,6 +104,53 @@ func TestLiveComposeRetryEligibilityPersists(t *testing.T) {
 	}
 }
 
+func TestLiveComposeStagingCleanupCandidates(t *testing.T) {
+	store, requestKey, strategyID := composeClaimSetup(t)
+	cleanupComposeTasks(t, requestKey)
+	seedComposeTask(t, requestKey, strategyID)
+	var taskID int64
+	if err := database.DB().Raw(`SELECT id FROM compose_tasks WHERE request_key = ?`, requestKey).Row().Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`UPDATE compose_tasks SET status = 'failed', attempt_count = 2, error_code = 'execution_uncertain' WHERE id = ?`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 1, 'auto', 'failed', 'storage_error', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 2, 'auto', 'failed', 'execution_uncertain', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.FindStagingCleanupCandidates(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range items {
+		if item.TaskID == taskID && item.Attempt == 1 {
+			found = true
+		}
+		if item.TaskID == taskID && item.Attempt == 2 {
+			t.Fatal("uncertain execution must not be cleaned automatically")
+		}
+	}
+	if !found {
+		t.Fatalf("known failed attempt %d missing from cleanup candidates", taskID)
+	}
+	if ok, err := store.MarkStagingCleaned(taskID, 1); err != nil || !ok {
+		t.Fatalf("mark cleaned: ok=%v err=%v", ok, err)
+	}
+	items, err = store.FindStagingCleanupCandidates(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.TaskID == taskID {
+			t.Fatalf("cleaned attempt %d still selected", taskID)
+		}
+	}
+}
+
 // TestHelperComposeClaimProcess is the claim loop executed as an independent
 // process by TestLiveComposeClaimCapacityAcrossProcesses; it claims until the
 // capacity gate or the queue runs dry and reports the claimed ids to a file.

@@ -78,6 +78,14 @@ type ComposeTaskAttempt struct {
 
 func (ComposeTaskAttempt) TableName() string { return "compose_task_attempts" }
 
+// ComposeStagingCleanupCandidate names only an attempt whose execution has
+// ended with a known result. The Worker derives the private staging key from
+// these internal identifiers; no storage key is exposed through the API.
+type ComposeStagingCleanupCandidate struct {
+	TaskID  int64
+	Attempt int
+}
+
 // CompositeOutput is the verified-output asset (engineering spec §3.5). The
 // worker writes it inside the same transaction that marks the task success —
 // a row here always has a verified object behind it. Publish facts live in

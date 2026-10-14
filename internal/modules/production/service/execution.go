@@ -18,6 +18,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
 
 // ComposeAttemptOutcome tells the worker loop what to do after one attempt.
@@ -160,8 +161,13 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageUploading, 80) {
 		return ComposeAttemptLeaseLost
 	}
-	tempKey := "compose-staging/" + strconv.FormatInt(task.ID, 10) + "/output.mp4"
-	formalKey := "compose-outputs/" + strconv.FormatInt(task.ID, 10) + "/output.mp4"
+	attemptPath := strconv.FormatInt(task.ID, 10) + "/" + strconv.Itoa(task.AttemptCount) + "/output.mp4"
+	tempKey := "compose-staging/" + attemptPath
+	formalKey := "compose-outputs/" + attemptPath
+	// A failed Put may have stored some bytes before returning an error.
+	// Every exit from this point attempts cleanup; the recovery scan handles
+	// any deletion that fails or is skipped by a crashed worker.
+	defer removeComposeObject(ctx, deps.Store, tempKey)
 	size, digest, err := uploadVerified(ctx, deps.Store, deps.Client, output.Path, tempKey)
 	if err != nil {
 		if errors.Is(err, errComposeOutputInvalid) {
@@ -185,14 +191,21 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		PublishStatus: "pending_publish", CreatedBy: task.CreatedBy,
 	}
 	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID, task.AttemptCount); err != nil {
-		// The row is no longer ours (cancelled, reaped, finished): the formal
-		// object is an orphan now and must not survive its dead task.
-		_ = deps.Store.Remove(context.WithoutCancel(ctx), formalKey)
-		_ = deps.Store.Remove(context.WithoutCancel(ctx), tempKey)
+		// ErrComposeCommitLost proves the transaction rolled back. Other
+		// errors may be a lost response after commit; deleting the formal
+		// object then could leave a success row pointing at missing bytes.
+		if errors.Is(err, repository.ErrComposeCommitLost) {
+			removeComposeObject(ctx, deps.Store, formalKey)
+		}
 		return ComposeAttemptLeaseLost
 	}
-	_ = deps.Store.Remove(context.WithoutCancel(ctx), tempKey)
 	return ComposeAttemptSuccess
+}
+
+func removeComposeObject(ctx context.Context, store storage.Store, key string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	_ = store.Remove(cleanupCtx, key)
 }
 
 // validateSnapshotTemplate checks the snapshot's binding against the executor

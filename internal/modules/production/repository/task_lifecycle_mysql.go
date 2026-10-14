@@ -401,6 +401,45 @@ func closeComposeTaskAttemptByNumber(tx *gorm.DB, taskID, attempt int64, outcome
 	return tx.Exec(`UPDATE compose_task_attempts SET outcome = ?, error_code = ?, error_message = ?, finished_at = ?, stage = ?, updated_at = ? WHERE task_id = ? AND attempt = ? AND outcome IN ('pending', 'running')`, outcome, errorCode, message, now, stage, now, taskID, attempt).Error
 }
 
+// FindStagingCleanupCandidates only exposes attempts whose execution has a
+// known terminal outcome. The execution_uncertain quarantine may still have
+// an old process writing its key, so it is intentionally excluded.
+func (ComposeTaskStore) FindStagingCleanupCandidates(limit int) ([]model.ComposeStagingCleanupCandidate, error) {
+	return findComposeStagingCleanupCandidates(database.DB(), limit)
+}
+
+func findComposeStagingCleanupCandidates(db *gorm.DB, limit int) ([]model.ComposeStagingCleanupCandidate, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rows, err := db.Raw(`SELECT task_id, attempt FROM compose_task_attempts WHERE staging_cleaned_at IS NULL AND outcome IN ('success', 'failed', 'cancelled') AND error_code <> 'execution_uncertain' AND attempt > 0 ORDER BY id LIMIT ?`, limit).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]model.ComposeStagingCleanupCandidate, 0)
+	for rows.Next() {
+		var item model.ComposeStagingCleanupCandidate
+		if err := rows.Scan(&item.TaskID, &item.Attempt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (ComposeTaskStore) MarkStagingCleaned(taskID int64, attempt int) (bool, error) {
+	return markComposeStagingCleaned(database.DB(), taskID, attempt, time.Now())
+}
+
+func markComposeStagingCleaned(db *gorm.DB, taskID int64, attempt int, now time.Time) (bool, error) {
+	result := db.Exec(`UPDATE compose_task_attempts SET staging_cleaned_at = ? WHERE task_id = ? AND attempt = ? AND staging_cleaned_at IS NULL AND outcome IN ('success', 'failed', 'cancelled') AND error_code <> 'execution_uncertain'`, now, taskID, attempt)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 // FindExpiredComposeLeases lists running tasks whose lease has lapsed — the
 // recovery scan's only input (spec §5.3). It reads; it never mutates.
 func (ComposeTaskStore) FindExpiredComposeLeases() ([]model.ComposeTask, error) {

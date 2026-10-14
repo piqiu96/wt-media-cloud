@@ -245,7 +245,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if out.TaskID != 77 || out.MaterialID != 42 || out.MaterialUsageID != 9 || out.TemplateCode != "basic_cut" || out.TemplateVersion != 1 {
 		t.Fatalf("committed=%+v", out)
 	}
-	if out.ObjectKey != "compose-outputs/77/output.mp4" || out.PublishStatus != "pending_publish" {
+	if out.ObjectKey != "compose-outputs/77/1/output.mp4" || out.PublishStatus != "pending_publish" {
 		t.Fatalf("committed=%+v key=%s", out, lifecycle.committedKey)
 	}
 	sum := sha256.Sum256([]byte("composed-output-bytes"))
@@ -255,10 +255,10 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if string(out.Media) != `{"duration_ms":900}` {
 		t.Fatalf("media=%s", out.Media)
 	}
-	if _, ok := store.objects["compose-outputs/77/output.mp4"]; !ok {
+	if _, ok := store.objects["compose-outputs/77/1/output.mp4"]; !ok {
 		t.Fatal("formal object missing")
 	}
-	if _, ok := store.objects["compose-staging/77/output.mp4"]; ok {
+	if _, ok := store.objects["compose-staging/77/1/output.mp4"]; ok {
 		t.Fatal("staging object survived the commit")
 	}
 	want := []string{"validating_input:10", "cutting:40", "uploading:80", "committing:90"}
@@ -321,12 +321,12 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 			return os.WriteFile(path, guide, 0o600)
 		},
 	}
-	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1,
+	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1, AttemptCount: 1,
 		ConfigSnapshot: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), Status: model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9), CreatedBy: 11}
 	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptSuccess {
 		t.Fatalf("outcome=%s failed=%v released=%v", outcome, lifecycle.failed, lifecycle.released)
 	}
-	formal := store.objects["compose-outputs/77/output.mp4"]
+	formal := store.objects["compose-outputs/77/1/output.mp4"]
 	if len(formal) == 0 || lifecycle.committed == nil || lifecycle.committed.TemplateCode != "guide_insert" {
 		t.Fatal("verified formal output missing")
 	}
@@ -492,7 +492,7 @@ func TestAttemptCancelsWhenRequestedBeforeCommit(t *testing.T) {
 	if lifecycle.committed != nil {
 		t.Fatal("a cancelled attempt must not commit")
 	}
-	if _, ok := store.objects["compose-staging/77/output.mp4"]; ok {
+	if _, ok := store.objects["compose-staging/77/1/output.mp4"]; ok {
 		t.Fatal("staging object must not exist")
 	}
 }
@@ -500,16 +500,31 @@ func TestAttemptCancelsWhenRequestedBeforeCommit(t *testing.T) {
 func TestAttemptCleansOrphansWhenCommitLosesTheRow(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	lifecycle.commitErr = repository.ErrComposeCommitLost
+	store.objects["compose-outputs/77/2/output.mp4"] = []byte("later-attempt")
 	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptLeaseLost {
 		t.Fatalf("outcome=%s", outcome)
 	}
-	for _, key := range []string{"compose-outputs/77/output.mp4", "compose-staging/77/output.mp4"} {
+	for _, key := range []string{"compose-outputs/77/1/output.mp4", "compose-staging/77/1/output.mp4"} {
 		if _, ok := store.objects[key]; ok {
 			t.Fatalf("orphan %s survived", key)
 		}
 	}
+	if string(store.objects["compose-outputs/77/2/output.mp4"]) != "later-attempt" {
+		t.Fatal("old attempt cleanup damaged a newer output")
+	}
 	if lifecycle.committed != nil {
 		t.Fatal("no output may be reported as committed")
+	}
+}
+
+func TestAttemptKeepsFormalObjectWhenCommitOutcomeIsUnknown(t *testing.T) {
+	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
+	lifecycle.commitErr = errors.New("database connection dropped during commit")
+	if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir); got != ComposeAttemptLeaseLost {
+		t.Fatalf("outcome=%s", got)
+	}
+	if _, ok := store.objects["compose-outputs/77/1/output.mp4"]; !ok {
+		t.Fatal("unknown commit outcome must preserve the possibly committed object")
 	}
 }
 
@@ -525,7 +540,7 @@ func TestAttemptReportsLeaseLostWhenProgressIsRefused(t *testing.T) {
 }
 
 func TestAttemptUploadRejectsTamperedReadback(t *testing.T) {
-	deps, lifecycle, _, _, task, runDir := attemptFixture(t)
+	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	// A readback that differs from the uploaded bytes must fail the upload,
 	// so the tampered-object case can never reach the commit transaction.
 	tamper := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -548,6 +563,9 @@ func TestAttemptUploadRejectsTamperedReadback(t *testing.T) {
 	}
 	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrExecutionFailed+"|") {
 		t.Fatalf("invalid output must not auto retry: failed=%v released=%v", lifecycle.failed, lifecycle.released)
+	}
+	if _, ok := store.objects["compose-staging/77/1/output.mp4"]; ok {
+		t.Fatal("invalid staged object survived the failed attempt")
 	}
 }
 

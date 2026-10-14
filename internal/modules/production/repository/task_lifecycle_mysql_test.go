@@ -233,6 +233,31 @@ func TestComposeRetryDelayIsBoundedExponential(t *testing.T) {
 	}
 }
 
+func TestStagingCleanupSelectsOnlySafeClosedAttempts(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery("SELECT task_id, attempt FROM compose_task_attempts WHERE staging_cleaned_at IS NULL AND outcome IN").
+		WithArgs(100).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "attempt"}).AddRow(int64(77), 2))
+	items, err := findComposeStagingCleanupCandidates(db, 100)
+	if err != nil || len(items) != 1 || items[0].TaskID != 77 || items[0].Attempt != 2 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestStagingCleanupMarksOnlyKnownFinishedAttempt(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 15, 2, 0, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE compose_task_attempts SET staging_cleaned_at = \\?").
+		WithArgs(now, int64(77), 2).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	ok, err := markComposeStagingCleaned(db, 77, 2, now)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
 func TestFailComposeTaskWritesTheTerminalError(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 9, 0, 0, time.UTC)
