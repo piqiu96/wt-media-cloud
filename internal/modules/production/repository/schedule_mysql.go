@@ -20,6 +20,81 @@ func (ComposeScheduleStore) ListRuns(strategyID int64, limit int) ([]model.Compo
 	return listComposeScheduleRuns(database.DB(), strategyID, limit)
 }
 
+// FindRun returns the strategy's latest run for a slot — the run whose batch
+// detail a page is asking about. Manual run-now and the scheduler can both
+// produce a run; the newest carries the skips the operator cares about.
+func (ComposeScheduleStore) FindRun(strategyID int64, slot time.Time) (model.ComposeScheduleRun, bool, error) {
+	rows, err := database.DB().Raw(`SELECT run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped_json, created_at FROM compose_schedule_runs WHERE compose_strategy_id = ? AND schedule_slot = ? ORDER BY created_at DESC, run_key DESC LIMIT 1`, strategyID, slot).Rows()
+	if err != nil {
+		return model.ComposeScheduleRun{}, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var run model.ComposeScheduleRun
+		var skipped []byte
+		if err := rows.Scan(&run.RunKey, &run.StrategyID, &run.TriggerType, &run.ScheduleSlot, &run.CandidateCount, &run.CreatedCount, &skipped, &run.CreatedAt); err != nil {
+			return model.ComposeScheduleRun{}, false, err
+		}
+		if err := json.Unmarshal(skipped, &run.Skipped); err != nil {
+			return model.ComposeScheduleRun{}, false, fmt.Errorf("compose schedule run %s has invalid skips: %w", run.RunKey, err)
+		}
+		return run, true, rows.Err()
+	}
+	return model.ComposeScheduleRun{}, false, rows.Err()
+}
+
+// BatchTasks reads one schedule run's own rows: every task the run created
+// for its (strategy, slot), with per-status counts. The counts come from a
+// GROUP BY, so partial failures read as partial failures.
+func (ComposeScheduleStore) BatchTasks(strategyID int64, slot time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error) {
+	return composeBatchTasks(database.DB(), strategyID, slot)
+}
+
+func composeBatchTasks(db *gorm.DB, strategyID int64, slot time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error) {
+	rows, err := db.Raw(`SELECT `+composeTaskColumns+` FROM compose_tasks WHERE compose_strategy_id = ? AND schedule_slot = ? ORDER BY material_id`, strategyID, slot).Rows()
+	if err != nil {
+		return nil, model.ComposeBatchCounts{}, err
+	}
+	defer rows.Close()
+	tasks := make([]model.ComposeTask, 0)
+	for rows.Next() {
+		item, err := scanComposeTask(rows)
+		if err != nil {
+			return nil, model.ComposeBatchCounts{}, err
+		}
+		tasks = append(tasks, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, model.ComposeBatchCounts{}, err
+	}
+	var counts model.ComposeBatchCounts
+	countRows, err := db.Raw(`SELECT status, COUNT(*) FROM compose_tasks WHERE compose_strategy_id = ? AND schedule_slot = ? GROUP BY status`, strategyID, slot).Rows()
+	if err != nil {
+		return nil, model.ComposeBatchCounts{}, err
+	}
+	defer countRows.Close()
+	for countRows.Next() {
+		var status string
+		var count int
+		if err := countRows.Scan(&status, &count); err != nil {
+			return nil, model.ComposeBatchCounts{}, err
+		}
+		switch status {
+		case "pending":
+			counts.Pending = count
+		case "running":
+			counts.Running = count
+		case "success":
+			counts.Success = count
+		case "failed":
+			counts.Failed = count
+		case "cancelled":
+			counts.Cancelled = count
+		}
+	}
+	return tasks, counts, countRows.Err()
+}
+
 func listComposeScheduleRuns(db *gorm.DB, strategyID int64, limit int) ([]model.ComposeScheduleRun, error) {
 	rows, err := db.Raw(`SELECT run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped_json, created_at FROM compose_schedule_runs WHERE compose_strategy_id = ? ORDER BY created_at DESC, run_key DESC LIMIT ?`, strategyID, limit).Rows()
 	if err != nil {

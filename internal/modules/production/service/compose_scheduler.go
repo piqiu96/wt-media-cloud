@@ -15,6 +15,8 @@ type ComposeScheduleRepository interface {
 	DueStrategyIDs(time.Time) ([]int64, error)
 	Run(repository.ScheduleRunOptions) (model.ComposeScheduleRun, bool, error)
 	ListRuns(int64, int) ([]model.ComposeScheduleRun, error)
+	BatchTasks(int64, time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error)
+	FindRun(int64, time.Time) (model.ComposeScheduleRun, bool, error)
 }
 
 type ComposeSchedulerService struct {
@@ -55,6 +57,41 @@ func (s *ComposeSchedulerService) ListRuns(actor identity.PublicUser, strategyID
 		return nil, ErrStrategyNotFound
 	}
 	return s.store.ListRuns(strategyID, 20)
+}
+
+// ComposeBatchView is one schedule run's result surface: the run's own facts
+// (skips included), every task it created for the slot, and per-status
+// counts read from the rows themselves.
+type ComposeBatchView struct {
+	Run    model.ComposeScheduleRun `json:"run"`
+	Tasks  []model.ComposeTask      `json:"tasks"`
+	Counts model.ComposeBatchCounts `json:"counts"`
+}
+
+func (s *ComposeSchedulerService) Batch(actor identity.PublicUser, strategyID int64, slot time.Time) (ComposeBatchView, error) {
+	if strategyID <= 0 || slot.IsZero() || actor.Status != identity.UserStatusEnabled {
+		return ComposeBatchView{}, ErrStrategyNotFound
+	}
+	strategy, found, err := s.strategies.Find(strategyID)
+	if err != nil {
+		return ComposeBatchView{}, err
+	}
+	if !found || !canReadStrategy(actor, strategy) {
+		return ComposeBatchView{}, ErrStrategyNotFound
+	}
+	tasks, counts, err := s.store.BatchTasks(strategyID, slot)
+	if err != nil {
+		return ComposeBatchView{}, err
+	}
+	run, _, err := s.store.FindRun(strategyID, slot)
+	if err != nil {
+		return ComposeBatchView{}, err
+	}
+	return ComposeBatchView{Run: run, Tasks: tasks, Counts: counts}, nil
+}
+
+func GetComposeStrategyBatch(actor identity.PublicUser, strategyID int64, slot time.Time) (ComposeBatchView, error) {
+	return NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{}).Batch(actor, strategyID, slot)
 }
 
 func (s *ComposeSchedulerService) RunDue(now time.Time) (int, error) {

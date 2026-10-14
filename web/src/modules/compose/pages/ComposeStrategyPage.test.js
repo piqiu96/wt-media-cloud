@@ -29,4 +29,13 @@ describe('compose strategy page', () => {
     expect(widePos).toBeLessThan(nameLabelPos)
     expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
   })
+
+  // 批次结果归集（CHG-20261015-095）：统计由服务端 GROUP BY 给出，页面不二次
+  // 推算；批次按运行记录的计划时间懒加载，部分失败要能逐素材看到。
+  it('reads run batches lazily and renders server-side counts per material', () => {
+    expect(source).toContain('client.listStrategyRunTasks(detailRow.value.id, run.schedule_slot)')
+    expect(source).toContain('batchCountText(batchDetail[run.run_key].view.counts)')
+    expect(source).toContain('素材 {{ task.material_id }}')
+    expect(source).toContain('task.error_message')
+  })
 })

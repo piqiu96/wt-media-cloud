@@ -78,6 +78,14 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs')
     expect(fetch.mock.calls[0][1].method).toBe('GET')
   })
+
+  it('reads a run batch with its schedule slot as the query', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok({ run: { run_key: 'slot-1' }, tasks: [{ id: 1, status: 'failed' }], counts: { success: 0, failed: 1 } }))
+    const client = createComposeClient({ fetch })
+    await expect(client.listStrategyRunTasks(7, '2026-10-15T01:00:00Z')).resolves.toMatchObject({ counts: { failed: 1 } })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs/tasks?schedule_slot=2026-10-15T01%3A00%3A00Z')
+    expect(fetch.mock.calls[0][1].method).toBe('GET')
+  })
 })
 
   // CHG-20261013-082：合成任务四条命令与 production/router.go 一一对应。列表的

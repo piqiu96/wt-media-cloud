@@ -17,3 +17,14 @@ type ComposeScheduleRun struct {
 	Skipped        []ComposeScheduleSkip `json:"skipped"`
 	CreatedAt      time.Time             `json:"created_at"`
 }
+
+// ComposeBatchCounts is one schedule run's per-status task tally. It comes
+// from a GROUP BY over the run's own rows, not from a page-sized listing, so
+// a truncated list cannot read as a fully-successful batch.
+type ComposeBatchCounts struct {
+	Pending   int `json:"pending"`
+	Running   int `json:"running"`
+	Success   int `json:"success"`
+	Failed    int `json:"failed"`
+	Cancelled int `json:"cancelled"`
+}

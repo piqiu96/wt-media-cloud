@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -212,6 +214,28 @@ func ListComposeStrategyRuns(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	api.Success(c, runs)
+}
+
+func ListComposeStrategyRunTasks(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	slot, err := time.Parse(time.RFC3339, strings.TrimSpace(c.Query("schedule_slot")))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "批次计划时间无效", "compose_strategy_invalid")
+		return
+	}
+	view, err := productionservice.GetComposeStrategyBatch(current, id, slot)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, view)
 }
 
 func writeStrategyError(c *hertzapp.RequestContext, err error) {

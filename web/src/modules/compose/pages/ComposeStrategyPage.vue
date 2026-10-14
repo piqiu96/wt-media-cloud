@@ -60,6 +60,33 @@ const skipReasons = {
   daily_limit: '达到每日上限', per_run_limit: '达到单次上限',
 }
 
+// 批次结果归集（CHG-20261015-095）：一次运行创建的一批任务逐素材展开；
+// 统计数字直接来自服务端对库内行的 GROUP BY，页面不做二次推算。
+const batchStatusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
+const batchDetail = ref({})
+
+async function toggleRunBatch(run) {
+  const state = batchDetail.value[run.run_key]
+  if (state) {
+    batchDetail.value[run.run_key] = { ...state, open: !state.open }
+    return
+  }
+  batchDetail.value[run.run_key] = { open: true, loading: true, error: '', view: null }
+  try {
+    const view = await client.listStrategyRunTasks(detailRow.value.id, run.schedule_slot)
+    if (detailRow.value?.id) batchDetail.value[run.run_key] = { open: true, loading: false, error: '', view }
+  } catch (e) {
+    batchDetail.value[run.run_key] = { open: true, loading: false, error: e?.message || '批次任务读取失败', view: null }
+  }
+}
+
+function batchCountText(counts) {
+  if (!counts) return ''
+  return Object.entries(batchStatusLabels)
+    .map(([key, label]) => `${label} ${counts[key] ?? 0}`)
+    .join(' · ')
+}
+
 async function loadRunHistory(strategyID) {
   runHistoryError.value = ''
   try {
@@ -617,6 +644,21 @@ function configLabel(config) {
           <div v-for="run in runHistory" :key="run.run_key" class="strategy-run">
             <div class="strategy-run__summary"><strong>{{ run.trigger_type === 'scheduled' ? '自动执行' : '立即执行' }} · {{ formatDateTime(run.schedule_slot) }}</strong><span>创建 {{ run.created_count }} / 候选 {{ run.candidate_count }}</span></div>
             <details v-if="run.skipped?.length"><summary>跳过 {{ run.skipped.length }} 项</summary><p v-for="(skip, index) in run.skipped" :key="`${run.run_key}-${index}`">{{ skip.material_id ? `素材 ${skip.material_id}：` : '' }}{{ skipReasons[skip.reason] || skip.reason }}</p></details>
+            <div v-if="run.created_count > 0" class="strategy-run__batch">
+              <button type="button" class="strategy-run__batch-toggle" @click="toggleRunBatch(run)">{{ batchDetail[run.run_key]?.open ? '收起批次任务' : '查看批次任务' }}</button>
+              <div v-if="batchDetail[run.run_key]?.open" class="strategy-run__batch-body">
+                <p v-if="batchDetail[run.run_key].loading" class="strategy-run-message">批次任务读取中…</p>
+                <p v-else-if="batchDetail[run.run_key].error" class="strategy-run-message">{{ batchDetail[run.run_key].error }}</p>
+                <template v-else-if="batchDetail[run.run_key].view">
+                  <p class="strategy-run__counts">{{ batchCountText(batchDetail[run.run_key].view.counts) }}</p>
+                  <div v-for="task in batchDetail[run.run_key].view.tasks" :key="task.id" class="strategy-run__task">
+                    <strong>任务 #{{ task.id }} · 素材 {{ task.material_id }}</strong>
+                    <span>{{ batchStatusLabels[task.status] || task.status }}<template v-if="task.composite_output_id"> · 成片 #{{ task.composite_output_id }}</template></span>
+                    <em v-if="task.error_message || task.error_code">{{ task.error_code ? `${task.error_code}: ` : '' }}{{ task.error_message || '—' }}</em>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
           <h4 class="strategy-detail-section">记录时间</h4>
           <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
@@ -633,6 +675,14 @@ function configLabel(config) {
 .strategy-run__summary strong { color: var(--wt-text-primary); font-weight: 600; }
 .strategy-run details { margin-top: 6px; }
 .strategy-run details p { margin: 4px 0 0 14px; }
+.strategy-run__batch { margin-top: 6px; }
+.strategy-run__batch-toggle { padding: 0; border: 0; background: none; color: var(--wt-primary); font-size: 12px; cursor: pointer; }
+.strategy-run__batch-body { margin-top: 6px; padding-left: 14px; }
+.strategy-run__counts { margin: 0 0 6px; color: var(--wt-text-tertiary); }
+.strategy-run__task { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; border-top: 1px dashed var(--wt-border); }
+.strategy-run__task strong { color: var(--wt-text-primary); font-weight: 600; }
+.strategy-run__task span { color: var(--wt-text-secondary); }
+.strategy-run__task em { font-style: normal; color: var(--td-error-color, #d54941); font-size: 12px; word-break: break-all; }
 .strategy-run-message { color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
 .strategy-list-summary { display: flex; gap: 20px; align-items: center; padding: 0 0 12px; color: var(--wt-text-tertiary); font-size: 12px; }

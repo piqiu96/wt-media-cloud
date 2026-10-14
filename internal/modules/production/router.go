@@ -25,6 +25,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.PUT("/api/v1/compose-strategies/:strategy_id/schedule", SetComposeStrategySchedule)
 	h.POST("/api/v1/compose-strategies/:strategy_id/run-now", RunComposeStrategyNow)
 	h.GET("/api/v1/compose-strategies/:strategy_id/runs", ListComposeStrategyRuns)
+	h.GET("/api/v1/compose-strategies/:strategy_id/runs/tasks", ListComposeStrategyRunTasks)
 	h.GET("/api/v1/materials", ListMaterials)
 	h.GET("/api/v1/materials/:material_id", GetMaterial)
 	h.GET("/api/v1/materials/:material_id/video-url", GetMaterialVideoURL)

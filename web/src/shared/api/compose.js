@@ -18,6 +18,9 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     setStrategySchedule(id, schedule) { return api.put(`/compose-strategies/${id}/schedule`, schedule) },
     runStrategyNow(id, requestKey) { return api.post(`/compose-strategies/${id}/run-now`, { request_key: requestKey }) },
     listStrategyRuns(id) { return api.get(`/compose-strategies/${id}/runs`) },
+    // 批次结果归集（CHG-20261015-095）：按运行记录的计划时间取该批次逐素材任务
+    // 与状态统计；schedule_slot 原样回传运行记录里的时间串。
+    listStrategyRunTasks(id, scheduleSlot) { return api.get(`/compose-strategies/${id}/runs/tasks`, { schedule_slot: scheduleSlot }) },
     // 合成任务（CHG-20261013-082）：列表筛选（status / compose_strategy_id）由服务端读 query。
     createComposeTasks(data) { return api.post('/compose-tasks', data) },
     listComposeTasks(params) { return api.get('/compose-tasks', params) },

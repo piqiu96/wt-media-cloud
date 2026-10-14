@@ -34,6 +34,57 @@ func (f *scheduleFake) ListRuns(strategyID int64, limit int) ([]model.ComposeSch
 	return f.runs, nil
 }
 
+func (f *scheduleFake) BatchTasks(int64, time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error) {
+	return nil, model.ComposeBatchCounts{}, nil
+}
+
+func (f *scheduleFake) FindRun(int64, time.Time) (model.ComposeScheduleRun, bool, error) {
+	return model.ComposeScheduleRun{}, false, nil
+}
+
+type scheduleBatchFake struct {
+	scheduleFake
+	tasks   []model.ComposeTask
+	counts  model.ComposeBatchCounts
+	slot    time.Time
+	findRun model.ComposeScheduleRun
+}
+
+func (f *scheduleBatchFake) BatchTasks(strategyID int64, slot time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error) {
+	f.slot = slot
+	return f.tasks, f.counts, nil
+}
+
+func (f *scheduleBatchFake) FindRun(int64, time.Time) (model.ComposeScheduleRun, bool, error) {
+	return f.findRun, f.findRun.RunKey != "", nil
+}
+
+func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
+	_, strategies, actor := strategyFixture()
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "active"}}
+	slot := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	store := &scheduleBatchFake{
+		tasks:   []model.ComposeTask{{ID: 1, Status: "success"}, {ID: 2, Status: "failed", ErrorCode: "execution_failed"}},
+		counts:  model.ComposeBatchCounts{Success: 1, Failed: 1},
+		findRun: model.ComposeScheduleRun{RunKey: "run-1", Skipped: []model.ComposeScheduleSkip{{MaterialID: 9, Reason: "already_produced"}}},
+	}
+	svc := NewComposeSchedulerService(store, strategies)
+	view, err := svc.Batch(actor, 11, slot)
+	if err != nil || !store.slot.Equal(slot) || len(view.Tasks) != 2 || view.Counts.Failed != 1 || view.Run.RunKey != "run-1" || view.Run.Skipped[0].Reason != "already_produced" {
+		t.Fatalf("batch=%+v slot=%v err=%v", view, store.slot, err)
+	}
+	if _, err := svc.Batch(actor, 12, slot); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("missing strategy error=%v", err)
+	}
+	actor.GameIDs = []string{"other"}
+	if _, err := svc.Batch(actor, 11, slot); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("out-of-scope error=%v", err)
+	}
+	if _, err := svc.Batch(actor, 11, time.Time{}); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("empty slot error=%v", err)
+	}
+}
+
 func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 	_, strategies, actor := strategyFixture()
 	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "active"}}
