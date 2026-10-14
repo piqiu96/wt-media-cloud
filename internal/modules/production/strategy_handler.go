@@ -174,6 +174,46 @@ func SetComposeStrategySchedule(_ context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, item)
 }
 
+func RunComposeStrategyNow(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		RequestKey string `json:"request_key"`
+	}
+	if !decodeStrategyBody(c, &input) {
+		return
+	}
+	result, err := productionservice.RunComposeStrategyNow(current, id, input.RequestKey)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+func ListComposeStrategyRuns(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	runs, err := productionservice.ListComposeStrategyRuns(current, id)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, runs)
+}
+
 func writeStrategyError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, productionservice.ErrStrategyInvalid):

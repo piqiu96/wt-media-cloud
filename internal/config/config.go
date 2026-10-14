@@ -187,6 +187,7 @@ type DouyinCredentialConfig struct {
 type SchedulerConfig struct {
 	ProxyExpiryInterval Duration `toml:"proxy_expiry_interval"`
 	DiscoveryInterval   Duration `toml:"discovery_interval"`
+	ComposeInterval     Duration `toml:"compose_interval"`
 	WorkerInterval      Duration `toml:"worker_interval"`
 	WorkerBatchSize     int      `toml:"worker_batch_size"`
 }
@@ -385,6 +386,9 @@ func (c Config) Validate() error {
 	}
 	if c.Scheduler.DiscoveryInterval.Duration <= 0 {
 		return errors.New("scheduler.discovery_interval must be greater than zero")
+	}
+	if c.Scheduler.ComposeInterval.Duration <= 0 {
+		return errors.New("scheduler.compose_interval must be greater than zero")
 	}
 	if c.Scheduler.WorkerInterval.Duration <= 0 {
 		return errors.New("scheduler.worker_interval must be greater than zero")

@@ -18,6 +18,7 @@ describe('compose api client', () => {
       .mockResolvedValueOnce(ok({ id: 8 }, 201))
       .mockResolvedValueOnce(ok({ id: 7, status: 'inactive' }))
       .mockResolvedValueOnce(ok({ id: 7, schedule: { enabled: true } }))
+      .mockResolvedValueOnce(ok({ run_key: 'r', created_count: 1 }))
       .mockResolvedValueOnce(ok([]))
     const client = createComposeClient({ fetch })
 
@@ -28,6 +29,7 @@ describe('compose api client', () => {
     await client.copyStrategy(7, '切片 副本')
     await client.setStrategyStatus(7, 'inactive')
     await client.setStrategySchedule(7, { enabled: true })
+    await client.runStrategyNow(7, 'request-001')
     await client.listTemplates()
     await client.listTeams()
 
@@ -50,8 +52,11 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[6][0]).toBe('/api/v1/compose-strategies/7/schedule')
     expect(fetch.mock.calls[6][1].method).toBe('PUT')
     expect(fetch.mock.calls[6][1].body).toBe(JSON.stringify({ enabled: true }))
-    expect(fetch.mock.calls[7][0]).toBe('/api/v1/compose-templates')
-    expect(fetch.mock.calls[8][0]).toBe('/api/v1/operation-teams')
+    expect(fetch.mock.calls[7][0]).toBe('/api/v1/compose-strategies/7/run-now')
+    expect(fetch.mock.calls[7][1].method).toBe('POST')
+    expect(fetch.mock.calls[7][1].body).toBe(JSON.stringify({ request_key: 'request-001' }))
+    expect(fetch.mock.calls[8][0]).toBe('/api/v1/compose-templates')
+    expect(fetch.mock.calls[9][0]).toBe('/api/v1/operation-teams')
   })
 
   // 页面用游戏列表做「游戏 ID → 名称」的展示映射和创建表单下拉，与素材/内容池页
@@ -63,6 +68,14 @@ describe('compose api client', () => {
 
     await expect(client.listGames()).resolves.toEqual([{ id: 'naruto', name: '火影' }])
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/games')
+    expect(fetch.mock.calls[0][1].method).toBe('GET')
+  })
+
+  it('reads strategy schedule run history', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok([{ run_key: 'slot-1', skipped: [{ material_id: 8, reason: 'already_produced' }] }]))
+    const client = createComposeClient({ fetch })
+    await expect(client.listStrategyRuns(7)).resolves.toHaveLength(1)
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs')
     expect(fetch.mock.calls[0][1].method).toBe('GET')
   })
 })

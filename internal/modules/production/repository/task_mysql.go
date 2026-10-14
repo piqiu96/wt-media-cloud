@@ -20,6 +20,7 @@ type ComposeTaskFilter struct {
 	TeamID        int64
 	GameIDs       []string
 	Status        model.ComposeTaskStatus
+	TriggerType   string
 	StrategyID    int64
 	CreatedBy     int64
 	CreatedFrom   time.Time
@@ -203,6 +204,10 @@ func listComposeTasks(db *gorm.DB, filter ComposeTaskFilter) ([]model.ComposeTas
 	if filter.Status != "" {
 		query += ` AND status = ?`
 		args = append(args, filter.Status)
+	}
+	if filter.TriggerType != "" {
+		query += ` AND trigger_type = ?`
+		args = append(args, filter.TriggerType)
 	}
 	if filter.StrategyID > 0 {
 		query += ` AND compose_strategy_id = ?`

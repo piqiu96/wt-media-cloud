@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.14.1
+  version: 2026.10.14.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -105,6 +105,45 @@ paths:
         '403': {description: Actor cannot manage this strategy.}
         '404': {description: Strategy absent or outside the actor's scope.}
         '409': {description: Bound template cannot be used for an enabled plan.}
+  /api/v1/compose-strategies/{strategy_id}/run-now:
+    post:
+      operationId: runComposeStrategyNow
+      summary: Start one immediate selection and queue pass without moving next_run_at.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_key]
+              properties:
+                request_key: {type: string, minLength: 8, maxLength: 64, description: Stable client idempotency key for this command.}
+      responses:
+        '200': {description: ComposeScheduleRun with per-material skip reasons.}
+        '400': {description: Invalid request or strategy has no plan.}
+        '403': {description: Actor cannot manage this strategy.}
+        '404': {description: Strategy absent or outside the actor's scope.}
+  /api/v1/compose-strategies/{strategy_id}/runs:
+    get:
+      operationId: listComposeStrategyRuns
+      summary: Read the latest 20 schedule runs and per-material skip reasons in the actor's strategy scope.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200':
+          description: Latest persisted schedule runs, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/ComposeScheduleRun'}
+        '404': {description: Strategy absent or outside the actor's scope.}
   /api/v1/compose-tasks:
     post:
       operationId: createComposeTasks
@@ -136,6 +175,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
+        - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, scheduled]}}
         - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
         - {$ref: '#/components/parameters/CreatedFrom'}
         - {$ref: '#/components/parameters/CreatedBefore'}
@@ -436,6 +476,25 @@ components:
         per_run_limit: {type: integer, minimum: 1, maximum: 100}
         daily_limit: {type: integer, minimum: 1, maximum: 1000}
         material_scope: {type: string, enum: [creator_usages], description: Active materials in the strategy creator's My Materials within the strategy team and game.}
+    ComposeScheduleRun:
+      type: object
+      required: [run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
+      properties:
+        run_key: {type: string}
+        compose_strategy_id: {type: integer, format: int64}
+        trigger_type: {type: string, enum: [manual, scheduled]}
+        schedule_slot: {type: string, format: date-time}
+        candidate_count: {type: integer, minimum: 0}
+        created_count: {type: integer, minimum: 0}
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [material_id, reason]
+            properties:
+              material_id: {type: integer, format: int64}
+              reason: {type: string}
+        created_at: {type: string, format: date-time}
     CreateComposeStrategy:
       type: object
       additionalProperties: false

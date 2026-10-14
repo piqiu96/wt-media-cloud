@@ -6,6 +6,10 @@ const source = readFileSync(new URL('./ComposeStrategyPage.vue', import.meta.url
 // 合成策略页：操作列宽随角色可点按钮数自适应；筛选栏按 AdminUI 规范 §2.1
 // 「高频优先、主条件更宽」排布。
 describe('compose strategy page', () => {
+  it('keeps immediate execution separate from saving the next planned time', () => {
+    expect(source).toContain('client.runStrategyNow(row.id, crypto.randomUUID())')
+    expect(source).toContain('不改变')
+  })
   // 普通运营只有 详情；管理角色（canManage）多 编辑/复制 两个。列宽跟着这份清单走。
   it('derives the op column width from the buttons the current role can see', () => {
     expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '复制', '计划'] : ['详情'])")

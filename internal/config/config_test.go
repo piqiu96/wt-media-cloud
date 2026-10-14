@@ -476,7 +476,7 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 func TestSchedulerDurationsAndBatchSizeAreValidated(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 0\n")
+	writeConfigFile(t, dir, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\ncompose_interval = \"30s\"\nworker_interval = \"5s\"\nworker_batch_size = 0\n")
 
 	_, err := LoadFromDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "worker_batch_size") {
@@ -602,7 +602,7 @@ func writeValidConfig(t *testing.T, root string) {
 	writeHTTPClient(t, root, "douyin", "https", "api.itfaba.com", 443, "30s")
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
-	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
+	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\ncompose_interval = \"30s\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
 	writeConfigFile(t, root, "scheduler/compose.toml", validComposeWorkerTOML())
 	writeConfigFile(t, root, "media/ffmpeg.toml", "ffmpeg_path = \"/opt/homebrew/bin/ffmpeg\"\nffprobe_path = \"/opt/homebrew/bin/ffprobe\"\nversion = \"8.1.2\"\nrequired_encoders = [\"libx264\", \"aac\"]\n")
 	writeConfigFile(t, root, "storage/object_storage.toml", validObjectStorageTOML())

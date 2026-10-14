@@ -114,7 +114,7 @@ func ListComposeTasks(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	input := productionservice.ListComposeTasksInput{Status: strings.TrimSpace(c.Query("status"))}
+	input := productionservice.ListComposeTasksInput{Status: strings.TrimSpace(c.Query("status")), TriggerType: strings.TrimSpace(c.Query("trigger_type"))}
 	from, before, err := parseComposeCreatedRange(strings.TrimSpace(c.Query("created_from")), strings.TrimSpace(c.Query("created_before")))
 	if err != nil {
 		api.FailureNamed(c, consts.StatusBadRequest, 15214, "合成任务时间范围无效", "compose_task_invalid")

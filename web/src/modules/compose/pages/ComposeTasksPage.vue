@@ -21,7 +21,7 @@ const rows = ref([])
 const strategies = ref([])
 const loading = ref(false)
 const error = ref('')
-const filters = ref({ status: '', compose_strategy_id: '', created_range: [] })
+const filters = ref({ status: '', trigger_type: '', compose_strategy_id: '', created_range: [] })
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const statusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
@@ -38,6 +38,7 @@ const stageLabels = {
 const columns = computed(() => [
   { colKey: 'id', title: '任务 ID', width: 80 },
   { colKey: 'status', title: '状态', width: 100 },
+  { colKey: 'trigger_type', title: '触发方式', width: 100 },
   { colKey: 'progress', title: '执行进度', width: 180 },
   { colKey: 'material_id', title: '关联素材', width: 130 },
   { colKey: 'strategy', title: '合成策略', width: 220 },
@@ -83,6 +84,7 @@ async function load() {
   try {
     const params = {}
     if (filters.value.status) params.status = filters.value.status
+    if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type
     if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id
     Object.assign(params, createdRangeParams(filters.value.created_range))
     const data = await client.listComposeTasks(params)
@@ -96,7 +98,7 @@ async function load() {
 }
 
 function reset() {
-  filters.value = { status: '', compose_strategy_id: '', created_range: [] }
+  filters.value = { status: '', trigger_type: '', compose_strategy_id: '', created_range: [] }
   load()
 }
 
@@ -230,6 +232,7 @@ onMounted(() => {
       <ResourceCard class="compose-tasks-card">
         <div class="filter-bar">
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="手动" /><t-option value="scheduled" label="自动" /></t-select></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           <div class="wt-filter-actions">
@@ -246,6 +249,7 @@ onMounted(() => {
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="还没有合成任务">
             <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusLabels[row.status] || row.status" /></template>
+            <template #trigger_type="{ row }">{{ row.trigger_type === 'scheduled' ? '自动' : '手动' }}</template>
             <template #progress="{ row }">
               <div class="compose-progress">
                 <div class="compose-progress__top"><span>{{ stageText(row) }}</span><strong>{{ row.progress }}%</strong></div>
@@ -292,6 +296,7 @@ onMounted(() => {
                     <div><span class="compose-detail__label">合成策略</span><span>{{ strategyName(detail) }}</span></div>
                     <div><span class="compose-detail__label">合成模板</span><span>{{ templateText(detail) }}</span></div>
                     <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
+                    <div><span class="compose-detail__label">触发方式</span><span>{{ detail.trigger_type === 'scheduled' ? '自动' : '手动' }}</span></div>
                     <div><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
                     <div><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
                     <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>

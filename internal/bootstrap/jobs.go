@@ -27,6 +27,16 @@ func runSchedulerProcess() error {
 	return nil
 }
 
+func runComposeSchedulerProcess() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	runner := scheduler.New()
+	runner.Register("compose-schedule", config.Get().Scheduler.ComposeInterval.Duration, jobs.RunComposeSchedule)
+	runner.Start(ctx)
+	<-ctx.Done()
+	return nil
+}
+
 func runWorkerProcess() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

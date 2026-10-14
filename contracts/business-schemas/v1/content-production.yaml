@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.14.1"
+revision: "2026.10.14.2"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -49,6 +49,18 @@ schemas:
       per_run_limit: {type: integer, minimum: 1, maximum: 100}
       daily_limit: {type: integer, minimum: 1, maximum: 1000}
       material_scope: {type: string, enum: [creator_usages]}
+  ComposeScheduleRun:
+    type: object
+    required: [run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
+    properties:
+      run_key: {type: string}
+      compose_strategy_id: {type: integer, format: int64}
+      trigger_type: {type: string, enum: [manual, scheduled]}
+      schedule_slot: {type: string, format: date-time}
+      candidate_count: {type: integer, minimum: 0}
+      created_count: {type: integer, minimum: 0}
+      skipped: {type: array}
+      created_at: {type: string, format: date-time}
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。

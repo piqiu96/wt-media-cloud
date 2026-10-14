@@ -11,8 +11,10 @@ describe('compose tasks page', () => {
   it('loads the list through the server-side filters it renders', () => {
     expect(source).toContain('client.listComposeTasks(params)')
     expect(source).toContain('if (filters.value.status) params.status = filters.value.status')
+    expect(source).toContain('if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type')
     expect(source).toContain('if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id')
     expect(source).toContain('v-model="filters.status"')
+    expect(source).toContain('v-model="filters.trigger_type"')
     expect(source).toContain('v-model="filters.compose_strategy_id"')
     expect(source).toContain('createdRangeParams(filters.value.created_range)')
     expect(source).toContain('v-model="filters.created_range"')

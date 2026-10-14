@@ -50,7 +50,32 @@ const copyName = ref('')
 
 const detailVisible = ref(false)
 const detailRow = ref(null)
+const runHistory = ref([])
+const runHistoryError = ref('')
 const scheduleRow = ref(null)
+
+const skipReasons = {
+  creator_disabled: '创建人已停用', template_unavailable: '模板不可用', other_game: '不属于当前游戏',
+  material_unavailable: '素材不可用', already_produced: '该策略已产出成片', in_progress: '任务正在排队或执行',
+  daily_limit: '达到每日上限', per_run_limit: '达到单次上限',
+}
+
+async function loadRunHistory(strategyID) {
+  runHistoryError.value = ''
+  try {
+    const data = await client.listStrategyRuns(strategyID)
+    if (detailRow.value?.id === strategyID) runHistory.value = Array.isArray(data) ? data : []
+  } catch (e) {
+    if (detailRow.value?.id === strategyID) runHistoryError.value = e?.message || '运行记录读取失败'
+  }
+}
+
+function openDetail(row) {
+  detailRow.value = row
+  runHistory.value = []
+  detailVisible.value = true
+  loadRunHistory(row.id)
+}
 
 const filters = ref({ name: '', game_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
@@ -235,6 +260,25 @@ function scheduleState(row) {
   if (!row.schedule || row.schedule.mode === 'manual') return '手动'
   if (!row.schedule.enabled) return '已暂停'
   return row.status === 'active' ? '已启用' : '策略停用'
+}
+
+function runNow(row) {
+  const dialog = DialogPlugin.confirm({
+    header: '立即创建合成任务',
+    body: `将从策略创建人的“我的素材”中筛选候选素材，为每条符合条件的素材创建独立任务。此操作不改变「${row.name}」的下次计划时间。`,
+    confirmBtn: { content: '立即执行', theme: 'primary' },
+    onConfirm: async () => {
+      try {
+        const result = await client.runStrategyNow(row.id, crypto.randomUUID())
+        feedback.toast.success(`已创建 ${result.created_count} 个合成任务`)
+        await loadRunHistory(row.id)
+        dialog.hide()
+      } catch (e) {
+        error.value = e?.message || '立即执行失败'
+        dialog.hide()
+      }
+    },
+  })
 }
 
 // 启停开关在列表行上（走查修订第 3 条）。开关受控于 row.status，确认后才真正变更；
@@ -431,7 +475,7 @@ function cutLabel(config) {
             <template #next_run_at="{ row }">{{ row.next_run_at ? formatDateTime(row.next_run_at) : '—' }}</template>
             <template #op="{ row }">
               <t-space size="small" class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="detailRow = row; detailVisible = true">详情</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
                 <template v-if="canManage">
                   <t-button size="small" theme="primary" @click="openEdit(row)">编辑</t-button>
                   <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCopy(row)">复制</t-button>
@@ -549,6 +593,14 @@ function cutLabel(config) {
           <div class="strategy-drawer__field"><span>素材范围</span><strong>创建人的“我的素材”（当前团队与游戏）</strong></div>
           <div class="strategy-drawer__field"><span>单次／每日上限</span><strong>{{ detailRow.schedule ? `${detailRow.schedule.per_run_limit}／${detailRow.schedule.daily_limit}` : '未设置' }}</strong></div>
           <div class="strategy-drawer__field"><span>下次执行</span><strong>{{ detailRow.next_run_at ? formatDateTime(detailRow.next_run_at) : '—' }}</strong></div>
+          <div v-if="canManage && detailRow.status === 'active' && detailRow.schedule" class="strategy-drawer__actions"><t-button theme="primary" @click="runNow(detailRow)">立即执行</t-button></div>
+          <h4 class="strategy-detail-section">最近运行</h4>
+          <p v-if="runHistoryError" class="strategy-run-message">{{ runHistoryError }}</p>
+          <p v-else-if="!runHistory.length" class="strategy-run-message">暂无运行记录</p>
+          <div v-for="run in runHistory" :key="run.run_key" class="strategy-run">
+            <div class="strategy-run__summary"><strong>{{ run.trigger_type === 'scheduled' ? '自动执行' : '立即执行' }} · {{ formatDateTime(run.schedule_slot) }}</strong><span>创建 {{ run.created_count }} / 候选 {{ run.candidate_count }}</span></div>
+            <details v-if="run.skipped?.length"><summary>跳过 {{ run.skipped.length }} 项</summary><p v-for="(skip, index) in run.skipped" :key="`${run.run_key}-${index}`">{{ skip.material_id ? `素材 ${skip.material_id}：` : '' }}{{ skipReasons[skip.reason] || skip.reason }}</p></details>
+          </div>
           <h4 class="strategy-detail-section">记录时间</h4>
           <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
           <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ formatDateTime(detailRow.updated_at) }}</strong></div>
@@ -559,6 +611,12 @@ function cutLabel(config) {
 </template>
 
 <style scoped>
+.strategy-run { padding: 10px 0; border-bottom: 1px solid var(--wt-border); color: var(--wt-text-secondary); font-size: 12px; }
+.strategy-run__summary { display: flex; justify-content: space-between; gap: 10px; }
+.strategy-run__summary strong { color: var(--wt-text-primary); font-weight: 600; }
+.strategy-run details { margin-top: 6px; }
+.strategy-run details p { margin: 4px 0 0 14px; }
+.strategy-run-message { color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
 .strategy-list-summary { display: flex; gap: 20px; align-items: center; padding: 0 0 12px; color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-list-summary strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
@@ -591,4 +649,5 @@ function cutLabel(config) {
 .strategy-drawer__field { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 0; }
 .strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.strategy-drawer__actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>

@@ -193,10 +193,20 @@ sudo ./bin/wtmctl deploy apply \
 端口：不填写
 ```
 
+### Compose Scheduler：宝塔进程管理器
+
+```text
+名称：wt-media-cloud-compose-scheduler
+工作目录：/home/www/wt-media-cloud/current
+启动文件：/home/www/wt-media-cloud/current/bin/compose-scheduler
+运行用户：www
+端口：不填写
+```
+
 启动顺序：
 
 ```text
-Server -> Worker -> Scheduler
+Server -> Worker -> Scheduler -> Compose Scheduler
 ```
 
 ## 7. 部署后验收

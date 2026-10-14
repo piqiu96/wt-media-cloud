@@ -34,6 +34,7 @@ type CreateComposeTasksInput struct {
 
 type ListComposeTasksInput struct {
 	Status        string    `json:"status"`
+	TriggerType   string    `json:"trigger_type"`
 	StrategyID    int64     `json:"compose_strategy_id"`
 	CreatedFrom   time.Time `json:"created_from"`
 	CreatedBefore time.Time `json:"created_before"`
@@ -259,6 +260,12 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 		return nil, ErrComposeTaskForbidden
 	}
 	filter := repository.ComposeTaskFilter{StrategyID: input.StrategyID, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
+	if input.TriggerType != "" {
+		if input.TriggerType != "manual" && input.TriggerType != "scheduled" {
+			return nil, fmt.Errorf("%w: unknown trigger_type %s", ErrComposeTaskInvalid, input.TriggerType)
+		}
+		filter.TriggerType = input.TriggerType
+	}
 	if input.Status != "" {
 		status := model.ComposeTaskStatus(input.Status)
 		switch status {

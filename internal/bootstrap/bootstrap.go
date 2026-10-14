@@ -34,6 +34,17 @@ func InitializeScheduler() (func() error, error) {
 	}, nil
 }
 
+func InitializeComposeScheduler() (func() error, error) {
+	closer, err := initializeResources(schedulerResourcePlan())
+	if err != nil {
+		return nil, err
+	}
+	return func() error {
+		defer closer()
+		return runComposeSchedulerProcess()
+	}, nil
+}
+
 // InitializeWorker initializes only resources required by the worker process and
 // returns its blocking run function.
 func InitializeWorker() (func() error, error) {
