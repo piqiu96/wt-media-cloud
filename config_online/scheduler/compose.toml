@@ -6,6 +6,9 @@ workspace_root = '.compose'
 node_id = 1
 concurrency = 2
 global_concurrency = 2
+# Free-space floor on the workspace volume: below it the worker pauses
+# claiming until space recovers (10 GiB).
+min_free_bytes = 10737418240
 lease = '5m'
 heartbeat_interval = '30s'
 task_timeout = '30m'

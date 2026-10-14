@@ -177,6 +177,8 @@ func runWorker(ctx context.Context) error {
 	settings := jobs.ComposeWorkerSettings{
 		NodeID:            cfg.Compose.Worker.NodeID,
 		Concurrency:       cfg.Compose.Worker.Concurrency,
+		WorkspaceRoot:     cfg.Compose.Worker.WorkspaceRoot,
+		MinFreeBytes:      cfg.Compose.Worker.MinFreeBytes,
 		Lease:             cfg.Compose.Worker.Lease.Duration,
 		HeartbeatInterval: cfg.Compose.Worker.HeartbeatInterval.Duration,
 		TaskTimeout:       cfg.Compose.Worker.TaskTimeout.Duration,

@@ -3,7 +3,9 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -258,6 +260,7 @@ func claimedTask(id int64) model.ComposeTask {
 func workerSettings() ComposeWorkerSettings {
 	return ComposeWorkerSettings{
 		NodeID: 9, Concurrency: 1, Lease: 50 * time.Millisecond,
+		WorkspaceRoot: ".", MinFreeBytes: 1,
 		HeartbeatInterval: 2 * time.Millisecond, TaskTimeout: 2 * time.Second,
 		PollInterval: 2 * time.Millisecond, RecoveryInterval: time.Hour,
 	}
@@ -557,5 +560,125 @@ func TestComposeWorkerRefusesInvalidSettings(t *testing.T) {
 	}
 	if fake.claimCount() != 0 {
 		t.Fatalf("a refused worker must not claim: %d", fake.claimCount())
+	}
+
+	settings = workerSettings()
+	settings.MinFreeBytes = 0
+	if err := RunComposeWorker(context.Background(), deps, settings); err == nil {
+		t.Fatal("RunComposeWorker() = nil error, want a refusal for a missing free-space floor")
+	}
+	if fake.claimCount() != 0 {
+		t.Fatalf("a refused worker must not claim: %d", fake.claimCount())
+	}
+}
+
+// diskFreeFake answers the slot's capacity probe with a test-controlled free
+// byte count, so the pause and its recovery are both observable.
+type diskFreeFake struct {
+	mu   sync.Mutex
+	free int64
+	err  error
+}
+
+func (f *diskFreeFake) diskFree(string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.free, f.err
+}
+
+func (f *diskFreeFake) set(free int64, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.free, f.err = free, err
+}
+
+// logCapture records the worker's own event lines.
+type logCapture struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (c *logCapture) log(format string, args ...any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lines = append(c.lines, fmt.Sprintf(format, args...))
+}
+
+func (c *logCapture) all() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.lines...)
+}
+
+func TestComposeWorkerPausesClaimingWhileDiskIsBelowTheMinimum(t *testing.T) {
+	fake := &workerTasksFake{claims: []model.ComposeTask{claimedTask(77)}}
+	disk := &diskFreeFake{free: 0}
+	logs := &logCapture{}
+	workspace, err := compose.NewWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	settings := workerSettings()
+	settings.MinFreeBytes = 1024
+	deps := ComposeWorkerDeps{Tasks: fake, Workspace: workspace, Attempt: (&attemptSpy{}).attempt, DiskFree: disk.diskFree, Log: logs.log}
+	cancel, done := startWorker(t, deps, settings)
+
+	waitFor(t, func() bool {
+		for _, line := range logs.all() {
+			if strings.Contains(line, "pausing claims") {
+				return true
+			}
+		}
+		return false
+	}, "the low-disk pause to be logged")
+	time.Sleep(30 * time.Millisecond)
+	if claims := fake.claimCount(); claims != 0 {
+		t.Fatalf("a worker below the free-space floor must not claim: %d", claims)
+	}
+
+	disk.set(4096, nil)
+	waitFor(t, func() bool { return fake.claimCount() >= 1 }, "claiming to resume once space recovers")
+	if err := stopWorker(cancel, done); err != nil {
+		t.Fatalf("RunComposeWorker: %v", err)
+	}
+	resumed := false
+	for _, line := range logs.all() {
+		if strings.Contains(line, "resuming claims") {
+			resumed = true
+		}
+	}
+	if !resumed {
+		t.Fatalf("recovery was not logged: %v", logs.all())
+	}
+}
+
+func TestComposeWorkerPausesClaimingWhenDiskSpaceCannotBeRead(t *testing.T) {
+	fake := &workerTasksFake{claims: []model.ComposeTask{claimedTask(77)}}
+	disk := &diskFreeFake{err: errors.New("statfs failed")}
+	logs := &logCapture{}
+	workspace, err := compose.NewWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	deps := ComposeWorkerDeps{Tasks: fake, Workspace: workspace, Attempt: (&attemptSpy{}).attempt, DiskFree: disk.diskFree, Log: logs.log}
+	cancel, done := startWorker(t, deps, workerSettings())
+
+	waitFor(t, func() bool {
+		for _, line := range logs.all() {
+			if strings.Contains(line, "cannot read free disk space") {
+				return true
+			}
+		}
+		return false
+	}, "the unreadable-capacity pause to be logged")
+	time.Sleep(30 * time.Millisecond)
+	if claims := fake.claimCount(); claims != 0 {
+		t.Fatalf("a worker that cannot verify capacity must not claim: %d", claims)
+	}
+
+	disk.set(4096, nil)
+	waitFor(t, func() bool { return fake.claimCount() >= 1 }, "claiming to resume once capacity is readable again")
+	if err := stopWorker(cancel, done); err != nil {
+		t.Fatalf("RunComposeWorker: %v", err)
 	}
 }

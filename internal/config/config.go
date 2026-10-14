@@ -168,6 +168,9 @@ type ComposeWorkerConfig struct {
 	NodeID            int64    `toml:"node_id"`
 	Concurrency       int      `toml:"concurrency"`
 	GlobalConcurrency int      `toml:"global_concurrency"`
+	// MinFreeBytes is the free-space floor on the workspace volume: below it
+	// the worker stops claiming until space recovers.
+	MinFreeBytes      int64    `toml:"min_free_bytes"`
 	Lease             Duration `toml:"lease"`
 	HeartbeatInterval Duration `toml:"heartbeat_interval"`
 	TaskTimeout       Duration `toml:"task_timeout"`
@@ -445,6 +448,9 @@ func validateComposeWorker(worker ComposeWorkerConfig) error {
 	}
 	if worker.GlobalConcurrency <= 0 || worker.Concurrency > worker.GlobalConcurrency {
 		return errors.New("scheduler.compose.global_concurrency must be positive and at least concurrency")
+	}
+	if worker.MinFreeBytes <= 0 {
+		return errors.New("scheduler.compose.min_free_bytes must be greater than zero")
 	}
 	if worker.Lease.Duration <= 0 {
 		return errors.New("scheduler.compose.lease must be greater than zero")

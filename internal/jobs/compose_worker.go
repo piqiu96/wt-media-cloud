@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
@@ -47,6 +49,8 @@ type composeWorkerTasks interface {
 type ComposeWorkerSettings struct {
 	NodeID            int64
 	Concurrency       int
+	WorkspaceRoot     string
+	MinFreeBytes      int64
 	Lease             time.Duration
 	HeartbeatInterval time.Duration
 	TaskTimeout       time.Duration
@@ -62,6 +66,9 @@ type ComposeWorkerDeps struct {
 	Tasks     composeWorkerTasks
 	Workspace *compose.Workspace
 	Attempt   func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir) productionservice.ComposeAttemptOutcome
+	// DiskFree reports the free bytes on the volume holding dir. Real wiring
+	// uses the host filesystem; tests answer with a fake.
+	DiskFree func(dir string) (int64, error)
 	// Log receives one line per notable worker event. Real wiring passes the
 	// job logger; tests leave it nil and lose nothing they assert on.
 	Log func(format string, args ...any)
@@ -76,6 +83,9 @@ func RunComposeWorker(ctx context.Context, deps ComposeWorkerDeps, settings Comp
 	}
 	if deps.Log == nil {
 		deps.Log = func(string, ...any) {}
+	}
+	if deps.DiskFree == nil {
+		deps.DiskFree = freeDiskBytes
 	}
 	if err := recoverExpiredComposeLeases(deps.Tasks, deps.Log); err != nil {
 		return fmt.Errorf("compose worker startup recovery: %w", err)
@@ -134,16 +144,51 @@ func validateComposeSettings(settings ComposeWorkerSettings) error {
 		return errors.New("compose worker poll interval must be greater than zero")
 	case settings.RecoveryInterval <= 0:
 		return errors.New("compose worker recovery interval must be greater than zero")
+	case strings.TrimSpace(settings.WorkspaceRoot) == "":
+		return errors.New("compose worker workspace root is required")
+	case settings.MinFreeBytes <= 0:
+		return errors.New("compose worker minimum free bytes must be greater than zero")
 	}
 	return nil
+}
+
+// freeDiskBytes reports the space available to unprivileged writes on the
+// volume holding dir — the workspace volume the compose runs consume.
+func freeDiskBytes(dir string) (int64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dir, &stat); err != nil {
+		return 0, err
+	}
+	return int64(stat.Bavail) * int64(stat.Bsize), nil
 }
 
 // runComposeSlot claims one task at a time until the context ends. An idle
 // slot waits PollInterval; a finished task pauses the slot the same interval
 // before the next claim, which is also the backoff that keeps a task cycling
-// through transient retries from spinning on the queue.
+// through transient retries from spinning on the queue. Before claiming, the
+// slot checks the workspace volume's free space: below the configured floor —
+// or unreadable — it pauses claiming until capacity recovers, since a run it
+// could not fit would only spend an attempt to die mid-cut.
 func runComposeSlot(ctx context.Context, deps ComposeWorkerDeps, settings ComposeWorkerSettings) {
+	paused := false
 	for ctx.Err() == nil {
+		free, err := deps.DiskFree(settings.WorkspaceRoot)
+		if err != nil || free < settings.MinFreeBytes {
+			if !paused {
+				paused = true
+				if err != nil {
+					deps.Log("compose worker cannot read free disk space for %s; pausing claims: %v", settings.WorkspaceRoot, err)
+				} else {
+					deps.Log("compose worker free disk space %d bytes is below the minimum %d; pausing claims", free, settings.MinFreeBytes)
+				}
+			}
+			sleepCompose(ctx, settings.PollInterval)
+			continue
+		}
+		if paused {
+			paused = false
+			deps.Log("compose worker free disk space recovered to %d bytes; resuming claims", free)
+		}
 		task, found, err := deps.Tasks.ClaimNextComposeTask(settings.NodeID, settings.Lease)
 		if err != nil {
 			deps.Log("compose worker claim failed: %v", err)

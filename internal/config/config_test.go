@@ -375,6 +375,7 @@ func TestLoadFromDirRefusesInvalidComposeWorkerSettings(t *testing.T) {
 		{"no task timeout", "task_timeout = \"0s\"\n", "task_timeout"},
 		{"no poll interval", "poll_interval = \"0s\"\n", "poll_interval"},
 		{"no recovery interval", "recovery_interval = \"0s\"\n", "recovery_interval"},
+		{"no free-space floor", "min_free_bytes = 0\n", "min_free_bytes"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -615,6 +616,7 @@ func validComposeWorkerTOML() string {
 		"node_id = 1\n" +
 		"concurrency = 2\n" +
 		"global_concurrency = 2\n" +
+		"min_free_bytes = 10737418240\n" +
 		"lease = \"5m\"\n" +
 		"heartbeat_interval = \"30s\"\n" +
 		"task_timeout = \"30m\"\n" +
