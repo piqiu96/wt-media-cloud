@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.14.3
+  version: 2026.10.15.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -222,6 +222,41 @@ paths:
         '403': {description: Task outside the actor's scope, or the actor is not a senior operator (named compose_task_forbidden).}
         '404': {description: Task absent or outside the actor's scope.}
         '409': {description: Task is not failed, or its error code is not retryable (named compose_task_not_retryable).}
+  /api/v1/compose-tasks/{task_id}/uncertain-review:
+    get:
+      operationId: listComposeUncertainReviews
+      summary: Read administrator verification records for one visible task.
+      description: Admin only. Returns records in attempt order; an empty list means the execution_uncertain failure is still awaiting verification. Records are human declarations, not automated process checks.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      responses:
+        '200': {description: '[ComposeUncertainReview] for the task.'}
+        '403': {description: Actor is not an admin (named compose_task_forbidden).}
+        '404': {description: Task absent or outside the actor's scope.}
+    post:
+      operationId: resolveComposeUncertain
+      summary: Administrator verifies an uncertain execution and retries the same task.
+      description: >-
+        Admin only. The administrator must independently verify that the old FFmpeg
+        process has stopped and no output has been committed, then provide a
+        reviewable evidence note. A guarded transaction records the declaration,
+        audit event and manual next attempt, and requeues only a currently
+        failed/execution_uncertain task with no composite output. This endpoint
+        does not claim to verify the external process automatically. An unverified
+        task remains failed/execution_uncertain and cannot use ordinary retry.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResolveComposeUncertainInput'}
+      responses:
+        '200': {description: ComposeUncertainResolution with the pending task and persisted review.}
+        '400': {description: Missing verification declarations or invalid evidence note (named compose_task_invalid).}
+        '403': {description: Actor is not an admin (named compose_task_forbidden).}
+        '404': {description: Task absent or outside the actor's scope.}
+        '409': {description: Task changed, was already resolved, or has a committed output (named compose_task_not_retryable).}
   /api/v1/compose-tasks/{task_id}/cancel:
     post:
       operationId: cancelComposeTask
@@ -648,6 +683,32 @@ components:
         error_message: {type: string}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    ResolveComposeUncertainInput:
+      type: object
+      additionalProperties: false
+      required: [old_execution_stopped, no_output_committed, evidence]
+      properties:
+        old_execution_stopped: {type: boolean, const: true, description: Administrator verified the old FFmpeg process is stopped.}
+        no_output_committed: {type: boolean, const: true, description: Administrator verified no output was committed.}
+        evidence: {type: string, minLength: 20, maxLength: 2000, description: Reviewable verification note; do not include credentials or signed URLs.}
+    ComposeUncertainReview:
+      type: object
+      additionalProperties: false
+      required: [id, compose_task_id, attempt, actor_user_id, evidence, created_at]
+      properties:
+        id: {type: integer, format: int64}
+        compose_task_id: {type: integer, format: int64}
+        attempt: {type: integer, minimum: 1, description: The uncertain attempt reviewed before manual retry.}
+        actor_user_id: {type: integer, format: int64}
+        evidence: {type: string, description: Administrator's verification note, not automated proof.}
+        created_at: {type: string, format: date-time}
+    ComposeUncertainResolution:
+      type: object
+      additionalProperties: false
+      required: [task, review]
+      properties:
+        task: {$ref: '#/components/schemas/ComposeTask'}
+        review: {$ref: '#/components/schemas/ComposeUncertainReview'}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:

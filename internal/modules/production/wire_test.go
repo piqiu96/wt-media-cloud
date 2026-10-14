@@ -443,3 +443,43 @@ func TestTheOutputDownloadEndpointIsInTheContract(t *testing.T) {
 		t.Fatal("contract declares no OutputID parameter")
 	}
 }
+
+func TestUncertainReviewContractRequiresExplicitHumanVerification(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Paths map[string]struct {
+			Get struct {
+				OperationID string `yaml:"operationId"`
+			} `yaml:"get"`
+			Post struct {
+				OperationID string               `yaml:"operationId"`
+				Responses   map[string]yaml.Node `yaml:"responses"`
+			} `yaml:"post"`
+		} `yaml:"paths"`
+		Components struct {
+			Schemas struct {
+				Input struct {
+					Required []string `yaml:"required"`
+				} `yaml:"ResolveComposeUncertainInput"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, ok := parsed.Paths["/api/v1/compose-tasks/{task_id}/uncertain-review"]
+	if !ok || endpoint.Get.OperationID != "listComposeUncertainReviews" || endpoint.Post.OperationID != "resolveComposeUncertain" {
+		t.Fatalf("uncertain review operations absent or renamed: %+v", endpoint)
+	}
+	for _, status := range []string{"200", "400", "403", "404", "409"} {
+		if _, ok := endpoint.Post.Responses[status]; !ok {
+			t.Fatalf("resolve operation lacks %s response", status)
+		}
+	}
+	if got, want := sortedCopy(parsed.Components.Schemas.Input.Required), []string{"evidence", "no_output_committed", "old_execution_stopped"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("verification fields = %v, want %v", got, want)
+	}
+}
