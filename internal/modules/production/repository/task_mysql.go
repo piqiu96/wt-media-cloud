@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const composeTaskColumns = `id, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
+const composeTaskColumns = `id, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
 
 type ComposeTaskFilter struct {
 	TeamID        int64
@@ -280,8 +280,8 @@ func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 	var item model.ComposeTask
 	var snapshot []byte
 	var claimedNode, compositeOutput sql.NullInt64
-	var leaseExpires, heartbeat, started, finished sql.NullTime
-	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &item.TriggerType, &item.MaterialID, &item.MaterialUsageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
+	var leaseExpires, heartbeat, nextAttempt, started, finished sql.NullTime
+	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &item.TriggerType, &item.MaterialID, &item.MaterialUsageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.ComposeTask{}, err
 	}
@@ -300,6 +300,10 @@ func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 	if heartbeat.Valid {
 		v := heartbeat.Time
 		item.HeartbeatAt = &v
+	}
+	if nextAttempt.Valid {
+		v := nextAttempt.Time
+		item.NextAttemptAt = &v
 	}
 	if started.Valid {
 		v := started.Time

@@ -164,8 +164,8 @@ func freeDiskBytes(dir string) (int64, error) {
 
 // runComposeSlot claims one task at a time until the context ends. An idle
 // slot waits PollInterval; a finished task pauses the slot the same interval
-// before the next claim, which is also the backoff that keeps a task cycling
-// through transient retries from spinning on the queue. Before claiming, the
+// before the next claim. Retry eligibility itself is persisted as
+// compose_tasks.next_attempt_at and checked by every claimant. Before claiming, the
 // slot checks the workspace volume's free space: below the configured floor —
 // or unreadable — it pauses claiming until capacity recovers, since a run it
 // could not fit would only spend an attempt to die mid-cut.
@@ -255,8 +255,8 @@ func runComposeTask(ctx context.Context, deps ComposeWorkerDeps, settings Compos
 			}
 			confirmIfCancelSeen(deps, settings, task, cancelSeen)
 		case productionservice.ComposeAttemptRetry:
-			// The row is pending again; the slot's pause before the next
-			// claim is the retry backoff.
+			// The row is pending with a durable next_attempt_at; this slot
+			// can keep polling without bypassing the shared retry deadline.
 		case productionservice.ComposeAttemptWaitInput:
 			sleepCompose(attemptCtx, settings.PollInterval)
 			continue

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -80,6 +81,26 @@ func setComposeCapacity(t *testing.T, limit int) {
 	})
 	if err := database.DB().Exec(`UPDATE compose_worker_capacity SET max_running = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = 1`, limit).Error; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The retry timestamp is a database fact. Two claimers with independent
+// connections see the same eligibility, including after a process restart.
+func TestLiveComposeRetryEligibilityPersists(t *testing.T) {
+	_, requestKey, strategyID := composeClaimSetup(t)
+	cleanupComposeTasks(t, requestKey)
+	seedComposeTask(t, requestKey, strategyID)
+	now := time.Now().UTC().Truncate(time.Second)
+	future := now.Add(2 * time.Minute)
+	if err := database.DB().Exec(`UPDATE compose_tasks SET next_attempt_at = ? WHERE request_key = ?`, future, requestKey).Error; err != nil {
+		t.Fatal(err)
+	}
+	var id int64
+	if err := database.DB().Raw(`SELECT id FROM compose_tasks WHERE request_key = ? AND status = 'pending' AND attempt_count < max_attempts AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, requestKey, now).Row().Scan(&id); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("future retry was claimable: id=%d err=%v", id, err)
+	}
+	if err := database.DB().Raw(`SELECT id FROM compose_tasks WHERE request_key = ? AND status = 'pending' AND attempt_count < max_attempts AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, requestKey, future).Row().Scan(&id); err != nil || id <= 0 {
+		t.Fatalf("due retry was not claimable: id=%d err=%v", id, err)
 	}
 }
 

@@ -34,10 +34,10 @@ func TestClaimNextComposeTaskFlipsPendingToRunning(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{"max_running"}).AddRow(2))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM compose_tasks WHERE status = 'running'").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery("SELECT id FROM compose_tasks WHERE status = 'pending' AND attempt_count < max_attempts").
+	mock.ExpectQuery("SELECT id FROM compose_tasks WHERE status = 'pending' AND attempt_count < max_attempts AND \\(next_attempt_at IS NULL OR next_attempt_at <= \\?\\)").WithArgs(now).
 		WillReturnRows(sqlmockIDRows(77))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'running'").
-		WithArgs(int64(9), now.Add(lease), now, now, now, int64(77)).
+		WithArgs(int64(9), now.Add(lease), now, now, now, int64(77), now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).
 		WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "running", now)...))
@@ -202,8 +202,8 @@ func TestReleaseComposeForRetryRequeuesWithoutErasingAttempts(t *testing.T) {
 	mock.ExpectQuery("SELECT stage, attempt_count FROM compose_tasks WHERE id = \\? AND claimed_node_id = \\? AND attempt_count = \\?").
 		WithArgs(int64(77), int64(9), 1, now).
 		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}).AddRow("uploading", 1))
-	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
-		WithArgs("storage_flaky", "object storage timeout", now, int64(77), int64(9), 1, now).
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'.*next_attempt_at = \\?").
+		WithArgs("storage_flaky", "object storage timeout", now.Add(30*time.Second), now, int64(77), int64(9), 1, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts SET outcome").
 		WithArgs("failed", "storage_flaky", "object storage timeout", now, "uploading", now, int64(77), int64(1)).
@@ -214,6 +214,23 @@ func TestReleaseComposeForRetryRequeuesWithoutErasingAttempts(t *testing.T) {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	assertExpectations(t, mock)
+}
+
+func TestComposeRetryDelayIsBoundedExponential(t *testing.T) {
+	for _, tc := range []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{1, 30 * time.Second},
+		{2, time.Minute},
+		{3, 2 * time.Minute},
+		{6, 15 * time.Minute},
+		{100, 15 * time.Minute},
+	} {
+		if got := composeRetryDelay(tc.attempt); got != tc.want {
+			t.Fatalf("attempt %d: got %s, want %s", tc.attempt, got, tc.want)
+		}
+	}
 }
 
 func TestFailComposeTaskWritesTheTerminalError(t *testing.T) {
@@ -298,7 +315,7 @@ func TestRequeueExpiredComposeLeaseTakesBackTheDeadWorkersRow(t *testing.T) {
 		WithArgs(int64(77), int64(9), 2, now).
 		WillReturnRows(sqlmock.NewRows([]string{"stage", "attempt_count"}).AddRow("cutting", 2))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
-		WithArgs("lease_expired", "worker lease expired", now, int64(77), int64(9), 2, now).
+		WithArgs("lease_expired", "worker lease expired", now.Add(time.Minute), now, int64(77), int64(9), 2, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts SET outcome").
 		WithArgs("failed", "lease_expired", "worker lease expired", now, "cutting", now, int64(77), int64(2)).

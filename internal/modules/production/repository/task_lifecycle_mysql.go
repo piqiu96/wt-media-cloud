@@ -66,14 +66,14 @@ func claimNextComposeTask(db *gorm.DB, nodeID int64, lease time.Duration, now ti
 			return errNoClaimableTask
 		}
 		var taskID int64
-		err := tx.Raw(`SELECT id FROM compose_tasks WHERE status = 'pending' AND attempt_count < max_attempts ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`).Row().Scan(&taskID)
+		err := tx.Raw(`SELECT id FROM compose_tasks WHERE status = 'pending' AND attempt_count < max_attempts AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).Row().Scan(&taskID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errNoClaimableTask
 		}
 		if err != nil {
 			return err
 		}
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'running', claimed_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND status = 'pending'`, nodeID, now.Add(lease), now, now, now, taskID)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'running', claimed_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, next_attempt_at = NULL, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, nodeID, now.Add(lease), now, now, now, taskID, now)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -227,6 +227,20 @@ func releaseComposeForRetry(db *gorm.DB, taskID, nodeID int64, attempt int, erro
 	return requeueRunningComposeTask(db, taskID, nodeID, attempt, false, errorCode, message, now)
 }
 
+// composeRetryDelay is durable backoff measured from the failed attempt's
+// database transition. The cap prevents pathological waits for manually
+// raised attempt budgets while keeping a rapid first recovery.
+func composeRetryDelay(attempt int) time.Duration {
+	delay := 30 * time.Second
+	for i := 1; i < attempt && delay < 15*time.Minute; i++ {
+		delay *= 2
+		if delay > 15*time.Minute {
+			return 15 * time.Minute
+		}
+	}
+	return delay
+}
+
 // FailComposeTask records the terminal failure of an attempt the caller owns.
 func (ComposeTaskStore) FailComposeTask(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error) {
 	return failComposeTask(database.DB(), taskID, nodeID, attempt, errorCode, message, time.Now())
@@ -315,8 +329,8 @@ func requeueRunningComposeTask(db *gorm.DB, taskID, nodeID int64, attempt int, l
 		if err != nil {
 			return err
 		}
-		updateSQL := `UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, stage = '', error_code = ?, error_message = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running'`
-		updateArgs := []any{errorCode, message, now, taskID, nodeID, attempt}
+		updateSQL := `UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, stage = '', error_code = ?, error_message = ?, next_attempt_at = ?, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running'`
+		updateArgs := []any{errorCode, message, now.Add(composeRetryDelay(int(attempt))), now, taskID, nodeID, attempt}
 		if lapsed {
 			updateSQL += ` AND lease_expires_at < ?`
 			updateArgs = append(updateArgs, now)
@@ -353,7 +367,7 @@ func (ComposeTaskStore) RetryFailed(item model.ComposeTask, actorID int64, actio
 func retryFailedComposeTask(db *gorm.DB, taskID, actorID int64, action string, now time.Time) (bool, error) {
 	retried := false
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, cancel_requested = 0, stage = '', progress = 0, started_at = NULL, finished_at = NULL, max_attempts = max_attempts + 1, updated_at = ? WHERE id = ? AND status = 'failed' AND error_code IN ('storage_error', 'task_timeout', 'execution_failed')`, now, taskID)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, next_attempt_at = NULL, cancel_requested = 0, stage = '', progress = 0, started_at = NULL, finished_at = NULL, max_attempts = max_attempts + 1, updated_at = ? WHERE id = ? AND status = 'failed' AND error_code IN ('storage_error', 'task_timeout', 'execution_failed')`, now, taskID)
 		if result.Error != nil {
 			return result.Error
 		}
