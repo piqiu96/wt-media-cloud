@@ -323,6 +323,11 @@ func TestLiveComposeOldGenerationWritesAreRejected(t *testing.T) {
 	if ok, err := store.ReleaseComposeForRetry(lost.ID, 900101, lost.AttemptCount, "chg094_test", "requeued for generation test"); err != nil || !ok {
 		t.Fatalf("release: ok=%v err=%v", ok, err)
 	}
+	// The next generation is intentionally ineligible until its persisted
+	// backoff expires. Advance only this test row's deadline before claiming.
+	if err := database.DB().Exec(`UPDATE compose_tasks SET next_attempt_at = UTC_TIMESTAMP(6) WHERE id = ?`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
 	alive, found, err := store.ClaimNextComposeTask(900101, 5*time.Minute)
 	if err != nil || !found {
 		t.Fatalf("second claim: found=%v err=%v", found, err)

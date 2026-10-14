@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +18,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
+	"github.com/wt-media/wt-media-cloud/internal/jobs"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
 
 // These gated tests run the real compose-worker binary against the local MySQL,
@@ -246,6 +251,115 @@ func TestLiveComposeWorkerRunsARealTaskToSuccess(t *testing.T) {
 		}
 	}
 	t.Logf("real worker ran task %d to success: output %d at %s; worker log: %s", taskID, outputID, objectKey, output.String())
+}
+
+func TestLiveComposeWorkerHonorsRetryDeadlineAcrossRestart(t *testing.T) {
+	binary, requestKey := liveWorkerSetup(t)
+	config.MustInitializeRuntimePaths()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
+		t.Skipf("object storage not reachable: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	taskID := cloneSuccessfulTask(t, requestKey+"-backoff")
+	future := time.Now().UTC().Add(30 * time.Second)
+	if err := database.DB().Exec(`UPDATE compose_tasks SET attempt_count = 1, next_attempt_at = ?, error_code = 'storage_error' WHERE id = ?`, future, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 1, 'auto', 'failed', 'storage_error', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertWaiting := func() {
+		t.Helper()
+		var status string
+		var attempts int
+		if err := database.DB().Raw(`SELECT status, attempt_count FROM compose_tasks WHERE id = ?`, taskID).Row().Scan(&status, &attempts); err != nil {
+			t.Fatal(err)
+		}
+		if status != "pending" || attempts != 1 {
+			t.Fatalf("retry escaped deadline: status=%s attempts=%d", status, attempts)
+		}
+	}
+	first, firstOutput := startWorkerProcess(t, binary)
+	time.Sleep(2 * time.Second)
+	assertWaiting()
+	stopWorkerProcess(t, first, firstOutput)
+	second, secondOutput := startWorkerProcess(t, binary)
+	time.Sleep(time.Second)
+	assertWaiting()
+	if err := database.DB().Exec(`UPDATE compose_tasks SET next_attempt_at = UTC_TIMESTAMP(6) WHERE id = ? AND status = 'pending'`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	waitForTaskStatus(t, taskID, "success", 3*time.Minute)
+	stopWorkerProcess(t, second, secondOutput)
+	var attempts int
+	var outputKey string
+	if err := database.DB().Raw(`SELECT attempt_count, output_object_key FROM compose_tasks WHERE id = ?`, taskID).Row().Scan(&attempts, &outputKey); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || outputKey != fmt.Sprintf("compose-outputs/%d/2/output.mp4", taskID) {
+		t.Fatalf("retry result: attempts=%d key=%q", attempts, outputKey)
+	}
+	if _, err := storage.Get().Stat(t.Context(), outputKey); err != nil {
+		t.Fatalf("retry formal output missing: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Get().Remove(t.Context(), outputKey) })
+	stagingKey := fmt.Sprintf("compose-staging/%d/2/output.mp4", taskID)
+	if _, err := storage.Get().Stat(t.Context(), stagingKey); !errors.Is(err, storage.ErrObjectNotFound) {
+		t.Fatalf("retry staging object survived: err=%v", err)
+	}
+	t.Logf("task %d held attempt 1 across worker restart, then completed attempt 2 at %s", taskID, outputKey)
+}
+
+func TestLiveComposeStagingCleanupRecoversStorageFailure(t *testing.T) {
+	_, requestKey := liveWorkerSetup(t)
+	config.MustInitializeRuntimePaths()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
+		t.Skipf("object storage not reachable: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	taskID := cloneSuccessfulTask(t, requestKey+"-cleanup")
+	if err := database.DB().Exec(`UPDATE compose_tasks SET status = 'failed', attempt_count = 1, error_code = 'storage_error' WHERE id = ?`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 1, 'auto', 'failed', 'storage_error', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("compose-staging/%d/1/output.mp4", taskID)
+	body := []byte("orphaned staged output")
+	if err := storage.Get().Put(t.Context(), key, bytes.NewReader(body), int64(len(body)), "video/mp4"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = storage.Get().Remove(t.Context(), key) })
+	store := repository.ComposeTaskStore{}
+	if err := jobs.CleanComposeStaging(t.Context(), store, func(context.Context, string) error { return errors.New("temporary storage outage") }); err == nil {
+		t.Fatal("fault injection did not report cleanup failure")
+	}
+	var count int
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND attempt = 1 AND staging_cleaned_at IS NULL`, taskID).Row().Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failed cleanup lost retry marker: count=%d err=%v", count, err)
+	}
+	if _, err := storage.Get().Stat(t.Context(), key); err != nil {
+		t.Fatalf("fault injection removed object unexpectedly: %v", err)
+	}
+	if err := jobs.CleanComposeStaging(t.Context(), store, storage.Get().Remove); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Get().Stat(t.Context(), key); !errors.Is(err, storage.ErrObjectNotFound) {
+		t.Fatalf("staged object survived recovery: %v", err)
+	}
+	var cleaned sql.NullTime
+	if err := database.DB().Raw(`SELECT staging_cleaned_at FROM compose_task_attempts WHERE task_id = ? AND attempt = 1`, taskID).Row().Scan(&cleaned); err != nil || !cleaned.Valid {
+		t.Fatalf("recovered deletion was not recorded: cleaned=%v err=%v", cleaned, err)
+	}
+	t.Logf("staging cleanup for task %d recovered after injected storage failure", taskID)
 }
 
 func TestLiveComposeWorkerConfirmsACancelWhileWaitingForInput(t *testing.T) {
