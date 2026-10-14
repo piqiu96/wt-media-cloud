@@ -32,6 +32,8 @@ func TestClaimNextComposeTaskFlipsPendingToRunning(t *testing.T) {
 	now := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
 	lease := 5 * time.Minute
 	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{"max_running"}).AddRow(2))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM compose_tasks WHERE status = 'running'").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT id FROM compose_tasks WHERE status = 'pending' AND attempt_count < max_attempts").
 		WillReturnRows(sqlmockIDRows(77))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'running'").
@@ -57,6 +59,8 @@ func TestClaimNextWritesNothingWhenQueueIsEmpty(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{"max_running"}).AddRow(2))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM compose_tasks WHERE status = 'running'").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT id FROM compose_tasks").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectRollback()
@@ -67,10 +71,28 @@ func TestClaimNextWritesNothingWhenQueueIsEmpty(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+func TestClaimNextRefusesTheClusterCapacityBeforeSelectingATask(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE").
+		WillReturnRows(sqlmock.NewRows([]string{"max_running"}).AddRow(2))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM compose_tasks WHERE status = 'running'").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectRollback()
+	_, found, err := claimNextComposeTask(db, 9, time.Minute, now)
+	if err != nil || found {
+		t.Fatalf("full cluster must not claim: found=%v err=%v", found, err)
+	}
+	assertExpectations(t, mock)
+}
+
 func TestClaimNextAbortsWhenTheClaimUpdateMisses(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{"max_running"}).AddRow(2))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM compose_tasks WHERE status = 'running'").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT id FROM compose_tasks").WillReturnRows(sqlmockIDRows(77))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'running'").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()

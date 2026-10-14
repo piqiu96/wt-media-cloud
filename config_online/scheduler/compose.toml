@@ -5,6 +5,7 @@
 workspace_root = '.compose'
 node_id = 1
 concurrency = 2
+global_concurrency = 2
 lease = '5m'
 heartbeat_interval = '30s'
 task_timeout = '30m'

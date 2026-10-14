@@ -131,6 +131,9 @@ func runWorker(ctx context.Context) error {
 		return fmt.Errorf("compose worker database: %w", err)
 	}
 	defer database.Close()
+	if err := repository.CheckComposeCapacity(cfg.Compose.Worker.GlobalConcurrency); err != nil {
+		return err
+	}
 
 	workspace, lock, err := prepare(ctx, cfg)
 	if err != nil {

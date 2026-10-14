@@ -614,6 +614,7 @@ func validComposeWorkerTOML() string {
 	return "workspace_root = \"compose-workspace\"\n" +
 		"node_id = 1\n" +
 		"concurrency = 2\n" +
+		"global_concurrency = 2\n" +
 		"lease = \"5m\"\n" +
 		"heartbeat_interval = \"30s\"\n" +
 		"task_timeout = \"30m\"\n" +

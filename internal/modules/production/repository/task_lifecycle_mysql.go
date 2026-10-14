@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
@@ -19,6 +20,19 @@ var ErrComposeCommitLost = errors.New("compose output commit lost the task row")
 // errNoClaimableTask rolls the claim transaction back (nothing was written)
 // and is translated to found=false at the boundary.
 var errNoClaimableTask = errors.New("no claimable compose task")
+
+// CheckComposeCapacity keeps every worker on one deployment-wide limit. The
+// row is changed by a controlled database migration when capacity changes.
+func CheckComposeCapacity(expected int) error {
+	var actual int
+	if err := database.DB().Raw(`SELECT max_running FROM compose_worker_capacity WHERE id = 1`).Row().Scan(&actual); err != nil {
+		return fmt.Errorf("read compose worker capacity: %w", err)
+	}
+	if actual != expected {
+		return fmt.Errorf("compose worker global concurrency %d differs from database capacity %d", expected, actual)
+	}
+	return nil
+}
 
 // Worker lifecycle writes for compose tasks (engineering spec §5). Every
 // mutation is a conditional UPDATE keyed by the current status and the
@@ -41,6 +55,16 @@ func claimNextComposeTask(db *gorm.DB, nodeID int64, lease time.Duration, now ti
 	var claimed model.ComposeTask
 	found := false
 	err := db.Transaction(func(tx *gorm.DB) error {
+		var limit, running int64
+		if err := tx.Raw(`SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE`).Row().Scan(&limit); err != nil {
+			return err
+		}
+		if err := tx.Raw(`SELECT COUNT(*) FROM compose_tasks WHERE status = 'running'`).Row().Scan(&running); err != nil {
+			return err
+		}
+		if running >= limit {
+			return errNoClaimableTask
+		}
 		var taskID int64
 		err := tx.Raw(`SELECT id FROM compose_tasks WHERE status = 'pending' AND attempt_count < max_attempts ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`).Row().Scan(&taskID)
 		if errors.Is(err, sql.ErrNoRows) {

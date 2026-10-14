@@ -167,6 +167,7 @@ type ComposeWorkerConfig struct {
 	// compose worker, so a stable configured number is the identity.
 	NodeID            int64    `toml:"node_id"`
 	Concurrency       int      `toml:"concurrency"`
+	GlobalConcurrency int      `toml:"global_concurrency"`
 	Lease             Duration `toml:"lease"`
 	HeartbeatInterval Duration `toml:"heartbeat_interval"`
 	TaskTimeout       Duration `toml:"task_timeout"`
@@ -441,6 +442,9 @@ func validateComposeWorker(worker ComposeWorkerConfig) error {
 	}
 	if worker.Concurrency <= 0 {
 		return errors.New("scheduler.compose.concurrency must be greater than zero")
+	}
+	if worker.GlobalConcurrency <= 0 || worker.Concurrency > worker.GlobalConcurrency {
+		return errors.New("scheduler.compose.global_concurrency must be positive and at least concurrency")
 	}
 	if worker.Lease.Duration <= 0 {
 		return errors.New("scheduler.compose.lease must be greater than zero")
