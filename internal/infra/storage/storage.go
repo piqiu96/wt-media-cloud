@@ -27,6 +27,10 @@ import (
 // only the calls that need object storage fail — with this error, which says why.
 var ErrNotConfigured = errors.New("object storage is not configured")
 
+// ErrObjectNotFound distinguishes a permanent missing source from temporary
+// storage failures so compose tasks do not repeatedly retry an absent input.
+var ErrObjectNotFound = errors.New("object storage key does not exist")
+
 // ObjectInfo describes an object Cloud has already written.
 type ObjectInfo struct {
 	// Key is the logical key the caller asked about, without the configured

@@ -413,6 +413,62 @@ func TestAttemptRetriesTransientStorageAndFailsWhenExhausted(t *testing.T) {
 	}
 }
 
+func TestAttemptDoesNotRetryMissingSourceObject(t *testing.T) {
+	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
+	store.statErr[fakeSourceKey] = storage.ErrObjectNotFound
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
+		t.Fatalf("missing source outcome=%s", outcome)
+	}
+	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputMissing+"|") {
+		t.Fatalf("missing source must be terminal: failed=%v released=%v", lifecycle.failed, lifecycle.released)
+	}
+}
+
+func TestAttemptDoesNotRequeueAfterContextCancellation(t *testing.T) {
+	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
+	store.statErr[fakeSourceKey] = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := RunComposeAttempt(ctx, deps, task, 9, runDir); got != ComposeAttemptLeaseLost {
+		t.Fatalf("cancelled attempt outcome=%s", got)
+	}
+	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 0 {
+		t.Fatalf("cancelled attempt wrote retry/failure: released=%v failed=%v", lifecycle.released, lifecycle.failed)
+	}
+}
+
+func TestAttemptClassifiesGuideDownloadFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want ComposeAttemptOutcome
+	}{
+		{"temporary network", fmt.Errorf("fetch: %w", compose.ErrGuideTemporary), ComposeAttemptRetry},
+		{"expired link", errors.New("guide HTTP 404"), ComposeAttemptFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, lifecycle, _, _, task, runDir := attemptFixture(t)
+			task.TemplateCode = "guide_insert"
+			task.ConfigSnapshot = json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`)
+			registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deps.Registry = registry
+			deps.FetchGuide = func(context.Context, string, string) error { return tc.err }
+			if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir); got != tc.want {
+				t.Fatalf("outcome=%s want=%s", got, tc.want)
+			}
+			if tc.want == ComposeAttemptRetry && len(lifecycle.released) != 1 {
+				t.Fatalf("temporary download not requeued: %v", lifecycle.released)
+			}
+			if tc.want == ComposeAttemptFailed && len(lifecycle.failed) != 1 {
+				t.Fatalf("permanent download not failed: %v", lifecycle.failed)
+			}
+		})
+	}
+}
+
 func TestAttemptFailsOnSnapshotRejectionBeforeAnyBytesMove(t *testing.T) {
 	deps, lifecycle, _, runner, task, runDir := attemptFixture(t)
 	task.ConfigSnapshot = json.RawMessage(`{"start_seconds":5}`)
@@ -484,11 +540,14 @@ func TestAttemptUploadRejectsTamperedReadback(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
 	})
 	deps.Client = &http.Client{Transport: tamper}
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptRetry {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if lifecycle.committed != nil {
 		t.Fatal("unverified bytes must not commit")
+	}
+	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrExecutionFailed+"|") {
+		t.Fatalf("invalid output must not auto retry: failed=%v released=%v", lifecycle.failed, lifecycle.released)
 	}
 }
 

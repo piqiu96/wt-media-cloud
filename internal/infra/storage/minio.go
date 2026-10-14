@@ -112,6 +112,9 @@ func (s *minioStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 	}
 	info, err := s.client.StatObject(ctx, s.bucket, object, minio.StatObjectOptions{})
 	if err != nil {
+		if isMissingStorageObject(err) {
+			return ObjectInfo{}, fmt.Errorf("stat %s: %w: %w", key, ErrObjectNotFound, err)
+		}
 		return ObjectInfo{}, fmt.Errorf("stat %s: %w", key, err)
 	}
 	return ObjectInfo{
@@ -120,6 +123,11 @@ func (s *minioStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 		ETag:        info.ETag,
 		ContentType: info.ContentType,
 	}, nil
+}
+
+func isMissingStorageObject(err error) bool {
+	response := minio.ToErrorResponse(err)
+	return response.Code == "NoSuchKey" || response.Code == "NoSuchObject"
 }
 
 func (s *minioStore) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {

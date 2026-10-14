@@ -33,6 +33,8 @@ const (
 	ComposeAttemptLeaseLost ComposeAttemptOutcome = "lease_lost"
 )
 
+var errComposeOutputInvalid = errors.New("compose output failed verification")
+
 // Task error_code values stored on failures. They surface through the task
 // detail API as plain strings (openapi leaves error_code free).
 const (
@@ -116,6 +118,15 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 			fetch = compose.DownloadGuide
 		}
 		if err := fetch(ctx, guide.GuideURL(), guidePath); err != nil {
+			if cancelRequested(deps.Tasks, task.ID) {
+				return ComposeAttemptCancelled
+			}
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return ComposeAttemptLeaseLost
+			}
+			if errors.Is(err, compose.ErrGuideTemporary) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, err.Error())
+			}
 			return failTerminal(deps.Tasks, task, nodeID, composeErrInputInvalid, err.Error())
 		}
 	}
@@ -153,13 +164,16 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	formalKey := "compose-outputs/" + strconv.FormatInt(task.ID, 10) + "/output.mp4"
 	size, digest, err := uploadVerified(ctx, deps.Store, deps.Client, output.Path, tempKey)
 	if err != nil {
-		return transientFailure(deps, task, nodeID, composeErrStorageError, err.Error())
+		if errors.Is(err, errComposeOutputInvalid) {
+			return failTerminal(deps.Tasks, task, nodeID, composeErrExecutionFailed, err.Error())
+		}
+		return transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, err.Error())
 	}
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageCommitting, 90) {
 		return ComposeAttemptLeaseLost
 	}
 	if err := deps.Store.Copy(ctx, tempKey, formalKey); err != nil {
-		return transientFailure(deps, task, nodeID, composeErrStorageError, "copy to formal key: "+err.Error())
+		return transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "copy to formal key: "+err.Error())
 	}
 	media, _ := json.Marshal(map[string]int64{"duration_ms": output.DurationMS})
 	out := model.CompositeOutput{
@@ -202,7 +216,7 @@ func validateSnapshotTemplate(registry *executor.Registry, task model.ComposeTas
 func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, runDir *compose.RunDir) (string, ComposeAttemptOutcome) {
 	material, found, err := deps.Materials.FindMaterial(task.MaterialID)
 	if err != nil {
-		return "", transientFailure(deps, task, nodeID, composeErrStorageError, "read material: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "read material: "+err.Error())
 	}
 	if !found {
 		return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputMissing, "material row is gone")
@@ -213,22 +227,25 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 	if material.VideoStatus != model.VideoReady || material.SourceObjectKey == "" {
 		if deps.EnsureInputPrepared != nil {
 			if err := deps.EnsureInputPrepared(ctx, task, task.MaterialID); err != nil {
-				return "", transientFailure(deps, task, nodeID, composeErrStorageError, "request input preparation: "+err.Error())
+				return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "request input preparation: "+err.Error())
 			}
 		}
 		_, _ = deps.Tasks.ReportComposeProgress(task.ID, nodeID, task.AttemptCount, composeStageWaitingInput, 20)
 		return "", ComposeAttemptWaitInput
 	}
 	if _, err := deps.Store.Stat(ctx, material.SourceObjectKey); err != nil {
-		return "", transientFailure(deps, task, nodeID, composeErrStorageError, "source object: "+err.Error())
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputMissing, "source object is gone: "+err.Error())
+		}
+		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "source object: "+err.Error())
 	}
 	grant, err := deps.Store.PresignGet(ctx, material.SourceObjectKey, deps.GrantTTL)
 	if err != nil {
-		return "", transientFailure(deps, task, nodeID, composeErrStorageError, "presign source: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "presign source: "+err.Error())
 	}
 	inputPath := filepath.Join(runDir.Path(), "source-input")
 	if err := downloadFile(ctx, deps.Client, grant.URL, inputPath); err != nil {
-		return "", transientFailure(deps, task, nodeID, composeErrStorageError, "download source: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "download source: "+err.Error())
 	}
 	return inputPath, ""
 }
@@ -247,7 +264,7 @@ func uploadVerified(ctx context.Context, store storage.Store, client *http.Clien
 		return 0, "", err
 	}
 	if info.Size() <= 0 {
-		return 0, "", errors.New("compose output is empty")
+		return 0, "", fmt.Errorf("%w: compose output is empty", errComposeOutputInvalid)
 	}
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -265,7 +282,7 @@ func uploadVerified(ctx context.Context, store storage.Store, client *http.Clien
 		return 0, "", fmt.Errorf("stat temporary object: %w", err)
 	}
 	if remote.Size != info.Size() {
-		return 0, "", fmt.Errorf("temporary object size mismatch: local %d, remote %d", info.Size(), remote.Size)
+		return 0, "", fmt.Errorf("%w: temporary object size mismatch: local %d, remote %d", errComposeOutputInvalid, info.Size(), remote.Size)
 	}
 	grant, err := store.PresignGet(ctx, tempKey, 10*time.Minute)
 	if err != nil {
@@ -276,7 +293,7 @@ func uploadVerified(ctx context.Context, store storage.Store, client *http.Clien
 		return 0, "", fmt.Errorf("readback temporary object: %w", err)
 	}
 	if hex.EncodeToString(readHash.Sum(nil)) != digest {
-		return 0, "", errors.New("readback sha256 mismatch")
+		return 0, "", fmt.Errorf("%w: readback sha256 mismatch", errComposeOutputInvalid)
 	}
 	return info.Size(), digest, nil
 }
@@ -336,4 +353,11 @@ func transientFailure(deps ComposeExecutorDeps, task model.ComposeTask, nodeID i
 		return ComposeAttemptLeaseLost
 	}
 	return failTerminal(deps.Tasks, task, nodeID, code, message+fmt.Sprintf(" (attempts exhausted after %d)", task.AttemptCount))
+}
+
+func transientFailureInContext(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, code, message string) ComposeAttemptOutcome {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return ComposeAttemptLeaseLost
+	}
+	return transientFailure(deps, task, nodeID, code, message)
 }

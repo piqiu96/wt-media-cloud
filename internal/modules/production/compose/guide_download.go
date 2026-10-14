@@ -17,6 +17,12 @@ import (
 
 const MaxGuideBytes int64 = 500 << 20
 
+// ErrGuideTemporary marks a failed transfer whose address and media settings
+// remain valid, so the worker may retry the same task snapshot after backoff.
+var ErrGuideTemporary = errors.New("temporary guide download failure")
+
+var errGuideUnsafe = errors.New("guide endpoint is not public HTTPS")
+
 // DownloadGuide resolves and pins a public HTTPS endpoint for this one request.
 // Proxies are disabled; each redirect is checked and each destination is
 // resolved and pinned before a connection is opened.
@@ -31,18 +37,18 @@ func DownloadGuide(ctx context.Context, rawURL, path string) error {
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil || port != "443" {
-				return nil, errors.New("guide endpoint must use HTTPS port 443")
+				return nil, errGuideUnsafe
 			}
 			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 			if err != nil {
 				return nil, fmt.Errorf("resolve guide host: %w", err)
 			}
 			if len(ips) == 0 {
-				return nil, errors.New("guide host has no addresses")
+				return nil, errGuideUnsafe
 			}
 			for _, ip := range ips {
 				if !publicGuideIP(ip) {
-					return nil, errors.New("guide host resolves to a non-public address")
+					return nil, errGuideUnsafe
 				}
 			}
 			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
@@ -61,10 +67,19 @@ func DownloadGuide(ctx context.Context, rawURL, path string) error {
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return errors.New("guide download failed; check that the address is reachable and has not expired")
+		if errors.Is(err, errGuideUnsafe) {
+			return errors.New("guide download failed; endpoint is not public HTTPS")
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("guide download failed; check that the address is reachable and has not expired: %w", ErrGuideTemporary)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
+			return fmt.Errorf("download guide: HTTP %d: %w", response.StatusCode, ErrGuideTemporary)
+		}
 		return fmt.Errorf("download guide: HTTP %d", response.StatusCode)
 	}
 	return saveGuideBody(response.Body, response.ContentLength, path, MaxGuideBytes)
@@ -76,13 +91,13 @@ func saveGuideBody(body io.Reader, contentLength int64, path string, limit int64
 	}
 	file, err := os.Create(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("create guide video: %w: %w", ErrGuideTemporary, err)
 	}
 	defer func() { _ = file.Close() }()
 	n, err := io.Copy(file, io.LimitReader(body, limit+1))
 	if err != nil {
 		_ = os.Remove(path)
-		return fmt.Errorf("read guide video: %w", err)
+		return fmt.Errorf("read guide video: %w: %w", ErrGuideTemporary, err)
 	}
 	if n == 0 || n > limit {
 		_ = os.Remove(path)

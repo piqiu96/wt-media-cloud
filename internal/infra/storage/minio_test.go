@@ -10,8 +10,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 )
+
+func TestMissingStorageObjectClassification(t *testing.T) {
+	for _, err := range []error{
+		minio.ErrorResponse{Code: "NoSuchKey"},
+		minio.ErrorResponse{Code: "NoSuchObject"},
+	} {
+		if !isMissingStorageObject(err) {
+			t.Fatalf("missing object not recognized: %v", err)
+		}
+	}
+	if isMissingStorageObject(minio.ErrorResponse{StatusCode: http.StatusServiceUnavailable}) {
+		t.Fatal("temporary storage outage classified as missing object")
+	}
+	if isMissingStorageObject(minio.ErrorResponse{Code: "NoSuchBucket", StatusCode: http.StatusNotFound}) {
+		t.Fatal("missing bucket is an infrastructure failure, not a missing source object")
+	}
+}
 
 func testStorageConfig(endpoint string) config.ObjectStorageConfig {
 	return config.ObjectStorageConfig{
