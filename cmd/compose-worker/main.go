@@ -120,6 +120,10 @@ func runWorker(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("compose worker config: %w", err)
 	}
+	if err := logger.Initialize(cfg.Loggers); err != nil {
+		return fmt.Errorf("compose worker logger: %w", err)
+	}
+	defer logger.Close()
 	if err := verifyWorkerEnvironment(ctx, cfg); err != nil {
 		return err
 	}
