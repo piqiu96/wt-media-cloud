@@ -86,6 +86,18 @@ type ComposeStagingCleanupCandidate struct {
 	Attempt int
 }
 
+// ComposeUncertainReview records an administrator's explicit verification of
+// one uncertain attempt. It is a human declaration, not an automatic claim
+// that an expired lease proves the old FFmpeg process has stopped.
+type ComposeUncertainReview struct {
+	ID          int64     `json:"id"`
+	TaskID      int64     `json:"compose_task_id"`
+	Attempt     int       `json:"attempt"`
+	ActorUserID int64     `json:"actor_user_id"`
+	Evidence    string    `json:"evidence"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // CompositeOutput is the verified-output asset (engineering spec §3.5). The
 // worker writes it inside the same transaction that marks the task success —
 // a row here always has a verified object behind it. Publish facts live in

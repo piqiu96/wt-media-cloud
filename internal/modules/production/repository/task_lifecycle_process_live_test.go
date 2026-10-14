@@ -104,6 +104,72 @@ func TestLiveComposeRetryEligibilityPersists(t *testing.T) {
 	}
 }
 
+func TestLiveComposeUncertainReviewIsAtomicAndSingleUse(t *testing.T) {
+	_, requestKey, strategyID := composeClaimSetup(t)
+	cleanupComposeTasks(t, requestKey)
+	t.Cleanup(func() {
+		if err := database.DB().Exec(`DELETE r FROM compose_uncertain_reviews r JOIN compose_tasks ct ON r.task_id = ct.id WHERE ct.request_key LIKE ?`, requestKey+"%").Error; err != nil {
+			t.Errorf("review cleanup: %v", err)
+		}
+	})
+	seedComposeTask(t, requestKey+"-eligible", strategyID)
+	seedComposeTask(t, requestKey+"-output", strategyID)
+	var eligibleID, outputID, actorID int64
+	if err := database.DB().Raw(`SELECT id, created_by FROM compose_tasks WHERE request_key = ?`, requestKey+"-eligible").Row().Scan(&eligibleID, &actorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Raw(`SELECT id FROM compose_tasks WHERE request_key = ?`, requestKey+"-output").Row().Scan(&outputID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{eligibleID, outputID} {
+		if err := database.DB().Exec(`UPDATE compose_tasks SET status = 'failed', error_code = 'execution_uncertain', attempt_count = 1 WHERE id = ?`, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 1, 'auto', 'failed', 'execution_uncertain', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, id).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.DB().Exec(`UPDATE compose_tasks SET output_object_key = 'compose-outputs/uncertain-already-committed.mp4' WHERE id = ?`, outputID).Error; err != nil {
+		t.Fatal(err)
+	}
+	evidence := "核对旧执行节点的 FFmpeg 进程已退出，且数据库和存储中未见已提交成片"
+	blocked, changed, err := resolveComposeUncertain(database.DB(), outputID, actorID, evidence, time.Now())
+	if err != nil || changed || blocked.ID != 0 {
+		t.Fatalf("output guard: review=%+v changed=%v err=%v", blocked, changed, err)
+	}
+	review, changed, err := resolveComposeUncertain(database.DB(), eligibleID, actorID, evidence, time.Now())
+	if err != nil || !changed || review.TaskID != eligibleID || review.Attempt != 1 || review.Evidence != evidence {
+		t.Fatalf("review=%+v changed=%v err=%v", review, changed, err)
+	}
+	if _, changed, err := resolveComposeUncertain(database.DB(), eligibleID, actorID, evidence, time.Now()); err != nil || changed {
+		t.Fatalf("duplicate review changed=%v err=%v", changed, err)
+	}
+	var status string
+	var count, maxAttempts int
+	if err := database.DB().Raw(`SELECT status, max_attempts FROM compose_tasks WHERE id = ?`, eligibleID).Row().Scan(&status, &maxAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" || maxAttempts != 4 {
+		t.Fatalf("task after review: status=%s max_attempts=%d", status, maxAttempts)
+	}
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND attempt = 2 AND source = 'manual' AND outcome = 'pending'`, eligibleID).Row().Scan(&count); err != nil || count != 1 {
+		t.Fatalf("manual attempt: count=%d err=%v", count, err)
+	}
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_uncertain_reviews WHERE task_id = ?`, eligibleID).Row().Scan(&count); err != nil || count != 1 {
+		t.Fatalf("review count=%d err=%v", count, err)
+	}
+	reviews, err := (ComposeTaskStore{}).ListUncertainReviews(eligibleID)
+	if err != nil || len(reviews) != 1 || reviews[0].ID != review.ID || reviews[0].Evidence != evidence {
+		t.Fatalf("review readback=%+v err=%v", reviews, err)
+	}
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, fmt.Sprint(eligibleID)).Row().Scan(&count); err != nil || count != 1 {
+		t.Fatalf("review audit count=%d err=%v", count, err)
+	}
+	t.Cleanup(func() {
+		_ = database.DB().Exec(`DELETE FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, fmt.Sprint(eligibleID)).Error
+	})
+}
+
 func TestLiveComposeStagingCleanupCandidates(t *testing.T) {
 	store, requestKey, strategyID := composeClaimSetup(t)
 	cleanupComposeTasks(t, requestKey)

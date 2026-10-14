@@ -522,6 +522,10 @@ func TestRetryComposeTaskRequiresSeniorRoleAndRetryableCode(t *testing.T) {
 	if tasks.tasks[0].Status != model.ComposeTaskFailed {
 		t.Fatalf("refused retry must not move the row: %+v", tasks.tasks[0])
 	}
+	tasks.tasks[0].ErrorCode = "execution_uncertain"
+	if _, err := svc.Retry(senior, 510); !errors.Is(err, ErrComposeTaskNotRetryable) {
+		t.Fatalf("uncertain execution must use administrator review: %v", err)
+	}
 
 	// A retryable code requeues the row and records who authorized it.
 	tasks.tasks[0].ErrorCode = "storage_error"
