@@ -100,7 +100,8 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if !ownsProgress(deps.Tasks, task.ID, nodeID, composeStageValidatingInput, 10) {
 		return ComposeAttemptLeaseLost
 	}
-	if err := validateSnapshotTemplate(deps.Registry, task); err != nil {
+	plan, err := validateSnapshotTemplate(deps.Registry, task)
+	if err != nil {
 		return failTerminal(deps.Tasks, task.ID, nodeID, composeErrTemplateUnavailable, err.Error())
 	}
 	inputPath, outcome := prepareInput(ctx, deps, task, nodeID, runDir)
@@ -108,8 +109,6 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		return outcome
 	}
 	guidePath := ""
-	definition, _ := deps.Registry.Lookup(task.TemplateCode, task.TemplateVersion)
-	plan, _ := definition.Executor.ValidateParams(task.ConfigSnapshot)
 	if guide, ok := plan.(executor.GuidePlan); ok {
 		guidePath = filepath.Join(runDir.Path(), "guide-input")
 		fetch := deps.FetchGuide
@@ -182,15 +181,16 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 // validateSnapshotTemplate checks the snapshot's binding against the executor
 // registry before any bytes move: an unknown template version or a params
 // rejection is a business failure with a clean task row, not a half-run.
-func validateSnapshotTemplate(registry *executor.Registry, task model.ComposeTask) error {
+func validateSnapshotTemplate(registry *executor.Registry, task model.ComposeTask) (executor.Plan, error) {
 	definition, err := registry.Lookup(task.TemplateCode, task.TemplateVersion)
 	if err != nil {
-		return fmt.Errorf("template %s v%d is not deployed to this worker: %w", task.TemplateCode, task.TemplateVersion, err)
+		return nil, fmt.Errorf("template %s v%d is not deployed to this worker: %w", task.TemplateCode, task.TemplateVersion, err)
 	}
-	if _, err := definition.Executor.ValidateParams(task.ConfigSnapshot); err != nil {
-		return fmt.Errorf("snapshot params rejected by %s v%d: %w", task.TemplateCode, task.TemplateVersion, err)
+	plan, err := definition.Executor.ValidateParams(task.ConfigSnapshot)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot params rejected by %s v%d: %w", task.TemplateCode, task.TemplateVersion, err)
 	}
-	return nil
+	return plan, nil
 }
 
 // prepareInput gates on readiness (PRD §5.4.4: an unready source keeps the
