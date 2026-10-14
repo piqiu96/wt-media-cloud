@@ -87,6 +87,7 @@ type ComposeExecutorDeps struct {
 	Runner              composeRunner
 	GrantTTL            time.Duration
 	Client              *http.Client
+	FetchGuide          func(context.Context, string, string) error
 	EnsureInputPrepared EnsureInputPrepared
 }
 
@@ -106,13 +107,26 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if outcome != "" {
 		return outcome
 	}
+	guidePath := ""
+	definition, _ := deps.Registry.Lookup(task.TemplateCode, task.TemplateVersion)
+	plan, _ := definition.Executor.ValidateParams(task.ConfigSnapshot)
+	if guide, ok := plan.(executor.GuidePlan); ok {
+		guidePath = filepath.Join(runDir.Path(), "guide-input")
+		fetch := deps.FetchGuide
+		if fetch == nil {
+			fetch = compose.DownloadGuide
+		}
+		if err := fetch(ctx, guide.GuideURL(), guidePath); err != nil {
+			return failTerminal(deps.Tasks, task.ID, nodeID, composeErrInputInvalid, err.Error())
+		}
+	}
 	if cancelRequested(deps.Tasks, task.ID) {
 		return ComposeAttemptCancelled
 	}
 	if !ownsProgress(deps.Tasks, task.ID, nodeID, composeStageCutting, 40) {
 		return ComposeAttemptLeaseLost
 	}
-	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath})
+	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, GuidePath: guidePath})
 	if err != nil {
 		// A run the worker terminated speaks with its context, not with
 		// FFmpeg's last words: a cancel request is a controlled stop, a spent

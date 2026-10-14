@@ -21,10 +21,17 @@ func run() error {
 		return err
 	}
 	defer closeResources()
-	item, err := repository.PublishTemplate(executor.BasicCutV1(), "基础切段")
-	if err != nil {
-		return err
+	for _, entry := range []struct {
+		definition executor.Definition
+		name       string
+	}{
+		{executor.BasicCutV1(), "基础切段"}, {executor.GuideInsertV1(), "引导片段插入"}, {executor.GuidePIPV1(), "引导画中画"},
+	} {
+		item, err := repository.PublishTemplate(entry.definition, entry.name)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("compose template published: id=%d code=%s version=%d status=%s\n", item.ID, item.Code, item.Version, item.Status)
 	}
-	fmt.Printf("compose template published: id=%d code=%s version=%d status=%s\n", item.ID, item.Code, item.Version, item.Status)
 	return nil
 }

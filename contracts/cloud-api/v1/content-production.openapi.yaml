@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.14.2
+  version: 2026.10.14.3
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -444,6 +444,15 @@ components:
       properties:
         start_seconds: {type: integer, minimum: 0}
         end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
+    GuideV1Config:
+      type: object
+      additionalProperties: false
+      required: [guide_video_url, insert_seconds, guide_duration_seconds, max_duration_seconds]
+      properties:
+        guide_video_url: {type: string, format: uri, description: Public downloadable HTTPS URL frozen in the task snapshot.}
+        insert_seconds: {type: integer, minimum: 0}
+        guide_duration_seconds: {type: integer, minimum: 0, description: Zero uses the whole guide video.}
+        max_duration_seconds: {type: integer, minimum: 0, description: Zero has no output duration limit.}
     ComposeStrategy:
       type: object
       required: [id, team_id, game_id, name, compose_template_id, compose_template_version, config, schedule, next_run_at, status, created_at, updated_at]
@@ -454,7 +463,10 @@ components:
         name: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
-        config: {$ref: '#/components/schemas/BasicCutV1Config'}
+        config:
+          oneOf:
+            - {$ref: '#/components/schemas/BasicCutV1Config'}
+            - {$ref: '#/components/schemas/GuideV1Config'}
         schedule:
           oneOf:
             - {$ref: '#/components/schemas/ComposeSchedule'}
@@ -505,14 +517,20 @@ components:
         name: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
-        config: {$ref: '#/components/schemas/BasicCutV1Config'}
+        config:
+          oneOf:
+            - {$ref: '#/components/schemas/BasicCutV1Config'}
+            - {$ref: '#/components/schemas/GuideV1Config'}
     UpdateComposeStrategy:
       type: object
       additionalProperties: false
       required: [name, config]
       properties:
         name: {type: string}
-        config: {$ref: '#/components/schemas/BasicCutV1Config'}
+        config:
+          oneOf:
+            - {$ref: '#/components/schemas/BasicCutV1Config'}
+            - {$ref: '#/components/schemas/GuideV1Config'}
     CopyComposeStrategy:
       type: object
       additionalProperties: false
@@ -537,6 +555,7 @@ components:
             Optional per-command parameter overrides, merged over the strategy
             config and validated against the bound template version's schema;
             the merge, not the override alone, is what the snapshot stores.
+            guide_video_url belongs to the strategy and cannot be overridden by a task.
         items:
           type: array
           minItems: 1

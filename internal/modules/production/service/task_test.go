@@ -200,6 +200,27 @@ func TestCreateComposeTasksCreatesPerItemWithMergedSnapshot(t *testing.T) {
 	}
 }
 
+func TestGuideTaskFreezesStrategyAddressAndRejectsTaskAddressOverride(t *testing.T) {
+	svc, tasks, strategies, _, actor := composeTaskFixture()
+	definition := executor.GuidePIPV1()
+	strategies.template = model.ComposeTemplate{ID: 3, Code: definition.Code, Version: 1, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"}
+	strategies.items[0].Config = json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)
+	input := CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-guide-0001"}}}
+	result, err := svc.Create(actor, input)
+	if err != nil || len(result.Created) != 1 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	strategies.items[0].Config = json.RawMessage(`{"guide_video_url":"https://media.example.com/changed.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)
+	if got := composeTaskSnapshot(t, result.Created[0].ConfigSnapshot)["guide_video_url"]; got != "https://media.example.com/guide.mp4" {
+		t.Fatalf("snapshot address = %v", got)
+	}
+	input.ConfigOverride = json.RawMessage(`{"guide_video_url":"https://media.example.com/other.mp4"}`)
+	input.Items[0].RequestKey = "rk-guide-0002"
+	if _, err := svc.Create(actor, input); !errors.Is(err, ErrComposeTaskInvalid) || tasks.creates != 1 {
+		t.Fatalf("override err=%v writes=%d", err, tasks.creates)
+	}
+}
+
 func TestCreateComposeTasksMergedOverrideMustMatchSchema(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
 	input := CreateComposeTasksInput{

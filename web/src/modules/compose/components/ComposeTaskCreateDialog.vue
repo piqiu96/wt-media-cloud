@@ -36,7 +36,7 @@ const fields = computed(() => {
   const strategy = selectedStrategy.value
   if (!strategy) return []
   const template = templates.value.find((item) => item.id === strategy.compose_template_id && item.version === strategy.compose_template_version)
-  return schemaFields(template?.schema)
+  return schemaFields(template?.schema).filter((field) => field.key !== 'guide_video_url')
 })
 
 function generateKeys(materials) {

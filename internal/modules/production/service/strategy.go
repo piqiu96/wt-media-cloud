@@ -257,8 +257,11 @@ func (s *StrategyService) validateConfig(templateID int64, version uint32, confi
 	if err != nil {
 		return err
 	}
-	definition := executor.BasicCutV1()
-	if !found || item.Code != definition.Code || item.Version != definition.Version || item.ExecutorID != definition.ExecutorID || (requireActive && item.Status != "active") || !sameJSON(item.Schema, definition.Schema) {
+	if !found {
+		return ErrStrategyTemplateUnavailable
+	}
+	definition, err := executor.DeployedDefinition(item.Code, item.Version)
+	if err != nil || item.ExecutorID != definition.ExecutorID || (requireActive && item.Status != "active") || !sameJSON(item.Schema, definition.Schema) {
 		return ErrStrategyTemplateUnavailable
 	}
 	if _, err := definition.Executor.ValidateParams(config); err != nil {

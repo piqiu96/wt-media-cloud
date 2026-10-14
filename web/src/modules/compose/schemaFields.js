@@ -8,6 +8,7 @@ export function schemaFields(schema) {
     key,
     label: def.title || key,
     type: def.type || 'string',
+    format: def.format,
     minimum: def.minimum,
     required: required.includes(key),
   }))

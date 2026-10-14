@@ -198,7 +198,7 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 	if err != nil {
 		return CreateComposeTasksResult{}, err
 	}
-	merged, err := s.mergedConfig(strategy, input.ConfigOverride)
+	merged, err := s.mergedConfig(template, strategy, input.ConfigOverride)
 	if err != nil {
 		return CreateComposeTasksResult{}, err
 	}
@@ -398,15 +398,18 @@ func (s *ComposeTaskService) materialFailure(actor identity.PublicUser, strategy
 }
 
 // usableTemplate resolves the strategy's bound template version and rejects
-// anything the basic_cut executor does not own — the same gate strategy
+// anything the deployed executor does not own — the same gate strategy
 // creation runs, now replayed at task time.
 func (s *ComposeTaskService) usableTemplate(strategy model.ComposeStrategy) (model.ComposeTemplate, error) {
 	item, found, err := s.strategies.FindTemplate(strategy.TemplateID, strategy.TemplateVersion)
 	if err != nil {
 		return model.ComposeTemplate{}, err
 	}
-	definition := executor.BasicCutV1()
-	if !found || item.Code != definition.Code || item.Version != definition.Version || item.ExecutorID != definition.ExecutorID || item.Status != "active" || !sameJSON(item.Schema, definition.Schema) {
+	if !found {
+		return model.ComposeTemplate{}, ErrStrategyTemplateUnavailable
+	}
+	definition, err := executor.DeployedDefinition(item.Code, item.Version)
+	if err != nil || item.ExecutorID != definition.ExecutorID || item.Status != "active" || !sameJSON(item.Schema, definition.Schema) {
 		return model.ComposeTemplate{}, ErrStrategyTemplateUnavailable
 	}
 	return item, nil
@@ -415,8 +418,15 @@ func (s *ComposeTaskService) usableTemplate(strategy model.ComposeStrategy) (mod
 // mergedConfig layers the command's optional config_override over the strategy
 // config and schema-validates the merge — the merge, not the override alone,
 // is what the snapshot stores (ADR-0021).
-func (s *ComposeTaskService) mergedConfig(strategy model.ComposeStrategy, override json.RawMessage) (json.RawMessage, error) {
+func (s *ComposeTaskService) mergedConfig(template model.ComposeTemplate, strategy model.ComposeStrategy, override json.RawMessage) (json.RawMessage, error) {
+	definition, err := executor.DeployedDefinition(template.Code, template.Version)
+	if err != nil {
+		return nil, ErrStrategyTemplateUnavailable
+	}
 	if len(override) == 0 {
+		if _, err := definition.Executor.ValidateParams(strategy.Config); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
+		}
 		return append(json.RawMessage(nil), strategy.Config...), nil
 	}
 	var base, extra map[string]any
@@ -425,8 +435,13 @@ func (s *ComposeTaskService) mergedConfig(strategy model.ComposeStrategy, overri
 			return nil, fmt.Errorf("%w: strategy config is not an object", ErrComposeTaskInvalid)
 		}
 	}
-	if err := json.Unmarshal(override, &extra); err != nil || extra == nil {
-		return nil, fmt.Errorf("%w: config_override must be an object", ErrComposeTaskInvalid)
+	if len(override) > 0 {
+		if err := json.Unmarshal(override, &extra); err != nil || extra == nil {
+			return nil, fmt.Errorf("%w: config_override must be an object", ErrComposeTaskInvalid)
+		}
+		if _, changesURL := extra["guide_video_url"]; changesURL {
+			return nil, fmt.Errorf("%w: guide video address belongs to the strategy", ErrComposeTaskInvalid)
+		}
 	}
 	merged := make(map[string]any, len(base)+len(extra))
 	for key, value := range base {
@@ -439,7 +454,6 @@ func (s *ComposeTaskService) mergedConfig(strategy model.ComposeStrategy, overri
 	if err != nil {
 		return nil, err
 	}
-	definition := executor.BasicCutV1()
 	if _, err := definition.Executor.ValidateParams(out); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
 	}

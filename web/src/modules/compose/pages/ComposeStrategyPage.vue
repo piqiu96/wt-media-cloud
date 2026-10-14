@@ -88,7 +88,7 @@ const columns = computed(() => [
   { colKey: 'next_run_at', title: '下次执行', width: 160 },
   { colKey: 'game', title: '游戏', width: 130 },
   { colKey: 'template', title: '模板', width: 180 },
-  { colKey: 'config', title: '切片区间', width: 120 },
+  { colKey: 'config', title: '主要参数', width: 170 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '复制', '计划'] : ['详情']), fixed: 'right' },
 ])
@@ -371,6 +371,11 @@ async function save() {
         invalid = invalid || field.label
         continue
       }
+      if (field.key === 'guide_video_url' && !validGuideURL(value)) {
+        paramErrors.value[field.key] = '请输入可公开下载的 HTTPS 视频地址'
+        invalid = invalid || field.label
+        continue
+      }
       config[field.key] = value
     }
   }
@@ -414,9 +419,18 @@ function templateLabel(id) {
   return template ? `${template.name} v${template.version}` : `模板 #${id}`
 }
 
-function cutLabel(config) {
-  if (!config || config.start_seconds === undefined || config.end_seconds === undefined) return '-'
-  return `${config.start_seconds}s – ${config.end_seconds}s`
+function validGuideURL(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password && !url.hash && (!url.port || url.port === '443')
+  } catch { return false }
+}
+
+function configLabel(config) {
+  if (!config) return '-'
+  if (config.insert_seconds !== undefined) return `第 ${config.insert_seconds} 秒插入`
+  if (config.start_seconds !== undefined && config.end_seconds !== undefined) return `${config.start_seconds}s – ${config.end_seconds}s`
+  return '-'
 }
 </script>
 
@@ -465,7 +479,7 @@ function cutLabel(config) {
             </template>
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #template="{ row }">{{ templateLabel(row.compose_template_id) }}</template>
-            <template #config="{ row }">{{ cutLabel(row.config) }}</template>
+            <template #config="{ row }">{{ configLabel(row.config) }}</template>
             <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
             <template #status="{ row }">
               <t-switch v-if="canManage" :value="row.status === 'active'" :label="['启用', '停用']" @change="(value) => toggleStatus(row, value)" />
@@ -535,7 +549,7 @@ function cutLabel(config) {
                     <div class="strategy-field">
                       <t-input-number v-if="field.type === 'integer'" v-model="templateParams[field.key]" :min="field.minimum ?? 0" theme="column" style="width:160px" :status="paramErrors[field.key] ? 'error' : undefined" />
                       <t-switch v-else-if="field.type === 'boolean'" v-model="templateParams[field.key]" />
-                      <t-input v-else v-model="templateParams[field.key]" :placeholder="`请输入${field.label}`" :status="paramErrors[field.key] ? 'error' : undefined" />
+                      <t-input v-else v-model="templateParams[field.key]" :type="field.format === 'uri' ? 'url' : 'text'" :placeholder="field.format === 'uri' ? 'https://.../guide.mp4' : `请输入${field.label}`" :status="paramErrors[field.key] ? 'error' : undefined" />
                       <p v-if="paramErrors[field.key]" class="strategy-field-error">{{ paramErrors[field.key] }}</p>
                     </div>
                   </t-form-item>
@@ -585,7 +599,10 @@ function cutLabel(config) {
           <h4 class="strategy-detail-section">合成配置</h4>
           <div class="strategy-drawer__field"><span>合成模板</span><strong>{{ templateLabel(detailRow.compose_template_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>模板版本</span><strong>v{{ detailRow.compose_template_version }}</strong></div>
-          <div class="strategy-drawer__field"><span>切片区间</span><strong>{{ cutLabel(detailRow.config) }}</strong></div>
+          <div class="strategy-drawer__field"><span>主要参数</span><strong>{{ configLabel(detailRow.config) }}</strong></div>
+          <div v-if="detailRow.config?.guide_video_url" class="strategy-drawer__field"><span>引导视频</span><strong class="strategy-guide-url">{{ detailRow.config.guide_video_url }}</strong></div>
+          <div v-if="detailRow.config?.guide_video_url" class="strategy-drawer__field"><span>引导时长</span><strong>{{ detailRow.config.guide_duration_seconds ? `${detailRow.config.guide_duration_seconds} 秒` : '完整视频' }}</strong></div>
+          <div v-if="detailRow.config?.guide_video_url" class="strategy-drawer__field"><span>成片上限</span><strong>{{ detailRow.config.max_duration_seconds ? `${detailRow.config.max_duration_seconds} 秒` : '不限' }}</strong></div>
           <h4 class="strategy-detail-section">自动执行计划</h4>
           <div class="strategy-drawer__field"><span>自动执行</span><strong>{{ scheduleState(detailRow) }}</strong></div>
           <div class="strategy-drawer__field"><span>周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>

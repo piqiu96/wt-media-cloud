@@ -84,3 +84,12 @@ func (r *Registry) Lookup(code string, version uint32) (Definition, error) {
 	}
 	return definition, nil
 }
+
+func DeployedDefinition(code string, version uint32) (Definition, error) {
+	for _, definition := range DeployedDefinitions() {
+		if definition.Code == code && definition.Version == version {
+			return definition, nil
+		}
+	}
+	return Definition{}, fmt.Errorf("%w: %s/%d", ErrUnknownTemplateVersion, code, version)
+}

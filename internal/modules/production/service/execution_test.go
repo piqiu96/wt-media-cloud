@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +267,71 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	}
 	if len(lifecycle.failed) != 0 || len(lifecycle.released) != 0 {
 		t.Fatalf("unexpected writes: failed=%v released=%v", lifecycle.failed, lifecycle.released)
+	}
+}
+
+func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is not installed")
+	}
+	dir := t.TempDir()
+	clip := func(name, color string) []byte {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		command := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c="+color+":s=320x240:r=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "2", "-c:v", "libx264", "-c:a", "aac", "-y", path)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("make clip: %v %s", err, output)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	source, guide := clip("source.mp4", "red"), clip("guide.mp4", "blue")
+	store := newStoreFake()
+	store.objects[fakeSourceKey] = source
+	registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &lifecycleFake{progressOK: true, releaseOK: true, failOK: true}
+	workspace, err := compose.NewWorkspace(filepath.Join(dir, "runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDir, err := workspace.NewRun("guide-attempt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runDir.Release()
+	address := "https://media.example.com/guide.mp4"
+	deps := ComposeExecutorDeps{
+		Tasks: lifecycle, Materials: materialsFake{byID: map[int64]model.Material{42: {ID: 42, TeamID: 7, VideoStatus: model.VideoReady, SourceObjectKey: fakeSourceKey}}},
+		Registry: registry, Store: store, Runner: &compose.Runner{FFmpegPath: ffmpeg, FFprobePath: ffprobe, Registry: registry}, GrantTTL: time.Minute, Client: memClient(store),
+		FetchGuide: func(_ context.Context, got, path string) error {
+			if got != address {
+				return fmt.Errorf("address changed: %s", got)
+			}
+			return os.WriteFile(path, guide, 0o600)
+		},
+	}
+	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1,
+		ConfigSnapshot: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), Status: model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9), CreatedBy: 11}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptSuccess {
+		t.Fatalf("outcome=%s failed=%v released=%v", outcome, lifecycle.failed, lifecycle.released)
+	}
+	formal := store.objects["compose-outputs/77/output.mp4"]
+	if len(formal) == 0 || lifecycle.committed == nil || lifecycle.committed.TemplateCode != "guide_insert" {
+		t.Fatal("verified formal output missing")
+	}
+	if output, err := exec.Command(ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1", filepath.Join(runDir.Path(), "output.mp4")).CombinedOutput(); err != nil || !bytes.Contains(output, []byte("4.0")) {
+		t.Fatalf("output probe=%s err=%v", output, err)
 	}
 }
 

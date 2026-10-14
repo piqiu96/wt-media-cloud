@@ -16,6 +16,9 @@ import (
 type videoProbe struct {
 	durationMS int64
 	hasVideo   bool
+	hasAudio   bool
+	width      int
+	height     int
 }
 
 // probeFile asks ffprobe about one file with fixed arguments. The report is
@@ -35,6 +38,8 @@ func probeFile(ctx context.Context, ffprobePath, path string) (videoProbe, error
 		} `json:"format"`
 		Streams []struct {
 			CodecType string `json:"codec_type"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
@@ -51,6 +56,9 @@ func probeFile(ctx context.Context, ffprobePath, path string) (videoProbe, error
 	for _, stream := range report.Streams {
 		if stream.CodecType == "video" {
 			probe.hasVideo = true
+			probe.width, probe.height = stream.Width, stream.Height
+		} else if stream.CodecType == "audio" {
+			probe.hasAudio = true
 		}
 	}
 	return probe, nil

@@ -70,7 +70,7 @@ func runVerify(ctx context.Context, input string, start, end int64) error {
 		return err
 	}
 	defer lock.Release()
-	registry, err := executor.NewRegistry(executor.BasicCutV1())
+	registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func runWorker(ctx context.Context) error {
 	}
 	defer lock.Release()
 
-	registry, err := executor.NewRegistry(executor.BasicCutV1())
+	registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
 	if err != nil {
 		return err
 	}

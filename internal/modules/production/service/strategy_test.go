@@ -129,3 +129,17 @@ func TestStrategyOperatorCannotReadInactiveTemplate(t *testing.T) {
 		t.Fatalf("get error=%v", err)
 	}
 }
+
+func TestGuideStrategyStoresDownloadAddress(t *testing.T) {
+	svc, store, actor := strategyFixture()
+	definition := executor.GuideInsertV1()
+	store.template = model.ComposeTemplate{ID: 4, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"}
+	config := json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)
+	created, err := svc.Create(actor, CreateStrategyInput{GameID: "delta", Name: "引导插入", TemplateID: 4, TemplateVersion: 1, Config: config})
+	if err != nil || string(created.Config) != string(config) {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	if _, err := svc.Create(actor, CreateStrategyInput{GameID: "delta", Name: "无效链接", TemplateID: 4, TemplateVersion: 1, Config: json.RawMessage(`{"guide_video_url":"file:///tmp/guide.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)}); !errors.Is(err, ErrStrategyInvalid) {
+		t.Fatalf("file URL error = %v", err)
+	}
+}

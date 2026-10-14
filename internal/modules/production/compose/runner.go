@@ -21,6 +21,7 @@ type Request struct {
 	TemplateVersion uint32
 	Params          json.RawMessage
 	InputPath       string
+	GuidePath       string
 }
 
 // Output.Path remains in the run directory until the caller releases it.
@@ -47,12 +48,34 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if !input.hasVideo {
 		return Output{}, fmt.Errorf("input %s has no video stream", request.InputPath)
 	}
-	if input.durationMS < endMS {
+	if _, guide := plan.(executor.GuidePlan); !guide && input.durationMS < endMS {
 		return Output{}, fmt.Errorf("input %s is %d ms long, shorter than the requested window ending at %d ms", request.InputPath, input.durationMS, endMS)
 	}
 
 	outputPath := filepath.Join(runDir.Path(), "output.mp4")
-	if err := runFFmpeg(ctx, r.FFmpegPath, plan.FFmpegArguments(request.InputPath, outputPath)); err != nil {
+	arguments := plan.FFmpegArguments(request.InputPath, outputPath)
+	requestedMS := endMS - startMS
+	if guidePlan, guide := plan.(executor.GuidePlan); guide {
+		if request.GuidePath == "" {
+			return Output{}, fmt.Errorf("guide video is required")
+		}
+		guideInput, err := probeFile(ctx, r.FFprobePath, request.GuidePath)
+		if err != nil {
+			return Output{}, fmt.Errorf("guide input: %w", err)
+		}
+		if !guideInput.hasVideo {
+			return Output{}, fmt.Errorf("guide input has no video stream")
+		}
+		requestedMS, err = guidePlan.OutputDurationMS(input.durationMS, guideInput.durationMS)
+		if err != nil {
+			return Output{}, err
+		}
+		arguments, err = guidePlan.FFmpegGuideArguments(request.InputPath, request.GuidePath, outputPath, input.durationMS, guideInput.durationMS, input.width, input.height, input.hasAudio, guideInput.hasAudio)
+		if err != nil {
+			return Output{}, err
+		}
+	}
+	if err := runFFmpeg(ctx, r.FFmpegPath, arguments); err != nil {
 		return Output{}, err
 	}
 	if _, err := os.Stat(outputPath); err != nil {
@@ -66,7 +89,6 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if !output.hasVideo {
 		return Output{}, fmt.Errorf("output has no video stream")
 	}
-	requestedMS := endMS - startMS
 	if output.durationMS*10 < requestedMS*9 {
 		return Output{}, fmt.Errorf("output duration %d ms is shorter than 90%% of the requested %d ms", output.durationMS, requestedMS)
 	}
