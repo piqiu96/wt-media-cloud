@@ -16,8 +16,9 @@ type composeStagingCleanupStore interface {
 }
 
 // CleanComposeStaging removes only the staging key for a known finished
-// attempt. The repository excludes execution_uncertain; its old process may
-// still be writing. A deletion failure remains unmarked for the next scan.
+// attempt. The repository excludes execution_uncertain until an administrator
+// records verification that the old process stopped. A deletion failure
+// remains unmarked for the next scan.
 func CleanComposeStaging(ctx context.Context, tasks composeStagingCleanupStore, remove func(context.Context, string) error) error {
 	items, err := tasks.FindStagingCleanupCandidates(100)
 	if err != nil {

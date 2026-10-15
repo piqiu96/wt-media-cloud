@@ -362,6 +362,61 @@ func TestLiveComposeStagingCleanupRecoversStorageFailure(t *testing.T) {
 	t.Logf("staging cleanup for task %d recovered after injected storage failure", taskID)
 }
 
+func TestLiveComposeUncertainReviewEnablesStagingCleanup(t *testing.T) {
+	_, requestKey := liveWorkerSetup(t)
+	config.MustInitializeRuntimePaths()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
+		t.Skipf("object storage not reachable: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	taskID := cloneSuccessfulTask(t, requestKey+"-uncertain-cleanup")
+	var actorID int64
+	if err := database.DB().Raw(`SELECT created_by FROM compose_tasks WHERE id = ?`, taskID).Row().Scan(&actorID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = database.DB().Exec(`DELETE FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, strconv.FormatInt(taskID, 10)).Error
+		_ = database.DB().Exec(`DELETE FROM compose_uncertain_reviews WHERE task_id = ?`, taskID).Error
+	})
+	if err := database.DB().Exec(`UPDATE compose_tasks SET status = 'failed', attempt_count = 1, error_code = 'execution_uncertain' WHERE id = ?`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 1, 'auto', 'failed', 'execution_uncertain', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("compose-staging/%d/1/output.mp4", taskID)
+	body := []byte("staging from uncertain execution")
+	if err := storage.Get().Put(t.Context(), key, bytes.NewReader(body), int64(len(body)), "video/mp4"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = storage.Get().Remove(t.Context(), key) })
+	store := repository.ComposeTaskStore{}
+	if err := jobs.CleanComposeStaging(t.Context(), store, storage.Get().Remove); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Get().Stat(t.Context(), key); err != nil {
+		t.Fatalf("unreviewed object was removed: %v", err)
+	}
+	if _, changed, err := store.ResolveUncertain(taskID, actorID, "已在旧 Worker 节点核对 FFmpeg 进程停止且数据库无成片"); err != nil || !changed {
+		t.Fatalf("review changed=%v err=%v", changed, err)
+	}
+	if err := jobs.CleanComposeStaging(t.Context(), store, storage.Get().Remove); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Get().Stat(t.Context(), key); !errors.Is(err, storage.ErrObjectNotFound) {
+		t.Fatalf("reviewed staging object survived: %v", err)
+	}
+	var cleaned sql.NullTime
+	if err := database.DB().Raw(`SELECT staging_cleaned_at FROM compose_task_attempts WHERE task_id = ? AND attempt = 1`, taskID).Row().Scan(&cleaned); err != nil || !cleaned.Valid {
+		t.Fatalf("reviewed attempt cleanup marker: %v err=%v", cleaned, err)
+	}
+	t.Logf("reviewed uncertain task %d allowed only its old staging key to be removed", taskID)
+}
+
 func TestLiveComposeWorkerConfirmsACancelWhileWaitingForInput(t *testing.T) {
 	binary, requestKey := liveWorkerSetup(t)
 	// A material whose source is not ready keeps the attempt in its wait loop

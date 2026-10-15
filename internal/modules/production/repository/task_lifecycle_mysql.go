@@ -402,8 +402,8 @@ func closeComposeTaskAttemptByNumber(tx *gorm.DB, taskID, attempt int64, outcome
 }
 
 // FindStagingCleanupCandidates only exposes attempts whose execution has a
-// known terminal outcome. The execution_uncertain quarantine may still have
-// an old process writing its key, so it is intentionally excluded.
+// known terminal outcome. An execution_uncertain attempt is excluded until
+// an administrator's verification record confirms the old process stopped.
 func (ComposeTaskStore) FindStagingCleanupCandidates(limit int) ([]model.ComposeStagingCleanupCandidate, error) {
 	return findComposeStagingCleanupCandidates(database.DB(), limit)
 }
@@ -412,7 +412,7 @@ func findComposeStagingCleanupCandidates(db *gorm.DB, limit int) ([]model.Compos
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	rows, err := db.Raw(`SELECT task_id, attempt FROM compose_task_attempts WHERE staging_cleaned_at IS NULL AND outcome IN ('success', 'failed', 'cancelled') AND error_code <> 'execution_uncertain' AND attempt > 0 ORDER BY id LIMIT ?`, limit).Rows()
+	rows, err := db.Raw(`SELECT a.task_id, a.attempt FROM compose_task_attempts a WHERE a.staging_cleaned_at IS NULL AND a.outcome IN ('success', 'failed', 'cancelled') AND (a.error_code <> 'execution_uncertain' OR EXISTS (SELECT 1 FROM compose_uncertain_reviews r WHERE r.task_id = a.task_id AND r.attempt = a.attempt)) AND a.attempt > 0 ORDER BY a.id LIMIT ?`, limit).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +433,7 @@ func (ComposeTaskStore) MarkStagingCleaned(taskID int64, attempt int) (bool, err
 }
 
 func markComposeStagingCleaned(db *gorm.DB, taskID int64, attempt int, now time.Time) (bool, error) {
-	result := db.Exec(`UPDATE compose_task_attempts SET staging_cleaned_at = ? WHERE task_id = ? AND attempt = ? AND staging_cleaned_at IS NULL AND outcome IN ('success', 'failed', 'cancelled') AND error_code <> 'execution_uncertain'`, now, taskID, attempt)
+	result := db.Exec(`UPDATE compose_task_attempts a SET a.staging_cleaned_at = ? WHERE a.task_id = ? AND a.attempt = ? AND a.staging_cleaned_at IS NULL AND a.outcome IN ('success', 'failed', 'cancelled') AND (a.error_code <> 'execution_uncertain' OR EXISTS (SELECT 1 FROM compose_uncertain_reviews r WHERE r.task_id = a.task_id AND r.attempt = a.attempt))`, now, taskID, attempt)
 	if result.Error != nil {
 		return false, result.Error
 	}

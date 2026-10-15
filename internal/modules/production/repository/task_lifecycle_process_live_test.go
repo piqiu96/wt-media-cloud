@@ -162,12 +162,92 @@ func TestLiveComposeUncertainReviewIsAtomicAndSingleUse(t *testing.T) {
 	if err != nil || len(reviews) != 1 || reviews[0].ID != review.ID || reviews[0].Evidence != evidence {
 		t.Fatalf("review readback=%+v err=%v", reviews, err)
 	}
+	candidates, err := (ComposeTaskStore{}).FindStagingCleanupCandidates(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundReviewed := false
+	for _, candidate := range candidates {
+		if candidate.TaskID == outputID {
+			t.Fatal("unreviewed uncertain attempt became cleanup eligible")
+		}
+		if candidate.TaskID == eligibleID && candidate.Attempt == 1 {
+			foundReviewed = true
+		}
+	}
+	if !foundReviewed {
+		t.Fatal("reviewed uncertain attempt was not eligible for staging cleanup")
+	}
+	if ok, err := (ComposeTaskStore{}).MarkStagingCleaned(eligibleID, 1); err != nil || !ok {
+		t.Fatalf("mark reviewed staging cleaned: ok=%v err=%v", ok, err)
+	}
 	if err := database.DB().Raw(`SELECT COUNT(*) FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, fmt.Sprint(eligibleID)).Row().Scan(&count); err != nil || count != 1 {
 		t.Fatalf("review audit count=%d err=%v", count, err)
 	}
 	t.Cleanup(func() {
 		_ = database.DB().Exec(`DELETE FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, fmt.Sprint(eligibleID)).Error
 	})
+}
+
+func TestLiveComposeUncertainReviewConcurrentSingleWinner(t *testing.T) {
+	_, requestKey, strategyID := composeClaimSetup(t)
+	cleanupComposeTasks(t, requestKey)
+	seedComposeTask(t, requestKey+"-race", strategyID)
+	var taskID, actorID int64
+	if err := database.DB().Raw(`SELECT id, created_by FROM compose_tasks WHERE request_key = ?`, requestKey+"-race").Row().Scan(&taskID, &actorID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = database.DB().Exec(`DELETE FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, fmt.Sprint(taskID)).Error
+		_ = database.DB().Exec(`DELETE FROM compose_uncertain_reviews WHERE task_id = ?`, taskID).Error
+	})
+	if err := database.DB().Exec(`UPDATE compose_tasks SET status = 'failed', error_code = 'execution_uncertain', attempt_count = 1 WHERE id = ?`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, error_code, created_at, updated_at) VALUES (?, 1, 'auto', 'failed', 'execution_uncertain', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, taskID).Error; err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		changed bool
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			_, changed, err := resolveComposeUncertain(database.DB(), taskID, actorID, "管理员核实旧 FFmpeg 已停止且没有已提交成片", time.Now())
+			results <- result{changed: changed, err: err}
+		}()
+	}
+	close(start)
+	winners := 0
+	for i := 0; i < 2; i++ {
+		select {
+		case result := <-results:
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			if result.changed {
+				winners++
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent review did not finish")
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("concurrent winners=%d, want 1", winners)
+	}
+	var reviews, attempts int
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_uncertain_reviews WHERE task_id = ?`, taskID).Row().Scan(&reviews); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND attempt = 2`, taskID).Row().Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if reviews != 1 || attempts != 1 {
+		t.Fatalf("concurrent readback: reviews=%d attempts=%d", reviews, attempts)
+	}
 }
 
 func TestLiveComposeStagingCleanupCandidates(t *testing.T) {

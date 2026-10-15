@@ -235,7 +235,7 @@ func TestComposeRetryDelayIsBoundedExponential(t *testing.T) {
 
 func TestStagingCleanupSelectsOnlySafeClosedAttempts(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery("SELECT task_id, attempt FROM compose_task_attempts WHERE staging_cleaned_at IS NULL AND outcome IN").
+	mock.ExpectQuery("SELECT a.task_id, a.attempt FROM compose_task_attempts a WHERE a.staging_cleaned_at IS NULL AND a.outcome IN.*EXISTS \\(SELECT 1 FROM compose_uncertain_reviews").
 		WithArgs(100).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "attempt"}).AddRow(int64(77), 2))
 	items, err := findComposeStagingCleanupCandidates(db, 100)
@@ -248,7 +248,7 @@ func TestStagingCleanupSelectsOnlySafeClosedAttempts(t *testing.T) {
 func TestStagingCleanupMarksOnlyKnownFinishedAttempt(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 15, 2, 0, 0, 0, time.UTC)
-	mock.ExpectExec("UPDATE compose_task_attempts SET staging_cleaned_at = \\?").
+	mock.ExpectExec("UPDATE compose_task_attempts a SET a.staging_cleaned_at = \\?.*EXISTS \\(SELECT 1 FROM compose_uncertain_reviews").
 		WithArgs(now, int64(77), 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	ok, err := markComposeStagingCleaned(db, 77, 2, now)
