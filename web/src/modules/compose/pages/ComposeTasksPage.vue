@@ -402,7 +402,7 @@ onMounted(() => {
               <t-tab-panel value="snapshot" label="参数快照">
                 <div class="compose-detail__section">
                   <h4>创建时的生效配置</h4>
-                  <p class="compose-detail__hint">任务始终按这份配置执行，后续策略修改不会影响它。</p>
+                  <p class="compose-detail__hint">任务按创建时的配置执行，后续策略修改不会影响它；下载地址在此隐藏。</p>
                   <pre class="compose-detail__snapshot">{{ JSON.stringify(detail.config_snapshot, null, 2) }}</pre>
                 </div>
               </t-tab-panel>

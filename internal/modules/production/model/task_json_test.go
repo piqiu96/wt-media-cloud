@@ -24,3 +24,21 @@ func TestComposeTaskAPIProjectionDoesNotExposeRawExecutionErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeTaskAPIProjectionHidesGuideDownloadURL(t *testing.T) {
+	task := ComposeTask{ConfigSnapshot: json.RawMessage(`{"guide_video_url":"https://media.example/guide.mp4?signature=secret","insert_seconds":3}`)}
+	encoded, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(encoded)
+	if strings.Contains(body, "signature=secret") || strings.Contains(body, "media.example") {
+		t.Fatalf("guide download URL leaked in task snapshot: %s", body)
+	}
+	if !strings.Contains(body, `"insert_seconds":3`) {
+		t.Fatalf("non-sensitive snapshot settings disappeared: %s", body)
+	}
+	if string(task.ConfigSnapshot) != `{"guide_video_url":"https://media.example/guide.mp4?signature=secret","insert_seconds":3}` {
+		t.Fatal("API projection modified the execution snapshot")
+	}
+}

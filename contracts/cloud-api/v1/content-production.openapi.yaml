@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.15.1
+  version: 2026.10.15.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -653,13 +653,13 @@ components:
         compose_strategy_id: {type: integer, format: int64}
         template_code: {type: string}
         template_version: {type: integer, minimum: 1}
-        config_snapshot: {type: object}
+        config_snapshot: {type: object, description: Frozen execution settings projected for readers; guide_video_url is replaced with a redaction label while the stored execution snapshot stays unchanged.}
         status: {type: string, enum: [pending, running, success, failed, cancelled]}
         cancel_requested: {type: boolean, description: A cancel was requested while running; the task stays running until the worker confirms the controlled stop.}
         stage: {type: string, description: Worker phase projection from the bounded set validating_input, waiting_input, cutting, uploading, committing; a pending task carries an empty stage.}
         progress: {type: integer, minimum: 0, maximum: 100}
         error_code: {type: string}
-        error_message: {type: string}
+        error_message: {type: string, description: Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned.}
         attempt_count: {type: integer, minimum: 0}
         started_at: {type: string, format: date-time, nullable: true, description: Null until execution starts.}
         finished_at: {type: string, format: date-time, nullable: true, description: Null until the terminal transition.}
@@ -680,7 +680,7 @@ components:
         outcome: {type: string, enum: [pending, running, success, failed, cancelled]}
         stage: {type: string, description: Last projected phase of the attempt; empty until the worker reports progress.}
         error_code: {type: string}
-        error_message: {type: string}
+        error_message: {type: string, description: Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned.}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     ResolveComposeUncertainInput:

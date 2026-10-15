@@ -32,7 +32,27 @@ func safeComposeErrorMessage(code, message string) string {
 func (task ComposeTask) MarshalJSON() ([]byte, error) {
 	type projection ComposeTask
 	task.ErrorMessage = safeComposeErrorMessage(task.ErrorCode, task.ErrorMessage)
+	task.ConfigSnapshot = safeComposeSnapshot(task.ConfigSnapshot)
 	return json.Marshal(projection(task))
+}
+
+func safeComposeSnapshot(snapshot json.RawMessage) json.RawMessage {
+	if len(snapshot) == 0 {
+		return snapshot
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(snapshot, &fields); err != nil || fields == nil {
+		return json.RawMessage(`{}`)
+	}
+	if _, exists := fields["guide_video_url"]; !exists {
+		return snapshot
+	}
+	fields["guide_video_url"] = json.RawMessage(`"（下载地址已隐藏）"`)
+	safe, err := json.Marshal(fields)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return safe
 }
 
 func (attempt ComposeTaskAttempt) MarshalJSON() ([]byte, error) {
