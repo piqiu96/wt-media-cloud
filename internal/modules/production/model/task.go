@@ -2,8 +2,31 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
+
+// ComposeTaskDisplayName captures a short, immutable label at creation time.
+// Legacy rows remain blank and are displayed with their task ID by clients.
+func ComposeTaskDisplayName(materialTitle string, materialID int64, strategyName string) string {
+	title := strings.TrimSpace(materialTitle)
+	if title == "" {
+		title = fmt.Sprintf("素材 #%d", materialID)
+	}
+	name := strings.TrimSpace(strategyName)
+	if name == "" {
+		name = "合成策略"
+	}
+	shorten := func(value string, limit int) string {
+		runes := []rune(value)
+		if len(runes) > limit {
+			return string(runes[:limit]) + "…"
+		}
+		return value
+	}
+	return shorten(title, 100) + " · " + shorten(name, 100)
+}
 
 type ComposeTaskStatus string
 
@@ -23,6 +46,7 @@ const (
 // the worker lifecycle (M4-C5) writes them.
 type ComposeTask struct {
 	ID              int64             `json:"id"`
+	DisplayName     string            `json:"display_name" gorm:"column:display_name"`
 	TeamID          int64             `json:"team_id"`
 	GameID          string            `json:"game_id"`
 	TriggerType     string            `json:"trigger_type"`

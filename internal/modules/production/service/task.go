@@ -224,9 +224,17 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 			res.Failed = append(res.Failed, *failure)
 			continue
 		}
+		material, found, err := s.materials.FindMaterial(item.MaterialID)
+		if err != nil {
+			return CreateComposeTasksResult{}, err
+		}
+		if !found {
+			return CreateComposeTasksResult{}, ErrComposeTaskNotFound
+		}
 		task := model.ComposeTask{
 			TeamID: strategy.TeamID, GameID: strategy.GameID, TriggerType: "manual",
-			MaterialID: item.MaterialID, StrategyID: strategy.ID,
+			DisplayName: model.ComposeTaskDisplayName(material.Title, item.MaterialID, strategy.Name),
+			MaterialID:  item.MaterialID, StrategyID: strategy.ID,
 			TemplateCode: template.Code, TemplateVersion: strategy.TemplateVersion,
 			ConfigSnapshot: merged, Status: model.ComposeTaskPending,
 			RequestKey: key, CreatedBy: int64(actor.ID),

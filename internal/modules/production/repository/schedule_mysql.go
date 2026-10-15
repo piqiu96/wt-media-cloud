@@ -149,6 +149,7 @@ type scheduleCandidate struct {
 	MaterialID int64
 	GameID     sql.NullString
 	Status     string
+	Title      string
 }
 
 func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeScheduleRun, bool, error) {
@@ -236,7 +237,8 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 				continue
 			}
 			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, TriggerType: trigger,
-				MaterialID: candidate.MaterialID, MaterialUsageID: candidate.UsageID, StrategyID: strategy.ID,
+				DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, strategy.Name),
+				MaterialID:  candidate.MaterialID, MaterialUsageID: candidate.UsageID, StrategyID: strategy.ID,
 				TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: append(json.RawMessage(nil), strategy.Config...),
 				Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, candidate.MaterialID), CreatedBy: strategy.CreatedBy}
 			if err := composeTaskInsertWithAudit(tx, &task, "compose_task.schedule", strategy.CreatedBy, now); err != nil {
@@ -257,7 +259,7 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 }
 
 func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) ([]scheduleCandidate, error) {
-	rows, err := tx.Raw(`SELECT mu.id, mu.material_id, sc.game_id, m.status FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.user_id = ? AND mu.team_id = ? AND m.team_id = ? AND mu.status = 'active' ORDER BY mu.id`, strategy.CreatedBy, strategy.TeamID, strategy.TeamID).Rows()
+	rows, err := tx.Raw(`SELECT mu.id, mu.material_id, sc.game_id, m.status, m.title FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.user_id = ? AND mu.team_id = ? AND m.team_id = ? AND mu.status = 'active' ORDER BY mu.id`, strategy.CreatedBy, strategy.TeamID, strategy.TeamID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +267,7 @@ func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) 
 	result := make([]scheduleCandidate, 0)
 	for rows.Next() {
 		var item scheduleCandidate
-		if err := rows.Scan(&item.UsageID, &item.MaterialID, &item.GameID, &item.Status); err != nil {
+		if err := rows.Scan(&item.UsageID, &item.MaterialID, &item.GameID, &item.Status, &item.Title); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

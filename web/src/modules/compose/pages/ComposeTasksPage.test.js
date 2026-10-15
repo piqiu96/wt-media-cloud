@@ -20,13 +20,14 @@ describe('compose tasks page', () => {
     expect(source).toContain('v-model="filters.created_range"')
   })
 
-  it('renders the five task statuses and the pending stage as 等待源素材', () => {
+  it('renders the five formal task statuses and separates stage from status', () => {
     expect(source).toContain("pending: '排队中'")
-    expect(source).toContain("running: '执行中'")
-    expect(source).toContain("success: '已完成'")
+    expect(source).toContain("running: '处理中'")
+    expect(source).toContain("success: '成功'")
     expect(source).toContain("failed: '失败'")
     expect(source).toContain("cancelled: '已取消'")
-    expect(source).toContain('等待源素材')
+    expect(source).toContain("title: '执行阶段'")
+    expect(source).not.toContain('<t-progress')
   })
 
   // 取消只对排队中的行出现——非 pending 的行连按钮都没有，而不是点了再被拒。
@@ -43,7 +44,7 @@ describe('compose tasks page', () => {
 
   // 操作列宽按行里最多会出现的按钮清单推导（排队中的行才有 取消），不再写死 130。
   it('derives the op column width from the buttons a pending row can show', () => {
-    expect(source).toContain("opColumnWidth(['详情', '取消'])")
+    expect(source).toContain("opColumnWidth(['详情', '取消', '重试'])")
     expect(source).not.toContain("width: 130, fixed: 'right'")
   })
 
@@ -63,7 +64,8 @@ describe('compose tasks page', () => {
   it('loads attempts through the attempts endpoint and renders them per attempt', () => {
     expect(source).toContain('client.listComposeTaskAttempts(row.id)')
     expect(source).toContain('client.listComposeTaskAttempts(id)')
-    expect(source).toContain("sourceLabels[attempt.source]")
+    expect(source).toContain('第 {{ attempt.attempt }} 次执行')
+    expect(source).not.toContain('自动发起')
     expect(source).toContain("outcomeLabels[attempt.outcome]")
     expect(source).toContain('执行记录')
     expect(source).toContain('还没有执行记录')
@@ -83,9 +85,9 @@ describe('compose tasks page', () => {
 
   // 成片关联只给 ID（服务端也不给对象地址），跳转去我的成片页。
   it('links a success task to its output id and the finished-media page', () => {
-    expect(source).toContain("detail.status === 'success' && detail.composite_output_id")
-    expect(source).toContain('成片 #{{ detail.composite_output_id }}')
-    expect(source).toContain("router.push({ name: 'FinishedMedia' })")
+    expect(source).toContain("row.status === 'success' ? row.composite_output_id : null")
+    expect(source).toContain('成片 #{{ outputID(detail) }}')
+    expect(source).toContain("name: 'FinishedMedia', query: { output_id:")
   })
 
   it('shows uncertain execution as pending administrator review and records explicit verification', () => {
@@ -95,6 +97,31 @@ describe('compose tasks page', () => {
     expect(source).toContain('reviewReady(')
     expect(source).toContain('client.resolveComposeUncertain(')
     expect(source).toContain('client.listComposeUncertainReviews(')
-    expect(source).toContain('diagnosticSummary(attempt)')
+    expect(source).toContain('失败阶段：')
+  })
+
+  it('places the task and linked entities before status, then removes duplicate summary and output tab', () => {
+    const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))
+    for (const [first, second] of [['task', 'material_id'], ['material_id', 'strategy'], ['strategy', 'output'], ['output', 'status'], ['status', 'stage'], ['stage', 'op']]) {
+      expect(columns.indexOf(`colKey: '${first}'`)).toBeLessThan(columns.indexOf(`colKey: '${second}'`))
+    }
+    expect(source).not.toContain('compose-list-summary')
+    expect(source).not.toContain('label="成片结果"')
+    expect(source).toContain('label="配置快照"')
+    expect(source).toContain('display_name?.trim()')
+    expect(source).toContain('goMaterial(row)')
+    expect(source).toContain('goStrategy(row)')
+  })
+
+  it('opens the existing entity detail surfaces by scoped API reads', () => {
+    const strategies = readFileSync(new URL('./ComposeStrategyPage.vue', import.meta.url), 'utf8')
+    const outputs = readFileSync(new URL('./MyOutputsPage.vue', import.meta.url), 'utf8')
+    const materials = readFileSync(new URL('../../materials/pages/MaterialLibraryPage.vue', import.meta.url), 'utf8')
+    expect(source).toContain("name: 'MaterialLibrary', query: { material_id:")
+    expect(source).toContain("name: 'ComposeStrategy', query: { strategy_id:")
+    expect(source).toContain("name: 'FinishedMedia', query: { output_id:")
+    expect(materials).toContain('client.get(Number(raw))')
+    expect(strategies).toContain('client.getStrategy(Number(id)).then(openDetail)')
+    expect(outputs).toContain('openDetail({ id: Number(id) })')
   })
 })

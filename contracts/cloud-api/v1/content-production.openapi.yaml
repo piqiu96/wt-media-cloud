@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.15.2
+  version: 2026.10.16.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -645,6 +645,7 @@ components:
       required: [id, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
+        display_name: {type: string, description: Creation-time material title and strategy name; empty for legacy tasks that cannot be safely reconstructed.}
         team_id: {type: integer, format: int64}
         game_id: {type: string}
         trigger_type: {type: string, enum: [manual, scheduled]}

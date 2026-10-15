@@ -3,7 +3,7 @@ import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
 import { DialogPlugin } from 'tdesign-vue-next'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
@@ -19,6 +19,7 @@ import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 // 发布状态由服务端筛选；下载、预览和归档不改变发布状态。
 const client = createComposeClient()
 const router = useRouter()
+const route = useRoute()
 const downloadCentre = useDownloadCentre()
 const downloadingID = ref(null)
 
@@ -32,7 +33,7 @@ const pagination = ref({ current: 1, pageSize: 20 })
 const statusLabels = { pending_publish: '待发布', published: '已发布', archived: '已归档' }
 const statusTones = { pending_publish: 'warning', published: 'success', archived: 'neutral' }
 // 任务状态是来源追踪里的投影，词表与合成任务页一致。
-const taskStatusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
+const taskStatusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
 
 const columns = computed(() => [
   { colKey: 'id', title: '成片 ID', width: 90 },
@@ -199,6 +200,8 @@ async function download(row) {
 onMounted(() => {
   load()
   loadStrategies()
+  const id = String(route.query.output_id || '')
+  if (/^\d+$/.test(id)) openDetail({ id: Number(id) })
 })
 </script>
 

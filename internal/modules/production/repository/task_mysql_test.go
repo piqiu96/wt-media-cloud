@@ -11,10 +11,10 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 )
 
-var composeTaskRowColumns = []string{"id", "team_id", "game_id", "trigger_type", "material_id", "material_usage_id", "compose_strategy_id", "template_code", "template_version", "config_snapshot_json", "status", "cancel_requested", "request_key", "created_by", "claimed_node_id", "lease_expires_at", "heartbeat_at", "attempt_count", "max_attempts", "next_attempt_at", "started_at", "finished_at", "stage", "progress", "error_code", "error_message", "output_object_key", "composite_output_id", "created_at", "updated_at"}
+var composeTaskRowColumns = []string{"id", "display_name", "team_id", "game_id", "trigger_type", "material_id", "material_usage_id", "compose_strategy_id", "template_code", "template_version", "config_snapshot_json", "status", "cancel_requested", "request_key", "created_by", "claimed_node_id", "lease_expires_at", "heartbeat_at", "attempt_count", "max_attempts", "next_attempt_at", "started_at", "finished_at", "stage", "progress", "error_code", "error_message", "output_object_key", "composite_output_id", "created_at", "updated_at"}
 
 func composeTaskRow(id int64, status string, now time.Time) []driverValue {
-	return []driverValue{int64(id), int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), []byte(`{"start_seconds":0,"end_seconds":1}`), status, false, "rk-123", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now}
+	return []driverValue{int64(id), "", int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), []byte(`{"start_seconds":0,"end_seconds":1}`), status, false, "rk-123", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now}
 }
 
 // driverValue keeps the row literals readable; sqlmock accepts any.
@@ -27,7 +27,7 @@ func TestCreateComposeTaskPersistsAndReadsBack(t *testing.T) {
 	mock.ExpectBegin()
 	// GORM writes every column, including the nil claim/lease/heartbeat and
 	// empty execution projection — the full 27-arg list pins that shape.
-	mock.ExpectExec("INSERT INTO `compose_tasks`").WithArgs(int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), task.ConfigSnapshot, model.ComposeTaskPending, false, "rk-123", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now).WillReturnResult(sqlmock.NewResult(77, 1))
+	mock.ExpectExec("INSERT INTO `compose_tasks`").WithArgs("", int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), task.ConfigSnapshot, model.ComposeTaskPending, false, "rk-123", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now).WillReturnResult(sqlmock.NewResult(77, 1))
 	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "pending", now)...))
@@ -106,7 +106,7 @@ func TestCreateForUsageChecksUsageInsideTransaction(t *testing.T) {
 	mock.ExpectQuery("SELECT .* FROM material_usages WHERE user_id = \\? AND material_id = \\? AND status = 'active'").
 		WithArgs(int64(11), int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "material_id", "user_id", "status", "removed_at", "created_at", "updated_at"}).AddRow(int64(9), int64(7), int64(42), int64(11), "active", nil, now, now))
-	mock.ExpectExec("INSERT INTO `compose_tasks`").WithArgs(int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), item.ConfigSnapshot, model.ComposeTaskPending, false, "rk-usage-1", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now).WillReturnResult(sqlmock.NewResult(77, 1))
+	mock.ExpectExec("INSERT INTO `compose_tasks`").WithArgs("", int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), item.ConfigSnapshot, model.ComposeTaskPending, false, "rk-usage-1", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now).WillReturnResult(sqlmock.NewResult(77, 1))
 	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "pending", now)...))

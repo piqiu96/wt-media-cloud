@@ -188,6 +188,9 @@ func TestCreateComposeTasksCreatesPerItemWithMergedSnapshot(t *testing.T) {
 		t.Fatalf("creates = %d", tasks.creates)
 	}
 	first := res.Created[0]
+	if first.DisplayName != "素材一 · 切段" {
+		t.Fatalf("task name must capture creation-time material and strategy: %q", first.DisplayName)
+	}
 	if first.MaterialID != 42 || first.MaterialUsageID != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.GameID != "delta" || first.TemplateCode != "basic_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
 		t.Fatalf("first task facts drifted: %+v", first)
 	}
@@ -371,18 +374,23 @@ func TestCreateComposeTasksDuplicateKeysInOneRequestRejected(t *testing.T) {
 }
 
 func TestCreateComposeTasksSnapshotFrozenAfterStrategyEdit(t *testing.T) {
-	svc, tasks, strategies, _, actor := composeTaskFixture()
+	svc, tasks, strategies, materials, actor := composeTaskFixture()
 	first, err := svc.Create(actor, CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-frozen-001"}}})
 	if err != nil || len(first.Created) != 1 {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	strategies.items[0].Config = json.RawMessage(`{"start_seconds":8,"end_seconds":9}`)
+	strategies.items[0].Name = "新策略名"
+	materials.items[0].Title = "新素材名"
 	stored, found, err := tasks.Find(first.Created[0].ID)
 	if err != nil || !found {
 		t.Fatalf("stored=%+v found=%v err=%v", stored, found, err)
 	}
 	if string(stored.ConfigSnapshot) != `{"start_seconds":0,"end_seconds":10}` {
 		t.Fatalf("strategy edit leaked into stored snapshot: %s", stored.ConfigSnapshot)
+	}
+	if stored.DisplayName != "素材一 · 切段" {
+		t.Fatalf("source rename changed historical task name: %q", stored.DisplayName)
 	}
 	second, err := svc.Create(actor, CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{{MaterialID: 43, RequestKey: "rk-frozen-002"}}})
 	if err != nil || len(second.Created) != 1 {

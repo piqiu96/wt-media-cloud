@@ -2,6 +2,7 @@
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import { createSessionClient } from '../../../shared/api/session.js'
@@ -15,6 +16,7 @@ import { scheduleLabel } from '../scheduleForm.js'
 import ComposeScheduleDialog from '../components/ComposeScheduleDialog.vue'
 
 const client = createComposeClient()
+const route = useRoute()
 const sessionClient = createSessionClient()
 
 const rows = ref([])
@@ -62,7 +64,7 @@ const skipReasons = {
 
 // 批次结果归集（CHG-20261015-095）：一次运行创建的一批任务逐素材展开；
 // 统计数字直接来自服务端对库内行的 GROUP BY，页面不做二次推算。
-const batchStatusLabels = { pending: '排队中', running: '执行中', success: '已完成', failed: '失败', cancelled: '已取消' }
+const batchStatusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
 const batchDetail = ref({})
 
 async function toggleRunBatch(run) {
@@ -163,7 +165,11 @@ const formSchemaFields = computed(() => {
 })
 
 
-onMounted(load)
+onMounted(() => {
+  load()
+  const id = String(route.query.strategy_id || '')
+  if (/^\d+$/.test(id)) client.getStrategy(Number(id)).then(openDetail).catch((e) => feedback.toast.error(e?.message || '打开策略失败'))
+})
 
 async function load() {
   loading.value = true
