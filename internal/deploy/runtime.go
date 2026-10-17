@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -91,17 +92,32 @@ func VerifyRuntime(ctx context.Context, profile Profile, releaseRoot string) err
 	return nil
 }
 
+// ServiceProcessBinaries maps every BaoTa-managed process to the binary that
+// must be running from the active release. A process listed in the release
+// manifest but missing here would make `wtmctl deploy verify` green while
+// nothing executes its work, so the two lists are kept in step by
+// TestServiceProcessCheckCoversReleaseManifest.
+func ServiceProcessBinaries(profile Profile) map[string]string {
+	current := filepath.Join(profile.Deploy.InstallRoot, "current", "bin")
+	return map[string]string{
+		"server":            filepath.Join(current, "wt-media-cloud"),
+		"worker":            filepath.Join(current, "discovery-worker"),
+		"scheduler":         filepath.Join(current, "discovery-scheduler"),
+		"compose-scheduler": filepath.Join(current, "compose-scheduler"),
+		"compose-worker":    filepath.Join(current, "compose-worker"),
+	}
+}
+
 func CheckServiceProcesses(profile Profile) (map[string]bool, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("read /proc: %w", err)
 	}
-	wanted := map[string]string{
-		"server":    filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "wt-media-cloud"),
-		"worker":    filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "discovery-worker"),
-		"scheduler": filepath.Join(profile.Deploy.InstallRoot, "current", "bin", "discovery-scheduler"),
+	wanted := ServiceProcessBinaries(profile)
+	result := make(map[string]bool, len(wanted))
+	for name := range wanted {
+		result[name] = false
 	}
-	result := map[string]bool{"server": false, "worker": false, "scheduler": false}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -118,4 +134,13 @@ func CheckServiceProcesses(profile Profile) (map[string]bool, error) {
 		}
 	}
 	return result, nil
+}
+
+func sortedKeys(m map[string]bool) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

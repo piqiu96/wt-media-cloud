@@ -414,7 +414,7 @@ func (r Runner) deploy(ctx context.Context, args []string) error {
 				return fmt.Errorf("%s process is not running", name)
 			}
 		}
-		fmt.Fprintf(r.Stdout, "current=%s\nmigrations=%d\ninitial_admin=%s/enabled\nruntime=ok\nprocesses=server,worker,scheduler\n", profile.Deploy.Release, result.Applied, result.Admin)
+		fmt.Fprintf(r.Stdout, "current=%s\nmigrations=%d\ninitial_admin=%s/enabled\nruntime=ok\nprocesses=%s\n", profile.Deploy.Release, result.Applied, result.Admin, strings.Join(sortedKeys(processes), ","))
 		return nil
 	default:
 		return fmt.Errorf("unknown deploy subcommand: %s", args[0])

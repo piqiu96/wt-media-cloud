@@ -1,6 +1,6 @@
 # WT Media Cloud Linux 宝塔部署手册
 
-部署统一由 `bin/wtmctl` 完成。`wtmctl` 不启动、停止或重启任何 Cloud 进程；Server、Worker、Scheduler 仍由宝塔管理。
+部署统一由 `bin/wtmctl` 完成。`wtmctl` 不启动、停止或重启任何 Cloud 进程；Server、Worker、Scheduler、Compose Scheduler、Compose Worker 五个进程仍由宝塔管理。
 
 ## 1. 目录约定
 
@@ -112,7 +112,7 @@ cd /home/www/wt-media-cloud/output/wt-media-cloud_<product-tag>_linux-amd64
 
 ## 5. 一键部署
 
-先由宝塔停止旧版本的 Server、Worker、Scheduler。
+先由宝塔停止旧版本的 Server、Worker、Scheduler、Compose Scheduler、Compose Worker。
 
 然后执行：
 
@@ -137,11 +137,11 @@ sudo ./bin/wtmctl deploy apply \
 
 ## 6. 宝塔进程配置
 
-三个进程的路径都指向 `current`，只需配置一次。
+五个进程的路径都指向 `current`，只需配置一次。
 
 ### 路径解析与环境变量
 
-三个进程不再依赖启动时的工作目录。程序按以下顺序解析 Cloud 根目录（`ENV_PATH`）：
+五个进程不再依赖启动时的工作目录。程序按以下顺序解析 Cloud 根目录（`ENV_PATH`）：
 
 1. 绝对路径 `WT_MEDIA_CLOUD_HOME`；
 2. 可执行文件所在目录的上级（`<home>/bin/<二进制>`，即使配置文件缺失也保持此根路径）；
@@ -203,10 +203,22 @@ sudo ./bin/wtmctl deploy apply \
 端口：不填写
 ```
 
+### Compose Worker：宝塔进程管理器
+
+```text
+名称：wt-media-cloud-compose-worker
+工作目录：/home/www/wt-media-cloud/current
+启动文件：/home/www/wt-media-cloud/current/bin/compose-worker
+运行用户：www
+端口：不填写
+```
+
+`compose-worker` 是唯一领取并执行 `compose_task` 的进程：它调用真实 FFmpeg 合成、把成片写入对象存储。没有它，合成任务只会停在排队中。
+
 启动顺序：
 
 ```text
-Server -> Worker -> Scheduler -> Compose Scheduler
+Server -> Worker -> Scheduler -> Compose Scheduler -> Compose Worker
 ```
 
 ## 7. 部署后验收
@@ -224,7 +236,7 @@ sudo /home/www/wt-media-cloud/current/bin/wtmctl deploy verify \
 - `/healthz`、`/api/v1/health`；
 - `/`、`/login`；
 - 未知 `/api/` 返回 404；
-- 宝塔三个进程正在运行。
+- 宝塔五个进程正在运行。
 
 外部 HTTPS：
 
@@ -236,7 +248,7 @@ curl -i https://wt.longyanyue.cn/api/v1/health
 
 ## 8. 回退
 
-先由宝塔停止三个进程。
+先由宝塔停止五个进程。
 
 确认应用与数据库兼容后执行：
 
