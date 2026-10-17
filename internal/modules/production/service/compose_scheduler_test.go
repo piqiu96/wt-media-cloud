@@ -61,7 +61,7 @@ func (f *scheduleBatchFake) FindRun(int64, time.Time) (model.ComposeScheduleRun,
 
 func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "active"}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled"}}
 	slot := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
 	store := &scheduleBatchFake{
 		tasks:   []model.ComposeTask{{ID: 1, Status: "success"}, {ID: 2, Status: "failed", ErrorCode: "execution_failed"}},
@@ -87,7 +87,7 @@ func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 
 func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "active"}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled"}}
 	store := &scheduleFake{runs: []model.ComposeScheduleRun{{StrategyID: 11, Skipped: []model.ComposeScheduleSkip{{MaterialID: 4, Reason: "already_produced"}}}}}
 	svc := NewComposeSchedulerService(store, strategies)
 	runs, err := svc.ListRuns(actor, 11)
@@ -114,8 +114,8 @@ func TestComposeSchedulerContinuesAfterOneStrategyFails(t *testing.T) {
 
 func TestComposeRunNowChecksActorAndUsesStableRequestKey(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	schedule := model.ComposeSchedule{Enabled: false, Mode: "manual", Timezone: "Asia/Shanghai", PerRunLimit: 2, DailyLimit: 4, MaterialScope: model.ComposeMaterialScopeCreatorUsages}
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "active", Schedule: &schedule}}
+	schedule := model.ComposeSchedule{Mode: "manual", Timezone: "Asia/Shanghai"}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled", ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Schedule: &schedule}}
 	store := &scheduleFake{}
 	svc := NewComposeSchedulerService(store, strategies)
 	actor.Role = identity.RoleOperator

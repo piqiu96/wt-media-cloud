@@ -44,10 +44,11 @@ func TestLiveComposeStrategyReadAfterScheduleMigration(t *testing.T) {
 	item := items[0]
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	next := now.Add(15 * time.Minute)
-	item.Schedule = &model.ComposeSchedule{Enabled: true, Mode: "interval", IntervalMinutes: 15, Timezone: "Asia/Shanghai", PerRunLimit: 2, DailyLimit: 5, MaterialScope: model.ComposeMaterialScopeCreatorUsages}
+	item.Schedule = &model.ComposeSchedule{Mode: "interval", IntervalMinutes: 15, Timezone: "Asia/Shanghai"}
+	item.ExecutionMode = model.ComposeExecutionScheduled
 	item.NextRunAt, item.UpdatedBy = &next, item.CreatedBy
 	stored, err := updateComposeStrategyAudited(tx, item, "compose_strategy.schedule", now)
-	if err != nil || stored.Schedule == nil || !stored.Schedule.Enabled || stored.NextRunAt == nil || !stored.NextRunAt.Equal(next) {
+	if err != nil || stored.Schedule == nil || stored.ExecutionMode != model.ComposeExecutionScheduled || stored.NextRunAt == nil || !stored.NextRunAt.Equal(next) {
 		t.Fatalf("transactional update/readback: stored=%+v err=%v", stored, err)
 	}
 	var persistedID int64

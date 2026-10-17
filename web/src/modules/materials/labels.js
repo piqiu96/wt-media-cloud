@@ -162,16 +162,19 @@ export function usageStatusTone(value) {
  *
  * 已放弃的关系先说恢复：这时候再提「去下载」，运营会以为那条路还通着。
  * 谁也不认识的取值画 `-`，不猜 —— 猜出来的下一步会指向一个不存在的动作。
+ *
+ * 提合成时**只说页面名字**：创建入口在合成任务页，这一页不再有任何合成按钮，
+ * 而合成任务页的选素材列表只列「使用中」的关系 —— 「恢复使用后可…选用」就是这么来的。
  */
 export function nextStepHint(material) {
-  if (material?.usage_status === 'removed') return '恢复使用后可继续下载与加入合成'
+  if (material?.usage_status === 'removed') return '恢复使用后可继续下载，并可在合成任务页选用'
   switch (material?.video_status) {
     case 'not_downloaded':
-      return '下载到本机后可加入合成'
+      return '下载到本机后可在合成任务页选用'
     case 'downloading':
       return '文件准备中，完成后即可下载到本机'
     case 'ready':
-      return '可加入合成，或重新下载到其他机器'
+      return '可在合成任务页选用，或重新下载到其他机器'
     case 'failed':
       // 「重试」这个动作已被收起（走查裁定只留「重新下载」），所以这句提示也用同一个
       // 词 —— 指着一个界面上不存在的按钮说「下一步」，比不说更糟。

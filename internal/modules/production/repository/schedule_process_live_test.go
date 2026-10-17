@@ -35,7 +35,7 @@ func TestLiveComposeSchedulerProcessesDeduplicate(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	var sourceID int64
-	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' JOIN materials m ON m.id = mu.material_id AND m.status = 'available' JOIN source_contents sc ON sc.id = m.source_content_id AND sc.game_id = s.game_id WHERE s.status = 'active' AND t.status = 'active' ORDER BY s.id LIMIT 1`).Row().Scan(&sourceID)
+	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' JOIN materials m ON m.id = mu.material_id AND m.status = 'available' JOIN source_contents sc ON sc.id = m.source_content_id AND sc.game_id = s.game_id WHERE s.status = 'enabled' AND t.status = 'active' ORDER BY s.id LIMIT 1`).Row().Scan(&sourceID)
 	if err != nil {
 		t.Skipf("no active strategy with eligible creator material: %v", err)
 	}
@@ -45,13 +45,13 @@ func TestLiveComposeSchedulerProcessesDeduplicate(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build scheduler: %v\n%s", err, output)
 	}
-	schedule := model.ComposeSchedule{Enabled: true, Mode: "interval", IntervalMinutes: 30, Timezone: "Asia/Shanghai", PerRunLimit: 1, DailyLimit: 1, MaterialScope: model.ComposeMaterialScopeCreatorUsages}
+	schedule := model.ComposeSchedule{Mode: "interval", IntervalMinutes: 30, Timezone: "Asia/Shanghai"}
 	scheduleJSON, err := json.Marshal(schedule)
 	if err != nil {
 		t.Fatal(err)
 	}
 	name := fmt.Sprintf("CHG092-process-smoke-%d", time.Now().UnixNano())
-	result := database.DB().Exec(`INSERT INTO compose_strategies (team_id, game_id, compose_template_id, compose_template_version, name, config_json, schedule_json, next_run_at, status, created_by, updated_by, created_at, updated_at) SELECT team_id, game_id, compose_template_id, compose_template_version, ?, config_json, ?, ?, 'active', created_by, updated_by, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) FROM compose_strategies WHERE id = ?`, name, scheduleJSON, time.Now().UTC().Add(-time.Minute), sourceID)
+	result := database.DB().Exec(`INSERT INTO compose_strategies (team_id, game_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at) SELECT team_id, game_id, compose_template_id, compose_template_version, ?, config_json, 'scheduled', ?, priority_rules_json, single_limit, daily_limit, ?, 'enabled', created_by, updated_by, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) FROM compose_strategies WHERE id = ?`, name, scheduleJSON, time.Now().UTC().Add(-time.Minute), sourceID)
 	if result.Error != nil || result.RowsAffected != 1 {
 		t.Fatalf("create smoke strategy: rows=%d err=%v", result.RowsAffected, result.Error)
 	}

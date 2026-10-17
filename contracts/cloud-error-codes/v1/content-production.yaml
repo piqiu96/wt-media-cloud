@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.14.1"
+revision: "2026.10.16.1"
 
 errors:
   material_not_found: {http_status: 404}
@@ -16,3 +16,4 @@ errors:
   compose_task_forbidden: {http_status: 403}
   compose_task_not_found: {http_status: 404}
   compose_task_not_cancellable: {http_status: 409}
+  compose_task_conflict: {http_status: 409}

@@ -61,6 +61,10 @@ func strategyFixture() (*StrategyService, *strategyMemoryStore, identity.PublicU
 	return service, store, actor
 }
 
+func strategyRulesFixture() []model.ComposePriorityRule {
+	return []model.ComposePriorityRule{{Priority: 1, Action: "match", Logic: "all", Conditions: []model.ComposeCondition{{Field: "like_count", Operator: "gte", Value: json.RawMessage(`0`)}}}}
+}
+
 func TestStrategyCreateRejectsUnknownConfigAndInactiveTemplate(t *testing.T) {
 	svc, store, actor := strategyFixture()
 	input := CreateStrategyInput{GameID: "delta", Name: "切段", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12,"bgm":"x"}`)}
@@ -79,7 +83,7 @@ func TestStrategyCreateRejectsUnknownConfigAndInactiveTemplate(t *testing.T) {
 
 func TestStrategyOperatorReadsAvailableTeamStrategyButCannotWrite(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", Status: "active", CreatedBy: 99}}
+	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", Status: "enabled", CreatedBy: 99}}
 	actor.Role = identity.RoleOperator
 	items, err := svc.List(actor)
 	if err != nil || len(items) != 1 || store.lastFilter.TeamID != 7 || !store.lastFilter.ActiveOnly {
@@ -101,8 +105,8 @@ func TestStrategySeniorCannotWriteOutsideGame(t *testing.T) {
 
 func TestStrategyUpdateKeepsBindingAndCopyRequiresActiveTemplate(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "原策略", Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), Status: "active", CreatedBy: 99}}
-	updated, err := svc.Update(actor, 4, UpdateStrategyInput{Name: "新策略", Config: json.RawMessage(`{"start_seconds":6,"end_seconds":12}`)})
+	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "原策略", Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Status: "enabled", CreatedBy: 99}}
+	updated, err := svc.Update(actor, 4, UpdateStrategyInput{Name: "新策略", Config: json.RawMessage(`{"start_seconds":6,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2})
 	if err != nil || updated.TemplateID != 3 || updated.TemplateVersion != 1 || updated.CreatedBy != 99 || updated.Name != "新策略" {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
@@ -111,17 +115,17 @@ func TestStrategyUpdateKeepsBindingAndCopyRequiresActiveTemplate(t *testing.T) {
 	if !errors.Is(err, ErrStrategyTemplateUnavailable) || store.writes != 1 {
 		t.Fatalf("copy error=%v writes=%d", err, store.writes)
 	}
-	if _, err = svc.SetStatus(actor, 4, "inactive"); err != nil {
+	if _, err = svc.SetStatus(actor, 4, "disabled"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.SetStatus(actor, 4, "active"); !errors.Is(err, ErrStrategyTemplateUnavailable) {
+	if _, err = svc.SetStatus(actor, 4, "enabled"); !errors.Is(err, ErrStrategyTemplateUnavailable) {
 		t.Fatalf("activation error=%v", err)
 	}
 }
 
 func TestStrategyOperatorCannotReadInactiveTemplate(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), Status: "active"}}
+	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), Status: "enabled"}}
 	actor.Role = identity.RoleOperator
 	store.template.Status = "inactive"
 	_, err := svc.Get(actor, 4)
@@ -135,7 +139,7 @@ func TestGuideStrategyStoresDownloadAddress(t *testing.T) {
 	definition := executor.GuideInsertV1()
 	store.template = model.ComposeTemplate{ID: 4, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"}
 	config := json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)
-	created, err := svc.Create(actor, CreateStrategyInput{GameID: "delta", Name: "引导插入", TemplateID: 4, TemplateVersion: 1, Config: config})
+	created, err := svc.Create(actor, CreateStrategyInput{GameID: "delta", Name: "引导插入", TemplateID: 4, TemplateVersion: 1, Config: config, ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2})
 	if err != nil || string(created.Config) != string(config) {
 		t.Fatalf("created=%+v err=%v", created, err)
 	}

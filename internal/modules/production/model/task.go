@@ -9,10 +9,12 @@ import (
 
 // ComposeTaskDisplayName captures a short, immutable label at creation time.
 // Legacy rows remain blank and are displayed with their task ID by clients.
+// The material fallback is the bare id: `#` prefixes belong to no identifier
+// in this product, and this string is what operators copy elsewhere.
 func ComposeTaskDisplayName(materialTitle string, materialID int64, strategyName string) string {
 	title := strings.TrimSpace(materialTitle)
 	if title == "" {
-		title = fmt.Sprintf("素材 #%d", materialID)
+		title = fmt.Sprintf("素材 %d", materialID)
 	}
 	name := strings.TrimSpace(strategyName)
 	if name == "" {
@@ -26,6 +28,23 @@ func ComposeTaskDisplayName(materialTitle string, materialID int64, strategyName
 		return value
 	}
 	return shorten(title, 100) + " · " + shorten(name, 100)
+}
+
+// ComposeTaskBatchDisplayName applies an operator-supplied batch label when the
+// command carries one: several materials are numbered in submission order, a
+// single material keeps the plain name. A blank (or whitespace-only) label
+// keeps the derived material/strategy name, so every existing caller is
+// unchanged. The rule lives here and only here — the create drawer, the
+// schedule path and any future client have to produce the same names.
+func ComposeTaskBatchDisplayName(name string, index, total int, materialTitle string, materialID int64, strategyName string) string {
+	label := strings.TrimSpace(name)
+	if label == "" {
+		return ComposeTaskDisplayName(materialTitle, materialID, strategyName)
+	}
+	if total <= 1 {
+		return label
+	}
+	return fmt.Sprintf("%s-%d", label, index+1)
 }
 
 type ComposeTaskStatus string
@@ -80,24 +99,74 @@ type ComposeTask struct {
 
 func (ComposeTask) TableName() string { return "compose_tasks" }
 
+// Compose task execution steps. One entry is appended to the attempt row as
+// each phase finishes; the detail page reads them back as the execution
+// process. The keys are a closed set — an entry whose key is not here is
+// dropped before it reaches a client.
+const (
+	ComposeStepValidateInput = "validate_input"
+	ComposeStepPrepareInput  = "prepare_input"
+	ComposeStepFetchGuide    = "fetch_guide"
+	ComposeStepCut           = "cut"
+	ComposeStepUpload        = "upload"
+	ComposeStepCommit        = "commit"
+)
+
+const (
+	ComposeStepOutcomeSuccess = "success"
+	ComposeStepOutcomeFailed  = "failed"
+)
+
+// ComposeTaskAttemptStep is one recorded step of an execution attempt. The
+// stored entry carries only server-authored labels and allowlisted metrics:
+// nothing here is copied from an error string, a signed URL, a storage key or
+// a local path. Normalize rebuilds the server-owned fields so the write path
+// and the API projection use one implementation.
+type ComposeTaskAttemptStep struct {
+	Step       string                    `json:"step"`
+	Label      string                    `json:"label"`
+	Outcome    string                    `json:"outcome"`
+	StartedAt  time.Time                 `json:"started_at"`
+	FinishedAt time.Time                 `json:"finished_at"`
+	DurationMS int64                     `json:"duration_ms"`
+	ErrorCode  string                    `json:"error_code"`
+	ErrorLabel string                    `json:"error_label"`
+	Metrics    ComposeAttemptStepMetrics `json:"metrics"`
+}
+
+// ComposeAttemptStepMetrics holds counts and digests only: the staged file's
+// size, the verified output's sha256, its duration and its row id.
+type ComposeAttemptStepMetrics struct {
+	SizeBytes        *int64 `json:"size_bytes,omitempty"`
+	SHA256           string `json:"sha256,omitempty"`
+	OutputDurationMS *int64 `json:"output_duration_ms,omitempty"`
+	OutputID         *int64 `json:"output_id,omitempty"`
+}
+
 // ComposeTaskAttempt is one execution attempt of a compose task (M4-G). A
 // manual retry opens its row at authorization time — source 'manual',
 // outcome 'pending' — and the worker's claim transaction stamps started_at;
 // the terminal paths (success, failure, requeue, cancel) close it. The
 // (task_id, attempt) unique key lets the claim INSERT rely on absence.
+//
+// Steps is the attempt's process log. It rides in the steps_json column but is
+// never written through gorm: the worker appends to it with an atomic
+// JSON_ARRAY_APPEND and ListAttempts decodes it by hand, so the field is
+// mapped out of gorm's view (`gorm:"-"`) on purpose.
 type ComposeTaskAttempt struct {
-	ID           int64      `json:"id"`
-	TaskID       int64      `json:"compose_task_id" gorm:"column:task_id"`
-	Attempt      int        `json:"attempt" gorm:"column:attempt"`
-	Source       string     `json:"source" gorm:"column:source"`
-	StartedAt    *time.Time `json:"started_at" gorm:"column:started_at"`
-	FinishedAt   *time.Time `json:"finished_at" gorm:"column:finished_at"`
-	Outcome      string     `json:"outcome" gorm:"column:outcome"`
-	Stage        string     `json:"stage" gorm:"column:stage"`
-	ErrorCode    string     `json:"error_code" gorm:"column:error_code"`
-	ErrorMessage string     `json:"error_message" gorm:"column:error_message"`
-	CreatedAt    time.Time  `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt    time.Time  `json:"updated_at" gorm:"column:updated_at"`
+	ID           int64                   `json:"id"`
+	TaskID       int64                   `json:"compose_task_id" gorm:"column:task_id"`
+	Attempt      int                     `json:"attempt" gorm:"column:attempt"`
+	Source       string                  `json:"source" gorm:"column:source"`
+	StartedAt    *time.Time              `json:"started_at" gorm:"column:started_at"`
+	FinishedAt   *time.Time              `json:"finished_at" gorm:"column:finished_at"`
+	Outcome      string                  `json:"outcome" gorm:"column:outcome"`
+	Stage        string                  `json:"stage" gorm:"column:stage"`
+	ErrorCode    string                  `json:"error_code" gorm:"column:error_code"`
+	ErrorMessage string                  `json:"error_message" gorm:"column:error_message"`
+	Steps        []ComposeTaskAttemptStep `json:"steps" gorm:"-"`
+	CreatedAt    time.Time               `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt    time.Time               `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (ComposeTaskAttempt) TableName() string { return "compose_task_attempts" }

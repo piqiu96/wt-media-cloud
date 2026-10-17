@@ -26,6 +26,13 @@ export function formatByteRate(value) {
   return `${formatBytes(rate)}/s`
 }
 
+/** 时长。未知或非正数画 `—`（「还没量到」不是「0 秒」），与成片页同一个全角破折号。 */
+export function formatDurationMs(value) {
+  const ms = Number(value)
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  return `${(ms / 1000).toFixed(1)} 秒`
+}
+
 /** 剩余时间。未知或非正数返回空串，调用方据此决定整段不显示。 */
 export function formatEta(seconds) {
   const value = Number(seconds)

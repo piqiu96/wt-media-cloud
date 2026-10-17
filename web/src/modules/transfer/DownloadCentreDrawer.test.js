@@ -120,11 +120,15 @@ describe('download centre drawer', () => {
   })
 
   /**
-   * 标题兜底跟着资产类型走：成片行的兜底是「成片 #id」，模板里不再有写死的「素材 #id」。
+   * 标题兜底跟着资产类型走：成片行的兜底是「成片 id」，素材行是「素材 id」，
+   * 两种都**不带 `#`**（CHG-20261015-098：编号是要复制去别处查的，前缀只会跟着被复制走）。
    */
   it('falls the row title back to the asset kind, not always a material', () => {
     expect(source).toContain('assetFallbackTitle(row.task)')
-    expect(source).not.toContain('`素材 #${row.task.asset_id}`')
+    const facts = readFileSync(new URL('./downloadFacts.js', import.meta.url), 'utf8')
+    expect(facts).toContain('`成片 ${task.asset_id}`')
+    expect(facts).toContain('`素材 ${task.asset_id}`')
+    expect(facts).not.toContain('#${task.asset_id}')
   })
 
   // 新任务要出现在这张列表里。不刷新的话画面停在旧行上，同一个素材看起来像没被重新下载过。

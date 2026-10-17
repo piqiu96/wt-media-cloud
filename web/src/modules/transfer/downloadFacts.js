@@ -219,12 +219,25 @@ export function canRedownload(task) {
 }
 
 /**
- * 标题兜底跟着资产类型走：素材行「素材 #id」，成片行「成片 #id」。任务行**有**
+ * 「已下载」的行还要不要一次「重新下载」：**只有实测本机那份文件不在时才给**。
+ *
+ * 与 `canRedownload` 是两件事：那一条认的是任务状态（失败/已取消 → 再来一次），这一条认的是
+ * 资产在不在本机。已下载就默认文件在 —— `FILE_PRESENCE.unknown` 不给，因为「读不到本机」
+ * 不是「文件不在」，而一个已经下好的素材被画成可以重下，是凭空多出来的动作。
+ */
+export function needsRedownload(downloadStatus, presence) {
+  return downloadStatus === 'downloaded' && presence === FILE_PRESENCE.absent
+}
+
+/**
+ * 标题兜底跟着资产类型走：素材行「素材 id」，成片行「成片 id」。任务行**有**
  * `asset_title`（创建时写死，见契约），这里只在它缺席时兜 —— 兜底写成什么类型，
  * 得看这行是什么，而不是默认所有行都是素材。
+ *
+ * 不带 `#`：这串数字是要被复制去别处查的编号，前缀只会跟着一起被复制走。
  */
 export function assetFallbackTitle(task) {
-  return task?.asset_type === 'composite_output' ? `成片 #${task.asset_id}` : `素材 #${task.asset_id}`
+  return task?.asset_type === 'composite_output' ? `成片 ${task.asset_id}` : `素材 ${task.asset_id}`
 }
 
 /**

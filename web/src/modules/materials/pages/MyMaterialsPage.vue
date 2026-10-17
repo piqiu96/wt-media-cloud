@@ -2,7 +2,7 @@
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
@@ -24,12 +24,14 @@ import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
-import ComposeTaskCreateDialog from '../../compose/components/ComposeTaskCreateDialog.vue'
+import { createFileTransferClient } from '../../../shared/api/fileTransfer.js'
+import { downloadedFileName, filePresence, needsRedownload } from '../../transfer/downloadFacts.js'
+import { savedFileStates } from '../../transfer/desktopBridge.js'
 
 const client = createMaterialsClient()
 const users = createUsersClient()
+const transferClient = createFileTransferClient()
 const route = useRoute()
-const router = useRouter()
 const downloadCentre = useDownloadCentre()
 
 const rows = ref([])
@@ -43,47 +45,20 @@ const detail = ref(null)
 const detailLoading = ref(false)
 const pagination = ref({ current: 1, pageSize: 20 })
 
-// 勾选多行或行内「加入合成」共用创建对话框；request_key 由对话框生成。
-const selectedRowKeys = ref([])
-const createVisible = ref(false)
-const createMaterials = ref([])
-
-function openCreate(rowsToCreate) {
-  createMaterials.value = rowsToCreate.map((row) => ({ id: row.id, title: row.title, cover_url: row.cover_url }))
-  createVisible.value = true
-}
-
-function createSelected() {
-  openCreate(rows.value.filter((row) => selectedRowKeys.value.includes(row.usage_id)))
-}
-
-async function onCreated(result) {
-  selectedRowKeys.value = []
-  const created = result.created || []
-  const failed = result.failed || []
-  if (failed.length > 0) {
-    feedback.toast.error(`已创建 ${created.length} 个任务，${failed.length} 个失败：${failed.map((item) => item.message).join('；')}`)
-  } else {
-    feedback.toast.success(`已创建 ${created.length} 个合成任务`)
-  }
-  await load()
-}
-
 // 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
 // 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
 //
 // 走查七轮：游戏不再独立成列，收进「素材」格的副行（与作者同格），腾出的位置给
 // 「使用状态」——这一页第一次同时有两个状态维度要并排（规范 §7.2）。使用状态是
 // 关系自己的状态，文件状态是素材的，两者不合并。
-// 勾选列只对使用中的关系开放（PRD §5.4.5：已放弃的关系不允许新建任务），
-// disabled 落在勾选项上，而不是选完再悄悄过滤。判据提成具名函数，列声明
-// 里保持一层花括号（列表规范的列宽量具按顶层花括号数分列）。
-const selectionDisabled = ({ row }) => ({ disabled: row.usage_status !== 'active' })
-
+//
+// 点赞与收藏是选素材时的决策依据（走查反馈），所以并排放在「素材」右边；数据在行上
+// （toRows 展开了嵌入的 material），不必再点开详情。
 const columns = [
-  { colKey: 'row-select', type: 'multiple', width: 46, checkProps: selectionDisabled },
   { colKey: 'id', title: '素材 ID', width: 90 },
   { colKey: 'material', title: '素材', width: 380 },
+  { colKey: 'like_count', title: '点赞', width: 90 },
+  { colKey: 'favorite_count', title: '收藏', width: 90 },
   { colKey: 'video_status', title: '文件状态', width: 100 },
   { colKey: 'usage_status', title: '使用状态', width: 100 },
   { colKey: 'added_at', title: '加入时间', width: 105 },
@@ -120,6 +95,9 @@ function toRows(usages) {
  * 那回答的是云端源文件准备好了没有，是另一件事，混在一起就把「还没下」画成「没准备」。
  * 云端准备态只留在详情抽屉的「文件信息」区。
  */
+// 与素材详情抽屉同一个量法（MaterialDetailDrawer:128）：千分位，空值显示 0 而不是空白。
+function countLabel(value) { return Number(value || 0).toLocaleString() }
+
 function fileStatus(row) {
   return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
 }
@@ -129,6 +107,56 @@ function fileStatus(row) {
 function cellSubline(row) {
   const game = gameName(games.value, row.game_id)
   return row.author_name ? `${game} · ${row.author_name}` : game
+}
+
+// 「本机那一份文件还在不在」，按任务表里的文件名索引（同 MaterialDetailDrawer 与下载中心）。
+// 空表 ＝ 没查过：浏览器读不到本机、Desktop 还没扫完 —— 那时一个字都不说，绝不把
+// 「我读不到」写成「文件不在」。
+const tasks = ref([])
+const presence = ref({})
+// 这张 presence 表是为哪个文件名集合量出来的。集合没变就不问第二遍。
+let measuredKey = null
+
+/**
+ * 只有**已下载**的行才需要这一问：名字从下载任务表里挑（`downloadedFileName` 只认本机、
+ * `user_download`、成功过、报了文件名的那一条），在不在由 Desktop 在已知保存位置里量。
+ * 没有已下载的行时连任务表都不读 —— 这一页平时不发多余请求。
+ */
+async function loadPresence() {
+  const downloaded = rows.value.filter((row) => row.download_status === 'downloaded')
+  if (downloaded.length === 0) {
+    measuredKey = null
+    tasks.value = []
+    presence.value = {}
+    return
+  }
+  try {
+    const data = await transferClient.listTasks({ limit: 200 })
+    tasks.value = Array.isArray(data) ? data : []
+  } catch {
+    tasks.value = []
+  }
+  const names = downloaded
+    .map((row) => downloadedFileName(tasks.value, row.id))
+    .filter((name) => typeof name === 'string' && name.trim())
+  const key = names.slice().sort().join('\n')
+  if (key === measuredKey) return
+  measuredKey = key
+  if (!key) {
+    presence.value = {}
+    return
+  }
+  try {
+    presence.value = await savedFileStates(names)
+  } catch {
+    // 问不到就退回「没查过」：界面上与不查完全一样（那颗「重新下载」不出现），不打扰运营。
+    presence.value = {}
+  }
+}
+
+function localPresence(row) {
+  const name = downloadedFileName(tasks.value, row.id)
+  return filePresence(name ? { file_name: name } : null, presence.value)
 }
 
 // 走查七轮起，列表不再只返回使用中的关系，已放弃的行也在（并且可以就地恢复）。
@@ -161,6 +189,7 @@ async function load() {
   } finally {
     loading.value = false
   }
+  await loadPresence()
 }
 
 async function loadGames() {
@@ -215,11 +244,6 @@ async function restore(row) {
   }
 }
 
-// 详情抽屉里的「合成」是浏览动作：带运营去合成任务页看全局，不在抽屉里替他选素材。
-function goToCompose() {
-  router.push({ name: 'Compose' })
-}
-
 async function download(row) {
   try {
     await client.createDownload(row.id)
@@ -252,9 +276,8 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page my-materials-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、补充文件并进入后续生产">
+      <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、查看使用状态与详情">
         <template #actions>
-          <t-button theme="primary" :disabled="selectedRowKeys.length === 0" @click="createSelected">创建合成任务</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
@@ -284,6 +307,8 @@ onMounted(() => {
                 </div>
               </div>
             </template>
+            <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
+            <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="fileStatus(row).tone" :label="fileStatus(row).label" /></template>
             <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的（缺值兜底成「使用中」
                  就是替服务端宣布一条它没说过关系）。 -->
@@ -294,7 +319,9 @@ onMounted(() => {
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
             <!-- CHG-069 任务 23：按钮由「使用状态 × 下载状态」矩阵驱动（任务状态与业务状态
                  严格隔离），每行最多 3 颗全部平铺（规范 §5.6）。已放弃只给恢复；使用中按
-                 下载状态给一步主操作——下载中不给（文件已经在准备了，再点还是同一条命令）。 -->
+                 下载状态给一步主操作——下载中不给（文件已经在准备了，再点还是同一条命令）。
+                 已下载是终态：本机那份文件还在就无事可做，**实测不在了**才给一次「重新下载」
+                 （合成的入口在合成任务页，这一页不再有合成按钮）。 -->
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
@@ -302,8 +329,8 @@ onMounted(() => {
                   <t-button size="small" theme="primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="row.download_status === 'downloaded'" size="small" theme="primary" @click="openCreate([row])">加入合成</t-button>
-                  <t-button v-else-if="row.download_status !== 'downloading'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
+                  <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" @click="download(row)">重新下载</t-button>
+                  <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
                   <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="giveUp(row)">放弃使用</t-button>
                 </template>
               </t-space>
@@ -324,13 +351,6 @@ onMounted(() => {
         @cancel="load"
         @give-up="giveUp"
         @restore="restore"
-        @compose="goToCompose"
-      />
-
-      <ComposeTaskCreateDialog
-        v-model:visible="createVisible"
-        :materials="createMaterials"
-        @created="onCreated"
       />
     </div>
   </t-loading>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,16 @@ import (
 )
 
 const composeTaskColumns = `id, display_name, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
+
+// ErrComposeTaskMaterialUsed reports that the same (strategy, material) pair
+// already has a task row, whatever its status: a pair is produced once, and a
+// second run is the retry action on that task, not another create.
+var ErrComposeTaskMaterialUsed = errors.New("compose task material already used")
+
+// composeTaskInFlight still defines "this task occupies the strategy's material
+// right now". The material-state aggregate is its only reader: the create guard
+// and the scheduler judge the pair by the existence of any task row instead.
+const composeTaskInFlight = `status IN ('pending', 'running')`
 
 type ComposeTaskFilter struct {
 	TeamID        int64
@@ -64,6 +75,12 @@ func appendComposeTaskAudit(tx *gorm.DB, item model.ComposeTask, action string, 
 	return tx.Exec(`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, 'compose_task', ?, ?, ?)`, id.NewID("audit"), actorID, action, fmt.Sprint(item.ID), summary, now).Error
 }
 
+// composeAutoRetryQuota is the automatic retry budget a compose task starts
+// with, mirroring the column DEFAULT 3 in migration 053. A manual retry rebases
+// max_attempts to attempt_count + this quota, so the operator gets the same
+// fault-tolerance budget again without renumbering the attempt history.
+const composeAutoRetryQuota = 3
+
 // composeTaskInsertWithAudit writes the task row and its audit entry on the
 // given handle without managing the transaction, so callers that need the
 // insert inside a larger transaction (CreateForUsage) share the same shape.
@@ -72,7 +89,7 @@ func composeTaskInsertWithAudit(tx *gorm.DB, item *model.ComposeTask, action str
 	// GORM writes every column explicitly, so the column DEFAULT 3 would never
 	// fire and a zero MaxAttempts would be persisted as "no retries allowed".
 	if item.MaxAttempts <= 0 {
-		item.MaxAttempts = 3
+		item.MaxAttempts = composeAutoRetryQuota
 	}
 	item.CreatedAt, item.UpdatedAt = now, now
 	if err := tx.Create(item).Error; err != nil {
@@ -112,7 +129,7 @@ func (ComposeTaskStore) ListAttempts(taskID int64) ([]model.ComposeTaskAttempt, 
 }
 
 func listComposeTaskAttempts(db *gorm.DB, taskID int64) ([]model.ComposeTaskAttempt, error) {
-	rows, err := db.Raw(`SELECT id, task_id, attempt, source, started_at, finished_at, outcome, stage, error_code, error_message, created_at, updated_at FROM compose_task_attempts WHERE task_id = ? ORDER BY attempt ASC`, taskID).Rows()
+	rows, err := db.Raw(`SELECT id, task_id, attempt, source, started_at, finished_at, outcome, stage, error_code, error_message, steps_json, created_at, updated_at FROM compose_task_attempts WHERE task_id = ? ORDER BY attempt ASC`, taskID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +138,8 @@ func listComposeTaskAttempts(db *gorm.DB, taskID int64) ([]model.ComposeTaskAtte
 	for rows.Next() {
 		var item model.ComposeTaskAttempt
 		var started, finished sql.NullTime
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.Attempt, &item.Source, &started, &finished, &item.Outcome, &item.Stage, &item.ErrorCode, &item.ErrorMessage, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var steps []byte
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.Attempt, &item.Source, &started, &finished, &item.Outcome, &item.Stage, &item.ErrorCode, &item.ErrorMessage, &steps, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if started.Valid {
@@ -129,6 +147,10 @@ func listComposeTaskAttempts(db *gorm.DB, taskID int64) ([]model.ComposeTaskAtte
 		}
 		if finished.Valid {
 			item.FinishedAt = &finished.Time
+		}
+		item.Steps, err = model.DecodeComposeAttemptSteps(steps)
+		if err != nil {
+			return nil, err
 		}
 		items = append(items, item)
 	}
@@ -147,6 +169,9 @@ func createForUsage(db *gorm.DB, item model.ComposeTask, action string, now time
 			return err
 		}
 		item.MaterialUsageID = usage.ID
+		if err := lockComposeTaskMaterial(tx, item.StrategyID, item.MaterialID); err != nil {
+			return err
+		}
 		if err := composeTaskInsertWithAudit(tx, &item, action, item.CreatedBy, now); err != nil {
 			return err
 		}
@@ -167,6 +192,89 @@ func createForUsage(db *gorm.DB, item model.ComposeTask, action string, now time
 		return model.ComposeTask{}, false, fmt.Errorf("created compose task %d cannot be read", item.ID)
 	}
 	return stored, true, nil
+}
+
+// lockComposeTaskMaterial refuses a create when the strategy already has any
+// task row for this material, finished or not: (策略,素材) is produced once, and
+// running it again is the retry action on the existing task. That is the same
+// rule the scheduler's candidate check applies, so a pair the drawer still
+// offers is exactly a pair with no task row at all.
+//
+// The strategy row is locked first: the task read matches one row at most and
+// usually none, so two concurrent creates for two different materials of one
+// strategy would otherwise gap-lock each other's insert position. That read is
+// a locking read because findActiveUsage already pinned this transaction's
+// snapshot, and a task created since then is invisible to a plain read.
+func lockComposeTaskMaterial(tx *gorm.DB, strategyID, materialID int64) error {
+	var locked int64
+	if err := tx.Raw(`SELECT id FROM compose_strategies WHERE id = ? FOR UPDATE`, strategyID).Row().Scan(&locked); err != nil {
+		return err
+	}
+	var usedID int64
+	err := tx.Raw(`SELECT id FROM compose_tasks WHERE compose_strategy_id = ? AND material_id = ? LIMIT 1 FOR UPDATE`, strategyID, materialID).Row().Scan(&usedID)
+	switch {
+	case err == nil:
+		return ErrComposeTaskMaterialUsed
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	default:
+		return err
+	}
+}
+
+// MaterialStates answers "what has this strategy done with each material" in
+// one query. The four status counts are what the drawer reads: any of them
+// above zero means the pair is already used and read-only, and a missing row
+// (all four zero) is the only shape a create accepts. Every requested id gets a
+// row, ascending: a missing row means the pair never ran, and the caller must
+// not have to tell that apart from a strategy that came back short.
+// materialIDs are expected deduplicated.
+func (ComposeTaskStore) MaterialStates(strategyID int64, materialIDs []int64) ([]model.ComposeMaterialState, error) {
+	return composeMaterialStates(database.DB(), strategyID, materialIDs)
+}
+
+func composeMaterialStates(db *gorm.DB, strategyID int64, materialIDs []int64) ([]model.ComposeMaterialState, error) {
+	states := make([]model.ComposeMaterialState, 0, len(materialIDs))
+	if strategyID <= 0 || len(materialIDs) == 0 {
+		return states, nil
+	}
+	ids := slices.Clone(materialIDs)
+	slices.Sort(ids)
+	query := `SELECT material_id, COALESCE(SUM(status = 'success'), 0), COALESCE(SUM(` + composeTaskInFlight + `), 0), COALESCE(SUM(status = 'failed'), 0), COALESCE(SUM(status = 'cancelled'), 0), MAX(created_at) FROM compose_tasks WHERE compose_strategy_id = ? AND material_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + `) GROUP BY material_id`
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, strategyID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.Raw(query, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := make(map[int64]model.ComposeMaterialState, len(ids))
+	for rows.Next() {
+		var item model.ComposeMaterialState
+		var last sql.NullTime
+		if err := rows.Scan(&item.MaterialID, &item.SuccessCount, &item.ActiveCount, &item.FailedCount, &item.CancelledCount, &last); err != nil {
+			return nil, err
+		}
+		if last.Valid {
+			at := last.Time
+			item.LastTaskAt = &at
+		}
+		seen[item.MaterialID] = item
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if item, ok := seen[id]; ok {
+			states = append(states, item)
+			continue
+		}
+		states = append(states, model.ComposeMaterialState{MaterialID: id})
+	}
+	return states, nil
 }
 
 func (ComposeTaskStore) CancelAudited(item model.ComposeTask, actorID int64, action string) (bool, error) {

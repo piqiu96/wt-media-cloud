@@ -11,8 +11,8 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createdRangeParams } from '../createdRange.js'
-import { formatBytes } from '../../../shared/utils/units.js'
-import { usageStatusLabel } from '../../materials/labels.js'
+import { formatBytes, formatDurationMs } from '../../../shared/utils/units.js'
+import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 
@@ -32,8 +32,6 @@ const pagination = ref({ current: 1, pageSize: 20 })
 
 const statusLabels = { pending_publish: '待发布', published: '已发布', archived: '已归档' }
 const statusTones = { pending_publish: 'warning', published: 'success', archived: 'neutral' }
-// 任务状态是来源追踪里的投影，词表与合成任务页一致。
-const taskStatusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
 
 const columns = computed(() => [
   { colKey: 'id', title: '成片 ID', width: 90 },
@@ -63,7 +61,7 @@ const archivedCount = computed(() => rows.value.filter((row) => row.publish_stat
 
 function strategyName(row) {
   const found = strategies.value.find((item) => item.id === row.compose_strategy_id)
-  return found ? found.name : `#${row.compose_strategy_id}`
+  return found ? found.name : `策略 ${row.compose_strategy_id}`
 }
 
 function templateText(row) {
@@ -71,11 +69,7 @@ function templateText(row) {
 }
 
 // media 是执行时量到的文件事实（时长等）；解析不动就当没有，不替服务端编数。
-function durationText(row) {
-  const ms = row.media?.duration_ms
-  if (!Number.isFinite(ms) || ms <= 0) return '—'
-  return `${(ms / 1000).toFixed(1)} 秒`
-}
+function durationText(row) { return formatDurationMs(row.media?.duration_ms) }
 
 async function load() {
   loading.value = true
@@ -154,7 +148,7 @@ async function retryPreview() {
 function archive(row) {
   const dialog = DialogPlugin.confirm({
     header: '归档成片',
-    body: `确认归档成片 #${row.id}？归档后不再出现在待发布列表，且不可恢复。`,
+    body: `确认归档成片 ${row.id}？归档后不再出现在待发布列表，且不可恢复。`,
     confirmBtn: { content: '归档', theme: 'danger' },
     onConfirm: async () => {
       dialog.destroy()
@@ -174,7 +168,7 @@ function archive(row) {
 function publish(row) {
   const dialog = DialogPlugin.confirm({
     header: '去发布',
-    body: `成片 #${row.id}（素材 #${row.material_id}）将带入发布流程。发布管理上线前不会记录任何发布结果。`,
+    body: `成片 ${row.id}（素材 ${row.material_id}）将带入发布流程。发布管理上线前不会记录任何发布结果。`,
     confirmBtn: { content: '进入发布管理', theme: 'primary' },
     onConfirm: () => {
       dialog.destroy()
@@ -271,42 +265,10 @@ onMounted(() => {
         <t-loading :loading="!detail" :show-overlay="true">
           <div v-if="detail" class="output-detail">
             <div class="output-detail__hero">
-              <div><span class="output-detail__eyebrow">成片 ID {{ detail.output.id }}</span><h3>成片 #{{ detail.output.id }}</h3><p>生成于 {{ formatDateTime(detail.output.created_at) }}</p></div>
+              <div><h3>成片 {{ detail.output.id }}</h3><p>生成于 {{ formatDateTime(detail.output.created_at) }}</p></div>
               <ResourceStatusBadge :tone="statusTones[detail.output.publish_status] || 'neutral'" :label="statusLabels[detail.output.publish_status] || detail.output.publish_status" />
             </div>
-            <t-tabs v-model="detailTab" class="output-detail__tabs">
-              <t-tab-panel value="basic" label="基本信息">
-                <div class="output-detail__panel">
-                  <video v-if="previewUrl" :src="previewUrl" controls preload="metadata" class="output-detail__video">当前环境不支持视频预览</video>
-                  <div v-else class="output-detail__preview-empty"><span>暂时无法预览此成片</span><t-button class="wt-secondary-button" variant="outline" size="small" :loading="previewLoading" @click="retryPreview">重试预览</t-button></div>
-                  <h4 class="output-detail__title">文件信息</h4>
-                  <div class="output-detail__grid">
-                    <div><span class="output-detail__label">文件大小</span><strong>{{ formatBytes(detail.output.file_size_bytes) }}</strong></div>
-                    <div><span class="output-detail__label">视频时长</span><strong>{{ durationText(detail.output) }}</strong></div>
-                    <div><span class="output-detail__label">生成时间</span><strong>{{ formatDateTime(detail.output.created_at) }}</strong></div>
-                  </div>
-                  <div class="output-detail__hash"><span class="output-detail__label">SHA-256</span><span>{{ detail.output.sha256 || '—' }}</span></div>
-                </div>
-              </t-tab-panel>
-              <t-tab-panel value="source" label="来源追踪">
-                <div class="output-detail__panel output-detail__grid">
-                  <div><span class="output-detail__label">素材</span><strong>#{{ detail.trace.material.id }} {{ detail.trace.material.title }}</strong></div>
-                  <div><span class="output-detail__label">素材使用</span><strong>#{{ detail.trace.material_usage.id }} {{ usageStatusLabel(detail.trace.material_usage.status) || detail.trace.material_usage.status || '—' }}</strong></div>
-                  <div><span class="output-detail__label">策略</span><strong>#{{ detail.trace.strategy.id }} {{ detail.trace.strategy.name || '—' }}</strong></div>
-                  <div><span class="output-detail__label">模板</span><strong>{{ detail.trace.strategy.template_code }} v{{ detail.trace.strategy.template_version }}</strong></div>
-                  <div><span class="output-detail__label">合成任务</span><strong>#{{ detail.trace.compose_task.id }} {{ taskStatusLabels[detail.trace.compose_task.status] || detail.trace.compose_task.status || '—' }}</strong></div>
-                  <div><span class="output-detail__label">任务创建</span><strong>{{ formatDateTime(detail.trace.compose_task.created_at) }}</strong></div>
-                </div>
-              </t-tab-panel>
-              <t-tab-panel value="snapshot" label="配置快照">
-                <div class="output-detail__panel">
-                  <h4 class="output-detail__title">任务参数快照（创建当时）</h4>
-                  <pre class="output-detail__snapshot">{{ JSON.stringify(detail.trace.compose_task.config_snapshot, null, 2) }}</pre>
-                  <h4 class="output-detail__title">策略当前配置</h4>
-                  <pre class="output-detail__snapshot">{{ JSON.stringify(detail.trace.strategy.config_snapshot, null, 2) }}</pre>
-                </div>
-              </t-tab-panel>
-            </t-tabs>
+            <ComposeOutputDetail v-model:tab="detailTab" :detail="detail" :preview-url="previewUrl" :preview-loading="previewLoading" @retry-preview="retryPreview" />
           </div>
         </t-loading>
       </t-drawer>
@@ -327,18 +289,5 @@ onMounted(() => {
 .output-related-cell__sub { color: var(--wt-text-tertiary); font-size: 12px; }
 .output-detail__hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 4px 0 20px; }
 .output-detail__hero h3 { margin: 4px 0; color: var(--wt-text-primary); font-size: 20px; }
-.output-detail__hero p, .output-detail__eyebrow { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
-.output-detail__panel { padding: 20px 0; }
-.output-detail__title { margin: 20px 0 12px; font-size: 14px; font-weight: 600; color: var(--wt-text-primary); }
-.output-detail__title:first-child { margin-top: 0; }
-.output-detail__video { width: 100%; border-radius: 8px; background: #000; max-height: 340px; }
-.output-detail__preview-empty { min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border: 1px dashed var(--wt-border); border-radius: 8px; color: var(--wt-text-secondary); font-size: 13px; }
-.output-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; font-size: 13px; }
-.output-detail__grid > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.output-detail__grid strong { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
-.output-detail__label { color: var(--wt-text-tertiary); font-size: 12px; }
-.output-detail__hash { display: flex; gap: 8px; align-items: baseline; margin-top: 10px; font-size: 12px; }
-.output-detail__hash span:last-child { word-break: break-all; color: var(--wt-text-primary); }
-.output-detail__snapshot { margin: 0; padding: 12px; background: var(--wt-bg-secondary, #f5f6f8); border-radius: 6px; font-size: 12px; overflow: auto; max-height: 220px; }
-@media (max-width: 700px) { .output-detail__grid { grid-template-columns: 1fr; } }
+.output-detail__hero p { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
 </style>

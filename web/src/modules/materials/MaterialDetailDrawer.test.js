@@ -220,6 +220,33 @@ describe('material detail drawer', () => {
     expect(source).toMatch(/\.material-detail__actions \{[^}]*justify-content: flex-end/)
   })
 
+  // 只读上下文（合成任务详情里点素材）：正文照旧，页脚那三颗会改素材关系的动作一颗都不给，
+  // 只留一个明确命名的跳转口——用户在关联抽屉里决定要不要离开当前页。
+  it('gives the readonly context a single explicit jump instead of the mutating actions', () => {
+    const footer = sliceBetween(template, '<template #footer>', '</template>\n  </t-drawer>')
+    // 逐行跟踪当前生效的 mode 守卫（页脚里的按钮有的是自带 v-if，有的在
+    // <template v-if="mode === 'mine'"> 里），把每颗按钮归到它真正所属的上下文。
+    const guarded = []
+    let current = ''
+    for (const line of footer.split('\n')) {
+      const guard = line.match(/v-if="mode === '(\w+)'/)
+      if (guard) current = guard[1]
+      for (const [, label] of line.matchAll(/>([^<>]+)<\/t-button>/g)) guarded.push([label.trim(), current])
+    }
+    expect(guarded).toEqual([
+      ['前往素材页面', 'readonly'],
+      ['加入我的素材', 'library'],
+      ['去我的素材', 'library'],
+      ['恢复使用', 'mine'],
+      ['重新下载', 'mine'],
+      ['取消下载', 'mine'],
+      ['{{ downloadActionLabel(downloadStatus) }}', 'mine'],
+      ['放弃使用', 'mine'],
+    ])
+    // 唯一那颗 readonly 按钮是跳转口，不改素材关系。
+    expect(footer).toContain('@click="$emit(\'go-page\', material)"')
+  })
+
   // 顶部把「这是什么」（来源副行 + 状态徽章）一次说清，正文才用于解释细节。
   it('heads the drawer with the source line and the status badges', () => {
     expect(template).toContain('material.author_name')
@@ -268,11 +295,14 @@ describe('material detail drawer', () => {
   })
 
   /**
-   * 页脚按「使用状态 × 下载状态」矩阵给真实业务动作（CHG-069 任务 23，与行内同一张表）。
-   * 「已放弃」只给恢复：一颗同时出现的「下载」会让运营以为那条关系还通着。
+   * 页脚按「使用状态 × 下载状态 × 本机文件」矩阵给真实业务动作（CHG-069 任务 23，
+   * 与行内同一张表）。「已放弃」只给恢复：一颗同时出现的「下载」会让运营以为那条关系还通着。
    *
-   * 使用中：已下载 → 加入合成；下载中 → 取消下载（不再给「再下载」，文件已经在准备了）；
-   * 未下载/失败 → 下载/重新下载。
+   * 使用中：已下载 **且本机那份实测不在了** → 重新下载；下载中 → 取消下载（不再给
+   * 「再下载」，文件已经在准备了）；未下载/失败 → 下载/重新下载。本机文件在不在由
+   * 本组件自己在 mine 上下文里量（`localFile` 正是那份扫描结果），不劳宿主传。
+   *
+   * CHG-20261015-098：合成的入口整条搬去合成任务页，页脚不再有「加入合成」。
    */
   it('gives the footer the action the usage × download matrix calls for', () => {
     const footer = sliceBetween(template, '<template #footer>', '</template>\n  </t-drawer>')
@@ -280,10 +310,12 @@ describe('material detail drawer', () => {
     expect(footer).toContain('>恢复使用</t-button>')
     expect(footer).toContain("$emit('give-up', material)")
     expect(footer).toContain('>放弃使用</t-button>')
-    expect(footer).toContain("$emit('compose', material)")
-    expect(footer).toContain("downloadStatus === 'downloaded'")
+    expect(footer).not.toContain("$emit('compose'")
+    expect(footer).toContain('needsRedownload(downloadStatus, localFile?.presence)')
     expect(footer).toContain("downloadStatus === 'downloading'")
+    expect(footer).toContain("downloadStatus !== 'downloaded'")
     expect(footer).toContain('@click="cancelDownload">取消下载</t-button>')
+    expect(footer).toContain('>重新下载</t-button>')
     expect(footer).toContain("$emit('download', material)\">{{ downloadActionLabel(downloadStatus) }}")
     // 恢复与放弃互斥，下载与放弃互斥：同一个素材不能同时有两条相反的出路。
     expect(footer).toContain("material.usage_status === 'removed'")
@@ -304,7 +336,7 @@ describe('material detail drawer', () => {
 describe('the local copy of a downloaded material', () => {
   it('takes the file name from the download tasks and the directory from this machine', () => {
     expect(source).toContain("import { createFileTransferClient } from '../../shared/api/fileTransfer.js'")
-    expect(source).toContain("import { downloadedFileName, isTerminal } from '../transfer/downloadFacts.js'")
+    expect(source).toContain("import { downloadedFileName, isTerminal, needsRedownload } from '../transfer/downloadFacts.js'")
     expect(source).toContain("import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'")
     expect(source).toContain('downloadedFileName(tasks')
     expect(source).toContain('savedFileStates([name])')

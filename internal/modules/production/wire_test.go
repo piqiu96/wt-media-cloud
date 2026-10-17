@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -315,6 +316,68 @@ func TestTheComposeTaskAttemptResponseMatchesTheOpenAPISchema(t *testing.T) {
 	}
 }
 
+// The step entries ride inside the attempt body, so the contract has to declare
+// their shape as well as the attempt's own: a client reading `steps` codes
+// against these two schemas, and the empty object is what the server emits for
+// a step with no facts to report.
+func TestTheComposeTaskAttemptStepResponseMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read compose task attempt openapi: %v", err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas struct {
+				Step struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeTaskAttemptStep"`
+				Metrics struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+				} `yaml:"ComposeTaskAttemptStepMetrics"`
+				Attempt struct {
+					Required []string `yaml:"required"`
+				} `yaml:"ComposeTaskAttempt"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse compose task attempt openapi: %v", err)
+	}
+	step := parsed.Components.Schemas.Step.Properties
+	if len(step) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeTaskAttemptStep properties")
+	}
+	if got, want := marshalledKeys(t, model.ComposeTaskAttemptStep{}), schemaPropertyNames(step); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeTaskAttemptStep keys = %v, contract = %v", got, want)
+	}
+	metrics := parsed.Components.Schemas.Metrics.Properties
+	if len(metrics) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeTaskAttemptStepMetrics properties")
+	}
+	// Each metric is optional and carries no value of its own, so one fixture
+	// that knows every fact is what accounts for the declared set.
+	size, duration, outputID := int64(1024), int64(15000), int64(55)
+	known := model.ComposeAttemptStepMetrics{
+		SizeBytes: &size, SHA256: "0f343b0931126a20f133d67c2b018a3b0f343b0931126a20f133d67c2b018a3b",
+		OutputDurationMS: &duration, OutputID: &outputID,
+	}
+	if got, want := marshalledKeys(t, known), schemaPropertyNames(metrics); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeTaskAttemptStepMetrics keys = %v, contract = %v", got, want)
+	}
+	if !containsString(parsed.Components.Schemas.Attempt.Required, "steps") {
+		t.Fatal("the attempt body always carries steps; the contract must say so")
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTheComposeTaskResponseMatchesTheOpenAPISchema(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
 	if err != nil {
@@ -402,6 +465,66 @@ func TestTheComposeOutputDetailMatchesTheOpenAPISchema(t *testing.T) {
 	}
 	if got, want := marshalledKeys(t, productionservice.ComposeOutputTrace{}), schemaPropertyNames(trace); !reflect.DeepEqual(got, want) {
 		t.Errorf("ComposeOutputTrace keys = %v, contract = %v", got, want)
+	}
+}
+
+// The material-states read is what the create drawer splits 未使用过/已使用过
+// on, so its response shape is a contract the Vue client codes against: the Go
+// read model's keys and the declared schema have to be the same set.
+func TestTheComposeMaterialStateResponseMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read content-production openapi: %v", err)
+	}
+	var parsed struct {
+		Paths map[string]struct {
+			Get struct {
+				OperationID string `yaml:"operationId"`
+				Parameters  []struct {
+					Name string `yaml:"name"`
+				} `yaml:"parameters"`
+			} `yaml:"get"`
+		} `yaml:"paths"`
+		Components struct {
+			Schemas struct {
+				MaterialState struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+					Required   []string             `yaml:"required"`
+				} `yaml:"ComposeMaterialState"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse content-production openapi: %v", err)
+	}
+	path, ok := parsed.Paths["/api/v1/compose-strategies/{strategy_id}/material-states"]
+	if !ok {
+		t.Fatal("the material-states path is not declared")
+	}
+	if path.Get.OperationID != "listComposeStrategyMaterialStates" {
+		t.Fatalf("operationId = %q", path.Get.OperationID)
+	}
+	declared := make([]string, 0, len(path.Get.Parameters))
+	for _, parameter := range path.Get.Parameters {
+		declared = append(declared, parameter.Name)
+	}
+	if !slices.Contains(declared, "material_ids") {
+		t.Fatalf("material-states parameters = %v, want material_ids", declared)
+	}
+	schema := parsed.Components.Schemas.MaterialState.Properties
+	if len(schema) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeMaterialState properties")
+	}
+	if got, want := marshalledKeys(t, model.ComposeMaterialState{}), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeMaterialState keys = %v, contract = %v", got, want)
+	}
+	// Every field is emitted unconditionally, nulls included: the drawer reads
+	// the absence of a row as "never used", so a key that could vanish would
+	// hand it a second way to say the same thing.
+	required := slices.Clone(parsed.Components.Schemas.MaterialState.Required)
+	slices.Sort(required)
+	if !slices.Equal(required, marshalledKeys(t, model.ComposeMaterialState{})) {
+		t.Errorf("ComposeMaterialState required = %v", parsed.Components.Schemas.MaterialState.Required)
 	}
 }
 

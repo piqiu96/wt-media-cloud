@@ -6,7 +6,7 @@ import { feedback } from '../../shared/ui/feedback/index.js'
 import { computed, ref, watch } from 'vue'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
-import { downloadedFileName, isTerminal } from '../transfer/downloadFacts.js'
+import { downloadedFileName, isTerminal, needsRedownload } from '../transfer/downloadFacts.js'
 import { transferRow } from '../transfer/transferRows.js'
 import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
 import { handOverCloudVideo } from './cloudVideo.js'
@@ -35,12 +35,13 @@ const props = defineProps({
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   games: { type: Array, default: () => [] },
-  // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支。
+  // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支，
+  // readonly 只读（关联实体引用的那类打开方式）——正文照旧，页脚一个动作都不给。
   mode: { type: String, default: 'library' },
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'give-up', 'restore', 'compose', 'cancel'])
+const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel'])
 
 const client = createMaterialsClient()
 const transfer = createFileTransferClient()
@@ -366,19 +367,22 @@ async function openDirectory() {
          「取消 / 确认」；接管同时让动作条钉在底部，不随正文高度跳动。 -->
     <template #footer>
       <div v-if="material" class="material-detail__actions">
+        <!-- 只读上下文（关联实体引用）只给一个明确命名的前往入口：它不改路由，用户自己点才跳。 -->
+        <t-button v-if="mode === 'readonly'" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
         <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
         <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
-        <!-- 我的素材这一组由「使用状态 × 下载状态」矩阵驱动（CHG-069 任务 23，与行内同一
-             张表）：已放弃只给恢复；使用中按下载状态给一步主操作 —— 下载中不给「再下载」
-             （文件已经在准备了，再点还是同一条命令），给的是「取消下载」。 -->
+        <!-- 我的素材这一组由「使用状态 × 下载状态 × 本机文件」矩阵驱动（CHG-069 任务 23，
+             与行内同一张表）：已放弃只给恢复；使用中按下载状态给一步主操作 —— 下载中不给
+             「再下载」（文件已经在准备了，再点还是同一条命令），给的是「取消下载」；已下载
+             只在**实测本机那份文件不在了**时才给一次「重新下载」（合成的入口在合成任务页）。 -->
         <template v-if="mode === 'mine'">
           <template v-if="material.usage_status === 'removed'">
             <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
           </template>
           <template v-else>
-            <t-button v-if="downloadStatus === 'downloaded'" theme="primary" @click="$emit('compose', material)">加入合成</t-button>
+            <t-button v-if="needsRedownload(downloadStatus, localFile?.presence)" theme="primary" @click="$emit('download', material)">重新下载</t-button>
             <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" @click="cancelDownload">取消下载</t-button>
-            <t-button v-else theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
+            <t-button v-else-if="downloadStatus !== 'downloaded'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
             <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
           </template>
         </template>

@@ -62,7 +62,9 @@ func composeTaskErrorFor(err error) (composeTaskErrorShape, bool) {
 	case errors.Is(err, productionservice.ErrComposeTaskNotCancellable):
 		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_cancellable", "合成任务已结束，不能取消"}, true
 	case errors.Is(err, productionservice.ErrComposeTaskNotRetryable):
-		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_retryable", "该失败不能重试，请修改后新建任务"}, true
+		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_retryable", "该任务当前状态不支持重试"}, true
+	case errors.Is(err, productionservice.ErrComposeTaskConflict):
+		return composeTaskErrorShape{consts.StatusConflict, 15219, "compose_task_conflict", "该素材在这个策略下已有任务记录，不能再次创建；如需重跑请在任务列表点「重试」"}, true
 	case errors.Is(err, productionservice.ErrStrategyTemplateUnavailable):
 		return composeTaskErrorShape{consts.StatusConflict, 15213, "compose_template_unavailable", "合成模板版本不可用"}, true
 	}

@@ -23,17 +23,27 @@ var (
 )
 
 type CreateStrategyInput struct {
-	TeamID          int64           `json:"team_id"`
-	GameID          string          `json:"game_id"`
-	Name            string          `json:"name"`
-	TemplateID      int64           `json:"compose_template_id"`
-	TemplateVersion uint32          `json:"compose_template_version"`
-	Config          json.RawMessage `json:"config"`
+	TeamID          int64                       `json:"team_id"`
+	GameID          string                      `json:"game_id"`
+	Name            string                      `json:"name"`
+	TemplateID      int64                       `json:"compose_template_id"`
+	TemplateVersion uint32                      `json:"compose_template_version"`
+	Config          json.RawMessage             `json:"config"`
+	ExecutionMode   string                      `json:"execution_mode"`
+	Schedule        *model.ComposeSchedule      `json:"schedule"`
+	PriorityRules   []model.ComposePriorityRule `json:"priority_rules"`
+	SingleLimit     int                         `json:"single_limit"`
+	DailyLimit      int                         `json:"daily_limit"`
 }
 
 type UpdateStrategyInput struct {
-	Name   string          `json:"name"`
-	Config json.RawMessage `json:"config"`
+	Name          string                      `json:"name"`
+	Config        json.RawMessage             `json:"config"`
+	ExecutionMode string                      `json:"execution_mode"`
+	Schedule      *model.ComposeSchedule      `json:"schedule"`
+	PriorityRules []model.ComposePriorityRule `json:"priority_rules"`
+	SingleLimit   int                         `json:"single_limit"`
+	DailyLimit    int                         `json:"daily_limit"`
 }
 
 type StrategyRepository interface {
@@ -144,7 +154,22 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 	if err := s.validateConfig(input.TemplateID, input.TemplateVersion, input.Config, true); err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	return s.store.CreateAudited(model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), Status: "active", CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}, "compose_strategy.create")
+	if err := validateStrategyExecution(input.ExecutionMode, input.Schedule, input.SingleLimit, input.DailyLimit); err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	if err := model.ValidateComposePriorityRules(input.PriorityRules); err != nil {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
+	}
+	rulesJSON, err := json.Marshal(input.PriorityRules)
+	if err != nil {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: priority_rules are invalid", ErrStrategyInvalid)
+	}
+	item := model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), ExecutionMode: input.ExecutionMode, Schedule: input.Schedule, PriorityRules: input.PriorityRules, RulesJSON: rulesJSON, SingleLimit: input.SingleLimit, DailyLimit: input.DailyLimit, Status: model.ComposeStrategyEnabled, CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}
+	item.NextRunAt, err = nextRunForStrategy(item, s.now())
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	return s.store.CreateAudited(item, "compose_strategy.create")
 }
 
 func (s *StrategyService) Update(actor identity.PublicUser, id int64, input UpdateStrategyInput) (model.ComposeStrategy, error) {
@@ -158,7 +183,23 @@ func (s *StrategyService) Update(actor identity.PublicUser, id int64, input Upda
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, input.Config, false); err != nil {
 		return model.ComposeStrategy{}, err
 	}
+	if err := validateStrategyExecution(input.ExecutionMode, input.Schedule, input.SingleLimit, input.DailyLimit); err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	if err := model.ValidateComposePriorityRules(input.PriorityRules); err != nil {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
+	}
+	rulesJSON, err := json.Marshal(input.PriorityRules)
+	if err != nil {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: priority_rules are invalid", ErrStrategyInvalid)
+	}
 	item.Name, item.Config, item.UpdatedBy = strings.TrimSpace(input.Name), append(json.RawMessage(nil), input.Config...), int64(actor.ID)
+	item.ExecutionMode, item.Schedule, item.PriorityRules, item.RulesJSON = input.ExecutionMode, input.Schedule, input.PriorityRules, rulesJSON
+	item.SingleLimit, item.DailyLimit = input.SingleLimit, input.DailyLimit
+	item.NextRunAt, err = nextRunForStrategy(item, s.now())
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
 	return s.store.UpdateAudited(item, "compose_strategy.update")
 }
 
@@ -173,8 +214,8 @@ func (s *StrategyService) Copy(actor identity.PublicUser, id int64, name string)
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, item.Config, true); err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	item.ID, item.Name, item.Status, item.CreatedBy, item.UpdatedBy = 0, strings.TrimSpace(name), "active", int64(actor.ID), int64(actor.ID)
-	item.Schedule, item.NextRunAt = nil, nil
+	item.ID, item.Name, item.Status, item.CreatedBy, item.UpdatedBy = 0, strings.TrimSpace(name), model.ComposeStrategyEnabled, int64(actor.ID), int64(actor.ID)
+	item.ExecutionMode, item.Schedule, item.ScheduleJSON, item.NextRunAt = model.ComposeExecutionManual, nil, nil, nil
 	return s.store.CreateAudited(item, "compose_strategy.copy")
 }
 
@@ -183,12 +224,15 @@ func (s *StrategyService) SetStatus(actor identity.PublicUser, id int64, status 
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	if status != "active" && status != "inactive" {
+	if status != model.ComposeStrategyEnabled && status != model.ComposeStrategyDisabled {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: invalid status", ErrStrategyInvalid)
 	}
-	if status == "active" {
+	if status == model.ComposeStrategyEnabled {
 		if err := s.validateConfig(item.TemplateID, item.TemplateVersion, item.Config, true); err != nil {
 			return model.ComposeStrategy{}, err
+		}
+		if err := model.ValidateComposePriorityRules(item.PriorityRules); err != nil {
+			return model.ComposeStrategy{}, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
 		}
 	}
 	item.Status, item.UpdatedBy = status, int64(actor.ID)
@@ -240,7 +284,7 @@ func canReadStrategy(actor identity.PublicUser, item model.ComposeStrategy) bool
 		return false
 	}
 	if actor.Role == identity.RoleOperator {
-		return item.Status == "active"
+		return item.Status == model.ComposeStrategyEnabled
 	}
 	return actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleAdmin
 }
@@ -248,6 +292,26 @@ func canReadStrategy(actor identity.PublicUser, item model.ComposeStrategy) bool
 func validateStrategyFields(name string) error {
 	if n := utf8.RuneCountInString(strings.TrimSpace(name)); n == 0 || n > 120 {
 		return fmt.Errorf("%w: name must contain 1-120 characters", ErrStrategyInvalid)
+	}
+	return nil
+}
+
+func validateStrategyExecution(mode string, schedule *model.ComposeSchedule, singleLimit, dailyLimit int) error {
+	if singleLimit < 1 || singleLimit > 100 || dailyLimit < singleLimit || dailyLimit > 1000 {
+		return fmt.Errorf("%w: limits must satisfy 1 <= single_limit <= 100 and single_limit <= daily_limit <= 1000", ErrStrategyInvalid)
+	}
+	switch mode {
+	case model.ComposeExecutionManual:
+		if schedule != nil {
+			return fmt.Errorf("%w: manual execution cannot have a schedule", ErrStrategyInvalid)
+		}
+	case model.ComposeExecutionScheduled:
+		if schedule == nil {
+			return fmt.Errorf("%w: scheduled execution requires a schedule", ErrStrategyInvalid)
+		}
+		return validateComposeSchedule(*schedule)
+	default:
+		return fmt.Errorf("%w: execution_mode is invalid", ErrStrategyInvalid)
 	}
 	return nil
 }

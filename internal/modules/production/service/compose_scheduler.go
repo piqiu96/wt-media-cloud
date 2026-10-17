@@ -129,11 +129,19 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 	if !found || !inGameScope(actor, strategy.TeamID, strategy.GameID) {
 		return model.ComposeScheduleRun{}, ErrStrategyNotFound
 	}
-	if strategy.Status != "active" || strategy.Schedule == nil {
-		return model.ComposeScheduleRun{}, fmt.Errorf("%w: strategy has no active plan", ErrStrategyInvalid)
+	if strategy.Status != model.ComposeStrategyEnabled {
+		return model.ComposeScheduleRun{}, fmt.Errorf("%w: strategy is disabled", ErrStrategyInvalid)
 	}
-	if err := validateComposeSchedule(*strategy.Schedule); err != nil {
-		return model.ComposeScheduleRun{}, err
+	if err := model.ValidateComposePriorityRules(strategy.PriorityRules); err != nil {
+		return model.ComposeScheduleRun{}, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
+	}
+	if strategy.ExecutionMode == model.ComposeExecutionScheduled {
+		if strategy.Schedule == nil {
+			return model.ComposeScheduleRun{}, fmt.Errorf("%w: scheduled strategy has no plan", ErrStrategyInvalid)
+		}
+		if err := validateComposeSchedule(*strategy.Schedule); err != nil {
+			return model.ComposeScheduleRun{}, err
+		}
 	}
 	result, processed, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: strategyID, Now: s.now(), ManualKey: requestKey, NextRun: nextRunForStrategy})
 	if err != nil {

@@ -163,6 +163,7 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 7, 0, 0, time.UTC)
 	out := composeOutputFixture(77)
+	step := closingCommitStep(now)
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `composite_outputs`").
 		WithArgs(int64(7), "delta", int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
@@ -172,8 +173,14 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// The closing step is written with the exact bytes the attempt list will
+	// hand back: the server's label, the id this INSERT generated, and nothing
+	// the worker could have put in a string.
+	mock.ExpectExec("UPDATE compose_task_attempts SET steps_json = JSON_ARRAY_APPEND").
+		WithArgs(`{"step":"commit","label":"保存成片记录","outcome":"success","started_at":"2026-10-14T09:06:58Z","finished_at":"2026-10-14T09:07:00Z","duration_ms":2000,"error_code":"","error_label":"","metrics":{"output_id":55}}`, now, int64(77), 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	commit, err := commitComposeOutput(db, out, "outputs/final", 9, 1, now)
+	commit, err := commitComposeOutput(db, out, "outputs/final", 9, 1, step, now)
 	if err != nil || commit.OutputID != 55 || commit.TaskID != 77 {
 		t.Fatalf("commit=%+v err=%v", commit, err)
 	}
@@ -187,11 +194,75 @@ func TestCommitComposeOutputRollsBackWhenTheTaskRowIsGone(t *testing.T) {
 	mock.ExpectExec("INSERT INTO `composite_outputs`").WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
-	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, 1, now); !errors.Is(err, ErrComposeCommitLost) {
+	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, 1, closingCommitStep(now), now); !errors.Is(err, ErrComposeCommitLost) {
 		t.Fatalf("want ErrComposeCommitLost, got %v", err)
 	}
 	assertExpectations(t, mock)
 }
+
+// closingCommitStep is the step the worker hands the commit: it carries only
+// the phase's own timing, because the outcome and the output id belong to the
+// transaction that writes them.
+func closingCommitStep(now time.Time) model.ComposeTaskAttemptStep {
+	return model.ComposeTaskAttemptStep{
+		Step:       model.ComposeStepCommit,
+		StartedAt:  now.Add(-2 * time.Second),
+		FinishedAt: now,
+		DurationMS: 2000,
+	}
+}
+
+// RecordComposeAttemptStep is the execution log's only write: one append, under
+// the same lease-and-attempt guard as the other lifecycle writes, so a reaped
+// or superseded attempt cannot receive a step.
+func TestRecordComposeAttemptStepAppendsUnderTheLeaseGuard(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 9, 0, 0, time.UTC)
+	step := model.ComposeTaskAttemptStep{
+		Step: model.ComposeStepCut, Outcome: model.ComposeStepOutcomeSuccess,
+		StartedAt: now.Add(-3 * time.Second), FinishedAt: now, DurationMS: 3000,
+		Metrics: model.ComposeAttemptStepMetrics{OutputDurationMS: int64Ptr(15000)},
+	}
+	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
+		WithArgs(`{"step":"cut","label":"视频合成","outcome":"success","started_at":"2026-10-14T09:08:57Z","finished_at":"2026-10-14T09:09:00Z","duration_ms":3000,"error_code":"","error_label":"","metrics":{"output_duration_ms":15000}}`, now, int64(77), 1, int64(9), 1, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	ok, err := recordComposeAttemptStep(db, 77, 9, 1, step, now)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	// A refusen answer is the honest reading of a lost lease: the log stops
+	// where it stopped, and the caller never turns it into a task write.
+	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	ok, err = recordComposeAttemptStep(db, 77, 9, 2, step, now)
+	if err != nil || ok {
+		t.Fatalf("a superseded attempt must not take a step: ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// The failure entry stores the category, never the message: the masking rule
+// holds at the write side too, so an FFmpeg line that reaches the task error
+// column cannot reach the step log.
+func TestRecordComposeAttemptStepStoresOnlyTheFailureCategory(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 14, 9, 9, 0, 0, time.UTC)
+	step := model.ComposeTaskAttemptStep{
+		Step: model.ComposeStepUpload, Outcome: model.ComposeStepOutcomeFailed, ErrorCode: "storage_error",
+		Label: "伪造的标签", ErrorLabel: "伪造的原因",
+		StartedAt: now, FinishedAt: now,
+		Metrics: model.ComposeAttemptStepMetrics{SHA256: "https://storage.invalid/signed?token=secret", SizeBytes: int64Ptr(0)},
+	}
+	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
+		WithArgs(`{"step":"upload","label":"上传并校验成片","outcome":"failed","started_at":"2026-10-14T09:09:00Z","finished_at":"2026-10-14T09:09:00Z","duration_ms":0,"error_code":"storage_error","error_label":"存储暂时失败","metrics":{}}`, now, int64(77), 1, int64(9), 1, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if ok, err := recordComposeAttemptStep(db, 77, 9, 1, step, now); err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func int64Ptr(value int64) *int64 { return &value }
 
 func TestReleaseComposeForRetryRequeuesWithoutErasingAttempts(t *testing.T) {
 	db, mock := newMockGORM(t)
@@ -275,40 +346,49 @@ func TestFailComposeTaskWritesTheTerminalError(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
-// CHG-20261013-089 (M4-G): a manual retry is one transaction — guarded task
-// requeue, manual attempt row, audit. A refusal (not failed, or an error code
-// outside the retryable set) writes nothing.
-func TestRetryFailedComposeTaskOpensTheManualAttempt(t *testing.T) {
+// CHG-20261013-089 (M4-G) / CHG-20261015-098 T-09: a manual retry is one
+// transaction — guarded task requeue, manual attempt row, audit.
+//
+// The guard takes a cancelled task and every failed task except
+// execution_uncertain; the expected SQL pins both the acceptance list and
+// max_attempts = attempt_count + ? so a revert to "failed, whitelisted codes"
+// or to a bare +1 fails here instead of silently narrowing what operators can
+// re-run. The stale failure code is cleared in the same statement.
+//
+// The attempt row is an upsert on purpose: retry → cancel before the claim →
+// retry again lands on an attempt number that already has a row, and
+// uq_compose_task_attempts_task_attempt would otherwise reject it with a 1062.
+func TestRetryComposeTaskReopensTheManualAttempt(t *testing.T) {
 	db, mock := newMockGORM(t)
-	now := time.Date(2026, 10, 14, 9, 13, 0, 0, time.UTC)
+	now := time.Date(2026, 10, 16, 9, 13, 0, 0, time.UTC)
 	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
-		WithArgs(now, int64(77)).
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'.*max_attempts = attempt_count \\+ \\?.*WHERE id = \\? AND \\(status = 'cancelled' OR \\(status = 'failed' AND error_code <> 'execution_uncertain'\\)\\)").
+		WithArgs(composeAutoRetryQuota, now, int64(77)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).
 		WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "pending", now)...))
-	mock.ExpectExec("INSERT INTO compose_task_attempts").
+	mock.ExpectExec("INSERT INTO compose_task_attempts .* ON DUPLICATE KEY UPDATE outcome = 'pending'").
 		WithArgs(int64(77), 1, now, now).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	ok, err := retryFailedComposeTask(db, 77, 5, "compose_task.retry", now)
+	ok, err := retryComposeTask(db, 77, 5, "compose_task.retry", now)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	assertExpectations(t, mock)
 }
 
-func TestRetryFailedComposeTaskWritesNothingWhenRefused(t *testing.T) {
+func TestRetryComposeTaskWritesNothingWhenRefused(t *testing.T) {
 	db, mock := newMockGORM(t)
-	now := time.Date(2026, 10, 14, 9, 13, 30, 0, time.UTC)
+	now := time.Date(2026, 10, 16, 9, 13, 30, 0, time.UTC)
 	for _, taskID := range []int64{77, 78} {
 		mock.ExpectBegin()
 		mock.ExpectExec("UPDATE compose_tasks SET status = 'pending'").
-			WithArgs(now, taskID).
+			WithArgs(composeAutoRetryQuota, now, taskID).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectCommit()
-		ok, err := retryFailedComposeTask(db, taskID, 5, "compose_task.retry", now)
+		ok, err := retryComposeTask(db, taskID, 5, "compose_task.retry", now)
 		if err != nil || ok {
 			t.Fatalf("refused retry must write nothing: ok=%v err=%v", ok, err)
 		}
@@ -381,22 +461,33 @@ func TestFailExpiredComposeLeaseTerminalizesTheDeadWorkersRow(t *testing.T) {
 }
 
 // M4-G: the attempts read is oldest first — one row per attempt, the manual
-// retry's pending row before the worker's claimed rows.
+// retry's pending row before the worker's claimed rows. The step log rides on
+// the same read: a NULL column and a stored array are both readable, because
+// every attempt written before the column existed has no steps at all.
 func TestListComposeTaskAttemptsReadsOldestFirst(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 14, 0, 0, time.UTC)
-	attemptColumns := []string{"id", "task_id", "attempt", "source", "started_at", "finished_at", "outcome", "stage", "error_code", "error_message", "created_at", "updated_at"}
+	attemptColumns := []string{"id", "task_id", "attempt", "source", "started_at", "finished_at", "outcome", "stage", "error_code", "error_message", "steps_json", "created_at", "updated_at"}
 	mock.ExpectQuery("SELECT .* FROM compose_task_attempts WHERE task_id = \\? ORDER BY attempt ASC").
 		WithArgs(int64(77)).
 		WillReturnRows(sqlmock.NewRows(attemptColumns).
-			AddRow(int64(1), int64(77), 1, "manual", nil, now, "failed", "uploading", "storage_error", "boom", now, now).
-			AddRow(int64(2), int64(77), 2, "auto", now, nil, "running", "cutting", "", "", now, now))
+			AddRow(int64(1), int64(77), 1, "manual", nil, now, "failed", "uploading", "storage_error", "boom", nil, now, now).
+			AddRow(int64(2), int64(77), 2, "auto", now, nil, "running", "cutting", "", "", []byte(`[{"step":"cut","label":"视频合成","outcome":"success","started_at":"2026-10-14T09:13:00Z","finished_at":"2026-10-14T09:14:00Z","duration_ms":60000,"error_code":"","error_label":"","metrics":{"output_duration_ms":15000}}]`), now, now))
 	items, err := listComposeTaskAttempts(db, 77)
 	if err != nil || len(items) != 2 {
 		t.Fatalf("items=%v err=%v", items, err)
 	}
 	if items[0].Source != "manual" || items[0].StartedAt != nil || items[0].FinishedAt == nil || items[1].StartedAt == nil || items[1].FinishedAt != nil {
 		t.Fatalf("attempt rows = %+v", items)
+	}
+	if len(items[0].Steps) != 0 {
+		t.Fatalf("a NULL step column must read as no steps: %+v", items[0].Steps)
+	}
+	if len(items[1].Steps) != 1 || items[1].Steps[0].Step != model.ComposeStepCut || items[1].Steps[0].Outcome != model.ComposeStepOutcomeSuccess {
+		t.Fatalf("attempt 2 steps = %+v", items[1].Steps)
+	}
+	if items[1].Steps[0].Metrics.OutputDurationMS == nil || *items[1].Steps[0].Metrics.OutputDurationMS != 15000 {
+		t.Fatalf("step metrics = %+v", items[1].Steps[0].Metrics)
 	}
 	assertExpectations(t, mock)
 }

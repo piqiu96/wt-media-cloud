@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
@@ -125,7 +126,7 @@ type ScheduleRunOptions struct {
 
 func (ComposeScheduleStore) DueStrategyIDs(now time.Time) ([]int64, error) {
 	var ids []int64
-	err := database.DB().Raw(`SELECT id FROM compose_strategies WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at, id LIMIT 100`, now).Scan(&ids).Error
+	err := database.DB().Raw(`SELECT id FROM compose_strategies WHERE status = 'enabled' AND execution_mode = 'scheduled' AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at, id LIMIT 100`, now).Scan(&ids).Error
 	return ids, err
 }
 
@@ -145,11 +146,23 @@ func scheduledTaskKey(runKey string, materialID int64) string {
 }
 
 type scheduleCandidate struct {
-	UsageID    int64
-	MaterialID int64
-	GameID     sql.NullString
-	Status     string
-	Title      string
+	UsageID       int64
+	MaterialID    int64
+	GameID        sql.NullString
+	Status        string
+	Title         string
+	PublishedAt   sql.NullTime
+	LikeCount     int64
+	FavoriteCount int64
+}
+
+func (candidate scheduleCandidate) facts() model.ComposeCandidateFacts {
+	facts := model.ComposeCandidateFacts{LikeCount: candidate.LikeCount, FavoriteCount: candidate.FavoriteCount}
+	if candidate.PublishedAt.Valid {
+		value := candidate.PublishedAt.Time.UTC()
+		facts.PublishedAt = &value
+	}
+	return facts
 }
 
 func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeScheduleRun, bool, error) {
@@ -177,10 +190,13 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 				return nil
 			}
 		}
-		if strategy.Status != "active" || strategy.Schedule == nil {
+		if strategy.Status != model.ComposeStrategyEnabled {
 			return nil
 		}
-		if !manual && (!strategy.Schedule.Enabled || strategy.NextRunAt == nil || strategy.NextRunAt.After(now)) {
+		if err := model.ValidateComposePriorityRules(strategy.PriorityRules); err != nil {
+			return fmt.Errorf("strategy %d has invalid rules: %w", strategy.ID, err)
+		}
+		if !manual && (strategy.ExecutionMode != model.ComposeExecutionScheduled || strategy.Schedule == nil || strategy.NextRunAt == nil || strategy.NextRunAt.After(now)) {
 			return nil
 		}
 		slot := now
@@ -217,7 +233,11 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 			return err
 		}
 		result.CandidateCount = len(candidates)
-		location, err := time.LoadLocation(strategy.Schedule.Timezone)
+		zone := "Asia/Shanghai"
+		if strategy.Schedule != nil {
+			zone = strategy.Schedule.Timezone
+		}
+		location, err := time.LoadLocation(zone)
 		if err != nil {
 			return err
 		}
@@ -227,8 +247,9 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 		if err := tx.Raw(`SELECT COUNT(*) FROM compose_tasks WHERE compose_strategy_id = ? AND schedule_slot IS NOT NULL AND created_at >= ? AND created_at < ?`, strategy.ID, dayStart.UTC(), dayStart.AddDate(0, 0, 1).UTC()).Row().Scan(&dailyCount); err != nil {
 			return err
 		}
+		pool := make([]scheduleCandidate, 0, len(candidates))
 		for _, candidate := range candidates {
-			reason, err := composeCandidateSkipReason(tx, strategy, candidate, result.CreatedCount, dailyCount)
+			reason, err := composeCandidateSkipReason(tx, strategy, candidate, 0, 0)
 			if err != nil {
 				return err
 			}
@@ -236,20 +257,36 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 				result.Skipped = append(result.Skipped, model.ComposeScheduleSkip{MaterialID: candidate.MaterialID, Reason: reason})
 				continue
 			}
+			pool = append(pool, candidate)
+		}
+		created, skipped, err := executeComposePriorityRules(strategy.PriorityRules, pool, now, strategy.SingleLimit, strategy.DailyLimit-dailyCount, func(candidate scheduleCandidate) (bool, error) {
 			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, TriggerType: trigger,
 				DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, strategy.Name),
 				MaterialID:  candidate.MaterialID, MaterialUsageID: candidate.UsageID, StrategyID: strategy.ID,
 				TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: append(json.RawMessage(nil), strategy.Config...),
 				Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, candidate.MaterialID), CreatedBy: strategy.CreatedBy}
+			if err := tx.SavePoint("compose_candidate").Error; err != nil {
+				return false, err
+			}
 			if err := composeTaskInsertWithAudit(tx, &task, "compose_task.schedule", strategy.CreatedBy, now); err != nil {
-				return err
+				if rollbackErr := tx.RollbackTo("compose_candidate").Error; rollbackErr != nil {
+					return false, errors.Join(err, rollbackErr)
+				}
+				return false, nil
 			}
 			if err := tx.Exec(`UPDATE compose_tasks SET schedule_slot = ? WHERE id = ?`, slot, task.ID).Error; err != nil {
-				return err
+				if rollbackErr := tx.RollbackTo("compose_candidate").Error; rollbackErr != nil {
+					return false, errors.Join(err, rollbackErr)
+				}
+				return false, nil
 			}
-			result.CreatedCount++
-			dailyCount++
+			return true, nil
+		})
+		if err != nil {
+			return err
 		}
+		result.CreatedCount = created
+		result.Skipped = append(result.Skipped, skipped...)
 		return finishComposeScheduleRun(tx, strategy, result, now, manual, options.NextRun)
 	})
 	if err != nil {
@@ -258,8 +295,54 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 	return result, processed, nil
 }
 
+// executeComposePriorityRules owns ordering, group semantics and quotas for both
+// immediate and scheduled runs. The callback creates one task with its audit.
+func executeComposePriorityRules(rules []model.ComposePriorityRule, pool []scheduleCandidate, now time.Time, singleLimit, remainingDaily int, create func(scheduleCandidate) (bool, error)) (int, []model.ComposeScheduleSkip, error) {
+	ordered := append([]model.ComposePriorityRule(nil), rules...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Priority < ordered[j].Priority })
+	created := 0
+	skipped := make([]model.ComposeScheduleSkip, 0)
+	for _, rule := range ordered {
+		remaining := make([]scheduleCandidate, 0, len(pool))
+		for _, candidate := range pool {
+			if !model.ComposeGroupPredicate(rule, candidate.facts(), now) {
+				remaining = append(remaining, candidate)
+				continue
+			}
+			if rule.Action == "filter" {
+				skipped = append(skipped, model.ComposeScheduleSkip{MaterialID: candidate.MaterialID, Reason: "filtered"})
+				continue
+			}
+			if created >= singleLimit || created >= remainingDaily {
+				reason := "per_run_limit"
+				if created >= remainingDaily {
+					reason = "daily_limit"
+				}
+				skipped = append(skipped, model.ComposeScheduleSkip{MaterialID: candidate.MaterialID, Reason: reason})
+				remaining = append(remaining, candidate)
+				continue
+			}
+			ok, err := create(candidate)
+			if err != nil {
+				return created, skipped, err
+			}
+			if !ok {
+				skipped = append(skipped, model.ComposeScheduleSkip{MaterialID: candidate.MaterialID, Reason: "task_create_failed"})
+				remaining = append(remaining, candidate)
+				continue
+			}
+			created++
+		}
+		pool = remaining
+		if created >= singleLimit || created >= remainingDaily {
+			break
+		}
+	}
+	return created, skipped, nil
+}
+
 func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) ([]scheduleCandidate, error) {
-	rows, err := tx.Raw(`SELECT mu.id, mu.material_id, sc.game_id, m.status, m.title FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.user_id = ? AND mu.team_id = ? AND m.team_id = ? AND mu.status = 'active' ORDER BY mu.id`, strategy.CreatedBy, strategy.TeamID, strategy.TeamID).Rows()
+	rows, err := tx.Raw(`SELECT mu.id, mu.material_id, sc.game_id, m.status, m.title, sc.published_at, sc.like_count, sc.favorite_count FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.user_id = ? AND mu.team_id = ? AND m.team_id = ? AND mu.status = 'active' ORDER BY mu.id`, strategy.CreatedBy, strategy.TeamID, strategy.TeamID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +350,7 @@ func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) 
 	result := make([]scheduleCandidate, 0)
 	for rows.Next() {
 		var item scheduleCandidate
-		if err := rows.Scan(&item.UsageID, &item.MaterialID, &item.GameID, &item.Status, &item.Title); err != nil {
+		if err := rows.Scan(&item.UsageID, &item.MaterialID, &item.GameID, &item.Status, &item.Title, &item.PublishedAt, &item.LikeCount, &item.FavoriteCount); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -282,20 +365,21 @@ func composeCandidateSkipReason(tx *gorm.DB, strategy model.ComposeStrategy, can
 	if candidate.Status != "available" {
 		return "material_unavailable", nil
 	}
-	var successful, active int
-	if err := tx.Raw(`SELECT COALESCE(SUM(status = 'success'), 0), COALESCE(SUM(status IN ('pending', 'running')), 0) FROM compose_tasks WHERE compose_strategy_id = ? AND material_id = ?`, strategy.ID, candidate.MaterialID).Row().Scan(&successful, &active); err != nil {
+	// Any task row at all — queued, produced, failed or cancelled — is the one
+	// reason to leave the pair alone: it was run once, and running it again is
+	// the retry action on that task. This is the same rule the create guard
+	// applies, so the automatic and the manual path offer the same pairs.
+	var taskCount int
+	if err := tx.Raw(`SELECT COUNT(*) FROM compose_tasks WHERE compose_strategy_id = ? AND material_id = ?`, strategy.ID, candidate.MaterialID).Row().Scan(&taskCount); err != nil {
 		return "", err
 	}
-	if successful > 0 {
-		return "already_produced", nil
+	if taskCount > 0 {
+		return "previously_run", nil
 	}
-	if active > 0 {
-		return "in_progress", nil
-	}
-	if dailyCount >= strategy.Schedule.DailyLimit {
+	if dailyCount >= strategy.DailyLimit {
 		return "daily_limit", nil
 	}
-	if createdCount >= strategy.Schedule.PerRunLimit {
+	if createdCount >= strategy.SingleLimit {
 		return "per_run_limit", nil
 	}
 	return "", nil

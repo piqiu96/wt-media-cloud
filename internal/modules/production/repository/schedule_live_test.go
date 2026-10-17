@@ -29,7 +29,7 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 		t.Fatalf("due strategy scan: %v", err)
 	}
 	var strategyID int64
-	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' WHERE s.status = 'active' AND t.status = 'active' GROUP BY s.id ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
+	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' WHERE s.status = 'enabled' AND t.status = 'active' GROUP BY s.id ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
 	if err != nil {
 		t.Skipf("no active strategy with creator usages: %v", err)
 	}
@@ -40,9 +40,9 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 	t.Cleanup(func() { _ = tx.Rollback().Error })
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	due := now.Add(-time.Minute)
-	schedule := model.ComposeSchedule{Enabled: true, Mode: "interval", IntervalMinutes: 30, Timezone: "Asia/Shanghai", PerRunLimit: 2, DailyLimit: 3, MaterialScope: model.ComposeMaterialScopeCreatorUsages}
+	schedule := model.ComposeSchedule{Mode: "interval", IntervalMinutes: 30, Timezone: "Asia/Shanghai"}
 	scheduleJSON, _ := json.Marshal(schedule)
-	if err := tx.Exec(`UPDATE compose_strategies SET schedule_json = ?, next_run_at = ? WHERE id = ?`, scheduleJSON, due, strategyID).Error; err != nil {
+	if err := tx.Exec(`UPDATE compose_strategies SET execution_mode = 'scheduled', schedule_json = ?, next_run_at = ? WHERE id = ?`, scheduleJSON, due, strategyID).Error; err != nil {
 		t.Fatal(err)
 	}
 	calculate := func(_ model.ComposeStrategy, at time.Time) (*time.Time, error) {
@@ -79,21 +79,31 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The limit checks sit behind the "already run" check, so they have to be
+		// asked about a pair with no task row at all — the id is deliberately one
+		// that cannot exist, which is exactly that shape.
+		fresh := candidate
+		fresh.MaterialID = -999
 		for _, check := range []struct {
 			created, daily int
 			want           string
-		}{{0, schedule.DailyLimit, "daily_limit"}, {schedule.PerRunLimit, 0, "per_run_limit"}} {
-			reason, err := composeCandidateSkipReason(tx, strategy, candidate, check.created, check.daily)
+		}{{0, strategy.DailyLimit, "daily_limit"}, {strategy.SingleLimit, 0, "per_run_limit"}} {
+			reason, err := composeCandidateSkipReason(tx, strategy, fresh, check.created, check.daily)
 			if err != nil || reason != check.want {
 				t.Fatalf("limit skip=%q want=%q err=%v", reason, check.want, err)
 			}
 		}
-		if err := tx.Exec(`UPDATE compose_tasks SET status = 'success' WHERE compose_strategy_id = ? AND schedule_slot = ?`, strategyID, first.ScheduleSlot).Error; err != nil {
-			t.Fatal(err)
-		}
-		reason, err := composeCandidateSkipReason(tx, strategy, candidate, 0, 0)
-		if err != nil || reason != "already_produced" {
-			t.Fatalf("successful material skip=%q err=%v", reason, err)
+		// Any task row for the pair skips the candidate, whatever its status:
+		// the scheduler and the create guard apply one rule, and running the
+		// pair again is the retry action on that task.
+		for _, status := range []string{"success", "failed", "cancelled", "pending"} {
+			if err := tx.Exec(`UPDATE compose_tasks SET status = ? WHERE compose_strategy_id = ? AND schedule_slot = ?`, status, strategyID, first.ScheduleSlot).Error; err != nil {
+				t.Fatal(err)
+			}
+			reason, err := composeCandidateSkipReason(tx, strategy, candidate, 0, 0)
+			if err != nil || reason != "previously_run" {
+				t.Fatalf("%s material skip=%q err=%v", status, reason, err)
+			}
 		}
 	}
 	second, processed, err := runComposeSchedule(tx, options)

@@ -15,11 +15,13 @@ const FILES = ['MaterialLibraryPage.vue', 'MyMaterialsPage.vue']
 
 // 走查四轮把封面/标题/来源平台三列合成一个「素材」格，8 列降到 6 列；走查五轮又加回
 // 两列（素材状态、使用情况，规范 §7.2 的第二个状态维度），素材库回到 8 列。
-// 走查七轮我的素材换了列但不加列数（游戏并入「素材」格副行，腾出的位置给「使用状态」），
-// CHG-20261013-082 加勾选列后是 7 列。分母留在这里，列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
+// 走查七轮我的素材换了列但不加列数（游戏并入「素材」格副行，腾出的位置给「使用状态」）；
+// CHG-20261013-082 为批量创建加的勾选列，在 CHG-20261015-098 随创建入口一起撤掉，回到 6 列；
+// 同一 CHG 的第五轮走查又加回两列（点赞、收藏 —— 选素材时的决策依据），所以是 8 列。
+// 分母留在这里，列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
 const TABLES = [
   { file: 'MaterialLibraryPage.vue', name: 'columns', count: 8 },
-  { file: 'MyMaterialsPage.vue', name: 'columns', count: 7 },
+  { file: 'MyMaterialsPage.vue', name: 'columns', count: 8 },
 ]
 
 describe('material list page conventions', () => {

@@ -9,6 +9,7 @@ import (
 	"database/sql/driver"
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	"gorm.io/gorm"
 )
 
 var composeTaskRowColumns = []string{"id", "display_name", "team_id", "game_id", "trigger_type", "material_id", "material_usage_id", "compose_strategy_id", "template_code", "template_version", "config_snapshot_json", "status", "cancel_requested", "request_key", "created_by", "claimed_node_id", "lease_expires_at", "heartbeat_at", "attempt_count", "max_attempts", "next_attempt_at", "started_at", "finished_at", "stage", "progress", "error_code", "error_message", "output_object_key", "composite_output_id", "created_at", "updated_at"}
@@ -19,6 +20,19 @@ func composeTaskRow(id int64, status string, now time.Time) []driverValue {
 
 // driverValue keeps the row literals readable; sqlmock accepts any.
 type driverValue = driver.Value
+
+// expectMaterialGuardFree replays the two locking reads of the create guard
+// with no task in flight: the strategy row (the lock that serializes creates of
+// one strategy) and then the empty in-flight match.
+func expectMaterialGuardFree(mock sqlmock.Sqlmock, strategyID, materialID int64) {
+	mock.ExpectQuery("SELECT id FROM compose_strategies WHERE id = \\? FOR UPDATE").
+		WithArgs(strategyID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(strategyID))
+	// No status predicate: the guard refuses any task row, not just an in-flight one.
+	mock.ExpectQuery("SELECT id FROM compose_tasks WHERE compose_strategy_id = \\? AND material_id = \\? LIMIT 1 FOR UPDATE").
+		WithArgs(strategyID, materialID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+}
 
 func TestCreateComposeTaskPersistsAndReadsBack(t *testing.T) {
 	db, mock := newMockGORM(t)
@@ -106,6 +120,7 @@ func TestCreateForUsageChecksUsageInsideTransaction(t *testing.T) {
 	mock.ExpectQuery("SELECT .* FROM material_usages WHERE user_id = \\? AND material_id = \\? AND status = 'active'").
 		WithArgs(int64(11), int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "material_id", "user_id", "status", "removed_at", "created_at", "updated_at"}).AddRow(int64(9), int64(7), int64(42), int64(11), "active", nil, now, now))
+	expectMaterialGuardFree(mock, 3, 42)
 	mock.ExpectExec("INSERT INTO `compose_tasks`").WithArgs("", int64(7), "delta", "manual", int64(42), int64(9), int64(3), "basic_cut", uint32(1), item.ConfigSnapshot, model.ComposeTaskPending, false, "rk-usage-1", int64(11), nil, nil, nil, 0, 3, nil, nil, nil, "", 0, "", "", "", nil, now, now).WillReturnResult(sqlmock.NewResult(77, 1))
 	mock.ExpectExec("INSERT INTO audit_logs").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
@@ -152,6 +167,93 @@ func TestCancelComposeTaskAuditedWritesAuditOnlyWhenPending(t *testing.T) {
 	ok, err = cancelComposeTaskAudited(db, model.ComposeTask{ID: 78}, 9, "compose_task.cancel", now)
 	if err != nil || ok {
 		t.Fatalf("non-pending cancel must write nothing: ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// The guard's refusal is a rollback with no INSERT at all — proving that
+// requires not registering an INSERT expectation, so this test doubles as the
+// "nothing was written" assertion.
+//
+// The expected SQL carries no status predicate on purpose: any task row at all
+// is the refusal, so a re-added `AND status IN (...)` must fail this test.
+func TestCreateForUsageRefusesAMaterialWithAnyTaskRecord(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
+	item := model.ComposeTask{TeamID: 7, GameID: "delta", MaterialID: 42, StrategyID: 3, Status: model.ComposeTaskPending, RequestKey: "rk-used-1", CreatedBy: 11}
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .* FROM material_usages WHERE user_id = \\? AND material_id = \\? AND status = 'active'").
+		WithArgs(int64(11), int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "material_id", "user_id", "status", "removed_at", "created_at", "updated_at"}).AddRow(int64(9), int64(7), int64(42), int64(11), "active", nil, now, now))
+	mock.ExpectQuery("SELECT id FROM compose_strategies WHERE id = \\? FOR UPDATE").
+		WithArgs(int64(3)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(3)))
+	mock.ExpectQuery("SELECT id FROM compose_tasks WHERE compose_strategy_id = \\? AND material_id = \\? LIMIT 1 FOR UPDATE").
+		WithArgs(int64(3), int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(500)))
+	mock.ExpectRollback()
+	created, found, err := createForUsage(db, item, "compose_task.create", now)
+	if !errors.Is(err, ErrComposeTaskMaterialUsed) || found || created.ID != 0 {
+		t.Fatalf("created=%+v found=%v err=%v", created, found, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// The guard reads the strategy row even when the pair was never used: that lock
+// is what serializes two creates of one strategy, so it must not be skippable.
+func TestLockComposeTaskMaterialTakesTheStrategyRowFirst(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id FROM compose_strategies WHERE id = \\? FOR UPDATE").
+		WithArgs(int64(3)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(3)))
+	mock.ExpectQuery("SELECT id FROM compose_tasks WHERE compose_strategy_id = \\? AND material_id = \\? LIMIT 1 FOR UPDATE").
+		WithArgs(int64(3), int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+	if err := db.Transaction(func(tx *gorm.DB) error { return lockComposeTaskMaterial(tx, 3, 42) }); err != nil {
+		t.Fatalf("free pair err = %v", err)
+	}
+	assertExpectations(t, mock)
+}
+
+
+// One query for the drawer's whole candidate list: every requested id comes
+// back, ascending, with the pairs that never ran filled in as zeros. The
+// expected SQL pins all four status counts — a dropped one (cancelled was the
+// last added) would stop matching here instead of silently reading as unused.
+func TestComposeMaterialStatesFillsMissingIDs(t *testing.T) {
+	db, mock := newMockGORM(t)
+	at := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT material_id, COALESCE\\(SUM\\(status = 'success'\\), 0\\), COALESCE\\(SUM\\(status IN \\('pending', 'running'\\)\\), 0\\), COALESCE\\(SUM\\(status = 'failed'\\), 0\\), COALESCE\\(SUM\\(status = 'cancelled'\\), 0\\), MAX\\(created_at\\) FROM compose_tasks WHERE compose_strategy_id = \\? AND material_id IN \\(\\?,\\?,\\?\\) GROUP BY material_id").
+		WithArgs(int64(5), int64(42), int64(43), int64(44)).
+		WillReturnRows(sqlmock.NewRows([]string{"material_id", "success_count", "active_count", "failed_count", "cancelled_count", "last_task_at"}).
+			AddRow(int64(42), 1, 0, 2, 0, at).
+			AddRow(int64(44), 0, 1, 0, 3, at.Add(time.Hour)))
+	states, err := composeMaterialStates(db, 5, []int64{42, 43, 44})
+	if err != nil || len(states) != 3 {
+		t.Fatalf("states=%+v err=%v", states, err)
+	}
+	if states[0].MaterialID != 42 || states[0].SuccessCount != 1 || states[0].FailedCount != 2 || states[0].CancelledCount != 0 {
+		t.Fatalf("material 42 = %+v", states[0])
+	}
+	if states[0].LastTaskAt == nil || !states[0].LastTaskAt.Equal(at) {
+		t.Fatalf("material 42 last task = %v", states[0].LastTaskAt)
+	}
+	if states[1].MaterialID != 43 || states[1].SuccessCount != 0 || states[1].ActiveCount != 0 || states[1].FailedCount != 0 || states[1].CancelledCount != 0 || states[1].LastTaskAt != nil {
+		t.Fatalf("material 43 must be zero-filled: %+v", states[1])
+	}
+	if states[2].ActiveCount != 1 || states[2].CancelledCount != 3 {
+		t.Fatalf("material 44 = %+v", states[2])
+	}
+	assertExpectations(t, mock)
+}
+
+func TestComposeMaterialStatesSkipsTheQueryWithoutInput(t *testing.T) {
+	db, mock := newMockGORM(t)
+	states, err := composeMaterialStates(db, 0, []int64{42})
+	if err != nil || len(states) != 0 {
+		t.Fatalf("states=%+v err=%v", states, err)
 	}
 	assertExpectations(t, mock)
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetake, downloadAssetKey, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isReclaimableAfterUnbind, isSuspendedOnDevice, isTerminal, needsCloudPreparation, progressOf, taskState, withinDays } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, canRetake, downloadAssetKey, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isReclaimableAfterUnbind, isSuspendedOnDevice, isTerminal, needsCloudPreparation, needsRedownload, progressOf, taskState, withinDays } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -192,6 +192,41 @@ describe('row actions', () => {
     expect(canRedownload(task({ status: 'cancelled', asset_type: 'compose_input' }))).toBe(false)
     expect(canRedownload(task({ status: 'cancelled', asset_id: 0 }))).toBe(false)
     expect(canRedownload(null)).toBe(false)
+  })
+})
+
+/**
+ * 「我的素材」那一行已下载之后还要不要「重新下载」（CHG-20261015-098 用户裁定：
+ * 「已下载且本地系统**有**对应文件 → 详情｜放弃使用；已下载但本地**没有** → 重新下载」）。
+ *
+ * 与上一条 `canRedownload` 是两个判据、两处用途，不是同一条规则的两份实现：
+ * 那一条问的是**任务**（失败/已取消 → 再来一次），这一条问的是**资产在不在本机**。
+ * 已下载行在下载任务表里是 success，永远过不了 `canRedownload`。
+ *
+ * 三态里只有 `absent` 翻转 —— `unknown`（浏览器读不到本机、Desktop 还没扫完）不给，
+ * 否则 Cloud Web 上每一条已下载的行都会长出一颗按不出东西的按钮。
+ */
+describe('re-downloading a material this machine has lost', () => {
+  it('flips only on a measured absence', () => {
+    expect(needsRedownload('downloaded', 'absent')).toBe(true)
+    expect(needsRedownload('downloaded', 'unknown')).toBe(false)
+    expect(needsRedownload('downloaded', 'present_current')).toBe(false)
+    expect(needsRedownload('downloaded', 'present_elsewhere')).toBe(false)
+  })
+
+  // 没量过（undefined / null）与量不到同义：这是浏览器里最常见的那一种，连它都要 false。
+  it('treats a missing measurement as unknown, not as absence', () => {
+    expect(needsRedownload('downloaded', undefined)).toBe(false)
+    expect(needsRedownload('downloaded', null)).toBe(false)
+  })
+
+  // 其余下载状态各有自己的出路（未下载 → 下载，下载中 → 取消，失败 → 重新下载），
+  // 不被这一条抢走；行内与详情页脚的分支顺序都按这个前提写。
+  it('leaves every other download status to its own branch', () => {
+    for (const status of ['', 'not_downloaded', 'downloading', 'failed']) {
+      expect(needsRedownload(status, 'absent'), status).toBe(false)
+    }
+    expect(needsRedownload(undefined, 'absent')).toBe(false)
   })
 })
 

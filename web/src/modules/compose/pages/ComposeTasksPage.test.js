@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(new URL('./ComposeTasksPage.vue', import.meta.url), 'utf8')
+const createDialog = readFileSync(new URL('../components/ComposeTaskCreateDialog.vue', import.meta.url), 'utf8')
 
-// CHG-20261013-082 T-05：合成任务页（列表/筛选/详情/排队中取消）。
+// CHG-20261013-082 T-05 / M4-M5 合成任务页定点整改：列表 9 列、详情 3 Tab 4 分区、
+// 关联实体只读抽屉、活动任务轮询。
 // 与本仓其余列表页同一量法：钉住**会静默失效**的那几处接线。
 describe('compose tasks page', () => {
   // 三个下拉/输入里最容易腐烂的是「筛了但参数没上车」：load 必须把两个筛选项
@@ -20,14 +22,73 @@ describe('compose tasks page', () => {
     expect(source).toContain('v-model="filters.created_range"')
   })
 
-  it('renders the five formal task statuses and separates stage from status', () => {
+  // 执行阶段是过程信息，只在详情里；列表放决策信息，进度百分比一律不进列表。
+  it('renders the five formal task statuses and keeps the stage out of the list', () => {
     expect(source).toContain("pending: '排队中'")
     expect(source).toContain("running: '处理中'")
     expect(source).toContain("success: '成功'")
     expect(source).toContain("failed: '失败'")
     expect(source).toContain("cancelled: '已取消'")
-    expect(source).toContain("title: '执行阶段'")
+    expect(source).not.toContain("title: '执行阶段'")
     expect(source).not.toContain('<t-progress')
+    expect(source).not.toContain('row.progress')
+  })
+
+  // 列序固定：识别 → 来源 → 结果 → 状态 → 时间 → 操作。
+  it('declares the nine columns in the fixed order', () => {
+    const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))
+    const order = ['id', 'name', 'trigger_type', 'material_id', 'strategy', 'output', 'status', 'created_at', 'op']
+    // 分母可见：列数对不上说明列结构被改过，立刻失败而不是让后面的顺序断言空转。
+    expect((columns.match(/colKey:/g) || [])).toHaveLength(order.length)
+    for (let index = 1; index < order.length; index += 1) {
+      const previous = columns.indexOf(`colKey: '${order[index - 1]}'`)
+      expect(previous, order[index - 1]).toBeGreaterThanOrEqual(0)
+      expect(previous).toBeLessThan(columns.indexOf(`colKey: '${order[index]}'`))
+    }
+  })
+
+  // 任务 ID 一律裸数字：`#252` 这类内码前缀在本页与创建抽屉里都不出现。
+  it('never prefixes an id with a hash', () => {
+    for (const [file, text] of [['ComposeTasksPage.vue', source], ['ComposeTaskCreateDialog.vue', createDialog]]) {
+      expect(text, file).not.toMatch(/#(?:\{|\$|\d)/)
+    }
+  })
+
+  // 任务名称是创建时形成的事实，只在历史行为空时才退回「合成任务 252」。
+  it('keeps the stored task name and falls back to a stable one', () => {
+    expect(source).toContain('display_name?.trim()')
+    expect(source).toContain('`合成任务 ${row.id}`')
+  })
+
+  /**
+   * CHG-20261015-098（用户裁定）：创建合成任务的入口**只**在这里 —— 我的素材里的工具条
+   * 批量与行内「加入合成」整条撤掉，素材改由创建抽屉自己去「我的素材」取。
+   *
+   * 三处接线都会静默失效：页头那颗按钮没挂 `createVisible`、页面尾部没挂抽屉实例、
+   * `@created` 没接上 `load()` —— 任何一处断掉，用户看到的都是「点了没反应」或者
+   * 「创建成功但列表里没有」。
+   */
+  it('carries the only create entry: a header button opening the shared dialog', () => {
+    expect(source).toContain('新建合成任务')
+    expect(source).toContain('@click="createVisible = true"')
+    expect(source).toContain('const createVisible = ref(false)')
+    expect(source).toContain('<ComposeTaskCreateDialog v-model:visible="createVisible" @created="onCreated" />')
+    expect(source).toContain("import ComposeTaskCreateDialog from '../components/ComposeTaskCreateDialog.vue'")
+    // 素材范围不再由宿主注入：入口只有一个，抽屉自己取候选。
+    expect(source).not.toContain(':materials="')
+  })
+
+  // 创建之后必须重读列表：新任务是 pending，列表的轮询正是靠这一行读到的数据挂上去的。
+  // 成功与部分失败分开说，失败的原因逐条带上 —— 只说「创建失败」等于让运营再试一次同样的错。
+  it('re-reads the list after creating and splits the created from the failed', () => {
+    const handler = source.slice(source.indexOf('async function onCreated'), source.indexOf('\n}', source.indexOf('async function onCreated')))
+    expect(handler).toContain('await load()')
+    expect(handler).toContain('result.created')
+    expect(handler).toContain('result.failed')
+    expect(handler).toContain('feedback.toast.success(`已创建 ${created.length} 个合成任务`)')
+    expect(handler).toMatch(/feedback\.toast\.error\(/)
+    // 成片是异步作业：这里说不出「合成成功」。
+    expect(source).not.toContain('合成成功')
   })
 
   // 取消只对排队中的行出现——非 pending 的行连按钮都没有，而不是点了再被拒。
@@ -43,19 +104,22 @@ describe('compose tasks page', () => {
   })
 
   // 操作列宽按行里最多会出现的按钮清单推导（排队中的行才有 取消），不再写死 130。
-  it('derives the op column width from the buttons a pending row can show', () => {
+  it('derives the op column width from the buttons a row can show', () => {
     expect(source).toContain("opColumnWidth(['详情', '取消', '重试'])")
     expect(source).not.toContain("width: 130, fixed: 'right'")
   })
 
-  // 高频条件在前：状态是排查任务时最先动的那个；策略名长，给它宽位。
-  it('puts the status filter first and gives the strategy select the wide slot', () => {
+  // 顺序即查找顺序：先认策略，再认谁触发的，然后才是状态与时间；策略名长，仍占宽位。
+  // 逐项按 label 文本定位（不是裸词 indexOf），顺序写错时这里一定红。
+  it('orders the filter bar 合成策略 → 触发方式 → 状态 → 创建时间', () => {
     const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
     expect(bar).not.toContain('<t-space')
-    expect(bar.indexOf('状态')).toBeGreaterThanOrEqual(0)
-    expect(bar.indexOf('状态')).toBeLessThan(bar.indexOf('合成策略'))
+    const labels = [...bar.matchAll(/wt-filter-field__label">([^<]+)</g)].map((match) => match[1])
+    expect(labels).toEqual(['合成策略', '触发方式', '状态', '创建时间'])
     const fields = bar.match(/wt-filter-field[^"]*"/g) || []
     expect(fields.filter((entry) => entry.includes('wt-filter-field--wide'))).toHaveLength(1)
+    // 宽位归策略，且它就是第一个字段。
+    expect(fields[0]).toContain('wt-filter-field--wide')
     expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
   })
 
@@ -71,23 +135,36 @@ describe('compose tasks page', () => {
     expect(source).toContain('还没有执行记录')
   })
 
-  // 重试分类钉在页面与服务端同一张表上：环境类与人工判断类有按钮（高级运营及以上），
-  // 输入/模板类不给入口只引导新建任务——藏的是按钮，不是点了再被 409。
-  it('gates the retry button by role and the error-code classes', () => {
-    expect(source).toContain("new Set(['storage_error', 'task_timeout', 'execution_failed'])")
-    expect(source).toContain("new Set(['input_missing', 'input_invalid', 'template_unavailable'])")
-    expect(source).toContain("canRetry && retryableCodes.has(detail.error_code)")
-    expect(source).toContain("newTaskCodes.has(detail.error_code)")
-    expect(source).toContain('该失败不能重试，请修正后新建任务')
+  // 重试受理范围钉在页面与服务端同一个判据上（retryPolicy）：已取消的、以及除
+  // execution_uncertain 以外的一切失败，高级运营及以上才有按钮 —— 藏的是按钮，
+  // 不是让人点了再被 409。
+  it('gates the retry button by role and the single exclusion the server makes', () => {
+    expect(source).toContain("import { UNCERTAIN_CODE, isRetryableTask, retryHint } from '../retryPolicy.js'")
+    expect(source).toContain('canRetry.value && isRetryableTask(row)')
+    expect(source).toContain("attempt.error_code === UNCERTAIN_CODE ? '不可直接重试' : '可由高级运营提交重试'")
     expect(source).toContain('client.retryComposeTask(item.id)')
     expect(source).toContain("currentUser.value?.role")
+    // 旧的错误码白名单整条撤掉：它会把 input_missing 这类失败判成「不可重试」，
+    // 而那条任务在新规则下没有第二个重跑入口。
+    expect(source).not.toContain('NEW_TASK_CODES')
+    expect(source).not.toContain('RETRYABLE_CODES')
   })
 
-  // 成片关联只给 ID（服务端也不给对象地址），跳转去我的成片页。
-  it('links a success task to its output id and the finished-media page', () => {
-    expect(source).toContain("row.status === 'success' ? row.composite_output_id : null")
-    expect(source).toContain('成片 #{{ outputID(detail) }}')
-    expect(source).toContain("name: 'FinishedMedia', query: { output_id:")
+  // 「为什么没有重试按钮」的理由由 retryPolicy 一处给出（那里逐条钉着），页面只负责
+  // 在概览与执行记录里用同一句 —— 同一件事不并存两种说法。
+  it('explains in the detail why the retry button is not there', () => {
+    expect(source).toContain('<p v-if="retryHint(detail, canRetry)" class="compose-detail__hint">{{ retryHint(detail, canRetry) }}</p>')
+    expect(source).not.toContain('修正后新建任务')
+  })
+
+  // 人工重试是「重新获得完整容错配额」而不是「次数清零」：执行编号不回退
+  // （compose_task_attempts 的 UNIQUE(task_id, attempt) 也不允许回退），文案里就不许出现清零。
+  it('asks before retrying and says the retry budget is recalculated, not zeroed', () => {
+    const dialog = source.slice(source.indexOf('function retry('), source.indexOf('function cancel('))
+    expect(dialog).toContain("header: '重试任务'")
+    expect(dialog).toContain('自动容错重试机会重新计算')
+    expect(dialog).toContain('DialogPlugin.confirm')
+    expect(dialog).not.toContain('清零')
   })
 
   it('shows uncertain execution as pending administrator review and records explicit verification', () => {
@@ -100,28 +177,170 @@ describe('compose tasks page', () => {
     expect(source).toContain('失败阶段：')
   })
 
-  it('places the task and linked entities before status, then removes duplicate summary and output tab', () => {
-    const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))
-    for (const [first, second] of [['task', 'material_id'], ['material_id', 'strategy'], ['strategy', 'output'], ['output', 'status'], ['status', 'stage'], ['stage', 'op']]) {
-      expect(columns.indexOf(`colKey: '${first}'`)).toBeLessThan(columns.indexOf(`colKey: '${second}'`))
-    }
-    expect(source).not.toContain('compose-list-summary')
-    expect(source).not.toContain('label="成片结果"')
-    expect(source).toContain('label="配置快照"')
-    expect(source).toContain('display_name?.trim()')
-    expect(source).toContain('goMaterial(row)')
-    expect(source).toContain('goStrategy(row)')
+  // 详情头只有「任务详情 + ×」：不放 Hero 大卡，也不放任何业务按钮。
+  it('drops the hero card and keeps business actions out of the header', () => {
+    expect(source).not.toContain('compose-detail__hero')
+    expect(source).toContain('header="任务详情"')
+    expect(source).toContain('size="min(62vw, 880px)"')
+    expect(source).toContain(':close-btn="true"')
+    expect(source).not.toContain('>关闭<')
   })
 
-  it('opens the existing entity detail surfaces by scoped API reads', () => {
+  // 页脚只在真有业务动作时才渲染；三 Tab 与概览四分区不得增删改名。
+  it('renders the footer only for an actionable task and keeps the four overview sections', () => {
+    expect(source).toContain(':footer="detailFooterOps.length > 0"')
+    expect(source).toContain("detailFooterOps.includes('cancel')")
+    expect(source).toContain("detailFooterOps.includes('retry')")
+    const overview = source.slice(source.indexOf('label="概览"'), source.indexOf('label="执行记录"'))
+    expect((overview.match(/<h4>/g) || [])).toHaveLength(4)
+    expect((source.match(/<t-tab-panel/g) || [])).toHaveLength(3)
+    for (const label of ['概览', '执行记录', '配置快照']) expect(source).toContain(`label="${label}"`)
+  })
+
+  // 失败任务的成片区只陈述事实：未生成成片 + 为什么，不编一个占位成片。
+  it('states that a failed task produced no output', () => {
+    expect(source).toContain('任务执行失败，因此没有生成成片。')
+    expect(source).toContain('未生成成片')
+    expect(source).toContain("row.status === 'success' ? row.composite_output_id : null")
+    // 当前阶段是纯文字，且阶段名带「中」的（视频合成中）不能直接接「失败」。
+    expect(source).toContain(".replace(/中$/, '')")
+  })
+
+  // 成片只在「生成结果」里出现一次：它既是关联（点得进去）也是结果（长什么样），
+  // 但两处都写就成了两个事实来源；生成时间也不再藏在成片后面那半句拼出来的话里。
+  it('keeps the output link out of the related-info section and gives the time its own cell', () => {
+    const related = source.slice(source.indexOf('<h4>关联信息</h4>'), source.indexOf('<h4>执行信息</h4>'))
+    expect(related).toContain('关联素材')
+    expect(related).toContain('合成策略')
+    expect(related).not.toContain('生成成片')
+    const result = source.slice(source.indexOf('<h4>生成结果</h4>'), source.indexOf('label="执行记录"'))
+    expect(result).toContain('生成成片')
+    expect(result).toContain('生成时间')
+    expect(result).toContain("{{ outputSummary ? formatDateTime(outputSummary.created_at) : '—' }}")
+    expect(source).not.toContain('生成于')
+  })
+
+  // 失败原因写进**详情**的任务信息并高亮：来查「为什么失败」的人先看的就是这一段，
+  // 不必再翻到执行记录去对错误码。列表页不加列（列数见上面那条九列断言）。
+  it('writes the failure reason into the detail task info, highlighted', () => {
+    const info = source.slice(source.indexOf('<h4>任务信息</h4>'), source.indexOf('<h4>关联信息</h4>'))
+    expect(info).toContain("v-if=\"detail.status === 'failed'\"")
+    expect(info).toContain('失败原因')
+    expect(info).toContain('safeComposeError(detail.error_code)')
+    expect(source).toContain('.compose-detail__failure-reason { color: var(--wt-danger); font-weight: 500; }')
+    expect(source).not.toContain("title: '失败原因'")
+  })
+
+  // 上面那条只钉得住字符串，钉不住「这支变量在页面上真能取到值」——本轮就踩过：规则写着
+  // var(--wt-status-error) 而字符串断言全绿，可那支语义表从未被任何入口引入，页面上是一片继承色。
+  // 所以这里从**应用入口真正 import 的样式表**取定义，只放行 TDesign 自带的 --td-*。
+  it('only uses CSS variables the loaded stylesheets define', () => {
+    const entries = ['../../../apps/cloud/main.ts', '../../../apps/desktop/main.ts']
+      .map((path) => new URL(path, import.meta.url))
+    const sheets = entries.flatMap((entry) => {
+      const code = readFileSync(entry, 'utf8')
+      return [...code.matchAll(/import\s+"(\.[^"]+\.css)"/g)].map((m) => new URL(m[1], entry))
+    })
+    // 反向对照：解析不到样式表就说明这条测试在空转，不是「没问题」。
+    expect(sheets.length).toBeGreaterThan(0)
+    const defined = new Set()
+    for (const sheet of sheets) {
+      const css = readFileSync(sheet, 'utf8')
+      for (const m of css.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(m[1])
+    }
+    const used = [...new Set([...source.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))]
+    expect(used.length).toBeGreaterThan(0)
+    const unresolved = used.filter((name) => !name.startsWith('--td-') && !defined.has(name))
+    expect(unresolved).toEqual([])
+  })
+
+  // 执行记录要看得见关键过程：每走完一步云端追加一条，页面把它列出来。步骤名是**服务端**
+  // 下发的中文，前端不另建一份 key→中文 的映射（两份就会各错一份）。
+  it('renders the recorded steps of every attempt', () => {
+    expect(source).toContain("import { attemptSteps, stepMetricsText } from '../attemptSteps.js'")
+    expect(source).toContain("import { formatDurationMs } from '../../../shared/utils/units.js'")
+    expect(source).toContain('v-for="step in attemptSteps(attempt)"')
+    expect(source).toContain("{{ step.label || '未记录' }}")
+    expect(source).toContain('用时 {{ formatDurationMs(step.duration_ms) }}')
+    expect(source).toContain('{{ stepMetricsText(step) }}')
+    expect(source).toContain("step.outcome === 'failed'")
+    expect(source).toContain("{{ step.error_label || '原因未记录' }}")
+    expect(source).toContain('该次执行没有步骤记录。')
+    const attemptsTab = source.slice(source.indexOf('label="执行记录"'), source.indexOf('label="配置快照"'))
+    expect(attemptsTab).toContain('compose-detail__steps')
+    expect(attemptsTab).not.toContain('step.error_message')
+    expect(source).not.toContain("cut: '视频合成'")
+  })
+
+  // 分页只保留一套总数（TDesign 自带），页面不再自报一个。
+  it('shows a single total count', () => {
+    expect(source).not.toContain('共 {{ rows.length }} 条')
+    expect(source).toContain(':total="rows.length"')
+  })
+
+  // 「前往…页面」是关联抽屉里唯一的路由入口：实体链接与表格行都不再换页。
+  it('opens related entities in read-only drawers instead of navigating away', () => {
+    expect(source).toContain('@click="openMaterial(row.material_id)"')
+    expect(source).toContain('@click="openStrategy(row.compose_strategy_id)"')
+    expect(source).toContain('@click="openOutput(outputID(row))"')
+    expect(source).not.toContain('@click="goMaterial(')
+    expect(source).not.toContain('@click="goStrategy(')
+    expect(source).not.toContain('@click="goOutput(')
+    for (const [fn, name] of [['goMaterialPage', 'MaterialLibrary'], ['goStrategyPage', 'ComposeStrategy'], ['goOutputPage', 'FinishedMedia']]) {
+      const body = source.match(new RegExp(`function ${fn}\\([^)]*\\) \\{([^}]*)\\}`))?.[1] || ''
+      expect(body, fn).toContain('router.push')
+      expect(body, fn).toContain(`name: '${name}'`)
+    }
+    // 三层关联各用一份只读详情：素材复用现成组件，策略/成片复用抽出来的共享组件。
+    expect(source).toContain('mode="readonly"')
+    expect(source).toContain('<ComposeStrategySummary')
+    expect(source).toContain('<ComposeOutputDetail')
+    // 任务上下文里的成片抽屉不开「配置快照」：那一页会露出带签名的引导视频地址。
+    expect(source).toContain(":tabs=\"['basic', 'source']\"")
+    // 来源追踪里的编号全站都不带 `#`（用户裁定：`#` 只管关联实体 ID 的显示前缀），
+    // 那个只为「我的成片页保留 #」而存在的开关连同它的默认值一起删了 ——
+    // 留着就是一个「有的页面带、有的不带」的口子。
+    expect(source).not.toContain('with-id-prefix')
+    const outputDetail = readFileSync(new URL('../components/ComposeOutputDetail.vue', import.meta.url), 'utf8')
+    expect(outputDetail).not.toContain('withIdPrefix')
+    expect(outputDetail).not.toContain('#${')
+  })
+
+  // 「前往…页面」那一跳要真能落到对象上：目标页得认这个 query（深链是唯一的路由出口）。
+  it('navigates to pages that still consume the deep-link query', () => {
     const strategies = readFileSync(new URL('./ComposeStrategyPage.vue', import.meta.url), 'utf8')
     const outputs = readFileSync(new URL('./MyOutputsPage.vue', import.meta.url), 'utf8')
     const materials = readFileSync(new URL('../../materials/pages/MaterialLibraryPage.vue', import.meta.url), 'utf8')
-    expect(source).toContain("name: 'MaterialLibrary', query: { material_id:")
-    expect(source).toContain("name: 'ComposeStrategy', query: { strategy_id:")
-    expect(source).toContain("name: 'FinishedMedia', query: { output_id:")
     expect(materials).toContain('client.get(Number(raw))')
     expect(strategies).toContain('client.getStrategy(Number(id)).then(openDetail)')
     expect(outputs).toContain('openDetail({ id: Number(id) })')
+  })
+
+  // 活动任务自动刷新：只复用模块内的最小轮询，页面自己不起 timer。
+  it('polls the list and the open detail only while a task is active', () => {
+    expect(source).toContain('useTaskPolling(')
+    expect(source).toContain('hasActiveTask(rows.value)')
+    expect(source).toContain('function syncListPolling()')
+    expect(source).toContain('function syncDetailPolling()')
+    expect(source).toContain('listPolling.start()')
+    expect(source).toContain('listPolling.stop()')
+    expect(source).toContain('detailPolling.start()')
+    expect(source).toContain('detailPolling.stop()')
+    // 轮询那一遍不掀整页 Loading、不把用户正在看的页码拨回去。
+    expect(source).toContain('load({ quiet: true })')
+    expect(source).toContain('if (!quiet) pagination.value.current = 1')
+    // 手动刷新还在。
+    expect(source).toContain('@click="load()"')
+    expect(source).not.toContain('setInterval')
+  })
+
+  // 关联实体仍按各自的详情端点取数，不拿列表行的副本充当详情。
+  it('reads the related entity details through their own endpoints', () => {
+    expect(source).toContain('materialsClient.get(id)')
+    expect(source).toContain('client.getStrategy(id)')
+    expect(source).toContain('client.getComposeOutput(id)')
+    expect(source).toContain('client.getComposeOutputVideoUrl(id)')
+    // 预览地址是短时签名，每次打开现取。
+    expect(source).toContain('client.getComposeOutputVideoUrl(id).catch(() => null)')
   })
 })

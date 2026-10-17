@@ -74,6 +74,10 @@ describe('my materials page', () => {
    * 规范 §5.6 与用户同轮裁定（「按钮按照超过 5 个才有更多按钮出现」）：本项目按钮数
    * 上限是 3 个（详情 + 一个主操作 + 放弃使用），永远到不了 5，所以**没有「更多」**——
    * 用户提示词里那套「3 个动作也收进更多」的写法按 §5.6 不采用。
+   *
+   * CHG-20261015-098 起已下载那一格再加一维：**本机实测还有没有那份文件**。有 → 不给
+   * 主操作（只剩 详情｜放弃使用）；实测没有 → 给「重新下载」。两个分支都由
+   * `needsRedownload` 判，与详情抽屉共用同一个判据（见下一条用例）。
    */
   it('branches each row on the usage × download matrix, flat and never behind 更多', () => {
     const op = source.slice(source.indexOf('#op="{ row }"'), source.indexOf('</t-space>'))
@@ -82,18 +86,35 @@ describe('my materials page', () => {
     // 已放弃：只有「恢复使用」，不再给必然空转的下载。
     expect(op).toContain("row.usage_status === 'removed'")
     expect(op).toContain('@click="restore(row)">恢复使用</t-button>')
-    // 使用中：主操作由 download_status 驱动 —— 已下载给「加入合成」（CHG-20261013-082
-    // 起打开创建对话框），下载中不给主操作（文件已经在准备了，再点还是同一条命令），
-    // 未下载/失败给「下载/重新下载」。
-    expect(op).toContain("row.download_status === 'downloaded'")
-    expect(op).toContain("row.download_status !== 'downloading'")
-    expect(op).toContain('@click="openCreate([row])">加入合成</t-button>')
+    // 使用中：已下载但本机那份实测不在 → 重新下载；否则下载中不给主操作（文件已经在
+    // 准备了，再点还是同一条命令），未下载/失败给「下载/重新下载」。
+    expect(op).toContain('needsRedownload(row.download_status, localPresence(row))')
+    expect(op).toContain('@click="download(row)">重新下载</t-button>')
+    expect(op).toContain("row.download_status !== 'downloading' && row.download_status !== 'downloaded'")
     expect(op).toContain('downloadActionLabel(row.download_status)')
     expect(op).toContain('@click="giveUp(row)">放弃使用</t-button>')
+    // 创建合成任务的入口整条搬去了合成任务页：行内不该再有任何合成动作。
+    expect(op).not.toContain('合成')
     // 矩阵判据从 video_status 切走：行内不再碰云端源文件态。
     expect(op).not.toContain('video_status')
     expect(source).not.toContain('<t-dropdown')
     expect(source).not.toContain('>更多<')
+  })
+
+  /**
+   * 「本机那份文件还在不在」是这一页唯一读本机的能力，它必须落在 Desktop 桥上的**批量**
+   * 查询里：`savedFileStates` 一次 invoke 问完所有已下载行。
+   *
+   * 只对 `downloaded` 的行取名字 —— 未下载的行没有文件名可问，问出来的是空。名字集合没变
+   * 就不重复扫（`measuredKey`），否则每次 `load()` 都白走一趟 IPC。
+   */
+  it('asks the desktop bridge once per changed set of downloaded file names', () => {
+    expect(source).toContain('downloadedFileName(tasks.value, row.id)')
+    expect(source).toContain('savedFileStates(')
+    expect(source).toContain('measuredKey')
+    // 浏览器里返回空表，presence 落到 unknown —— 不能把「读不到本机」画成「文件不在」。
+    expect(source).toContain('filePresence(')
+    expect(source).not.toContain('FILE_PRESENCE.absent')
   })
 
   // 「移出」是收藏夹的用词。关系是使用关系：放弃的是「使用」，不是把素材从清单里删掉。
@@ -104,9 +125,12 @@ describe('my materials page', () => {
   })
 
   // 走查七轮用户提示词第一节：这一页不是收藏夹，副标题不该说「收藏」。
-  it('describes the page as the place work continues, not a favourites list', () => {
-    expect(source).toContain('已加入的素材，在这里下载、补充文件并进入后续生产')
+  // CHG-20261015-098：这一页不再「进入后续生产」——合成的入口搬去了合成任务页，
+  // 副标题因此只说这里实际能做的事，诺言不多一句。
+  it('describes the page by what it actually offers, not a favourites list', () => {
+    expect(source).toContain('已加入的素材，在这里下载、查看使用状态与详情')
     expect(source).not.toContain('你收藏的素材')
+    expect(source).not.toContain('进入后续生产')
   })
 
   /**
@@ -141,25 +165,25 @@ describe('my materials page', () => {
   })
 
   // 抽屉按上下文给动作：我的素材上下文提供下载/重新下载，不再提供「加入我的素材」
-  // （它在这里就是自己）。
+  // （它在这里就是自己），也不再提供合成（CHG-20261015-098 撤掉 @compose）。
   it('opens the drawer in mine mode with the actions of a relation, and no add', () => {
     expect(source).toContain('mode="mine"')
     expect(source).toContain('@download="download"')
     expect(source).toContain('@give-up="giveUp"')
     expect(source).toContain('@restore="restore"')
     expect(source).not.toContain('@add=')
+    expect(source).not.toContain('@compose')
   })
 
-  // 「加入合成」在这条 CHG 里没有后端端点：`/compose` 今天指向 ComingSoon。它是一个
-  // **跳转**，不是一次假装成功的提交——点了会看见那一页的真实状态，而不是一个说
-  // 「已加入合成」的 toast，然后在合成页里找不到这条素材。
-  // 详情抽屉的「合成」仍是浏览动作（带运营去合成任务页）；行内按钮现在打开创建
-  // 对话框，由上面的用例钉住。
-  it('routes the drawer 合成 action to the compose page instead of faking a submission', () => {
-    expect(source).toContain("{ name: 'Compose' }")
-    // 只看模板：脚本里那句「发一个『已加入合成』的提示才是伪造」是这条决定本身的记录。
-    const template = source.slice(source.indexOf('<template>'))
-    expect(template).not.toContain('已加入合成')
+  // 「加入合成」的后端端点在 CHG-082 落地了，但入口在 CHG-20261015-098 又整条搬去了
+  // 合成任务页。这里钉住的是**没有任何残留**：既不能有一个说「已加入合成」的 toast
+  // （那是伪造的提交），也不能有一条指向合成页 `{ name: 'Compose' }` 的跳转。
+  it('leaves no compose affordance behind, faked or routed', () => {
+    expect(source).not.toContain("{ name: 'Compose' }")
+    expect(source).not.toContain('已加入合成')
+    // `useRouter` 也随之退了：这一页现在没有任何跳转，`route` 只用来读深链查询参数。
+    expect(source).not.toContain('useRouter')
+    expect(source).toContain("import { useRoute } from 'vue-router'")
   })
 
   // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 素材 ID 第一列、封面随后，
@@ -233,36 +257,32 @@ describe('my materials page', () => {
   })
 })
 
-  // CHG-20261013-082：创建合成任务从「跳占位页」变成打开创建对话框；表格加了
-  // 勾选列支持多选批量创建。钉住三处会静默失效的接线。
-  describe('compose task creation (CHG-20261013-082)', () => {
-    // 勾选只对使用中的关系开放：已放弃的关系不允许新建任务（PRD §5.4.5），
-    // 这条必须落在勾选项的 disabled 上，而不是选完再悄悄过滤。
-    it('offers row selection limited to in-use relations', () => {
-      expect(source).toContain("colKey: 'row-select'")
-      expect(source).toContain("row.usage_status !== 'active'")
+  // CHG-20261015-098（用户裁定）：创建合成任务的入口**只在合成任务页**。我的素材这一页
+  // 曾经有工具条批量和行内「加入合成」两个口子（CHG-20261013-082），现在整条撤掉 ——
+  // 素材改为在合成任务页的创建抽屉里从「我的素材」中选。这里钉住的是净删除：任何一处
+  // 残留都会让同一个能力出现两个入口，而它们的行为迟早会不一致。
+  describe('compose task creation moved out (CHG-20261015-098)', () => {
+    it('keeps no create entry, no dialog host and no selection machinery', () => {
+      // 逐个词查的是**子串**：旧变量名 `createMaterials` 不能进这张表——它是这一页
+      // 一直在用的 `createMaterialsClient()` 的前缀，词表写宽了会把正当代码报成残留。
+      for (const gone of [
+        '加入合成',
+        '创建合成任务',
+        'ComposeTaskCreateDialog',
+        'openCreate',
+        'createSelected',
+        'selectedRowKeys',
+        'selectionDisabled',
+        'row-select',
+      ]) {
+        expect(source, `我的素材不该再有 ${gone}`).not.toContain(gone)
+      }
     })
 
-    it('opens the shared create dialog from the row and the toolbar batch button', () => {
-      expect(source).toContain('@click="openCreate([row])">加入合成</t-button>')
-      expect(source).not.toContain('@click="goToCompose()">加入合成')
-      expect(source).toContain('@click="createSelected"')
-      expect(source).toContain('<ComposeTaskCreateDialog')
-      expect(source).toContain(':materials="createMaterials"')
-      expect(source).toContain('@created="onCreated"')
-    })
-
-    // request_key 是幂等键：生成时机在对话框打开那一刻、并在对话框存续期间稳定，
-    // 保存按钮的双击/重试才会命中服务端的唯一键幂等，而不是造出两批任务。
-    it('generates stable request keys inside the create dialog', () => {
-      const dialog = readFileSync(new URL('../../compose/components/ComposeTaskCreateDialog.vue', import.meta.url), 'utf8')
-      expect(dialog).toContain('crypto.randomUUID()')
-      expect(dialog).toMatch(/requestKeys\.value = generateKeys\(props\.materials\)/)
-    })
-
-    it('splits the created count from the failed reasons after creation', () => {
-      expect(source).toMatch(/result\.failed/)
-      expect(source).toMatch(/result\.created/)
-      expect(source).toContain('await load()')
+    // 勾选列撤了，列数回到 6（素材 ID / 素材 / 文件状态 / 使用状态 / 加入时间 / 操作）。
+    // 数量本身由 ListPageConventions 钉住，这里只管「勾选那一列不在了」。
+    it('drops the selection column it only had for batch creation', () => {
+      expect(source).toContain("row-key=\"usage_id\"")
+      expect(source).not.toContain('v-model:selected-row-keys')
     })
   })

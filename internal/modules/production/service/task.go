@@ -19,6 +19,7 @@ var (
 	ErrComposeTaskNotFound       = errors.New("compose task not found")
 	ErrComposeTaskNotCancellable = errors.New("compose task is not cancellable")
 	ErrComposeTaskNotRetryable   = errors.New("compose task is not retryable")
+	ErrComposeTaskConflict       = errors.New("compose task conflicts with a task this material already has")
 )
 
 type CreateComposeTaskItemInput struct {
@@ -27,7 +28,11 @@ type CreateComposeTaskItemInput struct {
 }
 
 type CreateComposeTasksInput struct {
-	StrategyID     int64                        `json:"strategy_id"`
+	StrategyID int64 `json:"strategy_id"`
+	// Name is the operator's label for this batch. Blank keeps the derived
+	// material · strategy name; otherwise the whole batch shares it, numbered
+	// in submission order (model.ComposeTaskBatchDisplayName).
+	Name           string                       `json:"name"`
 	ConfigOverride json.RawMessage              `json:"config_override"`
 	Items          []CreateComposeTaskItemInput `json:"items"`
 }
@@ -62,8 +67,9 @@ type ComposeTaskRepository interface {
 	CreateForUsage(model.ComposeTask, string) (model.ComposeTask, bool, error)
 	CancelAudited(model.ComposeTask, int64, string) (bool, error)
 	RequestComposeCancel(taskID, actorID int64, action string) (bool, error)
-	RetryFailed(model.ComposeTask, int64, string) (bool, error)
+	Retry(model.ComposeTask, int64, string) (bool, error)
 	ListAttempts(int64) ([]model.ComposeTaskAttempt, error)
+	MaterialStates(int64, []int64) ([]model.ComposeMaterialState, error)
 }
 
 type composeTaskStrategySource interface {
@@ -105,12 +111,14 @@ func CancelComposeTask(actor identity.PublicUser, id int64) (model.ComposeTask, 
 	return wiredComposeTaskService().Cancel(actor, id)
 }
 
-// Retry requeues one failed task for another attempt (M4-G, PRD §5.8.5):
-// visibility first, then the senior-operator gate — retry is a §5.10.3
+// Retry requeues one failed or cancelled task for another attempt (M4-G, PRD
+// §5.8.5): visibility first, then the senior-operator gate — retry is a §5.10.3
 // senior capability, a plain operator only reads. The repository's guarded
-// update refuses a non-failed row or an error code outside the retryable
-// set; either refusal answers compose_task_not_retryable. The snapshot never
-// changes — operators who need different parameters create a new task.
+// update refuses anything but a cancelled row or a failed row other than
+// execution_uncertain; a refusal answers compose_task_not_retryable, unless a
+// concurrent retry already put the task back to pending, which answers with
+// that row. The snapshot never changes — operators who need different
+// parameters create a new task.
 func (s *ComposeTaskService) Retry(actor identity.PublicUser, id int64) (model.ComposeTask, error) {
 	item, found, err := s.tasks.Find(id)
 	if err != nil {
@@ -122,7 +130,7 @@ func (s *ComposeTaskService) Retry(actor identity.PublicUser, id int64) (model.C
 	if actor.Role != identity.RoleAdmin && actor.Role != identity.RoleSeniorOperator {
 		return model.ComposeTask{}, ErrComposeTaskForbidden
 	}
-	ok, err := s.tasks.RetryFailed(item, int64(actor.ID), "compose_task.retry")
+	ok, err := s.tasks.Retry(item, int64(actor.ID), "compose_task.retry")
 	if err != nil {
 		return model.ComposeTask{}, err
 	}
@@ -170,6 +178,11 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 	if len(input.Items) == 0 || len(input.Items) > 50 {
 		return CreateComposeTasksResult{}, fmt.Errorf("%w: items must contain 1-50 entries", ErrComposeTaskInvalid)
 	}
+	// Counted in runes: the limit is what fits the column and reads as a name,
+	// and a Chinese label must not be cut three times shorter than a Latin one.
+	if name := strings.TrimSpace(input.Name); len([]rune(name)) > 60 {
+		return CreateComposeTasksResult{}, fmt.Errorf("%w: name must be at most 60 characters", ErrComposeTaskInvalid)
+	}
 	keys := make(map[string]struct{}, len(input.Items))
 	for _, item := range input.Items {
 		key := strings.TrimSpace(item.RequestKey)
@@ -191,7 +204,7 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 	if !found || !canReadStrategy(actor, strategy) {
 		return CreateComposeTasksResult{}, ErrComposeTaskNotFound
 	}
-	if strategy.Status != "active" {
+	if strategy.Status != model.ComposeStrategyEnabled {
 		return CreateComposeTasksResult{}, fmt.Errorf("%w: strategy is not active", ErrComposeTaskInvalid)
 	}
 	template, err := s.usableTemplate(strategy)
@@ -203,7 +216,7 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 		return CreateComposeTasksResult{}, err
 	}
 	res := CreateComposeTasksResult{Created: []model.ComposeTask{}, Failed: []CreateComposeTaskFailure{}}
-	for _, item := range input.Items {
+	for index, item := range input.Items {
 		key := strings.TrimSpace(item.RequestKey)
 		if existing, found, err := s.tasks.FindByRequestKey(key); err != nil {
 			return CreateComposeTasksResult{}, err
@@ -233,13 +246,20 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 		}
 		task := model.ComposeTask{
 			TeamID: strategy.TeamID, GameID: strategy.GameID, TriggerType: "manual",
-			DisplayName: model.ComposeTaskDisplayName(material.Title, item.MaterialID, strategy.Name),
+			DisplayName: model.ComposeTaskBatchDisplayName(input.Name, index, len(input.Items), material.Title, item.MaterialID, strategy.Name),
 			MaterialID:  item.MaterialID, StrategyID: strategy.ID,
 			TemplateCode: template.Code, TemplateVersion: strategy.TemplateVersion,
 			ConfigSnapshot: merged, Status: model.ComposeTaskPending,
 			RequestKey: key, CreatedBy: int64(actor.ID),
 		}
 		created, written, err := s.tasks.CreateForUsage(task, "compose_task.create")
+		if errors.Is(err, repository.ErrComposeTaskMaterialUsed) {
+			// The Chinese wording lives with the other compose-task messages in
+			// the handler's mapping table, so a batch of five says it five times
+			// in one voice.
+			res.Failed = append(res.Failed, CreateComposeTaskFailure{MaterialID: item.MaterialID, RequestKey: key, Err: ErrComposeTaskConflict})
+			continue
+		}
 		if err != nil {
 			return CreateComposeTasksResult{}, err
 		}
@@ -297,6 +317,37 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 		}
 	}
 	return s.tasks.List(filter)
+}
+
+// ComposeMaterialStateLimit bounds one material-states read. The create drawer
+// sends its whole candidate list in one call; a larger request is a client
+// mistake, not a large material library. The handler parses to the same number.
+const ComposeMaterialStateLimit = 200
+
+// MaterialStates answers the create drawer's 未使用过 / 已使用过 split: what this
+// strategy has already done with each candidate material. It is history read
+// through the strategy, so it needs exactly the strategy's own visibility and
+// nothing more — the material ids only group the counts and never reveal a
+// material the actor could not otherwise see.
+func (s *ComposeTaskService) MaterialStates(actor identity.PublicUser, strategyID int64, materialIDs []int64) ([]model.ComposeMaterialState, error) {
+	if actor.Status != identity.UserStatusEnabled {
+		return nil, ErrComposeTaskForbidden
+	}
+	if strategyID <= 0 || len(materialIDs) == 0 || len(materialIDs) > ComposeMaterialStateLimit {
+		return nil, fmt.Errorf("%w: material_ids must hold 1-%d ids", ErrStrategyInvalid, ComposeMaterialStateLimit)
+	}
+	strategy, found, err := s.strategies.Find(strategyID)
+	if err != nil {
+		return nil, err
+	}
+	if !found || !canReadStrategy(actor, strategy) {
+		return nil, ErrStrategyNotFound
+	}
+	return s.tasks.MaterialStates(strategyID, materialIDs)
+}
+
+func ListComposeStrategyMaterialStates(actor identity.PublicUser, strategyID int64, materialIDs []int64) ([]model.ComposeMaterialState, error) {
+	return wiredComposeTaskService().MaterialStates(actor, strategyID, materialIDs)
 }
 
 // Cancel flips a pending task to cancelled, and asks the worker's controlled

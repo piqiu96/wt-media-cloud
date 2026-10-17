@@ -169,12 +169,12 @@ func verifyLiveGuideTask(t *testing.T, ctx context.Context, cfg config.Config, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	strategy, err := CreateComposeStrategy(admin, CreateStrategyInput{TeamID: materialScope.TeamID, GameID: materialScope.GameID, Name: "CHG093 引导视频链路验证", TemplateID: templateID, TemplateVersion: 1, Config: params})
+	strategy, err := CreateComposeStrategy(admin, CreateStrategyInput{TeamID: materialScope.TeamID, GameID: materialScope.GameID, Name: "CHG093 引导视频链路验证", TemplateID: templateID, TemplateVersion: 1, Config: params, ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if _, err := SetComposeStrategyStatus(admin, strategy.ID, "inactive"); err != nil {
+		if _, err := SetComposeStrategyStatus(admin, strategy.ID, model.ComposeStrategyDisabled); err != nil {
 			t.Errorf("disable verification strategy %d: %v", strategy.ID, err)
 		}
 	}()

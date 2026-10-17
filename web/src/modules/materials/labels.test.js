@@ -219,18 +219,24 @@ describe('usage status dimension', () => {
 
 // 「下一步」是前端提示文案，不是业务状态（用户提示词明说）。它只把「这个文件状态意味着
 // 接下来该做什么」说出来，不发请求、不改状态。
+//
+// 提示里指向的是**页面名字**（用户裁定「下一步提示指向合成任务页」）：合成的入口在
+// CHG-20261015-098 从我的素材搬去了合成任务页，说「加入合成」会让运营在这一页上找一颗
+// 已经不存在的按钮。文案只承诺「可在合成任务页选用」，不描述那一页怎么操作。
 describe('next-step hint', () => {
   it('speaks from the file state', () => {
-    expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('下载到本机后可加入合成')
+    expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('下载到本机后可在合成任务页选用')
     expect(nextStepHint({ video_status: 'downloading' })).toBe('文件准备中，完成后即可下载到本机')
-    expect(nextStepHint({ video_status: 'ready' })).toBe('可加入合成，或重新下载到其他机器')
+    expect(nextStepHint({ video_status: 'ready' })).toBe('可在合成任务页选用，或重新下载到其他机器')
     expect(nextStepHint({ video_status: 'failed' })).toBe('重新下载，或查看最近一次失败原因')
   })
 
   // 已放弃的关系先要恢复，才轮到文件那一维：一句「去下载」会让运营以为这条路还通着。
+  // 恢复之后也不必回这一页——合成任务页只列「使用中」的素材，恢复即回到候选里。
   it('sends a given-up relation to restore before anything else', () => {
-    expect(nextStepHint({ usage_status: 'removed', video_status: 'ready' })).toBe('恢复使用后可继续下载与加入合成')
-    expect(nextStepHint({ usage_status: 'removed' })).toBe('恢复使用后可继续下载与加入合成')
+    const removed = '恢复使用后可继续下载，并可在合成任务页选用'
+    expect(nextStepHint({ usage_status: 'removed', video_status: 'ready' })).toBe(removed)
+    expect(nextStepHint({ usage_status: 'removed' })).toBe(removed)
   })
 
   it('invents nothing when it cannot read the file state', () => {

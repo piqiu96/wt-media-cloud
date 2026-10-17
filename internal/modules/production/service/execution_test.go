@@ -29,21 +29,35 @@ const fakeSourceKey = "materials/42/source.mp4"
 var fakeSourceBytes = []byte("fake-source-video-bytes")
 
 // lifecycleFake records every lifecycle write; each switch turns one write
-// into a refusal so a test can name the branch it exercises.
+// into a refusal so a test can name the branch it exercises. It also mirrors
+// the append guard: a terminal write closes the attempt, and a closed attempt
+// takes no more steps.
 type lifecycleFake struct {
-	find         []model.ComposeTask // popped from the front by Find
-	commitErr    error
-	progressOK   bool
-	releaseOK    bool
-	failOK       bool
-	progress     []string
-	released     []string
-	failed       []string
-	committed    *model.CompositeOutput
-	committedKey string
-	ensureCalled []int64
-	cancelOnFind int // after this many Find calls, report CancelRequested
-	findCalls    int
+	find          []model.ComposeTask // popped from the front by Find
+	commitErr     error
+	progressOK    bool
+	releaseOK     bool
+	failOK        bool
+	progress      []string
+	released      []string
+	failed        []string
+	steps         []model.ComposeTaskAttemptStep
+	attemptClosed bool
+	committed     *model.CompositeOutput
+	committedKey  string
+	ensureCalled  []int64
+	cancelOnFind  int // after this many Find calls, report CancelRequested
+	findCalls     int
+}
+
+// stepLog renders the recorded steps as `key/outcome/code`, so a test can name
+// the sequence and where it stopped.
+func (f *lifecycleFake) stepLog() []string {
+	log := make([]string, 0, len(f.steps))
+	for _, step := range f.steps {
+		log = append(log, step.Step+"/"+step.Outcome+"/"+step.ErrorCode)
+	}
+	return log
 }
 
 func (f *lifecycleFake) RenewComposeLease(int64, int64, int, time.Duration) (bool, error) {
@@ -55,23 +69,44 @@ func (f *lifecycleFake) ReportComposeProgress(_, _ int64, _ int, stage string, p
 	return f.progressOK, nil
 }
 
-func (f *lifecycleFake) CommitComposeOutput(out model.CompositeOutput, key string, _ int64, _ int) (model.ComposeOutputCommit, error) {
+func (f *lifecycleFake) RecordComposeAttemptStep(_, _ int64, _ int, step model.ComposeTaskAttemptStep) (bool, error) {
+	if f.attemptClosed {
+		return false, nil
+	}
+	f.steps = append(f.steps, step)
+	return true, nil
+}
+
+func (f *lifecycleFake) CommitComposeOutput(out model.CompositeOutput, key string, _ int64, _ int, step model.ComposeTaskAttemptStep) (model.ComposeOutputCommit, error) {
 	if f.commitErr != nil {
 		return model.ComposeOutputCommit{}, f.commitErr
 	}
 	copy := out
 	f.committed = &copy
 	f.committedKey = key
-	return model.ComposeOutputCommit{OutputID: 55, TaskID: out.TaskID}, nil
+	// The real commit appends the closing step inside its transaction and
+	// closes the attempt there too, so both facts are one write here as well.
+	outputID := int64(55)
+	step.Outcome = model.ComposeStepOutcomeSuccess
+	step.Metrics.OutputID = &outputID
+	f.steps = append(f.steps, step)
+	f.attemptClosed = true
+	return model.ComposeOutputCommit{OutputID: outputID, TaskID: out.TaskID}, nil
 }
 
 func (f *lifecycleFake) ReleaseComposeForRetry(_, _ int64, _ int, code, message string) (bool, error) {
 	f.released = append(f.released, code+"|"+message)
+	if f.releaseOK {
+		f.attemptClosed = true
+	}
 	return f.releaseOK, nil
 }
 
 func (f *lifecycleFake) FailComposeTask(_, _ int64, _ int, code, message string) (bool, error) {
 	f.failed = append(f.failed, code+"|"+message)
+	if f.failOK {
+		f.attemptClosed = true
+	}
 	return f.failOK, nil
 }
 
@@ -142,6 +177,14 @@ func (s *storeFake) Copy(_ context.Context, sourceKey, destinationKey string) er
 func (s *storeFake) Remove(_ context.Context, key string) error {
 	delete(s.objects, key)
 	return nil
+}
+
+// putFailingStore refuses every upload, so a test can put the failure at the
+// phase it names without disturbing the ones before it.
+type putFailingStore struct{ *storeFake }
+
+func (putFailingStore) Put(context.Context, string, io.Reader, int64, string) error {
+	return errors.New("object storage is unreachable")
 }
 
 func memClient(store *storeFake) *http.Client {
@@ -268,6 +311,25 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if len(lifecycle.failed) != 0 || len(lifecycle.released) != 0 {
 		t.Fatalf("unexpected writes: failed=%v released=%v", lifecycle.failed, lifecycle.released)
 	}
+	// The execution log is the run's own account: the steps this template
+	// actually walked, each with the facts that phase measured.
+	wantSteps := []string{"prepare_input/success/", "cut/success/", "upload/success/", "commit/success/"}
+	if got := lifecycle.stepLog(); strings.Join(got, ",") != strings.Join(wantSteps, ",") {
+		t.Fatalf("steps=%v want=%v", got, wantSteps)
+	}
+	if size := lifecycle.steps[0].Metrics.SizeBytes; size == nil || *size != int64(len(fakeSourceBytes)) {
+		t.Fatalf("prepare step must report the staged size: %+v", lifecycle.steps[0].Metrics)
+	}
+	if duration := lifecycle.steps[1].Metrics.OutputDurationMS; duration == nil || *duration != 900 {
+		t.Fatalf("cut step must report the executor's duration: %+v", lifecycle.steps[1].Metrics)
+	}
+	upload := lifecycle.steps[2].Metrics
+	if upload.SizeBytes == nil || *upload.SizeBytes != int64(len("composed-output-bytes")) || upload.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("upload step must report what was verified: %+v", upload)
+	}
+	if last := lifecycle.steps[3]; last.StartedAt.IsZero() || last.FinishedAt.Before(last.StartedAt) || last.DurationMS < 0 {
+		t.Fatalf("every step must carry its own timing: %+v", last)
+	}
 }
 
 func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
@@ -373,6 +435,30 @@ func TestAttemptFailsWhenMaterialRowIsGone(t *testing.T) {
 	}
 	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputMissing+"|") {
 		t.Fatalf("failed=%v", lifecycle.failed)
+	}
+	// The step had to land before the terminal write: closing the attempt is
+	// what makes the append guard refuse everything after it, so this entry
+	// existing at all is the ordering proof.
+	if got := lifecycle.stepLog(); len(got) != 1 || got[0] != "prepare_input/failed/"+composeErrInputMissing {
+		t.Fatalf("a terminal failure must log its step before it closes the attempt: %v", got)
+	}
+}
+
+func TestAttemptLogsTheStepItStoppedOnAfterTheOnesItCompleted(t *testing.T) {
+	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
+	// The source stages fine; the upload is where this attempt dies.
+	deps.Store = putFailingStore{storeFake: store}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptRetry {
+		t.Fatalf("outcome=%s failed=%v", outcome, lifecycle.failed)
+	}
+	want := []string{"prepare_input/success/", "cut/success/", "upload/failed/" + composeErrStorageError}
+	if got := lifecycle.stepLog(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("steps=%v want=%v", got, want)
+	}
+	// One entry per step: the retry branch ends the attempt, and so does the
+	// exhausted branch, but neither writes the failing step twice.
+	if len(lifecycle.released) != 1 {
+		t.Fatalf("released=%v", lifecycle.released)
 	}
 }
 

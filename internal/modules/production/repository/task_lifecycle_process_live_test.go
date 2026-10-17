@@ -37,7 +37,7 @@ func composeClaimSetup(t *testing.T) (store ComposeTaskStore, requestKey string,
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' JOIN materials m ON m.id = mu.material_id AND m.status = 'available' JOIN source_contents sc ON sc.id = m.source_content_id AND sc.game_id = s.game_id WHERE s.status = 'active' AND t.status = 'active' ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
+	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' JOIN materials m ON m.id = mu.material_id AND m.status = 'available' JOIN source_contents sc ON sc.id = m.source_content_id AND sc.game_id = s.game_id WHERE s.status = 'enabled' AND t.status = 'active' ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
 	if err != nil {
 		t.Skipf("no active strategy with eligible creator material: %v", err)
 	}
@@ -483,7 +483,8 @@ func TestLiveComposeOldGenerationWritesAreRejected(t *testing.T) {
 	}
 
 	out := model.CompositeOutput{TeamID: alive.TeamID, GameID: alive.GameID, MaterialID: alive.MaterialID, MaterialUsageID: alive.MaterialUsageID, TaskID: alive.ID, StrategyID: alive.StrategyID, TemplateCode: alive.TemplateCode, TemplateVersion: alive.TemplateVersion, ObjectKey: "outputs/" + requestKey + ".mp4", FileSizeBytes: 1, SHA256: "deadbeef", Media: []byte(`{}`), PublishStatus: "pending_publish", CreatedBy: alive.CreatedBy}
-	if _, err := store.CommitComposeOutput(out, out.ObjectKey, 900101, lost.AttemptCount); !errors.Is(err, ErrComposeCommitLost) {
+	closing := model.ComposeTaskAttemptStep{Step: model.ComposeStepCommit, StartedAt: time.Now(), FinishedAt: time.Now()}
+	if _, err := store.CommitComposeOutput(out, out.ObjectKey, 900101, lost.AttemptCount, closing); !errors.Is(err, ErrComposeCommitLost) {
 		t.Fatalf("old-generation commit must lose: %v", err)
 	}
 	if ok, err := store.RenewComposeLease(alive.ID, 900101, lost.AttemptCount, 5*time.Minute); err != nil || ok {

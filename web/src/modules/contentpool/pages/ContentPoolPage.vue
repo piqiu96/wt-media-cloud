@@ -413,8 +413,8 @@ async function advanceReview() {
   await openDetail(next)
 }
 
-function strategyLabel(row) { return row.strategy_name || (row.strategy_id ? `策略 #${row.strategy_id}` : '-') }
-function taskLabel(row) { return row.crawl_task_name || (row.crawl_task_id ? `任务 #${row.crawl_task_id}` : '-') }
+function strategyLabel(row) { return row.strategy_name || (row.strategy_id ? `策略 ${row.strategy_id}` : '-') }
+function taskLabel(row) { return row.crawl_task_name || (row.crawl_task_id ? `任务 ${row.crawl_task_id}` : '-') }
 function platformLabel(value) { return ({ douyin: '抖音', bilibili: 'B站' })[value] || value || '-' }
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
 function statusTone(value) { return ({ pending: 'warning', material_created: 'success', ignored: 'neutral' })[value] || 'info' }

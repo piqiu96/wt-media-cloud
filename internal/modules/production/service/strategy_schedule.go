@@ -10,54 +10,26 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 )
 
-func SetComposeStrategySchedule(actor identity.PublicUser, id int64, input model.ComposeSchedule) (model.ComposeStrategy, error) {
-	return wiredStrategyService().SetSchedule(actor, id, input)
-}
-
-func (s *StrategyService) SetSchedule(actor identity.PublicUser, id int64, input model.ComposeSchedule) (model.ComposeStrategy, error) {
-	item, err := s.managed(actor, id)
-	if err != nil {
-		return model.ComposeStrategy{}, err
+// PreviewComposeStrategyNextRun shares the scheduler's exact schedule algorithm.
+func PreviewComposeStrategyNextRun(actor identity.PublicUser, input model.ComposeSchedule) (*time.Time, error) {
+	if !canManageStrategies(actor) {
+		return nil, ErrStrategyForbidden
 	}
-	if err := validateComposeSchedule(input); err != nil {
-		return model.ComposeStrategy{}, err
-	}
-	if input.Enabled && item.Status == "active" {
-		if err := s.validateConfig(item.TemplateID, item.TemplateVersion, item.Config, true); err != nil {
-			return model.ComposeStrategy{}, err
-		}
-	}
-	item.Schedule = &input
-	item.NextRunAt, err = nextRunForStrategy(item, s.now())
-	if err != nil {
-		return model.ComposeStrategy{}, err
-	}
-	item.UpdatedBy = int64(actor.ID)
-	return s.store.UpdateAudited(item, "compose_strategy.schedule")
+	return nextComposeRun(input, time.Now())
 }
 
 func nextRunForStrategy(item model.ComposeStrategy, now time.Time) (*time.Time, error) {
-	if item.Status != "active" || item.Schedule == nil || !item.Schedule.Enabled {
+	if item.Status != model.ComposeStrategyEnabled || item.ExecutionMode != model.ComposeExecutionScheduled || item.Schedule == nil {
 		return nil, nil
 	}
 	return nextComposeRun(*item.Schedule, now)
 }
 
 func validateComposeSchedule(s model.ComposeSchedule) error {
-	if s.MaterialScope != model.ComposeMaterialScopeCreatorUsages {
-		return fmt.Errorf("%w: material_scope must be creator_usages", ErrStrategyInvalid)
-	}
 	if _, err := time.LoadLocation(s.Timezone); err != nil || strings.TrimSpace(s.Timezone) != s.Timezone || s.Timezone == "" {
 		return fmt.Errorf("%w: timezone is invalid", ErrStrategyInvalid)
 	}
-	if s.PerRunLimit < 1 || s.PerRunLimit > 100 || s.DailyLimit < s.PerRunLimit || s.DailyLimit > 1000 {
-		return fmt.Errorf("%w: limits must satisfy 1 <= per_run_limit <= 100 and per_run_limit <= daily_limit <= 1000", ErrStrategyInvalid)
-	}
 	switch s.Mode {
-	case "manual":
-		if s.Enabled || s.IntervalMinutes != 0 || s.DailyTime != "" {
-			return fmt.Errorf("%w: manual plan cannot be enabled or timed", ErrStrategyInvalid)
-		}
 	case "interval":
 		if s.IntervalMinutes < 1 || s.IntervalMinutes > 1440 || s.DailyTime != "" {
 			return fmt.Errorf("%w: interval_minutes must be 1-1440", ErrStrategyInvalid)
@@ -90,9 +62,6 @@ func parseComposeDailyTime(value string) (int, int, error) {
 func nextComposeRun(s model.ComposeSchedule, now time.Time) (*time.Time, error) {
 	if err := validateComposeSchedule(s); err != nil {
 		return nil, err
-	}
-	if !s.Enabled {
-		return nil, nil
 	}
 	if s.Mode == "interval" {
 		next := now.Add(time.Duration(s.IntervalMinutes) * time.Minute).UTC()

@@ -16,8 +16,8 @@ describe('compose api client', () => {
       .mockResolvedValueOnce(ok({ id: 7 }))
       .mockResolvedValueOnce(ok({ id: 7 }))
       .mockResolvedValueOnce(ok({ id: 8 }, 201))
-      .mockResolvedValueOnce(ok({ id: 7, status: 'inactive' }))
-      .mockResolvedValueOnce(ok({ id: 7, schedule: { enabled: true } }))
+      .mockResolvedValueOnce(ok({ id: 7, status: 'disabled' }))
+      .mockResolvedValueOnce(ok({ next_run_at: '2026-10-17T02:00:00Z' }))
       .mockResolvedValueOnce(ok({ run_key: 'r', created_count: 1 }))
       .mockResolvedValueOnce(ok([]))
     const client = createComposeClient({ fetch })
@@ -27,8 +27,8 @@ describe('compose api client', () => {
     await client.createStrategy({ name: '切片' })
     await client.updateStrategy(7, { name: '切片' })
     await client.copyStrategy(7, '切片 副本')
-    await client.setStrategyStatus(7, 'inactive')
-    await client.setStrategySchedule(7, { enabled: true })
+    await client.setStrategyStatus(7, 'disabled')
+    await client.previewStrategyNextRun({ mode: 'interval', interval_minutes: 30, timezone: 'Asia/Shanghai' })
     await client.runStrategyNow(7, 'request-001')
     await client.listTemplates()
     await client.listTeams()
@@ -48,10 +48,10 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[4][1].body).toBe(JSON.stringify({ name: '切片 副本' }))
     expect(fetch.mock.calls[5][0]).toBe('/api/v1/compose-strategies/7/status')
     expect(fetch.mock.calls[5][1].method).toBe('PATCH')
-    expect(fetch.mock.calls[5][1].body).toBe(JSON.stringify({ status: 'inactive' }))
-    expect(fetch.mock.calls[6][0]).toBe('/api/v1/compose-strategies/7/schedule')
-    expect(fetch.mock.calls[6][1].method).toBe('PUT')
-    expect(fetch.mock.calls[6][1].body).toBe(JSON.stringify({ enabled: true }))
+    expect(fetch.mock.calls[5][1].body).toBe(JSON.stringify({ status: 'disabled' }))
+    expect(fetch.mock.calls[6][0]).toBe('/api/v1/compose-strategies/next-run-preview')
+    expect(fetch.mock.calls[6][1].method).toBe('POST')
+    expect(fetch.mock.calls[6][1].body).toBe(JSON.stringify({ mode: 'interval', interval_minutes: 30, timezone: 'Asia/Shanghai' }))
     expect(fetch.mock.calls[7][0]).toBe('/api/v1/compose-strategies/7/run-now')
     expect(fetch.mock.calls[7][1].method).toBe('POST')
     expect(fetch.mock.calls[7][1].body).toBe(JSON.stringify({ request_key: 'request-001' }))
@@ -162,3 +162,41 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[4][0]).toBe('/api/v1/compose-outputs/5/downloads')
     expect(fetch.mock.calls[4][1].method).toBe('POST')
   })
+
+// 素材使用情况（创建抽屉的未使用过/已使用过分组）：服务端一次最多认 200 个 ID，超了整块
+// 400，所以分片必须在客户端做掉 —— 留给调用方就是留一个「素材多了就整块不可用」的坑。
+describe('compose material states', () => {
+  it('reads one query for a small candidate list', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok([{ material_id: 42, success_count: 1 }]))
+    const client = createComposeClient({ fetch })
+    await expect(client.listStrategyMaterialStates(7, [42, 43])).resolves.toHaveLength(1)
+    expect(fetch.mock.calls).toHaveLength(1)
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/material-states?material_ids=42%2C43')
+    expect(fetch.mock.calls[0][1].method).toBe('GET')
+  })
+
+  it('splits more than 200 ids and merges the answers', async () => {
+    const ids = Array.from({ length: 450 }, (_, index) => index + 1)
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(ok([{ material_id: 1 }]))
+      .mockResolvedValueOnce(ok([{ material_id: 201 }]))
+      .mockResolvedValueOnce(ok([{ material_id: 401 }]))
+    const client = createComposeClient({ fetch })
+    await expect(client.listStrategyMaterialStates(7, ids)).resolves.toHaveLength(3)
+    expect(fetch.mock.calls).toHaveLength(3)
+    const counts = fetch.mock.calls.map((call) => call[0].split('material_ids=')[1].split('%2C'))
+    expect(counts.map((list) => list.length)).toEqual([200, 200, 50])
+    expect(counts[0][0]).toBe('1')
+    expect(counts[1][0]).toBe('201')
+    expect(counts[2][49]).toBe('450')
+  })
+
+  // 同一个 ID 出现两次只该问一次：重复只浪费额度，还会让「每个请求的 ID 都有一条」这个
+  // 契约看起来被违反了。
+  it('asks about a repeated id once', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok([]))
+    const client = createComposeClient({ fetch })
+    await client.listStrategyMaterialStates(7, [42, 42, 43])
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/material-states?material_ids=42%2C43')
+  })
+})

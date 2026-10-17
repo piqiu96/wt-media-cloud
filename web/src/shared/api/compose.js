@@ -1,6 +1,9 @@
 import { createApiClient } from './http.js'
 import { isDesktop } from '../../utils.js'
 
+// 与 service.ComposeMaterialStateLimit 同一个数：服务端按 ID 个数校验，超限是整块 400。
+const MATERIAL_STATE_CHUNK = 200
+
 export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
@@ -15,19 +18,31 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     updateStrategy(id, data) { return api.put(`/compose-strategies/${id}`, data) },
     copyStrategy(id, name) { return api.post(`/compose-strategies/${id}/copy`, { name }) },
     setStrategyStatus(id, status) { return api.patch(`/compose-strategies/${id}/status`, { status }) },
-    setStrategySchedule(id, schedule) { return api.put(`/compose-strategies/${id}/schedule`, schedule) },
+    previewStrategyNextRun(schedule) { return api.post('/compose-strategies/next-run-preview', schedule) },
     runStrategyNow(id, requestKey) { return api.post(`/compose-strategies/${id}/run-now`, { request_key: requestKey }) },
     listStrategyRuns(id) { return api.get(`/compose-strategies/${id}/runs`) },
     // 批次结果归集（CHG-20261015-095）：按运行记录的计划时间取该批次逐素材任务
     // 与状态统计；schedule_slot 原样回传运行记录里的时间串。
     listStrategyRunTasks(id, scheduleSlot) { return api.get(`/compose-strategies/${id}/runs/tasks`, { schedule_slot: scheduleSlot }) },
+    // 素材在一条策略下的使用情况（创建抽屉的未使用过/已使用过分组）。服务端一次最多
+    // 认 200 个 ID，超了整块 400，所以分片在这里做掉，调用方只给一份 ID 列表。
+    async listStrategyMaterialStates(id, materialIds) {
+      const ids = [...new Set(materialIds || [])]
+      const states = []
+      for (let start = 0; start < ids.length; start += MATERIAL_STATE_CHUNK) {
+        const chunk = ids.slice(start, start + MATERIAL_STATE_CHUNK)
+        const rows = await api.get(`/compose-strategies/${id}/material-states`, { material_ids: chunk.join(',') })
+        if (Array.isArray(rows)) states.push(...rows)
+      }
+      return states
+    },
     // 合成任务（CHG-20261013-082）：列表筛选（status / compose_strategy_id）由服务端读 query。
     createComposeTasks(data) { return api.post('/compose-tasks', data) },
     listComposeTasks(params) { return api.get('/compose-tasks', params) },
     getComposeTask(id) { return api.get(`/compose-tasks/${id}`) },
     cancelComposeTask(id) { return api.post(`/compose-tasks/${id}/cancel`) },
-    // 执行记录与人工重试（CHG-20261013-089）：attempts 沿任务 scope 读，retry 只认
-    // failed 终态；非重试错误码由服务端 409 compose_task_not_retryable 拒绝。
+    // 执行记录与人工重试（CHG-20261013-089）：attempts 沿任务 scope 读，retry 受理已取消
+    // 与除 execution_uncertain 以外的失败；其余状态由服务端 409 compose_task_not_retryable 拒绝。
     listComposeTaskAttempts(id) { return api.get(`/compose-tasks/${id}/attempts`) },
     retryComposeTask(id) { return api.post(`/compose-tasks/${id}/retry`) },
     listComposeUncertainReviews(id) { return api.get(`/compose-tasks/${id}/uncertain-review`) },

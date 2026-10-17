@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -109,6 +111,23 @@ func UpdateComposeStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, item)
 }
 
+func PreviewComposeStrategyNextRun(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	var schedule model.ComposeSchedule
+	if !decodeStrategyBody(c, &schedule) {
+		return
+	}
+	next, err := productionservice.PreviewComposeStrategyNextRun(current, schedule)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, map[string]any{"next_run_at": next})
+}
+
 func CopyComposeStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	current, ok := actor(c)
 	if !ok {
@@ -148,27 +167,6 @@ func SetComposeStrategyStatus(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	item, err := productionservice.SetComposeStrategyStatus(current, id, input.Status)
-	if err != nil {
-		writeStrategyError(c, err)
-		return
-	}
-	api.Success(c, item)
-}
-
-func SetComposeStrategySchedule(_ context.Context, c *hertzapp.RequestContext) {
-	current, ok := actor(c)
-	if !ok {
-		return
-	}
-	id, ok := strategyID(c)
-	if !ok {
-		return
-	}
-	var input model.ComposeSchedule
-	if !decodeStrategyBody(c, &input) {
-		return
-	}
-	item, err := productionservice.SetComposeStrategySchedule(current, id, input)
 	if err != nil {
 		writeStrategyError(c, err)
 		return
@@ -236,6 +234,58 @@ func ListComposeStrategyRunTasks(_ context.Context, c *hertzapp.RequestContext) 
 		return
 	}
 	api.Success(c, view)
+}
+
+func ListComposeStrategyMaterialStates(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	ids, err := parseMaterialStateIDs(c.Query("material_ids"))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, err.Error(), "compose_strategy_invalid")
+		return
+	}
+	states, err := productionservice.ListComposeStrategyMaterialStates(current, id, ids)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, states)
+}
+
+// parseMaterialStateIDs reads the comma-separated material ids of one
+// material-states read. It rejects a missing or malformed list instead of
+// treating it as empty: an empty list would come back as "nothing was ever
+// used", which is the one wrong answer the caller cannot detect.
+func parseMaterialStateIDs(raw string) ([]int64, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, errors.New("material_ids 不能为空")
+	}
+	parts := strings.Split(trimmed, ",")
+	if len(parts) > productionservice.ComposeMaterialStateLimit {
+		return nil, fmt.Errorf("material_ids 最多 %d 个素材", productionservice.ComposeMaterialStateLimit)
+	}
+	ids := make([]int64, 0, len(parts))
+	seen := make(map[int64]struct{}, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || value <= 0 {
+			return nil, errors.New("material_ids 必须是正整数，用英文逗号分隔")
+		}
+		if _, dup := seen[value]; dup {
+			continue
+		}
+		seen[value] = struct{}{}
+		ids = append(ids, value)
+	}
+	slices.Sort(ids)
+	return ids, nil
 }
 
 func writeStrategyError(c *hertzapp.RequestContext, err error) {

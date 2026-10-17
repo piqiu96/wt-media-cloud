@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -55,10 +57,11 @@ func TestComposeStrategyRoutesRequireAuthentication(t *testing.T) {
 		{consts.MethodPut, "/api/v1/compose-strategies/5"},
 		{consts.MethodPost, "/api/v1/compose-strategies/5/copy"},
 		{consts.MethodPatch, "/api/v1/compose-strategies/5/status"},
-		{consts.MethodPut, "/api/v1/compose-strategies/5/schedule"},
+		{consts.MethodPost, "/api/v1/compose-strategies/next-run-preview"},
 		{consts.MethodPost, "/api/v1/compose-strategies/5/run-now"},
 		{consts.MethodGet, "/api/v1/compose-strategies/5/runs"},
 		{consts.MethodGet, "/api/v1/compose-strategies/5/runs/tasks"},
+		{consts.MethodGet, "/api/v1/compose-strategies/5/material-states"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {
@@ -342,6 +345,7 @@ func TestComposeTaskErrorCarriesTheFrozenPairs(t *testing.T) {
 		{"forbidden", productionservice.ErrComposeTaskForbidden, consts.StatusForbidden, 15215, "compose_task_forbidden"},
 		{"missing", productionservice.ErrComposeTaskNotFound, consts.StatusNotFound, 15216, "compose_task_not_found"},
 		{"not cancellable", productionservice.ErrComposeTaskNotCancellable, consts.StatusConflict, 15217, "compose_task_not_cancellable"},
+		{"conflict", productionservice.ErrComposeTaskConflict, consts.StatusConflict, 15219, "compose_task_conflict"},
 		{"template unavailable", productionservice.ErrStrategyTemplateUnavailable, consts.StatusConflict, 15213, "compose_template_unavailable"},
 	} {
 		engine := server.New()
@@ -385,6 +389,7 @@ func TestTheComposeTaskNamesAreTheFrozenOnes(t *testing.T) {
 		{"compose_task_forbidden", consts.StatusForbidden},
 		{"compose_task_not_found", consts.StatusNotFound},
 		{"compose_task_not_cancellable", consts.StatusConflict},
+		{"compose_task_conflict", consts.StatusConflict},
 	} {
 		declared := fmt.Sprintf("%s: {http_status: %d}", frozen.name, frozen.status)
 		if !strings.Contains(string(content), declared) {
@@ -399,6 +404,7 @@ func TestComposeTaskFailurePayloadsCarryTheFrozenErrcodes(t *testing.T) {
 		Failed: []productionservice.CreateComposeTaskFailure{
 			{MaterialID: 42, RequestKey: "rk-usage-001", Err: productionservice.ErrComposeTaskInvalid, Message: "素材不在我的素材或已移出"},
 			{MaterialID: 43, RequestKey: "rk-scope-001", Err: productionservice.ErrComposeTaskForbidden, Message: "素材不在你的团队范围内"},
+			{MaterialID: 44, RequestKey: "rk-busy-001", Err: productionservice.ErrComposeTaskConflict},
 		},
 	}
 	engine := server.New()
@@ -430,7 +436,7 @@ func TestComposeTaskFailurePayloadsCarryTheFrozenErrcodes(t *testing.T) {
 	if len(body.Data.Created) != 1 || body.Data.Created[0].ID != 77 || body.Data.Created[0].Status != "pending" {
 		t.Fatalf("created = %+v", body.Data.Created)
 	}
-	if len(body.Data.Failed) != 2 {
+	if len(body.Data.Failed) != 3 {
 		t.Fatalf("failed = %+v", body.Data.Failed)
 	}
 	if body.Data.Failed[0].Errcode != 15214 || body.Data.Failed[0].Error != "compose_task_invalid" || body.Data.Failed[0].Message != "素材不在我的素材或已移出" || body.Data.Failed[0].RequestKey != "rk-usage-001" {
@@ -438,6 +444,57 @@ func TestComposeTaskFailurePayloadsCarryTheFrozenErrcodes(t *testing.T) {
 	}
 	if body.Data.Failed[1].Errcode != 15215 || body.Data.Failed[1].Error != "compose_task_forbidden" {
 		t.Fatalf("failed[1] = %+v", body.Data.Failed[1])
+	}
+	// The service leaves Message empty for a conflict on purpose: the sentence
+	// has to come from the mapping table, or a five-item batch would answer in
+	// two different voices.
+	if body.Data.Failed[2].Errcode != 15219 || body.Data.Failed[2].Error != "compose_task_conflict" || body.Data.Failed[2].Message != "该素材在这个策略下已有任务记录，不能再次创建；如需重跑请在任务列表点「重试」" {
+		t.Fatalf("failed[2] = %+v", body.Data.Failed[2])
+	}
+}
+
+// The ids of one material-states read arrive as one comma-separated query
+// parameter, so the parsing is where an empty or malformed list would turn into
+// the one wrong answer — "nothing was ever used".
+func TestParseMaterialStateIDs(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		raw  string
+		want []int64
+	}{
+		{"trims and sorts", " 43 , 42 ", []int64{42, 43}},
+		{"drops duplicates", "1,2,2,1", []int64{1, 2}},
+		{"single id", "42", []int64{42}},
+		{"empty rejects", "", nil},
+		{"spaces reject", "   ", nil},
+		{"zero rejects", "0", nil},
+		{"word rejects", "a", nil},
+		{"dangling comma rejects", "1,", nil},
+		{"negative rejects", "42,-1", nil},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := parseMaterialStateIDs(testCase.raw)
+			if testCase.want == nil {
+				if err == nil {
+					t.Fatalf("%q parsed to %v, want an error", testCase.raw, got)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, testCase.want) {
+				t.Fatalf("parseMaterialStateIDs(%q) = %v, %v; want %v", testCase.raw, got, err, testCase.want)
+			}
+		})
+	}
+	over := make([]string, productionservice.ComposeMaterialStateLimit+1)
+	for i := range over {
+		over[i] = strconv.Itoa(i + 1)
+	}
+	if _, err := parseMaterialStateIDs(strings.Join(over, ",")); err == nil {
+		t.Fatalf("%d ids must be rejected", len(over))
+	}
+	atLimit := over[:productionservice.ComposeMaterialStateLimit]
+	if got, err := parseMaterialStateIDs(strings.Join(atLimit, ",")); err != nil || len(got) != productionservice.ComposeMaterialStateLimit {
+		t.Fatalf("at the limit: %d ids, err=%v", len(got), err)
 	}
 }
 

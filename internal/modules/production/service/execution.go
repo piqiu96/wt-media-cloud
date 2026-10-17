@@ -45,6 +45,7 @@ const (
 	composeErrExecutionFailed     = "execution_failed"
 	composeErrStorageError        = "storage_error"
 	composeErrTaskTimeout         = "task_timeout"
+	composeErrExecutionUncertain  = "execution_uncertain"
 )
 
 // Compose stage/progress boundaries (change.md §7: stage enum, progress at
@@ -67,7 +68,8 @@ type composeRunner interface {
 type composeTaskLifecycle interface {
 	RenewComposeLease(taskID, nodeID int64, attempt int, lease time.Duration) (bool, error)
 	ReportComposeProgress(taskID, nodeID int64, attempt int, stage string, progress int) (bool, error)
-	CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int) (model.ComposeOutputCommit, error)
+	RecordComposeAttemptStep(taskID, nodeID int64, attempt int, step model.ComposeTaskAttemptStep) (bool, error)
+	CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int, step model.ComposeTaskAttemptStep) (model.ComposeOutputCommit, error)
 	ReleaseComposeForRetry(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
 	FailComposeTask(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
 	Find(id int64) (model.ComposeTask, bool, error)
@@ -94,25 +96,60 @@ type ComposeExecutorDeps struct {
 	EnsureInputPrepared EnsureInputPrepared
 }
 
+// attemptStep marks when the phase currently running started, so both a
+// completed step and a failed one report how long it ran.
+type attemptStep struct {
+	key     string
+	started time.Time
+}
+
+func beginStep(key string) attemptStep { return attemptStep{key: key, started: time.Now()} }
+
+// The metric builders keep call sites from spelling out a pointer literal per
+// step; fields that are not set stay omitted from the stored entry.
+func sizeMetrics(bytes int64) model.ComposeAttemptStepMetrics {
+	return model.ComposeAttemptStepMetrics{SizeBytes: &bytes}
+}
+
+func uploadMetrics(size int64, digest string) model.ComposeAttemptStepMetrics {
+	return model.ComposeAttemptStepMetrics{SizeBytes: &size, SHA256: digest}
+}
+
+func durationMetrics(milliseconds int64) model.ComposeAttemptStepMetrics {
+	return model.ComposeAttemptStepMetrics{OutputDurationMS: &milliseconds}
+}
+
+// fileMetrics reports a staged file's size, or nothing when the filesystem
+// cannot tell us: every metric is a fact about the bytes this worker moved.
+func fileMetrics(path string) model.ComposeAttemptStepMetrics {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= 0 {
+		return model.ComposeAttemptStepMetrics{}
+	}
+	return sizeMetrics(info.Size())
+}
+
 // RunComposeAttempt executes one claimed task inside an owned run directory:
 // validate against the snapshot, gate on input readiness, run the executor,
 // upload to a temporary key, verify, copy to the formal key, and commit the
 // output and the success flip in one transaction. Source facts come only from
 // the task row — the latest strategy config is never read here (ADR-0021).
 func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, runDir *compose.RunDir) ComposeAttemptOutcome {
+	validateStep := beginStep(model.ComposeStepValidateInput)
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageValidatingInput, 10) {
 		return ComposeAttemptLeaseLost
 	}
 	plan, err := validateSnapshotTemplate(deps.Registry, task)
 	if err != nil {
-		return failTerminal(deps.Tasks, task, nodeID, composeErrTemplateUnavailable, err.Error())
+		return failTerminal(deps.Tasks, task, nodeID, validateStep, composeErrTemplateUnavailable, err.Error())
 	}
-	inputPath, outcome := prepareInput(ctx, deps, task, nodeID, runDir)
+	inputPath, outcome := prepareInput(ctx, deps, task, nodeID, beginStep(model.ComposeStepPrepareInput), runDir)
 	if outcome != "" {
 		return outcome
 	}
 	guidePath := ""
 	if guide, ok := plan.(executor.GuidePlan); ok {
+		fetchStep := beginStep(model.ComposeStepFetchGuide)
 		guidePath = filepath.Join(runDir.Path(), "guide-input")
 		fetch := deps.FetchGuide
 		if fetch == nil {
@@ -126,10 +163,11 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 				return ComposeAttemptLeaseLost
 			}
 			if errors.Is(err, compose.ErrGuideTemporary) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, err.Error())
+				return transientFailureInContext(ctx, deps, task, nodeID, fetchStep, composeErrStorageError, err.Error())
 			}
-			return failTerminal(deps.Tasks, task, nodeID, composeErrInputInvalid, err.Error())
+			return failTerminal(deps.Tasks, task, nodeID, fetchStep, composeErrInputInvalid, err.Error())
 		}
+		recordStepSuccess(deps.Tasks, task, nodeID, fetchStep, fileMetrics(guidePath))
 	}
 	if cancelRequested(deps.Tasks, task.ID) {
 		return ComposeAttemptCancelled
@@ -137,6 +175,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageCutting, 40) {
 		return ComposeAttemptLeaseLost
 	}
+	cutStep := beginStep(model.ComposeStepCut)
 	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, GuidePath: guidePath})
 	if err != nil {
 		// A run the worker terminated speaks with its context, not with
@@ -148,13 +187,14 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 			return ComposeAttemptCancelled
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return transientFailure(deps, task, nodeID, composeErrTaskTimeout, err.Error())
+			return transientFailure(deps, task, nodeID, cutStep, composeErrTaskTimeout, err.Error())
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return ComposeAttemptLeaseLost
 		}
-		return failTerminal(deps.Tasks, task, nodeID, composeErrExecutionFailed, err.Error())
+		return failTerminal(deps.Tasks, task, nodeID, cutStep, composeErrExecutionFailed, err.Error())
 	}
+	recordStepSuccess(deps.Tasks, task, nodeID, cutStep, durationMetrics(output.DurationMS))
 	if cancelRequested(deps.Tasks, task.ID) {
 		return ComposeAttemptCancelled
 	}
@@ -168,18 +208,21 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	// Every exit from this point attempts cleanup; the recovery scan handles
 	// any deletion that fails or is skipped by a crashed worker.
 	defer removeComposeObject(ctx, deps.Store, tempKey)
+	uploadStep := beginStep(model.ComposeStepUpload)
 	size, digest, err := uploadVerified(ctx, deps.Store, deps.Client, output.Path, tempKey)
 	if err != nil {
 		if errors.Is(err, errComposeOutputInvalid) {
-			return failTerminal(deps.Tasks, task, nodeID, composeErrExecutionFailed, err.Error())
+			return failTerminal(deps.Tasks, task, nodeID, uploadStep, composeErrExecutionFailed, err.Error())
 		}
-		return transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, err.Error())
+		return transientFailureInContext(ctx, deps, task, nodeID, uploadStep, composeErrStorageError, err.Error())
 	}
+	recordStepSuccess(deps.Tasks, task, nodeID, uploadStep, uploadMetrics(size, digest))
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageCommitting, 90) {
 		return ComposeAttemptLeaseLost
 	}
+	commitStep := beginStep(model.ComposeStepCommit)
 	if err := deps.Store.Copy(ctx, tempKey, formalKey); err != nil {
-		return transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "copy to formal key: "+err.Error())
+		return transientFailureInContext(ctx, deps, task, nodeID, commitStep, composeErrStorageError, "copy to formal key: "+err.Error())
 	}
 	media, _ := json.Marshal(map[string]int64{"duration_ms": output.DurationMS})
 	out := model.CompositeOutput{
@@ -190,13 +233,22 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		ObjectKey: formalKey, FileSizeBytes: size, SHA256: digest, Media: media,
 		PublishStatus: "pending_publish", CreatedBy: task.CreatedBy,
 	}
-	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID, task.AttemptCount); err != nil {
+	// The commit is the one step that cannot be appended afterwards: it closes
+	// the attempt row, so the append's own guard would refuse it. It rides
+	// inside the transaction instead, where the record of the step and the
+	// success it reports are one fact.
+	closing := finishedStep(commitStep)
+	closing.Outcome = model.ComposeStepOutcomeSuccess
+	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID, task.AttemptCount, closing); err != nil {
 		// ErrComposeCommitLost proves the transaction rolled back. Other
 		// errors may be a lost response after commit; deleting the formal
 		// object then could leave a success row pointing at missing bytes.
 		if errors.Is(err, repository.ErrComposeCommitLost) {
 			removeComposeObject(ctx, deps.Store, formalKey)
 		}
+		// The attempt is left for the recovery scan, so this entry is what
+		// tells the operator the run stopped here with an unknown result.
+		recordStepFailure(deps.Tasks, task, nodeID, commitStep, composeErrExecutionUncertain)
 		return ComposeAttemptLeaseLost
 	}
 	return ComposeAttemptSuccess
@@ -226,21 +278,21 @@ func validateSnapshotTemplate(registry *executor.Registry, task model.ComposeTas
 // prepareInput gates on readiness (PRD §5.4.4: an unready source keeps the
 // task waiting, it never fabricates an input), and stages the prepared source
 // into the run directory. A non-empty outcome short-circuits the attempt.
-func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, runDir *compose.RunDir) (string, ComposeAttemptOutcome) {
+func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, runDir *compose.RunDir) (string, ComposeAttemptOutcome) {
 	material, found, err := deps.Materials.FindMaterial(task.MaterialID)
 	if err != nil {
-		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "read material: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "read material: "+err.Error())
 	}
 	if !found {
-		return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputMissing, "material row is gone")
+		return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "material row is gone")
 	}
 	if material.VideoStatus == model.VideoFailed {
-		return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputInvalid, "source preparation failed for material "+strconv.FormatInt(task.MaterialID, 10))
+		return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputInvalid, "source preparation failed for material "+strconv.FormatInt(task.MaterialID, 10))
 	}
 	if material.VideoStatus != model.VideoReady || material.SourceObjectKey == "" {
 		if deps.EnsureInputPrepared != nil {
 			if err := deps.EnsureInputPrepared(ctx, task, task.MaterialID); err != nil {
-				return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "request input preparation: "+err.Error())
+				return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "request input preparation: "+err.Error())
 			}
 		}
 		_, _ = deps.Tasks.ReportComposeProgress(task.ID, nodeID, task.AttemptCount, composeStageWaitingInput, 20)
@@ -248,18 +300,19 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 	}
 	if _, err := deps.Store.Stat(ctx, material.SourceObjectKey); err != nil {
 		if errors.Is(err, storage.ErrObjectNotFound) {
-			return "", failTerminal(deps.Tasks, task, nodeID, composeErrInputMissing, "source object is gone: "+err.Error())
+			return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "source object is gone: "+err.Error())
 		}
-		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "source object: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "source object: "+err.Error())
 	}
 	grant, err := deps.Store.PresignGet(ctx, material.SourceObjectKey, deps.GrantTTL)
 	if err != nil {
-		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "presign source: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "presign source: "+err.Error())
 	}
 	inputPath := filepath.Join(runDir.Path(), "source-input")
 	if err := downloadFile(ctx, deps.Client, grant.URL, inputPath); err != nil {
-		return "", transientFailureInContext(ctx, deps, task, nodeID, composeErrStorageError, "download source: "+err.Error())
+		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "download source: "+err.Error())
 	}
+	recordStepSuccess(deps.Tasks, task, nodeID, step, fileMetrics(inputPath))
 	return inputPath, ""
 }
 
@@ -347,30 +400,68 @@ func cancelRequested(tasks composeTaskLifecycle, taskID int64) bool {
 	return err == nil && found && item.CancelRequested
 }
 
-// failTerminal marks the task failed and reports the outcome; the write is
-// best-effort — a lost lease leaves the row to the recovery scan, which is
-// the honest owner of that situation.
-func failTerminal(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, code, message string) ComposeAttemptOutcome {
+// finishedStep stamps a marker with the finish time and the elapsed duration —
+// the part of a step every path shares.
+func finishedStep(step attemptStep) model.ComposeTaskAttemptStep {
+	finished := time.Now()
+	return model.ComposeTaskAttemptStep{
+		Step:       step.key,
+		StartedAt:  step.started,
+		FinishedAt: finished,
+		DurationMS: finished.Sub(step.started).Milliseconds(),
+	}
+}
+
+// recordStep appends one finished step to the attempt this worker still owns.
+// The write is evidence, never a control signal: the result is ignored, and a
+// lost race can only drop an entry, never duplicate or misattribute one. The
+// server owns the label and the failure category, so only the phase's own
+// facts are passed in.
+func recordStep(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, step attemptStep, outcome, code string, metrics model.ComposeAttemptStepMetrics) {
+	if step.started.IsZero() {
+		return
+	}
+	entry := finishedStep(step)
+	entry.Outcome, entry.ErrorCode, entry.Metrics = outcome, code, metrics
+	_, _ = tasks.RecordComposeAttemptStep(task.ID, nodeID, task.AttemptCount, entry)
+}
+
+func recordStepSuccess(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, step attemptStep, metrics model.ComposeAttemptStepMetrics) {
+	recordStep(tasks, task, nodeID, step, model.ComposeStepOutcomeSuccess, "", metrics)
+}
+
+func recordStepFailure(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, step attemptStep, code string) {
+	recordStep(tasks, task, nodeID, step, model.ComposeStepOutcomeFailed, code, model.ComposeAttemptStepMetrics{})
+}
+
+// failTerminal records the failing step, marks the task failed and reports the
+// outcome; the task write is best-effort — a lost lease leaves the row to the
+// recovery scan, which is the honest owner of that situation.
+func failTerminal(tasks composeTaskLifecycle, task model.ComposeTask, nodeID int64, step attemptStep, code, message string) ComposeAttemptOutcome {
+	recordStepFailure(tasks, task, nodeID, step, code)
 	_, _ = tasks.FailComposeTask(task.ID, nodeID, task.AttemptCount, code, message)
 	return ComposeAttemptFailed
 }
 
 // transientFailure requeues within the attempt budget, or terminal-fails with
 // the exhaustion note once the budget is spent — a task must never end up
-// pending forever with no attempts left.
-func transientFailure(deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, code, message string) ComposeAttemptOutcome {
+// pending forever with no attempts left. The failing step is recorded on
+// whichever branch ends the attempt, and the requeue closes the attempt row,
+// so it is written first: afterwards the append's own guard refuses it.
+func transientFailure(deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, code, message string) ComposeAttemptOutcome {
 	if task.AttemptCount < task.MaxAttempts {
+		recordStepFailure(deps.Tasks, task, nodeID, step, code)
 		if ok, _ := deps.Tasks.ReleaseComposeForRetry(task.ID, nodeID, task.AttemptCount, code, message); ok {
 			return ComposeAttemptRetry
 		}
 		return ComposeAttemptLeaseLost
 	}
-	return failTerminal(deps.Tasks, task, nodeID, code, message+fmt.Sprintf(" (attempts exhausted after %d)", task.AttemptCount))
+	return failTerminal(deps.Tasks, task, nodeID, step, code, message+fmt.Sprintf(" (attempts exhausted after %d)", task.AttemptCount))
 }
 
-func transientFailureInContext(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, code, message string) ComposeAttemptOutcome {
+func transientFailureInContext(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, code, message string) ComposeAttemptOutcome {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return ComposeAttemptLeaseLost
 	}
-	return transientFailure(deps, task, nodeID, code, message)
+	return transientFailure(deps, task, nodeID, step, code, message)
 }
