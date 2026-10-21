@@ -20,6 +20,10 @@ type StrategyFilter struct {
 	TeamID     int64
 	GameIDs    []string
 	ActiveOnly bool
+	Search     string
+	GameID     string
+	TemplateID int64
+	Status     string
 }
 
 type StrategyStore struct{}
@@ -157,6 +161,22 @@ func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeS
 	if filter.ActiveOnly {
 		query += ` AND s.status = ? AND t.status = 'active'`
 		args = append(args, model.ComposeStrategyEnabled)
+	}
+	if filter.Search != "" {
+		query += ` AND (s.name LIKE ? ESCAPE '!' OR CAST(s.id AS CHAR) = ?)`
+		args = append(args, likeContains(filter.Search), filter.Search)
+	}
+	if filter.GameID != "" {
+		query += ` AND s.game_id = ?`
+		args = append(args, filter.GameID)
+	}
+	if filter.TemplateID > 0 {
+		query += ` AND s.compose_template_id = ?`
+		args = append(args, filter.TemplateID)
+	}
+	if filter.Status != "" {
+		query += ` AND s.status = ?`
+		args = append(args, filter.Status)
 	}
 	query += ` ORDER BY s.id DESC LIMIT 200`
 	rows, err := db.Raw(query, args...).Rows()

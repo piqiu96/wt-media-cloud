@@ -24,6 +24,8 @@ type ComposeOutputFilter struct {
 	CreatedBy     int64
 	PublishStatus string
 	Source        string
+	Search        string
+	TriggerType   string
 	CreatedFrom   time.Time
 	CreatedBefore time.Time
 }
@@ -77,6 +79,17 @@ func listComposeOutputs(db *gorm.DB, filter ComposeOutputFilter) ([]model.Compos
 			query += ` AND EXISTS (SELECT 1 FROM materials m WHERE m.id = composite_outputs.material_id AND m.title LIKE ? ESCAPE '!')`
 			args = append(args, title)
 		}
+	}
+	if filter.Search != "" {
+		// One box searches the same facts the page shows: the output ID, the
+		// source material (ID and title) and the strategy name.
+		like := likeContains(filter.Search)
+		query += ` AND (CAST(composite_outputs.id AS CHAR) LIKE ? ESCAPE '!' OR CAST(composite_outputs.material_id AS CHAR) LIKE ? ESCAPE '!' OR EXISTS (SELECT 1 FROM materials m WHERE m.id = composite_outputs.material_id AND m.title LIKE ? ESCAPE '!') OR EXISTS (SELECT 1 FROM compose_strategies s WHERE s.id = composite_outputs.compose_strategy_id AND s.name LIKE ? ESCAPE '!'))`
+		args = append(args, like, like, like, like)
+	}
+	if filter.TriggerType != "" {
+		query += ` AND EXISTS (SELECT 1 FROM compose_tasks t WHERE t.id = composite_outputs.compose_task_id AND t.trigger_type = ?)`
+		args = append(args, filter.TriggerType)
 	}
 	if !filter.CreatedFrom.IsZero() {
 		query += ` AND created_at >= ?`

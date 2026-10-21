@@ -26,6 +26,8 @@ var (
 type ListComposeOutputsInput struct {
 	PublishStatus string    `json:"publish_status"`
 	Source        string    `json:"source"`
+	Search        string    `json:"search"`
+	TriggerType   string    `json:"trigger_type"`
 	CreatedFrom   time.Time `json:"created_from"`
 	CreatedBefore time.Time `json:"created_before"`
 }
@@ -172,13 +174,25 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 	if len([]rune(source)) > 100 {
 		return nil, fmt.Errorf("%w: source is too long", ErrComposeOutputInvalid)
 	}
-	filter := repository.ComposeOutputFilter{Source: source, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
+	search := strings.TrimSpace(input.Search)
+	if len([]rune(search)) > 100 {
+		return nil, fmt.Errorf("%w: search is too long", ErrComposeOutputInvalid)
+	}
+	filter := repository.ComposeOutputFilter{Source: source, Search: search, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
 	if input.PublishStatus != "" {
 		switch input.PublishStatus {
 		case "pending_publish", "published", "archived":
 			filter.PublishStatus = input.PublishStatus
 		default:
 			return nil, fmt.Errorf("%w: unknown publish_status %s", ErrComposeOutputInvalid, input.PublishStatus)
+		}
+	}
+	if input.TriggerType != "" {
+		switch input.TriggerType {
+		case "manual", "scheduled":
+			filter.TriggerType = input.TriggerType
+		default:
+			return nil, fmt.Errorf("%w: unknown trigger_type %s", ErrComposeOutputInvalid, input.TriggerType)
 		}
 	}
 	if actor.Role != identity.RoleAdmin {

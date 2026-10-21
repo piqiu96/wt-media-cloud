@@ -3,6 +3,7 @@ package repository
 import (
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,24 @@ func TestProfileBindingMigrationKeepsScansAndProfilesSeparate(t *testing.T) {
 		if !containsString(content, required) {
 			t.Fatalf("migration missing %q", required)
 		}
+	}
+}
+
+func TestListProfilesFiltersAndOrdersInSQL(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	mock.ExpectQuery(`SELECT .* FROM browser_profiles WHERE 1=1 AND user_id = \? AND id LIKE \? ESCAPE '!' AND name LIKE \? ESCAPE '!' AND \(group_id LIKE \? ESCAPE '!' OR group_name LIKE \? ESCAPE '!'\) AND bit_profile_id LIKE \? ESCAPE '!' AND remark LIKE \? ESCAPE '!' AND local_status = \? AND business_status = \? ORDER BY seq DESC, id DESC`).
+		WithArgs(sharedidentity.UserID(5), "%bp!_1%", "%窗口!_1%", "%分组!_1%", "%分组!_1%", "%bit!_1%", "%备注!_1%", "active", "enabled").
+		WillReturnRows(sqlmock.NewRows(strings.Split(profileColumnsSQL, ", ")))
+	items, err := listProfiles(db, ProfileListFilter{
+		UserID: 5, ID: "bp_1", Name: "窗口_1", Group: "分组_1",
+		BitProfileID: "bit_1", Remark: "备注_1", LocalStatus: "active", BusinessStatus: "enabled",
+	})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

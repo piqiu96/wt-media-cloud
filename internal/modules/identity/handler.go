@@ -288,7 +288,7 @@ func ListTeams(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	teams, err := identityservice.ListTeams(actor.ID)
+	teams, err := identityservice.ListTeams(actor.ID, strings.TrimSpace(c.Query("keyword")))
 	if err != nil {
 		writeIdentityError(c, err)
 		return

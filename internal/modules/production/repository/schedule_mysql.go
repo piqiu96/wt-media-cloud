@@ -17,8 +17,63 @@ import (
 
 type ComposeScheduleStore struct{}
 
+type ScheduleRunHistoryOptions struct {
+	StrategyID    int64
+	Page          int
+	PageSize      int
+	TriggerType   string
+	CreatedFrom   *time.Time
+	CreatedBefore *time.Time
+}
+
 func (ComposeScheduleStore) ListRuns(strategyID int64, limit int) ([]model.ComposeScheduleRun, error) {
 	return listComposeScheduleRuns(database.DB(), strategyID, limit)
+}
+
+func (ComposeScheduleStore) ListRunHistory(options ScheduleRunHistoryOptions) (model.ComposeScheduleRunHistoryPage, error) {
+	return listComposeScheduleRunHistory(database.DB(), options)
+}
+
+func listComposeScheduleRunHistory(db *gorm.DB, options ScheduleRunHistoryOptions) (model.ComposeScheduleRunHistoryPage, error) {
+	page := model.ComposeScheduleRunHistoryPage{Items: []model.ComposeScheduleRunHistoryItem{}, Page: options.Page, PageSize: options.PageSize}
+	where := " WHERE r.compose_strategy_id = ?"
+	args := []any{options.StrategyID}
+	if options.TriggerType != "" {
+		where += " AND r.trigger_type = ?"
+		args = append(args, options.TriggerType)
+	}
+	if options.CreatedFrom != nil {
+		where += " AND r.created_at >= ?"
+		args = append(args, *options.CreatedFrom)
+	}
+	if options.CreatedBefore != nil {
+		where += " AND r.created_at < ?"
+		args = append(args, *options.CreatedBefore)
+	}
+	if err := db.Raw("SELECT COUNT(*) FROM compose_schedule_runs r"+where, args...).Row().Scan(&page.Total); err != nil {
+		return page, err
+	}
+	query := `SELECT r.run_key, r.compose_strategy_id, r.trigger_type, r.schedule_slot, r.candidate_count, r.created_count, r.skipped_json, r.created_at,
+		(SELECT COUNT(*) FROM compose_tasks t WHERE t.compose_strategy_id = r.compose_strategy_id AND t.schedule_slot = r.schedule_slot AND t.status = 'failed')
+		FROM compose_schedule_runs r` + where + ` ORDER BY r.created_at DESC, r.run_key DESC LIMIT ? OFFSET ?`
+	rows, err := db.Raw(query, append(args, options.PageSize, (options.Page-1)*options.PageSize)...).Rows()
+	if err != nil {
+		return page, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item model.ComposeScheduleRunHistoryItem
+		var skipped []byte
+		run := &item.ComposeScheduleRun
+		if err := rows.Scan(&run.RunKey, &run.StrategyID, &run.TriggerType, &run.ScheduleSlot, &run.CandidateCount, &run.CreatedCount, &skipped, &run.CreatedAt, &item.FailedCount); err != nil {
+			return page, err
+		}
+		if err := json.Unmarshal(skipped, &run.Skipped); err != nil {
+			return page, fmt.Errorf("compose schedule run %s has invalid skips: %w", run.RunKey, err)
+		}
+		page.Items = append(page.Items, item)
+	}
+	return page, rows.Err()
 }
 
 // FindRun returns the strategy's latest run for a slot — the run whose batch

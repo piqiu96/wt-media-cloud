@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { handOverCloudVideo } from './cloudVideo.js'
 
-// 地址在这里是**假造**的：真实地址是凭据，不进测试、不进日志，这里只需看它被原样
-// 交出去。
+// 地址在这里是**假造**的：只验证对象路径转成公开读取路径，不使用真实素材。
 const SIGNED =
-  'https://s3.oss.longyanyue.cn/data/dev/materials/30/a.mp4?X-Amz-Signature=stub'
+  'https://s3.oss.longyanyue.cn/data/wt_media/dev/materials/30/a.mp4?X-Amz-Signature=stub'
+const PUBLIC = 'https://data.bucket.oss.longyanyue.cn/wt_media/dev/materials/30/a.mp4'
 
 /**
  * 装一个假的 `window`（`environment: 'node'` 下没有它）并把每次调用按顺序记进一条
@@ -58,7 +58,7 @@ describe('cloud video hand-over', () => {
       desktop: true,
       reportError: () => {},
     })
-    expect(calls).toEqual([['fetch'], ['open', SIGNED, '_blank', 'noopener']])
+    expect(calls).toEqual([['fetch'], ['open', PUBLIC, '_blank', 'noopener']])
     expect(client.getVideoUrl).toHaveBeenCalledWith(30)
   })
 
@@ -92,7 +92,7 @@ describe('cloud video hand-over', () => {
       desktop: false,
       reportError: () => {},
     })
-    expect(calls).toEqual([['open', '', '_blank'], ['fetch'], ['replace', SIGNED]])
+    expect(calls).toEqual([['open', '', '_blank'], ['fetch'], ['replace', PUBLIC]])
     expect(tab.opener).toBe(null)
   })
 

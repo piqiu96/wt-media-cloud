@@ -68,8 +68,17 @@ func wiredStrategyService() *StrategyService {
 	return NewStrategyService(repository.StrategyStore{}, identity.ResolveGame)
 }
 
-func ListComposeStrategies(actor identity.PublicUser) ([]model.ComposeStrategy, error) {
-	return wiredStrategyService().List(actor)
+// ComposeStrategyListQuery carries the list page's filters. Pagination stays
+// client-side; the repository caps the result at 200 rows.
+type ComposeStrategyListQuery struct {
+	Search     string
+	GameID     string
+	TemplateID int64
+	Status     string
+}
+
+func ListComposeStrategies(actor identity.PublicUser, query ComposeStrategyListQuery) ([]model.ComposeStrategy, error) {
+	return wiredStrategyService().List(actor, query)
 }
 func GetComposeStrategy(actor identity.PublicUser, id int64) (model.ComposeStrategy, error) {
 	return wiredStrategyService().Get(actor, id)
@@ -87,11 +96,20 @@ func SetComposeStrategyStatus(actor identity.PublicUser, id int64, status string
 	return wiredStrategyService().SetStatus(actor, id, status)
 }
 
-func (s *StrategyService) List(actor identity.PublicUser) ([]model.ComposeStrategy, error) {
+func (s *StrategyService) List(actor identity.PublicUser, query ComposeStrategyListQuery) ([]model.ComposeStrategy, error) {
 	if actor.Status != identity.UserStatusEnabled {
 		return nil, ErrStrategyForbidden
 	}
-	filter := repository.StrategyFilter{ActiveOnly: actor.Role == identity.RoleOperator}
+	if query.Status != "" && query.Status != model.ComposeStrategyEnabled && query.Status != model.ComposeStrategyDisabled {
+		return nil, fmt.Errorf("%w: unknown status %s", ErrStrategyInvalid, query.Status)
+	}
+	filter := repository.StrategyFilter{
+		ActiveOnly: actor.Role == identity.RoleOperator,
+		Search:     strings.TrimSpace(query.Search),
+		GameID:     strings.TrimSpace(query.GameID),
+		TemplateID: query.TemplateID,
+		Status:     query.Status,
+	}
 	if actor.Role != identity.RoleAdmin {
 		if actor.Role != identity.RoleOperator && actor.Role != identity.RoleSeniorOperator {
 			return nil, ErrStrategyForbidden

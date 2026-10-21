@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 )
@@ -193,6 +194,115 @@ func TestAutomaticMaterializationSupportsORRule(t *testing.T) {
 	task, _, _ = store.FindCrawlTask(task.ID)
 	if contentStore.items[1].Status != StatusMaterialCreated || task.Stats.AutoMaterialized != 1 || task.Stats.Pending != 0 {
 		t.Fatalf("expected OR-pass materialization, source=%+v stats=%+v", contentStore.items[1], task.Stats)
+	}
+}
+
+func TestAutomaticMaterializationUsesRuleGroups(t *testing.T) {
+	store := newDiscoveryMemory()
+	contentStore := newMemoryStore()
+	crawler := &cloudCrawlerStub{}
+	service := NewDiscoveryService(store, NewService(contentStore), crawler)
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
+		TeamID: team, Name: "规则组素材", StrategyType: "keyword", Platform: "douyin",
+		Config: map[string]any{
+			"keyword": "热点",
+			"material_rules": []any{
+				map[string]any{"priority": 1, "action": "filter", "logic": "all", "conditions": []any{
+					map[string]any{"field": "like_count", "operator": "lte", "value": 100},
+				}},
+				map[string]any{"priority": 2, "action": "match", "logic": "all", "conditions": []any{
+					map[string]any{"field": "published_at", "operator": "recent_days", "value": 2},
+					map[string]any{"field": "favorite_count", "operator": "gte", "value": 500},
+				}},
+			},
+		}, Status: StrategyEnabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	stale := time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339)
+	crawler.items = []map[string]any{
+		{"platform_content_id": "fresh", "like_count": 5000, "favorite_count": 700, "published_at": fresh},
+		{"platform_content_id": "stale", "like_count": 5000, "favorite_count": 700, "published_at": stale},
+		{"platform_content_id": "low", "like_count": 50, "favorite_count": 700, "published_at": fresh},
+	}
+	task, err := service.CreateRun(actor, strategy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.RunNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	task, _, _ = store.FindCrawlTask(task.ID)
+	if contentStore.items[1].Status != StatusMaterialCreated {
+		t.Fatalf("fresh source should match the date rule: %+v", contentStore.items[1])
+	}
+	if contentStore.items[2].Status != StatusPending {
+		t.Fatalf("stale source should miss the date rule: %+v", contentStore.items[2])
+	}
+	if contentStore.items[3].Status != StatusPending {
+		t.Fatalf("low-like source should be filtered out: %+v", contentStore.items[3])
+	}
+	if task.Stats.AutoMaterialized != 1 || task.Stats.Pending != 2 {
+		t.Fatalf("unexpected stats: %+v", task.Stats)
+	}
+}
+
+func TestRetryFailedUsesPublishedAtForDateRules(t *testing.T) {
+	store := newDiscoveryMemory()
+	contentStore := newMemoryStore()
+	content := NewService(contentStore)
+	service := NewDiscoveryService(store, content, fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{}, nil
+	}))
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	oldTime := time.Now().UTC().Add(-72 * time.Hour)
+	freshTime := time.Now().UTC().Add(-time.Hour)
+	oldSource, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-old", SourceType: "strategy", LikeCount: 12000, PublishedAt: &oldTime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshSource, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-fresh", SourceType: "strategy", LikeCount: 12000, PublishedAt: &freshTime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := CrawlTask{
+		TeamID: team, TaskType: "discovery_task", Platform: "douyin", Status: CrawlFailed,
+		Snapshot: map[string]any{"operation": "keyword", "material_rules": []any{
+			map[string]any{"priority": 1, "action": "match", "logic": "all", "conditions": []any{
+				map[string]any{"field": "published_at", "operator": "recent_days", "value": 2},
+			}},
+		}},
+		Stats: CrawlStats{Scanned: 2, Found: 2, Failed: 2},
+		Results: []map[string]any{
+			{"platform_content_id": oldSource.PlatformContentID, "source_content_id": oldSource.ID, "processing_status": "material_failed", "failure_reason": "provider failed"},
+			{"platform_content_id": freshSource.PlatformContentID, "source_content_id": freshSource.ID, "processing_status": "material_failed", "failure_reason": "provider failed"},
+		},
+	}
+	task, err = store.CreateCrawlTask(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryTask, err := service.retryFailed(actor, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.RunNext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	completed, _, _ := store.FindCrawlTask(retryTask.ID)
+	if completed.Stats.AutoMaterialized != 1 || completed.Stats.Pending != 1 {
+		t.Fatalf("unexpected retry stats: %+v results=%+v", completed.Stats, completed.Results)
+	}
+	if oldSource, _, _ := contentStore.FindSource(oldSource.ID); oldSource.Status != StatusPending || oldSource.MaterialID != nil {
+		t.Fatalf("stale source should stay pending: %+v", oldSource)
+	}
+	if freshSource, _, _ := contentStore.FindSource(freshSource.ID); freshSource.Status != StatusMaterialCreated || freshSource.MaterialID == nil {
+		t.Fatalf("fresh source should materialize: %+v", freshSource)
 	}
 }
 

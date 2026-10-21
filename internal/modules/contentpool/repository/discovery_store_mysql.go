@@ -33,17 +33,43 @@ func createStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStra
 	}
 	return v, nil
 }
-func ListStrategies(team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
-	return listStrategies(database.DB(), team)
+
+type DiscoveryStrategyFilter struct {
+	Search string
+	Type   string
+	Status string
 }
-func listStrategies(db *gorm.DB, team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
+
+func ListStrategies(team *sharedidentity.TeamID) ([]model.DiscoveryStrategy, error) {
+	return listStrategies(database.DB(), team, DiscoveryStrategyFilter{})
+}
+func ListStrategiesFiltered(team *sharedidentity.TeamID, filter DiscoveryStrategyFilter) ([]model.DiscoveryStrategy, error) {
+	return listStrategies(database.DB(), team, filter)
+}
+func listStrategies(db *gorm.DB, team *sharedidentity.TeamID, filter DiscoveryStrategyFilter) ([]model.DiscoveryStrategy, error) {
 	query := `SELECT s.id,s.team_id,s.game_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by`
+	conditions := []string{}
 	args := []any{}
 	if team != nil {
-		query += " WHERE s.team_id = ?"
+		conditions = append(conditions, "s.team_id = ?")
 		args = append(args, *team)
 	}
-	query += " ORDER BY id DESC"
+	if filter.Type != "" {
+		conditions = append(conditions, "s.strategy_type = ?")
+		args = append(args, filter.Type)
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "s.status = ?")
+		args = append(args, filter.Status)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		conditions = append(conditions, "(s.name LIKE ? ESCAPE '!' OR CAST(s.id AS CHAR) = ?)")
+		args = append(args, likeContains(search), search)
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY s.id DESC"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -110,10 +136,20 @@ func createCrawlTask(db *gorm.DB, v model.CrawlTask) (model.CrawlTask, error) {
 	}
 	return v, nil
 }
-func ListCrawlTasks(team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
-	return listCrawlTasks(database.DB(), team, strategyID)
+
+type CrawlTaskFilter struct {
+	Search     string
+	Status     string
+	StrategyID *int64
 }
-func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
+
+func ListCrawlTasks(team *sharedidentity.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
+	return listCrawlTasks(database.DB(), team, CrawlTaskFilter{StrategyID: strategyID})
+}
+func ListCrawlTasksFiltered(team *sharedidentity.TeamID, filter CrawlTaskFilter) ([]model.CrawlTask, error) {
+	return listCrawlTasks(database.DB(), team, filter)
+}
+func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, filter CrawlTaskFilter) ([]model.CrawlTask, error) {
 	query := `SELECT t.id,t.team_id,t.strategy_id,t.parent_task_id,t.schedule_key,t.task_id,t.task_type,t.platform,t.status,t.snapshot_json,t.stats_json,t.result_json,t.error_message,t.started_at,t.finished_at,t.created_by,t.updated_by,t.created_at,t.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM crawl_tasks t LEFT JOIN users cu ON cu.id=t.created_by LEFT JOIN users uu ON uu.id=t.updated_by`
 	conditions := []string{}
 	args := []any{}
@@ -121,14 +157,28 @@ func listCrawlTasks(db *gorm.DB, team *sharedidentity.TeamID, strategyID *int64)
 		conditions = append(conditions, "t.team_id = ?")
 		args = append(args, *team)
 	}
-	if strategyID != nil {
+	if filter.StrategyID != nil {
 		conditions = append(conditions, "t.strategy_id = ?")
-		args = append(args, *strategyID)
+		args = append(args, *filter.StrategyID)
+	}
+	if filter.Status != "" {
+		conditions = append(conditions, "t.status = ?")
+		args = append(args, filter.Status)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		like := likeContains(search)
+		conditions = append(conditions, `((CASE
+			WHEN t.task_type = 'discovery_task' THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), '策略')
+			WHEN t.task_type = 'retry_failed_task' THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.strategy_name')), '重试')
+			WHEN JSON_UNQUOTE(JSON_EXTRACT(t.snapshot_json, '$.operation')) = 'url' THEN 'ID发现'
+			ELSE '关键词发现'
+		END) LIKE ? ESCAPE '!' OR t.task_id LIKE ? ESCAPE '!' OR CAST(t.id AS CHAR) = ?)`)
+		args = append(args, like, like, search)
 	}
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY id DESC LIMIT 500"
+	query += " ORDER BY t.id DESC LIMIT 500"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -273,6 +323,12 @@ func nullString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// likeContains builds a contains pattern whose user-provided % and _ stay
+// literal. Every LIKE using it must declare ESCAPE '!'.
+func likeContains(value string) string {
+	return "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value) + "%"
 }
 
 var errStrategyDuplicate = errors.New("discovery strategy already exists")

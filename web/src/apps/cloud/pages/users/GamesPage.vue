@@ -3,6 +3,9 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
+import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
+import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
+import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
 
 const client = createUsersClient()
 const games = ref([])
@@ -26,12 +29,14 @@ const pagedGames = computed(() => {
 
 const columns = [
   { colKey: 'id', title: '游戏ID', width: 160 },
-  { colKey: 'name', title: '游戏名称' },
+  { colKey: 'name', title: '游戏名称', width: 200 },
   { colKey: 'references', title: '关联情况', width: 190 },
   { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'remark', title: '备注' },
-  { colKey: 'operations', title: '操作', width: 220 },
+  { colKey: 'remark', title: '备注', width: 220 },
+  { colKey: 'operations', title: '操作', width: 220, fixed: 'right' },
 ]
+
+const tableScroll = computed(() => ({ x: `${columns.reduce((sum, col) => sum + col.width, 0)}px` }))
 
 onMounted(loadGames)
 
@@ -144,27 +149,29 @@ async function deleteGame(game) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <t-card title="游戏管理" :bordered="true">
+    <div class="wt-resource-page">
+    <ResourcePageHeader title="游戏管理" description="维护游戏分类与关联范围">
       <template #actions>
-        <t-button theme="primary" size="small" @click="openCreate">新建游戏</t-button>
-        <t-button size="small" style="margin-left:8px" @click="loadGames">刷新</t-button>
+        <t-button theme="primary" @click="openCreate">新增游戏</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="loadGames">刷新</t-button>
       </template>
-      <div class="filter-row">
-        <label class="filter-field"><span>综合搜索</span><t-input v-model="filters.keyword" placeholder="游戏 ID / 名称" clearable style="width:220px" /></label>
-        <label class="filter-field"><span>状态</span><t-select v-model="filters.status" placeholder="全部" clearable style="width:140px">
+    </ResourcePageHeader>
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <ResourceCard class="system-resource-card">
+      <div class="filter-bar">
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.keyword" placeholder="游戏 ID / 名称" clearable @enter="loadGames" /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" placeholder="全部" clearable>
           <t-option value="enabled" label="启用" />
           <t-option value="disabled" label="停用" />
         </t-select></label>
-        <t-button theme="primary" size="small" @click="loadGames">查询</t-button>
-        <t-button class="wt-secondary-button" size="small" variant="outline" @click="resetFilters">重置</t-button>
+        <div class="wt-filter-actions"><t-button theme="primary" @click="loadGames">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
       </div>
-      <t-table :data="pagedGames" :columns="columns" row-key="id" size="small" hover>
+      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedGames" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
         <template #references="{ row }">
           <t-link v-if="hasReferences(row)" theme="primary" @click="openReferences(row)">用户 {{ referenceSummary(row).user_scope_count }} / 账号 {{ referenceSummary(row).media_account_count }}</t-link>
           <span v-else>无关联</span>
         </template>
-        <template #status="{ row }"><t-tag :theme="row.status === 'enabled' ? 'success' : 'danger'" size="small">{{ row.status === 'enabled' ? '启用' : '停用' }}</t-tag></template>
+        <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
         <template #operations="{ row }">
           <t-space>
             <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
@@ -172,12 +179,12 @@ async function deleteGame(game) {
             <t-button size="small" variant="text" theme="danger" :disabled="hasReferences(row)" @click="deleteGame(row)">删除</t-button>
           </t-space>
         </template>
-      </t-table>
-      <div class="pagination-row">
+      </t-table></div>
+      <div class="pagination-bar">
         <t-pagination v-model:current="pagination.current" v-model:page-size="pagination.pageSize" :total="games.length" :page-size-options="[10, 20, 50]" />
       </div>
-    </t-card>
-    <t-dialog v-model:visible="dialogVisible" :header="editingGame ? '编辑游戏' : '新建游戏'" :confirm-btn="{ loading: saving }" @confirm="saveGame">
+    </ResourceCard>
+    <t-dialog v-model:visible="dialogVisible" :header="editingGame ? '编辑游戏' : '新增游戏'" :confirm-btn="{ loading: saving }" @confirm="saveGame">
       <t-form>
         <t-form-item label="游戏ID"><t-input v-model="gameForm.id" :disabled="!!editingGame" placeholder="仅支持32位以内字母或数字，例如 naruto01" /></t-form-item>
         <t-form-item label="游戏名称"><t-input v-model="gameForm.name" placeholder="例如：火影忍者" /></t-form-item>
@@ -190,7 +197,7 @@ async function deleteGame(game) {
         <t-form-item label="备注"><t-textarea v-model="gameForm.remark" /></t-form-item>
       </t-form>
     </t-dialog>
-    <t-drawer :close-btn="true" v-model:visible="referencesVisible" :header="`${referenceGame?.name || ''} 的关联详情`" :size="'620px'" :footer="false">
+    <t-drawer :close-btn="true" v-model:visible="referencesVisible" :header="`${referenceGame?.name || ''} 的关联详情`" size="min(92vw, 760px)" :footer="false">
       <t-loading :loading="referencesLoading">
         <div class="reference-section">用户授权</div>
         <t-table :data="references.users || []" size="small" row-key="user_id" :columns="[
@@ -202,12 +209,10 @@ async function deleteGame(game) {
         ]" />
       </t-loading>
     </t-drawer>
+    </div>
   </t-loading>
 </template>
 
 <style scoped>
-.filter-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
-.filter-field { display:flex; align-items:center; gap:8px; color:var(--wt-text-secondary); font-size:13px; font-weight:500; white-space:nowrap; }
-.pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
 .reference-section { margin: 16px 0 8px; font-weight: 600; }
 </style>

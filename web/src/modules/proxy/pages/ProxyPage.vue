@@ -320,9 +320,10 @@ const columns = [
   { colKey: "proxy_protocol", title: "协议", width: 80 },
   { colKey: "region", title: "地区", width: 100 },
   { colKey: "supplier", title: "供应商", width: 100 },
-  { colKey: "business_status", title: "状态", width: 90 },
 	{ colKey: "max_profile_count", title: "窗口容量", width: 170 },
 	{ colKey: "bindings", title: "绑定窗口", width: 120 },
+  // 状态排在属性与关联实体之后（AdminUI 规范 §4.1）。
+  { colKey: "business_status", title: "状态", width: 90 },
 	{ colKey: "last_check_result", title: "检测结果", width: 100 },
   { colKey: "expires_at", title: "到期时间", width: 140 },
 	{ colKey: "op", title: "操作", width: 340, fixed: "right" },
@@ -353,20 +354,18 @@ function formatTime(t) {
     <ResourceCard class="proxy-resource-card">
     <!-- 搜索/过滤栏 -->
     <div class="filter-bar">
-      <t-space wrap>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">代理状态</span><t-select v-model="searchBizStatus" placeholder="状态" clearable style="width:100%">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">代理状态</span><t-select v-model="searchBizStatus" placeholder="全部" clearable>
           <t-option value="active" label="正常" />
           <t-option value="paused" label="停用" />
           <t-option value="expired" label="过期" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="searchSupplier" placeholder="供应商" clearable style="width:100%" /></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="searchRegion" placeholder="地区" clearable style="width:100%" /></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="IP / 备注" clearable style="width:100%" /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="searchSupplier" placeholder="供应商" clearable /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="searchRegion" placeholder="地区" clearable /></label>
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="searchText" placeholder="IP / 备注" clearable /></label>
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadProxies">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
         </div>
-      </t-space>
     </div>
 
     <!-- 操作栏 -->
@@ -490,10 +489,7 @@ function formatTime(t) {
     </t-dialog>
 
     <!-- 详情抽屉 -->
-    <!-- :footer="false" 是必须的，不是样式洁癖：TDesign 的 drawer footer 默认 true，
-         不关就会在底部渲染一对「取消 / 确认」。详情抽屉里那对按钮没有任何含义
-         （规范 §6.3），页面上唯一真实动作「提取新地址并检测」留在正文里。 -->
-    <t-drawer :close-btn="true" v-model:visible="detailVisible" header="代理详情" :size="'480px'" destroy-on-close :footer="false">
+    <t-drawer :close-btn="true" v-model:visible="detailVisible" header="代理详情" size="min(92vw, 760px)" destroy-on-close :footer="detailProxy?.source_type === 'api'">
       <t-descriptions v-if="detailProxy" :column="1" bordered size="small">
         <t-descriptions-item label="ID">{{ detailProxy.id }}</t-descriptions-item>
         <t-descriptions-item label="地址">{{ detailProxy.host }}:{{ detailProxy.port }}</t-descriptions-item>
@@ -512,7 +508,7 @@ function formatTime(t) {
       </t-descriptions>
       <t-divider>绑定窗口</t-divider>
       <t-loading :loading="loadingBindings"><t-table :data="boundProfiles" size="small" :columns="[{ colKey: 'name', title: '窗口' }, { colKey: 'bit_profile_id', title: 'BitBrowser ID' }, { colKey: 'user_id', title: '用户' }, { colKey: 'local_status', title: '状态' }]" row-key="id" /></t-loading>
-      <t-button v-if="detailProxy?.source_type === 'api'" style="margin-top:12px" @click="refreshDynamicProxy(detailProxy)">提取新地址并检测</t-button>
+      <template #footer><t-button v-if="detailProxy?.source_type === 'api'" theme="primary" @click="refreshDynamicProxy(detailProxy)">提取新地址并检测</t-button></template>
     </t-drawer>
 
     <!-- 配额弹窗 -->

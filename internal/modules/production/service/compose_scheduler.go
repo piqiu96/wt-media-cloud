@@ -15,6 +15,7 @@ type ComposeScheduleRepository interface {
 	DueStrategyIDs(time.Time) ([]int64, error)
 	Run(repository.ScheduleRunOptions) (model.ComposeScheduleRun, bool, error)
 	ListRuns(int64, int) ([]model.ComposeScheduleRun, error)
+	ListRunHistory(repository.ScheduleRunHistoryOptions) (model.ComposeScheduleRunHistoryPage, error)
 	BatchTasks(int64, time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error)
 	FindRun(int64, time.Time) (model.ComposeScheduleRun, bool, error)
 }
@@ -43,6 +44,25 @@ func RunComposeStrategyNow(actor identity.PublicUser, strategyID int64, requestK
 
 func ListComposeStrategyRuns(actor identity.PublicUser, strategyID int64) ([]model.ComposeScheduleRun, error) {
 	return NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{}).ListRuns(actor, strategyID)
+}
+
+func ListComposeStrategyRunHistory(actor identity.PublicUser, strategyID int64, options repository.ScheduleRunHistoryOptions) (model.ComposeScheduleRunHistoryPage, error) {
+	return NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{}).RunHistory(actor, strategyID, options)
+}
+
+func (s *ComposeSchedulerService) RunHistory(actor identity.PublicUser, strategyID int64, options repository.ScheduleRunHistoryOptions) (model.ComposeScheduleRunHistoryPage, error) {
+	if strategyID <= 0 || actor.Status != identity.UserStatusEnabled {
+		return model.ComposeScheduleRunHistoryPage{}, ErrStrategyNotFound
+	}
+	strategy, found, err := s.strategies.Find(strategyID)
+	if err != nil {
+		return model.ComposeScheduleRunHistoryPage{}, err
+	}
+	if !found || !canReadStrategy(actor, strategy) {
+		return model.ComposeScheduleRunHistoryPage{}, ErrStrategyNotFound
+	}
+	options.StrategyID = strategyID
+	return s.store.ListRunHistory(options)
 }
 
 func (s *ComposeSchedulerService) ListRuns(actor identity.PublicUser, strategyID int64) ([]model.ComposeScheduleRun, error) {

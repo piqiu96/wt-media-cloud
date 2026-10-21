@@ -47,7 +47,16 @@ func listSources(db *gorm.DB, filter Filter) ([]model.SourceContentView, error) 
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY s.id DESC LIMIT 500"
+	sortColumns := map[string]string{"id": "s.id", "published_at": "s.published_at", "created_at": "s.created_at", "updated_at": "s.updated_at"}
+	sortColumn := sortColumns[filter.SortBy]
+	if sortColumn == "" {
+		sortColumn = "s.published_at"
+	}
+	sortOrder := "DESC"
+	if strings.EqualFold(filter.SortOrder, "asc") {
+		sortOrder = "ASC"
+	}
+	query += " ORDER BY " + sortColumn + " " + sortOrder + ", s.id DESC LIMIT 500"
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -78,6 +87,10 @@ func findSource(db *gorm.DB, id int64) (model.SourceContentView, bool, error) {
 func sourceViewConditions(filter Filter) ([]string, []any) {
 	conditions := []string{}
 	args := []any{}
+	if filter.ID != nil {
+		conditions = append(conditions, "s.id = ?")
+		args = append(args, *filter.ID)
+	}
 	if filter.TeamID != nil {
 		conditions = append(conditions, "s.team_id = ?")
 		args = append(args, *filter.TeamID)
@@ -106,10 +119,18 @@ func sourceViewConditions(filter Filter) ([]string, []any) {
 		conditions = append(conditions, "s.material_id = ?")
 		args = append(args, *filter.MaterialID)
 	}
-	if strings.TrimSpace(filter.Search) != "" {
-		like := "%" + strings.TrimSpace(filter.Search) + "%"
-		conditions = append(conditions, "(s.title LIKE ? OR s.platform_content_id LIKE ? OR s.author_name LIKE ? OR s.source_url LIKE ?)")
-		args = append(args, like, like, like, like)
+	if filter.PublishedFrom != "" {
+		conditions = append(conditions, "s.published_at >= ?")
+		args = append(args, filter.PublishedFrom)
+	}
+	if filter.PublishedTo != "" {
+		conditions = append(conditions, "s.published_at < DATE_ADD(?, INTERVAL 1 DAY)")
+		args = append(args, filter.PublishedTo)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		like := likeContains(search)
+		conditions = append(conditions, "(CAST(s.id AS CHAR) = ? OR s.title LIKE ? ESCAPE '!' OR s.platform_content_id LIKE ? ESCAPE '!' OR s.author_name LIKE ? ESCAPE '!' OR s.source_url LIKE ? ESCAPE '!')")
+		args = append(args, search, like, like, like, like)
 	}
 	return conditions, args
 }

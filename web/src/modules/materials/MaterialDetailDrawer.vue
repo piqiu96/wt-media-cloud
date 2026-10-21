@@ -1,8 +1,8 @@
 <script setup>
 import { feedback } from '../../shared/ui/feedback/index.js'
 // 素材详情抽屉，素材库与我的素材共用一份。行内只放识别信息（封面、ID、标题、文件状态），
-// 其余在这里；云端视频地址不随素材 body 返回，是签名地址、会过期，故点「打开云端视频」
-// 时才向详情链接接口要一次。
+// 其余在这里；云端视频地址不随素材 body 返回，点击「打开云端视频」时才向
+// 详情链接接口取准确对象路径，再交给共用的公开读取地址转换。
 import { computed, ref, watch } from 'vue'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
@@ -38,6 +38,7 @@ const props = defineProps({
   // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支，
   // readonly 只读（关联实体引用的那类打开方式）——正文照旧，页脚一个动作都不给。
   mode: { type: String, default: 'library' },
+  showPageLink: { type: Boolean, default: true },
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
@@ -128,7 +129,7 @@ const fileStatus = computed(() => {
 function countLabel(value) { return Number(value || 0).toLocaleString() }
 
 /**
- * 云端视频地址是**签名**的、会过期，所以每次点击现取，不预先拿也不留。
+ * 云端视频每次点击现取对象路径，不预先拿也不留。
  *
  * 交付方式两个宿主不同（浏览器自己开标签页，打包的桌面端由壳交给系统浏览器），
  * 判据与理由都在 `cloudVideo.js`；这里只回答「现在跑在哪个宿主里」。
@@ -221,6 +222,7 @@ async function openDirectory() {
     size="min(62vw, 880px)"
     destroy-on-close
     :close-btn="true"
+    :footer="mode !== 'readonly' || showPageLink"
     @update:visible="$emit('update:visible', $event)"
   >
     <t-loading :loading="loading" :show-overlay="true">
@@ -368,7 +370,7 @@ async function openDirectory() {
     <template #footer>
       <div v-if="material" class="material-detail__actions">
         <!-- 只读上下文（关联实体引用）只给一个明确命名的前往入口：它不改路由，用户自己点才跳。 -->
-        <t-button v-if="mode === 'readonly'" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
+        <t-button v-if="mode === 'readonly' && showPageLink" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
         <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
         <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
         <!-- 我的素材这一组由「使用状态 × 下载状态 × 本机文件」矩阵驱动（CHG-069 任务 23，

@@ -3,6 +3,9 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
+import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
+import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
+import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
 
 const client = createUsersClient()
 const users = ref([])
@@ -37,10 +40,12 @@ const columns = [
   { colKey: 'username', title: '用户名', width: 150 },
   { colKey: 'role', title: '角色', width: 120 },
   { colKey: 'team_name', title: '运营分组', width: 140 },
-  { colKey: 'game_ids', title: '游戏范围' },
+  { colKey: 'game_ids', title: '游戏范围', width: 220 },
   { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'operations', title: '操作', width: 280, fixed: 'right' },
 ]
+
+const tableScroll = computed(() => ({ x: `${columns.reduce((sum, col) => sum + col.width, 0)}px` }))
 
 onMounted(loadAll)
 
@@ -211,40 +216,41 @@ function gameScopeText(gameIds) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-
-    <t-card title="用户管理" :bordered="true">
+    <div class="wt-resource-page">
+    <ResourcePageHeader title="用户管理" description="管理用户权限、运营分组与游戏范围">
       <template #actions>
-        <t-button theme="primary" size="small" @click="openCreateUser">新建用户</t-button>
-        <t-button theme="default" size="small" style="margin-left:8px" @click="loadAll">刷新</t-button>
+        <t-button theme="primary" @click="openCreateUser">新增用户</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
       </template>
-      <div class="filter-row">
-        <label class="filter-field"><span>UID</span><t-input v-model="filters.uid" placeholder="UID" clearable style="width:120px" /></label>
-        <label class="filter-field"><span>用户名</span><t-input v-model="filters.username" placeholder="用户名" clearable style="width:140px" /></label>
-        <label class="filter-field"><span>角色</span><t-select v-model="filters.role" placeholder="全部" clearable style="width:140px">
+    </ResourcePageHeader>
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <ResourceCard class="system-resource-card">
+      <div class="filter-bar">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">UID</span><t-input v-model="filters.uid" placeholder="UID" clearable /></label>
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">用户名</span><t-input v-model="filters.username" placeholder="用户名" clearable /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">角色</span><t-select v-model="filters.role" placeholder="全部" clearable>
           <t-option value="admin" label="管理员" />
           <t-option value="senior_operator" label="高级运营" />
           <t-option value="operator" label="普通运营" />
         </t-select></label>
-        <label class="filter-field"><span>运营分组</span><t-select v-model="filters.teamId" placeholder="全部" clearable style="width:160px">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">运营分组</span><t-select v-model="filters.teamId" placeholder="全部" clearable>
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
         </t-select></label>
-        <label class="filter-field"><span>游戏</span><t-select v-model="filters.gameId" placeholder="全部" clearable style="width:160px">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.gameId" placeholder="全部" clearable>
           <t-option v-for="game in games" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
         </t-select></label>
-        <label class="filter-field"><span>状态</span><t-select v-model="filters.status" placeholder="全部" clearable style="width:120px">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" placeholder="全部" clearable>
           <t-option value="enabled" label="启用" />
           <t-option value="disabled" label="停用" />
         </t-select></label>
-        <t-button theme="primary" size="small" @click="applyFilters">查询</t-button>
-        <t-button class="wt-secondary-button" size="small" variant="outline" @click="clearFilters">重置</t-button>
+        <div class="wt-filter-actions"><t-button theme="primary" @click="applyFilters">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="clearFilters">重置</t-button></div>
       </div>
 
-      <t-table :data="pagedUsers" :columns="columns" size="small" hover row-key="id">
+      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedUsers" :columns="columns" size="small" hover row-key="id" :scroll="tableScroll">
         <template #role="{ row }"><t-tag size="small">{{ roleLabels[row.role] || row.role }}</t-tag></template>
         <template #team_name="{ row }">{{ row.team_name || '全局' }}</template>
         <template #game_ids="{ row }">{{ gameScopeText(row.game_ids) }}</template>
-        <template #status="{ row }"><t-tag :theme="row.status === 'enabled' ? 'success' : 'danger'" size="small">{{ row.status === 'enabled' ? '启用' : '停用' }}</t-tag></template>
+        <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
         <template #operations="{ row }">
           <t-space>
             <t-button size="small" variant="text" @click="openEditUser(row)">编辑用户</t-button>
@@ -253,13 +259,13 @@ function gameScopeText(gameIds) {
             <t-button size="small" variant="text" theme="danger" @click="deleteUser(row)">删除</t-button>
           </t-space>
         </template>
-      </t-table>
-      <div class="pagination-row">
+      </t-table></div>
+      <div class="pagination-bar">
         <t-pagination v-model:current="pagination.current" v-model:page-size="pagination.pageSize" :total="users.length" :page-size-options="[10, 20, 50]" />
       </div>
-    </t-card>
+    </ResourceCard>
 
-    <t-dialog v-model:visible="userDialogVisible" :header="editingUser ? '编辑用户' : '新建用户'" :confirm-btn="{ loading: savingUser }" @confirm="saveUser">
+    <t-dialog v-model:visible="userDialogVisible" :header="editingUser ? '编辑用户' : '新增用户'" :confirm-btn="{ loading: savingUser }" @confirm="saveUser">
       <t-form>
         <t-form-item label="用户名"><t-input v-model="userForm.username" :disabled="!!editingUser" /></t-form-item>
         <t-form-item v-if="!editingUser" label="初始密码"><t-input v-model="userForm.password" type="password" /></t-form-item>
@@ -291,11 +297,9 @@ function gameScopeText(gameIds) {
         <template #suffix><t-button size="small" variant="text" @click="copyPassword">复制</t-button></template>
       </t-input>
     </t-dialog>
+    </div>
   </t-loading>
 </template>
 
 <style scoped>
-.filter-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
-.filter-field { display:flex; align-items:center; gap:8px; color:var(--wt-text-secondary); font-size:13px; font-weight:500; white-space:nowrap; }
-.pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
 </style>

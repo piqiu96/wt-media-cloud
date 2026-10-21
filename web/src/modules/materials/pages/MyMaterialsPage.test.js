@@ -27,13 +27,25 @@ describe('my materials page', () => {
     expect(source).not.toMatch(/const \w+ = await client\.removeUsage/)
   })
 
-  // 这条守卫是给一个几乎发生过的 bug 的：筛选栏里有一个「视频状态」下拉，而过滤函数
-  // 只看了搜索词 —— 那个下拉会安静地什么都不做。列表接口只返回 active 的关系，
-  // 所以状态筛选是唯一一个能把「已选」和「没选」区分开的条件。
-  it('actually applies the video status filter it renders', () => {
-    expect(source).toContain('if (statusFilter.value && row.video_status !== statusFilter.value) return false')
-    expect(source).toContain('const filteredRows = computed')
+  it('defaults to published_at descending and lets ID/time columns toggle the order', () => {
+    expect(source).toContain("const sortBy = ref('published_at')")
+    expect(source).toContain("const sortOrder = ref('desc')")
+    expect(source).toContain("{ colKey: 'id', title: '素材 ID', width: 90, sorter: true }")
+    expect(source).toContain("{ colKey: 'published_at', title: '发布时间', width: 150, sorter: true }")
+    expect(source).toContain("{ colKey: 'added_at', title: '加入时间', width: 105, sorter: true }")
+    expect(source).toContain("sortBy.value = sort?.sortBy || 'published_at'")
+    expect(source).toContain("sortOrder.value = sort?.descending === false ? 'asc' : 'desc'")
+    expect(source).toContain('@sort-change="changeSort"')
+    expect(source).toContain('sort_by: sortBy.value, sort_order: sortOrder.value')
+  })
+
+  // 这条守卫是给一个几乎发生过的 bug 的：筛选栏里有一个「文件状态」下拉，而过滤函数
+  // 只看了搜索词 —— 那个下拉会安静地什么都不做。状态筛选由 /my-materials 的
+  // video_status 参数完成，页面不再对返回行二次过滤，但控件必须与请求参数接线。
+  it('sends the file status filter it renders to the server', () => {
+    expect(source).toContain('video_status: statusFilter.value')
     expect(source).toContain('v-model="statusFilter"')
+    expect(source).not.toContain('row.video_status !== statusFilter.value')
   })
 
   /**
@@ -236,8 +248,9 @@ describe('my materials page', () => {
     expect(cell).not.toContain('video_status')
     expect(cell).toContain('downloadStatusLabel(row.download_status)')
     expect(cell).toContain('downloadStatusTone(row.download_status)')
-    // 下载状态与素材云侧状态不合并：video_status 那四档仍在筛选下拉里原样使用。
-    expect(source).toContain('row.video_status !== statusFilter.value')
+    // 下载状态与素材云侧状态不合并：video_status 那四档仍是服务端筛选参数，不参与本格。
+    expect(source).toContain('video_status: statusFilter.value')
+    expect(source).not.toContain('row.video_status')
   })
 
   /**
@@ -262,7 +275,7 @@ describe('my materials page', () => {
   // 素材改为在合成任务页的创建抽屉里从「我的素材」中选。这里钉住的是净删除：任何一处
   // 残留都会让同一个能力出现两个入口，而它们的行为迟早会不一致。
   describe('compose task creation moved out (CHG-20261015-098)', () => {
-    it('keeps no create entry, no dialog host and no selection machinery', () => {
+    it('keeps no compose creation entry or dialog host', () => {
       // 逐个词查的是**子串**：旧变量名 `createMaterials` 不能进这张表——它是这一页
       // 一直在用的 `createMaterialsClient()` 的前缀，词表写宽了会把正当代码报成残留。
       for (const gone of [
@@ -271,18 +284,16 @@ describe('my materials page', () => {
         'ComposeTaskCreateDialog',
         'openCreate',
         'createSelected',
-        'selectedRowKeys',
-        'selectionDisabled',
-        'row-select',
       ]) {
         expect(source, `我的素材不该再有 ${gone}`).not.toContain(gone)
       }
     })
 
-    // 勾选列撤了，列数回到 6（素材 ID / 素材 / 文件状态 / 使用状态 / 加入时间 / 操作）。
-    // 数量本身由 ListPageConventions 钉住，这里只管「勾选那一列不在了」。
-    it('drops the selection column it only had for batch creation', () => {
+    it('uses relation keys for the new batch download selection', () => {
       expect(source).toContain("row-key=\"usage_id\"")
-      expect(source).not.toContain('v-model:selected-row-keys')
+      expect(source).toContain('v-model:selected-row-keys="selectedRowKeys"')
+      expect(source).toContain("checkProps: ({ row }) => ({ disabled: !canSelectForDownload(row) || batchLoading.value })")
+      expect(source).toContain('class="wt-selection-toolbar"')
+      expect(source).toContain('>批量下载</t-button>')
     })
   })

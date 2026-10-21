@@ -18,6 +18,18 @@ type ComposeScheduleRun struct {
 	CreatedAt      time.Time             `json:"created_at"`
 }
 
+type ComposeScheduleRunHistoryItem struct {
+	ComposeScheduleRun
+	FailedCount int `json:"failed_count"`
+}
+
+type ComposeScheduleRunHistoryPage struct {
+	Items    []ComposeScheduleRunHistoryItem `json:"items"`
+	Total    int                             `json:"total"`
+	Page     int                             `json:"page"`
+	PageSize int                             `json:"page_size"`
+}
+
 // ComposeBatchCounts is one schedule run's per-status task tally. It comes
 // from a GROUP BY over the run's own rows, not from a page-sized listing, so
 // a truncated list cannot read as a fully-successful batch.

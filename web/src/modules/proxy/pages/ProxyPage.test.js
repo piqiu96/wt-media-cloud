@@ -35,4 +35,16 @@ describe('proxy resource page', () => {
     expect(source).toContain('>供应商</span>')
     expect(source).toContain('{ colKey: "op", title: "操作", width: 340, fixed: "right" }')
   })
+
+  // AdminUI 规范 §4.1：状态排在属性与关联实体之后。代理的容量/绑定是属性与关联，
+  // 状态与检测结果紧随其后；把状态放回供应商后面会让「这台还能不能用」先于
+  // 「这台绑了谁」出现，读表顺序与运营的判断顺序相反。
+  it('puts the status columns after capacity and bindings', () => {
+    const ordered = ['supplier', 'max_profile_count', 'bindings', 'business_status', 'last_check_result', 'expires_at']
+    const offsets = ordered.map((key) => source.indexOf(`{ colKey: "${key}"`))
+    expect(offsets.every((at) => at > -1), '六列都必须找得到').toBe(true)
+    for (let i = 1; i < offsets.length; i += 1) {
+      expect(offsets[i], `${ordered[i]} 必须排在 ${ordered[i - 1]} 之后`).toBeGreaterThan(offsets[i - 1])
+    }
+  })
 })

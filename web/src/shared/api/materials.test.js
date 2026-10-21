@@ -35,16 +35,17 @@ describe('materials api client', () => {
     expect(fetch.mock.calls[5][1].method).toBe('POST')
   })
 
-  // 服务端只读 `search`（production/handler.go ListMaterials 只取 c.Query("search")）。
-  // 把 team_id / game_id / video_status 传进去不会报错，只会被安静地丢掉然后回全量 ——
-  // 那正是「看起来筛了其实没筛」。这条钉住客户端不替服务端想象参数。
-  it('sends only the search parameter the server actually reads', async () => {
+  // 服务端的白名单是 `search` / `game_id` / `video_status` / `sort_by` / `sort_order`
+  // （production/handler.go 的 ListMaterials）。`team_id` 不在其中：团队范围由会话决定，
+  // 传进去不会报错，只会被安静地丢掉然后回全量 —— 那正是「看起来筛了其实没筛」。
+  // 这条钉住客户端不替服务端想象参数，也不吞服务端真读的参数。
+  it('forwards the five filters the server reads and drops team_id', async () => {
     const fetch = vi.fn().mockResolvedValue(ok([]))
     const client = createMaterialsClient({ fetch })
 
-    await client.list({ search: 'x', team_id: 10, game_id: 'naruto', video_status: 'ready' })
+    await client.list({ search: 'x', team_id: 10, game_id: 'naruto', video_status: 'ready', sort_by: 'published_at', sort_order: 'desc' })
 
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/materials?search=x')
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/materials?search=x&game_id=naruto&video_status=ready&sort_by=published_at&sort_order=desc')
   })
 
   // 200（已在我的素材里）与 201（新建或恢复）的响应体完全一样，`parseResponse` 两种

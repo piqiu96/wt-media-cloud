@@ -3,6 +3,8 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
+import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
+import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 
 const client = createUsersClient()
 const teams = ref([])
@@ -16,22 +18,19 @@ const editingTeam = ref(null)
 const teamName = ref('')
 const saving = ref(false)
 
-const filteredTeams = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return teams.value
-  return teams.value.filter((team) => String(team.id).includes(kw) || team.name.toLowerCase().includes(kw))
-})
 const pagedTeams = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return filteredTeams.value.slice(start, start + pagination.value.pageSize)
+  return teams.value.slice(start, start + pagination.value.pageSize)
 })
 
 const columns = [
   { colKey: 'id', title: '分组ID', width: 100 },
-  { colKey: 'name', title: '分组名称' },
+  { colKey: 'name', title: '分组名称', width: 240 },
   { colKey: 'user_count', title: '用户数', width: 100 },
-  { colKey: 'operations', title: '操作', width: 180 },
+  { colKey: 'operations', title: '操作', width: 180, fixed: 'right' },
 ]
+
+const tableScroll = computed(() => ({ x: `${columns.reduce((sum, col) => sum + col.width, 0)}px` }))
 
 onMounted(loadAll)
 
@@ -39,7 +38,8 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [teamRows, userRows] = await Promise.all([client.listTeams(), client.listUsers()])
+    // 关键字（分组 ID 精确 / 名称片段）由服务端过滤，页面只做分页切片。
+    const [teamRows, userRows] = await Promise.all([client.listTeams({ keyword: keyword.value.trim() }), client.listUsers()])
     users.value = userRows || []
     teams.value = (teamRows || []).map((team) => ({
       ...team,
@@ -54,12 +54,12 @@ async function loadAll() {
 }
 
 function search() {
-  pagination.value.current = 1
+  loadAll()
 }
 
 function resetFilters() {
   keyword.value = ''
-  pagination.value.current = 1
+  loadAll()
 }
 
 function openCreate() {
@@ -106,37 +106,37 @@ async function deleteTeam(team) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <t-card title="运营分组" :bordered="true">
+    <div class="wt-resource-page">
+    <ResourcePageHeader title="运营分组" description="管理运营人员的分组归属">
       <template #actions>
-        <t-button theme="primary" size="small" @click="openCreate">新建分组</t-button>
-        <t-button size="small" style="margin-left:8px" @click="loadAll">刷新</t-button>
+        <t-button theme="primary" @click="openCreate">新增分组</t-button>
+        <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
       </template>
-      <div class="filter-row">
-        <label class="filter-field"><span>综合搜索</span><t-input v-model="keyword" placeholder="分组 ID / 名称" clearable @change="search" style="width:220px" /></label>
-        <t-button theme="primary" size="small" @click="search">查询</t-button>
-        <t-button class="wt-secondary-button" size="small" variant="outline" @click="resetFilters">重置</t-button>
+    </ResourcePageHeader>
+    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+    <ResourceCard class="system-resource-card">
+      <div class="filter-bar">
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="keyword" placeholder="分组 ID / 名称" clearable @enter="search" /></label>
+        <div class="wt-filter-actions"><t-button theme="primary" @click="search">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
       </div>
-      <t-table :data="pagedTeams" :columns="columns" row-key="id" size="small" hover>
+      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedTeams" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
         <template #operations="{ row }">
           <t-space>
             <t-button size="small" variant="text" @click="openRename(row)">重命名</t-button>
             <t-button size="small" variant="text" theme="danger" :disabled="row.user_count > 0" @click="deleteTeam(row)">删除</t-button>
           </t-space>
         </template>
-      </t-table>
-      <div class="pagination-row">
-        <t-pagination v-model:current="pagination.current" v-model:page-size="pagination.pageSize" :total="filteredTeams.length" :page-size-options="[10, 20, 50]" />
+      </t-table></div>
+      <div class="pagination-bar">
+        <t-pagination v-model:current="pagination.current" v-model:page-size="pagination.pageSize" :total="teams.length" :page-size-options="[10, 20, 50]" />
       </div>
-    </t-card>
-    <t-dialog v-model:visible="dialogVisible" :header="editingTeam ? '重命名运营分组' : '新建运营分组'" :confirm-btn="{ loading: saving }" @confirm="saveTeam">
+    </ResourceCard>
+    <t-dialog v-model:visible="dialogVisible" :header="editingTeam ? '重命名运营分组' : '新增运营分组'" :confirm-btn="{ loading: saving }" @confirm="saveTeam">
       <t-form><t-form-item label="分组名称"><t-input v-model="teamName" /></t-form-item></t-form>
     </t-dialog>
+    </div>
   </t-loading>
 </template>
 
 <style scoped>
-.filter-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:16px; }
-.filter-field { display:flex; align-items:center; gap:8px; color:var(--wt-text-secondary); font-size:13px; font-weight:500; white-space:nowrap; }
-.pagination-row { display:flex; justify-content:flex-end; margin-top:16px; }
 </style>

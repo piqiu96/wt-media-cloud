@@ -162,7 +162,7 @@ func GetProxyBindings(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
-	profiles, err := profilebindingservice.ListProfiles(actor, 0)
+	profiles, err := profilebindingservice.ListProfiles(actor, 0, profilebindingservice.ProfileListFilter{})
 	if err != nil {
 		api.InternalError(c, "浏览器窗口查询失败")
 		return

@@ -50,6 +50,18 @@ func TestListComposeStrategiesAppliesScopeInSQL(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+func TestListComposeStrategiesAppliesSearchAndFiltersInSQL(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(`SELECT .* FROM compose_strategies s JOIN compose_templates t.*s\.name LIKE \? ESCAPE '!'.*s\.game_id = \?.*s\.compose_template_id = \?.*s\.status = \?.*LIMIT 200`).
+		WithArgs("%剪辑!_100%", "剪辑_100", "delta", int64(3), "disabled").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "team_id", "game_id", "compose_template_id", "compose_template_version", "name", "config_json", "execution_mode", "schedule_json", "priority_rules_json", "single_limit", "daily_limit", "next_run_at", "status", "created_by", "updated_by", "created_at", "updated_at"}))
+	items, err := listComposeStrategies(db, StrategyFilter{Search: "剪辑_100", GameID: "delta", TemplateID: 3, Status: "disabled"})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
+}
+
 func TestUpdateAndReadComposeStrategySchedule(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)

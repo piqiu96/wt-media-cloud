@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest'
 // 都用「字段标题 + 控件」，标题在控件**左侧**（用户在同轮的两个版式里选了左侧）。
 //
 // 这件事单靠改页面是留不住的：下一个新页面照样会写出 `<t-input placeholder="搜索名称" />`，
-// 而它看上去没有任何问题。所以把约定钉成一条站级测试，扫所有含 `filter-row` 的页面。
+// 而它看上去没有任何问题。所以把约定钉成一条站级测试，扫所有资源页 `filter-bar`。
 //
-// 扫描的是源码结构，不是渲染结果：`.filter-field` 这个类名就是「标题 + 控件」的落点，
-// 页面上它的写法是 `<label class="filter-field"><span>标题</span><t-input … /></label>`。
+// 扫描的是源码结构，不是渲染结果：`.wt-filter-field` 是「标题 + 控件」的落点，
+// 页面使用 `<label class="wt-filter-field"><span>标题</span><t-input … /></label>`。
 
 const SRC = new URL('./', import.meta.url).pathname
 
@@ -40,9 +40,8 @@ function openingTag(text, start) {
   return text.slice(start)
 }
 
-/** 从 `class="filter-row"` 所在的那个 div 取到与它配对的 `</div>`。 */
-function filterRowBlock(text, marker) {
-  const at = text.indexOf(marker)
+/** 从筛选栏 div 取到与它配对的 `</div>`。 */
+function filterRowBlock(text, at) {
   const tagStart = text.lastIndexOf('<div', at)
   const tag = openingTag(text, tagStart)
   const body = tagStart + tag.length
@@ -63,7 +62,7 @@ function filterRowBlock(text, marker) {
   return text.slice(body, i)
 }
 
-/** 一个筛选控件的标题：同一行里最近的那个 `<label class="filter-field">` 的 `<span>`。 */
+/** 一个筛选控件的标题：同一行里最近的 `.wt-filter-field` 的 `<span>`。 */
 function titleOf(block, controlAt) {
   const labelAt = block.lastIndexOf('<label', controlAt)
   if (labelAt === -1) return null
@@ -78,12 +77,11 @@ export function auditFilterRows() {
   const rows = []
   for (const file of vueFiles(SRC)) {
     const text = readFileSync(file, 'utf8')
-    let from = 0
-    for (;;) {
-      const at = text.indexOf('class="filter-row"', from)
-      if (at === -1) break
-      from = at + 1
-      const block = filterRowBlock(text, 'class="filter-row"')
+    const markerRe = /class="filter-bar"/g
+    let marker
+    while ((marker = markerRe.exec(text)) !== null) {
+      const at = marker.index
+      const block = filterRowBlock(text, at)
       const controls = []
       const controlRe = /<t-(input|select)\b/g
       let control
@@ -101,10 +99,9 @@ export function auditFilterRows() {
       let button
       while ((button = buttonRe.exec(block)) !== null) {
         const tag = openingTag(block, button.index)
-        const label = /<t-button\b[^>]*>\s*([^<\s][^<]*?)\s*<\/t-button>/.exec(
-          block.slice(button.index, button.index + tag.length + 40)
-        )
-        if (label) buttons.push({ text: label[1], tag })
+        const closeAt = block.indexOf('</t-button>', button.index + tag.length)
+        const label = closeAt === -1 ? '' : block.slice(button.index + tag.length, closeAt).trim()
+        if (label && !label.includes('<')) buttons.push({ text: label, tag })
       }
       rows.push({
         file: file.replace(SRC, ''),
@@ -133,15 +130,13 @@ function perPage(rows) {
 
 describe('filter panel convention', () => {
   // 分母先钉住：扫不到筛选行的扫描器会让下面每条断言在空集上静默通过。
-  // 实测 2026-09-30 全站 7 页（素材库、我的素材、内容池 crawl-tasks / 挖掘策略、
-  // 用户管理、运营分组、游戏管理）、19 个控件（8 输入框 + 11 Select）。
-  // 两个下限都取实测值而不是一个好看的整数：写成 15 的话，少掉一整页的筛选行照样是绿的。
+  // 本轮全部管理列表都使用 filter-bar；固定分母防止扫描器在空集上误通过。
   it('scans every filter row in the app', () => {
-    expect(rows.length, '扫描器没找到筛选行，这条约定就是空转').toBeGreaterThanOrEqual(7)
+    expect(rows.length, '扫描器没找到筛选行，这条约定就是空转').toBeGreaterThanOrEqual(14)
     expect(
       rows.reduce((sum, row) => sum + row.controls.length, 0),
       '筛选控件数',
-    ).toBeGreaterThanOrEqual(19)
+    ).toBeGreaterThanOrEqual(35)
   })
 
   it('gives every filter control a visible field title', () => {

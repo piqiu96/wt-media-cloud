@@ -102,7 +102,23 @@ func ListContent(_ context.Context, c *hertzapp.RequestContext) {
 		teamValue := identityservice.TeamID(value)
 		team = &teamValue
 	}
-	filter := dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search")}
+	filter := dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search"), PublishedFrom: c.Query("published_from"), PublishedTo: c.Query("published_to"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")}
+	if raw := strings.TrimSpace(c.Query("content_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			api.BadRequest(c, 10001, "内容 ID 无效")
+			return
+		}
+		filter.ID = &value
+	}
+	for _, date := range []string{filter.PublishedFrom, filter.PublishedTo} {
+		if date != "" {
+			if _, err := time.Parse("2006-01-02", date); err != nil {
+				api.BadRequest(c, 10001, "发布时间格式无效")
+				return
+			}
+		}
+	}
 	for name, target := range map[string]**int64{"strategy_id": &filter.StrategyID, "crawl_task_id": &filter.CrawlTaskID, "material_id": &filter.MaterialID} {
 		if raw := strings.TrimSpace(c.Query(name)); raw != "" {
 			value, err := strconv.ParseInt(raw, 10, 64)
@@ -326,7 +342,11 @@ func ListDiscoveryStrategies(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	items, err := contentservice.ListStrategies(actor)
+	items, err := contentservice.ListStrategiesFiltered(actor, contentservice.StrategyListQuery{
+		Search: strings.TrimSpace(c.Query("search")),
+		Type:   strings.TrimSpace(c.Query("type")),
+		Status: strings.TrimSpace(c.Query("status")),
+	})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return
@@ -442,7 +462,11 @@ func ListCrawlTasks(_ context.Context, c *hertzapp.RequestContext) {
 		}
 		strategyID = &id
 	}
-	items, err := contentservice.ListCrawlTasks(actor, strategyID)
+	items, err := contentservice.ListCrawlTasksFiltered(actor, contentservice.CrawlTaskListQuery{
+		Search:     strings.TrimSpace(c.Query("search")),
+		Status:     strings.TrimSpace(c.Query("status")),
+		StrategyID: strategyID,
+	})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return

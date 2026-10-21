@@ -22,14 +22,19 @@ func (mysqlContentStore) CreateSource(v model.SourceContent, raw json.RawMessage
 }
 func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContentView, error) {
 	return repository.ListSources(repository.Filter{
-		TeamID:      v.TeamID,
-		Platform:    v.Platform,
-		Status:      v.Status,
-		SourceType:  v.SourceType,
-		Search:      v.Search,
-		StrategyID:  v.StrategyID,
-		CrawlTaskID: v.CrawlTaskID,
-		MaterialID:  v.MaterialID,
+		ID:            v.ID,
+		TeamID:        v.TeamID,
+		Platform:      v.Platform,
+		Status:        v.Status,
+		SourceType:    v.SourceType,
+		Search:        v.Search,
+		PublishedFrom: v.PublishedFrom,
+		PublishedTo:   v.PublishedTo,
+		SortBy:        v.SortBy,
+		SortOrder:     v.SortOrder,
+		StrategyID:    v.StrategyID,
+		CrawlTaskID:   v.CrawlTaskID,
+		MaterialID:    v.MaterialID,
 	})
 }
 func (mysqlContentStore) FindSource(id int64) (model.SourceContentView, bool, error) {
@@ -53,6 +58,9 @@ func (mysqlDiscoveryStore) CreateStrategy(v model.DiscoveryStrategy) (model.Disc
 func (mysqlDiscoveryStore) ListStrategies(team *identityservice.TeamID) ([]model.DiscoveryStrategy, error) {
 	return repository.ListStrategies(team)
 }
+func (mysqlDiscoveryStore) ListStrategiesFiltered(team *identityservice.TeamID, query StrategyListQuery) ([]model.DiscoveryStrategy, error) {
+	return repository.ListStrategiesFiltered(team, repository.DiscoveryStrategyFilter{Search: query.Search, Type: query.Type, Status: query.Status})
+}
 func (mysqlDiscoveryStore) FindStrategy(id int64) (model.DiscoveryStrategy, bool, error) {
 	return repository.FindStrategy(id)
 }
@@ -67,6 +75,9 @@ func (mysqlDiscoveryStore) CreateCrawlTask(v model.CrawlTask) (model.CrawlTask, 
 }
 func (mysqlDiscoveryStore) ListCrawlTasks(team *identityservice.TeamID, strategyID *int64) ([]model.CrawlTask, error) {
 	return repository.ListCrawlTasks(team, strategyID)
+}
+func (mysqlDiscoveryStore) ListCrawlTasksFiltered(team *identityservice.TeamID, query CrawlTaskListQuery) ([]model.CrawlTask, error) {
+	return repository.ListCrawlTasksFiltered(team, repository.CrawlTaskFilter{Search: query.Search, Status: query.Status, StrategyID: query.StrategyID})
 }
 func (mysqlDiscoveryStore) FindCrawlTask(id int64) (model.CrawlTask, bool, error) {
 	return repository.FindCrawlTask(id)

@@ -21,8 +21,14 @@ describe('M2-A3 management pages', () => {
     expect(teamsSource).toContain(':disabled="row.user_count > 0"')
   })
 
+  it('sends the team keyword to the backend and paginates the returned rows', () => {
+    expect(teamsSource).toContain('client.listTeams({ keyword: keyword.value.trim() })')
+    expect(teamsSource).not.toContain('filteredTeams')
+    expect(teamsSource).toContain(':total="teams.length"')
+  })
+
   it('gives game page search/list/filter/pagination basics', () => {
-    for (const required of ['游戏管理', '综合搜索', '游戏 ID / 名称', '状态', '查询', '重置', '关联情况', '用户授权', '媒体账号', '新建游戏', 't-table', 't-pagination', '查看关联详情']) {
+    for (const required of ['游戏管理', '综合搜索', '游戏 ID / 名称', '状态', '查询', '重置', '关联情况', '用户授权', '媒体账号', '新增游戏', 't-table', 't-pagination', '查看关联详情']) {
       expect(gamesSource).toContain(required)
     }
     expect(gamesSource).toContain(":disabled=\"row.status === 'enabled' && hasReferences(row)\"")

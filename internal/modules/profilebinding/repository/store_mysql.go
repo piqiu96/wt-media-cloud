@@ -66,20 +66,66 @@ func findBinding(db *gorm.DB, userID sharedidentity.UserID) (model.BitAccountBin
 	return binding, true, nil
 }
 
-func ListProfiles(userID sharedidentity.UserID) ([]model.BrowserProfile, error) {
-	return listProfilesByUser(database.DB(), userID)
+// ProfileListFilter carries the list page's filters. The running state is not
+// here: it comes from the Desktop runtime, not from the cloud row.
+type ProfileListFilter struct {
+	UserID         sharedidentity.UserID
+	ID             string
+	Name           string
+	Group          string
+	BitProfileID   string
+	Remark         string
+	LocalStatus    string
+	BusinessStatus string
 }
 
-func listProfilesByUser(db *gorm.DB, userID sharedidentity.UserID) ([]model.BrowserProfile, error) {
-	return listProfilesByQuery(db, `SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE user_id = ? ORDER BY id DESC`, userID)
+func ListProfiles(filter ProfileListFilter) ([]model.BrowserProfile, error) {
+	return listProfiles(database.DB(), filter)
 }
 
-func ListAllProfiles() ([]model.BrowserProfile, error) {
-	return listAllProfiles(database.DB())
+func listProfiles(db *gorm.DB, filter ProfileListFilter) ([]model.BrowserProfile, error) {
+	query := `SELECT ` + profileColumnsSQL + ` FROM browser_profiles WHERE 1=1`
+	args := make([]any, 0, 10)
+	if filter.UserID > 0 {
+		query += ` AND user_id = ?`
+		args = append(args, filter.UserID)
+	}
+	if filter.ID != "" {
+		query += ` AND id LIKE ? ESCAPE '!'`
+		args = append(args, profileLikeContains(filter.ID))
+	}
+	if filter.Name != "" {
+		query += ` AND name LIKE ? ESCAPE '!'`
+		args = append(args, profileLikeContains(filter.Name))
+	}
+	if filter.Group != "" {
+		like := profileLikeContains(filter.Group)
+		query += ` AND (group_id LIKE ? ESCAPE '!' OR group_name LIKE ? ESCAPE '!')`
+		args = append(args, like, like)
+	}
+	if filter.BitProfileID != "" {
+		query += ` AND bit_profile_id LIKE ? ESCAPE '!'`
+		args = append(args, profileLikeContains(filter.BitProfileID))
+	}
+	if filter.Remark != "" {
+		query += ` AND remark LIKE ? ESCAPE '!'`
+		args = append(args, profileLikeContains(filter.Remark))
+	}
+	if filter.LocalStatus != "" {
+		query += ` AND local_status = ?`
+		args = append(args, filter.LocalStatus)
+	}
+	if filter.BusinessStatus != "" {
+		query += ` AND business_status = ?`
+		args = append(args, filter.BusinessStatus)
+	}
+	// BitBrowser scans keep the scanned order; the page shows the newest first.
+	query += ` ORDER BY seq DESC, id DESC`
+	return listProfilesByQuery(db, query, args...)
 }
 
-func listAllProfiles(db *gorm.DB) ([]model.BrowserProfile, error) {
-	return listProfilesByQuery(db, `SELECT `+profileColumnsSQL+` FROM browser_profiles ORDER BY id DESC`)
+func profileLikeContains(value string) string {
+	return "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value) + "%"
 }
 
 func listProfilesByQuery(db *gorm.DB, query string, args ...any) ([]model.BrowserProfile, error) {

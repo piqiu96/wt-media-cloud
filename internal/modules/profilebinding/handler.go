@@ -136,7 +136,28 @@ func ListBrowserProfiles(ctx context.Context, c *hertzapp.RequestContext) {
 		}
 		userID = identityservice.UserID(parsed)
 	}
-	profiles, err := profileservice.ListProfiles(actor, userID)
+	filter := profileservice.ProfileListFilter{
+		ID:             strings.TrimSpace(c.Query("id")),
+		Name:           strings.TrimSpace(c.Query("name")),
+		Group:          strings.TrimSpace(c.Query("group")),
+		BitProfileID:   strings.TrimSpace(c.Query("bit_profile_id")),
+		Remark:         strings.TrimSpace(c.Query("remark")),
+		LocalStatus:    strings.TrimSpace(c.Query("local_status")),
+		BusinessStatus: strings.TrimSpace(c.Query("business_status")),
+	}
+	switch filter.LocalStatus {
+	case "", string(profileservice.ProfileActive), string(profileservice.ProfileLocalMissing), string(profileservice.ProfileArchived):
+	default:
+		api.BadRequest(c, 10001, "窗口状态筛选无效")
+		return
+	}
+	switch filter.BusinessStatus {
+	case "", string(profileservice.ProfileBusinessEnabled), string(profileservice.ProfileBusinessDisabled):
+	default:
+		api.BadRequest(c, 10001, "业务状态筛选无效")
+		return
+	}
+	profiles, err := profileservice.ListProfiles(actor, userID, filter)
 	if err != nil {
 		writeProfileError(c, err)
 		return

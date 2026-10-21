@@ -34,18 +34,17 @@ describe('operation resource design primitives', () => {
     expect(metrics).toMatch(/\.metric-list__item \{[^}]*white-space: nowrap/)
   })
 
-  it('keeps resource filters wide and responsive while table operations remain pinned', () => {
+  it('keeps resource filters adaptive while table operations remain pinned', () => {
     const styles = read('../../styles/resource-module.css')
 
-    expect(styles).toContain('grid-template-columns: repeat(4, minmax(220px, 1fr))')
-    expect(styles).toContain('@media (max-width: 1560px)')
-    expect(styles).toContain('@media (max-width: 1180px)')
+    expect(styles).not.toContain('.filter-bar > .t-space')
+    expect(styles).toContain('flex-wrap: wrap')
     expect(styles).toContain('width: max-content')
     expect(styles).toContain('.t-table__fixed-right')
   })
 
   // 自适应筛选栏：字段是 .filter-bar 直接子元素时的布局规则——主条件（--wide）
-  // 可伸可缩，普通条件固定基准宽，动作组居右；t-space 网格只留给未改造的旧页面。
+  // 可伸可缩，普通条件固定基准宽，动作组居右。
   it('provides the adaptive filter-bar layout for direct-child filter fields', () => {
     const styles = read('../../styles/resource-module.css')
 
@@ -54,6 +53,12 @@ describe('operation resource design primitives', () => {
     expect(styles).toMatch(/\.filter-bar > \.wt-filter-field \{[^}]*flex: 0 1 200px/)
     expect(styles).toMatch(/\.filter-bar > \.wt-filter-field--wide \{[^}]*flex: 1 1 280px/)
     expect(styles).toMatch(/\.filter-bar > \.wt-filter-actions \{[^}]*margin-left: auto/)
+  })
+
+  it('renders metric cards as controls only when the page supports metric filtering', () => {
+    const source = read('ResourceStatGrid.vue')
+    expect(source).toContain("interactive: { type: Boolean, default: false }")
+    expect(source).toContain("interactive ? 'button' : 'div'")
   })
 
   // t-input / t-select 渲染出来的根元素是 .t-input__wrap / .t-select__wrap——挂在组件上的

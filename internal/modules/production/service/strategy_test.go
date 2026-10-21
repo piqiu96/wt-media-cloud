@@ -85,7 +85,7 @@ func TestStrategyOperatorReadsAvailableTeamStrategyButCannotWrite(t *testing.T) 
 	svc, store, actor := strategyFixture()
 	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", Status: "enabled", CreatedBy: 99}}
 	actor.Role = identity.RoleOperator
-	items, err := svc.List(actor)
+	items, err := svc.List(actor, ComposeStrategyListQuery{})
 	if err != nil || len(items) != 1 || store.lastFilter.TeamID != 7 || !store.lastFilter.ActiveOnly {
 		t.Fatalf("items=%v filter=%+v err=%v", items, store.lastFilter, err)
 	}

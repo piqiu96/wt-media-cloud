@@ -27,6 +27,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.PATCH("/api/v1/compose-strategies/:strategy_id/status", SetComposeStrategyStatus)
 	h.POST("/api/v1/compose-strategies/:strategy_id/run-now", RunComposeStrategyNow)
 	h.GET("/api/v1/compose-strategies/:strategy_id/runs", ListComposeStrategyRuns)
+	h.GET("/api/v1/compose-strategies/:strategy_id/runs/history", ListComposeStrategyRunHistory)
 	h.GET("/api/v1/compose-strategies/:strategy_id/runs/tasks", ListComposeStrategyRunTasks)
 	h.GET("/api/v1/compose-strategies/:strategy_id/material-states", ListComposeStrategyMaterialStates)
 	h.GET("/api/v1/materials", ListMaterials)

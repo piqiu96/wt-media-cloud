@@ -1,5 +1,5 @@
 openapi: 3.0.3
-info: {title: WT Media Cloud Browser Profile API, version: 2026.10.02.1}
+info: {title: WT Media Cloud Browser Profile API, version: 2026.10.21.1}
 paths:
   /api/v1/bit-browser/profile-scans:
     post:
@@ -54,7 +54,15 @@ paths:
     get:
       operationId: listBrowserProfiles
       security: [{sessionCookie: []}]
-      parameters: [{in: query, name: user_id, schema: {type: integer, format: int64}, description: Admin-only explicit owner filter.}]
+      parameters:
+        - {in: query, name: user_id, schema: {type: integer, format: int64}, description: Admin-only explicit owner filter.}
+        - {in: query, name: id, schema: {type: string}, description: Profile ID substring.}
+        - {in: query, name: name, schema: {type: string}, description: Window name substring.}
+        - {in: query, name: group, schema: {type: string}, description: Group ID or group name substring.}
+        - {in: query, name: bit_profile_id, schema: {type: string}, description: BitBrowser profile ID substring.}
+        - {in: query, name: remark, schema: {type: string}, description: Remark substring.}
+        - {in: query, name: local_status, schema: {type: string, enum: [active, local_missing, archived]}, description: Exact local status.}
+        - {in: query, name: business_status, schema: {type: string, enum: [enabled, disabled]}, description: Exact business status.}
       responses:
         '200':
           description: Visible confirmed Profile mirrors, including a formal proxy_id only after successful Agent read-back.

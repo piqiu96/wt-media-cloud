@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 )
 
@@ -41,6 +44,27 @@ func (m *discoveryMemory) ListStrategies(team *identityservice.TeamID) ([]Discov
 	}
 	return out, nil
 }
+func (m *discoveryMemory) ListStrategiesFiltered(team *identityservice.TeamID, query StrategyListQuery) ([]DiscoveryStrategy, error) {
+	items, err := m.ListStrategies(team)
+	if err != nil {
+		return nil, err
+	}
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	out := make([]DiscoveryStrategy, 0, len(items))
+	for _, item := range items {
+		if query.Type != "" && item.StrategyType != query.Type {
+			continue
+		}
+		if query.Status != "" && string(item.Status) != query.Status {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(item.Name), search) && strconv.FormatInt(item.ID, 10) != search {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
 func (m *discoveryMemory) FindStrategy(id int64) (DiscoveryStrategy, bool, error) {
 	v, ok := m.strategies[id]
 	return v, ok, nil
@@ -71,6 +95,47 @@ func (m *discoveryMemory) ListCrawlTasks(team *identityservice.TeamID, strategyI
 		out = append(out, v)
 	}
 	return out, nil
+}
+func (m *discoveryMemory) ListCrawlTasksFiltered(team *identityservice.TeamID, query CrawlTaskListQuery) ([]CrawlTask, error) {
+	items, err := m.ListCrawlTasks(team, query.StrategyID)
+	if err != nil {
+		return nil, err
+	}
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	out := make([]CrawlTask, 0, len(items))
+	for _, item := range items {
+		if query.Status != "" && string(item.Status) != query.Status {
+			continue
+		}
+		if search != "" {
+			display := crawlTaskDisplayName(item)
+			if !strings.Contains(strings.ToLower(display+" "+item.TaskID), search) && strconv.FormatInt(item.ID, 10) != search {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func crawlTaskDisplayName(task CrawlTask) string {
+	switch task.TaskType {
+	case "discovery_task":
+		if name, ok := task.Snapshot["strategy_name"]; ok {
+			return fmt.Sprint(name)
+		}
+		return "策略"
+	case "retry_failed_task":
+		if name, ok := task.Snapshot["strategy_name"]; ok {
+			return fmt.Sprint(name)
+		}
+		return "重试"
+	default:
+		if fmt.Sprint(task.Snapshot["operation"]) == "url" {
+			return "ID发现"
+		}
+		return "关键词发现"
+	}
 }
 func (m *discoveryMemory) FindCrawlTask(id int64) (CrawlTask, bool, error) {
 	v, ok := m.tasks[id]
@@ -314,7 +379,7 @@ func TestAdminManualRunUsesExplicitTeamScope(t *testing.T) {
 	}
 }
 
-func TestStrategyMaterialConfigValidationAndSnapshot(t *testing.T) {
+func TestStrategyMaterialRulesValidationAndSnapshot(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
 		return CrawlerResult{}, nil
@@ -324,25 +389,46 @@ func TestStrategyMaterialConfigValidationAndSnapshot(t *testing.T) {
 	base := func() DiscoveryStrategy {
 		return DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Status: StrategyEnabled}
 	}
+	condition := func(field, operator string, value any) map[string]any {
+		return map[string]any{"field": field, "operator": operator, "value": value}
+	}
 
 	invalid := base()
-	invalid.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "AND"}
+	invalid.Config = map[string]any{"keyword": "demo", "material_rules": []any{
+		map[string]any{"priority": 2, "action": "match", "logic": "all", "conditions": []any{condition("like_count", "gte", 1000)}},
+	}}
 	if _, err := service.CreateStrategy(actor, invalid); !errors.Is(err, ErrDiscoveryInvalid) {
-		t.Fatalf("auto material without positive threshold should be invalid, got %v", err)
+		t.Fatalf("non-contiguous priority should be invalid, got %v", err)
 	}
-	invalid.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "XOR", "like_threshold": 10000}
+	invalid.Config = map[string]any{"keyword": "demo", "material_rules": []any{
+		map[string]any{"priority": 1, "action": "filter", "logic": "all", "conditions": []any{condition("published_at", "recent_hours", 24)}},
+	}}
 	if _, err := service.CreateStrategy(actor, invalid); !errors.Is(err, ErrDiscoveryInvalid) {
-		t.Fatalf("unsupported material rule should be invalid, got %v", err)
+		t.Fatalf("filter-only rules should be invalid, got %v", err)
+	}
+	invalid.Config = map[string]any{"keyword": "demo", "material_rules": []any{
+		map[string]any{"priority": 1, "action": "match", "logic": "all", "conditions": []any{}},
+	}}
+	if _, err := service.CreateStrategy(actor, invalid); !errors.Is(err, ErrDiscoveryInvalid) {
+		t.Fatalf("empty condition list should be invalid, got %v", err)
 	}
 
+	// Historical auto_material/threshold configs are translated on read and
+	// rewritten to the rule-group shape on save.
 	input := base()
-	input.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "and", "like_threshold": 10000, "favorite_threshold": 500}
+	input.Config = map[string]any{"keyword": "demo", "auto_material": true, "material_rule": "or", "like_threshold": 10000, "favorite_threshold": 500}
 	strategy, err := service.CreateStrategy(actor, input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strategy.Config["material_rule"] != "AND" || strategy.Config["like_threshold"] != int64(10000) {
-		t.Fatalf("material config was not normalized: %+v", strategy.Config)
+	rules, err := model.ResolveMaterialRules(strategy.Config)
+	if err != nil || len(rules) != 1 || rules[0].Action != "match" || rules[0].Logic != "any" || len(rules[0].Conditions) != 2 {
+		t.Fatalf("legacy material config was not normalized: rules=%+v err=%v config=%+v", rules, err, strategy.Config)
+	}
+	for _, legacy := range []string{"auto_material", "material_rule", "like_threshold", "favorite_threshold"} {
+		if _, exists := strategy.Config[legacy]; exists {
+			t.Fatalf("legacy key %q survived normalization: %+v", legacy, strategy.Config)
+		}
 	}
 
 	task, err := service.CreateRun(actor, strategy.ID)
@@ -355,12 +441,15 @@ func TestStrategyMaterialConfigValidationAndSnapshot(t *testing.T) {
 
 	updated := base()
 	updated.Name = "新热点"
-	updated.Config = map[string]any{"keyword": "new", "auto_material": true, "material_rule": "OR", "like_threshold": 20000, "favorite_threshold": 1000}
+	updated.Config = map[string]any{"keyword": "new", "material_rules": []any{
+		map[string]any{"priority": 1, "action": "match", "logic": "all", "conditions": []any{condition("favorite_count", "gte", 1000)}},
+	}}
 	if _, err = service.UpdateStrategy(actor, strategy.ID, updated); err != nil {
 		t.Fatal(err)
 	}
-	if task.Snapshot["strategy_name"] != "热点" || task.Snapshot["material_rule"] != "AND" || task.Snapshot["like_threshold"] != int64(10000) {
-		t.Fatalf("historical task snapshot was changed: %+v", task.Snapshot)
+	snapshotRules, err := model.ResolveMaterialRules(task.Snapshot)
+	if err != nil || len(snapshotRules) != 1 || snapshotRules[0].Logic != "any" {
+		t.Fatalf("historical task snapshot was changed: rules=%+v err=%v snapshot=%+v", snapshotRules, err, task.Snapshot)
 	}
 }
 

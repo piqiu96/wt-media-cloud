@@ -10,6 +10,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
@@ -40,7 +41,7 @@ func ListMaterials(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	items, err := productionservice.ListMaterials(actor, strings.TrimSpace(c.Query("search")))
+	items, err := productionservice.ListMaterialsFiltered(actor, repository.MaterialFilter{Search: strings.TrimSpace(c.Query("search")), GameID: c.Query("game_id"), VideoStatus: c.Query("video_status"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")})
 	if err != nil {
 		writeProductionError(c, err)
 		return
@@ -148,7 +149,7 @@ func ListMyMaterials(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	items, err := productionservice.ListMyMaterials(actor)
+	items, err := productionservice.ListMyMaterialsFiltered(actor, productionservice.MyMaterialsQuery{Search: c.Query("search"), VideoStatus: c.Query("video_status"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")})
 	if err != nil {
 		writeProductionError(c, err)
 		return

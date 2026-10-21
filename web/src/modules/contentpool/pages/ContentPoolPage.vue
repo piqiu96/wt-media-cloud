@@ -9,7 +9,6 @@ import { createSessionClient } from '../../../shared/api/session.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
-import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
@@ -26,9 +25,13 @@ const rows = ref([])
 const loading = ref(false)
 const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
+const contentID = ref(route.query.content_id ? String(route.query.content_id) : '')
 const platform = ref('')
 const sourceType = ref('')
 const status = ref('')
+const publishedRange = ref([])
+const sortBy = ref('published_at')
+const sortOrder = ref('desc')
 const strategyFilter = ref(route.query.strategy_id ? String(route.query.strategy_id) : '')
 const taskFilter = ref(route.query.crawl_task_id ? String(route.query.crawl_task_id) : '')
 const materialFilter = ref(route.query.material_id ? String(route.query.material_id) : '')
@@ -80,17 +83,10 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
-const stats = computed(() => [
-  { key: 'all', label: '全部内容', value: rows.value.length, tone: 'info' },
-  { key: 'pending', label: '待处理', value: pendingCount.value, tone: 'warning' },
-  { key: 'material_created', label: '已转素材', value: rows.value.filter((row) => row.status === 'material_created').length, tone: 'success' },
-  { key: 'ignored', label: '已忽略', value: rows.value.filter((row) => row.status === 'ignored').length, tone: 'neutral' },
-])
-
 // TDesign 的 fixed 表格布局在 WebKit 中需要明确 width，minWidth 不能保证内容列宽度。
 const columns = [
   { colKey: 'row-select', type: 'multiple', width: 48 },
-  { colKey: 'id', title: 'ID', width: 80 },
+  { colKey: 'id', title: 'ID', width: 80, sorter: true },
   { colKey: 'title', title: '内容', width: 340 },
   { colKey: 'platform', title: '平台', width: 110 },
   { colKey: 'game', title: '游戏', width: 110 },
@@ -98,12 +94,15 @@ const columns = [
   // 互动列为较长的带千分位数值留出宽度。
   { colKey: 'interaction', title: '互动', width: 120 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
-  { colKey: 'source', title: '来源', width: 260 },
-  { colKey: 'published_at', title: '发布时间', width: 150 },
-  { colKey: 'created_at', title: '发现时间', width: 150 },
-  { colKey: 'updated_at', title: '修改时间', width: 150 },
-  { colKey: 'updated_by_name', title: '修改人', width: 120 },
+  // 来源策略与来源任务是两种关联实体，各占一列（AdminUI 规范 §4.1 一种实体一列）。
+  { colKey: 'source_strategy', title: '来源策略', width: 140 },
+  { colKey: 'source_task', title: '来源任务', width: 180 },
+  // 状态排在关联实体与时间之后（§4.1：主体 → 属性 → 关联实体 → 状态/结果 → 时间）。
   { colKey: 'status', title: '状态', width: 120 },
+  { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
+  { colKey: 'created_at', title: '发现时间', width: 150, sorter: true },
+  { colKey: 'updated_at', title: '修改时间', width: 150, sorter: true },
+  { colKey: 'updated_by_name', title: '修改人', width: 120 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
 
@@ -121,7 +120,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await client.list({ search: search.value.trim(), platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined, material_id: materialFilter.value || undefined })
+    const result = await client.list({ search: search.value.trim(), content_id: contentID.value.trim() || undefined, platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined, material_id: materialFilter.value || undefined, published_from: publishedRange.value?.[0] || undefined, published_to: publishedRange.value?.[1] || undefined, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = Array.isArray(result) ? result : []
     pagination.value.current = 1
   } catch (e) {
@@ -131,13 +130,14 @@ async function load() {
   }
 }
 
-function applyStatFilter(key) {
-  status.value = key === 'all' ? '' : key
+function reset() {
+  search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []
   load()
 }
 
-function reset() {
-  search.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''
+function changeSort(sort) {
+  sortBy.value = sort?.sortBy || 'published_at'
+  sortOrder.value = sort?.descending === false ? 'asc' : 'desc'
   load()
 }
 
@@ -484,19 +484,24 @@ function openImageViewer(url) {
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
-      <ResourceStatGrid v-if="!isLibrary" :items="stats" @select="applyStatFilter" />
       <ResourceCard class="content-pool-card" :class="{ 'is-reviewing': reviewMode }">
         <div class="filter-bar">
-          <t-space wrap>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
+            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
-            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><span v-if="!isLibrary && selectedRowKeys.length" class="selection-count">已选 {{ selectedRowKeys.length }} 项</span><t-button v-if="!isLibrary && selectedRowKeys.length" theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button><t-button v-if="!isLibrary && selectedRowKeys.length" class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button></div>
-          </t-space>
+            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+            <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+        </div>
+        <div v-if="!isLibrary && selectedRowKeys.length" class="wt-selection-toolbar">
+          <span class="wt-selection-toolbar__count">已选 {{ selectedRowKeys.length }} 项</span>
+          <t-button theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button>
+          <t-button class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button>
+          <t-button class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button>
         </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
             <template #title="{ row }">
               <div class="title-cell">
                 <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
@@ -517,12 +522,13 @@ function openImageViewer(url) {
             </template>
             <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
             <template #interaction="{ row }"><MetricList :items="interactionLabel(row)" /></template>
-            <template #source="{ row }">
-              <div class="source-cell">
-                <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link>
-                <small v-if="row.crawl_task_id">{{ taskLabel(row) }}</small>
-                <span v-if="!row.strategy_id && !row.crawl_task_id">-</span>
-              </div>
+            <template #source_strategy="{ row }">
+              <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link>
+              <span v-else>—</span>
+            </template>
+            <template #source_task="{ row }">
+              <span v-if="row.crawl_task_id">{{ taskLabel(row) }}</span>
+              <span v-else>—</span>
             </template>
             <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
@@ -541,7 +547,7 @@ function openImageViewer(url) {
         </div>
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" class="content-detail-drawer" :header="reviewMode ? '内容审核' : '内容详情'" size="min(72vw, 1200px)" destroy-on-close :footer="reviewMode" @close="exitReviewMode()">
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" class="content-detail-drawer" :header="reviewMode ? '内容审核' : '内容详情'" size="min(92vw, 960px)" destroy-on-close :footer="reviewMode || Boolean(detail?.source_url || (!isLibrary && ['pending', 'ignored'].includes(detail?.status)))" @close="exitReviewMode()">
         <div v-if="detail" class="detail-workspace">
           <div v-if="reviewMode" class="review-progress">
             <span>待审核 {{ reviewQueue.length }}</span>
@@ -601,21 +607,11 @@ function openImageViewer(url) {
             <section class="detail-panel">
               <h4>处理结果</h4>
               <dl>
-                <div><dt>当前状态</dt><dd><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></dd></div>
                 <div><dt>关联素材</dt><dd><t-link v-if="detail.material_id" class="wt-primary-link" theme="primary" @click="viewMaterial(detail)">素材详情</t-link><span v-else>未转换</span></dd></div>
                 <div><dt>审核备注</dt><dd>{{ detail.audit_note || '-' }}</dd></div>
                 <div><dt>失败原因</dt><dd :class="{ 'is-danger': detail.failure_reason }">{{ detail.failure_reason || '-' }}</dd></div>
               </dl>
             </section>
-          </div>
-          <div class="detail-actions">
-            <a v-if="detail.source_url" class="detail-primary-link" :href="detail.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a>
-            <t-button v-if="detail.material_id" class="wt-secondary-button" variant="outline" @click="viewMaterial(detail)">素材详情</t-button>
-            <template v-if="!reviewMode && !isLibrary && detail.status === 'pending'">
-              <t-button theme="primary" @click="materialize(detail)">转素材</t-button>
-              <t-button class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'ignored')">忽略</t-button>
-            </template>
-            <t-button v-if="!reviewMode && !isLibrary && detail.status === 'ignored'" class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'pending')">恢复待处理</t-button>
           </div>
         </div>
         <template #footer>
@@ -628,6 +624,14 @@ function openImageViewer(url) {
               <t-button class="wt-secondary-button" variant="outline" :disabled="reviewProcessing" @click="reviewAction('skip')">跳过</t-button>
               <t-button class="wt-secondary-button" variant="outline" :disabled="reviewProcessing" @click="exitReviewMode()">取消审核</t-button>
             </div>
+          </div>
+          <div v-else-if="detail" class="detail-actions">
+            <a v-if="detail.source_url" class="wt-primary-link" :href="detail.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a>
+            <template v-if="!isLibrary && detail.status === 'pending'">
+              <t-button theme="primary" @click="materialize(detail)">转素材</t-button>
+              <t-button class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'ignored')">忽略</t-button>
+            </template>
+            <t-button v-if="!isLibrary && detail.status === 'ignored'" class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'pending')">恢复</t-button>
           </div>
         </template>
       </t-drawer>
@@ -724,8 +728,7 @@ function openImageViewer(url) {
 .title-copy > span { color: var(--wt-text-primary); font-weight: 600; }
 .title-copy small { overflow: hidden; color: var(--wt-text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .content-pool-page :deep(.wt-resource-actions) { max-width: 360px; }
-.selection-count { color: var(--wt-text-secondary); font-size: 13px; white-space: nowrap; }
-.content-detail-drawer :deep(.t-drawer) { max-width: 1200px; }
+.content-detail-drawer :deep(.t-drawer) { max-width: 960px; }
 .detail-workspace { display: flex; flex-direction: column; gap: 18px; }
 .review-progress { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid rgba(37, 99, 235, 0.18); border-radius: 10px; background: var(--wt-info-bg); }
 .review-progress span { color: var(--wt-text-tertiary); font-size: 13px; }
@@ -737,8 +740,6 @@ function openImageViewer(url) {
 .detail-primary { min-width: 0; }
 .detail-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .detail-title-row h3 { margin: 0; color: var(--wt-text-primary); font-size: 21px; font-weight: 650; line-height: 1.35; }
-.source-cell { display: flex; flex-direction: column; gap: 2px; }
-.source-cell small { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .detail-meta-grid div, .detail-metrics div { padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
 .detail-meta-grid span, .detail-metrics span { display: block; color: var(--wt-text-tertiary); font-size: 12px; }
@@ -753,8 +754,7 @@ function openImageViewer(url) {
 .detail-panel dt { color: var(--wt-text-tertiary); font-size: 13px; }
 .detail-panel dd { overflow-wrap: anywhere; margin: 0; color: var(--wt-text-primary); font-size: 14px; line-height: 1.5; }
 .detail-panel dd.is-danger { color: var(--wt-danger); }
-.detail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 4px; border-top: 1px solid var(--wt-border); }
-.detail-primary-link { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 16px; border-radius: 6px; background: var(--wt-primary); color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; }
+.detail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .review-footer { display: flex; flex-direction: column; gap: 10px; }
 .review-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .manual-search-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
@@ -764,7 +764,6 @@ function openImageViewer(url) {
 }
 @media (max-width: 760px) {
   .detail-title-row, .detail-actions { align-items: stretch; flex-direction: column; }
-  .detail-primary-link { width: 100%; }
   .review-actions { flex-wrap: wrap; }
 }
 .discover-dialog { display: flex; flex-direction: column; gap: 14px; }

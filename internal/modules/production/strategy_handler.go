@@ -48,7 +48,20 @@ func ListComposeStrategies(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	items, err := productionservice.ListComposeStrategies(current)
+	query := productionservice.ComposeStrategyListQuery{
+		Search: strings.TrimSpace(c.Query("search")),
+		GameID: strings.TrimSpace(c.Query("game_id")),
+		Status: strings.TrimSpace(c.Query("status")),
+	}
+	if raw := strings.TrimSpace(c.Query("template_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			api.FailureNamed(c, consts.StatusBadRequest, 15210, "模板 ID 无效", "compose_strategy_invalid")
+			return
+		}
+		query.TemplateID = value
+	}
+	items, err := productionservice.ListComposeStrategies(current, query)
 	if err != nil {
 		writeStrategyError(c, err)
 		return
@@ -212,6 +225,58 @@ func ListComposeStrategyRuns(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	api.Success(c, runs)
+}
+
+func ListComposeStrategyRunHistory(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "页码无效", "compose_strategy_invalid")
+		return
+	}
+	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	if err != nil || pageSize < 1 || pageSize > 50 {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "每页条数无效", "compose_strategy_invalid")
+		return
+	}
+	options := repository.ScheduleRunHistoryOptions{Page: page, PageSize: pageSize, TriggerType: strings.TrimSpace(c.Query("trigger_type"))}
+	if options.TriggerType != "" && options.TriggerType != "manual" && options.TriggerType != "scheduled" {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "触发方式无效", "compose_strategy_invalid")
+		return
+	}
+	if raw := strings.TrimSpace(c.Query("created_from")); raw != "" {
+		value, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			api.FailureNamed(c, consts.StatusBadRequest, 15210, "开始时间无效", "compose_strategy_invalid")
+			return
+		}
+		options.CreatedFrom = &value
+	}
+	if raw := strings.TrimSpace(c.Query("created_before")); raw != "" {
+		value, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			api.FailureNamed(c, consts.StatusBadRequest, 15210, "结束时间无效", "compose_strategy_invalid")
+			return
+		}
+		options.CreatedBefore = &value
+	}
+	if options.CreatedFrom != nil && options.CreatedBefore != nil && !options.CreatedFrom.Before(*options.CreatedBefore) {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "时间范围无效", "compose_strategy_invalid")
+		return
+	}
+	result, err := productionservice.ListComposeStrategyRunHistory(current, id, options)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, result)
 }
 
 func ListComposeStrategyRunTasks(_ context.Context, c *hertzapp.RequestContext) {

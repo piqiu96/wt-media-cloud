@@ -37,14 +37,19 @@ type SourceInput struct {
 }
 
 type Filter struct {
-	TeamID      *sharedidentity.TeamID
-	Platform    string
-	Status      model.Status
-	SourceType  string
-	Search      string
-	StrategyID  *int64
-	CrawlTaskID *int64
-	MaterialID  *int64
+	ID            *int64
+	TeamID        *sharedidentity.TeamID
+	Platform      string
+	Status        model.Status
+	SourceType    string
+	Search        string
+	PublishedFrom string
+	PublishedTo   string
+	SortBy        string
+	SortOrder     string
+	StrategyID    *int64
+	CrawlTaskID   *int64
+	MaterialID    *int64
 }
 
 type CrawlerRequest struct {

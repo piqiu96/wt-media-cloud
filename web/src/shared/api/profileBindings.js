@@ -36,8 +36,17 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
       if (options.overwrite) body.overwrite = true
       return api.post('/bit-browser/main-identity', body)
     },
-    listProfiles() {
-      return api.get('/browser-profiles')
+    listProfiles(filters = {}) {
+      return api.get('/browser-profiles', {
+        user_id: filters.user_id,
+        id: filters.id,
+        name: filters.name,
+        group: filters.group,
+        bit_profile_id: filters.bit_profile_id,
+        remark: filters.remark,
+        local_status: filters.local_status,
+        business_status: filters.business_status,
+      })
     },
     createProfile(config, options = {}) {
       return api.post('/browser-profiles', { ...config, node_id: options.nodeId })

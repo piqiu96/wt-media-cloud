@@ -210,10 +210,14 @@ func (s *Service) AddUsage(actor identityservice.PublicUser, materialID int64) (
 }
 
 func (s *Service) ListMaterials(actor identityservice.PublicUser, search string) ([]model.Material, error) {
+	return s.ListMaterialsFiltered(actor, repository.MaterialFilter{Search: search})
+}
+
+func (s *Service) ListMaterialsFiltered(actor identityservice.PublicUser, filter repository.MaterialFilter) ([]model.Material, error) {
 	if actor.Status != identityservice.UserStatusEnabled {
 		return nil, ErrForbidden
 	}
-	filter := repository.MaterialFilter{Search: strings.TrimSpace(search)}
+	filter.Search = strings.TrimSpace(filter.Search)
 	if actor.Role != identityservice.RoleAdmin {
 		if actor.TeamID == nil || len(actor.GameIDs) == 0 {
 			return nil, ErrForbidden

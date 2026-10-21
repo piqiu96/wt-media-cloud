@@ -810,24 +810,23 @@ const columns = [
       style="margin-bottom:16px"
     />
 
-    <ResourceStatGrid :items="resourceAccountStats" @select="applyStatFilter" />
+    <ResourceStatGrid :items="resourceAccountStats" interactive @select="applyStatFilter" />
 
     <ResourceCard class="account-resource-card">
     <div class="filter-bar">
-      <t-space wrap>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable style="width:100%" /></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="searchGameIds" multiple clearable placeholder="游戏" style="width:100%">
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="searchGameIds" multiple clearable placeholder="全部">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="平台" clearable style="width:100%">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option value="bilibili" label="哔哩" />
             <t-option value="baijiahao" label="百度" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchBizStatus" placeholder="业务状态" clearable style="width:100%">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchBizStatus" placeholder="全部" clearable>
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">账号状态</span><t-select v-model="searchLoginStatus" placeholder="账号状态" clearable style="width:100%">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">账号状态</span><t-select v-model="searchLoginStatus" placeholder="全部" clearable>
             <t-option value="normal" label="正常" />
             <t-option value="not_logged_in" label="未登录" />
             <t-option value="expired" label="登录失效" />
@@ -835,15 +834,14 @@ const columns = [
             <t-option value="restricted" label="账号受限" />
             <t-option value="environment_error" label="检查失败" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" placeholder="标签" clearable style="width:100%">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" placeholder="全部" clearable>
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable style="width:100%" /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable /></label>
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadAccounts">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
         </div>
-      </t-space>
     </div>
 
     <t-card v-if="batchResults.length" title="批量检查结果" :bordered="true" class="batch-result-card">

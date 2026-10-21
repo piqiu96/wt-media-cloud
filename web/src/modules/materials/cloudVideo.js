@@ -1,4 +1,6 @@
-// 拿到签名地址之后，这一步交给谁。
+import { publicObjectReadUrl } from '../../shared/utils/objectReadUrl.js'
+
+// 拿到云端对象地址之后，这一步交给谁。
 //
 // 两个宿主的规矩不一样，而且不能互相顶替：
 //
@@ -10,13 +12,12 @@
 //   系统浏览器。这里因此**不预留标签页**：预留只会拿到 `null`，而把那个 `null` 读成
 //   「被拦」正是此前「浏览器拦截了新标签页」那句误报的来处。
 //
-// 地址是签名的、会过期，所以每次点击现取，不预先拿也不留：`getVideoUrl` 只在这一刻
-// 被调用一次。
+// 每次点击现取对象路径，不预先拿也不留：`getVideoUrl` 只在这一刻调用一次。
 
-/** 取一次签名地址。空地址当失败抛出，别让空串走到窗口 API 里去。 */
+/** 取一次对象地址并转换为浏览器读地址。空地址不交给窗口 API。 */
 async function cloudVideoAddress(client, materialId) {
   const data = await client.getVideoUrl(materialId)
-  const url = data?.url
+  const url = publicObjectReadUrl(data?.url)
   if (!url) throw new Error('云端视频地址为空')
   return url
 }

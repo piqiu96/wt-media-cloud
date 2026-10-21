@@ -95,7 +95,7 @@ type Store interface {
 	CreateTeam(OperationTeam) (TeamID, error)
 	CreateTeamWithAudit(OperationTeam, AuditEvent) (TeamID, error)
 	FindTeam(TeamID) (OperationTeam, bool, error)
-	ListTeams() ([]OperationTeam, error)
+	ListTeams(keyword string) ([]OperationTeam, error)
 	UpdateTeam(OperationTeam) error
 	UpdateTeamWithAudit(OperationTeam, AuditEvent) error
 	DeleteTeam(TeamID) error
@@ -511,7 +511,7 @@ func (s *Service) CreateTeam(actorID UserID, name string) (OperationTeam, error)
 	return team, nil
 }
 
-func (s *Service) ListTeams(actorID UserID) ([]OperationTeam, error) {
+func (s *Service) ListTeams(actorID UserID, keyword string) ([]OperationTeam, error) {
 	_, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return nil, err
@@ -519,7 +519,7 @@ func (s *Service) ListTeams(actorID UserID) ([]OperationTeam, error) {
 	if !ok {
 		return nil, ErrForbidden
 	}
-	return s.store.ListTeams()
+	return s.store.ListTeams(strings.TrimSpace(keyword))
 }
 
 func (s *Service) RenameTeam(actorID UserID, teamID TeamID, name string) (OperationTeam, error) {
@@ -1213,14 +1213,23 @@ func (s *memoryStore) FindTeam(teamID TeamID) (OperationTeam, bool, error) {
 	return team, ok, nil
 }
 
-func (s *memoryStore) ListTeams() ([]OperationTeam, error) {
+func (s *memoryStore) ListTeams(keyword string) ([]OperationTeam, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	needle := strings.ToLower(strings.TrimSpace(keyword))
 	result := make([]OperationTeam, 0, len(s.teams))
 	for _, team := range s.teams {
+		if needle != "" && !strings.Contains(strings.ToLower(team.Name), needle) && strconv.FormatInt(int64(team.ID), 10) != needle {
+			continue
+		}
 		result = append(result, team)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		return result[i].ID < result[j].ID
+	})
 	return result, nil
 }
 

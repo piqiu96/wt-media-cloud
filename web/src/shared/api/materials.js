@@ -7,11 +7,10 @@ import { isDesktop } from '../../utils.js'
  *
  * 两条容易写错的地方，写在调用点旁边：
  *
- * 1. `list` 的形参就是白名单：**只有 `search` 会被转发**。服务端的团队范围与游戏范围由
- *    会话决定（`ListMaterials` 只读 `c.Query("search")`），页面给 `team_id`/`game_id`
- *    这类筛选项就是在假装它筛得动 —— 传进去不会报错，只会被安静地丢掉然后回全量。
- *    解构而不是透传，是为了让这条边界在调用点就成立，而不是靠注释维持。游戏过滤
- *    因此只能在客户端做。
+ * 1. `list` 的形参就是白名单：服务端读 `search`/`game_id`/`video_status`/`sort_by`/
+ *    `sort_order`（`ListMaterialsFiltered`）。团队范围仍由会话决定，页面给 `team_id`
+ *    就是在假装它筛得动 —— 传进去不会报错，只会被安静地丢掉然后回全量。解构而不是
+ *    透传，是为了让这条边界在调用点就成立，而不是靠注释维持。
  *
  * 2. `addUsage` 的 200/201 之别在客户端**结构上不可见**：`parseResponse` 两种情况都
  *    返回 `body.data`（见 shared/api/http.js）。差别只在服务端有意义（是不是新建/恢复），
@@ -20,14 +19,14 @@ import { isDesktop } from '../../utils.js'
 export function createMaterialsClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    list({ search } = {}) { return api.get('/materials', { search }) },
+    list({ search, game_id, video_status, sort_by, sort_order } = {}) { return api.get('/materials', { search, game_id, video_status, sort_by, sort_order }) },
     get(id) { return api.get(`/materials/${id}`) },
     addUsage(id) { return api.post(`/materials/${id}/usages`, {}) },
     removeUsage(usageId) { return api.delete(`/material-usages/${usageId}`) },
     // 恢复走关系自己的端点，不靠「再 add 一次」：那条命令按素材 id 走，说不清它恢复的是
     // 哪一行。两条路径最终落到同一行（uq_material_usages_user_material）。
     restoreUsage(usageId) { return api.post(`/material-usages/${usageId}/restore`, {}) },
-    listMyMaterials() { return api.get('/my-materials') },
+    listMyMaterials(params = {}) { return api.get('/my-materials', params) },
     // 202 恒定：此刻还没有任何字节被下载，任务在节点领取前一直是 pending。
     // 下一次诚实的进度来源是 GET /file-transfer-tasks，不是这个响应。
     async createDownload(id) {

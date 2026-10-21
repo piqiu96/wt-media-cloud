@@ -8,7 +8,6 @@ import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
-import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
@@ -27,6 +26,8 @@ const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
 const statusFilter = ref('')
 const gameFilter = ref('')
+const sortBy = ref('published_at')
+const sortOrder = ref('desc')
 const games = ref([])
 const detailVisible = ref(false)
 const detail = ref(null)
@@ -45,13 +46,14 @@ const mineIds = ref(new Set())
 // 两个状态维度并排（规范 §7.2）：素材状态已有真值（materials.status），使用情况还没有。
 // 缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到状态的素材画成「可用」。
 const columns = [
-  { colKey: 'id', title: '素材 ID', width: 90 },
+  { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 360 },
   { colKey: 'game', title: '游戏', width: 100 },
   { colKey: 'material_status', title: '素材状态', width: 100 },
   { colKey: 'video_status', title: '文件状态', width: 100 },
   { colKey: 'usage', title: '使用情况', width: 170 },
-  { colKey: 'created_at', title: '入库时间', width: 105 },
+  { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
+  { colKey: 'created_at', title: '入库时间', width: 105, sorter: true },
   { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
 
@@ -59,28 +61,10 @@ const tableScroll = computed(() => ({
   x: `${columns.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
 }))
 
-// 服务端只读 `search`（见 shared/api/materials.js 的白名单），所以文件状态与游戏这两个
-// 筛选只能在**已加载的行**上做。这不是「假装筛了」：素材一次全取（服务端上限 200 条），
-// 筛的就是全部；给服务端加一个它读不了的参数才是装样子。
-const filteredRows = computed(() => rows.value.filter((row) => (
-  (!statusFilter.value || row.video_status === statusFilter.value)
-  && (!gameFilter.value || row.game_id === gameFilter.value)
-)))
-
 const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return filteredRows.value.slice(start, start + pagination.value.pageSize)
+  return rows.value.slice(start, start + pagination.value.pageSize)
 })
-
-const stats = computed(() => [
-  { key: 'all', label: '全部素材', value: rows.value.length, tone: 'info' },
-  ...VIDEO_STATUSES.map((status) => ({
-    key: status,
-    label: videoStatusLabel(status),
-    value: rows.value.filter((row) => row.video_status === status).length,
-    tone: videoStatusTone(status),
-  })),
-])
 
 // 筛选项只列**已加载数据里真的出现过**的游戏：列一个点下去没有任何行的选项，
 // 与「筛了但服务端没筛」是同一种误导。
@@ -93,7 +77,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await client.list({ search: search.value })
+    const data = await client.list({ search: search.value, game_id: gameFilter.value, video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = Array.isArray(data) ? data : []
     pagination.value.current = 1
   } catch (e) {
@@ -227,8 +211,10 @@ function reset() {
   load()
 }
 
-function applyStatFilter(key) {
-  statusFilter.value = key === 'all' ? '' : key
+function changeSort(sort) {
+  sortBy.value = sort?.sortBy || 'published_at'
+  sortOrder.value = sort?.descending === false ? 'asc' : 'desc'
+  load()
 }
 
 onMounted(() => {
@@ -248,20 +234,15 @@ onMounted(() => {
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
-      <ResourceStatGrid :items="stats" @select="applyStatFilter" />
-      <ResourceCard class="material-filter-card">
-        <div class="filter-row">
-          <label class="filter-field"><span>综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" style="width:220px" @enter="load" /></label>
-          <label class="filter-field"><span>文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
-          <label class="filter-field"><span>游戏</span><t-select v-model="gameFilter" clearable placeholder="全部" style="width:140px"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
-          <t-button theme="primary" @click="load">查询</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
-        </div>
-      </ResourceCard>
-
       <ResourceCard class="material-table-card">
+        <div class="filter-bar">
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+        </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无素材">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面 + 标题 + 来源平台合成一格；标题跳来源平台落地页，没有则退回普通文本。 -->
             <template #material="{ row }">
@@ -288,6 +269,7 @@ onMounted(() => {
               </div>
             </template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <template #op="{ row }">
               <!-- 详情 | 单一主操作；已加入的行换成「去我的素材」，不再给必然空转的「加入」。 -->
               <t-space class="wt-resource-actions">
@@ -300,7 +282,7 @@ onMounted(() => {
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="filteredRows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
       <MaterialDetailDrawer
@@ -318,10 +300,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.material-filter-card { padding: 14px 20px; }
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
-.filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .material-cell__cover { width: 56px; height: 36px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -338,6 +317,6 @@ span.material-title { color: var(--wt-text-primary); }
 .material-added-toast { display: flex; align-items: center; gap: 12px; }
 .material-added-toast__text { color: var(--wt-text-primary); }
 @media (max-width: 680px) {
-  .material-filter-card, .material-table-card { padding: 16px; }
+  .material-table-card { padding: 16px; }
 }
 </style>

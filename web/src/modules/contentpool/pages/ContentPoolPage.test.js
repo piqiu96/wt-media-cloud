@@ -6,7 +6,8 @@ const source = readFileSync(new URL('./ContentPoolPage.vue', import.meta.url), '
 describe('content pool page', () => {
   it('uses the shared resource layout and exposes the M3-A actions', () => {
     expect(source).toContain('ResourcePageHeader')
-    expect(source).toContain('ResourceStatGrid')
+    // 概览指标与分页总数重复，已移除（AdminUI 规范 §3.3）。
+    expect(source).not.toContain('ResourceStatGrid')
     expect(source).toContain('ResourceStatusBadge')
     expect(source).toContain('发现内容')
     expect(source).toContain('ID/链接发现')
@@ -26,7 +27,8 @@ describe('content pool page', () => {
     expect(source).toContain('discover-mode')
     expect(source).not.toContain('筛选条件')
     expect(source).toContain('interaction')
-    expect(source).toContain("colKey: 'source'")
+    expect(source).toContain("colKey: 'source_strategy'")
+    expect(source).toContain("colKey: 'source_task'")
     expect(source).toContain('updated_by_name')
     expect(source).toContain('interactionLabel')
     expect(source).toContain('result?.items')
@@ -38,6 +40,14 @@ describe('content pool page', () => {
     expect(source).toContain('gameName')
     expect(source).not.toContain('导入链接')
     expect(source).not.toContain('进入审核模式')
+  })
+
+  it('filters by exact content ID and defaults to published_at descending', () => {
+    expect(source).toContain('const contentID = ref(')
+    expect(source).toContain("content_id: contentID.value.trim() || undefined")
+    expect(source).toContain("const sortBy = ref('published_at')")
+    expect(source).toContain("const sortOrder = ref('desc')")
+    expect(source).toContain("{ colKey: 'published_at', title: '发布时间', width: 150, sorter: true }")
   })
 
   it('consolidates video search and fetches IDs or links synchronously', () => {
@@ -164,14 +174,16 @@ describe('content pool page', () => {
     expect(source).not.toContain('查看素材')
   })
 
-  it('shows the selection count next to batch actions and hides both when nothing is selected', () => {
+  it('keeps batch actions in a separate selection toolbar below the filters', () => {
     expect(source).toContain('已选 {{ selectedRowKeys.length }} 项')
-    const guarded = source.match(/v-if="!isLibrary && selectedRowKeys\.length"/g) || []
-    expect(guarded).toHaveLength(4)
+    expect(source).toContain('v-if="!isLibrary && selectedRowKeys.length" class="wt-selection-toolbar"')
+    const filters = source.slice(source.indexOf('<div class="filter-bar">'), source.indexOf('<div class="table-scroll-wrap">'))
+    expect(filters.indexOf('class="wt-selection-toolbar"')).toBeGreaterThan(filters.indexOf('</div>\n        <div v-if="!isLibrary'))
+    expect(filters).not.toContain('<t-space wrap>')
   })
 
   it('renders a large content decision workspace instead of a CRUD field table', () => {
-    expect(source).toContain('size="min(72vw, 1200px)"')
+    expect(source).toContain('size="min(92vw, 960px)"')
     expect(source).toContain('class="detail-workspace"')
     expect(source).toContain('class="detail-cover"')
     expect(source).toContain('row.strategy_name')

@@ -13,6 +13,18 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
+// ProfileListFilter carries the list page's filters. The running state stays
+// on the page: it is a Desktop runtime fact, not a cloud row field.
+type ProfileListFilter struct {
+	ID             string
+	Name           string
+	Group          string
+	BitProfileID   string
+	Remark         string
+	LocalStatus    string
+	BusinessStatus string
+}
+
 type (
 	BitAccountStatus      = model.BitAccountStatus
 	ProfileLocalStatus    = model.ProfileLocalStatus
@@ -62,8 +74,7 @@ const (
 
 type Store interface {
 	FindBinding(userID identityservice.UserID) (BitAccountBinding, bool, error)
-	ListProfiles(userID identityservice.UserID) ([]BrowserProfile, error)
-	ListAllProfiles() ([]BrowserProfile, error)
+	ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]BrowserProfile, error)
 	GetProfile(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
@@ -126,7 +137,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	if hasBinding && binding.MainUserID != mainUserID {
 		return ProfileScan{}, ErrIdentityMismatch
 	}
-	existing, err := s.store.ListProfiles(actor.ID)
+	existing, err := s.store.ListProfiles(actor.ID, ProfileListFilter{})
 	if err != nil {
 		return ProfileScan{}, err
 	}
@@ -334,19 +345,14 @@ func (s *Service) RejectScan(actor identityservice.PublicUser, scanID string) er
 	return nil
 }
 
-func (s *Service) ListProfiles(actor identityservice.PublicUser, userID identityservice.UserID) ([]BrowserProfile, error) {
+func (s *Service) ListProfiles(actor identityservice.PublicUser, userID identityservice.UserID, filter ProfileListFilter) ([]BrowserProfile, error) {
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
-	var profiles []BrowserProfile
-	var err error
-	if userID > 0 {
-		profiles, err = s.store.ListProfiles(userID)
-	} else if actor.Role == identityservice.RoleAdmin || actor.Role == identityservice.RoleSeniorOperator {
-		profiles, err = s.store.ListAllProfiles()
-	} else {
-		profiles, err = s.store.ListProfiles(actor.ID)
+	if userID <= 0 && actor.Role != identityservice.RoleAdmin && actor.Role != identityservice.RoleSeniorOperator {
+		userID = actor.ID
 	}
+	profiles, err := s.store.ListProfiles(userID, filter)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,12 @@
   box-shadow: var(--wt-shadow-card);
 }
 
+.wt-resource-page .system-resource-card { padding: 18px 20px; }
+
+@media (max-width: 680px) {
+  .wt-resource-page .system-resource-card { padding: 16px; }
+}
+
 /* Filters sit inside the resource card: a quiet divider keeps the page dense
    without introducing a second, template-like card around the form. */
 .wt-resource-page .wt-resource-filter {
@@ -61,19 +67,21 @@
 
 .wt-resource-page .filter-bar > .wt-filter-actions { margin-left: auto; }
 
-/* All resource filters share the browser-window layout: no more than four
-   controls in one row, then a natural wrap as the available workspace narrows. */
-.wt-resource-page .filter-bar > .t-space {
-  display: grid !important;
-  width: 100%;
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
-  gap: 12px 16px !important;
+.wt-resource-page .wt-selection-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--wt-radius-sm);
+  background: var(--wt-bg-page);
 }
 
-.wt-resource-page .filter-bar > .t-space > .t-space__item {
-  width: 100%;
-  min-width: 0;
-  margin: 0 !important;
+.wt-resource-page .wt-selection-toolbar__count {
+  color: var(--wt-text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .wt-resource-page .wt-filter-field {
@@ -108,14 +116,6 @@
   align-items: center;
   gap: 8px;
   min-height: 36px;
-}
-
-@media (max-width: 1560px) {
-  .wt-resource-page .filter-bar > .t-space { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (max-width: 1180px) {
-  .wt-resource-page .filter-bar > .t-space { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .wt-resource-page .table-scroll-wrap { overflow-x: auto; width: 100%; }

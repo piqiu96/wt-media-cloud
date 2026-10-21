@@ -11,11 +11,12 @@ import (
 )
 
 type scheduleFake struct {
-	ids     []int64
-	options []repository.ScheduleRunOptions
-	failID  int64
-	runs    []model.ComposeScheduleRun
-	listID  int64
+	ids            []int64
+	options        []repository.ScheduleRunOptions
+	failID         int64
+	runs           []model.ComposeScheduleRun
+	listID         int64
+	historyOptions repository.ScheduleRunHistoryOptions
 }
 
 func (f *scheduleFake) DueStrategyIDs(time.Time) ([]int64, error) { return f.ids, nil }
@@ -32,6 +33,14 @@ func (f *scheduleFake) ListRuns(strategyID int64, limit int) ([]model.ComposeSch
 		return nil, errors.New("unexpected run history limit")
 	}
 	return f.runs, nil
+}
+func (f *scheduleFake) ListRunHistory(options repository.ScheduleRunHistoryOptions) (model.ComposeScheduleRunHistoryPage, error) {
+	f.historyOptions = options
+	items := make([]model.ComposeScheduleRunHistoryItem, len(f.runs))
+	for i, run := range f.runs {
+		items[i].ComposeScheduleRun = run
+	}
+	return model.ComposeScheduleRunHistoryPage{Items: items, Total: len(items), Page: options.Page, PageSize: options.PageSize}, nil
 }
 
 func (f *scheduleFake) BatchTasks(int64, time.Time) ([]model.ComposeTask, model.ComposeBatchCounts, error) {
@@ -99,6 +108,23 @@ func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 	}
 	actor.GameIDs = []string{"other"}
 	if _, err := svc.ListRuns(actor, 11); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("out-of-scope error=%v", err)
+	}
+}
+
+func TestComposeScheduleRunHistoryScopesAndPassesFilters(t *testing.T) {
+	_, strategies, actor := strategyFixture()
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled"}}
+	store := &scheduleFake{runs: []model.ComposeScheduleRun{{StrategyID: 11}}}
+	svc := NewComposeSchedulerService(store, strategies)
+	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	options := repository.ScheduleRunHistoryOptions{Page: 2, PageSize: 10, TriggerType: "manual", CreatedFrom: &from}
+	page, err := svc.RunHistory(actor, 11, options)
+	if err != nil || page.Total != 1 || store.historyOptions.StrategyID != 11 || store.historyOptions.Page != 2 || store.historyOptions.TriggerType != "manual" || !store.historyOptions.CreatedFrom.Equal(from) {
+		t.Fatalf("page=%+v options=%+v err=%v", page, store.historyOptions, err)
+	}
+	actor.GameIDs = []string{"other"}
+	if _, err := svc.RunHistory(actor, 11, options); !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("out-of-scope error=%v", err)
 	}
 }

@@ -50,11 +50,13 @@ type crawler interface {
 type discoveryStore interface {
 	CreateStrategy(model.DiscoveryStrategy) (model.DiscoveryStrategy, error)
 	ListStrategies(*identityservice.TeamID) ([]model.DiscoveryStrategy, error)
+	ListStrategiesFiltered(*identityservice.TeamID, StrategyListQuery) ([]model.DiscoveryStrategy, error)
 	FindStrategy(int64) (model.DiscoveryStrategy, bool, error)
 	UpdateStrategy(model.DiscoveryStrategy) (model.DiscoveryStrategy, error)
 	DeleteStrategy(int64) error
 	CreateCrawlTask(model.CrawlTask) (model.CrawlTask, error)
 	ListCrawlTasks(*identityservice.TeamID, *int64) ([]model.CrawlTask, error)
+	ListCrawlTasksFiltered(*identityservice.TeamID, CrawlTaskListQuery) ([]model.CrawlTask, error)
 	FindCrawlTask(int64) (model.CrawlTask, bool, error)
 	UpdateCrawlTask(model.CrawlTask) (model.CrawlTask, error)
 	ClaimPendingCrawlTask(time.Time) (model.CrawlTask, bool, error)
@@ -90,6 +92,14 @@ func (s *discoveryService) listStrategies(actor identityservice.PublicUser) ([]m
 	return s.store.ListStrategies(team)
 }
 
+func (s *discoveryService) listStrategiesFiltered(actor identityservice.PublicUser, query StrategyListQuery) ([]model.DiscoveryStrategy, error) {
+	team, err := s.scope(actor, nil)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.ListStrategiesFiltered(team, query)
+}
+
 func validStrategy(input model.DiscoveryStrategy) bool {
 	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Platform) != "douyin" || (input.StrategyType != "keyword" && input.StrategyType != "author") {
 		return false
@@ -101,29 +111,7 @@ func validStrategy(input model.DiscoveryStrategy) bool {
 }
 
 func normalizeMaterialConfig(config map[string]any) bool {
-	if config == nil {
-		return false
-	}
-	autoMaterial := boolValue(config["auto_material"])
-	rule := "AND"
-	if value, exists := config["material_rule"]; exists {
-		if text := strings.ToUpper(strings.TrimSpace(fmt.Sprint(value))); text != "" && text != "<NIL>" {
-			rule = text
-		}
-	}
-	if rule != "AND" && rule != "OR" {
-		return false
-	}
-	likeThreshold := int64Value(config["like_threshold"])
-	favoriteThreshold := int64Value(config["favorite_threshold"])
-	if autoMaterial && likeThreshold <= 0 && favoriteThreshold <= 0 {
-		return false
-	}
-	config["auto_material"] = autoMaterial
-	config["material_rule"] = rule
-	config["like_threshold"] = likeThreshold
-	config["favorite_threshold"] = favoriteThreshold
-	return true
+	return model.NormalizeMaterialConfig(config)
 }
 
 func (s *discoveryService) createStrategy(actor identityservice.PublicUser, input model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
@@ -388,7 +376,7 @@ func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map
 	default:
 		task.Stats.Added++
 		item["source_content_id"] = source.ID
-		if !shouldAutoMaterialize(task.Snapshot, item) {
+		if !shouldAutoMaterialize(task.Snapshot, item, s.now()) {
 			task.Stats.Pending++
 			item["processing_status"] = "pending"
 			return
@@ -457,8 +445,8 @@ func (s *discoveryService) executeRetryClaimed(ctx context.Context, task model.C
 				task.Stats.Failed++
 				continue
 			}
-			thresholdItem := map[string]any{"like_count": source.LikeCount, "favorite_count": source.FavoriteCount}
-			if !shouldAutoMaterialize(task.Snapshot, thresholdItem) {
+			ruleFacts := map[string]any{"published_at": source.PublishedAt, "like_count": source.LikeCount, "favorite_count": source.FavoriteCount}
+			if !shouldAutoMaterialize(task.Snapshot, ruleFacts, s.now()) {
 				item["processing_status"] = "pending"
 				delete(item, "failure_reason")
 				task.Results = append(task.Results, item)
@@ -532,36 +520,31 @@ func optionalString(value any) *string {
 	return &text
 }
 
-func shouldAutoMaterialize(snapshot map[string]any, item map[string]any) bool {
-	if !boolValue(snapshot["auto_material"]) {
+func shouldAutoMaterialize(snapshot map[string]any, item map[string]any, now time.Time) bool {
+	rules, err := model.ResolveMaterialRules(snapshot)
+	if err != nil {
 		return false
 	}
-	likeThreshold := int64Value(snapshot["like_threshold"])
-	favoriteThreshold := int64Value(snapshot["favorite_threshold"])
-	conditions := make([]bool, 0, 2)
-	if likeThreshold > 0 {
-		conditions = append(conditions, int64Value(item["like_count"]) >= likeThreshold)
+	return model.ShouldAutoMaterialize(rules, model.MaterialCandidateFacts{
+		PublishedAt:   materialPublishedAt(item["published_at"]),
+		LikeCount:     int64Value(item["like_count"]),
+		FavoriteCount: int64Value(item["favorite_count"]),
+	}, now)
+}
+
+// materialPublishedAt accepts both the crawler's RFC3339 text and the time
+// value already parsed on a content-pool row (the retry path passes the row).
+func materialPublishedAt(value any) *time.Time {
+	switch typed := value.(type) {
+	case *time.Time:
+		return typed
+	case time.Time:
+		return &typed
+	case nil:
+		return nil
+	default:
+		return parsePublishedAt(value)
 	}
-	if favoriteThreshold > 0 {
-		conditions = append(conditions, int64Value(item["favorite_count"]) >= favoriteThreshold)
-	}
-	if len(conditions) == 0 {
-		return false
-	}
-	if strings.EqualFold(fmt.Sprint(snapshot["material_rule"]), "OR") {
-		for _, passed := range conditions {
-			if passed {
-				return true
-			}
-		}
-		return false
-	}
-	for _, passed := range conditions {
-		if !passed {
-			return false
-		}
-	}
-	return true
 }
 
 func (s *discoveryService) runDue(now time.Time) int {
@@ -598,6 +581,14 @@ func (s *discoveryService) listCrawlTasks(actor identityservice.PublicUser, stra
 		return nil, err
 	}
 	return s.store.ListCrawlTasks(team, strategyID)
+}
+
+func (s *discoveryService) listCrawlTasksFiltered(actor identityservice.PublicUser, query CrawlTaskListQuery) ([]model.CrawlTask, error) {
+	team, err := s.scope(actor, nil)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.ListCrawlTasksFiltered(team, query)
 }
 func (s *discoveryService) getCrawlTask(actor identityservice.PublicUser, id int64) (model.CrawlTask, bool, error) {
 	item, ok, err := s.store.FindCrawlTask(id)

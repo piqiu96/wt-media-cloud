@@ -1,7 +1,7 @@
 <script setup>
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
@@ -27,6 +27,7 @@ import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 import { createFileTransferClient } from '../../../shared/api/fileTransfer.js'
 import { downloadedFileName, filePresence, needsRedownload } from '../../transfer/downloadFacts.js'
 import { savedFileStates } from '../../transfer/desktopBridge.js'
+import { canSelectForDownload, submitMaterialDownloads } from './myMaterialsBatch.js'
 
 const client = createMaterialsClient()
 const users = createUsersClient()
@@ -39,11 +40,15 @@ const loading = ref(false)
 const error = ref('')
 const search = ref('')
 const statusFilter = ref('')
+const sortBy = ref('published_at')
+const sortOrder = ref('desc')
 const games = ref([])
 const detailVisible = ref(false)
 const detail = ref(null)
 const detailLoading = ref(false)
 const pagination = ref({ current: 1, pageSize: 20 })
+const selectedRowKeys = ref([])
+const batchLoading = ref(false)
 
 // 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
 // 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
@@ -55,13 +60,15 @@ const pagination = ref({ current: 1, pageSize: 20 })
 // 点赞与收藏是选素材时的决策依据（走查反馈），所以并排放在「素材」右边；数据在行上
 // （toRows 展开了嵌入的 material），不必再点开详情。
 const columns = [
-  { colKey: 'id', title: '素材 ID', width: 90 },
+  { colKey: 'row-select', type: 'multiple', width: 48, checkProps: ({ row }) => ({ disabled: !canSelectForDownload(row) || batchLoading.value }) },
+  { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 380 },
   { colKey: 'like_count', title: '点赞', width: 90 },
   { colKey: 'favorite_count', title: '收藏', width: 90 },
   { colKey: 'video_status', title: '文件状态', width: 100 },
   { colKey: 'usage_status', title: '使用状态', width: 100 },
-  { colKey: 'added_at', title: '加入时间', width: 105 },
+  { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
+  { colKey: 'added_at', title: '加入时间', width: 105, sorter: true },
   { colKey: 'op', title: '操作', width: 285, fixed: 'right' },
 ]
 
@@ -160,29 +167,29 @@ function localPresence(row) {
 }
 
 // 走查七轮起，列表不再只返回使用中的关系，已放弃的行也在（并且可以就地恢复）。
-const filteredRows = computed(() => rows.value.filter((row) => {
-  if (statusFilter.value && row.video_status !== statusFilter.value) return false
-  const keyword = search.value.trim()
-  if (!keyword) return true
-  return `${row.title || ''}${row.author_name || ''}`.includes(keyword)
-}))
-
 function reset() {
   search.value = ''
   statusFilter.value = ''
+  load()
 }
+
+watch([search, statusFilter], () => {
+  pagination.value.current = 1
+  selectedRowKeys.value = []
+})
 
 const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return filteredRows.value.slice(start, start + pagination.value.pageSize)
+  return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await client.listMyMaterials()
+    const data = await client.listMyMaterials({ search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = toRows(Array.isArray(data) ? data : [])
+    selectedRowKeys.value = selectedRowKeys.value.filter((key) => rows.value.some((row) => String(row.usage_id) === String(key) && canSelectForDownload(row)))
     pagination.value.current = 1
   } catch (e) {
     error.value = e?.message || '读取我的素材失败'
@@ -190,6 +197,12 @@ async function load() {
     loading.value = false
   }
   await loadPresence()
+}
+
+function changeSort(sort) {
+  sortBy.value = sort?.sortBy || 'published_at'
+  sortOrder.value = sort?.descending === false ? 'asc' : 'desc'
+  load()
 }
 
 async function loadGames() {
@@ -256,6 +269,26 @@ async function download(row) {
   }
 }
 
+async function batchDownload() {
+  if (!selectedRowKeys.value.length || batchLoading.value) return
+  batchLoading.value = true
+  try {
+    const result = await submitMaterialDownloads(rows.value, selectedRowKeys.value, (materialId) => client.createDownload(materialId))
+    selectedRowKeys.value = []
+    if (result.submitted) {
+      feedback.toast.success(`已提交 ${result.submitted} 个下载任务，可在下载中心查看进度`)
+      downloadCentre.open()
+    }
+    if (result.failures.length || result.skipped) {
+      const reason = result.failures[0] ? `；首个失败：${createDownloadFailureMessage(result.failures[0].error)}` : ''
+      feedback.toast.error(`批量下载共 ${result.total} 项，提交 ${result.submitted} 项，失败 ${result.failures.length} 项，跳过 ${result.skipped} 项${reason}`)
+    }
+    await load()
+  } finally {
+    batchLoading.value = false
+  }
+}
+
 onMounted(() => {
   load()
   loadGames()
@@ -281,18 +314,18 @@ onMounted(() => {
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
-      <ResourceCard class="material-filter-card">
-        <div class="filter-row">
-          <label class="filter-field"><span>综合搜索</span><t-input v-model="search" clearable placeholder="标题、作者" style="width:220px" /></label>
-          <label class="filter-field"><span>文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部" style="width:140px"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
-          <t-button theme="primary" @click="load">查询</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
-        </div>
-      </ResourceCard>
-
       <ResourceCard class="material-table-card">
+        <div class="filter-bar">
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、作者" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+        </div>
+        <div v-if="selectedRowKeys.length" class="wt-selection-toolbar">
+          <span class="wt-selection-toolbar__count">已选 {{ selectedRowKeys.length }} 项</span>
+          <t-button theme="primary" :loading="batchLoading" @click="batchDownload">批量下载</t-button>
+        </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" empty="我的素材还是空的">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="我的素材还是空的">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面、标题与「游戏 · 作者」合成一格（走查七轮起副行是这两样；素材库那一页
                  的副行仍是来源平台）。标题就是去来源平台的入口，蓝色可点；没有落地页的
@@ -317,6 +350,7 @@ onMounted(() => {
               <template v-else>—</template>
             </template>
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
+            <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <!-- CHG-069 任务 23：按钮由「使用状态 × 下载状态」矩阵驱动（任务状态与业务状态
                  严格隔离），每行最多 3 颗全部平铺（规范 §5.6）。已放弃只给恢复；使用中按
                  下载状态给一步主操作——下载中不给（文件已经在准备了，再点还是同一条命令）。
@@ -337,7 +371,7 @@ onMounted(() => {
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="filteredRows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
       <MaterialDetailDrawer
@@ -357,10 +391,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.material-filter-card { padding: 14px 20px; }
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
-.filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -372,6 +403,6 @@ span.material-title { color: var(--wt-text-primary); }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 @media (max-width: 680px) {
-  .material-filter-card, .material-table-card { padding: 16px; }
+  .material-table-card { padding: 16px; }
 }
 </style>

@@ -3,7 +3,7 @@ import { createApiClient } from './http.js'
 export function createDiscoveryClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    listStrategies() { return api.get('/discovery-strategies') },
+    listStrategies(filters = {}) { return api.get('/discovery-strategies', { search: filters.search, type: filters.type, status: filters.status }) },
     listGames(filters = {}) { return api.get('/games', { status: filters.status }) },
     createStrategy(data) { return api.post('/discovery-strategies', data) },
     updateStrategy(id, data) { return api.put(`/discovery-strategies/${id}`, data) },

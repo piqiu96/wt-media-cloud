@@ -42,16 +42,28 @@ describe('material library page', () => {
     expect(source).toMatch(/onMounted\(\(\) => \{[^}]*openFromQuery\(\)/s)
   })
 
-  // 筛选只给服务端真的会读的那一个。视频状态与游戏在这一侧筛（API client 只转发 search），
-  // 页面不得凭空出现一个「团队」下拉 —— 那会让运营以为筛过了，而服务端回的是全量。
-  it('asks the server for exactly the search it supports and filters the rest locally', () => {
-    expect(source).toContain('client.list({ search: search.value })')
-    expect(source).toContain('const filteredRows = computed')
-    expect(source).toContain('row.video_status === statusFilter.value')
-    expect(source).toContain('row.game_id === gameFilter.value')
+  // 搜索、游戏、视频状态与排序都由服务端读 query；页面不再对返回行做二次过滤。
+  // 页面也不得凭空出现一个「团队」下拉 —— 团队范围由会话决定，给了也筛不动。
+  it('sends search, game, status and sorting to the server', () => {
+    expect(source).toContain("client.list({ search: search.value, game_id: gameFilter.value, video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })")
+    expect(source).not.toContain('filteredRows')
+    expect(source).not.toContain('row.video_status === statusFilter.value')
+    expect(source).not.toContain('row.game_id === gameFilter.value')
     // 筛选项只列已加载数据里出现过的游戏：列一个点下去没有任何行的选项是同一种误导。
     expect(source).toContain('const gameOptions = computed')
     expect(source).toContain('new Set(rows.value.map((row) => row.game_id).filter(Boolean))')
+  })
+
+  it('defaults to published_at descending and lets ID/time columns toggle the order', () => {
+    expect(source).toContain("const sortBy = ref('published_at')")
+    expect(source).toContain("const sortOrder = ref('desc')")
+    expect(source).toContain("{ colKey: 'id', title: '素材 ID', width: 90, sorter: true }")
+    expect(source).toContain("{ colKey: 'published_at', title: '发布时间', width: 150, sorter: true }")
+    expect(source).toContain("{ colKey: 'created_at', title: '入库时间', width: 105, sorter: true }")
+    expect(source).toContain("sortBy.value = sort?.sortBy || 'published_at'")
+    expect(source).toContain("sortOrder.value = sort?.descending === false ? 'asc' : 'desc'")
+    expect(source).toContain('@sort-change="changeSort"')
+    expect(source).toContain('sort_by: sortBy.value, sort_order: sortOrder.value')
   })
 
   it('adds to my materials through the one idempotent command', () => {

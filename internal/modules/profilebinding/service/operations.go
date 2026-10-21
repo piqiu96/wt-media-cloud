@@ -33,8 +33,8 @@ func RejectScan(actor service.PublicUser, scanID string) error {
 	return newService(mysqlStore{}).RejectScan(actor, scanID)
 }
 
-func ListProfiles(actor service.PublicUser, userID service.UserID) ([]model.BrowserProfile, error) {
-	return newService(mysqlStore{}).ListProfiles(actor, userID)
+func ListProfiles(actor service.PublicUser, userID service.UserID, filter ProfileListFilter) ([]model.BrowserProfile, error) {
+	return newService(mysqlStore{}).ListProfiles(actor, userID, filter)
 }
 
 func DeleteProfile(actor service.PublicUser, profileID string) error {

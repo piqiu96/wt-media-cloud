@@ -79,6 +79,13 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[0][1].method).toBe('GET')
   })
 
+  it('reads a filtered history page with the server total', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok({ items: [{ run_key: 'run-1' }], total: 21, page: 2, page_size: 10 }))
+    const client = createComposeClient({ fetch })
+    await expect(client.listStrategyRunHistory(7, { page: 2, page_size: 10, trigger_type: 'manual' })).resolves.toMatchObject({ total: 21, page: 2 })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs/history?page=2&page_size=10&trigger_type=manual')
+  })
+
   it('reads a run batch with its schedule slot as the query', async () => {
     const fetch = vi.fn().mockResolvedValue(ok({ run: { run_key: 'slot-1' }, tasks: [{ id: 1, status: 'failed' }], counts: { success: 0, failed: 1 } }))
     const client = createComposeClient({ fetch })

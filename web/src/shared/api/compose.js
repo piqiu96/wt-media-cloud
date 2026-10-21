@@ -8,7 +8,7 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
     listTemplates() { return api.get('/compose-templates') },
-    listStrategies() { return api.get('/compose-strategies') },
+    listStrategies(filters = {}) { return api.get('/compose-strategies', { search: filters.search, game_id: filters.game_id, template_id: filters.template_id, status: filters.status }) },
     // 管理员创建策略时要选目标团队；高级运营的团队由服务端固定。
     listTeams() { return api.get('/operation-teams') },
     // 游戏列表用于展示映射和创建表单下拉，与素材/内容池页共用同一端点。
@@ -21,6 +21,7 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     previewStrategyNextRun(schedule) { return api.post('/compose-strategies/next-run-preview', schedule) },
     runStrategyNow(id, requestKey) { return api.post(`/compose-strategies/${id}/run-now`, { request_key: requestKey }) },
     listStrategyRuns(id) { return api.get(`/compose-strategies/${id}/runs`) },
+    listStrategyRunHistory(id, params) { return api.get(`/compose-strategies/${id}/runs/history`, params) },
     // 批次结果归集（CHG-20261015-095）：按运行记录的计划时间取该批次逐素材任务
     // 与状态统计；schedule_slot 原样回传运行记录里的时间串。
     listStrategyRunTasks(id, scheduleSlot) { return api.get(`/compose-strategies/${id}/runs/tasks`, { schedule_slot: scheduleSlot }) },

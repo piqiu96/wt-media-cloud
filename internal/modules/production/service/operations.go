@@ -34,6 +34,10 @@ func ListMaterials(actor identityservice.PublicUser, search string) ([]model.Mat
 	return newWiredService().ListMaterials(actor, search)
 }
 
+func ListMaterialsFiltered(actor identityservice.PublicUser, filter repository.MaterialFilter) ([]model.Material, error) {
+	return newWiredService().ListMaterialsFiltered(actor, filter)
+}
+
 func ListMyMaterials(actor identityservice.PublicUser) ([]model.MaterialUsage, error) {
 	return newWiredService().ListMyMaterials(actor)
 }

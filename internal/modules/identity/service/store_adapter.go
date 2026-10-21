@@ -44,7 +44,9 @@ func (mysqlStore) CreateTeamWithAudit(team model.OperationTeam, event model.Audi
 func (mysqlStore) FindTeam(teamID model.TeamID) (model.OperationTeam, bool, error) {
 	return repository.FindTeam(teamID)
 }
-func (mysqlStore) ListTeams() ([]model.OperationTeam, error) { return repository.ListTeams() }
+func (mysqlStore) ListTeams(keyword string) ([]model.OperationTeam, error) {
+	return repository.ListTeams(keyword)
+}
 func (mysqlStore) UpdateTeam(team model.OperationTeam) error { return repository.UpdateTeam(team) }
 func (mysqlStore) UpdateTeamWithAudit(team model.OperationTeam, event model.AuditEvent) error {
 	return repository.UpdateTeamWithAudit(team, event)

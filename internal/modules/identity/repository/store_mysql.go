@@ -388,12 +388,19 @@ func findTeam(db *gorm.DB, teamID model.TeamID) (model.OperationTeam, bool, erro
 	return team, err == nil, err
 }
 
-func ListTeams() ([]model.OperationTeam, error) {
-	return listTeams(database.DB())
+func ListTeams(keyword string) ([]model.OperationTeam, error) {
+	return listTeams(database.DB(), keyword)
 }
 
-func listTeams(db *gorm.DB) ([]model.OperationTeam, error) {
-	rows, err := queryRows(db, `SELECT id, name, created_at, updated_at FROM operation_teams ORDER BY name, id`)
+func listTeams(db *gorm.DB, keyword string) ([]model.OperationTeam, error) {
+	query := `SELECT id, name, created_at, updated_at FROM operation_teams WHERE 1=1`
+	args := make([]any, 0, 2)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		query += ` AND (name LIKE ? ESCAPE '!' OR CAST(id AS CHAR) = ?)`
+		args = append(args, teamLikeContains(keyword), keyword)
+	}
+	query += ` ORDER BY name, id`
+	rows, err := queryRows(db, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -407,6 +414,10 @@ func listTeams(db *gorm.DB) ([]model.OperationTeam, error) {
 		teams = append(teams, team)
 	}
 	return teams, rows.Err()
+}
+
+func teamLikeContains(value string) string {
+	return "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(value) + "%"
 }
 
 func UpdateTeam(team model.OperationTeam) error {

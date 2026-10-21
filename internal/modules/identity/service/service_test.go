@@ -2,25 +2,43 @@ package service
 
 import (
 	"errors"
-	"github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
 )
 
 func TestOwnProfileDefaultsAndChoiceSurviveNewLogin(t *testing.T) {
 	s := NewService(NewMemoryStore())
 	user, err := s.BootstrapAdmin("admin", "a-long-initial-password")
-	if err != nil { t.Fatal(err) }
-	if user.Nickname != "admin" || user.AvatarID != "sky" { t.Fatalf("defaults = %+v", user) }
-	if _, err := s.UpdateOwnProfile(user.ID, "", "ocean"); !errors.Is(err, ErrInvalidInput) { t.Fatalf("empty nickname = %v", err) }
-	if _, err := s.UpdateOwnProfile(user.ID, "小明", "external-url"); !errors.Is(err, ErrInvalidInput) { t.Fatalf("external avatar = %v", err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Nickname != "admin" || user.AvatarID != "sky" {
+		t.Fatalf("defaults = %+v", user)
+	}
+	if _, err := s.UpdateOwnProfile(user.ID, "", "ocean"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty nickname = %v", err)
+	}
+	if _, err := s.UpdateOwnProfile(user.ID, "小明", "external-url"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("external avatar = %v", err)
+	}
 	updated, err := s.UpdateOwnProfile(user.ID, " 小明 ", "ocean")
-	if err != nil { t.Fatal(err) }
-	if updated.Nickname != "小明" || updated.AvatarID != "ocean" || updated.Username != "admin" { t.Fatalf("updated = %+v", updated) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Nickname != "小明" || updated.AvatarID != "ocean" || updated.Username != "admin" {
+		t.Fatalf("updated = %+v", updated)
+	}
 	logged, err := s.Login("admin", "a-long-initial-password")
-	if err != nil { t.Fatal(err) }
-	if logged.User.Nickname != "小明" || logged.User.AvatarID != "ocean" { t.Fatalf("login user = %+v", logged.User) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logged.User.Nickname != "小明" || logged.User.AvatarID != "ocean" {
+		t.Fatalf("login user = %+v", logged.User)
+	}
 }
 
 func TestLoginReportsDistinctInputErrorsBeforeCredentialCheck(t *testing.T) {
@@ -348,7 +366,7 @@ func TestOnlyAdminManagesTeamsAndReferencedTeamCannotBeDeleted(t *testing.T) {
 		TeamID: &team.ID, GameIDs: []string{"game-a"},
 	})
 
-	teams, err := service.ListTeams(operator.ID)
+	teams, err := service.ListTeams(operator.ID, "")
 	if err != nil || len(teams) != 1 || teams[0].ID != team.ID || teams[0].Name != "火影组" {
 		t.Fatalf("ListTeams(operator) = %#v, err = %v", teams, err)
 	}
@@ -869,9 +887,29 @@ func TestCreateTeamAuditFailureDoesNotPersistTeam(t *testing.T) {
 	if _, err := service.CreateTeam(admin.ID, "失败组"); err == nil {
 		t.Fatal("CreateTeam() error = nil")
 	}
-	teams, _ := base.ListTeams()
+	teams, _ := base.ListTeams("")
 	if len(teams) != 0 {
 		t.Fatalf("failed audited team create persisted teams: %+v", teams)
+	}
+}
+
+func TestListTeamsFiltersByKeywordAndID(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	first, _ := service.CreateTeam(admin.ID, "火影组")
+	service.CreateTeam(admin.ID, "海贼组")
+
+	byName, err := service.ListTeams(admin.ID, "海贼")
+	if err != nil || len(byName) != 1 || byName[0].Name != "海贼组" {
+		t.Fatalf("ListTeams(keyword) = %#v, err = %v", byName, err)
+	}
+	byID, err := service.ListTeams(admin.ID, strconv.FormatInt(int64(first.ID), 10))
+	if err != nil || len(byID) != 1 || byID[0].ID != first.ID {
+		t.Fatalf("ListTeams(id) = %#v, err = %v", byID, err)
+	}
+	all, err := service.ListTeams(admin.ID, "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("ListTeams(empty) = %#v, err = %v", all, err)
 	}
 }
 

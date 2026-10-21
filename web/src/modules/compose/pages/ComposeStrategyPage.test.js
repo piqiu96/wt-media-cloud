@@ -1,11 +1,23 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { compileTemplate, parse } from '@vue/compiler-sfc'
 
 const source = readFileSync(new URL('./ComposeStrategyPage.vue', import.meta.url), 'utf8')
 
 // 合成策略页：操作列宽随角色可点按钮数自适应；筛选栏按 AdminUI 规范 §2.1
 // 「高频优先、主条件更宽」排布。
 describe('compose strategy page', () => {
+  it('compiles the strategy detail and shared summary templates', () => {
+    for (const [name, input] of [
+      ['ComposeStrategyPage.vue', source],
+      ['ComposeStrategySummary.vue', readFileSync(new URL('../components/ComposeStrategySummary.vue', import.meta.url), 'utf8')],
+    ]) {
+      const parsed = parse(input, { filename: name })
+      expect(parsed.errors).toEqual([])
+      const compiled = compileTemplate({ source: parsed.descriptor.template.content, filename: name, id: name })
+      expect(compiled.errors).toEqual([])
+    }
+  })
   it('keeps immediate execution separate from saving the next planned time', () => {
     expect(source).toContain('client.runStrategyNow(row.id, crypto.randomUUID())')
     expect(source).toContain('不改变')

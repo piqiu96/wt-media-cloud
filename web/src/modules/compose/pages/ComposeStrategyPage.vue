@@ -2,7 +2,7 @@
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import { createSessionClient } from '../../../shared/api/session.js'
@@ -18,6 +18,7 @@ import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 
 const client = createComposeClient()
 const route = useRoute()
+const router = useRouter()
 const sessionClient = createSessionClient()
 
 const rows = ref([])
@@ -83,20 +84,17 @@ const copyName = ref('')
 
 const detailVisible = ref(false)
 const detailRow = ref(null)
+const detailTab = ref('overview')
 const runPendingID = ref(null)
 const statusPendingID = ref(null)
 const runHistory = ref([])
 const runHistoryError = ref('')
-
-// previously_run 是现行原因串（这条 (策略, 素材) 已有任务记录）；already_produced 与
-// in_progress 是它合并前的两种，历史 run 的快照里还留着，所以照样要有词。
-const skipReasons = {
-  creator_disabled: '创建人已停用', template_unavailable: '模板不可用', other_game: '不属于当前游戏',
-  material_unavailable: '素材不可用', already_produced: '该策略已产出成片', in_progress: '任务正在排队或执行',
-  previously_run: '已有任务记录',
-  filtered: '被执行条件过滤', task_create_failed: '创建任务失败',
-  daily_limit: '达到每日上限', per_run_limit: '达到单次上限',
-}
+const runHistoryLoading = ref(false)
+const runHistoryTotal = ref(0)
+const runPagination = ref({ current: 1, pageSize: 10 })
+const runFilters = ref({ trigger_type: '', created_range: [] })
+const appliedRunFilters = ref({ trigger_type: '', created_range: [] })
+let runHistorySequence = 0
 
 // 批次结果归集（CHG-20261015-095）：一次运行创建的一批任务逐素材展开；
 // 统计数字直接来自服务端对库内行的 GROUP BY，页面不做二次推算。
@@ -126,23 +124,60 @@ function batchCountText(counts) {
 }
 
 async function loadRunHistory(strategyID) {
+  const sequence = ++runHistorySequence
+  runHistoryLoading.value = true
   runHistoryError.value = ''
   try {
-    const data = await client.listStrategyRuns(strategyID)
-    if (detailRow.value?.id === strategyID) runHistory.value = Array.isArray(data) ? data : []
+    const params = { page: runPagination.value.current, page_size: runPagination.value.pageSize }
+    if (appliedRunFilters.value.trigger_type) params.trigger_type = appliedRunFilters.value.trigger_type
+    const [from, through] = appliedRunFilters.value.created_range || []
+    if (from) params.created_from = new Date(`${from}T00:00:00`).toISOString()
+    if (through) {
+      const end = new Date(`${through}T00:00:00`)
+      end.setDate(end.getDate() + 1)
+      params.created_before = end.toISOString()
+    }
+    const data = await client.listStrategyRunHistory(strategyID, params)
+    if (detailRow.value?.id === strategyID && sequence === runHistorySequence) {
+      runHistory.value = data.items || []
+      runHistoryTotal.value = data.total || 0
+    }
   } catch (e) {
-    if (detailRow.value?.id === strategyID) runHistoryError.value = e?.message || '运行记录读取失败'
+    if (detailRow.value?.id === strategyID && sequence === runHistorySequence) runHistoryError.value = e?.message || '运行记录读取失败'
+  } finally {
+    if (sequence === runHistorySequence) runHistoryLoading.value = false
   }
 }
 
+function applyRunFilters() {
+  appliedRunFilters.value = { trigger_type: runFilters.value.trigger_type, created_range: [...(runFilters.value.created_range || [])] }
+  runPagination.value.current = 1
+  loadRunHistory(detailRow.value.id)
+}
+
+function resetRunFilters() {
+  runFilters.value = { trigger_type: '', created_range: [] }
+  applyRunFilters()
+}
+
+function onRunPageChange() { loadRunHistory(detailRow.value.id) }
+function openRunTask(task) { router.push({ name: 'Compose', query: { task_id: String(task.id) } }) }
+
 function openDetail(row) {
   detailRow.value = row
+  detailTab.value = 'overview'
   runHistory.value = []
+  runHistoryTotal.value = 0
+  runPagination.value = { current: 1, pageSize: 10 }
+  runFilters.value = { trigger_type: '', created_range: [] }
+  appliedRunFilters.value = { trigger_type: '', created_range: [] }
+  batchDetail.value = {}
   detailVisible.value = true
   loadRunHistory(row.id)
 }
 
-const filters = ref({ name: '', game_id: '', template_id: '', status: '' })
+// 筛选走列表接口（search/game_id/template_id/status），页面只对返回行做分页切片。
+const filters = ref({ search: '', game_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const columns = computed(() => [
@@ -161,17 +196,9 @@ const tableScroll = computed(() => ({
   x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
-const filteredRows = computed(() => rows.value.filter((row) => {
-  if (filters.value.name && !String(row.name || '').toLowerCase().includes(filters.value.name.trim().toLowerCase())) return false
-  if (filters.value.game_id && row.game_id !== filters.value.game_id) return false
-  if (filters.value.template_id && row.compose_template_id !== filters.value.template_id) return false
-  if (filters.value.status && row.status !== filters.value.status) return false
-  return true
-}))
-
 const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return filteredRows.value.slice(start, start + pagination.value.pageSize)
+  return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
 const templateOptions = computed(() => templates.value.map((template) => ({
@@ -212,7 +239,8 @@ async function load() {
     // 管理员的创建表单另用它选目标团队。
     currentUser.value = await sessionClient.me()
     const [strategyRows, templateRows, gameRows, teamRows] = await Promise.all([
-      client.listStrategies(), client.listTemplates(), client.listGames(), client.listTeams().catch(() => []),
+      client.listStrategies({ search: filters.value.search.trim(), game_id: filters.value.game_id, template_id: filters.value.template_id, status: filters.value.status }),
+      client.listTemplates(), client.listGames(), client.listTeams().catch(() => []),
     ])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
     templates.value = Array.isArray(templateRows) ? templateRows : []
@@ -263,8 +291,9 @@ watch(() => [visible.value, form.value.execution_mode, form.value.schedule.mode,
 })
 
 function resetFilters() {
-  filters.value = { name: '', game_id: '', template_id: '', status: '' }
+  filters.value = { search: '', game_id: '', template_id: '', status: '' }
   pagination.value.current = 1
+  load()
 }
 
 function openCreate() {
@@ -356,7 +385,7 @@ function runNow(row) {
   if (runPendingID.value !== null || row.status !== 'enabled') return
   const dialog = DialogPlugin.confirm({
     header: '立即创建合成任务',
-    body: `将从策略创建人的“我的素材”中筛选候选素材，为每条符合条件的素材创建独立任务。此操作不改变「${row.name}」的下次计划时间。`,
+    body: `将从当前策略业务范围内的可生产素材中筛选候选项，为每条符合条件的素材创建独立任务。此操作不改变「${row.name}」的下次计划时间。`,
     confirmBtn: { content: '立即执行', theme: 'primary' },
     onConfirm: async () => {
       if (runPendingID.value !== null) return
@@ -559,15 +588,29 @@ function guideFileName(value) {
   try { return decodeURIComponent(new URL(value).pathname.split('/').pop()) || '引导视频' } catch { return '引导视频' }
 }
 
-function conditionText(condition) {
+function conditionParts(condition) {
   const field = conditionFields.find((item) => item.value === condition.field)?.label || condition.field
-  const operators = conditionOperators(condition.field)
-  const operator = operators.find((item) => item.value === condition.operator)?.label || condition.operator
-  if (condition.operator === 'recent_hours') return `${field}近 ${condition.value} 小时`
-  if (condition.operator === 'recent_days') return `${field}近 ${condition.value} 天`
-  const value = condition.field === 'published_at' ? formatDateTime(condition.value) : condition.value
-  return `${field}${operator}${value}`
+  const operator = conditionOperators(condition.field).find((item) => item.value === condition.operator)?.label || condition.operator
+  const value = condition.field === 'published_at' && !['recent_hours', 'recent_days'].includes(condition.operator)
+    ? formatDateTime(condition.value)
+    : ['recent_hours', 'recent_days'].includes(condition.operator)
+      ? `${condition.value} ${condition.operator === 'recent_hours' ? '小时' : '天'}`
+      : condition.value
+  return { field, operator, value }
 }
+
+function orderedRules(row) { return [...(row.priority_rules || [])].sort((a, b) => a.priority - b.priority) }
+
+const runColumns = [
+  { colKey: 'created_at', title: '执行时间', width: 155 },
+  { colKey: 'trigger_type', title: '触发方式', width: 90 },
+  { colKey: 'candidate_count', title: '候选数', width: 70 },
+  { colKey: 'skipped_count', title: '跳过数', width: 70 },
+  { colKey: 'created_count', title: '创建任务数', width: 95 },
+  { colKey: 'failed_count', title: '失败数', width: 65 },
+  { colKey: 'op', title: '操作', width: 120 },
+]
+const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) => sum + column.width, 0)}px` }))
 
 </script>
 
@@ -585,7 +628,7 @@ function conditionText(condition) {
       <!-- 筛选区与表格同卡（与内容池一致）：filter-bar 自带分隔线，下方接表格与分页。 -->
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" @enter="load" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="load" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
           </t-select></label>
@@ -629,7 +672,7 @@ function conditionText(condition) {
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="filteredRows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
       <t-dialog :visible="visible" :header="editingID ? '编辑合成策略' : '新增合成策略'" width="880px" :footer="false" @close="requestCloseEditor">
@@ -672,7 +715,7 @@ function conditionText(condition) {
 
             <div class="strategy-section">
               <div class="strategy-section__title"><span class="strategy-no">②</span>合成配置<small>需要填写哪些参数由所选合成模板决定</small></div>
-              <t-form label-width="88px">
+              <t-form class="strategy-config-form" label-align="top">
                 <t-form-item v-if="!editingID && !form.compose_template_id" label=""><div class="strategy-bind-hint">先选择合成模板，需要填写哪些参数由模板决定。</div></t-form-item>
                 <template v-else>
                   <t-form-item v-for="field in formSchemaFields" :key="field.key" :label="field.label" :required-mark="field.required">
@@ -789,58 +832,85 @@ function conditionText(condition) {
         </div>
       </t-dialog>
 
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" :header="detailRow?.name || '策略详情'" size="min(62vw, 880px)" :footer="canManage">
-        <div v-if="detailRow" class="strategy-drawer">
-          <div class="strategy-drawer__field"><span>策略 ID</span><strong>{{ detailRow.id }}</strong></div>
-          <ComposeStrategySummary
-            :strategy="detailRow"
-            :team="teamName(detailRow.team_id)"
-            :game="gameName(detailRow.game_id)"
-            :templates="templates"
-            :guide-url="detailRow.config?.guide_video_url || ''"
-          />
-          <h4 class="strategy-detail-section">执行设置</h4>
-          <div class="strategy-drawer__field"><span>执行方式</span><strong>{{ detailRow.execution_mode === 'scheduled' ? '定时执行' : '手动执行' }}</strong></div>
-          <template v-if="detailRow.execution_mode === 'scheduled'">
-            <div class="strategy-drawer__field"><span>周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>
-            <div class="strategy-drawer__field"><span>时区</span><strong>{{ detailRow.schedule?.timezone || '—' }}</strong></div>
-            <div class="strategy-drawer__field"><span>下次执行</span><strong>{{ detailRow.next_run_at ? formatDateTime(detailRow.next_run_at) : '—' }}</strong></div>
-          </template>
-          <h4 class="strategy-detail-section">执行条件</h4>
-          <div class="strategy-drawer__field"><span>候选范围</span><strong>创建人的“我的素材”（当前团队与游戏）</strong></div>
-          <div class="strategy-drawer__field"><span>单次／每日上限</span><strong>{{ detailRow.single_limit }}／{{ detailRow.daily_limit }}</strong></div>
-          <div v-for="group in detailRow.priority_rules || []" :key="group.priority" class="strategy-drawer__field"><span>优先级 {{ group.priority }}</span><strong>{{ group.action === 'filter' ? '过滤' : '命中' }} · {{ group.logic === 'all' ? '全部满足' : '任一满足' }}<br />{{ (group.conditions || []).map(conditionText).join(group.logic === 'all' ? ' 且 ' : ' 或 ') }}</strong></div>
-          <h4 class="strategy-detail-section">最近运行</h4>
-          <p v-if="runHistoryError" class="strategy-run-message">{{ runHistoryError }}</p>
-          <p v-else-if="!runHistory.length" class="strategy-run-message">暂无运行记录</p>
-          <div v-for="run in runHistory" :key="run.run_key" class="strategy-run">
-            <div class="strategy-run__summary"><strong>{{ run.trigger_type === 'scheduled' ? '自动执行' : '立即执行' }} · {{ formatDateTime(run.schedule_slot) }}</strong><span>创建 {{ run.created_count }} / 候选 {{ run.candidate_count }}</span></div>
-            <details v-if="run.skipped?.length"><summary>跳过 {{ run.skipped.length }} 项</summary><p v-for="(skip, index) in run.skipped" :key="`${run.run_key}-${index}`">{{ skip.material_id ? `素材 ${skip.material_id}：` : '' }}{{ skipReasons[skip.reason] || skip.reason }}</p></details>
-            <div v-if="run.created_count > 0" class="strategy-run__batch">
-              <button type="button" class="strategy-run__batch-toggle" @click="toggleRunBatch(run)">{{ batchDetail[run.run_key]?.open ? '收起批次任务' : '查看批次任务' }}</button>
-              <div v-if="batchDetail[run.run_key]?.open" class="strategy-run__batch-body">
-                <p v-if="batchDetail[run.run_key].loading" class="strategy-run-message">批次任务读取中…</p>
-                <p v-else-if="batchDetail[run.run_key].error" class="strategy-run-message">{{ batchDetail[run.run_key].error }}</p>
-                <template v-else-if="batchDetail[run.run_key].view">
-                  <p class="strategy-run__counts">{{ batchCountText(batchDetail[run.run_key].view.counts) }}</p>
-                  <div v-for="task in batchDetail[run.run_key].view.tasks" :key="task.id" class="strategy-run__task">
-                    <strong>任务 {{ task.id }} · 素材 {{ task.material_id }}</strong>
-                    <span>{{ batchStatusLabels[task.status] || task.status }}<template v-if="task.composite_output_id"> · 成片 {{ task.composite_output_id }}</template></span>
-                    <em v-if="task.error_message || task.error_code">{{ task.error_code ? `${task.error_code}: ` : '' }}{{ task.error_message || '—' }}</em>
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" :header="detailRow?.name || '策略详情'" size="min(92vw, 880px)" :footer="canManage">
+        <t-tabs v-if="detailRow" v-model="detailTab" class="strategy-detail-tabs">
+          <t-tab-panel value="overview" label="概览">
+            <div class="strategy-overview">
+              <ComposeStrategySummary
+                overview
+                :strategy="detailRow"
+                :team="teamName(detailRow.team_id)"
+                :game="gameName(detailRow.game_id)"
+                :templates="templates"
+                :guide-url="detailRow.config?.guide_video_url || ''"
+              />
+              <section class="strategy-overview__section">
+                <h4>执行设置</h4>
+                <div class="strategy-overview__grid">
+                  <div class="strategy-overview__field"><span>执行方式</span><strong>{{ detailRow.execution_mode === 'scheduled' ? '定时执行' : '手动执行' }}</strong></div>
+                  <template v-if="detailRow.execution_mode === 'scheduled'">
+                    <div class="strategy-overview__field"><span>执行计划</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>
+                    <div class="strategy-overview__field"><span>时区</span><strong>{{ detailRow.schedule?.timezone || '—' }}</strong></div>
+                    <div class="strategy-overview__field"><span>下次执行</span><strong>{{ detailRow.next_run_at ? formatDateTime(detailRow.next_run_at) : '—' }}</strong></div>
+                  </template>
+                </div>
+              </section>
+              <section class="strategy-overview__section">
+                <h4>执行条件</h4>
+                <div class="strategy-overview__grid">
+                  <div class="strategy-overview__field strategy-overview__field--wide"><span>候选范围</span><strong>当前策略业务范围内可生产素材</strong></div>
+                  <div class="strategy-overview__field"><span>单次上限</span><strong>{{ detailRow.single_limit }} 条</strong></div>
+                  <div class="strategy-overview__field"><span>每日上限</span><strong>{{ detailRow.daily_limit }} 条</strong></div>
+                </div>
+                <div v-for="group in orderedRules(detailRow)" :key="group.priority" class="strategy-overview__rule">
+                  <div class="strategy-overview__rule-head"><strong>优先级 {{ group.priority }}</strong><span>{{ group.action === 'filter' ? '过滤' : '命中' }}</span><span>{{ group.logic === 'all' ? '全部满足' : '任一满足' }}</span></div>
+                  <div v-for="(condition, index) in group.conditions || []" :key="index" class="strategy-overview__condition">
+                    <span>{{ conditionParts(condition).field }}</span><span>{{ conditionParts(condition).operator }}</span><strong>{{ conditionParts(condition).value }}</strong>
                   </div>
-                </template>
-              </div>
+                </div>
+              </section>
             </div>
-          </div>
-          <h4 class="strategy-detail-section">记录时间</h4>
-          <div class="strategy-drawer__field"><span>创建时间</span><strong>{{ formatDateTime(detailRow.created_at) }}</strong></div>
-          <div class="strategy-drawer__field"><span>修改时间</span><strong>{{ formatDateTime(detailRow.updated_at) }}</strong></div>
-        </div>
+          </t-tab-panel>
+          <t-tab-panel value="runs" label="运行记录">
+            <div class="strategy-history">
+              <div class="strategy-history__filters">
+                <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="runFilters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="人工执行" /><t-option value="scheduled" label="定时执行" /></t-select></label>
+                <label class="wt-filter-field"><span class="wt-filter-field__label">执行时间</span><t-date-range-picker v-model="runFilters.created_range" value-type="YYYY-MM-DD" clearable /></label>
+                <div class="strategy-history__actions"><t-button theme="primary" @click="applyRunFilters">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetRunFilters">重置</t-button></div>
+              </div>
+              <p v-if="runHistoryError" class="strategy-run-message">{{ runHistoryError }} <t-link theme="primary" @click="loadRunHistory(detailRow.id)">重试</t-link></p>
+              <t-loading v-else :loading="runHistoryLoading" :show-overlay="true">
+                <div class="table-scroll-wrap">
+                  <t-table class="wt-resource-table" :data="runHistory" :columns="runColumns" row-key="run_key" hover size="small" :scroll="runTableScroll" empty="暂无运行记录">
+                    <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
+                    <template #trigger_type="{ row }">{{ row.trigger_type === 'scheduled' ? '定时执行' : '人工执行' }}</template>
+                    <template #skipped_count="{ row }">{{ row.skipped?.length ?? 0 }}</template>
+                    <template #op="{ row }"><t-link v-if="row.created_count" theme="primary" @click="toggleRunBatch(row)">{{ batchDetail[row.run_key]?.open ? '收起本次任务' : '查看本次任务' }}</t-link><span v-else>—</span></template>
+                  </t-table>
+                </div>
+                <div v-for="run in runHistory.filter((item) => batchDetail[item.run_key]?.open)" :key="run.run_key" class="strategy-history__tasks">
+                  <strong>本次任务 · {{ formatDateTime(run.created_at) }}</strong>
+                  <p v-if="batchDetail[run.run_key].loading" class="strategy-run-message">任务读取中…</p>
+                  <p v-else-if="batchDetail[run.run_key].error" class="strategy-run-message">{{ batchDetail[run.run_key].error }}</p>
+                  <template v-else-if="batchDetail[run.run_key].view">
+                    <p class="strategy-run__counts">{{ batchCountText(batchDetail[run.run_key].view.counts) }}</p>
+                    <div v-for="task in batchDetail[run.run_key].view.tasks" :key="task.id" class="strategy-run__task">
+                      <t-link theme="primary" @click="openRunTask(task)">任务 {{ task.id }} · 素材 {{ task.material_id }}</t-link>
+                      <span>{{ batchStatusLabels[task.status] || task.status }}<template v-if="task.composite_output_id"> · 成片 {{ task.composite_output_id }}</template></span>
+                      <em v-if="task.error_message || task.error_code">{{ task.error_code ? `${task.error_code}: ` : '' }}{{ task.error_message || '—' }}</em>
+                    </div>
+                  </template>
+                </div>
+                <div class="pagination-bar"><t-pagination v-model:current="runPagination.current" v-model:pageSize="runPagination.pageSize" :total="runHistoryTotal" :page-size-options="[10, 20, 50]" @current-change="onRunPageChange" @page-size-change="onRunPageChange" /></div>
+              </t-loading>
+            </div>
+          </t-tab-panel>
+        </t-tabs>
         <template #footer>
-          <div v-if="detailRow && canManage" class="strategy-editor__footer">
-            <t-button class="wt-secondary-button" variant="outline" @click="openEdit(detailRow)">编辑</t-button>
-            <t-button class="wt-secondary-button" variant="outline" :disabled="detailRow.status !== 'enabled'" @click="runNow(detailRow)">执行</t-button>
+          <div v-if="detailRow && canManage" class="strategy-detail__footer">
             <t-button class="wt-secondary-button" variant="outline" @click="openCopy(detailRow)">复制</t-button>
+            <t-button class="wt-secondary-button" variant="outline" @click="openEdit(detailRow)">编辑</t-button>
+            <span :title="detailRow.status !== 'enabled' ? '策略已停用，请先在策略列表启用后执行。' : ''"><t-button theme="primary" :disabled="detailRow.status !== 'enabled' || runPendingID !== null" :loading="runPendingID === detailRow.id" @click="runNow(detailRow)">执行</t-button></span>
           </div>
         </template>
       </t-drawer>
@@ -849,19 +919,10 @@ function conditionText(condition) {
 </template>
 
 <style scoped>
-.strategy-run { padding: 10px 0; border-bottom: 1px solid var(--wt-border); color: var(--wt-text-secondary); font-size: 12px; }
-.strategy-run__summary { display: flex; justify-content: space-between; gap: 10px; }
-.strategy-run__summary strong { color: var(--wt-text-primary); font-weight: 600; }
-.strategy-run details { margin-top: 6px; }
-.strategy-run details p { margin: 4px 0 0 14px; }
-.strategy-run__batch { margin-top: 6px; }
-.strategy-run__batch-toggle { padding: 0; border: 0; background: none; color: var(--wt-primary); font-size: 12px; cursor: pointer; }
-.strategy-run__batch-body { margin-top: 6px; padding-left: 14px; }
 .strategy-run__counts { margin: 0 0 6px; color: var(--wt-text-tertiary); }
-.strategy-run__task { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; border-top: 1px dashed var(--wt-border); }
-.strategy-run__task strong { color: var(--wt-text-primary); font-weight: 600; }
+.strategy-run__task { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--wt-border); }
 .strategy-run__task span { color: var(--wt-text-secondary); }
-.strategy-run__task em { font-style: normal; color: var(--td-error-color, #d54941); font-size: 12px; word-break: break-all; }
+.strategy-run__task em { color: var(--td-error-color); font-style: normal; overflow-wrap: anywhere; }
 .strategy-run-message { color: var(--wt-text-tertiary); font-size: 12px; }
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
 .strategy-id { color: var(--wt-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -889,16 +950,34 @@ function conditionText(condition) {
 .strategy-rule { margin: 12px 0; padding: 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
 .strategy-rule__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .strategy-rule__conditions { display: flex; flex-direction: column; gap: 8px; width: 100%; }
-.strategy-rule__condition { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) minmax(150px, 1.5fr) auto; gap: 8px; align-items: center; }
+.strategy-config-form :deep(.t-form__label) { white-space: normal; overflow-wrap: anywhere; }
+.strategy-rule__condition { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; }
+.strategy-rule__condition > :nth-child(-n + 3) { min-width: 0; width: 100%; }
+.strategy-rule__condition > :last-child { justify-self: end; }
 .strategy-rule__add { width: 100%; margin-bottom: 16px; }
-.strategy-detail-section { margin: 24px 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--wt-border); color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.strategy-drawer__hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 4px 0 16px; }
-.strategy-drawer__hero span, .strategy-drawer__hero p { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
-.strategy-drawer__hero h3 { margin: 4px 0; color: var(--wt-text-primary); font-size: 20px; }
-.strategy-drawer__field { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 0; }
-.strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; }
-.strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
-.strategy-drawer__actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.strategy-detail-tabs { margin-top: -8px; }
+.strategy-overview { display: grid; gap: 12px; padding-top: 12px; }
+.strategy-overview__section { border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); padding: 14px 16px; }
+.strategy-overview__section h4 { margin: 0 0 12px; color: var(--wt-text-primary); font-size: 14px; }
+.strategy-overview__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+.strategy-overview__field { display: grid; grid-template-columns: minmax(82px, 0.45fr) minmax(0, 1fr); gap: 8px; font-size: 13px; }
+.strategy-overview__field--wide { grid-column: 1 / -1; }
+.strategy-overview__field span { color: var(--wt-text-tertiary); }
+.strategy-overview__field strong { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
+.strategy-overview__rule { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }
+.strategy-overview__rule-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.strategy-overview__rule-head strong { margin-right: auto; color: var(--wt-text-primary); font-size: 13px; }
+.strategy-overview__rule-head span { padding: 2px 8px; border-radius: var(--wt-radius-sm); background: var(--wt-bg-page); color: var(--wt-text-secondary); }
+.strategy-overview__condition { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) minmax(0, 2fr); gap: 8px; padding: 5px 0; border-top: 1px solid var(--wt-border); font-size: 12px; }
+.strategy-overview__condition span { color: var(--wt-text-secondary); }
+.strategy-overview__condition strong { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
+.strategy-history { padding-top: 12px; }
+.strategy-history__filters { display: grid; grid-template-columns: 160px minmax(220px, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.strategy-history__actions { display: flex; gap: 8px; }
+.strategy-history__tasks { margin: 12px 0; padding: 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); font-size: 12px; }
+.strategy-history__tasks > strong { display: block; margin-bottom: 8px; color: var(--wt-text-primary); }
+.strategy-detail__footer { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 680px) { .strategy-overview__grid, .strategy-history__filters { grid-template-columns: 1fr; } .strategy-overview__field--wide { grid-column: auto; } }
 .strategy-readonly { display: block; padding: 7px 0; color: var(--wt-text-primary); font-size: 13px; font-weight: 500; }
 .strategy-media { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .strategy-media__card { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }

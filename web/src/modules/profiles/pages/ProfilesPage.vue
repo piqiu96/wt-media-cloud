@@ -10,7 +10,6 @@ import { createSessionClient } from "../../../shared/api/session.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
-import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 import { isDesktop } from "../../../utils.js"
 // Static import: a dynamic import() of a node_modules bare specifier does not
@@ -134,47 +133,18 @@ const userFilterOptions = computed(() => {
   }
   return list
 })
-const filteredProfiles = computed(() => {
-  const id = filterId.value.trim().toLowerCase()
-  const name = filterName.value.trim().toLowerCase()
-  const group = filterGroup.value.trim().toLowerCase()
-  const bitId = filterBitId.value.trim().toLowerCase()
-  const remark = filterRemark.value.trim().toLowerCase()
-  return profiles.value.filter((profile) => {
-    if (statusFilter.value && profile.local_status !== statusFilter.value) return false
-    if (businessFilter.value && profile.business_status !== businessFilter.value) return false
-    if (runningFilter.value === "open" && openStates.value[profile.id] !== true) return false
-    if (runningFilter.value === "closed" && openStates.value[profile.id] !== false) return false
-    if (userFilter.value && String(profile.user_id || "") !== userFilter.value) return false
-    if (id && !String(profile.id || "").toLowerCase().includes(id)) return false
-    if (name && !String(profile.name || "").toLowerCase().includes(name)) return false
-    if (group && ![profile.group_id, profile.group_name].some((value) => String(value || "").toLowerCase().includes(group))) return false
-    if (bitId && !String(profile.bit_profile_id || "").toLowerCase().includes(bitId)) return false
-    if (remark && !String(profile.remark || "").toLowerCase().includes(remark)) return false
-    return true
-  }).sort((a, b) => (Number(b.seq) || 0) - (Number(a.seq) || 0))
-})
+// 窗口筛选与 seq DESC, id DESC 排序都由 /browser-profiles 完成（后端在 LIMIT 之前过滤）。
+// 运行状态是 Desktop 本地事实（openStates），不是 Cloud 列表字段，只能保留为本地叠加。
+const filteredProfiles = computed(() => profiles.value.filter((profile) => {
+  if (runningFilter.value === "open" && openStates.value[profile.id] !== true) return false
+  if (runningFilter.value === "closed" && openStates.value[profile.id] !== false) return false
+  return true
+}))
 
 const pagedProfiles = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
   return filteredProfiles.value.slice(start, start + pagination.value.pageSize)
 })
-
-const profileStatItems = computed(() => [
-  { key: "total", label: "窗口总数", value: profiles.value.length, tone: "info" },
-  { key: "open", label: "运行中", value: profiles.value.filter((profile) => isWindowOpen(profile)).length, tone: "success" },
-  { key: "bound_proxy", label: "已绑代理", value: profiles.value.filter((profile) => profile.proxy_id).length, tone: "info" },
-  { key: "attention", label: "需关注", value: profiles.value.filter((profile) => profile.local_status !== "active" || profile.business_status === "disabled").length, tone: "warning" },
-])
-
-function applyProfileStatFilter(key) {
-  businessFilter.value = ""
-  runningFilter.value = ""
-  statusFilter.value = ""
-  if (key === "open") runningFilter.value = "open"
-  if (key === "bound_proxy") filterRemark.value = ""
-  if (key === "attention") statusFilter.value = "local_missing"
-}
 
 async function applyFilters() {
   pagination.value.current = 1
@@ -278,7 +248,18 @@ async function loadProfiles() {
   error.value = ""
   loading.value = true
   try {
-    const [listedProfiles, proxyResult] = await Promise.all([bindingClient.listProfiles(), proxyClient.list()])
+    // 运行状态不在列表字段里，其余筛选全部下推服务端；排序也由服务端保证。
+    const query = {
+      id: filterId.value.trim(),
+      name: filterName.value.trim(),
+      group: filterGroup.value.trim(),
+      bit_profile_id: filterBitId.value.trim(),
+      remark: filterRemark.value.trim(),
+      local_status: statusFilter.value,
+      business_status: businessFilter.value,
+      user_id: userFilter.value,
+    }
+    const [listedProfiles, proxyResult] = await Promise.all([bindingClient.listProfiles(query), proxyClient.list()])
     profiles.value = listedProfiles
     const all = Array.isArray(proxyResult) ? proxyResult : (proxyResult?.list || [])
     proxyById.value = Object.fromEntries(all.map((item) => [item.id, item]))
@@ -979,25 +960,22 @@ const changedColumns = [...diffColumns, { colKey: "fields", title: "变更字段
       </template>
     </ResourcePageHeader>
 
-    <ResourceStatGrid :items="profileStatItems" @select="applyProfileStatFilter" />
 
     <ResourceCard class="window-resource-card">
       <div class="filter-bar">
-        <t-space wrap>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">窗口 ID</span><t-input v-model="filterId" clearable placeholder="ID" style="width:100%" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">名称</span><t-input v-model="filterName" clearable placeholder="名称" style="width:100%" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">分组</span><t-select v-model="filterGroup" clearable placeholder="分组" style="width:100%" :options="groupFilterOptions" filterable /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">Bit ID</span><t-input v-model="filterBitId" clearable placeholder="Bit ID" style="width:100%" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">备注</span><t-input v-model="filterRemark" clearable placeholder="备注" style="width:100%" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="businessFilter" clearable placeholder="状态" style="width:100%"><t-option value="enabled" label="启用" /><t-option value="disabled" label="停用" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">运行状态</span><t-select v-model="runningFilter" clearable placeholder="运行" style="width:100%"><t-option value="open" label="打开" /><t-option value="closed" label="关闭" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">授权用户</span><t-select v-model="userFilter" clearable placeholder="授权用户" style="width:100%" :options="userFilterOptions" filterable /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">Cloud 状态</span><t-select v-model="statusFilter" clearable placeholder="Cloud状态" style="width:100%"><t-option value="active" label="可用" /><t-option value="local_missing" label="本机缺失" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">窗口 ID</span><t-input v-model="filterId" clearable placeholder="ID" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">名称</span><t-input v-model="filterName" clearable placeholder="名称" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">分组</span><t-select v-model="filterGroup" clearable placeholder="全部" :options="groupFilterOptions" filterable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">Bit ID</span><t-input v-model="filterBitId" clearable placeholder="Bit ID" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">备注</span><t-input v-model="filterRemark" clearable placeholder="备注" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="businessFilter" clearable placeholder="全部"><t-option value="enabled" label="启用" /><t-option value="disabled" label="停用" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">运行状态</span><t-select v-model="runningFilter" clearable placeholder="全部"><t-option value="open" label="打开" /><t-option value="closed" label="关闭" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">授权用户</span><t-select v-model="userFilter" clearable placeholder="全部" :options="userFilterOptions" filterable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">Cloud 状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option value="active" label="可用" /><t-option value="local_missing" label="本机缺失" /></t-select></label>
           <div class="wt-filter-actions">
             <t-button theme="primary" :loading="loading" @click="applyFilters">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" :disabled="loading" @click="resetFilters">重置</t-button>
           </div>
-        </t-space>
       </div>
       <div class="table-scroll-wrap">
       <t-table

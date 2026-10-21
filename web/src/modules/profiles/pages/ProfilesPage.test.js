@@ -7,10 +7,11 @@ describe('browser window resource page', () => {
   it('composes the shared resource presentation primitives', () => {
     expect(source).toContain('ResourcePageHeader')
     expect(source).toContain('ResourceCard')
-    expect(source).toContain('ResourceStatGrid')
+    // 概览指标与分页总数/筛选结果重复，已移除（AdminUI 规范 §3.3）。
+    expect(source).not.toContain('ResourceStatGrid')
+    expect(source).not.toContain('profileStatItems')
     expect(source).toContain('ResourceStatusBadge')
     expect(source).toContain('wt-resource-table')
-    expect(source).toContain('profileStatItems')
   })
 
   it('shows all five routine window operations directly instead of hiding them in an overflow menu', () => {
@@ -20,6 +21,15 @@ describe('browser window resource page', () => {
     expect(source).toContain('@click="openProxyBinding(row)"')
     expect(source).toContain('@click="openEdit(row)"')
     expect(source).toContain('@click="toggleBusinessStatus(row)"')
+  })
+
+  it('sends window filters to the backend and keeps only the local running overlay', () => {
+    expect(source).toContain('bindingClient.listProfiles(query)')
+    expect(source).toContain('local_status: statusFilter.value')
+    expect(source).toContain('business_status: businessFilter.value')
+    expect(source).toContain('user_id: userFilter.value')
+    expect(source).toContain('if (runningFilter.value === "open" && openStates.value[profile.id] !== true) return false')
+    expect(source).not.toContain('.sort((a, b) => (Number(b.seq)')
   })
 
   it('keeps the browser window operation column pinned during horizontal scrolling', () => {

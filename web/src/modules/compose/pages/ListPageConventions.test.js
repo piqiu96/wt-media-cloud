@@ -14,7 +14,7 @@ const FILES = ['ComposeStrategyPage.vue', 'ComposeTasksPage.vue', 'MyOutputsPage
 const TABLES = [
   { file: 'ComposeStrategyPage.vue', name: 'columns', count: 8 },
   { file: 'ComposeTasksPage.vue', name: 'columns', count: 9 },
-  { file: 'MyOutputsPage.vue', name: 'columns', count: 8 },
+  { file: 'MyOutputsPage.vue', name: 'columns', count: 9 },
 ]
 
 describe('compose list page conventions', () => {

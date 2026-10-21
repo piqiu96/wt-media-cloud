@@ -10,6 +10,20 @@ import (
 
 var outputRowColumns = []string{"id", "team_id", "game_id", "material_id", "material_usage_id", "compose_task_id", "compose_strategy_id", "template_code", "template_version", "object_key", "file_size_bytes", "sha256", "media_json", "publish_status", "created_by", "created_at", "updated_at"}
 
+func TestListComposeOutputsSearchesFactsAndTriggerInSQL(t *testing.T) {
+	from := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	before := from.Add(24 * time.Hour)
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(`FROM composite_outputs.*CAST\(composite_outputs\.id AS CHAR\) LIKE \? ESCAPE '!'.*m\.title LIKE \? ESCAPE '!'.*s\.name LIKE \? ESCAPE '!'.*trigger_type = \?.*created_at >= \? AND created_at < \?`).
+		WithArgs(int64(7), "delta", "%58!_1%", "%58!_1%", "%58!_1%", "%58!_1%", "manual", from, before).
+		WillReturnRows(sqlmock.NewRows(outputRowColumns))
+	items, err := listComposeOutputs(db, ComposeOutputFilter{TeamID: 7, GameIDs: []string{"delta"}, Search: "58_1", TriggerType: "manual", CreatedFrom: from, CreatedBefore: before})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
+}
+
 func TestListComposeOutputsScopesSourceAndDateInSQL(t *testing.T) {
 	from := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
 	before := from.Add(24 * time.Hour)

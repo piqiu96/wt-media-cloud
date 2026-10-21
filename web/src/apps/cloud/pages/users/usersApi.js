@@ -25,8 +25,8 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
     deleteUser(userId) {
       return api.delete(`/users/${userId}`)
     },
-    listTeams() {
-      return api.get('/operation-teams')
+    listTeams(filters = {}) {
+      return api.get('/operation-teams', { keyword: filters.keyword })
     },
     createTeam(name) {
       return api.post('/operation-teams', { name })

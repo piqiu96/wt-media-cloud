@@ -2,7 +2,7 @@
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
@@ -23,11 +23,13 @@ import MaterialDetailDrawer from '../../materials/MaterialDetailDrawer.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
 import ComposeTaskCreateDialog from '../components/ComposeTaskCreateDialog.vue'
+import { publicObjectReadUrl } from '../../../shared/utils/objectReadUrl.js'
 
 const client = createComposeClient()
 const materialsClient = createMaterialsClient()
 const sessionClient = createSessionClient()
 const router = useRouter()
+const route = useRoute()
 
 const rows = ref([])
 const strategies = ref([])
@@ -329,13 +331,13 @@ async function openStrategy(id) {
 async function openOutput(id) {
   outputDrawer.value = { visible: true, loading: true, previewLoading: false, detail: null, previewUrl: '', tab: 'basic' }
   try {
-    // 预览地址是短时签名，每次打开现取；取不到不挡详情，预览区自己给重试。
+    // 每次打开都从现有接口取准确对象地址；取不到不挡详情，预览区自己给重试。
     const [data, link] = await Promise.all([
       client.getComposeOutput(id),
       client.getComposeOutputVideoUrl(id).catch(() => null),
     ])
     outputDrawer.value.detail = data
-    outputDrawer.value.previewUrl = link?.url || ''
+    outputDrawer.value.previewUrl = publicObjectReadUrl(link?.url)
   } catch (e) {
     feedback.toast.error(e?.message || '打开成片失败')
     outputDrawer.value.visible = false
@@ -350,7 +352,7 @@ async function retryOutputPreview() {
   outputDrawer.value.previewLoading = true
   try {
     const link = await client.getComposeOutputVideoUrl(id)
-    outputDrawer.value.previewUrl = link?.url || ''
+    outputDrawer.value.previewUrl = publicObjectReadUrl(link?.url)
     if (!outputDrawer.value.previewUrl) feedback.toast.error('预览地址获取失败，请稍后重试')
   } catch (e) {
     feedback.toast.error(e?.message || '预览地址获取失败，请稍后重试')
@@ -441,6 +443,8 @@ onMounted(() => {
     currentUser.value = me
     if (detail.value) loadReviews(detail.value.id)
   }).catch(() => {})
+  const taskID = String(route.query.task_id || '')
+  if (/^\d+$/.test(taskID)) openDetail({ id: Number(taskID) })
 })
 </script>
 
@@ -693,28 +697,31 @@ onMounted(() => {
 .compose-list-limit { margin: 8px 0 0; color: var(--wt-text-secondary); font-size: 12px; }
 .compose-detail { min-height: 320px; }
 .compose-detail__tabs { margin-top: 4px; }
-.compose-detail__section { padding: 16px 2px; }
-.compose-detail__section h4 { margin: 0 0 14px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.compose-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; font-size: 13px; }
-.compose-detail__grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--wt-text-primary); }
+.compose-detail__section { margin-top: 16px; padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-card); }
+.compose-detail__section h4 { margin: 0 0 16px; color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
+.compose-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; font-size: 14px; line-height: 1.5; }
+.compose-detail__grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--wt-text-primary); overflow-wrap: anywhere; }
 .compose-detail__label { color: var(--wt-text-tertiary); font-size: 12px; }
 .compose-detail__snapshot-fields { margin-top: 16px; }
 /* 失败态一律用 --wt-danger：语义表 tokens.css 里的 --wt-status-error 从未被任何入口引入，运行时取不到值；
    这支红与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
 .compose-detail__failure-reason { color: var(--wt-danger); font-weight: 500; }
-.compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; }
-.compose-detail__empty { margin: 0 0 4px; color: var(--wt-text-secondary); font-size: 13px; }
-.compose-detail__attempt { padding: 14px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); margin-bottom: 10px; }
+.compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
+.compose-detail__grid + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__section > .compose-detail__hint + .compose-detail__grid { margin-top: 12px; }
+.compose-detail__empty { margin: 0; color: var(--wt-text-secondary); font-size: 14px; }
+.compose-detail__attempt { padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); background: var(--wt-bg-page); }
+.compose-detail__attempt + .compose-detail__attempt { margin-top: 12px; }
 .compose-detail__attempt-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-.compose-detail__attempt-head strong { color: var(--wt-text-primary); font-size: 13px; }
-.compose-detail__attempt-meta { margin-top: 8px; color: var(--wt-text-secondary); font-size: 12px; }
+.compose-detail__attempt-head strong { color: var(--wt-text-primary); font-size: 14px; }
+.compose-detail__attempt-meta { margin: 8px 0 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__attempt-err { margin: 8px 0 0; color: var(--wt-danger); font-size: 12px; }
 .compose-detail__steps { margin: 10px 0 0; padding: 0; list-style: none; }
-.compose-detail__steps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding: 4px 0; border-top: 1px dashed var(--wt-border); color: var(--wt-text-secondary); font-size: 12px; }
+.compose-detail__steps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; padding: 8px 0; border-top: 1px dashed var(--wt-border); color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__step-name { min-width: 108px; color: var(--wt-text-primary); font-weight: 500; }
 .compose-detail__step-metrics { color: var(--wt-text-tertiary); }
 .compose-detail__step-error { color: var(--wt-danger); }
 .compose-detail__review { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.compose-detail__review h4 { margin-bottom: 0; }
 .compose-detail__review :deep(.t-textarea) { width: 100%; }
 .compose-detail__review-evidence { margin: 8px 0 0; color: var(--wt-text-primary); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .compose-detail__footer { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }

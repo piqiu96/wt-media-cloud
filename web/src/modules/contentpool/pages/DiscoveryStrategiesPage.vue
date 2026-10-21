@@ -1,7 +1,7 @@
 <script setup>
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
@@ -12,6 +12,7 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
 
 const client = createDiscoveryClient()
 const route = useRoute()
@@ -33,7 +34,37 @@ const authorVisible = ref(false)
 const keywordTarget = ref(null)
 const authorTarget = ref(null)
 
-const filters = ref({ name: '', type: '', status: '' })
+// 筛选走列表接口（search/type/status），页面只对返回行做分页切片。
+const filters = ref({ search: '', type: '', status: '' })
+const pagination = ref({ current: 1, pageSize: 20 })
+
+const conditionFields = [
+  { label: '发布时间', value: 'published_at' },
+  { label: '点赞量', value: 'like_count' },
+  { label: '收藏量', value: 'favorite_count' },
+]
+
+function conditionOperators(field) {
+  return field === 'published_at'
+    ? [{ label: '不早于', value: 'gte' }, { label: '早于', value: 'lt' }, { label: '近 N 小时', value: 'recent_hours' }, { label: '近 N 天', value: 'recent_days' }]
+    : [{ label: '等于', value: 'eq' }, { label: '大于等于', value: 'gte' }, { label: '小于等于', value: 'lte' }]
+}
+
+function renumberRules() { form.value.config.material_rules.forEach((rule, index) => { rule.priority = index + 1 }) }
+function addRule() { form.value.config.material_rules.push({ priority: form.value.config.material_rules.length + 1, action: 'match', logic: 'all', conditions: [defaultCondition()] }) }
+function removeRule(index) { form.value.config.material_rules.splice(index, 1); renumberRules() }
+function moveRule(index, direction) {
+  const target = index + direction
+  if (target < 0 || target >= form.value.config.material_rules.length) return
+  const [rule] = form.value.config.material_rules.splice(index, 1)
+  form.value.config.material_rules.splice(target, 0, rule)
+  renumberRules()
+}
+function changeConditionField(condition) {
+  condition.operator = condition.field === 'published_at' ? 'recent_days' : 'gte'
+  condition.value = condition.field === 'published_at' ? 1 : 0
+}
+function changeConditionOperator(condition) { condition.value = ['gte', 'lt'].includes(condition.operator) && condition.field === 'published_at' ? null : 1 }
 
 // 每一列都必须声明 width，**不许只写 minWidth**。
 //
@@ -54,9 +85,10 @@ const columns = [
   // 99px（标签 36 + gap 6 + 数值 57），加 td 左右内边距 16px = 115px。
   // 取 120px 留一点余量。
   { colKey: 'latest', title: '最近效果', width: 120 },
+  // 状态排在关联实体/时间之后（AdminUI 规范 §4.1：主体 → 属性 → 关联实体 → 状态/结果 → 时间）。
+  { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'updated_at', title: '修改时间', width: 150 },
   { colKey: 'updated_by_name', title: '修改人', width: 110 },
-  { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
 ]
 
@@ -78,20 +110,19 @@ const runningSet = computed(() => new Set(
   tasks.value.filter((task) => task.strategy_id && ['pending', 'running'].includes(task.status)).map((task) => task.strategy_id)
 ))
 
-const filteredRows = computed(() => rows.value.filter((row) => {
-  if (filters.value.name && !String(row.name || '').toLowerCase().includes(filters.value.name.trim().toLowerCase())) return false
-  if (filters.value.type && row.strategy_type !== filters.value.type) return false
-  if (filters.value.status && row.status !== filters.value.status) return false
-  return true
-}))
+const pagedRows = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return rows.value.slice(start, start + pagination.value.pageSize)
+})
 
+watch(filters, () => { pagination.value.current = 1 }, { deep: true })
+
+// 只保留列表查询拿不到的动作统计：总数与启用数等于分页总数和状态筛选结果，不再重复展示（§3.3）。
 const stats = computed(() => {
   const today = new Date().toDateString()
   const todayRuns = tasks.value.filter((task) => new Date(task.created_at).toDateString() === today).length
   const auto = tasks.value.reduce((sum, task) => sum + (Number(task.stats?.auto_materialized) || 0), 0)
   return [
-    { key: 'total', label: '策略总数', value: rows.value.length, tone: 'info' },
-    { key: 'enabled', label: '启用策略', value: rows.value.filter((row) => row.status === 'enabled').length, tone: 'success' },
     { key: 'today', label: '今日执行', value: todayRuns, tone: 'warning' },
     { key: 'auto', label: '自动素材', value: auto, tone: 'info' },
   ]
@@ -116,10 +147,8 @@ function defaultForm() {
       keywords: [],
       authors: [],
       author: '',
-      auto_material: false,
-      material_rule: 'AND',
-      like_threshold: 0,
-      favorite_threshold: 0,
+      // 空规则组 = 只采集、不自动转素材；规则组形状与合成策略 priority_rules 一致。
+      material_rules: [],
     },
     schedule: 'manual',
     timezone: 'Asia/Shanghai',
@@ -131,8 +160,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(), client.listTasks(), client.listGames()])
+    const query = { search: String(filters.value.search || '').trim(), type: filters.value.type, status: filters.value.status }
+    const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(query), client.listTasks(), client.listGames()])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
+    pagination.value.current = 1
     tasks.value = Array.isArray(taskRows) ? taskRows : []
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
@@ -143,7 +174,8 @@ async function load() {
 }
 
 function resetFilters() {
-  filters.value = { name: '', type: '', status: '' }
+  filters.value = { search: '', type: '', status: '' }
+  load()
 }
 
 function openCreate() {
@@ -154,6 +186,16 @@ function openCreate() {
   visible.value = true
 }
 
+// 历史配置把转素材设置摊在 config 顶层；编辑器只认 material_rules，
+// 打开时翻译一次，保存后旧键自然消失（后端 NormalizeMaterialConfig 也会清理）。
+const LEGACY_MATERIAL_KEYS = ['auto_material', 'material_rule', 'like_threshold', 'favorite_threshold']
+
+function withoutLegacyMaterialKeys(config) {
+  const next = { ...config }
+  for (const key of LEGACY_MATERIAL_KEYS) delete next[key]
+  return next
+}
+
 function fillForm(row) {
   const config = row.config || {}
   form.value = {
@@ -162,11 +204,8 @@ function fillForm(row) {
     strategy_type: row.strategy_type,
     platform: row.platform,
     config: {
-      ...config,
-      auto_material: Boolean(config.auto_material),
-      material_rule: config.material_rule || 'AND',
-      like_threshold: Number(config.like_threshold || 0),
-      favorite_threshold: Number(config.favorite_threshold || 0),
+      ...withoutLegacyMaterialKeys(config),
+      material_rules: displayRules(resolveMaterialRules(config)),
     },
     schedule: row.schedule || 'manual',
     timezone: row.timezone || 'Asia/Shanghai',
@@ -204,23 +243,43 @@ function openCopy(row) {
   visible.value = true
 }
 
+// 空规则组合法（只采集）；非空时必须至少有一个命中组，否则内容永远不会转素材。
+function materialRulesError(rules) {
+  if (!rules.length) return ''
+  if (!rules.some((rule) => rule.action === 'match')) return '至少需要一个「命中」规则组，否则内容不会自动转素材'
+  for (const rule of rules) {
+    if (!Array.isArray(rule.conditions) || !rule.conditions.length) return `优先级 ${rule.priority} 至少需要一个条件`
+    for (const condition of rule.conditions) {
+      if (condition.field === 'published_at' && ['gte', 'lt'].includes(condition.operator)) {
+        if (!condition.value || !Number.isFinite(Number(condition.value))) return `优先级 ${rule.priority} 的发布时间未填写完整`
+        continue
+      }
+      const value = Number(condition.value)
+      if (!Number.isInteger(value) || value < 0) return `优先级 ${rule.priority} 的条件值必须是非负整数`
+      if (condition.field === 'published_at' && value < 1) return `优先级 ${rule.priority} 的时间范围至少为 1`
+      if (condition.field === 'published_at' && condition.operator === 'recent_hours' && value > 8760) return `优先级 ${rule.priority} 的小时数不能超过 8760`
+      if (condition.field === 'published_at' && condition.operator === 'recent_days' && value > 365) return `优先级 ${rule.priority} 的天数不能超过 365`
+    }
+  }
+  return ''
+}
+
 async function save() {
   if (!String(form.value.name || '').trim()) {
     feedback.toast.error('请输入策略名称')
     return
   }
-  if (form.value.config.auto_material && Number(form.value.config.like_threshold) <= 0 && Number(form.value.config.favorite_threshold) <= 0) {
-    feedback.toast.error('开启自动转素材后，至少设置一个正数阈值')
+  const materialRules = Array.isArray(form.value.config.material_rules) ? form.value.config.material_rules : []
+  const rulesError = materialRulesError(materialRules)
+  if (rulesError) {
+    feedback.toast.error(rulesError)
     return
   }
   saving.value = true
   try {
     const config = {
-      ...form.value.config,
-      auto_material: Boolean(form.value.config.auto_material),
-      material_rule: form.value.config.material_rule || 'AND',
-      like_threshold: Number(form.value.config.like_threshold || 0),
-      favorite_threshold: Number(form.value.config.favorite_threshold || 0),
+      ...withoutLegacyMaterialKeys(form.value.config),
+      material_rules: saveRules(materialRules),
     }
     if (!String(form.value.game_id || '').trim()) {
       feedback.toast.error('请选择所属游戏')
@@ -329,31 +388,8 @@ function openAuthors(row) {
   authorVisible.value = true
 }
 
-function formatThreshold(value) {
-  const n = Number(value || 0)
-  if (n <= 0) return ''
-  if (n >= 10000) {
-    const w = n / 10000
-    return `${Number.isInteger(w) ? w : w.toFixed(1).replace(/\.0$/, '')}万`
-  }
-  if (n >= 1000) {
-    const k = n / 1000
-    return `${Number.isInteger(k) ? k : k.toFixed(1).replace(/\.0$/, '')}千`
-  }
-  return String(n)
-}
-
 function materialLabel(row) {
-  const config = row.config || {}
-  if (!config.auto_material) return '关闭'
-  const like = Number(config.like_threshold || 0)
-  const favorite = Number(config.favorite_threshold || 0)
-  const parts = []
-  if (like > 0) parts.push(`赞≥${formatThreshold(like)}`)
-  if (favorite > 0) parts.push(`藏≥${formatThreshold(favorite)}`)
-  if (!parts.length) return '关闭'
-  const joiner = config.material_rule === 'OR' ? ' 或 ' : ' 且 '
-  return parts.join(joiner)
+  return materialRulesSummary(row.config || {})
 }
 
 function scheduleLabel(schedule) {
@@ -391,32 +427,28 @@ function latestStats(row) {
 
       <ResourceStatGrid :items="stats" />
 
-      <ResourceCard class="strategy-filter-card">
-        <div class="filter-row">
-          <label class="filter-field"><span>策略名称</span><t-input v-model="filters.name" clearable placeholder="搜索策略名称" style="width:220px" @enter="load" /></label>
-          <label class="filter-field"><span>策略类型</span><t-select v-model="filters.type" clearable placeholder="全部" style="width:140px">
+      <ResourceCard class="strategy-card">
+        <div class="filter-bar">
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称或 ID" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">策略类型</span><t-select v-model="filters.type" clearable placeholder="全部">
             <t-option value="keyword" label="关键词" />
             <t-option value="author" label="作者" />
           </t-select></label>
-          <label class="filter-field"><span>状态</span><t-select v-model="filters.status" clearable placeholder="全部" style="width:140px">
+          <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
           </t-select></label>
-          <t-button theme="primary" @click="load">查询</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
         </div>
-      </ResourceCard>
-
-      <ResourceCard class="strategy-card">
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘策略">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘策略">
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #type="{ row }">{{ typeLabel(row.strategy_type) }}</template>
             <template #rule="{ row }">
               <a class="strategy-rule-link" @click="row.strategy_type === 'author' ? openAuthors(row) : openKeywords(row)">{{ ruleLabel(row) }}</a>
             </template>
             <template #schedule="{ row }">{{ scheduleLabel(row.schedule) }}</template>
-            <template #material="{ row }">{{ materialLabel(row) }}</template>
+            <template #material="{ row }"><span class="material-summary" :title="materialLabel(row)">{{ materialLabel(row) }}</span></template>
             <template #latest="{ row }">
               <MetricList v-if="latestStats(row).length" :items="latestStats(row)" />
               <span v-else>-</span>
@@ -440,6 +472,7 @@ function latestStats(row) {
             </template>
           </t-table>
         </div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
       <t-dialog v-model:visible="visible" :header="editingID ? '编辑挖掘策略' : '新增挖掘策略'" width="880px" :footer="false">
@@ -472,15 +505,39 @@ function latestStats(row) {
             </div>
 
             <div class="strategy-section">
-              <div class="strategy-section__title"><span class="strategy-no">④</span>转素材规则<small>设置符合条件的内容自动转为素材</small></div>
-              <t-form label-width="88px">
-                <t-form-item label="自动转素材"><t-switch v-model="form.config.auto_material" /></t-form-item>
-                <template v-if="form.config.auto_material">
-                  <t-form-item label="判断条件" required-mark><t-radio-group v-model="form.config.material_rule"><t-radio value="AND">全部满足</t-radio><t-radio value="OR">任一满足</t-radio></t-radio-group></t-form-item>
-                  <t-form-item label="点赞数"><t-input-number v-model="form.config.like_threshold" :min="0" :step="1000" theme="column" placeholder="0 表示不参与" /></t-form-item>
-                  <t-form-item label="收藏数"><t-input-number v-model="form.config.favorite_threshold" :min="0" :step="100" theme="column" placeholder="0 表示不参与" /></t-form-item>
-                </template>
-              </t-form>
+              <div class="strategy-section__title"><span class="strategy-no">④</span>转素材规则<small>按优先级从上往下匹配，第一条命中的规则决定是否自动转素材；不配置时只采集</small></div>
+              <div v-for="(rule, index) in form.config.material_rules" :key="rule.priority" class="strategy-rule">
+                <div class="strategy-rule__header">
+                  <strong>优先级 {{ rule.priority }}</strong>
+                  <t-space size="small">
+                    <t-button size="small" variant="text" :disabled="index === 0" @click="moveRule(index, -1)">上移</t-button>
+                    <t-button size="small" variant="text" :disabled="index === form.config.material_rules.length - 1" @click="moveRule(index, 1)">下移</t-button>
+                    <t-button size="small" theme="danger" variant="text" @click="removeRule(index)">删除</t-button>
+                  </t-space>
+                </div>
+                <t-form label-width="88px">
+                  <t-form-item label="规则类型" required-mark>
+                    <t-radio-group v-model="rule.action"><t-radio value="match">命中</t-radio><t-radio value="filter">过滤</t-radio></t-radio-group>
+                  </t-form-item>
+                  <t-form-item label="判断方式" required-mark>
+                    <t-radio-group v-model="rule.logic"><t-radio value="all">全部满足</t-radio><t-radio value="any">任一满足</t-radio></t-radio-group>
+                  </t-form-item>
+                  <t-form-item label="条件" required-mark>
+                    <div class="strategy-rule__conditions">
+                      <div v-for="(condition, conditionIndex) in rule.conditions" :key="conditionIndex" class="strategy-rule__condition">
+                        <t-select v-model="condition.field" @change="changeConditionField(condition)"><t-option v-for="field in conditionFields" :key="field.value" :value="field.value" :label="field.label" /></t-select>
+                        <!-- 运算符选项必须走 :options：<t-option> 子节点是插槽内容，编辑器换 form 对象后下拉会停在旧对象上。 -->
+                        <t-select v-model="condition.operator" :options="conditionOperators(condition.field)" @change="changeConditionOperator(condition)" />
+                        <t-date-picker v-if="condition.field === 'published_at' && ['gte', 'lt'].includes(condition.operator)" v-model="condition.value" enable-time-picker value-type="time-stamp" format="YYYY-MM-DD HH:mm:ss" clearable />
+                        <t-input-number v-else v-model="condition.value" :min="condition.operator === 'recent_hours' || condition.operator === 'recent_days' ? 1 : 0" :max="condition.operator === 'recent_hours' ? 8760 : condition.operator === 'recent_days' ? 365 : undefined" theme="column" />
+                        <t-button size="small" theme="danger" variant="text" :disabled="rule.conditions.length === 1" @click="rule.conditions.splice(conditionIndex, 1)">删除</t-button>
+                      </div>
+                      <t-button size="small" variant="text" @click="rule.conditions.push(defaultCondition())">添加条件</t-button>
+                    </div>
+                  </t-form-item>
+                </t-form>
+              </div>
+              <t-button class="strategy-rule__add" variant="outline" @click="addRule">添加优先级</t-button>
             </div>
 
             <div class="strategy-section">
@@ -495,7 +552,7 @@ function latestStats(row) {
               <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略，游戏仅用于内容分类和数据统计。</span></div>
               <div class="strategy-aside__item"><strong>② 挖掘对象</strong><span>可配置关键词或作者，系统将根据配置对象发现相关内容。</span></div>
               <div class="strategy-aside__item"><strong>③ 执行计划</strong><span>支持手动执行和定时执行，定时执行按设定时间自动运行。</span></div>
-              <div class="strategy-aside__item"><strong>④ 转素材规则</strong><span>开启后符合条件的内容将自动转入素材库，减少人工筛选成本。</span></div>
+              <div class="strategy-aside__item"><strong>④ 转素材规则</strong><span>规则按优先级从上往下匹配，命中「过滤」不转素材，命中「命中」自动转素材；无规则时只采集。</span></div>
               <div class="strategy-aside__tip">小提示：创建策略后，建议先手动执行一次，验证规则是否符合预期。</div>
             </div>
           </div>
@@ -533,7 +590,7 @@ function latestStats(row) {
         </div>
       </t-dialog>
 
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="480px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="min(92vw, 560px)" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
@@ -555,11 +612,16 @@ function latestStats(row) {
 
 <style scoped>
 .strategy-card { padding: 18px 20px; margin-top: 16px; }
-.strategy-filter-card { padding: 14px 20px; }
-.filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .strategy-rule-link { color: #7c3aed; cursor: pointer; font-weight: 500; }
 .strategy-rule-link:hover { text-decoration: underline; }
+.material-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.strategy-rule { margin: 12px 0; padding: 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
+.strategy-rule__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.strategy-rule__conditions { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.strategy-rule__condition { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; }
+.strategy-rule__condition > :nth-child(-n + 3) { min-width: 0; width: 100%; }
+.strategy-rule__condition > :last-child { justify-self: end; }
+.strategy-rule__add { width: 100%; margin-bottom: 16px; }
 .form-section { margin: 6px 0 4px; padding-left: 96px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 600; }
 .config-dialog { display: flex; flex-direction: column; gap: 12px; }
 .config-meta { display: flex; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }

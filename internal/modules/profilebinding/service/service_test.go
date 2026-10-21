@@ -88,7 +88,7 @@ func TestSeniorCanViewButCannotMutateSameTeamProfileCloudRecord(t *testing.T) {
 	service := newTestService(store)
 	actor := identityservice.PublicUser{ID: 1, Role: identityservice.RoleSeniorOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamA}
 
-	profiles, err := service.ListProfiles(actor, 0)
+	profiles, err := service.ListProfiles(actor, 0, ProfileListFilter{})
 	if err != nil || len(profiles) != 1 || profiles[0].ID != "same-team" {
 		t.Fatalf("ListProfiles(same team) profiles=%+v error=%v", profiles, err)
 	}
@@ -116,7 +116,7 @@ func TestDefaultProfileListAppliesRoleVisibility(t *testing.T) {
 			store.profiles["own"] = BrowserProfile{ID: "own", UserID: 1, TeamID: &teamA}
 			store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA}
 			store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB}
-			profiles, err := newTestService(store).ListProfiles(tc.actor, 0)
+			profiles, err := newTestService(store).ListProfiles(tc.actor, 0, ProfileListFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -433,15 +433,15 @@ func (s *memoryStore) FindBinding(userID identityservice.UserID) (BitAccountBind
 	return binding, ok, nil
 }
 
-func (s *memoryStore) ListProfiles(userID identityservice.UserID) ([]BrowserProfile, error) {
-	return s.profileList(userID), nil
-}
-
-func (s *memoryStore) ListAllProfiles() ([]BrowserProfile, error) {
+func (s *memoryStore) ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]BrowserProfile, error) {
+	if userID > 0 {
+		return s.profileList(userID), nil
+	}
 	profiles := make([]BrowserProfile, 0, len(s.profiles))
 	for _, profile := range s.profiles {
 		profiles = append(profiles, profile)
 	}
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].BitProfileID < profiles[j].BitProfileID })
 	return profiles, nil
 }
 

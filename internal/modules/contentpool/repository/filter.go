@@ -7,12 +7,17 @@ import (
 
 // Filter is the persistence projection of content-source query criteria.
 type Filter struct {
-	TeamID      *identity.TeamID
-	Platform    string
-	Status      model.Status
-	SourceType  string
-	Search      string
-	StrategyID  *int64
-	CrawlTaskID *int64
-	MaterialID  *int64
+	ID            *int64
+	TeamID        *identity.TeamID
+	Platform      string
+	Status        model.Status
+	SourceType    string
+	Search        string
+	PublishedFrom string
+	PublishedTo   string
+	SortBy        string
+	SortOrder     string
+	StrategyID    *int64
+	CrawlTaskID   *int64
+	MaterialID    *int64
 }

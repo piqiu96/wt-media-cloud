@@ -13,11 +13,17 @@ type mysqlStore struct{}
 func (mysqlStore) FindBinding(userID identityservice.UserID) (model.BitAccountBinding, bool, error) {
 	return repository.FindBinding(userID)
 }
-func (mysqlStore) ListProfiles(userID identityservice.UserID) ([]model.BrowserProfile, error) {
-	return repository.ListProfiles(userID)
-}
-func (mysqlStore) ListAllProfiles() ([]model.BrowserProfile, error) {
-	return repository.ListAllProfiles()
+func (mysqlStore) ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]model.BrowserProfile, error) {
+	return repository.ListProfiles(repository.ProfileListFilter{
+		UserID:         userID,
+		ID:             filter.ID,
+		Name:           filter.Name,
+		Group:          filter.Group,
+		BitProfileID:   filter.BitProfileID,
+		Remark:         filter.Remark,
+		LocalStatus:    filter.LocalStatus,
+		BusinessStatus: filter.BusinessStatus,
+	})
 }
 func (mysqlStore) GetProfile(profileID string) (model.BrowserProfile, bool, error) {
 	return repository.GetProfile(profileID)

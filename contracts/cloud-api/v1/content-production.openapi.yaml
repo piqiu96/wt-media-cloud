@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.17.1
+  version: 2026.10.21.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -17,8 +17,14 @@ paths:
       operationId: listComposeStrategies
       summary: List strategies in the actor's team and game scope; operators see only enabled strategies.
       security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: search, required: false, description: Strategy name substring, or exact strategy ID when numeric., schema: {type: string, maxLength: 100}}
+        - {in: query, name: game_id, required: false, description: Exact game ID., schema: {type: string}}
+        - {in: query, name: template_id, required: false, description: Exact compose template ID; non-positive values are refused., schema: {type: integer, minimum: 1}}
+        - {in: query, name: status, required: false, description: Exact strategy status. Unknown values are refused., schema: {type: string, enum: [enabled, disabled]}}
       responses:
         '200': {description: Visible strategies with their fixed template version and current config.}
+        '400': {description: Invalid filter (named compose_strategy_invalid).}
     post:
       operationId: createComposeStrategy
       summary: Senior operator creates a strategy bound to one active template version.
@@ -140,6 +146,29 @@ paths:
                   data:
                     type: array
                     items: {$ref: '#/components/schemas/ComposeScheduleRun'}
+        '404': {description: Strategy absent or outside the actor's scope.}
+  /api/v1/compose-strategies/{strategy_id}/runs/history:
+    get:
+      operationId: listComposeStrategyRunHistory
+      summary: Read paged strategy run history with optional trigger and time filters.
+      security: [{sessionCookie: []}]
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 50, default: 10}}
+        - {in: query, name: trigger_type, schema: {type: string, enum: [manual, scheduled]}}
+        - {in: query, name: created_from, schema: {type: string, format: date-time}, description: Inclusive UTC or offset-aware execution start.}
+        - {in: query, name: created_before, schema: {type: string, format: date-time}, description: Exclusive UTC or offset-aware execution end.}
+      responses:
+        '200':
+          description: Persisted runs and an exact filtered total, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/ComposeScheduleRunHistoryPage'}
+        '400': {description: Invalid pagination or filters.}
         '404': {description: Strategy absent or outside the actor's scope.}
   /api/v1/compose-strategies/{strategy_id}/material-states:
     get:
@@ -327,6 +356,8 @@ paths:
       parameters:
         - {$ref: '#/components/parameters/OutputStatus'}
         - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
+        - {in: query, name: search, required: false, description: Output ID, source material ID/title, or strategy name substring., schema: {type: string, maxLength: 100}}
+        - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, scheduled]}}
         - {$ref: '#/components/parameters/CreatedFrom'}
         - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
@@ -608,6 +639,18 @@ components:
               material_id: {type: integer, format: int64}
               reason: {type: string}
         created_at: {type: string, format: date-time}
+    ComposeScheduleRunHistoryPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/ComposeScheduleRunHistoryItem'}}
+        total: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 50}
+    ComposeScheduleRunHistoryItem:
+      allOf:
+        - {$ref: '#/components/schemas/ComposeScheduleRun'}
+        - {type: object, required: [failed_count], properties: {failed_count: {type: integer, minimum: 0}}}
     CreateComposeStrategy:
       type: object
       additionalProperties: false

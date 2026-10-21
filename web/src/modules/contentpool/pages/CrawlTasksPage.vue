@@ -1,7 +1,7 @@
 <script setup>
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
@@ -23,7 +23,9 @@ const activeTab = ref('overview')
 const games = ref([])
 const strategyDrawerVisible = ref(false)
 const strategyDrawer = ref(null)
-const filters = ref({ name: '', status: '' })
+// 筛选走列表接口（search/status），页面只对返回行做分页切片。
+const filters = ref({ search: '', status: '' })
+const pagination = ref({ current: 1, pageSize: 20 })
 
 // 每一列都必须声明 width，**不许只写 minWidth**。
 //
@@ -64,15 +66,12 @@ const resultColumns = [
   { colKey: 'op', title: '操作', width: 100 },
 ]
 
-const filteredRows = computed(() => rows.value.filter((row) => {
-  const keyword = filters.value.name.trim().toLowerCase()
-  if (keyword) {
-    const name = strategyName(row).toLowerCase()
-    if (!name.includes(keyword)) return false
-  }
-  if (filters.value.status && row.status !== filters.value.status) return false
-  return true
-}))
+const pagedRows = computed(() => {
+  const start = (pagination.value.current - 1) * pagination.value.pageSize
+  return rows.value.slice(start, start + pagination.value.pageSize)
+})
+
+watch(filters, () => { pagination.value.current = 1 }, { deep: true })
 
 onMounted(async () => {
   await load()
@@ -88,8 +87,11 @@ async function load() {
   error.value = ''
   try {
     const strategyID = Number(route.query.strategy_id || 0)
-    const data = await client.listTasks(strategyID > 0 ? { strategy_id: strategyID } : undefined)
+    // 从策略详情跳进来时锁定来源策略，其余筛选交给后端。
+    const params = { strategy_id: strategyID > 0 ? strategyID : undefined, search: filters.value.search.trim(), status: filters.value.status }
+    const data = await client.listTasks(params)
     rows.value = Array.isArray(data) ? data : []
+    pagination.value.current = 1
     const gameRows = await client.listGames()
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
@@ -100,7 +102,8 @@ async function load() {
 }
 
 function resetFilters() {
-  filters.value = { name: '', status: '' }
+  filters.value = { search: '', status: '' }
+  load()
 }
 
 async function open(row) {
@@ -309,24 +312,20 @@ function hasFailed(task) {
         </template>
       </ResourcePageHeader>
 
-      <ResourceCard class="task-filter-card">
-        <div class="filter-row">
-          <label class="filter-field"><span>任务名称 / 来源策略</span><t-input v-model="filters.name" clearable placeholder="搜索任务名称 / 来源策略" style="width:240px" /></label>
-          <label class="filter-field"><span>状态</span><t-select v-model="filters.status" clearable placeholder="全部" style="width:150px">
+      <ResourceCard class="task-card">
+        <div class="filter-bar">
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">任务名称 / 来源策略</span><t-input v-model="filters.search" clearable placeholder="搜索任务名称 / 来源策略" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="success" label="成功" />
             <t-option value="partial_success" label="部分成功" />
             <t-option value="failed" label="失败" />
             <t-option value="running" label="执行中" />
             <t-option value="pending" label="待执行" />
           </t-select></label>
-          <t-button theme="primary" @click="load">查询</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
         </div>
-      </ResourceCard>
-
-      <ResourceCard class="task-card">
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="filteredRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘任务">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘任务">
             <template #name="{ row }">
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
             </template>
@@ -348,9 +347,10 @@ function hasFailed(task) {
             </template>
           </t-table>
         </div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <t-drawer :close-btn="true" v-model:visible="visible" header="挖掘任务详情" size="760px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="visible" header="挖掘任务详情" size="min(92vw, 760px)" :footer="Boolean(detail && hasFailed(detail))">
         <div v-if="detail" class="task-detail">
           <div class="detail-head">
             <h3 class="task-title">{{ taskName(detail) }}</h3>
@@ -373,10 +373,6 @@ function hasFailed(task) {
             <div class="summary-tile"><strong>{{ detail.stats?.auto_materialized || 0 }}</strong><span>自动素材</span></div>
             <div class="summary-tile"><strong>{{ detail.stats?.pending || 0 }}</strong><span>待审核</span></div>
             <div class="summary-tile"><strong>{{ detail.stats?.failed || 0 }}</strong><span>失败</span></div>
-          </div>
-
-          <div class="result-actions">
-            <t-button v-if="hasFailed(detail)" size="small" theme="primary" :loading="retrying" @click="retry(detail)">重新执行</t-button>
           </div>
 
           <t-tabs v-model="activeTab">
@@ -427,9 +423,12 @@ function hasFailed(task) {
             </t-tab-panel>
           </t-tabs>
         </div>
+        <template #footer>
+          <t-button v-if="detail && hasFailed(detail)" theme="primary" :loading="retrying" @click="retry(detail)">重试</t-button>
+        </template>
       </t-drawer>
 
-      <t-drawer :close-btn="true" v-model:visible="strategyDrawerVisible" header="策略详情" size="480px" :footer="false">
+      <t-drawer :close-btn="true" v-model:visible="strategyDrawerVisible" header="策略详情" size="min(92vw, 560px)" :footer="Boolean(strategyDrawer)">
         <div v-if="strategyDrawer" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(strategyDrawer.game_id) }}</strong></div>
@@ -438,10 +437,8 @@ function hasFailed(task) {
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ strategyDrawer.schedule || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>转素材规则</span><strong>{{ snapshotMaterialLabel(strategyDrawer) }}</strong></div>
-          <div class="strategy-drawer__actions">
-            <t-button theme="primary" block @click="goStrategy">查看策略</t-button>
-          </div>
         </div>
+        <template #footer><t-button v-if="strategyDrawer" theme="primary" @click="goStrategy">查看策略</t-button></template>
       </t-drawer>
     </div>
   </t-loading>
@@ -449,9 +446,6 @@ function hasFailed(task) {
 
 <style scoped>
 .task-card { padding: 18px 20px; margin-top: 16px; }
-.task-filter-card { padding: 14px 20px; }
-.filter-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.filter-field { display: flex; align-items: center; gap: 8px; color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .task-detail { display: flex; flex-direction: column; gap: 14px; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .task-title { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 600; }
@@ -464,7 +458,6 @@ function hasFailed(task) {
 .summary-tile { padding: 14px 10px; border: 1px solid var(--wt-border); border-radius: 8px; text-align: center; }
 .summary-tile strong { display: block; color: var(--wt-primary); font-size: 22px; font-weight: 650; }
 .summary-tile span { display: block; margin-top: 5px; color: var(--wt-text-tertiary); font-size: 12px; }
-.result-actions { display: flex; justify-content: flex-end; }
 .result-cover { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; display: flex; align-items: center; justify-content: center; background: var(--wt-bg-page); color: var(--wt-text-tertiary); font-size: 11px; }
 .result-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .overview-summary p { margin: 0; color: var(--wt-text-secondary); font-size: 14px; line-height: 1.7; }
@@ -486,7 +479,6 @@ function hasFailed(task) {
 .strategy-drawer__field { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
 .strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
 .strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
-.strategy-drawer__actions { margin-top: 4px; }
 .task-source-link { color: #7c3aed; cursor: pointer; font-weight: 500; }
 .task-source-link:hover { text-decoration: underline; }
 </style>

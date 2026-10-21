@@ -67,8 +67,8 @@ func CreateTeam(actorID UserID, name string) (OperationTeam, error) {
 	return newService(mysqlStore{}).CreateTeam(actorID, name)
 }
 
-func ListTeams(actorID UserID) ([]OperationTeam, error) {
-	return newService(mysqlStore{}).ListTeams(actorID)
+func ListTeams(actorID UserID, keyword string) ([]OperationTeam, error) {
+	return newService(mysqlStore{}).ListTeams(actorID, keyword)
 }
 
 func RenameTeam(actorID UserID, teamID TeamID, name string) (OperationTeam, error) {

@@ -46,7 +46,7 @@ const menuItems = [
   { value: 'analytics', title: '数据分析', icon: 'chart-bar', children: [
     { title: '数据统计', path: '/stats', icon: 'chart-bar' },
   ] },
-  { value: 'system', title: '系统', icon: 'setting', children: [
+  { value: 'system', title: '系统管理', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
     { title: '运营分组', path: '/operation-teams', icon: 'view-organization' },
     { title: '游戏管理', path: '/games', icon: 'gamepad' },

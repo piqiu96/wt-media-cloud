@@ -8,6 +8,10 @@ const createDialog = readFileSync(new URL('../components/ComposeTaskCreateDialog
 // 关联实体只读抽屉、活动任务轮询。
 // 与本仓其余列表页同一量法：钉住**会静默失效**的那几处接线。
 describe('compose tasks page', () => {
+  it('opens the existing task detail for a run-history task link', () => {
+    expect(source).toContain("const taskID = String(route.query.task_id || '')")
+    expect(source).toContain('openDetail({ id: Number(taskID) })')
+  })
   // 三个下拉/输入里最容易腐烂的是「筛了但参数没上车」：load 必须把两个筛选项
   // 都拼进服务端参数，缺一个那条筛选就是摆设（MyMaterialsPage 有过这个 bug）。
   it('loads the list through the server-side filters it renders', () => {
@@ -340,7 +344,8 @@ describe('compose tasks page', () => {
     expect(source).toContain('client.getStrategy(id)')
     expect(source).toContain('client.getComposeOutput(id)')
     expect(source).toContain('client.getComposeOutputVideoUrl(id)')
-    // 预览地址是短时签名，每次打开现取。
+    // 每次打开都从原接口取准确对象地址，再转换为可播放地址。
     expect(source).toContain('client.getComposeOutputVideoUrl(id).catch(() => null)')
+    expect(source.match(/publicObjectReadUrl\(link\?\.url\)/g)).toHaveLength(2)
   })
 })
