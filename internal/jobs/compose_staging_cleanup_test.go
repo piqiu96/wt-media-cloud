@@ -26,7 +26,7 @@ func TestComposeWorkerRunsStagingCleanupAtStartup(t *testing.T) {
 	deps := ComposeWorkerDeps{
 		Tasks:     &workerTasksFake{},
 		Workspace: workspace,
-		Attempt: func(context.Context, model.ComposeTask, *compose.RunDir) productionservice.ComposeAttemptOutcome {
+		Attempt: func(context.Context, model.ComposeTask, *compose.RunDir, *productionservice.ComposeInputGate) productionservice.ComposeAttemptOutcome {
 			t.Fatal("no task should be claimed")
 			return ""
 		},

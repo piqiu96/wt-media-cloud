@@ -198,16 +198,18 @@ type attemptSpy struct {
 	returned int
 	tasks    []int64
 	paths    []string
+	gates    []*productionservice.ComposeInputGate
 	outcomes []productionservice.ComposeAttemptOutcome
 	blocks   chan struct{}
 }
 
-func (s *attemptSpy) attempt(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir) productionservice.ComposeAttemptOutcome {
+func (s *attemptSpy) attempt(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir, gate *productionservice.ComposeInputGate) productionservice.ComposeAttemptOutcome {
 	s.mu.Lock()
 	call := s.calls
 	s.calls++
 	s.tasks = append(s.tasks, task.ID)
 	s.paths = append(s.paths, runDir.Path())
+	s.gates = append(s.gates, gate)
 	s.mu.Unlock()
 	if s.blocks != nil && call == 0 {
 		select {
@@ -233,6 +235,12 @@ func (s *attemptSpy) callCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
+}
+
+func (s *attemptSpy) gatePointers() []*productionservice.ComposeInputGate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*productionservice.ComposeInputGate(nil), s.gates...)
 }
 
 func (s *attemptSpy) returnedCount() int {
@@ -425,6 +433,12 @@ func TestComposeWorkerReattemptsAWaitingTaskWithoutReclaiming(t *testing.T) {
 	if confirmed := fake.confirmedIDs(); len(confirmed) != 0 {
 		t.Fatalf("confirmed=%v", confirmed)
 	}
+	// The gate is the claim's memory: every poll of the same claim must see the
+	// same one, or the self-heal would be granted again on every tick.
+	gates := spy.gatePointers()
+	if len(gates) != 3 || gates[0] == nil || gates[1] != gates[0] || gates[2] != gates[0] {
+		t.Fatalf("gates = %v, want one pointer reused across the claim's wait loop", gates)
+	}
 }
 
 func TestComposeWorkerConfirmsACancelThatLandsWhileWaiting(t *testing.T) {
@@ -519,6 +533,13 @@ func TestComposeWorkerReclaimsARetryOutcome(t *testing.T) {
 	}
 	if got := fake.claimCount(); got < 2 {
 		t.Fatalf("a retry outcome must go back through the claim: claims=%d", got)
+	}
+	// A retry is a new claim, which is exactly the "one more self-heal" a user
+	// means by clicking retry — so the second claim must not inherit the first's
+	// memory.
+	gates := spy.gatePointers()
+	if len(gates) < 2 || gates[0] == nil || gates[1] == nil || gates[0] == gates[1] {
+		t.Fatalf("gates = %v, want a fresh gate for the reclaimed attempt", gates)
 	}
 }
 

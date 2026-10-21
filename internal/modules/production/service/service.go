@@ -68,6 +68,12 @@ type Store interface {
 	// because the caller's next step depends on it.
 	MarkVideoPreparing(identityservice.TeamID, int64, time.Time) (bool, error)
 
+	// MarkVideoRepreparing moves a `ready` material back to `downloading` after its
+	// object was observed missing. The caller names the exact key and prepared
+	// timestamp it observed, so a concurrent attempt that finished in between is
+	// not taken back; false means the row moved on and the caller must re-read.
+	MarkVideoRepreparing(identityservice.TeamID, int64, string, *time.Time, time.Time) (bool, error)
+
 	// MarkVideoReady writes the facts of a verified prepared source, and reports
 	// whether the scope matched a row at all.
 	MarkVideoReady(identityservice.TeamID, int64, repository.VideoFacts, time.Time) (bool, error)
@@ -113,6 +119,11 @@ type TransferCreator interface {
 	// status for one user, raw (see the transfer service). "My Materials" derives
 	// its download lifecycle from it; the transfer module stays out of badges.
 	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
+
+	// AttachCompletedDependency releases a download that was inserted after its
+	// preparation had already succeeded. The bool reports that the attachment
+	// landed; the returned task is the refreshed row.
+	AttachCompletedDependency(taskID string) (transferdto.Task, bool, error)
 }
 
 // ObjectLinker mints the address a stored object is read at; a consumer-side
@@ -130,6 +141,13 @@ type TransferCreator interface {
 // the operator clicks, so there is no held address for an expiry to invalidate.
 type ObjectLinker interface {
 	PresignObjectURL(ctx context.Context, objectKey string) (string, error)
+
+	// ObjectExists answers whether the bucket currently holds the key. `ready` is a
+	// projection and a projection can outlive what it points at — the incident this
+	// check was added for — so every consumer that is about to promise the object
+	// asks first. A missing object is `(false, nil)`; only a store failure is an
+	// error, because "cannot tell" must not be reported as "gone".
+	ObjectExists(ctx context.Context, objectKey string) (bool, error)
 }
 
 type Service struct {
@@ -173,7 +191,9 @@ func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64
 // VideoURL answers the cloud address of a prepared material's video — the
 // detail drawer's link, deliberately not part of the material body. Scope first,
 // then readiness (409 while preparation is unfinished), then the same
-// `videoFacts` completeness a local download reads, and only then a signature.
+// `videoFacts` completeness a local download reads, then a check that the object
+// is really in the bucket (409 if not — a `ready` row can outlive its object),
+// and only then a signature.
 func (s *Service) VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID int64) (string, error) {
 	material, err := s.GetMaterial(actor, materialID)
 	if err != nil {
@@ -185,6 +205,16 @@ func (s *Service) VideoURL(ctx context.Context, actor identityservice.PublicUser
 	objectKey, _, _, err := videoFacts(material)
 	if err != nil {
 		return "", err
+	}
+	exists, err := s.links.ObjectExists(ctx, objectKey)
+	if err != nil {
+		return "", fmt.Errorf("check material %d source object: %w", material.ID, err)
+	}
+	if !exists {
+		// Signing a missing object would open a 404 in the drawer. The 409 says the
+		// same thing the download route says: no prepared video is available right
+		// now, and a preparation can change that.
+		return "", ErrMaterialUnavailable
 	}
 	return s.links.PresignObjectURL(ctx, objectKey)
 }
@@ -379,20 +409,36 @@ func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) 
 // The download is **never** queued without a node. An executor claims on its own
 // credential, so a task with no assignee would be claimed by whichever device
 // polled first — a file the user asked for on one machine landing on another.
-func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
+func (s *Service) CreateDownload(ctx context.Context, actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
 	material, err := s.GetMaterial(actor, materialID)
 	if err != nil {
 		return transferdto.Task{}, err
 	}
-	ready := material.VideoStatus == model.VideoReady
+	// `ready` is a projection, so a ready row still has to prove its object is
+	// in the bucket before this route promises a download: the incident this
+	// branch was added for is exactly a row that said ready about an object that
+	// no longer existed, and the Local Agent would have received a 404 grant.
 	var objectKey, sha256 string
 	var size int64
-	switch {
-	case ready:
+	needsPreparation := material.VideoStatus != model.VideoReady
+	if !needsPreparation {
 		if objectKey, size, sha256, err = videoFacts(material); err != nil {
 			return transferdto.Task{}, err
 		}
-	case strings.TrimSpace(material.SourceURL) == "":
+		exists, existsErr := s.links.ObjectExists(ctx, objectKey)
+		if existsErr != nil {
+			return transferdto.Task{}, fmt.Errorf("check material %d source object: %w", material.ID, existsErr)
+		}
+		if !exists {
+			if strings.TrimSpace(material.SourceURL) == "" {
+				// Ready, object gone, and no page address to re-resolve: nothing can
+				// make this download possible, and the 409 is honest.
+				return transferdto.Task{}, ErrMaterialUnavailable
+			}
+			needsPreparation = true
+			objectKey, size, sha256 = "", 0, ""
+		}
+	} else if strings.TrimSpace(material.SourceURL) == "" {
 		// Not ready *and* nothing to prepare from: the material's source address is
 		// gone, so waiting produces no file and the 409 is honest. Every other
 		// not-ready state is a wait rather than a refusal, which is why the
@@ -419,7 +465,7 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		TotalBytes:       size,
 		ExpectedSHA256:   sha256,
 	}
-	if !ready {
+	if needsPreparation {
 		// The preparation is a Cloud task keyed on the material rather than on this
 		// user: two operators clicking at once get one fetch, and the second click's
 		// wait attaches to the task the first one queued. `transfer`'s dedupe is what
@@ -436,29 +482,47 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 		input.DependencyTaskID = prepare.ID
 		// The task is the fact and the projection follows it, in that order: a
 		// `downloading` material with no task would show the user a queue position
-		// that does not exist. The statement is guarded so that this click cannot
-		// take a `ready` material back to `downloading`.
-		preparing, err := s.store.MarkVideoPreparing(material.TeamID, material.ID, s.now().UTC())
+		// that does not exist. A ready row whose object is gone needs the
+		// key-and-timestamp compare (`MarkVideoRepreparing`) so a preparation that
+		// finished in the meantime is not taken back; every other state uses the
+		// ordinary marker.
+		var preparing bool
+		if material.VideoStatus == model.VideoReady {
+			preparing, err = s.store.MarkVideoRepreparing(material.TeamID, material.ID, material.SourceObjectKey, material.VideoPreparedAt, s.now().UTC())
+		} else {
+			preparing, err = s.store.MarkVideoPreparing(material.TeamID, material.ID, s.now().UTC())
+		}
 		if err != nil {
 			return transferdto.Task{}, fmt.Errorf("mark material %d preparing: %w", material.ID, err)
 		}
 		if !preparing {
-			// The guard refused, so the material left `not_downloaded`/`failed`
-			// between the read at the top of this method and the statement above.
-			// There are two ways that happens and they need different tasks: another
-			// click is already preparing this material, in which case waiting for it
-			// is exactly the plan, or preparation finished and it is now `ready`, in
-			// which case a wait would hold a file back that can be fetched now. Only
-			// a fresh read tells the two apart, and guessing wrong on the second is
-			// the one that strands a download.
-			if material, err = s.GetMaterial(actor, materialID); err != nil {
-				return transferdto.Task{}, err
+			// The guard refused, so the material moved between the read at the top of
+			// this method and the statement above. There are two ways that happens and
+			// they need different tasks: another preparation is now running (waiting is
+			// exactly the plan), or one finished and the row is `ready` again, in which
+			// case a wait would hold a file back that can be fetched now. Only a fresh
+			// read tells the two apart, and guessing wrong on the second strands a
+			// download.
+			refreshed, readErr := s.GetMaterial(actor, materialID)
+			if readErr != nil {
+				return transferdto.Task{}, readErr
 			}
-			if material.VideoStatus == model.VideoReady {
-				input.DependencyTaskID = ""
-				if input.SourceObjectKey, input.TotalBytes, input.ExpectedSHA256, err = videoFacts(material); err != nil {
-					return transferdto.Task{}, err
+			if refreshed.VideoStatus == model.VideoReady {
+				key, freshSize, freshSHA, factsErr := videoFacts(refreshed)
+				if factsErr != nil {
+					return transferdto.Task{}, factsErr
 				}
+				exists, existsErr := s.links.ObjectExists(ctx, key)
+				if existsErr != nil {
+					return transferdto.Task{}, fmt.Errorf("check material %d source object: %w", refreshed.ID, existsErr)
+				}
+				if !exists {
+					// The projection says ready again but the object is still missing;
+					// queuing a download would only hand the agent a 404.
+					return transferdto.Task{}, ErrMaterialUnavailable
+				}
+				input.DependencyTaskID = ""
+				input.SourceObjectKey, input.TotalBytes, input.ExpectedSHA256 = key, freshSize, freshSHA
 			}
 		}
 	}
@@ -468,6 +532,15 @@ func (s *Service) CreateDownload(actor identityservice.PublicUser, materialID in
 			return transferdto.Task{}, ErrInvalidInput
 		}
 		return transferdto.Task{}, fmt.Errorf("queue user download for material %d: %w", material.ID, err)
+	}
+	if input.DependencyTaskID != "" {
+		// The preparation may have finished between `Ensure` and the insert, in which
+		// case the live hand-over saw no row to update. The attachment is best-effort:
+		// a failure here leaves the row for the scheduled sweep, and the task body the
+		// client already holds is still the truth until the sweep releases it.
+		if attached, ok, attachErr := s.transfers.AttachCompletedDependency(task.ID); attachErr == nil && ok {
+			return attached, nil
+		}
 	}
 	return task, nil
 }

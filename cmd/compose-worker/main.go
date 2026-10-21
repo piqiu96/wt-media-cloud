@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
@@ -96,7 +97,7 @@ func runVerify(ctx context.Context, input string, start, end int64) error {
 		return err
 	}
 	defer storage.Close()
-	if err := compose.VerifyUpload(ctx, storage.Get(), cfg.Storage.ObjectStorage.PresignTTL.Duration, output.Path, filepath.Base(runDir.Path())); err != nil {
+	if err := compose.VerifyUpload(ctx, storage.Get(), output.Path, filepath.Base(runDir.Path())); err != nil {
 		return err
 	}
 	if err := runDir.Release(); err != nil {
@@ -160,22 +161,25 @@ func runWorker(ctx context.Context) error {
 		Client:    &http.Client{},
 		// The preparation is requested in the task creator's name so the
 		// transfer row's actor reads as the person whose compose run needs
-		// the video, not as the worker process.
-		EnsureInputPrepared: func(ctx context.Context, task model.ComposeTask, materialID int64) error {
-			material, found, err := repository.FindMaterialUnscoped(materialID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("material %d is gone", materialID)
-			}
-			_, err = transferservice.EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput{
+		// the video, not as the worker process. The projection is moved after
+		// the request: a `ready` row is taken back only by the key-and-timestamp
+		// compare (see MarkVideoRepreparing), every other state by the ordinary
+		// marker. A refused mark is benign — another writer moved the row — and
+		// is reported as `observed=false` rather than as an error.
+		EnsureInputPrepared: func(ctx context.Context, task model.ComposeTask, material model.Material) (bool, error) {
+			if _, err := transferservice.EnsureMaterialSourcePrepare(transferservice.EnsureMaterialSourcePrepareInput{
 				TeamID:      material.TeamID,
 				AssetID:     material.ID,
 				AssetTitle:  material.Title,
 				RequestedBy: identityservice.UserID(task.CreatedBy),
-			})
-			return err
+			}); err != nil {
+				return false, err
+			}
+			now := time.Now().UTC()
+			if material.VideoStatus == model.VideoReady && material.SourceObjectKey != "" {
+				return repository.MarkVideoRepreparing(material.TeamID, material.ID, material.SourceObjectKey, material.VideoPreparedAt, now)
+			}
+			return repository.MarkVideoPreparing(material.TeamID, material.ID, now)
 		},
 	}
 	settings := jobs.ComposeWorkerSettings{
@@ -195,8 +199,8 @@ func runWorker(ctx context.Context) error {
 		CleanStaging: func(ctx context.Context) error {
 			return jobs.CleanComposeStaging(ctx, repository.ComposeTaskStore{}, storage.Get().Remove)
 		},
-		Attempt: func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir) productionservice.ComposeAttemptOutcome {
-			return productionservice.RunComposeAttempt(ctx, executorDeps, task, settings.NodeID, runDir)
+		Attempt: func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir, gate *productionservice.ComposeInputGate) productionservice.ComposeAttemptOutcome {
+			return productionservice.RunComposeAttempt(ctx, executorDeps, task, settings.NodeID, runDir, gate)
 		},
 		Log: func(format string, args ...any) { logger.Job().Infof(format, args...) },
 	}

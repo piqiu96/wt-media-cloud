@@ -396,14 +396,104 @@ func TestMarkVideoPreparingOnlyLeavesTheStatesAPreparationMayStartFrom(t *testin
 func TestMarkVideoPreparingStatementNamesBothStatesAPreparationMayStartFrom(t *testing.T) {
 	for _, fragment := range []string{
 		"video_status IN ('not_downloaded', 'failed')",
+		"video_status = 'ready' AND COALESCE(source_object_key, '') = ''",
 		"video_status = 'downloading'",
 		"video_error = ''",
 		"id = ? AND team_id = ?",
 	} {
 		if !strings.Contains(markVideoPreparingSQL, fragment) {
-			t.Errorf("the statement no longer contains %q, so a `ready` material can be dragged back to `downloading`: %s", fragment, markVideoPreparingSQL)
+			t.Errorf("the statement no longer contains %q, which is a state or a fact a preparation may start from: %s", fragment, markVideoPreparingSQL)
 		}
 	}
+	// A ready row that names a key is not this statement's to take back: that is
+	// the observed-missing case and needs the key-and-timestamp compare.
+	if strings.Contains(markVideoPreparingSQL, "IN ('not_downloaded', 'failed', 'ready')") {
+		t.Errorf("a plain ready row was added to the startable states, so a stale click can take back a prepared video: %s", markVideoPreparingSQL)
+	}
+}
+
+// The take-back of a ready row is the one write that undoes a projection whose
+// promise was observed false, so its predicate is two facts read by the caller:
+// the exact key, and the moment it was written. A statement that matched on the
+// material id alone would take back a preparation that finished in between.
+func TestMarkVideoRepreparingScopesTheTakeBackToTheObservedKeyAndMoment(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
+	preparedAt := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(markVideoRepreparingSQL)).
+		WithArgs(now, int64(42), int64(7), "materials/42/x.mp4", preparedAt).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(markVideoRepreparingSQL)).
+		WithArgs(now, int64(42), int64(7), "materials/42/x.mp4", preparedAt).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	repreparing, err := markVideoRepreparing(db, 7, 42, "materials/42/x.mp4", &preparedAt, now)
+	if err != nil {
+		t.Fatalf("markVideoRepreparing() error = %v", err)
+	}
+	if !repreparing {
+		t.Fatal("a row still carrying the observed key and moment must be taken back")
+	}
+	repreparing, err = markVideoRepreparing(db, 7, 42, "materials/42/x.mp4", &preparedAt, now)
+	if err != nil {
+		t.Fatalf("markVideoRepreparing() second call error = %v", err)
+	}
+	if repreparing {
+		t.Fatal("a row the compare refused must not be reported as taken")
+	}
+	assertExpectations(t, mock)
+
+	for _, fragment := range []string{
+		"video_status = 'ready'",
+		"COALESCE(source_object_key, '') = ?",
+		"video_prepared_at <=> ?",
+		"video_error = ''",
+	} {
+		if !strings.Contains(markVideoRepreparingSQL, fragment) {
+			t.Errorf("the take-back lost %q, so a newer preparation's result can be overwritten: %s", fragment, markVideoRepreparingSQL)
+		}
+	}
+}
+
+// The compare takes a NULL timestamp from a legacy row through MySQL's null-safe
+// equality. A plain `=` would match nothing there, and the repair would never run
+// for exactly the rows most likely to have lost their object.
+func TestMarkVideoRepreparingMatchesALegacyNullPreparedAt(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
+	mock.ExpectExec(regexp.QuoteMeta(markVideoRepreparingSQL)).
+		WithArgs(now, int64(42), int64(7), "materials/42/x.mp4", nil).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	repreparing, err := markVideoRepreparing(db, 7, 42, "materials/42/x.mp4", nil, now)
+	if err != nil || !repreparing {
+		t.Fatalf("repreparing=%v error=%v, want a NULL prepared_at matched", repreparing, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// An empty key is a keyless ready row, which belongs to `MarkVideoPreparing`;
+// letting this statement also cover it would give two entry points with
+// different guards the same meaning.
+func TestMarkVideoRepreparingRefusesAnEmptyKeyOrIncompleteScope(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
+	for _, testCase := range []struct {
+		name       string
+		teamID     identity.TeamID
+		materialID int64
+		key        string
+	}{
+		{"no team", 0, 42, "materials/42/x.mp4"},
+		{"no material", 7, 0, "materials/42/x.mp4"},
+		{"no key", 7, 42, "   "},
+	} {
+		_, err := markVideoRepreparing(db, testCase.teamID, testCase.materialID, testCase.key, nil, now)
+		if err == nil || !strings.Contains(err.Error(), "invalid material repreparation marker") {
+			t.Fatalf("%s: error = %v, want the scope refused before any statement runs", testCase.name, err)
+		}
+	}
+	assertExpectations(t, mock)
 }
 
 // The refusal is asserted by its reason rather than by "an error came back",
@@ -692,6 +782,11 @@ func TestMarkVideoFailedWillNotTakeBackAReadyMaterial(t *testing.T) {
 
 	if !strings.Contains(markVideoFailedSQL, "video_status <> 'ready'") {
 		t.Errorf("the statement no longer refuses a ready material: %s", markVideoFailedSQL)
+	}
+	// The exception: a ready row that names no key never had a video to keep, so a
+	// preparation that failed can and must say so.
+	if !strings.Contains(markVideoFailedSQL, "COALESCE(source_object_key, '') = ''") {
+		t.Errorf("a keyless ready row can never be marked failed: %s", markVideoFailedSQL)
 	}
 }
 

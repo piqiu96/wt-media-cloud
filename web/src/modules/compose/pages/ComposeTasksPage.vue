@@ -83,6 +83,15 @@ function strategyName(row) {
   return found ? found.name : `策略 ${row.compose_strategy_id}`
 }
 
+/**
+ * 状态徽标：等待素材时底层状态仍是「运行中」，但用户看到的事实是「还在等文件」。
+ * 产品口径把这两种等待分开——运行中是在合成，等待素材是在等源文件。
+ */
+function statusText(row) {
+  if (row.status === 'running' && row.stage === 'waiting_input') return stageLabels.waiting_input
+  return statusLabels[row.status] || row.status
+}
+
 /** 当前阶段只说阶段，不带进度百分比；失败时也不拿错误码的文字冒充阶段。 */
 function stageText(row) {
   if (row.status === 'success') return '已完成'
@@ -478,7 +487,7 @@ onMounted(() => {
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link></template>
             <template #strategy="{ row }"><t-link class="compose-strategy-link" theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link></template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
-            <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusLabels[row.status] || row.status" /></template>
+            <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
@@ -506,7 +515,7 @@ onMounted(() => {
                     <div><span class="compose-detail__label">触发方式</span><span>{{ triggerText(detail) }}</span></div>
                     <div><span class="compose-detail__label">创建人 ID</span><span>{{ detail.created_by }}</span></div>
                     <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
-                    <div><span class="compose-detail__label">当前状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusLabels[detail.status] || detail.status" /></div>
+                    <div><span class="compose-detail__label">当前状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusText(detail)" /></div>
                     <!-- 失败原因就写在任务信息里：找「为什么失败」的人先看的就是这一段，不必
                          再翻到执行记录去对错误码。列表页不加列（详情才需要这个上下文）。 -->
                     <div v-if="detail.status === 'failed'"><span class="compose-detail__label">失败原因</span><span class="compose-detail__failure-reason">{{ safeComposeError(detail.error_code) }}</span></div>

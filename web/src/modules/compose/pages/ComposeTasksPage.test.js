@@ -38,6 +38,17 @@ describe('compose tasks page', () => {
     expect(source).not.toContain('row.progress')
   })
 
+  // 等待素材时底层仍是「运行中」，但用户看到的事实是「还在等文件」。列表与详情两处
+  // 徽标都必须走同一个 statusText：只改一处，另一处就退回「处理中」，用户会以为
+  // 合成正在跑，而实际上云端连源文件都还没拿到。
+  it('labels a waiting task as waiting for its material, not as processing', () => {
+    expect(source).toContain("waiting_input: '等待素材准备'")
+    expect(source).toContain('function statusText(row)')
+    expect(source).toContain("if (row.status === 'running' && row.stage === 'waiting_input') return stageLabels.waiting_input")
+    expect(source).toContain(':label="statusText(row)"')
+    expect(source).toContain(':label="statusText(detail)"')
+  })
+
   // 列序固定：识别 → 来源 → 结果 → 状态 → 时间 → 操作。
   it('declares the nine columns in the fixed order', () => {
     const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
@@ -50,6 +51,10 @@ func (mysqlStore) MarkVideoPreparing(teamID identityservice.TeamID, materialID i
 	return repository.MarkVideoPreparing(teamID, materialID, now)
 }
 
+func (mysqlStore) MarkVideoRepreparing(teamID identityservice.TeamID, materialID int64, expectedObjectKey string, expectedPreparedAt *time.Time, now time.Time) (bool, error) {
+	return repository.MarkVideoRepreparing(teamID, materialID, expectedObjectKey, expectedPreparedAt, now)
+}
+
 func (mysqlStore) MarkVideoReady(teamID identityservice.TeamID, materialID int64, facts repository.VideoFacts, now time.Time) (bool, error) {
 	return repository.MarkVideoReady(teamID, materialID, facts, now)
 }
@@ -87,6 +92,10 @@ func (productionTransferCreator) LatestUserDownloadStatuses(userID identityservi
 	return transferservice.LatestUserDownloadStatuses(userID, materialIDs)
 }
 
+func (productionTransferCreator) AttachCompletedDependency(taskID string) (transferdto.Task, bool, error) {
+	return transferservice.AttachCompletedDependency(taskID)
+}
+
 // productionObjectLinker is this module's whole dependency on the storage
 // boundary; the minting itself lives in `infra/storage`.
 type productionObjectLinker struct{}
@@ -100,4 +109,18 @@ func (productionObjectLinker) PresignObjectURL(ctx context.Context, key string) 
 		return "", err
 	}
 	return grant.URL, nil
+}
+
+// ObjectExists is a metadata read, not a download: `Stat` costs one HEAD and no
+// bytes, so asking before every download and every preview does not move the
+// data the operation was going to move anyway.
+func (productionObjectLinker) ObjectExists(ctx context.Context, key string) (bool, error) {
+	_, err := storage.Get().Stat(ctx, key)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

@@ -187,6 +187,22 @@ func (putFailingStore) Put(context.Context, string, io.Reader, int64, string) er
 	return errors.New("object storage is unreachable")
 }
 
+// statSizeStore reports a fixed size for every object, so a test can make the
+// upload's post-write Stat disagree with the bytes it just sent.
+type statSizeStore struct {
+	*storeFake
+	size int64
+}
+
+func (s statSizeStore) Stat(ctx context.Context, key string) (storage.ObjectInfo, error) {
+	info, err := s.storeFake.Stat(ctx, key)
+	if err != nil {
+		return info, err
+	}
+	info.Size = s.size
+	return info, nil
+}
+
 func memClient(store *storeFake) *http.Client {
 	return &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		key := strings.TrimPrefix(request.URL.String(), "mem://")
@@ -270,7 +286,7 @@ func nodePtr(id int64) *int64 { return &id }
 
 func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	deps, lifecycle, store, runner, task, runDir := attemptFixture(t)
-	outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir)
+	outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil)
 	if outcome != ComposeAttemptSuccess {
 		t.Fatalf("outcome=%s progress=%v failed=%v released=%v", outcome, lifecycle.progress, lifecycle.failed, lifecycle.released)
 	}
@@ -385,7 +401,7 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 	}
 	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1, AttemptCount: 1,
 		ConfigSnapshot: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), Status: model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9), CreatedBy: 11}
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptSuccess {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptSuccess {
 		t.Fatalf("outcome=%s failed=%v released=%v", outcome, lifecycle.failed, lifecycle.released)
 	}
 	formal := store.objects["compose-outputs/77/1/output.mp4"]
@@ -400,16 +416,17 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 func TestAttemptWaitsWhenSourceNotReady(t *testing.T) {
 	deps, lifecycle, _, runner, task, runDir := attemptFixture(t)
 	deps.Materials = materialsFake{byID: map[int64]model.Material{
-		42: {ID: 42, VideoStatus: model.VideoNotDownloaded},
+		42: {ID: 42, VideoStatus: model.VideoNotDownloaded, SourceURL: "https://www.douyin.com/video/42"},
 	}}
 	var ensureTasks []model.ComposeTask
 	ensure := []int64{}
-	deps.EnsureInputPrepared = func(_ context.Context, requestor model.ComposeTask, materialID int64) error {
-		ensure = append(ensure, materialID)
+	deps.EnsureInputPrepared = func(_ context.Context, requestor model.ComposeTask, material model.Material) (bool, error) {
+		ensure = append(ensure, material.ID)
 		ensureTasks = append(ensureTasks, requestor)
-		return nil
+		return false, nil
 	}
-	outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir)
+	gate := &ComposeInputGate{}
+	outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate)
 	if outcome != ComposeAttemptWaitInput {
 		t.Fatalf("outcome=%s", outcome)
 	}
@@ -419,6 +436,17 @@ func TestAttemptWaitsWhenSourceNotReady(t *testing.T) {
 	if len(ensureTasks) != 1 || ensureTasks[0].ID != 77 || ensureTasks[0].CreatedBy != 11 {
 		t.Fatalf("the hook must see the task so preparation can be requested in its name: %+v", ensureTasks)
 	}
+	if !gate.PrepareRequested {
+		t.Fatalf("gate=%+v", gate)
+	}
+	// The same claim polls again: the one request it already made is reused, not
+	// repeated until the task times out.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("second outcome=%s", outcome)
+	}
+	if len(ensure) != 1 {
+		t.Fatalf("a claim must request preparation at most once: ensure=%v", ensure)
+	}
 	if !strings.Contains(strings.Join(lifecycle.progress, ","), "waiting_input:20") {
 		t.Fatalf("progress=%v", lifecycle.progress)
 	}
@@ -427,10 +455,60 @@ func TestAttemptWaitsWhenSourceNotReady(t *testing.T) {
 	}
 }
 
+func TestAttemptWaitsForAnInFlightPreparationWithoutRequestingAgain(t *testing.T) {
+	deps, lifecycle, _, runner, task, runDir := attemptFixture(t)
+	deps.Materials = materialsFake{byID: map[int64]model.Material{
+		42: {ID: 42, VideoStatus: model.VideoDownloading, SourceURL: "https://www.douyin.com/video/42"},
+	}}
+	ensure := 0
+	deps.EnsureInputPrepared = func(context.Context, model.ComposeTask, model.Material) (bool, error) {
+		ensure++
+		return false, nil
+	}
+	gate := &ComposeInputGate{}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("outcome=%s", outcome)
+	}
+	if ensure != 1 {
+		t.Fatalf("a running preparation is kept alive through the deduped request: ensure=%d", ensure)
+	}
+	if !gate.PrepareObserved || gate.PrepareRequested {
+		t.Fatalf("seeing `downloading` is evidence the preparation ran: gate=%+v", gate)
+	}
+	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 0 || len(runner.requests) != 0 {
+		t.Fatalf("waiting must not retry, run or fail: released=%v failed=%v", lifecycle.released, lifecycle.failed)
+	}
+}
+
+func TestAttemptTreatsAKeylessReadyRowAsUnprepared(t *testing.T) {
+	deps, lifecycle, _, runner, task, runDir := attemptFixture(t)
+	deps.Materials = materialsFake{byID: map[int64]model.Material{
+		42: {ID: 42, VideoStatus: model.VideoReady, SourceURL: "https://www.douyin.com/video/42"},
+	}}
+	deps.EnsureInputPrepared = func(context.Context, model.ComposeTask, model.Material) (bool, error) {
+		return true, nil
+	}
+	gate := &ComposeInputGate{}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("outcome=%s", outcome)
+	}
+	// The request moved the projection, yet the row is still keyless: the record
+	// is malformed, not merely stale.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptFailed {
+		t.Fatalf("second outcome=%s", outcome)
+	}
+	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputInvalid+"|") {
+		t.Fatalf("failed=%v", lifecycle.failed)
+	}
+	if len(runner.requests) != 0 {
+		t.Fatal("a keyless row must never reach the runner")
+	}
+}
+
 func TestAttemptFailsWhenMaterialRowIsGone(t *testing.T) {
 	deps, lifecycle, _, _, task, runDir := attemptFixture(t)
 	deps.Materials = materialsFake{byID: map[int64]model.Material{}}
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptFailed {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputMissing+"|") {
@@ -448,7 +526,7 @@ func TestAttemptLogsTheStepItStoppedOnAfterTheOnesItCompleted(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	// The source stages fine; the upload is where this attempt dies.
 	deps.Store = putFailingStore{storeFake: store}
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptRetry {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptRetry {
 		t.Fatalf("outcome=%s failed=%v", outcome, lifecycle.failed)
 	}
 	want := []string{"prepare_input/success/", "cut/success/", "upload/failed/" + composeErrStorageError}
@@ -465,10 +543,31 @@ func TestAttemptLogsTheStepItStoppedOnAfterTheOnesItCompleted(t *testing.T) {
 func TestAttemptFailsBusinessWhenSourcePreparationFailed(t *testing.T) {
 	deps, lifecycle, _, runner, task, runDir := attemptFixture(t)
 	deps.Materials = materialsFake{byID: map[int64]model.Material{
-		42: {ID: 42, VideoStatus: model.VideoFailed},
+		42: {ID: 42, VideoStatus: model.VideoFailed, SourceURL: "https://www.douyin.com/video/42"},
 	}}
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
+	ensure := 0
+	deps.EnsureInputPrepared = func(context.Context, model.ComposeTask, model.Material) (bool, error) {
+		ensure++
+		return true, nil
+	}
+	gate := &ComposeInputGate{}
+	// A failed source is retried once by the claim that needs it, not failed on
+	// sight: the first poll asks and waits.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
 		t.Fatalf("outcome=%s", outcome)
+	}
+	if ensure != 1 || !gate.PrepareRequested || !gate.PrepareObserved {
+		t.Fatalf("ensure=%d gate=%+v", ensure, gate)
+	}
+	if len(lifecycle.failed) != 0 {
+		t.Fatalf("the retry request must not fail the task: %v", lifecycle.failed)
+	}
+	// The retry ran and failed again: now it is a business failure.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptFailed {
+		t.Fatalf("second outcome=%s", outcome)
+	}
+	if ensure != 1 {
+		t.Fatalf("an observed retry must not be requested twice: ensure=%d", ensure)
 	}
 	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputInvalid+"|") {
 		t.Fatalf("failed=%v", lifecycle.failed)
@@ -478,10 +577,34 @@ func TestAttemptFailsBusinessWhenSourcePreparationFailed(t *testing.T) {
 	}
 }
 
+func TestAttemptWaitsForARequestedRetryThatHasNotLanded(t *testing.T) {
+	deps, lifecycle, _, _, task, runDir := attemptFixture(t)
+	deps.Materials = materialsFake{byID: map[int64]model.Material{
+		42: {ID: 42, VideoStatus: model.VideoFailed, SourceURL: "https://www.douyin.com/video/42"},
+	}}
+	ensure := 0
+	deps.EnsureInputPrepared = func(context.Context, model.ComposeTask, model.Material) (bool, error) {
+		ensure++
+		return false, nil
+	}
+	gate := &ComposeInputGate{}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("outcome=%s", outcome)
+	}
+	// The request has not moved the projection yet: the preparation is queued,
+	// not failed, so the claim keeps waiting without writing a terminal state.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("second outcome=%s", outcome)
+	}
+	if ensure != 1 || len(lifecycle.failed) != 0 || len(lifecycle.released) != 0 {
+		t.Fatalf("ensure=%d failed=%v released=%v", ensure, lifecycle.failed, lifecycle.released)
+	}
+}
+
 func TestAttemptRetriesTransientStorageAndFailsWhenExhausted(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	store.statErr[fakeSourceKey] = errors.New("storage unreachable")
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptRetry {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptRetry {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if len(lifecycle.released) != 1 || !strings.HasPrefix(lifecycle.released[0], composeErrStorageError+"|") {
@@ -491,7 +614,7 @@ func TestAttemptRetriesTransientStorageAndFailsWhenExhausted(t *testing.T) {
 	deps.Tasks = lifecycle2
 	exhausted := task
 	exhausted.AttemptCount = 3
-	if outcome := RunComposeAttempt(context.Background(), deps, exhausted, 9, runDir); outcome != ComposeAttemptFailed {
+	if outcome := RunComposeAttempt(context.Background(), deps, exhausted, 9, runDir, nil); outcome != ComposeAttemptFailed {
 		t.Fatalf("exhausted outcome=%s", outcome)
 	}
 	if len(lifecycle2.failed) != 1 || !strings.Contains(lifecycle2.failed[0], "attempts exhausted after 3") {
@@ -499,14 +622,75 @@ func TestAttemptRetriesTransientStorageAndFailsWhenExhausted(t *testing.T) {
 	}
 }
 
-func TestAttemptDoesNotRetryMissingSourceObject(t *testing.T) {
+func TestAttemptRequestsOnePreparationWhenAReadySourceObjectIsGone(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	store.statErr[fakeSourceKey] = storage.ErrObjectNotFound
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
-		t.Fatalf("missing source outcome=%s", outcome)
+	deps.Materials = materialsFake{byID: map[int64]model.Material{
+		42: {ID: 42, TeamID: 7, VideoStatus: model.VideoReady, SourceObjectKey: fakeSourceKey, SourceURL: "https://www.douyin.com/video/42"},
+	}}
+	ensure := 0
+	deps.EnsureInputPrepared = func(_ context.Context, _ model.ComposeTask, material model.Material) (bool, error) {
+		ensure++
+		if material.SourceObjectKey != fakeSourceKey {
+			t.Fatalf("the request must carry the key that was seen missing: %+v", material)
+		}
+		return true, nil
 	}
-	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputMissing+"|") {
-		t.Fatalf("missing source must be terminal: failed=%v released=%v", lifecycle.failed, lifecycle.released)
+	gate := &ComposeInputGate{}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("a missing object on a ready row must self-heal once: outcome=%s", outcome)
+	}
+	if ensure != 1 || !gate.PrepareRequested || gate.RequestedKey != fakeSourceKey {
+		t.Fatalf("ensure=%d gate=%+v", ensure, gate)
+	}
+	if len(lifecycle.failed) != 0 || len(lifecycle.released) != 0 {
+		t.Fatalf("waiting must not write terminal state: failed=%v released=%v", lifecycle.failed, lifecycle.released)
+	}
+	// The one request was observed and the object is still gone: a failed
+	// self-heal ends the task instead of being requested again.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptFailed {
+		t.Fatalf("second outcome=%s", outcome)
+	}
+	if ensure != 1 {
+		t.Fatalf("the observed retry must not be requested again: ensure=%d", ensure)
+	}
+	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputMissing+"|") {
+		t.Fatalf("failed=%v", lifecycle.failed)
+	}
+	if len(lifecycle.released) != 0 {
+		t.Fatalf("a failed self-heal is terminal, not retryable: released=%v", lifecycle.released)
+	}
+}
+
+func TestAttemptUsesTheRepreparedSourceUnderTheSameClaim(t *testing.T) {
+	deps, lifecycle, store, runner, task, runDir := attemptFixture(t)
+	store.statErr[fakeSourceKey] = storage.ErrObjectNotFound
+	repreparedKey := "materials/42/reprepared.mp4"
+	store.objects[repreparedKey] = []byte("reprepared-source-bytes")
+	sourceURL := "https://www.douyin.com/video/42"
+	materials := materialsFake{byID: map[int64]model.Material{
+		42: {ID: 42, TeamID: 7, VideoStatus: model.VideoReady, SourceObjectKey: fakeSourceKey, SourceURL: sourceURL},
+	}}
+	deps.Materials = materials
+	deps.EnsureInputPrepared = func(context.Context, model.ComposeTask, model.Material) (bool, error) {
+		return true, nil
+	}
+	gate := &ComposeInputGate{}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptWaitInput {
+		t.Fatalf("outcome=%s", outcome)
+	}
+	// The preparation finished and published different bytes: the same claim
+	// picks them up and finishes instead of treating its own request as failure.
+	materials.byID[42] = model.Material{ID: 42, TeamID: 7, VideoStatus: model.VideoReady, SourceObjectKey: repreparedKey, SourceURL: sourceURL}
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, gate); outcome != ComposeAttemptSuccess {
+		t.Fatalf("outcome=%s failed=%v", outcome, lifecycle.failed)
+	}
+	if len(runner.requests) != 1 {
+		t.Fatalf("runner requests=%d", len(runner.requests))
+	}
+	staged, err := os.ReadFile(runner.requests[0].InputPath)
+	if err != nil || string(staged) != "reprepared-source-bytes" {
+		t.Fatalf("the run must consume the reprepared bytes: err=%v body=%q", err, staged)
 	}
 }
 
@@ -515,7 +699,7 @@ func TestAttemptDoesNotRequeueAfterContextCancellation(t *testing.T) {
 	store.statErr[fakeSourceKey] = context.Canceled
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if got := RunComposeAttempt(ctx, deps, task, 9, runDir); got != ComposeAttemptLeaseLost {
+	if got := RunComposeAttempt(ctx, deps, task, 9, runDir, nil); got != ComposeAttemptLeaseLost {
 		t.Fatalf("cancelled attempt outcome=%s", got)
 	}
 	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 0 {
@@ -542,7 +726,7 @@ func TestAttemptClassifiesGuideDownloadFailure(t *testing.T) {
 			}
 			deps.Registry = registry
 			deps.FetchGuide = func(context.Context, string, string) error { return tc.err }
-			if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir); got != tc.want {
+			if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); got != tc.want {
 				t.Fatalf("outcome=%s want=%s", got, tc.want)
 			}
 			if tc.want == ComposeAttemptRetry && len(lifecycle.released) != 1 {
@@ -558,7 +742,7 @@ func TestAttemptClassifiesGuideDownloadFailure(t *testing.T) {
 func TestAttemptFailsOnSnapshotRejectionBeforeAnyBytesMove(t *testing.T) {
 	deps, lifecycle, _, runner, task, runDir := attemptFixture(t)
 	task.ConfigSnapshot = json.RawMessage(`{"start_seconds":5}`)
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptFailed {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrTemplateUnavailable+"|") {
@@ -572,7 +756,7 @@ func TestAttemptFailsOnSnapshotRejectionBeforeAnyBytesMove(t *testing.T) {
 func TestAttemptCancelsWhenRequestedBeforeCommit(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	lifecycle.cancelOnFind = 1 // first Find (after input gate) reports the request
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptCancelled {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptCancelled {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if lifecycle.committed != nil {
@@ -587,7 +771,7 @@ func TestAttemptCleansOrphansWhenCommitLosesTheRow(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	lifecycle.commitErr = repository.ErrComposeCommitLost
 	store.objects["compose-outputs/77/2/output.mp4"] = []byte("later-attempt")
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptLeaseLost {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptLeaseLost {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	for _, key := range []string{"compose-outputs/77/1/output.mp4", "compose-staging/77/1/output.mp4"} {
@@ -606,7 +790,7 @@ func TestAttemptCleansOrphansWhenCommitLosesTheRow(t *testing.T) {
 func TestAttemptKeepsFormalObjectWhenCommitOutcomeIsUnknown(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	lifecycle.commitErr = errors.New("database connection dropped during commit")
-	if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir); got != ComposeAttemptLeaseLost {
+	if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); got != ComposeAttemptLeaseLost {
 		t.Fatalf("outcome=%s", got)
 	}
 	if _, ok := store.objects["compose-outputs/77/1/output.mp4"]; !ok {
@@ -617,7 +801,7 @@ func TestAttemptKeepsFormalObjectWhenCommitOutcomeIsUnknown(t *testing.T) {
 func TestAttemptReportsLeaseLostWhenProgressIsRefused(t *testing.T) {
 	deps, lifecycle, _, _, task, runDir := attemptFixture(t)
 	lifecycle.progressOK = false
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptLeaseLost {
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptLeaseLost {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if lifecycle.committed != nil || len(lifecycle.failed) != 0 || len(lifecycle.released) != 0 {
@@ -625,33 +809,23 @@ func TestAttemptReportsLeaseLostWhenProgressIsRefused(t *testing.T) {
 	}
 }
 
-func TestAttemptUploadRejectsTamperedReadback(t *testing.T) {
+func TestAttemptRejectsAnUploadWhoseStoredSizeDiffers(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
-	// A readback that differs from the uploaded bytes must fail the upload,
-	// so the tampered-object case can never reach the commit transaction.
-	tamper := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		key := strings.TrimPrefix(request.URL.String(), "mem://")
-		if strings.HasPrefix(key, "compose-staging/") {
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader([]byte("tampered-bytes"))), Header: http.Header{}}, nil
-		}
-		body, ok := deps.Store.(*storeFake).objects[key]
-		if !ok {
-			return nil, errors.New("no such object " + key)
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
-	})
-	deps.Client = &http.Client{Transport: tamper}
-	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir); outcome != ComposeAttemptFailed {
+	deps.Store = statSizeStore{storeFake: store, size: int64(len("composed-output-bytes") + 1)}
+	// The upload itself succeeds (the store's Content-MD5 accepted the bytes);
+	// the independent size reading is what disagrees, which is a storage fault
+	// no retry of the same upload can fix.
+	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptFailed {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if lifecycle.committed != nil {
-		t.Fatal("unverified bytes must not commit")
+		t.Fatal("a mis-sized object must not commit")
 	}
 	if len(lifecycle.released) != 0 || len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrExecutionFailed+"|") {
 		t.Fatalf("invalid output must not auto retry: failed=%v released=%v", lifecycle.failed, lifecycle.released)
 	}
 	if _, ok := store.objects["compose-staging/77/1/output.mp4"]; ok {
-		t.Fatal("invalid staged object survived the failed attempt")
+		t.Fatal("the rejected staged object survived the failed attempt")
 	}
 }
 
@@ -668,7 +842,7 @@ func TestAttemptClassifiesTerminatedRunAsCancelledWhenRequested(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan ComposeAttemptOutcome, 1)
 	go func() {
-		done <- RunComposeAttempt(ctx, deps, task, 9, runDir)
+		done <- RunComposeAttempt(ctx, deps, task, 9, runDir, nil)
 	}()
 	select {
 	case <-deps.Runner.(killedRunner).started:
@@ -689,7 +863,7 @@ func TestAttemptClassifiesTerminatedRunAsTransientTimeout(t *testing.T) {
 	deps.Runner = killedRunner{started: make(chan struct{})}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if outcome := RunComposeAttempt(ctx, deps, task, 9, runDir); outcome != ComposeAttemptRetry {
+	if outcome := RunComposeAttempt(ctx, deps, task, 9, runDir, nil); outcome != ComposeAttemptRetry {
 		t.Fatalf("outcome=%s", outcome)
 	}
 	if len(lifecycle.released) != 1 || !strings.HasPrefix(lifecycle.released[0], composeErrTaskTimeout+"|") {

@@ -290,8 +290,8 @@ func TestReportProgressRejectsCancelledOrUnclaimedTask(t *testing.T) {
 // recorded as a success even if the service's own check is bypassed.
 func TestCompleteTaskRequiresRunningClaimAndIntegrity(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)")).
-		WithArgs(int64(100), int64(100), testSHA256, int64(100), "示例视频-42.mp4", testNow, testNow, testNow, "transfer-1", "node-1", int64(100), testSHA256).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, source_object_key = COALESCE(NULLIF(?, ''), source_object_key), file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)")).
+		WithArgs(int64(100), int64(100), testSHA256, int64(100), "", "示例视频-42.mp4", testNow, testNow, testNow, "transfer-1", "node-1", int64(100), testSHA256).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	completed, err := completeTask(db, CompletionInput{TaskID: "transfer-1", NodeID: "node-1", Bytes: 100, SHA256: testSHA256, FileName: "示例视频-42.mp4"}, testNow)
@@ -1265,4 +1265,80 @@ func TestLatestUserDownloadStatusesAnswersAnEmptyListWithoutQuerying(t *testing.
 		t.Fatalf("len(statuses) = %d, want 0", len(statuses))
 	}
 	assertExpectations(t, mock)
+}
+
+// The hand-over that ran before the dependent row existed left it pointing at a
+// finished preparation. The attachment is the repair: it copies the facts and
+// clears the pointer, in one statement, and only for a pending row whose
+// preparation really produced a key, a size and a hash.
+func TestAttachCompletedDependencyCopiesTheFinishedPreparationsFacts(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectExec(regexp.QuoteMeta(attachCompletedDependencySQL)).
+		WithArgs(testNow, "transfer-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	attached, err := attachCompletedDependency(db, "transfer-1", testNow)
+	if err != nil {
+		t.Fatalf("attachCompletedDependency() error = %v", err)
+	}
+	if !attached {
+		t.Fatal("a pending row whose preparation succeeded must be attached")
+	}
+	assertExpectations(t, mock)
+}
+
+func TestAttachCompletedDependencyReportsARowItDidNotTouch(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectExec(regexp.QuoteMeta(attachCompletedDependencySQL)).
+		WithArgs(testNow, "transfer-1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	attached, err := attachCompletedDependency(db, "transfer-1", testNow)
+	if err != nil {
+		t.Fatalf("attachCompletedDependency() error = %v", err)
+	}
+	if attached {
+		t.Fatal("nothing matched, so nothing was attached")
+	}
+	assertExpectations(t, mock)
+}
+
+func TestAttachCompletedDependencyRefusesAnEmptyTaskID(t *testing.T) {
+	db, mock := newMockGORM(t)
+	if _, err := attachCompletedDependency(db, "  ", testNow); err == nil || err.Error() != "invalid dependency attachment" {
+		t.Fatalf("error = %v, want the refusal that precedes the statement", err)
+	}
+	assertExpectations(t, mock)
+}
+
+// The sweep uses the same join without the single-row predicate: its whole job
+// is the rows the live attachment was not called for. It reports how many it
+// released so the reconcile log line says whether anything was waiting.
+func TestReconcileCompletedDependenciesReleasesEveryWaitingRow(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectExec(regexp.QuoteMeta(reconcileCompletedDependenciesSQL)).
+		WithArgs(testNow).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+
+	released, err := reconcileCompletedDependencies(db, testNow)
+	if err != nil {
+		t.Fatalf("reconcileCompletedDependencies() error = %v", err)
+	}
+	if released != 3 {
+		t.Fatalf("released = %d, want 3", released)
+	}
+	assertExpectations(t, mock)
+}
+
+// The sweep's statement must not carry the attach's `d.id` predicate: a sweep
+// that only repaired one row would leave every other waiting download pending
+// forever while the single-row tests stayed green.
+func TestReconcileStatementCoversRowsTheAttachPredicateWouldExclude(t *testing.T) {
+	if strings.Contains(reconcileCompletedDependenciesSQL, "d.id = ?") {
+		t.Fatal("the sweep statement still matches a single row")
+	}
+	if !strings.Contains(reconcileCompletedDependenciesSQL, "d.status = 'pending'") ||
+		!strings.Contains(reconcileCompletedDependenciesSQL, "p.status = 'success'") {
+		t.Fatal("the sweep must keep the pending/success pair")
+	}
 }

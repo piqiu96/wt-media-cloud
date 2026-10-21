@@ -121,6 +121,10 @@ type Store interface {
 	FailTask(repository.FailureInput, time.Time) (bool, error)
 	CancelTask(string, identityservice.TeamID, identityservice.UserID, time.Time) (bool, error)
 	FailDependents(string, string, string, time.Time) (int64, error)
+	// AttachCompletedDependency gives a dependent inserted after its preparation
+	// already succeeded the facts the live hand-over could not have given it (see
+	// the repository).
+	AttachCompletedDependency(string, time.Time) (bool, error)
 }
 
 // NodeAuthenticator is the one question this module asks the runtime-binding
@@ -327,6 +331,33 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		return dto.Task{}, err
 	}
 	return taskBody(task), nil
+}
+
+// AttachCompletedDependency gives one just-inserted download the facts of a
+// preparation that had already finished when it was inserted.
+//
+// The insert and the preparation's completion are two statements with no shared
+// transaction, and the live hand-over updates only the rows that exist when it
+// runs. A click landing in that gap gets a pointer to a task that is already
+// `success` — nothing will hand it facts, and the lease guard refuses to claim
+// it, so it would wait forever. The caller attempts this repair immediately
+// after inserting; the scheduled sweep covers a crash between the two. The
+// refreshed body is returned when the attachment landed, so the caller answers
+// exactly as the live path would have.
+func (s *Service) AttachCompletedDependency(taskID string) (dto.Task, bool, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return dto.Task{}, false, ErrInvalidInput
+	}
+	attached, err := s.store.AttachCompletedDependency(taskID, s.now().UTC())
+	if err != nil || !attached {
+		return dto.Task{}, false, err
+	}
+	task, err := s.store.GetTask(taskID)
+	if err != nil {
+		return dto.Task{}, false, missingOr(err)
+	}
+	return taskBody(task), true, nil
 }
 
 // CreateUserDownloadInput carries the material facts a download needs and no

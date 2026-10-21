@@ -130,6 +130,15 @@ func isMissingStorageObject(err error) bool {
 	return response.Code == "NoSuchKey" || response.Code == "NoSuchObject"
 }
 
+// Put uploads the object with a Content-MD5 checksum the store itself verifies.
+//
+// SendContentMd5 makes the client hash the exact bytes it reads and send the
+// digest with the request (per part, for a multipart upload); the server
+// recomputes it over what it received and rejects a mismatch with BadDigest.
+// That is the integrity proof a caller gets without a readback: a truncated or
+// corrupted transfer fails here, and the successful return means the stored
+// bytes are the hashed bytes. The checksum costs one pass over the reader the
+// upload already makes and no extra network traffic.
 func (s *minioStore) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
 	object, err := s.object(key)
 	if err != nil {
@@ -138,7 +147,8 @@ func (s *minioStore) Put(ctx context.Context, key string, body io.Reader, size i
 	if size < 0 {
 		return fmt.Errorf("put %s: size must be known and non-negative, got %d", key, size)
 	}
-	if _, err := s.client.PutObject(ctx, s.bucket, object, body, size, minio.PutObjectOptions{ContentType: contentType}); err != nil {
+	options := minio.PutObjectOptions{ContentType: contentType, SendContentMd5: true}
+	if _, err := s.client.PutObject(ctx, s.bucket, object, body, size, options); err != nil {
 		return fmt.Errorf("put %s: %w", key, err)
 	}
 	return nil

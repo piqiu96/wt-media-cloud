@@ -101,7 +101,7 @@ func TestLiveGuideDownloadComposeAndStorageReadback(t *testing.T) {
 	if output.DurationMS < 3700 || output.DurationMS > 4300 {
 		t.Fatalf("duration=%d", output.DurationMS)
 	}
-	size, digest, err := uploadVerified(ctx, store, &http.Client{Timeout: 2 * time.Minute}, output.Path, outputKey)
+	size, digest, err := uploadVerified(ctx, store, output.Path, outputKey)
 	if err != nil || size == 0 || len(digest) != 64 {
 		t.Fatalf("upload size=%d digest length=%d err=%v", size, len(digest), err)
 	}

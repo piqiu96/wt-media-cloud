@@ -333,6 +333,10 @@ type fakeSources struct {
 	body   io.ReadCloser
 	source sourcefile.Source
 	err    error
+	// open, when set, answers each Open from scratch. A retried fetch opens the
+	// source again, and a fake that handed the same reader out twice would make
+	// the retry fail for a reason the test did not choose.
+	open func() (io.ReadCloser, sourcefile.Source, error)
 
 	addresses []string
 	offsets   []int64
@@ -345,14 +349,21 @@ func (f *fakeSources) Open(ctx context.Context, address string, offset int64) (i
 	if f.err != nil {
 		return nil, sourcefile.Source{}, f.err
 	}
+	if f.open != nil {
+		return f.open()
+	}
 	return f.body, f.source, nil
 }
 
 type fakeDetails struct {
 	events *eventLog
 
-	address    string
-	err        error
+	address string
+	err     error
+	// answers, when non-empty, is consumed one entry per call before err is
+	// consulted, so a test can fail the first resolution and let the retry
+	// succeed. A nil entry is a successful answer.
+	answers    []error
 	platforms  []string
 	contentIDs []int64
 }
@@ -361,6 +372,14 @@ func (f *fakeDetails) Address(ctx context.Context, platform string, contentID in
 	f.events.add("address")
 	f.platforms = append(f.platforms, platform)
 	f.contentIDs = append(f.contentIDs, contentID)
+	if len(f.answers) > 0 {
+		answer := f.answers[0]
+		f.answers = f.answers[1:]
+		if answer != nil {
+			return "", answer
+		}
+		return f.address, nil
+	}
 	if f.err != nil {
 		return "", f.err
 	}
@@ -797,16 +816,18 @@ func TestPrepareFailureMatrix(t *testing.T) {
 		{
 			name: "the source answered with no bytes",
 			spoil: func(h *harness) {
-				h.sources.body = io.NopCloser(bytes.NewReader(nil))
-				h.sources.source = sourcefile.Source{TotalBytes: 0}
+				h.sources.open = func() (io.ReadCloser, sourcefile.Source, error) {
+					return io.NopCloser(bytes.NewReader(nil)), sourcefile.Source{TotalBytes: 0}, nil
+				}
 			},
 			code: codeFetchFailed, fragment: "no bytes",
 		},
 		{
 			name: "the body was shorter than the server declared",
 			spoil: func(h *harness) {
-				h.sources.body = io.NopCloser(strings.NewReader(shortBody))
-				h.sources.source = sourcefile.Source{TotalBytes: int64(len(h.body))}
+				h.sources.open = func() (io.ReadCloser, sourcefile.Source, error) {
+					return io.NopCloser(strings.NewReader(shortBody)), sourcefile.Source{TotalBytes: int64(len(h.body))}, nil
+				}
 			},
 			code: codeFetchFailed, fragment: "declared",
 		},
@@ -820,15 +841,18 @@ func TestPrepareFailureMatrix(t *testing.T) {
 		{
 			name: "the body did not start where it was asked to",
 			spoil: func(h *harness) {
-				h.sources.source = sourcefile.Source{RangeStart: 1024, TotalBytes: int64(len(h.body))}
+				h.sources.open = func() (io.ReadCloser, sourcefile.Source, error) {
+					return io.NopCloser(bytes.NewReader(h.body)), sourcefile.Source{RangeStart: 1024, TotalBytes: int64(len(h.body))}, nil
+				}
 			},
 			code: codeFetchFailed, fragment: "offset 1024",
 		},
 		{
 			name: "the body broke midway",
 			spoil: func(h *harness) {
-				h.sources.body = io.NopCloser(&breakingReader{body: h.body, failAfter: 1})
-				h.sources.source = sourcefile.Source{TotalBytes: int64(len(h.body))}
+				h.sources.open = func() (io.ReadCloser, sourcefile.Source, error) {
+					return io.NopCloser(&breakingReader{body: h.body, failAfter: 1}), sourcefile.Source{TotalBytes: int64(len(h.body))}, nil
+				}
 			},
 			code: codeFetchFailed, fragment: "connection reset by peer",
 		},
@@ -893,14 +917,6 @@ func TestPrepareFailureMatrix(t *testing.T) {
 			code: codeFetchFailed, fragment: "temporary download directory",
 		},
 		{
-			name: "the context was cancelled while the body was arriving",
-			spoil: func(h *harness) {
-				h.sources.body = io.NopCloser(&cancellingReader{body: h.body, cancel: h.cancel})
-				h.sources.source = sourcefile.Source{TotalBytes: int64(len(h.body))}
-			},
-			code: codeFetchFailed, fragment: "context canceled",
-		},
-		{
 			name: "the lease could not be renewed",
 			spoil: func(h *harness) {
 				h.preparer.Now = steppingClock(10 * time.Second)
@@ -948,6 +964,87 @@ func TestPrepareFailureMatrix(t *testing.T) {
 			h.assertNoAddressInOutput(t)
 		})
 	}
+}
+
+// A worker that is shutting down has not learned anything about the source.
+// Writing a terminal failure would turn our own stop into a material failure, so
+// nothing is written and the lapsed lease makes the task claimable again. The
+// fetch is not retried either: the context is not something a second attempt can
+// improve.
+func TestPrepareLeavesTheTaskOpenWhenTheContextEndsMidDownload(t *testing.T) {
+	h := harnessFor(t)
+	h.sources.open = func() (io.ReadCloser, sourcefile.Source, error) {
+		return io.NopCloser(&cancellingReader{body: h.body, cancel: h.cancel}), sourcefile.Source{TotalBytes: int64(len(h.body))}, nil
+	}
+	h.run(t)
+
+	if h.events.indexOf("fail_task") >= 0 {
+		t.Fatalf("a worker shutdown must not fail the task; events: %v", h.events.all())
+	}
+	if len(h.materials.failed) != 0 || len(h.materials.readyFacts) != 0 {
+		t.Fatalf("no material state may be written: failed=%v ready=%d", h.materials.failed, len(h.materials.readyFacts))
+	}
+	if !h.log.has("interrupted") {
+		t.Fatalf("outcomes = %v, want an interrupted record", h.log.outcomes())
+	}
+	if len(h.sources.offsets) != 1 {
+		t.Fatalf("a cancelled fetch was retried: %d opens", len(h.sources.offsets))
+	}
+	h.assertNoFormalObject(t)
+}
+
+// A transient resolution or transfer failure is retried once inside the same
+// task: the address is short-lived, so re-resolving it is exactly what a second
+// attempt is for. One retry is the bound — each attempt downloads a whole video.
+func TestPrepareRetriesTransientFetchFailuresOnce(t *testing.T) {
+	transient := errors.New("the detail endpoint timed out")
+
+	t.Run("a failed address resolution is retried", func(t *testing.T) {
+		h := harnessFor(t)
+		h.details.answers = []error{transient, nil}
+		h.run(t)
+
+		if len(h.details.platforms) != 2 {
+			t.Fatalf("address calls = %d, want the first failure and one retry", len(h.details.platforms))
+		}
+		if len(h.materials.readyFacts) != 1 || !h.log.has("success") {
+			t.Fatalf("the retry did not produce a prepared material: %v", h.log.outcomes())
+		}
+	})
+
+	t.Run("a broken download is retried", func(t *testing.T) {
+		h := harnessFor(t)
+		attempts := 0
+		h.sources.open = func() (io.ReadCloser, sourcefile.Source, error) {
+			attempts++
+			if attempts == 1 {
+				return io.NopCloser(&breakingReader{body: h.body, failAfter: 1}), sourcefile.Source{TotalBytes: int64(len(h.body))}, nil
+			}
+			return io.NopCloser(bytes.NewReader(h.body)), sourcefile.Source{RangeStart: 0, TotalBytes: int64(len(h.body)), ContentType: "video/mp4"}, nil
+		}
+		h.run(t)
+
+		if attempts != 2 {
+			t.Fatalf("opens = %d, want the broken attempt and one retry", attempts)
+		}
+		if len(h.details.platforms) != 2 {
+			t.Fatalf("address calls = %d, want the retry to re-resolve the address", len(h.details.platforms))
+		}
+		if len(h.materials.readyFacts) != 1 || !h.log.has("success") {
+			t.Fatalf("the retry did not produce a prepared material: %v", h.log.outcomes())
+		}
+	})
+
+	t.Run("a payload with no address is not retried", func(t *testing.T) {
+		h := harnessFor(t)
+		h.details.err = fmt.Errorf("resolving the address: %w", douyin.ErrNoMediaAddress)
+		h.run(t)
+
+		if len(h.details.platforms) != 1 || len(h.sources.offsets) != 0 {
+			t.Fatalf("address calls = %d opens = %d, want one resolution and no download", len(h.details.platforms), len(h.sources.offsets))
+		}
+		h.assertFailure(t, codeAddressMissing)
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -69,11 +69,17 @@ type ProgressInput struct {
 }
 
 type CompletionInput struct {
-	TaskID   string
-	NodeID   string
-	Bytes    int64
-	SHA256   string
-	FileName string
+	TaskID string
+	NodeID string
+	Bytes  int64
+	SHA256 string
+	// SourceObjectKey is the object the verified bytes live at, when the
+	// completing task produced one — a Cloud preparation does, a download does
+	// not. It is written with the completion so that a later `Attach...` can
+	// hand the facts to a dependent that was inserted too late for the live
+	// hand-over. Empty leaves the column untouched.
+	SourceObjectKey string
+	FileName        string
 }
 
 type FailureInput struct {
@@ -357,6 +363,60 @@ func handOverDependencies(db *gorm.DB, prepareTaskID string, facts DependencyFac
 		return 0, fmt.Errorf("invalid dependency hand-over")
 	}
 	result := db.Exec(`UPDATE file_transfer_tasks SET source_object_key = ?, total_bytes = ?, expected_sha256 = ?, dependency_task_id = NULL, updated_at = ? WHERE dependency_task_id = ? AND status = 'pending'`, facts.SourceObjectKey, facts.TotalBytes, strings.ToLower(strings.TrimSpace(facts.ExpectedSHA256)), now, prepareTaskID)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+// AttachCompletedDependency hands a finished preparation's facts to one
+// dependent that missed the live hand-over.
+//
+// The hole this closes is a narrow race, not a broken hand-over: a download row
+// inserted after `HandOverDependencies` ran has a pointer to a preparation that
+// is already `success`, so nothing will ever hand it facts (the hand-over only
+// updates rows that exist when it runs) and nothing will ever claim it (the
+// lease guard refuses a row whose dependency is set). The row would sit
+// `pending` forever. The download's own request calls this immediately after
+// inserting; `ReconcileCompletedDependencies` sweeps whatever a crash left.
+//
+// The facts are copied, not invented: the object key, the verified byte count
+// and the verified hash all come from the dependency row's completion columns,
+// and the predicate requires all three to be present before the pointer is
+// cleared. A dependent whose status is no longer `pending` is left alone — it
+// was cancelled or failed on its own path, and attaching facts would resurrect
+// it.
+func AttachCompletedDependency(dependentTaskID string, now time.Time) (bool, error) {
+	return attachCompletedDependency(database.DB(), dependentTaskID, now)
+}
+
+const attachCompletedDependencySQL = `UPDATE file_transfer_tasks d JOIN file_transfer_tasks p ON p.id = d.dependency_task_id SET d.source_object_key = p.source_object_key, d.total_bytes = p.integrity_bytes, d.expected_sha256 = p.integrity_sha256, d.dependency_task_id = NULL, d.updated_at = ? WHERE d.id = ? AND d.status = 'pending' AND p.status = 'success' AND COALESCE(p.source_object_key, '') <> '' AND p.integrity_bytes > 0 AND p.integrity_sha256 IS NOT NULL`
+
+func attachCompletedDependency(db *gorm.DB, dependentTaskID string, now time.Time) (bool, error) {
+	dependentTaskID = strings.TrimSpace(dependentTaskID)
+	if dependentTaskID == "" {
+		return false, fmt.Errorf("invalid dependency attachment")
+	}
+	result := db.Exec(attachCompletedDependencySQL, now, dependentTaskID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// ReconcileCompletedDependencies is the sweep for every dependent still
+// pointing at a preparation that already succeeded — the rows a crashed request
+// inserted just after the live hand-over, or whose immediate attachment failed.
+// It is the same join as `attachCompletedDependency` without the single-row
+// predicate, and returns how many rows it released.
+func ReconcileCompletedDependencies(now time.Time) (int64, error) {
+	return reconcileCompletedDependencies(database.DB(), now)
+}
+
+const reconcileCompletedDependenciesSQL = `UPDATE file_transfer_tasks d JOIN file_transfer_tasks p ON p.id = d.dependency_task_id SET d.source_object_key = p.source_object_key, d.total_bytes = p.integrity_bytes, d.expected_sha256 = p.integrity_sha256, d.dependency_task_id = NULL, d.updated_at = ? WHERE d.status = 'pending' AND p.status = 'success' AND COALESCE(p.source_object_key, '') <> '' AND p.integrity_bytes > 0 AND p.integrity_sha256 IS NOT NULL`
+
+func reconcileCompletedDependencies(db *gorm.DB, now time.Time) (int64, error) {
+	result := db.Exec(reconcileCompletedDependenciesSQL, now)
 	if result.Error != nil {
 		return 0, result.Error
 	}
@@ -750,7 +810,7 @@ func completeTask(db *gorm.DB, input CompletionInput, now time.Time) (bool, erro
 	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.NodeID) == "" || input.Bytes < 0 || len(strings.TrimSpace(input.SHA256)) != 64 {
 		return false, fmt.Errorf("invalid transfer completion")
 	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)`, input.Bytes, input.Bytes, input.SHA256, input.Bytes, nullIfEmpty(input.FileName), now, now, now, input.TaskID, input.NodeID, input.Bytes, input.SHA256)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, source_object_key = COALESCE(NULLIF(?, ''), source_object_key), file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)`, input.Bytes, input.Bytes, input.SHA256, input.Bytes, strings.TrimSpace(input.SourceObjectKey), nullIfEmpty(input.FileName), now, now, now, input.TaskID, input.NodeID, input.Bytes, input.SHA256)
 	if result.Error != nil {
 		return false, result.Error
 	}

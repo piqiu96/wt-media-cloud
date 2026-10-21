@@ -65,7 +65,7 @@ type ComposeWorkerSettings struct {
 type ComposeWorkerDeps struct {
 	Tasks     composeWorkerTasks
 	Workspace *compose.Workspace
-	Attempt   func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir) productionservice.ComposeAttemptOutcome
+	Attempt   func(ctx context.Context, task model.ComposeTask, runDir *compose.RunDir, gate *productionservice.ComposeInputGate) productionservice.ComposeAttemptOutcome
 	// CleanStaging retries precise per-attempt object deletion after a known
 	// terminal outcome. It is optional for isolated loop tests.
 	CleanStaging func(context.Context) error
@@ -236,6 +236,10 @@ func runComposeTask(ctx context.Context, deps ComposeWorkerDeps, settings Compos
 	attemptCtx, stopAttempt := context.WithTimeout(ctx, settings.TaskTimeout)
 	defer stopAttempt()
 
+	// One gate per claim, reused by every waiting poll of this claim: the
+	// self-heal budget is "once per claim", and a manual retry is a new claim.
+	gate := &productionservice.ComposeInputGate{}
+
 	var guards sync.WaitGroup
 	cancelSeen := &composeFlag{}
 	guards.Add(2)
@@ -253,7 +257,7 @@ func runComposeTask(ctx context.Context, deps ComposeWorkerDeps, settings Compos
 			settleTerminatedWait(deps, settings, task, cancelSeen)
 			break
 		}
-		switch outcome := deps.Attempt(attemptCtx, task, runDir); outcome {
+		switch outcome := deps.Attempt(attemptCtx, task, runDir, gate); outcome {
 		case productionservice.ComposeAttemptSuccess, productionservice.ComposeAttemptFailed, productionservice.ComposeAttemptLeaseLost:
 			confirmIfCancelSeen(deps, settings, task, cancelSeen)
 		case productionservice.ComposeAttemptCancelled:

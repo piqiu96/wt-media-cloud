@@ -41,6 +41,10 @@ func LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int
 	return newWiredService().LatestUserDownloadStatuses(userID, materialIDs)
 }
 
+func AttachCompletedDependency(taskID string) (dto.Task, bool, error) {
+	return newWiredService().AttachCompletedDependency(taskID)
+}
+
 func CancelTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
 	return newWiredService().CancelTask(actor, taskID)
 }

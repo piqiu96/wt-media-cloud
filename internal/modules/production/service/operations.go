@@ -26,8 +26,8 @@ func VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID 
 	return newWiredService().VideoURL(ctx, actor, materialID)
 }
 
-func CreateDownload(actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
-	return newWiredService().CreateDownload(actor, materialID)
+func CreateDownload(ctx context.Context, actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
+	return newWiredService().CreateDownload(ctx, actor, materialID)
 }
 
 func ListMaterials(actor identityservice.PublicUser, search string) ([]model.Material, error) {

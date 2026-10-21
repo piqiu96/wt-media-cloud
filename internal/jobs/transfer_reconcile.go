@@ -30,8 +30,16 @@ func RunTransferReconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reconcile exhausted transfers: %w", err)
 	}
-	if cancelled+exhausted > 0 {
-		logger.Job().Infof("transfer reconcile finished %d cancelled, %d exhausted", cancelled, exhausted)
+	// A dependent inserted after its preparation already finished is not failed
+	// by anything above; it is waiting on a hand-over that has already run. This
+	// sweep attaches the finished facts the same way the live hand-over would
+	// have, and releases the row.
+	attached, err := transferrepo.ReconcileCompletedDependencies(time.Now())
+	if err != nil {
+		return fmt.Errorf("reconcile completed dependencies: %w", err)
+	}
+	if cancelled+exhausted+attached > 0 {
+		logger.Job().Infof("transfer reconcile finished %d cancelled, %d exhausted, %d dependencies attached", cancelled, exhausted, attached)
 	}
 	return nil
 }

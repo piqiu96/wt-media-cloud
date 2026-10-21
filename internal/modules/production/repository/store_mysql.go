@@ -301,13 +301,15 @@ func restoreUsageByID(db *gorm.DB, usageID int64, userID identity.UserID, now ti
 }
 
 // MarkVideoPreparing moves the material's readiness projection to `downloading`,
-// and only out of the two states a preparation may legitimately start from.
+// and only out of the states a preparation may legitimately start from.
 //
 // The guard is the whole point rather than a nicety: `ready` is the projection's
 // promise that the object key, the size and the hash were written together, and a
 // click that read the row before a preparation finished must not be able to take
-// that promise back. The caller is told which of the two happened through the
-// returned flag instead of being left to assume it won.
+// that promise back. The one `ready` row this statement does take back is one
+// carrying no object key at all: it promises a video no key names, and the same
+// statement is what moves it towards a usable one. The caller is told which of the
+// two happened through the returned flag instead of being left to assume it won.
 //
 // The previous failure's message is cleared with the status, because it belongs to
 // an attempt that is no longer the current one and the new attempt's outcome is not
@@ -316,13 +318,51 @@ func MarkVideoPreparing(teamID identity.TeamID, materialID int64, now time.Time)
 	return markVideoPreparing(database.DB(), teamID, materialID, now)
 }
 
-const markVideoPreparingSQL = `UPDATE materials SET video_status = 'downloading', video_error = '', updated_at = ? WHERE id = ? AND team_id = ? AND video_status IN ('not_downloaded', 'failed')`
+const markVideoPreparingSQL = `UPDATE materials SET video_status = 'downloading', video_error = '', updated_at = ? WHERE id = ? AND team_id = ? AND (video_status IN ('not_downloaded', 'failed') OR (video_status = 'ready' AND COALESCE(source_object_key, '') = ''))`
 
 func markVideoPreparing(db *gorm.DB, teamID identity.TeamID, materialID int64, now time.Time) (bool, error) {
 	if teamID <= 0 || materialID <= 0 {
 		return false, fmt.Errorf("invalid material preparation marker")
 	}
 	result := db.Exec(markVideoPreparingSQL, now, materialID, teamID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// MarkVideoRepreparing moves a `ready` material back to `downloading` when the
+// object it names has been observed missing.
+//
+// This is a different act from `MarkVideoPreparing`, and the predicate says why in
+// two clauses. `ready` is normally taken back by nothing, because the row's promise
+// is that its key is fetchable; this statement exists for the case where that
+// promise has been observed false. The caller therefore has to name the exact key
+// it found missing, and the row has to still carry that key with the same
+// `video_prepared_at` the caller read. Both together keep a slower reader from
+// taking back a newer preparation's result: if a concurrent attempt finished in
+// between, either the key differs (different bytes, different key) or the prepared
+// timestamp differs, and zero rows come back.
+//
+// `video_prepared_at <=> ?` is MySQL's null-safe equality, so a legacy row with a
+// NULL timestamp matches a caller that read NULL.
+//
+// An empty expected key is refused in Go rather than matched as a special case: a
+// keyless `ready` row is `MarkVideoPreparing`'s business, and letting this
+// statement also cover it would make two entry points with different guards mean
+// the same thing.
+func MarkVideoRepreparing(teamID identity.TeamID, materialID int64, expectedObjectKey string, expectedPreparedAt *time.Time, now time.Time) (bool, error) {
+	return markVideoRepreparing(database.DB(), teamID, materialID, expectedObjectKey, expectedPreparedAt, now)
+}
+
+const markVideoRepreparingSQL = `UPDATE materials SET video_status = 'downloading', video_error = '', updated_at = ? WHERE id = ? AND team_id = ? AND video_status = 'ready' AND COALESCE(source_object_key, '') = ? AND video_prepared_at <=> ?`
+
+func markVideoRepreparing(db *gorm.DB, teamID identity.TeamID, materialID int64, expectedObjectKey string, expectedPreparedAt *time.Time, now time.Time) (bool, error) {
+	expectedObjectKey = strings.TrimSpace(expectedObjectKey)
+	if teamID <= 0 || materialID <= 0 || expectedObjectKey == "" {
+		return false, fmt.Errorf("invalid material repreparation marker")
+	}
+	result := db.Exec(markVideoRepreparingSQL, now, materialID, teamID, expectedObjectKey, expectedPreparedAt)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -418,16 +458,19 @@ func markVideoNotPrepared(db *gorm.DB, teamID identity.TeamID, materialID int64,
 
 // MarkVideoFailed records that a preparation did not produce a verified source.
 //
-// The update refuses a material that is already `ready`, and that predicate is the
-// reason this function exists rather than being folded into the caller: a retry
-// that fails after a slower earlier attempt succeeded would otherwise take a
-// material that has a fetchable video back to `failed`, and the row would say the
-// video is unavailable while the object it names sits in the bucket.
+// The update refuses a material that is `ready` with an object key, and that
+// predicate is the reason this function exists rather than being folded into the
+// caller: a retry that fails after a slower earlier attempt succeeded would
+// otherwise take a material that has a fetchable video back to `failed`, and the
+// row would say the video is unavailable while the object it names sits in the
+// bucket. The one `ready` row it does take back is the keyless one, which promises
+// nothing fetchable; writing `failed` with the reason is strictly more information
+// than leaving it keyless and `ready`.
 func MarkVideoFailed(teamID identity.TeamID, materialID int64, message string, now time.Time) (bool, error) {
 	return markVideoFailed(database.DB(), teamID, materialID, message, now)
 }
 
-const markVideoFailedSQL = `UPDATE materials SET video_status = 'failed', video_error = ?, updated_at = ? WHERE id = ? AND team_id = ? AND video_status <> 'ready'`
+const markVideoFailedSQL = `UPDATE materials SET video_status = 'failed', video_error = ?, updated_at = ? WHERE id = ? AND team_id = ? AND (video_status <> 'ready' OR COALESCE(source_object_key, '') = '')`
 
 func markVideoFailed(db *gorm.DB, teamID identity.TeamID, materialID int64, message string, now time.Time) (bool, error) {
 	if teamID <= 0 || materialID <= 0 {

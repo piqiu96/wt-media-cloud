@@ -54,7 +54,9 @@ type memoryStore struct {
 	completeOK        bool
 	failOK            bool
 	cancelOK          bool
+	attachOK          bool
 	failDependentsErr error
+	lastAttach        string
 
 	listFilter   repository.TaskFilter
 	lastStatusID identityservice.UserID
@@ -292,6 +294,14 @@ func (s *memoryStore) FailDependents(prepareTaskID, errorCode, errorMessage stri
 		return 0, s.failDependentsErr
 	}
 	return 0, nil
+}
+
+// AttachCompletedDependency records the row it was asked about; a test that wants
+// the attached body marks the task itself, so the service's re-read is visible.
+func (s *memoryStore) AttachCompletedDependency(taskID string, _ time.Time) (bool, error) {
+	s.counts["attachDependency"]++
+	s.lastAttach = taskID
+	return s.attachOK, nil
 }
 
 type stubNodes struct {
@@ -1496,5 +1506,62 @@ func TestEnsureMaterialSourcePrepareRefusesAnIncompleteIdentity(t *testing.T) {
 		if store.counts["createPrepare"] != 0 {
 			t.Fatalf("%s: a refused preparation still reached the store", testCase.name)
 		}
+	}
+}
+
+// The attachment repairs a row the live hand-over could not reach — a download
+// inserted after its preparation completed. The answer must be the repaired row:
+// the client that just asked for the download would otherwise keep a pending body
+// that still points at nothing.
+func TestAttachCompletedDependencyReturnsTheRepairedRow(t *testing.T) {
+	sha := "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
+	store := newMemoryStore(model.Task{ID: "transfer-1", Status: model.StatusPending, TotalBytes: 2048, IntegritySHA256: sha})
+	store.attachOK = true
+	svc := testService(store, nil)
+
+	task, attached, err := svc.AttachCompletedDependency("transfer-1")
+	if err != nil {
+		t.Fatalf("AttachCompletedDependency() error = %v", err)
+	}
+	if !attached || store.lastAttach != "transfer-1" {
+		t.Fatalf("attached=%v lastAttach=%q", attached, store.lastAttach)
+	}
+	if task.TotalBytes != 2048 || task.ChecksumSHA256 == nil || *task.ChecksumSHA256 != sha {
+		t.Fatalf("task = %+v, want the facts the attachment wrote", task)
+	}
+	if store.count("get") != 1 {
+		t.Fatalf("GetTask calls = %d, want the repaired row read back once", store.count("get"))
+	}
+}
+
+// Nothing matched means the preparation is still running (or its facts are
+// incomplete). That is not an error and not an attached task: the caller keeps
+// the pending body it already has and the scheduled sweep retries later.
+func TestAttachCompletedDependencyReportsAnUnfinishedPreparation(t *testing.T) {
+	store := newMemoryStore(model.Task{ID: "transfer-1", Status: model.StatusPending})
+	svc := testService(store, nil)
+
+	task, attached, err := svc.AttachCompletedDependency("transfer-1")
+	if err != nil {
+		t.Fatalf("AttachCompletedDependency() error = %v", err)
+	}
+	if attached || task.ID != "" {
+		t.Fatalf("attached=%v task=%+v, want nothing attached", attached, task)
+	}
+	if store.count("get") != 0 {
+		t.Fatal("an unattached row must not be read back")
+	}
+}
+
+func TestAttachCompletedDependencyRefusesAnEmptyTaskID(t *testing.T) {
+	store := newMemoryStore()
+	svc := testService(store, nil)
+
+	_, _, err := svc.AttachCompletedDependency("   ")
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+	if store.count("attachDependency") != 0 {
+		t.Fatal("an empty task id must not reach the store")
 	}
 }

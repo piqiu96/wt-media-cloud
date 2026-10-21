@@ -110,7 +110,7 @@ func GetMaterialVideoURL(ctx context.Context, c *hertzapp.RequestContext) {
 // own Local Agent, and answers 202 because nothing has been downloaded yet: the
 // task is pending until a node claims it, and the client's next honest source of
 // progress is `GET /api/v1/file-transfer-tasks`.
-func CreateMaterialDownload(_ context.Context, c *hertzapp.RequestContext) {
+func CreateMaterialDownload(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
 		return
@@ -119,7 +119,7 @@ func CreateMaterialDownload(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	task, err := productionservice.CreateDownload(actor, id)
+	task, err := productionservice.CreateDownload(ctx, actor, id)
 	if err != nil {
 		writeProductionError(c, err)
 		return

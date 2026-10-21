@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
@@ -76,11 +77,45 @@ type composeTaskLifecycle interface {
 }
 
 // EnsureInputPrepared asks the transfer domain to start a cloud-side input
-// preparation for a material whose source is not ready yet. It is injectable
-// because the file_transfer_task boundary (spec §4.4) lives in another module,
-// and it sees the task because the preparation is requested in the task
-// creator's name — the transfer row's actor comes from it.
-type EnsureInputPrepared func(ctx context.Context, requestor model.ComposeTask, materialID int64) error
+// preparation for a material whose source is not ready, and reports whether the
+// material's projection was moved to `downloading` by that request.
+//
+// It is injectable because the file_transfer_task boundary (spec §4.4) lives in
+// another module, and it sees the task and the material because the preparation
+// is requested in the task creator's name — the transfer row's actor comes from
+// the task — and because which write is safe depends on what the caller saw: a
+// `ready` row with a key is taken back only by the key-and-timestamp compare,
+// every other state by the ordinary preparation marker.
+type EnsureInputPrepared func(ctx context.Context, requestor model.ComposeTask, material model.Material) (observed bool, err error)
+
+// ComposeInputGate is one claim's memory of its single self-heal attempt.
+//
+// A claim is the unit of retry budget, so it is also the unit of self-heal: the
+// first time an attempt finds the source missing it may ask for one preparation,
+// and everything after that waits for or judges that one request. The gate
+// survives the `waiting_input` loop (the worker polls the attempt again and
+// again under the same claim) and is dropped when the claim ends — a manual
+// retry is a new claim and gets a fresh gate, which is exactly the "retry once"
+// a user means by clicking retry.
+//
+// The three fields are written on the attempt's goroutine only; the worker does
+// not share them between slots.
+type ComposeInputGate struct {
+	// PrepareRequested says this claim has asked for a preparation. At most one
+	// request per claim: a request that does not produce a source ends the task
+	// instead of being repeated until the timeout.
+	PrepareRequested bool
+	// PrepareObserved says this claim has seen evidence that the requested
+	// preparation actually ran: the request's mark moved the projection, the
+	// material was seen `downloading`, or a `ready` row appeared carrying a
+	// different object key. A source that is still missing after the request was
+	// observed is a failed self-heal, not a slow one.
+	PrepareObserved bool
+	// RequestedKey is the object key that was observed missing when the request
+	// was made. A later `ready` row naming a different key is a result of this
+	// request even though the content-addressed key is usually the same.
+	RequestedKey string
+}
 
 // ComposeExecutorDeps carries the collaborators of one attempt. Everything is
 // an interface or a function so the unit tests substitute memory fakes.
@@ -134,7 +169,14 @@ func fileMetrics(path string) model.ComposeAttemptStepMetrics {
 // upload to a temporary key, verify, copy to the formal key, and commit the
 // output and the success flip in one transaction. Source facts come only from
 // the task row — the latest strategy config is never read here (ADR-0021).
-func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, runDir *compose.RunDir) ComposeAttemptOutcome {
+//
+// gate is the claim's self-heal memory and is reused across the waiting loop;
+// nil is a fresh zero gate, which is what a single-shot caller (and every test
+// that does not exercise the wait) means by calling once.
+func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, runDir *compose.RunDir, gate *ComposeInputGate) ComposeAttemptOutcome {
+	if gate == nil {
+		gate = &ComposeInputGate{}
+	}
 	validateStep := beginStep(model.ComposeStepValidateInput)
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageValidatingInput, 10) {
 		return ComposeAttemptLeaseLost
@@ -143,7 +185,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if err != nil {
 		return failTerminal(deps.Tasks, task, nodeID, validateStep, composeErrTemplateUnavailable, err.Error())
 	}
-	inputPath, outcome := prepareInput(ctx, deps, task, nodeID, beginStep(model.ComposeStepPrepareInput), runDir)
+	inputPath, outcome := prepareInput(ctx, deps, task, nodeID, beginStep(model.ComposeStepPrepareInput), runDir, gate)
 	if outcome != "" {
 		return outcome
 	}
@@ -209,7 +251,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	// any deletion that fails or is skipped by a crashed worker.
 	defer removeComposeObject(ctx, deps.Store, tempKey)
 	uploadStep := beginStep(model.ComposeStepUpload)
-	size, digest, err := uploadVerified(ctx, deps.Store, deps.Client, output.Path, tempKey)
+	size, digest, err := uploadVerified(ctx, deps.Store, output.Path, tempKey)
 	if err != nil {
 		if errors.Is(err, errComposeOutputInvalid) {
 			return failTerminal(deps.Tasks, task, nodeID, uploadStep, composeErrExecutionFailed, err.Error())
@@ -278,7 +320,27 @@ func validateSnapshotTemplate(registry *executor.Registry, task model.ComposeTas
 // prepareInput gates on readiness (PRD §5.4.4: an unready source keeps the
 // task waiting, it never fabricates an input), and stages the prepared source
 // into the run directory. A non-empty outcome short-circuits the attempt.
-func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, runDir *compose.RunDir) (string, ComposeAttemptOutcome) {
+//
+// `ready` is a projection, and this is the function that stops trusting it: the
+// object is stat'ed before a byte is promised, and a row whose object is gone is
+// repaired through one preparation rather than failed on the spot. The branch
+// table it implements, with `gate` carrying what this claim has already done:
+//
+//	ready, key, object present      -> download and run
+//	ready, key, object missing      -> first time: request + mark repreparing;
+//	                                   after an observed request: input_missing
+//	ready, no key                   -> request an ordinary preparation, or
+//	                                   input_missing if there is no page to re-resolve
+//	downloading                     -> keep the (single, deduped) preparation, wait
+//	failed                          -> request one retry; an observed retry that
+//	                                   failed again is input_invalid
+//	not_downloaded                  -> request, then wait; observed-and-still-empty
+//	                                   is input_invalid
+//
+// A material with no `source_url` never gets a preparation task: the worker
+// would have nothing to resolve and the task could only fail. It fails directly,
+// with the code that names what is missing.
+func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, runDir *compose.RunDir, gate *ComposeInputGate) (string, ComposeAttemptOutcome) {
 	material, found, err := deps.Materials.FindMaterial(task.MaterialID)
 	if err != nil {
 		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "read material: "+err.Error())
@@ -286,40 +348,134 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 	if !found {
 		return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "material row is gone")
 	}
-	if material.VideoStatus == model.VideoFailed {
-		return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputInvalid, "source preparation failed for material "+strconv.FormatInt(task.MaterialID, 10))
+	if gate.PrepareRequested {
+		if material.VideoStatus == model.VideoDownloading {
+			// The projection says a preparation is in flight, which is the
+			// evidence a waiting request was looking for.
+			gate.PrepareObserved = true
+		}
+		if material.VideoStatus == model.VideoReady && material.SourceObjectKey != "" && material.SourceObjectKey != gate.RequestedKey {
+			// A different content-addressed key means these are different bytes,
+			// so a newer preparation has produced them.
+			gate.PrepareObserved = true
+		}
 	}
-	if material.VideoStatus != model.VideoReady || material.SourceObjectKey == "" {
+
+	switch material.VideoStatus {
+	case model.VideoReady:
+		if material.SourceObjectKey == "" {
+			return waitOrFailForKeyless(ctx, deps, task, nodeID, step, material, gate)
+		}
+		if _, statErr := deps.Store.Stat(ctx, material.SourceObjectKey); statErr != nil {
+			if !errors.Is(statErr, storage.ErrObjectNotFound) {
+				return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "source object: "+statErr.Error())
+			}
+			if gate.PrepareRequested {
+				if gate.PrepareObserved {
+					return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "source object is still gone after re-preparing: "+statErr.Error())
+				}
+				return waitForInput(deps, task, nodeID)
+			}
+			if strings.TrimSpace(material.SourceURL) == "" {
+				return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "source object is gone and the material has no page address to prepare it from: "+statErr.Error())
+			}
+			return requestInputPreparation(ctx, deps, task, nodeID, step, material, gate, material.SourceObjectKey)
+		}
+		grant, err := deps.Store.PresignGet(ctx, material.SourceObjectKey, deps.GrantTTL)
+		if err != nil {
+			return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "presign source: "+err.Error())
+		}
+		inputPath := filepath.Join(runDir.Path(), "source-input")
+		if err := downloadFile(ctx, deps.Client, grant.URL, inputPath); err != nil {
+			return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "download source: "+err.Error())
+		}
+		recordStepSuccess(deps.Tasks, task, nodeID, step, fileMetrics(inputPath))
+		return inputPath, ""
+
+	case model.VideoDownloading:
+		// Someone's preparation is running. Asking again is a no-op by dedupe and
+		// covers a projection that says `downloading` with the task row gone.
+		gate.PrepareObserved = true
 		if deps.EnsureInputPrepared != nil {
-			if err := deps.EnsureInputPrepared(ctx, task, task.MaterialID); err != nil {
+			observed, err := deps.EnsureInputPrepared(ctx, task, material)
+			if err != nil {
 				return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "request input preparation: "+err.Error())
 			}
+			if observed {
+				gate.PrepareObserved = true
+			}
 		}
-		_, _ = deps.Tasks.ReportComposeProgress(task.ID, nodeID, task.AttemptCount, composeStageWaitingInput, 20)
-		return "", ComposeAttemptWaitInput
-	}
-	if _, err := deps.Store.Stat(ctx, material.SourceObjectKey); err != nil {
-		if errors.Is(err, storage.ErrObjectNotFound) {
-			return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "source object is gone: "+err.Error())
+		return waitForInput(deps, task, nodeID)
+
+	case model.VideoFailed, model.VideoNotDownloaded:
+		code := composeErrInputInvalid
+		if gate.PrepareRequested {
+			if gate.PrepareObserved {
+				return "", failTerminal(deps.Tasks, task, nodeID, step, code, "source preparation did not produce a video for material "+strconv.FormatInt(task.MaterialID, 10))
+			}
+			return waitForInput(deps, task, nodeID)
 		}
-		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "source object: "+err.Error())
+		if strings.TrimSpace(material.SourceURL) == "" {
+			return "", failTerminal(deps.Tasks, task, nodeID, step, code, "source is not prepared and the material has no page address to prepare it from")
+		}
+		return requestInputPreparation(ctx, deps, task, nodeID, step, material, gate, "")
+
+	default:
+		return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputInvalid, "source status "+string(material.VideoStatus)+" cannot be prepared")
 	}
-	grant, err := deps.Store.PresignGet(ctx, material.SourceObjectKey, deps.GrantTTL)
-	if err != nil {
-		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "presign source: "+err.Error())
-	}
-	inputPath := filepath.Join(runDir.Path(), "source-input")
-	if err := downloadFile(ctx, deps.Client, grant.URL, inputPath); err != nil {
-		return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "download source: "+err.Error())
-	}
-	recordStepSuccess(deps.Tasks, task, nodeID, step, fileMetrics(inputPath))
-	return inputPath, ""
 }
 
-// uploadVerified writes the output to the temporary key, then proves the
-// stored bytes equal the local file (size and sha256 through a presigned
-// readback) before the caller commits anything formal.
-func uploadVerified(ctx context.Context, store storage.Store, client *http.Client, path, tempKey string) (int64, string, error) {
+// waitOrFailForKeyless handles the `ready` row that names no object. It
+// promises a video nobody can fetch, so it is treated as unprepared: the same
+// preparation marker (broadened to take back exactly this shape) moves it
+// along, and an observed request that still left it keyless is input_invalid —
+// the row is malformed rather than merely stale.
+func waitOrFailForKeyless(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, material model.Material, gate *ComposeInputGate) (string, ComposeAttemptOutcome) {
+	if gate.PrepareRequested {
+		if gate.PrepareObserved {
+			return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputInvalid, "material is ready without an object key after re-preparing")
+		}
+		return waitForInput(deps, task, nodeID)
+	}
+	if strings.TrimSpace(material.SourceURL) == "" {
+		return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputMissing, "material is ready without an object key and has no page address to prepare it from")
+	}
+	return requestInputPreparation(ctx, deps, task, nodeID, step, material, gate, "")
+}
+
+// requestInputPreparation asks for the one preparation this claim may request
+// and records it on the gate. `observed` is the transfer-side mark's own answer:
+// true means the projection moved because of this request, which is stronger
+// evidence than any later poll.
+func requestInputPreparation(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, step attemptStep, material model.Material, gate *ComposeInputGate, requestedKey string) (string, ComposeAttemptOutcome) {
+	if deps.EnsureInputPrepared != nil {
+		observed, err := deps.EnsureInputPrepared(ctx, task, material)
+		if err != nil {
+			return "", transientFailureInContext(ctx, deps, task, nodeID, step, composeErrStorageError, "request input preparation: "+err.Error())
+		}
+		gate.PrepareObserved = observed
+	}
+	gate.PrepareRequested = true
+	gate.RequestedKey = requestedKey
+	return waitForInput(deps, task, nodeID)
+}
+
+func waitForInput(deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64) (string, ComposeAttemptOutcome) {
+	_, _ = deps.Tasks.ReportComposeProgress(task.ID, nodeID, task.AttemptCount, composeStageWaitingInput, 20)
+	return "", ComposeAttemptWaitInput
+}
+
+// uploadVerified writes the output to the temporary key and proves the store
+// accepted those exact bytes before the caller commits anything formal.
+//
+// The proof is the upload's Content-MD5 (`storage.Put` sends it and the store
+// verifies it): a successful upload already means "the stored bytes hash to the
+// digest computed over the bytes read", with no second transfer. The `Stat` is
+// the independent second reading — a store that accepted the checksum but
+// recorded a different length is a storage fault, and a formal copy must not be
+// built on top of it. There is deliberately no readback: it would move the
+// whole output again to learn what the checksum proved at upload time.
+func uploadVerified(ctx context.Context, store storage.Store, path, tempKey string) (int64, string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, "", fmt.Errorf("open compose output: %w", err)
@@ -349,17 +505,6 @@ func uploadVerified(ctx context.Context, store storage.Store, client *http.Clien
 	}
 	if remote.Size != info.Size() {
 		return 0, "", fmt.Errorf("%w: temporary object size mismatch: local %d, remote %d", errComposeOutputInvalid, info.Size(), remote.Size)
-	}
-	grant, err := store.PresignGet(ctx, tempKey, 10*time.Minute)
-	if err != nil {
-		return 0, "", fmt.Errorf("presign temporary object: %w", err)
-	}
-	readHash := sha256.New()
-	if err := downloadInto(ctx, client, grant.URL, readHash); err != nil {
-		return 0, "", fmt.Errorf("readback temporary object: %w", err)
-	}
-	if hex.EncodeToString(readHash.Sum(nil)) != digest {
-		return 0, "", fmt.Errorf("%w: readback sha256 mismatch", errComposeOutputInvalid)
 	}
 	return info.Size(), digest, nil
 }

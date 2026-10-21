@@ -193,17 +193,51 @@ func (p *Preparer) Prepare(ctx context.Context) (bool, error) {
 // has already been dealt with.
 func (p *Preparer) run(ctx context.Context, task transfermodel.Task) {
 	// failBeforeReady is the outcome of a preparation that produced no verified
-	// source. All three places that could believe otherwise are told: the material
-	// the user sees, the downloads waiting on this task, and the task itself.
+	// source. Three places are told, in this order: the task row, the material the
+	// user sees, and the downloads waiting on this task. The order is the rule —
+	// a material is not declared failed, and waiters are not released, for a
+	// failure the task row did not record; the reconciler is the safety net when
+	// the row says terminal but a waiter is still attached.
+	//
+	// The context check comes first and writes nothing: a worker being shut down
+	// (or an attempt the caller cancelled) has not learned anything about the
+	// source, and its lease is the right owner of that question. The heartbeat
+	// before the write is the last proof that this worker still holds the row;
+	// "cannot reach the database" is not proof that it does not, so only an
+	// explicit refusal diverts to the lost-lease path, and the FailTask guard
+	// below still refuses a row another worker owns.
 	failBeforeReady := func(code, message string) {
+		message = failureText(message)
+		if ctx.Err() != nil {
+			p.record(task, "interrupted", message)
+			return
+		}
+		held, heartbeatErr := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, p.now(), p.lease())
+		if heartbeatErr == nil && !held {
+			p.settleLostLease(task, errLeaseLost)
+			return
+		}
+		if heartbeatErr != nil {
+			p.record(task, "lease check failed", heartbeatErr.Error())
+		}
+		written, err := p.failTask(task, code, message)
+		if err != nil {
+			p.record(task, "task failure write failed", err.Error())
+			return
+		}
+		if !written {
+			p.record(task, "failure not recorded", "the task is no longer running under this worker")
+			return
+		}
 		if err := p.Materials.MarkVideoFailed(task.TeamID, task.AssetID, message); err != nil {
-			// The task and its waiters are still settled below. A projection that
-			// could not be written leaves the material reading as "being prepared",
-			// which the downloads list still shows as a stalled task — the failure is
-			// recorded, not silent.
+			// A projection that could not be written leaves the material reading as
+			// "being prepared"; the terminal task row is still the record, and the
+			// next click's preparation marker is refused only while that status
+			// lasts. The failure is recorded, not silent.
 			p.record(task, "material write failed", err.Error())
 		}
-		p.failTaskAndWaiters(task, code, message)
+		p.releaseWaiters(task, code, message)
+		p.record(task, "failed", code)
 	}
 
 	source, err := p.Materials.ResolvePreparationSource(task.TeamID, task.AssetID)
@@ -211,26 +245,19 @@ func (p *Preparer) run(ctx context.Context, task transfermodel.Task) {
 		failBeforeReady(codeSourceUnresolved, err.Error())
 		return
 	}
-	address, err := p.Details.Address(ctx, source.Platform, source.ContentID)
+	download, fetchCode, err := p.fetchPreparation(ctx, task, source)
 	if err != nil {
-		// A payload that carries no address is a different answer from an endpoint
-		// that could not be reached, and the two lead to different actions: one is a
-		// material the provider has nothing to serve for, the other is worth retrying.
-		code := codeDetailFailed
-		if errors.Is(err, douyin.ErrNoMediaAddress) || errors.Is(err, douyin.ErrNoDetailItem) {
-			code = codeAddressMissing
-		}
-		failBeforeReady(code, err.Error())
-		return
-	}
-
-	download, err := p.download(ctx, task, address)
-	if err != nil {
-		if errors.Is(err, errLeaseLost) {
+		switch {
+		case errors.Is(err, errLeaseLost):
 			p.settleLostLease(task, err)
-			return
+		case ctx.Err() != nil:
+			// The context ended while fetching. Writing a terminal row here would
+			// turn our own shutdown into a material failure; the lapsed lease makes
+			// the task claimable again.
+			p.record(task, "interrupted", err.Error())
+		default:
+			failBeforeReady(fetchCode, err.Error())
 		}
-		failBeforeReady(codeFetchFailed, err.Error())
 		return
 	}
 	// The bytes never outlive the attempt, on any path from here: a partial file left
@@ -269,6 +296,63 @@ func (p *Preparer) run(ctx context.Context, task transfermodel.Task) {
 	p.finish(task, download, facts)
 }
 
+// fetchPreparation resolves the source address and downloads it, retrying the
+// pair exactly once when the failure is one a fresh address could fix: a
+// platform endpoint that answered with an error, or a transfer that broke off.
+// A payload that genuinely carries no address, a lease this worker no longer
+// holds, and a context that has ended are not retried — the first cannot be
+// improved by asking again, and the other two belong to somebody else.
+//
+// One retry is the bound because each attempt re-resolves a provider payload and
+// downloads a whole video; an unbounded loop would spend the task's attempts and
+// the operator's bandwidth on a source that is simply gone. The heartbeat before
+// the retry is what keeps this worker from retrying a task another worker has
+// already taken over.
+func (p *Preparer) fetchPreparation(ctx context.Context, task transfermodel.Task, source productionservice.PreparationSource) (download, string, error) {
+	fetched, code, err := p.fetchOnce(ctx, task, source)
+	if err == nil || !retryablePrepareFailure(code) || errors.Is(err, errLeaseLost) || ctx.Err() != nil {
+		return fetched, code, err
+	}
+	held, heartbeatErr := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, p.now(), p.lease())
+	if heartbeatErr != nil {
+		// A retry that cannot prove the lease is ours would race a possible new
+		// owner. End with the first failure's reason; failBeforeReady reports the
+		// heartbeat trouble on its own.
+		p.record(task, "retry skipped", heartbeatErr.Error())
+		return fetched, code, err
+	}
+	if !held {
+		return fetched, code, errLeaseLost
+	}
+	return p.fetchOnce(ctx, task, source)
+}
+
+// fetchOnce is one resolution of the platform address and one download. The
+// returned code names the failing step and is meaningful only with a non-nil
+// error.
+func (p *Preparer) fetchOnce(ctx context.Context, task transfermodel.Task, source productionservice.PreparationSource) (download, string, error) {
+	address, err := p.Details.Address(ctx, source.Platform, source.ContentID)
+	if err != nil {
+		// A payload that carries no address is a different answer from an endpoint
+		// that could not be reached, and the two lead to different actions: one is a
+		// material the provider has nothing to serve for, the other is worth retrying.
+		code := codeDetailFailed
+		if errors.Is(err, douyin.ErrNoMediaAddress) || errors.Is(err, douyin.ErrNoDetailItem) {
+			code = codeAddressMissing
+		}
+		return download{}, code, err
+	}
+	fetched, err := p.download(ctx, task, address)
+	if err != nil {
+		return download{}, codeFetchFailed, err
+	}
+	return fetched, "", nil
+}
+
+func retryablePrepareFailure(code string) bool {
+	return code == codeDetailFailed || code == codeFetchFailed
+}
+
 // finish releases the downloads waiting on a prepared material and closes the task.
 //
 // It runs only once the material says it is ready, which is why it takes no part in
@@ -293,6 +377,9 @@ func (p *Preparer) finish(task transfermodel.Task, download download, facts prod
 		NodeID: p.WorkerID,
 		Bytes:  download.size,
 		SHA256: download.digest,
+		// Written with the completion so a download inserted after the hand-over
+		// can be repaired from this row (see AttachCompletedDependency).
+		SourceObjectKey: facts.ObjectKey,
 	}, p.now())
 	if err != nil {
 		// Deliberately no terminal write. Everything the user can see is already
@@ -518,38 +605,50 @@ func (p *Preparer) confirm(ctx context.Context, key string, size int64) error {
 	return nil
 }
 
-// failTaskAndWaiters records a task's terminal failure and releases the downloads
-// waiting on it.
-//
-// The two writes are separate statements, and the waiters are released even when
-// the task's own write does not land. Without that, a waiter would sit `pending`
-// pointing at a task that is terminal: nothing would ever hand it facts, and
-// `leaseable` refuses a local task whose dependency is set, so nothing would pick
-// it up either. The reconciliation sweep closes that hole eventually, but eventual
-// is a property of a job this build has not registered yet.
-func (p *Preparer) failTaskAndWaiters(task transfermodel.Task, code, message string) {
-	message = failureText(message)
-	if _, err := p.Transfers.FailDependents(task.ID, code, message, p.now()); err != nil {
-		p.record(task, "dependent release failed", err.Error())
-	}
-	written, err := p.Transfers.FailTask(transferrepo.FailureInput{
+// failTask records the terminal failure, and only under the row's own guards:
+// the worker, the attempt and the absence of a cancel request must still match.
+func (p *Preparer) failTask(task transfermodel.Task, code, message string) (bool, error) {
+	return p.Transfers.FailTask(transferrepo.FailureInput{
 		TaskID:       task.ID,
 		NodeID:       p.WorkerID,
 		Status:       transfermodel.StatusFailed,
 		ErrorCode:    code,
 		ErrorMessage: message,
 	}, p.now())
+}
+
+// releaseWaiters ends the downloads waiting on a task that will not produce
+// facts. Without it they would sit `pending` pointing at a terminal task:
+// nothing would ever hand them facts, and `leaseable` refuses a row whose
+// dependency is set, so nothing would pick them up either. The reconciliation
+// sweep is the safety net for a release that fails.
+func (p *Preparer) releaseWaiters(task transfermodel.Task, code, message string) {
+	if _, err := p.Transfers.FailDependents(task.ID, code, message, p.now()); err != nil {
+		p.record(task, "dependent release failed", err.Error())
+	}
+}
+
+// failTaskAndWaiters records a terminal failure on the task and then releases
+// the waiters. It writes nothing to the material: the callers are the paths
+// where the projection is either not involved (a hand-over failure after the
+// material is already ready) or written separately under its own guard.
+func (p *Preparer) failTaskAndWaiters(task transfermodel.Task, code, message string) bool {
+	message = failureText(message)
+	written, err := p.failTask(task, code, message)
 	if err != nil {
 		p.record(task, "task failure write failed", err.Error())
-		return
+		return false
 	}
 	if !written {
 		// Another worker owns the row now, or it is already terminal. Its own run
-		// decides what it becomes, and this one must not overwrite that.
+		// decides what it becomes, and this one must not overwrite that — nor tell
+		// the waiters anything the row does not say.
 		p.record(task, "failure not recorded", "the task is no longer running under this worker")
-		return
+		return false
 	}
+	p.releaseWaiters(task, code, message)
 	p.record(task, "failed", code)
+	return true
 }
 
 // settleLostLease decides what a task becomes when this worker is no longer the
@@ -570,14 +669,7 @@ func (p *Preparer) settleLostLease(task transfermodel.Task, cause error) {
 	if current.CancelRequestedAt != nil {
 		status, code = transfermodel.StatusCancelled, codeCancelled
 	}
-	// The waiters are released either way. When this worker was replaced mid-download
-	// nothing was ever handed over, so they would otherwise be left pointing at a
-	// task that is now terminal. When it got as far as the hand-over, the pointer is
-	// already NULL and this matches no rows.
 	message := failureText(cause.Error())
-	if _, err := p.Transfers.FailDependents(task.ID, code, message, p.now()); err != nil {
-		p.record(task, "dependent release failed", err.Error())
-	}
 	written, err := p.Transfers.FailTask(transferrepo.FailureInput{
 		TaskID:       task.ID,
 		NodeID:       p.WorkerID,
@@ -594,13 +686,20 @@ func (p *Preparer) settleLostLease(task transfermodel.Task, cause error) {
 		p.record(task, "lease lost", err.Error())
 		return
 	}
-	if status == transfermodel.StatusCancelled {
-		p.takeBackMaterial(task)
-	}
 	if !written {
 		p.record(task, "lease lost", "the task is no longer running under this worker")
 		return
 	}
+	// The material write follows the task write: taking the projection back from a
+	// row that is no longer ours would fight the worker that now owns it. The
+	// waiters are released after both — when this worker was replaced mid-download
+	// nothing was ever handed over, so they would otherwise be left pointing at a
+	// terminal task; when it got as far as the hand-over, the pointer is already
+	// NULL and the release matches no rows.
+	if status == transfermodel.StatusCancelled {
+		p.takeBackMaterial(task)
+	}
+	p.releaseWaiters(task, code, message)
 	p.record(task, string(status), code)
 }
 

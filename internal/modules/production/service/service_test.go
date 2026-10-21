@@ -61,6 +61,17 @@ type memoryStore struct {
 	preparedFor   int64
 	preparedCount int
 
+	// The take-back write is recorded with the exact key and timestamp it was
+	// scoped to: that pair is the compare, and a service that passed the wrong
+	// one would still move a row and every flag-based assertion would pass.
+	repreparing     bool
+	repreparingErr  error
+	repreparedTeam  sharedidentity.TeamID
+	repreparedFor   int64
+	repreparedKey   string
+	repreparedAt    *time.Time
+	repreparedCount int
+
 	// The worker's two writes, recorded in full rather than as a flag: what the
 	// service does with each is the part under test — one turns a refused write into
 	// a missing material, the other lets it pass — and the facts have to be shown to
@@ -134,6 +145,15 @@ type stubTransfers struct {
 	downloadStatuses map[int64]string
 	// lastStatusQuery records the material_ids handed to LatestUserDownloadStatuses.
 	lastStatusQuery []int64
+
+	// attachOK/attachTask stand in for the post-insert hand-over: false is the
+	// ordinary "the preparation has not finished yet" answer, and the task body
+	// is what the caller must return when the attach did happen.
+	attachTask  transferdto.Task
+	attachOK    bool
+	attachErr   error
+	attachIDs   []string
+	attachCount int
 }
 
 func (s *stubTransfers) EnsureMaterialSourcePrepare(input transferservice.EnsureMaterialSourcePrepareInput) (transferdto.Task, error) {
@@ -165,6 +185,18 @@ func (s *stubTransfers) LatestUserDownloadStatuses(userID service.UserID, materi
 	return s.downloadStatuses, nil
 }
 
+func (s *stubTransfers) AttachCompletedDependency(taskID string) (transferdto.Task, bool, error) {
+	s.attachCount++
+	s.attachIDs = append(s.attachIDs, taskID)
+	if s.attachErr != nil {
+		return transferdto.Task{}, false, s.attachErr
+	}
+	if !s.attachOK {
+		return transferdto.Task{}, false, nil
+	}
+	return s.attachTask, true, nil
+}
+
 func testService(store Store) *Service {
 	return NewService(store, &stubNodes{}, &stubTransfers{}, &stubLinks{})
 }
@@ -182,6 +214,15 @@ type stubLinks struct {
 	err error
 	key string
 	ctx context.Context
+
+	// missing names the keys the bucket is told not to hold; every other key is
+	// present. Absence is opt-in for the same reason refusals are elsewhere: a
+	// double that answered "missing" by default would make every older ready-row
+	// test exercise the repair branch without saying so.
+	missing    map[string]bool
+	existsErr  error
+	existsKeys []string
+	existsCtx  context.Context
 }
 
 func (s *stubLinks) PresignObjectURL(ctx context.Context, key string) (string, error) {
@@ -190,6 +231,15 @@ func (s *stubLinks) PresignObjectURL(ctx context.Context, key string) (string, e
 		return "", s.err
 	}
 	return s.url, nil
+}
+
+func (s *stubLinks) ObjectExists(ctx context.Context, key string) (bool, error) {
+	s.existsKeys = append(s.existsKeys, key)
+	s.existsCtx = ctx
+	if s.existsErr != nil {
+		return false, s.existsErr
+	}
+	return !s.missing[key], nil
 }
 
 func (s *memoryStore) FindMaterial(int64) (model.Material, bool, error) {
@@ -203,6 +253,12 @@ func (s *memoryStore) MarkVideoPreparing(teamID sharedidentity.TeamID, materialI
 	s.preparedCount++
 	s.preparedTeam, s.preparedFor = teamID, materialID
 	return s.preparing, s.preparingErr
+}
+func (s *memoryStore) MarkVideoRepreparing(teamID sharedidentity.TeamID, materialID int64, expectedObjectKey string, expectedPreparedAt *time.Time, _ time.Time) (bool, error) {
+	s.repreparedCount++
+	s.repreparedTeam, s.repreparedFor = teamID, materialID
+	s.repreparedKey, s.repreparedAt = expectedObjectKey, expectedPreparedAt
+	return s.repreparing, s.repreparingErr
 }
 func (s *memoryStore) MarkVideoReady(teamID sharedidentity.TeamID, materialID int64, facts repository.VideoFacts, now time.Time) (bool, error) {
 	s.readyTeam, s.readyFor, s.readyFacts, s.readyAt = teamID, materialID, facts, now
@@ -542,6 +598,46 @@ func TestVideoURLPropagatesTheLinkerRefusal(t *testing.T) {
 	}
 }
 
+// `ready` says the row was written with all its facts, not that the bucket still
+// holds the object. An address signed for a gone object opens a 404 in the
+// drawer, so the same 409 the download route gives is the answer here.
+func TestVideoURLRefusesAReadyMaterialWhoseObjectIsGone(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	size := int64(4096)
+	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	links := &stubLinks{url: "http://unused", missing: map[string]bool{ready.SourceObjectKey: true}}
+	svc := NewService(&memoryStore{found: true, material: ready}, &stubNodes{}, &stubTransfers{}, links)
+	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); !errors.Is(err, ErrMaterialUnavailable) {
+		t.Fatalf("VideoURL() error = %v, want ErrMaterialUnavailable", err)
+	}
+	if links.key != "" {
+		t.Fatalf("an address was signed for a missing object: %q", links.key)
+	}
+}
+
+// A bucket that cannot answer is a fault, not "missing": the drawer must not be
+// told the video is temporarily unavailable because the storage was unreachable,
+// and no address may be signed on an unknown answer.
+func TestVideoURLReportsABucketCheckFailure(t *testing.T) {
+	team := service.TeamID(7)
+	game := "game-a"
+	size := int64(4096)
+	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	links := &stubLinks{url: "http://unused", existsErr: errors.New("storage unreachable")}
+	svc := NewService(&memoryStore{found: true, material: ready}, &stubNodes{}, &stubTransfers{}, links)
+	_, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	if err == nil || !strings.Contains(err.Error(), "storage unreachable") {
+		t.Fatalf("VideoURL() error = %v, want the bucket failure to propagate", err)
+	}
+	if errors.Is(err, ErrMaterialUnavailable) {
+		t.Fatal("unreachable storage must not be reported as an unavailable video")
+	}
+	if links.key != "" {
+		t.Fatalf("an address was signed on an unknown bucket answer: %q", links.key)
+	}
+}
+
 func TestRemoveUsageChecksTheMaterialScopeBeforeSoftRemoval(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-b"
@@ -735,7 +831,7 @@ func TestCreateDownloadAddressesTheTaskToTheResolvedNode(t *testing.T) {
 	now := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
 
-	task, err := svc.CreateDownload(scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -827,7 +923,7 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 		svc := NewService(store, testCase.nodes, transfers, &stubLinks{})
 		svc.resolveGame = stubResolveGame
 
-		if _, err := svc.CreateDownload(actor, 42); !errors.Is(err, testCase.want) {
+		if _, err := svc.CreateDownload(context.Background(), actor, 42); !errors.Is(err, testCase.want) {
 			t.Fatalf("%s: error = %v, want %v", testCase.name, err, testCase.want)
 		}
 		// The one arm that legitimately reaches the transfer module is the one
@@ -857,7 +953,7 @@ func TestCreateDownloadDoesNotPresentAnIncompleteReadyRowAsUnavailable(t *testin
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 	svc.resolveGame = stubResolveGame
 
-	_, err := svc.CreateDownload(scopedActor(team, game), 42)
+	_, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
 	if err == nil {
 		t.Fatal("a ready material with no hash must not be queued for download")
 	}
@@ -893,7 +989,7 @@ func TestCreateDownloadQueuesAWaitingTaskForAMaterialWithNoPreparedVideo(t *test
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 	svc.resolveGame = stubResolveGame
 
-	task, err := svc.CreateDownload(scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -933,7 +1029,7 @@ func TestCreateDownloadQueuesNoPreparationForAPreparedMaterial(t *testing.T) {
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 	svc.resolveGame = stubResolveGame
 
-	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
 	if transfers.prepareCount != 0 {
@@ -959,7 +1055,7 @@ func TestCreateDownloadFetchesDirectlyWhenTheVideoBecameReadyMidRequest(t *testi
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 	svc.resolveGame = stubResolveGame
 
-	if _, err := svc.CreateDownload(scopedActor(team, game), 42); err != nil {
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
 	if store.findCount != 2 {
@@ -986,7 +1082,7 @@ func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) 
 	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
 	svc.resolveGame = stubResolveGame
 
-	task, err := svc.CreateDownload(scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -995,6 +1091,199 @@ func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) 
 	}
 	if task.ID != "transfer-1" {
 		t.Fatalf("task = %+v", task)
+	}
+}
+
+// A ready row whose object is gone is not downloaded and not refused: the same
+// click reprepares the material and queues the download behind that preparation.
+// The take-back is the key-and-timestamp compare, so the exact pair the row was
+// read with is what the assertion pins — a service that passed a zero timestamp
+// would still move the row in the fake and fail in production.
+func TestCreateDownloadRepreparesAReadyMaterialWhoseObjectIsGone(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	preparedAt := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
+	material := readyMaterial(team, game)
+	material.SourceURL = "https://www.douyin.com/video/42"
+	material.VideoPreparedAt = &preparedAt
+	store := &memoryStore{found: true, material: material, repreparing: true}
+	links := &stubLinks{missing: map[string]bool{material.SourceObjectKey: true}}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, links)
+	svc.resolveGame = stubResolveGame
+
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	if err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if transfers.prepareCount != 1 || transfers.count != 1 {
+		t.Fatalf("prepare calls = %d, download calls = %d", transfers.prepareCount, transfers.count)
+	}
+	if store.repreparedCount != 1 || store.repreparedTeam != team || store.repreparedFor != 42 {
+		t.Fatalf("take-back count=%d team=%d material=%d", store.repreparedCount, store.repreparedTeam, store.repreparedFor)
+	}
+	if store.repreparedKey != material.SourceObjectKey || store.repreparedAt == nil || !store.repreparedAt.Equal(preparedAt) {
+		t.Fatalf("take-back scope = key %q prepared_at %v, want %q / %v", store.repreparedKey, store.repreparedAt, material.SourceObjectKey, preparedAt)
+	}
+	if store.preparedCount != 0 {
+		t.Fatalf("a ready row must be taken back by the compare, not the ordinary marker: %d", store.preparedCount)
+	}
+	if transfers.last.DependencyTaskID != "transfer-prepare-1" {
+		t.Fatalf("dependency = %q, want the preparation", transfers.last.DependencyTaskID)
+	}
+	if transfers.last.SourceObjectKey != "" || transfers.last.TotalBytes != 0 || transfers.last.ExpectedSHA256 != "" {
+		t.Fatalf("a waiting download must carry no facts of its own: %+v", transfers.last)
+	}
+	if task.ID != "transfer-1" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+// The take-back can refuse because a preparation finished between the read and
+// the compare. The fresh row is the only source that can tell that apart from
+// "another preparation is still running", and guessing wrong strands a download
+// behind a preparation nobody needs any more.
+func TestCreateDownloadReReadsAfterTheTakeBackWasRefused(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	gone := readyMaterial(team, game)
+	gone.SourceURL = "https://www.douyin.com/video/42"
+	fresh := readyMaterial(team, game)
+	fresh.SourceObjectKey = "materials/42/bbbbbbbb.mp4"
+
+	for _, tc := range []struct {
+		name      string
+		refreshed model.Material
+		missing   map[string]bool
+		want      error
+		wantFacts bool
+	}{
+		{"ready again with the object present", fresh, nil, nil, true},
+		{"ready again but the object is still gone", fresh, map[string]bool{fresh.SourceObjectKey: true}, ErrMaterialUnavailable, false},
+		{"still being prepared", model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoDownloading, SourceURL: gone.SourceURL}, nil, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			refreshed := tc.refreshed
+			store := &memoryStore{found: true, material: gone, repreparing: false, refind: &refreshed}
+			links := &stubLinks{missing: map[string]bool{gone.SourceObjectKey: true}}
+			for key := range tc.missing {
+				links.missing[key] = true
+			}
+			transfers := &stubTransfers{}
+			svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, links)
+			svc.resolveGame = stubResolveGame
+
+			task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+			if tc.want != nil {
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("error = %v, want %v", err, tc.want)
+				}
+				if transfers.count != 0 {
+					t.Fatalf("a refused click queued %d task(s)", transfers.count)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateDownload() error = %v", err)
+			}
+			if store.findCount != 2 {
+				t.Fatalf("material lookups = %d, want a re-read after the refused take-back", store.findCount)
+			}
+			if !tc.wantFacts {
+				if transfers.last.DependencyTaskID != "transfer-prepare-1" {
+					t.Fatalf("dependency = %q, want the outstanding preparation", transfers.last.DependencyTaskID)
+				}
+				if task.ID != "transfer-1" {
+					t.Fatalf("task = %+v", task)
+				}
+				return
+			}
+			if transfers.last.DependencyTaskID != "" {
+				t.Fatalf("dependency = %q, want none: the fresh row is ready", transfers.last.DependencyTaskID)
+			}
+			if transfers.last.SourceObjectKey != fresh.SourceObjectKey || transfers.last.TotalBytes != 2048 || transfers.last.ExpectedSHA256 != fresh.VideoSHA256 {
+				t.Fatalf("the facts must come from the fresh row: %+v", transfers.last)
+			}
+		})
+	}
+}
+
+// A bucket that cannot answer is not "the object is missing": treating an
+// outage as a missing object would queue a preparation for a material that is
+// fine, and the route would report a download in progress that nobody needs.
+func TestCreateDownloadReportsABucketCheckFailure(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	store := &memoryStore{found: true, material: readyMaterial(team, game)}
+	links := &stubLinks{existsErr: errors.New("storage unreachable")}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, links)
+	svc.resolveGame = stubResolveGame
+
+	_, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	if err == nil || !strings.Contains(err.Error(), "storage unreachable") {
+		t.Fatalf("error = %v, want the bucket failure to propagate", err)
+	}
+	if transfers.prepareCount != 0 || transfers.count != 0 || store.repreparedCount != 0 {
+		t.Fatalf("a bucket failure must queue nothing: prepare=%d download=%d take-back=%d", transfers.prepareCount, transfers.count, store.repreparedCount)
+	}
+}
+
+// Ready, object gone, and no page address: there is nothing to re-resolve, so
+// the only honest answer is the 409 the drawer already reads as "no prepared
+// video right now". A preparation task here could only fail.
+func TestCreateDownloadRefusesAReadyMaterialWhoseObjectIsGoneAndHasNoSource(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	material := readyMaterial(team, game)
+	store := &memoryStore{found: true, material: material}
+	links := &stubLinks{missing: map[string]bool{material.SourceObjectKey: true}}
+	transfers := &stubTransfers{}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, links)
+	svc.resolveGame = stubResolveGame
+
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); !errors.Is(err, ErrMaterialUnavailable) {
+		t.Fatalf("error = %v, want ErrMaterialUnavailable", err)
+	}
+	if transfers.prepareCount != 0 || transfers.count != 0 {
+		t.Fatalf("nothing may be queued: prepare=%d download=%d", transfers.prepareCount, transfers.count)
+	}
+}
+
+// The preparation may finish between `Ensure` and the insert; the live hand-over
+// then had no row to update. The route attaches afterwards, and when that works
+// the client must receive the attached body — the one that now carries the
+// object key — rather than the pending row it would otherwise be stuck with.
+func TestCreateDownloadReturnsTheAttachedTaskBody(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: true}
+	transfers := &stubTransfers{attachOK: true, attachTask: transferdto.Task{ID: "transfer-1", Status: "pending", TotalBytes: 2048}}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
+
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	if err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if transfers.attachCount != 1 || len(transfers.attachIDs) != 1 || transfers.attachIDs[0] != "transfer-1" {
+		t.Fatalf("attach calls = %v, want the created task", transfers.attachIDs)
+	}
+	if task.TotalBytes != 2048 {
+		t.Fatalf("task = %+v, want the attached body", task)
+	}
+}
+
+// A direct download queues nothing, so there is no dependency to attach after
+// it. Without this arm the attach could be called unconditionally and every
+// other test would still pass.
+func TestCreateDownloadDoesNotAttachWithoutADependency(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+	store := &memoryStore{found: true, material: readyMaterial(team, game)}
+	transfers := &stubTransfers{attachOK: true}
+	svc := NewService(store, &stubNodes{node: runtimeservice.AgentNode{ID: "node-7"}}, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
+
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
+		t.Fatalf("CreateDownload() error = %v", err)
+	}
+	if transfers.attachCount != 0 {
+		t.Fatalf("a direct download attached %d dependency(ies)", transfers.attachCount)
 	}
 }
 
