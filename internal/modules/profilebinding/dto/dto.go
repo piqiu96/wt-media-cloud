@@ -20,7 +20,6 @@ type ProfileInput struct {
 type SnapshotInput struct {
 	MainUserID string         `json:"main_user_id"`
 	Profiles   []ProfileInput `json:"profiles"`
-	NodeID     string         `json:"node_id,omitempty"`
 }
 
 type MainIdentityInput struct {

@@ -124,14 +124,13 @@ func TestWriteProductionErrorKeepsTheTwoMissingResourcesApart(t *testing.T) {
 	}
 }
 
-// The two 409s on the download route are a different pair to tell apart: both
-// mean "not now", and a client reading only the frozen contract — which publishes
-// names and statuses and no numeric errcodes — has exactly one field to branch on.
-// So this asserts that field.
+// The download route's conflict means "not now", and a client reading only the
+// frozen contract — which publishes names and statuses and no numeric errcodes —
+// has exactly one field to branch on. So this asserts that field.
 //
-// A status-only assertion would pass with the two names swapped, and an errcode
-// assertion would pass with either name; only the name distinguishes them.
-func TestTheTwoDownloadConflictsCarryTheirFrozenNames(t *testing.T) {
+// A status-only assertion would pass whatever name the handler wrote; only the
+// name itself is the contract.
+func TestTheDownloadConflictCarriesItsFrozenName(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string
 		err     error
@@ -139,7 +138,6 @@ func TestTheTwoDownloadConflictsCarryTheirFrozenNames(t *testing.T) {
 		want    string
 	}{
 		{"no prepared video", productionservice.ErrMaterialUnavailable, 15005, "material_unavailable"},
-		{"no local node", productionservice.ErrLocalNodeUnavailable, 15105, "local_transfer_node_unavailable"},
 	} {
 		engine := server.New()
 		engine.POST("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
@@ -172,10 +170,9 @@ func TestTheTwoDownloadConflictsCarryTheirFrozenNames(t *testing.T) {
 // a copy nothing checks is a copy that drifts. This reads the frozen files and
 // asserts each name is declared there as a 409, so a contract revision that
 // renames one fails here rather than in a client.
-func TestTheDownloadConflictNamesAreTheFrozenOnes(t *testing.T) {
+func TestTheDownloadConflictNameIsTheFrozenOne(t *testing.T) {
 	for file, names := range map[string][]string{
 		"content-production.yaml": {"material_unavailable"},
-		"file-transfer.yaml":      {"local_transfer_node_unavailable"},
 	} {
 		content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-error-codes", "v1", file))
 		if err != nil {
@@ -190,12 +187,11 @@ func TestTheDownloadConflictNamesAreTheFrozenOnes(t *testing.T) {
 }
 
 // The output download route shares `writeComposeOutputError` with the read and
-// archive routes, so its two refusals must survive that sharing: the node
-// conflict keeps the same frozen name the material download answers with, and
-// an out-of-scope output keeps the compose-output not-found shape. Driven
-// directly for the same reason the material mapping is — the route itself needs
-// a live session and MySQL.
-func TestWriteComposeOutputErrorKeepsTheDownloadRefusalsStraight(t *testing.T) {
+// archive routes, so its refusal must survive that sharing: an out-of-scope
+// output keeps the compose-output not-found shape rather than being answered as
+// an internal fault. Driven directly for the same reason the material mapping is
+// — the route itself needs a live session and MySQL.
+func TestWriteComposeOutputErrorKeepsTheDownloadRefusalStraight(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string
 		err     error
@@ -203,7 +199,6 @@ func TestWriteComposeOutputErrorKeepsTheDownloadRefusalsStraight(t *testing.T) {
 		errcode int
 		want    string
 	}{
-		{"no local node", productionservice.ErrLocalNodeUnavailable, consts.StatusConflict, 15105, "local_transfer_node_unavailable"},
 		{"out-of-scope output", productionservice.ErrComposeOutputNotFound, consts.StatusNotFound, 15216, "compose_output_not_found"},
 	} {
 		engine := server.New()

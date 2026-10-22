@@ -12,7 +12,6 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	proxyservice "github.com/wt-media/wt-media-cloud/internal/modules/proxy/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
@@ -381,17 +380,8 @@ func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	var req struct {
 		ScanID string `json:"scan_id"`
-		NodeID string `json:"node_id"`
 	}
 	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	if strings.TrimSpace(req.NodeID) == "" {
-		api.Failure(c, 400, 10001, "本机节点不能为空", nil)
-		return
-	}
-	if err := runtimeservice.CheckLocalTrust(actor.ID, req.NodeID); err != nil {
-		api.Forbidden(c, 11003, "当前本机环境未获可信授权")
 		return
 	}
 	scan, err := profilebindingservice.ConfirmScan(actor, req.ScanID)

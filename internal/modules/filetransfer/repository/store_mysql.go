@@ -12,6 +12,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
@@ -23,7 +24,7 @@ var ErrNotFound = errors.New("file transfer task not found")
 // visible at all, which is the point: with a list per query, a column reaches
 // the callers that remembered it and is silently missing from the ones that did
 // not.
-const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, assigned_device_id, claimed_by_node_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
+const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, claimed_by, attempt_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
 
 type CreateTaskInput struct {
 	ID               string
@@ -37,8 +38,6 @@ type CreateTaskInput struct {
 	Purpose          model.Purpose
 	ExecutionScope   model.ExecutionScope
 	RequestedBy      identity.UserID
-	AssignedNodeID   string
-	AssignedDeviceID string
 	DependencyTaskID string
 	DedupeKey        string
 	TotalBytes       int64
@@ -61,7 +60,8 @@ type TaskFilter struct {
 
 type ProgressInput struct {
 	TaskID           string
-	NodeID           string
+	ClaimedBy        string
+	AttemptID        string
 	TransferredBytes int64
 	TotalBytes       int64
 	SpeedBytesPerSec int64
@@ -69,10 +69,11 @@ type ProgressInput struct {
 }
 
 type CompletionInput struct {
-	TaskID string
-	NodeID string
-	Bytes  int64
-	SHA256 string
+	TaskID    string
+	ClaimedBy string
+	AttemptID string
+	Bytes     int64
+	SHA256    string
 	// SourceObjectKey is the object the verified bytes live at, when the
 	// completing task produced one — a Cloud preparation does, a download does
 	// not. It is written with the completion so that a later `Attach...` can
@@ -84,7 +85,8 @@ type CompletionInput struct {
 
 type FailureInput struct {
 	TaskID       string
-	NodeID       string
+	ClaimedBy    string
+	AttemptID    string
 	Status       model.Status
 	ErrorCode    string
 	ErrorMessage string
@@ -107,13 +109,11 @@ type CreateUserDownloadInput struct {
 	// PublishedAt is when the material was published, copied onto the task like
 	// GameName so the lease can carry it to the executor for naming. A material
 	// without a publish time leaves it nil and the executor omits that segment.
-	PublishedAt      *time.Time
-	SourceObjectKey  string
-	RequestedBy      identity.UserID
-	AssignedNodeID   string
-	AssignedDeviceID string
-	TotalBytes       int64
-	ExpectedSHA256   string
+	PublishedAt     *time.Time
+	SourceObjectKey string
+	RequestedBy     identity.UserID
+	TotalBytes      int64
+	ExpectedSHA256  string
 	// DependencyTaskID names the Cloud preparation task whose object this download
 	// will fetch, when there is one. With it set, the object key, size and hash may
 	// be left empty: the download is a queued request whose facts do not exist yet,
@@ -161,27 +161,18 @@ func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
 // then downloaded again and failed is, right now, a failed download, and
 // re-downloading it is a request that should be honoured.
 //
-// The check and the generation count are scoped to the **device** the click names,
-// the same dimension the dedupe key is keyed on. A device switch is a new
-// destination: a material downloaded on the old computer was never downloaded
-// here, so the new device's click must queue its own task rather than be answered
-// with the old device's success row. A repeat click on the same device keeps the
-// existing behaviour — answered with the success row, or collapsed onto the
-// outstanding task by the key.
-//
-// That is a deliberate divergence from `latestUserDownloadStatuses`, which stays
-// user-level: "已下载" is an asset state (this material is downloaded on some
-// device of this user's) and must not flip as the user moves between machines,
-// while the write-gate has to be destination-aware because a new destination
-// genuinely needs its own file. For a single-device user — the whole installed
-// base at the time the dimension changed — the two scopes select the same rows,
-// so the change is invisible until a second device exists.
+// The check and the generation count are scoped to the **user**, the same
+// dimension the dedupe key is keyed on. A download belongs to a person, not to
+// the machine that happens to execute it: any machine the user logs in on can
+// claim the outstanding task, and a repeat click on another machine is the same
+// click. There is no per-machine destination to distinguish, so
+// `latestUserDownloadStatuses` and this write-gate select the same rows.
 func CreateUserDownloadTask(input CreateUserDownloadInput, now time.Time) (model.Task, error) {
 	return createUserDownloadTask(database.DB(), input, now)
 }
 
 func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time.Time) (model.Task, error) {
-	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 || strings.TrimSpace(input.AssignedDeviceID) == "" {
+	if input.TeamID <= 0 || input.AssetID <= 0 || input.RequestedBy <= 0 {
 		return model.Task{}, fmt.Errorf("invalid user download input")
 	}
 	// The type the caller names, or the one every pre-CHG-085 caller meant. The
@@ -195,16 +186,16 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	}
 	var task model.Task
 	err := db.Transaction(func(tx *gorm.DB) error {
-		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID)
+		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1", assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		if err == nil && latest.Status == model.StatusSuccess {
+		if err == nil && (latest.Status == model.StatusSuccess || latest.Status == model.StatusPending || latest.Status == model.StatusRunning) {
 			task = latest
 			return nil
 		}
 		var finished int64
-		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? AND status IN ('success', 'failed', 'cancelled')`, assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy, input.AssignedDeviceID).Row().Scan(&finished); err != nil {
+		if err := tx.Raw(`SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')`, assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy).Row().Scan(&finished); err != nil {
 			return err
 		}
 		task, err = createTask(tx, CreateTaskInput{
@@ -219,10 +210,8 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			Purpose:          model.PurposeUserDownload,
 			ExecutionScope:   model.ExecutionLocalAgent,
 			RequestedBy:      input.RequestedBy,
-			AssignedNodeID:   input.AssignedNodeID,
-			AssignedDeviceID: input.AssignedDeviceID,
 			DependencyTaskID: input.DependencyTaskID,
-			DedupeKey:        userDownloadDedupeKey(assetType, input.AssetID, input.RequestedBy, input.AssignedDeviceID, finished+1),
+			DedupeKey:        userDownloadDedupeKey(assetType, input.AssetID, input.RequestedBy, finished+1),
 			TotalBytes:       input.TotalBytes,
 			ExpectedSHA256:   input.ExpectedSHA256,
 			MaxAttempts:      input.MaxAttempts,
@@ -235,30 +224,25 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 	return task, nil
 }
 
-// userDownloadDedupeKey binds a download to **the asset type**, the asset, the
-// user, **the device** and the generation.
+// userDownloadDedupeKey binds a download to the asset type, the asset, the user
+// and the generation.
 //
 // The type is in the key because a material and a composite output are
 // different assets even at the same numeric id: without it, output 5 and
-// material 5 for one user on one device would share a key, and the second
-// click would be answered with the first asset's row. The device is in the key because it is the stable destination. The node was
-// in the key before stage 3, but a node is a registration instance: renewal and
-// supersede mint a new node id, and unbind replaces the device's node entirely,
-// so the node dimension was not stable across a device's lifetime. Two devices
-// are two destinations and collapsing them would send a file the user asked for
-// on the laptop only to the desktop; two nodes on the same device are the same
-// destination, so a task re-keyed on the node would have stopped deduping on
-// every re-registration. The generation is a counter rather than a timestamp so
+// material 5 for one user would share a key, and the second click would be
+// answered with the first asset's row. There is no machine dimension: a
+// download belongs to the user and can be claimed by whichever machine that
+// user is logged in on, so keying it to a device would either hide an
+// outstanding task from the other machine or create a second copy of a file the
+// user asked for once. The generation is a counter rather than a timestamp so
 // that the key is a pure function of durable state — a clock or a random value
 // here would make the duplicate-click case depend on timing.
 //
-// It is hashed because `dedupe_key` is `CHAR(64)`: the readable form is longer
-// than that as soon as a device id is a uuid, and MySQL would answer a silent
-// truncation with a collision between two different downloads. The generation is
-// part of the digest, so the key is still exactly as discriminating as the tuple
-// — it is just no longer readable in a row dump.
-func userDownloadDedupeKey(assetType model.AssetType, assetID int64, userID identity.UserID, deviceID string, generation int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("user_download|%s|%d|%d|%s|%d", assetType, assetID, userID, strings.TrimSpace(deviceID), generation)))
+// It is hashed because `dedupe_key` is `CHAR(64)`. The generation is part of the
+// digest, so the key is still exactly as discriminating as the tuple — it is
+// just no longer readable in a row dump.
+func userDownloadDedupeKey(assetType model.AssetType, assetID int64, userID identity.UserID, generation int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("v2|user_download|%s|%d|%d|%d", assetType, assetID, userID, generation)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -278,13 +262,12 @@ type CreateMaterialSourcePrepareInput struct {
 // source video into the object store.
 //
 // It is keyed on the **material**, not on the user who clicked, unlike a user
-// download. A download is a destination — two devices are two files, so the node
-// is part of its key — while a preparation is a property of the material: the
-// object is content-addressed and identical for everyone, so a second user
-// clicking while the first preparation is outstanding must attach to it rather
-// than start a second download of the same video. That is the "no unbounded
-// duplicate tasks for one business command" rule, and it is why this key carries
-// no user id.
+// download. A download is per user — the same click from two accounts is two
+// rows — while a preparation is a property of the material: the object is
+// content-addressed and identical for everyone, so a second user clicking while
+// the first preparation is outstanding must attach to it rather than start a
+// second download of the same video. That is the "no unbounded duplicate tasks
+// for one business command" rule, and it is why this key carries no user id.
 //
 // The generation is the count of *finished* preparations, exactly as on the user
 // download side: a click while one is outstanding counts the same generation and
@@ -490,7 +473,7 @@ func createTask(db *gorm.DB, input CreateTaskInput, now time.Time) (model.Task, 
 	if err := validateCreateInput(input); err != nil {
 		return model.Task{}, err
 	}
-	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, assigned_device_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.AssignedNodeID), nullIfEmpty(input.AssignedDeviceID), nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
 		return model.Task{}, err
 	}
 	return selectTask(db, "dedupe_key = ?", input.DedupeKey)
@@ -636,7 +619,7 @@ func latestUserDownloadStatuses(db *gorm.DB, userID identity.UserID, materialIDs
 // two clauses below exist to prevent.
 //
 // `cancel_requested_at IS NULL`. Without it, cancelling a running task and then
-// losing its executor (the node dies, the lease expires) makes the task claimable
+// losing its executor (the process dies, the lease expires) makes the task claimable
 // again — and every predicate the new owner would use to report progress,
 // heartbeat, or complete also requires `cancel_requested_at IS NULL`. So the new
 // owner could take the lease and then be refused by all three, and the task would
@@ -659,17 +642,18 @@ func latestUserDownloadStatuses(db *gorm.DB, userID identity.UserID, materialIDs
 // the symptom would be a queue head that never moves.
 const leaseable = `cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)`
 
-func ClaimLocalTask(taskID, nodeID string, now time.Time, lease time.Duration) (model.Task, bool, error) {
-	return claimLocalTask(database.DB(), taskID, nodeID, now, lease)
+func ClaimLocalTask(taskID string, userID identity.UserID, claimedBy string, now time.Time, lease time.Duration) (model.Task, bool, error) {
+	return claimLocalTask(database.DB(), taskID, userID, claimedBy, now, lease)
 }
 
-// claimLocalTask leases one task the caller named, to the node it was assigned.
-func claimLocalTask(db *gorm.DB, taskID, nodeID string, now time.Time, lease time.Duration) (model.Task, bool, error) {
-	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(nodeID) == "" || lease <= 0 {
+// claimLocalTask leases one task the caller named, if it belongs to the user the
+// Agent Token identified.
+func claimLocalTask(db *gorm.DB, taskID string, userID identity.UserID, claimedBy string, now time.Time, lease time.Duration) (model.Task, bool, error) {
+	if strings.TrimSpace(taskID) == "" || userID <= 0 || strings.TrimSpace(claimedBy) == "" || lease <= 0 {
 		return model.Task{}, false, fmt.Errorf("invalid local transfer claim")
 	}
 	leaseUntil := now.Add(lease)
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND `+leaseable, nodeID, leaseUntil, now, now, now, taskID, nodeID, now)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by = ?, attempt_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND requested_by = ? AND `+leaseable, claimedBy, id.NewID("attempt"), leaseUntil, now, now, now, taskID, userID, now)
 	if result.Error != nil {
 		return model.Task{}, false, result.Error
 	}
@@ -680,7 +664,7 @@ func claimLocalTask(db *gorm.DB, taskID, nodeID string, now time.Time, lease tim
 	return task, err == nil, err
 }
 
-// NextLocalTask reports the oldest task waiting for one local node, without
+// NextLocalTask reports the oldest task waiting for one user's agent, without
 // leasing it.
 //
 // It exists because a lease carries a download grant. Minting the grant after the
@@ -693,19 +677,19 @@ func claimLocalTask(db *gorm.DB, taskID, nodeID string, now time.Time, lease tim
 //
 // The caller must still lease through `ClaimLocalTask`, which re-asserts this same
 // predicate: this function only says what is *probably* available.
-func NextLocalTask(nodeID string, now time.Time) (model.Task, bool, error) {
-	return nextLocalTask(database.DB(), nodeID, now)
+func NextLocalTask(userID identity.UserID, now time.Time) (model.Task, bool, error) {
+	return nextLocalTask(database.DB(), userID, now)
 }
 
-func nextLocalTask(db *gorm.DB, nodeID string, now time.Time) (model.Task, bool, error) {
-	if strings.TrimSpace(nodeID) == "" {
+func nextLocalTask(db *gorm.DB, userID identity.UserID, now time.Time) (model.Task, bool, error) {
+	if userID <= 0 {
 		return model.Task{}, false, fmt.Errorf("invalid local transfer lookup")
 	}
 	// The order is `created_at, id` rather than `created_at` alone: two tasks
 	// created in the same microsecond would otherwise be picked in an arbitrary
-	// order, and a node polling this could be handed a different one each time.
+	// order, and two polls could be handed different ones each time.
 	var taskID string
-	err := db.Raw(`SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND `+leaseable+` ORDER BY created_at ASC, id ASC LIMIT 1`, nodeID, now).Row().Scan(&taskID)
+	err := db.Raw(`SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND requested_by = ? AND `+leaseable+` ORDER BY created_at ASC, id ASC LIMIT 1`, userID, now).Row().Scan(&taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Task{}, false, nil
 	}
@@ -748,7 +732,7 @@ func claimCloudTask(db *gorm.DB, workerID string, now time.Time, lease time.Dura
 		return model.Task{}, false, err
 	}
 	leaseUntil := now.Add(lease)
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND `+leaseable, workerID, leaseUntil, now, now, now, taskID, now)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'running', claimed_by = ?, attempt_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND `+leaseable, workerID, id.NewID("attempt"), leaseUntil, now, now, now, taskID, now)
 	if result.Error != nil {
 		return model.Task{}, false, result.Error
 	}
@@ -764,10 +748,10 @@ func ReportProgress(input ProgressInput, now time.Time) (bool, error) {
 }
 
 func reportProgress(db *gorm.DB, input ProgressInput, now time.Time) (bool, error) {
-	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.NodeID) == "" || input.TransferredBytes < 0 || input.TotalBytes < 0 || input.SpeedBytesPerSec < 0 || input.ETASeconds < 0 {
+	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.ClaimedBy) == "" || strings.TrimSpace(input.AttemptID) == "" || input.TransferredBytes < 0 || input.TotalBytes < 0 || input.SpeedBytesPerSec < 0 || input.ETASeconds < 0 {
 		return false, fmt.Errorf("invalid transfer progress")
 	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, speed_bytes_per_sec = ?, eta_seconds = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?) AND transferred_bytes <= ?`, input.TransferredBytes, input.TotalBytes, input.SpeedBytesPerSec, input.ETASeconds, now, now, input.TaskID, input.NodeID, now, input.TransferredBytes)
+	result := db.Exec(`UPDATE file_transfer_tasks SET transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, speed_bytes_per_sec = ?, eta_seconds = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?) AND transferred_bytes <= ?`, input.TransferredBytes, input.TotalBytes, input.SpeedBytesPerSec, input.ETASeconds, now, now, input.TaskID, input.ClaimedBy, input.AttemptID, now, input.TransferredBytes)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -776,16 +760,16 @@ func reportProgress(db *gorm.DB, input ProgressInput, now time.Time) (bool, erro
 
 // HeartbeatTask renews only the current executor's unexpired lease. A stale or
 // cancelled executor cannot revive its task through heartbeat traffic.
-func HeartbeatTask(taskID, nodeID string, now time.Time, lease time.Duration) (bool, error) {
-	return heartbeatTask(database.DB(), taskID, nodeID, now, lease)
+func HeartbeatTask(taskID, claimedBy, attemptID string, now time.Time, lease time.Duration) (bool, error) {
+	return heartbeatTask(database.DB(), taskID, claimedBy, attemptID, now, lease)
 }
 
-func heartbeatTask(db *gorm.DB, taskID, nodeID string, now time.Time, lease time.Duration) (bool, error) {
-	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(nodeID) == "" || lease <= 0 {
+func heartbeatTask(db *gorm.DB, taskID, claimedBy, attemptID string, now time.Time, lease time.Duration) (bool, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(claimedBy) == "" || strings.TrimSpace(attemptID) == "" || lease <= 0 {
 		return false, fmt.Errorf("invalid transfer heartbeat")
 	}
 	leaseUntil := now.Add(lease)
-	result := db.Exec(`UPDATE file_transfer_tasks SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?)`, now, leaseUntil, now, taskID, nodeID, now)
+	result := db.Exec(`UPDATE file_transfer_tasks SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?)`, now, leaseUntil, now, taskID, claimedBy, attemptID, now)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -807,10 +791,10 @@ func CompleteTask(input CompletionInput, now time.Time) (bool, error) {
 // stated where the row can enforce it, so a race that slipped past the service
 // still cannot mark unverified bytes as a success.
 func completeTask(db *gorm.DB, input CompletionInput, now time.Time) (bool, error) {
-	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.NodeID) == "" || input.Bytes < 0 || len(strings.TrimSpace(input.SHA256)) != 64 {
+	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.ClaimedBy) == "" || strings.TrimSpace(input.AttemptID) == "" || input.Bytes < 0 || len(strings.TrimSpace(input.SHA256)) != 64 {
 		return false, fmt.Errorf("invalid transfer completion")
 	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, source_object_key = COALESCE(NULLIF(?, ''), source_object_key), file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)`, input.Bytes, input.Bytes, input.SHA256, input.Bytes, strings.TrimSpace(input.SourceObjectKey), nullIfEmpty(input.FileName), now, now, now, input.TaskID, input.NodeID, input.Bytes, input.SHA256)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, source_object_key = COALESCE(NULLIF(?, ''), source_object_key), file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)`, input.Bytes, input.Bytes, input.SHA256, input.Bytes, strings.TrimSpace(input.SourceObjectKey), nullIfEmpty(input.FileName), now, now, now, input.TaskID, input.ClaimedBy, input.AttemptID, input.Bytes, input.SHA256)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -937,7 +921,7 @@ func reconcileExhaustedTasks(db *gorm.DB, now time.Time) (int64, error) {
 	return result.RowsAffected + released, nil
 }
 
-// FailTask records a failed or cancelled terminal outcome only from the node
+// FailTask records a failed or cancelled terminal outcome only from the executor
 // that currently owns the running task lease.
 func FailTask(input FailureInput, now time.Time) (bool, error) {
 	return failTask(database.DB(), input, now)
@@ -955,10 +939,10 @@ func FailTask(input FailureInput, now time.Time) (bool, error) {
 // all — every writer would be refused and the row would sit in `running` until a
 // reconciliation timeout that the design does not otherwise need.
 func failTask(db *gorm.DB, input FailureInput, now time.Time) (bool, error) {
-	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.NodeID) == "" || (input.Status != model.StatusFailed && input.Status != model.StatusCancelled) || strings.TrimSpace(input.ErrorCode) == "" || len(input.ErrorCode) > 128 || len(input.ErrorMessage) > 500 {
+	if strings.TrimSpace(input.TaskID) == "" || strings.TrimSpace(input.ClaimedBy) == "" || strings.TrimSpace(input.AttemptID) == "" || (input.Status != model.StatusFailed && input.Status != model.StatusCancelled) || strings.TrimSpace(input.ErrorCode) == "" || len(input.ErrorCode) > 128 || len(input.ErrorMessage) > 500 {
 		return false, fmt.Errorf("invalid transfer terminal failure")
 	}
-	result := db.Exec(`UPDATE file_transfer_tasks SET status = ?, error_code = ?, error_message = ?, finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ?`, input.Status, input.ErrorCode, input.ErrorMessage, now, now, now, input.TaskID, input.NodeID)
+	result := db.Exec(`UPDATE file_transfer_tasks SET status = ?, error_code = ?, error_message = ?, finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ?`, input.Status, input.ErrorCode, input.ErrorMessage, now, now, now, input.TaskID, input.ClaimedBy, input.AttemptID)
 	if result.Error != nil {
 		return false, result.Error
 	}
@@ -992,16 +976,6 @@ func validateCreateInput(input CreateTaskInput) error {
 	}
 	if input.TotalBytes < 0 {
 		return fmt.Errorf("invalid transfer total size")
-	}
-	if input.ExecutionScope == model.ExecutionLocalAgent && strings.TrimSpace(input.AssignedNodeID) == "" {
-		return fmt.Errorf("local transfer requires assigned node")
-	}
-	// A user download goes to one device, and the dedupe key and the
-	// latest-success check are both scoped to it (see `createUserDownloadTask`).
-	// A download without a destination device could not be deduped without
-	// colliding every device-less click onto one key.
-	if input.Purpose == model.PurposeUserDownload && strings.TrimSpace(input.AssignedDeviceID) == "" {
-		return fmt.Errorf("user download requires assigned device")
 	}
 	// A Cloud preparation produces the object; a local transfer downloads one that
 	// is already verified. So the local side is the one that must have the object
@@ -1082,10 +1056,10 @@ type rowScanner interface{ Scan(...any) error }
 func scanTask(row rowScanner, task *model.Task) error {
 	var teamID, requestedBy int64
 	var assetType, purpose, scope, status string
-	var assetTitle, gameName, objectKey, fileName, assignedNode, assignedDevice, claimedNode, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
+	var assetTitle, gameName, objectKey, fileName, claimedBy, attemptID, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
 	var eta, integrityBytes sql.NullInt64
 	var lease, heartbeat, started, finished, cancelRequested, publishedAt sql.NullTime
-	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &assignedNode, &assignedDevice, &claimedNode, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
+	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &claimedBy, &attemptID, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
 		return err
 	}
 	task.TeamID = identity.TeamID(teamID)
@@ -1100,9 +1074,8 @@ func scanTask(row rowScanner, task *model.Task) error {
 	task.ExecutionScope = model.ExecutionScope(scope)
 	task.Status = model.Status(status)
 	task.RequestedBy = identity.UserID(requestedBy)
-	task.AssignedNodeID = assignedNode.String
-	task.AssignedDeviceID = assignedDevice.String
-	task.ClaimedByNodeID = claimedNode.String
+	task.ClaimedBy = claimedBy.String
+	task.AttemptID = attemptID.String
 	task.DependencyTaskID = dependency.String
 	task.ExpectedSHA256 = expectedSHA256.String
 	task.FileName = fileName.String

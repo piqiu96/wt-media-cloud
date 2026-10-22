@@ -15,12 +15,12 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
-	"github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
@@ -49,7 +49,7 @@ func registerRoutes(engine *server.Hertz) error {
 func registerModuleRoutes(engine *server.Hertz) {
 	cloudagent.RegisterRoutes(engine)
 	identity.RegisterRoutes(engine)
-	runtimebinding.RegisterRoutes(engine)
+	localagent.RegisterRoutes(engine)
 	profileguard.RegisterRoutes(engine)
 	profilebinding.RegisterRoutes(engine)
 	mediaaccount.RegisterRoutes(engine)

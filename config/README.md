@@ -26,11 +26,14 @@ in. It is required in both trees.
 
 ## Credentials
 
-`agent.toml` and `douyin.toml` are tracked locally. **`object_storage.toml` is
-not**: it is listed in `.gitignore`, and the local tree ships only a value-less
-`object_storage.toml.example`. The release template for every credential is
-`config_online/credentials/*.toml.tpl`; real values arrive only through the
-server-specific variables file.
+`agent.toml`, `agent_token.toml` and `douyin.toml` are tracked locally.
+`agent_token.toml` holds the HMAC key for stateless Local Agent tokens: the
+tracked value is a development key, deploy renders the real one from
+`WT_MEDIA_AGENT_TOKEN_SECRET`, and the server refuses to start when the key is
+missing or shorter than 32 characters. **`object_storage.toml` is not**: it is listed in `.gitignore`, and
+the local tree ships only a value-less `object_storage.toml.example`. The release
+template for every credential is `config_online/credentials/*.toml.tpl`; real
+values arrive only through the server-specific variables file.
 
 This is a deliberate difference from the other two, which were confirmed
 tracked under the stage policy recorded as A-03 in

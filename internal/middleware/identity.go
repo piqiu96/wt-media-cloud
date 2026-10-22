@@ -8,6 +8,7 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
 )
@@ -55,6 +56,10 @@ func AuthenticateRequestContext(c *hertzapp.RequestContext) (service.AuthContext
 		}
 	}
 	token := sessionToken(c)
+	if token == "" && agenttoken.IsAgentToken(string(c.GetHeader("Authorization"))) {
+		api.FailureCode(c, 403, 11003, "Agent 凭证不能访问用户接口", "AGENT_SCOPE_FORBIDDEN", nil, false, "none")
+		return service.AuthContext{}, false
+	}
 	authContext, err := service.AuthenticateContext(token)
 	if err != nil {
 		logAuthenticationFailure(c, token != "", err)

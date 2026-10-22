@@ -19,6 +19,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
+	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
@@ -37,6 +38,7 @@ type resourceStep struct {
 func serverResourcePlan() []resourceStep {
 	return []resourceStep{
 		configResource(),
+		agentTokenResource(),
 		loggerResource(),
 		metricsResource(),
 		tracingResource(),
@@ -131,6 +133,22 @@ func configResource() resourceStep {
 			if err := config.Initialize(); err != nil {
 				return nil, err
 			}
+			return func() error { return nil }, nil
+		},
+	}
+}
+
+// agentTokenResource publishes the Agent Token signer. Only the HTTP process
+// issues and verifies tokens, so scheduler and worker plans do not load it.
+func agentTokenResource() resourceStep {
+	return resourceStep{
+		name: "agent_token",
+		open: func() (func() error, error) {
+			signer, err := agenttoken.NewSigner([]byte(config.Get().Credentials.AgentToken.Secret))
+			if err != nil {
+				return nil, err
+			}
+			agenttoken.Configure(signer)
 			return func() error { return nil }, nil
 		},
 	}

@@ -1,17 +1,19 @@
 // Package profileguard owns Cloud preflight permits for sensitive Profile tasks.
+//
+// A permit is a mutual-exclusion lock, not a credential. It guarantees that one
+// sensitive operation at a time runs against a Profile; the caller is
+// authenticated by its Agent Token (strict for a new preflight, report-safe for
+// renew/finish), and the permit is scoped to that token's user. There is no
+// node identity and no second secret to present.
 package service
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"strings"
 	"time"
 
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
@@ -27,11 +29,11 @@ type (
 )
 
 var (
-	ErrInvalidInput            = model.ErrInvalidInput
-	ErrTaskNotFound            = model.ErrTaskNotFound
-	ErrTaskAssignmentMismatch  = model.ErrTaskAssignmentMismatch
-	ErrRuntimeUnavailable      = model.ErrRuntimeUnavailable
-	ErrPermitCredentialInvalid = model.ErrPermitCredentialInvalid
+	ErrInvalidInput           = model.ErrInvalidInput
+	ErrTaskNotFound           = model.ErrTaskNotFound
+	ErrTaskAssignmentMismatch = model.ErrTaskAssignmentMismatch
+	ErrRuntimeUnavailable     = model.ErrRuntimeUnavailable
+	ErrPermitInvalid          = model.ErrPermitInvalid
 )
 
 const (
@@ -60,25 +62,18 @@ const (
 	FinishResultUncertain = model.FinishResultUncertain
 )
 
-type NodeAuthenticator interface {
-	AuthenticateNode(nodeID, credential string) (runtimeservice.AgentNode, error)
-}
-
 type Store interface {
 	FindAuthorizedTask(taskID string) (SensitiveTask, bool, error)
-	AcquirePermit(task SensitiveTask, nodeID string, permit Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error)
-	RenewPermit(permitID, nodeID, credentialHash string, at, expiresAt time.Time) (time.Time, error)
-	FinishPermit(permitID, nodeID, credentialHash string, outcome FinishOutcome, at time.Time) error
+	AcquirePermit(task SensitiveTask, permit Permit, at time.Time) (PreflightOutcome, error)
+	RenewPermit(permitID string, userID identityservice.UserID, at, expiresAt time.Time) (time.Time, error)
+	FinishPermit(permitID string, userID identityservice.UserID, outcome FinishOutcome, at time.Time) error
 }
 
 type Service struct {
 	store      Store
-	nodes      NodeAuthenticator
 	now        func() time.Time
 	newID      func(string) string
-	newSecret  func() string
 	permitTTL  time.Duration
-	freshness  time.Duration
 	maxRenewal time.Duration
 }
 
@@ -86,14 +81,11 @@ type Option func(*Service)
 
 func WithClock(now func() time.Time) Option            { return func(s *Service) { s.now = now } }
 func WithIDGenerator(newID func(string) string) Option { return func(s *Service) { s.newID = newID } }
-func WithSecretGenerator(newSecret func() string) Option {
-	return func(s *Service) { s.newSecret = newSecret }
-}
 
-func newService(store Store, nodes NodeAuthenticator, options ...Option) *Service {
+func newService(store Store, options ...Option) *Service {
 	service := &Service{
-		store: store, nodes: nodes, now: func() time.Time { return time.Now().UTC() }, newID: id.NewID,
-		newSecret: randomSecret, permitTTL: 2 * time.Minute, freshness: 90 * time.Second, maxRenewal: 2 * time.Minute,
+		store: store, now: func() time.Time { return time.Now().UTC() }, newID: id.NewID,
+		permitTTL: 2 * time.Minute, maxRenewal: 2 * time.Minute,
 	}
 	for _, option := range options {
 		option(service)
@@ -101,66 +93,51 @@ func newService(store Store, nodes NodeAuthenticator, options ...Option) *Servic
 	return service
 }
 
-func (s *Service) Preflight(nodeID, nodeCredential, taskID string) (PreflightOutcome, error) {
-	if strings.TrimSpace(taskID) == "" {
+// Preflight takes the per-Profile lock for a task belonging to the token's user.
+// A task belonging to somebody else answers not-found, so the endpoint cannot be
+// used to probe which task ids exist.
+func (s *Service) Preflight(userID identityservice.UserID, taskID string) (PreflightOutcome, error) {
+	if userID <= 0 || strings.TrimSpace(taskID) == "" {
 		return PreflightOutcome{}, ErrInvalidInput
-	}
-	node, err := s.nodes.AuthenticateNode(nodeID, nodeCredential)
-	if err != nil {
-		return PreflightOutcome{}, err
 	}
 	task, found, err := s.store.FindAuthorizedTask(taskID)
 	if err != nil {
 		return PreflightOutcome{}, err
 	}
-	if !found || task.Status != TaskAuthorized {
+	if !found || task.Status != TaskAuthorized || task.UserID != userID {
 		return PreflightOutcome{}, ErrTaskNotFound
 	}
-	if task.NodeID != node.ID || task.UserID != node.UserID || !validOperation(task.Operation) {
+	if !validOperation(task.Operation) {
 		return PreflightOutcome{}, ErrTaskAssignmentMismatch
 	}
 	now := s.now()
-	secret := s.newSecret()
 	permit := Permit{
 		ID: s.newID("profile-permit"), TaskID: task.ID, UserID: task.UserID, ProfileID: task.ProfileID,
-		NodeID: node.ID, Operation: task.Operation, Status: PermitActive, CredentialHash: secretHash(secret),
+		Operation: task.Operation, Status: PermitActive,
 		AcquiredAt: now, ExpiresAt: now.Add(s.permitTTL),
 	}
-	outcome, err := s.store.AcquirePermit(task, node.ID, permit, now, s.freshness)
-	if err != nil {
-		return PreflightOutcome{}, err
-	}
-	if outcome.Outcome == OutcomeGranted {
-		outcome.PermitCredential = secret
-	}
-	return outcome, nil
+	return s.store.AcquirePermit(task, permit, now)
 }
 
-func (s *Service) Renew(nodeID, nodeCredential, permitID, permitCredential string, extension time.Duration) (time.Time, error) {
-	node, err := s.nodes.AuthenticateNode(nodeID, nodeCredential)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if strings.TrimSpace(permitID) == "" || strings.TrimSpace(permitCredential) == "" {
+// Renew extends a permit the same user holds. The user check is what keeps a
+// permit id from acting as a cross-user bearer: knowing the id is not enough.
+func (s *Service) Renew(userID identityservice.UserID, permitID string, extension time.Duration) (time.Time, error) {
+	if userID <= 0 || strings.TrimSpace(permitID) == "" {
 		return time.Time{}, ErrInvalidInput
 	}
 	if extension <= 0 || extension > s.maxRenewal {
 		extension = s.maxRenewal
 	}
 	now := s.now()
-	return s.store.RenewPermit(permitID, node.ID, secretHash(permitCredential), now, now.Add(extension))
+	return s.store.RenewPermit(permitID, userID, now, now.Add(extension))
 }
 
-func (s *Service) Finish(nodeID, nodeCredential, permitID, permitCredential string, outcome FinishOutcome) error {
-	node, err := s.nodes.AuthenticateNode(nodeID, nodeCredential)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(permitID) == "" || strings.TrimSpace(permitCredential) == "" ||
+func (s *Service) Finish(userID identityservice.UserID, permitID string, outcome FinishOutcome) error {
+	if userID <= 0 || strings.TrimSpace(permitID) == "" ||
 		(outcome != FinishCompleted && outcome != FinishResultUncertain) {
 		return ErrInvalidInput
 	}
-	return s.store.FinishPermit(permitID, node.ID, secretHash(permitCredential), outcome, s.now())
+	return s.store.FinishPermit(permitID, userID, outcome, s.now())
 }
 
 func validOperation(operation SensitiveOperation) bool {
@@ -171,17 +148,4 @@ func validOperation(operation SensitiveOperation) bool {
 	default:
 		return false
 	}
-}
-
-func secretHash(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
-}
-
-func randomSecret() string {
-	value := make([]byte, 32)
-	if _, err := rand.Read(value); err != nil {
-		panic(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(value)
 }

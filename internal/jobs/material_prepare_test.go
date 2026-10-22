@@ -180,7 +180,7 @@ func (f *fakeTransfers) GetTask(taskID string) (transfermodel.Task, error) {
 	return f.current, f.getErr
 }
 
-func (f *fakeTransfers) HeartbeatTask(taskID, nodeID string, now time.Time, lease time.Duration) (bool, error) {
+func (f *fakeTransfers) HeartbeatTask(taskID, claimedBy, attemptID string, now time.Time, lease time.Duration) (bool, error) {
 	f.events.add("heartbeat")
 	f.heartbeats++
 	return f.heartbeatOK, f.heartbeatErr
@@ -460,7 +460,7 @@ func harnessFor(t *testing.T) *harness {
 	}
 	transfers := &fakeTransfers{
 		events:      events,
-		claimed:     transfermodel.Task{ID: testTaskID, TeamID: testTeamID, AssetID: testMaterial, Status: transfermodel.StatusRunning},
+		claimed:     transfermodel.Task{ID: testTaskID, TeamID: testTeamID, AssetID: testMaterial, Status: transfermodel.StatusRunning, AttemptID: "attempt-1"},
 		claimFound:  true,
 		heartbeatOK: true,
 		completeOK:  true,
@@ -561,8 +561,11 @@ func (h *harness) assertFailure(t *testing.T, code string) {
 		if input.Status != transfermodel.StatusFailed {
 			t.Errorf("status = %q, want failed for code %q", input.Status, code)
 		}
-		if input.NodeID != testWorkerID {
-			t.Errorf("node id = %q, want this worker", input.NodeID)
+		if input.ClaimedBy != testWorkerID {
+			t.Errorf("claimed_by = %q, want this worker", input.ClaimedBy)
+		}
+		if input.AttemptID != "attempt-1" {
+			t.Errorf("attempt_id = %q, want the claim this run was given", input.AttemptID)
 		}
 		return
 	}
@@ -651,8 +654,8 @@ func TestPrepareWritesTheFactsOfTheBytesItHashed(t *testing.T) {
 	if len(h.transfers.completionInputs) != 1 {
 		t.Fatalf("CompleteTask called %d times, want 1", len(h.transfers.completionInputs))
 	}
-	if got := h.transfers.completionInputs[0]; got.Bytes != int64(len(h.body)) || got.SHA256 != facts.SHA256 || got.NodeID != testWorkerID {
-		t.Errorf("completion = %+v, want the measured size and digest under this worker's id", got)
+	if got := h.transfers.completionInputs[0]; got.Bytes != int64(len(h.body)) || got.SHA256 != facts.SHA256 || got.ClaimedBy != testWorkerID || got.AttemptID != "attempt-1" {
+		t.Errorf("completion = %+v, want the measured size and digest under this worker's claim", got)
 	}
 	if h.sources.offsets[0] != 0 {
 		t.Errorf("the source was opened at offset %d, want the whole file from zero", h.sources.offsets[0])

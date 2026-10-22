@@ -63,9 +63,8 @@ type Task struct {
 	ExecutionScope    ExecutionScope  `json:"execution_scope"`
 	Status            Status          `json:"status"`
 	RequestedBy       identity.UserID `json:"requested_by"`
-	AssignedNodeID    string          `json:"assigned_node_id,omitempty"`
-	AssignedDeviceID  string          `json:"assigned_device_id,omitempty"`
-	ClaimedByNodeID   string          `json:"claimed_by_node_id,omitempty"`
+	ClaimedBy         string          `json:"claimed_by,omitempty"`
+	AttemptID         string          `json:"attempt_id,omitempty"`
 	DependencyTaskID  string          `json:"dependency_task_id,omitempty"`
 	TotalBytes        int64           `json:"total_bytes,omitempty"`
 	TransferredBytes  int64           `json:"transferred_bytes,omitempty"`

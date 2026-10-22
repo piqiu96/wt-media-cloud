@@ -149,6 +149,7 @@ type Store interface {
 	TeamHasReferences(TeamID) (bool, error)
 	CreateSession(Session, string) (SessionCreateResult, error)
 	FindSessionByTokenHash(tokenHash string) (Session, bool, error)
+	FindSessionByID(sessionID string) (Session, bool, error)
 	FindActiveDesktopSession(userID UserID, at time.Time) (Session, bool, error)
 	InvalidateUserSessions(userID UserID, at time.Time, reason string) error
 	InvalidateUserSessionsWithAudit(userID UserID, at time.Time, reason string, event AuditEvent) error
@@ -344,7 +345,10 @@ func (s *Service) LoginWithOptions(username, password string, options LoginOptio
 	if clientType == "" {
 		clientType = ClientTypeWeb
 	}
-	now := s.now()
+	// Agent Tokens derive their exp from this timestamp at one-second
+	// granularity. Truncating here keeps session and token expiring at the same
+	// instant instead of letting the token lapse up to a second earlier.
+	now := s.now().Truncate(time.Second)
 	token := s.newToken()
 	session := Session{
 		ID:         s.newID("session"),
@@ -420,6 +424,54 @@ func (s *Service) AuthenticateContext(token string) (AuthContext, error) {
 	}
 	if !ok || user.Status != UserStatusEnabled {
 		return AuthContext{}, ErrSessionInvalidated
+	}
+	return AuthContext{User: publicUser(user), Session: session}, nil
+}
+
+// AuthenticateAgentSession is the strict mode for Agent Token operations: the
+// token's sid must still be the one active Desktop session, and the user must
+// still be enabled. It deliberately returns only agent-facing outcomes so the
+// caller can map takeover and re-login requirements without guessing.
+func (s *Service) AuthenticateAgentSession(sessionID string) (AuthContext, error) {
+	if sessionID == "" {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	session, ok, err := s.store.FindSessionByID(sessionID)
+	if err != nil {
+		return AuthContext{}, err
+	}
+	if !ok || session.ClientType != ClientTypeDesktop {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	if session.InvalidatedReason == SessionInvalidReasonDesktopReplaced {
+		return AuthContext{}, ErrDesktopReplaced
+	}
+	if session.InvalidAt != nil || !s.now().Before(session.ExpiresAt) {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	user, ok, err := s.store.FindUser(session.UserID)
+	if err != nil {
+		return AuthContext{}, err
+	}
+	if !ok || user.Status != UserStatusEnabled {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	active, ok, err := s.store.FindActiveDesktopSession(session.UserID, s.now())
+	if err != nil {
+		if errors.Is(err, ErrSessionStateInvalid) {
+			// Several valid Desktop rows cannot come from a login; it is a
+			// takeover that raced a stale row. Fail closed the same way, so the
+			// old Desktop is told it was replaced instead of silently retrying
+			// a login that would be refused again.
+			return AuthContext{}, ErrDesktopReplaced
+		}
+		return AuthContext{}, err
+	}
+	if !ok {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	if active.ID != session.ID {
+		return AuthContext{}, ErrDesktopReplaced
 	}
 	return AuthContext{User: publicUser(user), Session: session}, nil
 }
@@ -1452,6 +1504,17 @@ func (s *memoryStore) FindSessionByTokenHash(tokenHash string) (Session, bool, e
 	defer s.mu.RUnlock()
 	session, ok := s.sessions[tokenHash]
 	return session, ok, nil
+}
+
+func (s *memoryStore) FindSessionByID(sessionID string) (Session, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, session := range s.sessions {
+		if session.ID == sessionID {
+			return session, true, nil
+		}
+	}
+	return Session{}, false, nil
 }
 
 func (s *memoryStore) FindActiveDesktopSession(userID UserID, at time.Time) (Session, bool, error) {

@@ -34,10 +34,6 @@ func writeComposeOutputError(c *hertzapp.RequestContext, err error) {
 		api.FailureNamed(c, consts.StatusNotFound, 15216, "成片不存在", "compose_output_not_found")
 	case errors.Is(err, productionservice.ErrComposeOutputNotArchivable):
 		api.FailureNamed(c, consts.StatusConflict, 15218, "成片已发布或已归档，不能归档", "compose_output_not_archivable")
-	// The download route's own conflict, the same frozen name the material
-	// download answers with: the client branches on the name, not the errcode.
-	case errors.Is(err, productionservice.ErrLocalNodeUnavailable):
-		api.ConflictNamed(c, 15105, "本机没有可用的下载节点", "local_transfer_node_unavailable")
 	case errors.Is(err, productionservice.ErrInvalidInput):
 		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片请求参数无效："+err.Error(), "compose_output_invalid")
 	default:

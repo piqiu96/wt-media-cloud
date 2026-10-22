@@ -35,17 +35,15 @@ import "time"
 // windows, and `updated_at` moves on lease renewals that are not completions. It is
 // null until the task is terminal, like the other nullable fields.
 //
-// `assigned_device_id` was added so the download centre can recognise the tasks
-// bound to this computer: it matches the durable device (users.device_id) against
-// the local device identity, which is what lets it tell a suspended task of this
-// machine's from a row that belongs to another machine. Empty for Cloud
-// preparations, which have no destination device.
+// `attempt_id` names the current claim, so a report can be tied to the executor
+// that took the lease rather than to a machine identity. Empty for a task that
+// has never been claimed.
 type Task struct {
 	ID                        string     `json:"id"`
 	AssetType                 string     `json:"asset_type"`
 	AssetID                   int64      `json:"asset_id"`
 	AssetTitle                string     `json:"asset_title"`
-	AssignedDeviceID          string     `json:"assigned_device_id"`
+	AttemptID                 string     `json:"attempt_id"`
 	Purpose                   string     `json:"purpose"`
 	ExecutionScope            string     `json:"execution_scope"`
 	Status                    string     `json:"status"`
@@ -73,6 +71,7 @@ type Task struct {
 // always has something to check its bytes against.
 type LocalLease struct {
 	TaskID               string     `json:"task_id"`
+	AttemptID            string     `json:"attempt_id"`
 	AssetType            string     `json:"asset_type"`
 	AssetID              int64      `json:"asset_id"`
 	Title                string     `json:"title"`
@@ -112,15 +111,17 @@ type TransferTerminal struct {
 // struct is the whole body — an extra field is a rejected request, not a
 // harmless addition.
 type HeartbeatRequest struct {
-	CompletedBytes int64 `json:"completed_bytes"`
+	AttemptID      string `json:"attempt_id"`
+	CompletedBytes int64  `json:"completed_bytes"`
 }
 
 // ProgressRequest reports transfer progress. Progress does not renew the lease,
 // which is why it carries no lease field and why the contract gives its response
 // no body.
 type ProgressRequest struct {
-	CompletedBytes int64 `json:"completed_bytes"`
-	BytesPerSecond int64 `json:"bytes_per_second"`
+	AttemptID      string `json:"attempt_id"`
+	CompletedBytes int64  `json:"completed_bytes"`
+	BytesPerSecond int64  `json:"bytes_per_second"`
 }
 
 // CompletionRequest is the executor's terminal report.
@@ -131,6 +132,7 @@ type ProgressRequest struct {
 // exactly what the integrity rule exists to refuse.
 type CompletionRequest struct {
 	Status         string `json:"status"`
+	AttemptID      string `json:"attempt_id"`
 	CompletedBytes int64  `json:"completed_bytes"`
 	SHA256         string `json:"sha256"`
 	FileName       string `json:"file_name"`

@@ -8,7 +8,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/repository"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 type mysqlStore struct{}
@@ -32,14 +31,14 @@ func (mysqlStore) HideUserDownloadHistory(userID identityservice.UserID, assetTy
 func (mysqlStore) LatestUserDownloadStatuses(userID identityservice.UserID, materialIDs []int64) (map[int64]string, error) {
 	return repository.LatestUserDownloadStatuses(userID, materialIDs)
 }
-func (mysqlStore) NextLocalTask(nodeID string, now time.Time) (model.Task, bool, error) {
-	return repository.NextLocalTask(nodeID, now)
+func (mysqlStore) NextLocalTask(userID identityservice.UserID, now time.Time) (model.Task, bool, error) {
+	return repository.NextLocalTask(userID, now)
 }
-func (mysqlStore) ClaimLocalTask(taskID, nodeID string, now time.Time, lease time.Duration) (model.Task, bool, error) {
-	return repository.ClaimLocalTask(taskID, nodeID, now, lease)
+func (mysqlStore) ClaimLocalTask(taskID string, userID identityservice.UserID, claimedBy string, now time.Time, lease time.Duration) (model.Task, bool, error) {
+	return repository.ClaimLocalTask(taskID, userID, claimedBy, now, lease)
 }
-func (mysqlStore) HeartbeatTask(taskID, nodeID string, now time.Time, lease time.Duration) (bool, error) {
-	return repository.HeartbeatTask(taskID, nodeID, now, lease)
+func (mysqlStore) HeartbeatTask(taskID, claimedBy, attemptID string, now time.Time, lease time.Duration) (bool, error) {
+	return repository.HeartbeatTask(taskID, claimedBy, attemptID, now, lease)
 }
 func (mysqlStore) ReportProgress(input repository.ProgressInput, now time.Time) (bool, error) {
 	return repository.ReportProgress(input, now)
@@ -58,16 +57,6 @@ func (mysqlStore) FailDependents(prepareTaskID, errorCode, errorMessage string, 
 }
 func (mysqlStore) AttachCompletedDependency(dependentTaskID string, now time.Time) (bool, error) {
 	return repository.AttachCompletedDependency(dependentTaskID, now)
-}
-
-// runtimeNodeAuth is the whole of this module's dependency on the
-// runtime-binding domain. It is a type rather than a call inside the service so
-// that a test can answer the credential question without a node table, and so
-// that the one place a real node lookup happens is visible.
-type runtimeNodeAuth struct{}
-
-func (runtimeNodeAuth) AuthenticateNodeCredential(credential string) (runtimeservice.AgentNode, error) {
-	return runtimeservice.AuthenticateNodeCredential(credential)
 }
 
 // objectStorageGrants is the whole of this module's dependency on the object

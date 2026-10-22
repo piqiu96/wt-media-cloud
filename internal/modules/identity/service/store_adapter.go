@@ -89,6 +89,9 @@ func (mysqlStore) CreateSession(session model.Session, replaceSessionID string) 
 func (mysqlStore) FindSessionByTokenHash(tokenHash string) (model.Session, bool, error) {
 	return repository.FindSessionByTokenHash(tokenHash)
 }
+func (mysqlStore) FindSessionByID(sessionID string) (model.Session, bool, error) {
+	return repository.FindSessionByID(sessionID)
+}
 func (mysqlStore) FindActiveDesktopSession(userID model.UserID, at time.Time) (model.Session, bool, error) {
 	return repository.FindActiveDesktopSession(userID, at)
 }

@@ -21,11 +21,12 @@ import (
 )
 
 // Every route the module publishes, in the order the router installs them, with
-// the family it belongs to. The two families answer the same 401 to a caller with
-// no credential — one because a session is missing, the other because a node
-// bearer token is — and that is the point: a request naming no caller cannot be
-// told apart from a request naming a path nobody registered unless the routes are
-// actually bound.
+// the family it belongs to and the credential kind it demands. Both families
+// answer 401 to a caller with no credential, but with different codes — a
+// session route wants a login, an executor route wants an Agent Token — so the
+// kind is what says the two cannot be substituted for one another. A request
+// naming no caller also cannot be told apart from a request naming a path
+// nobody registered unless the routes are actually bound.
 func TestRegisterRoutesBindsTransferEndpoints(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)
@@ -34,14 +35,15 @@ func TestRegisterRoutesBindsTransferEndpoints(t *testing.T) {
 		family string
 		method string
 		path   string
+		code   string
 	}{
-		{"session", consts.MethodGet, "/api/v1/file-transfer-tasks"},
-		{"session", consts.MethodPost, "/api/v1/file-transfer-tasks/task-1/cancel"},
-		{"session", consts.MethodPost, "/api/v1/file-transfer-tasks/task-1/hide"},
-		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/claim"},
-		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/heartbeat"},
-		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/progress"},
-		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/complete"},
+		{"session", consts.MethodGet, "/api/v1/file-transfer-tasks", "AUTH_SESSION_INVALID"},
+		{"session", consts.MethodPost, "/api/v1/file-transfer-tasks/task-1/cancel", "AUTH_SESSION_INVALID"},
+		{"session", consts.MethodPost, "/api/v1/file-transfer-tasks/task-1/hide", "AUTH_SESSION_INVALID"},
+		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/claim", "AUTH_AGENT_TOKEN_INVALID"},
+		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/heartbeat", "AUTH_AGENT_TOKEN_INVALID"},
+		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/progress", "AUTH_AGENT_TOKEN_INVALID"},
+		{"executor", consts.MethodPost, "/api/v1/cloud-agent/file-transfer-tasks/task-1/complete", "AUTH_AGENT_TOKEN_INVALID"},
 	}
 
 	// The control that keeps the loop honest: an engine where every path answers
@@ -53,37 +55,23 @@ func TestRegisterRoutesBindsTransferEndpoints(t *testing.T) {
 	}
 
 	for _, route := range routes {
-		// A nil body on purpose, including for the four POSTs: the executor
-		// handlers read the credential before they decode, so the credential-less
-		// answer does not depend on the body being parseable.
+		// A nil body on purpose, including for the four POSTs: the Agent Token
+		// middleware runs before the handler decodes, so the credential-less answer
+		// does not depend on the body being parseable.
 		response := ut.PerformRequest(engine.Engine, route.method, route.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {
 			t.Fatalf("%s %s (%s route) status = %d body=%s, want 401", route.method, route.path, route.family, response.Result().StatusCode(), response.Result().Body())
 		}
-	}
-}
-
-// The executor handlers take their credential out of the Authorization header and
-// nowhere else, and this pins the accepted shape. `Bearer` with no value, a bare
-// token and a different scheme all have to be refused, because a route that
-// accepted any of them would be authenticating on the presence of a header.
-func TestBearerCredentialAcceptsOnlyABearerValue(t *testing.T) {
-	for _, testCase := range []struct {
-		header     string
-		credential string
-		ok         bool
-	}{
-		{"Bearer node-secret", "node-secret", true},
-		{"Bearer   node-secret  ", "node-secret", true},
-		{"Bearer ", "", false},
-		{"Bearer", "", false},
-		{"node-secret", "", false},
-		{"Basic node-secret", "", false},
-		{"", "", false},
-	} {
-		credential, ok := bearerCredential(testCase.header)
-		if ok != testCase.ok || credential != testCase.credential {
-			t.Fatalf("bearerCredential(%q) = (%q, %t), want (%q, %t)", testCase.header, credential, ok, testCase.credential, testCase.ok)
+		var body struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(response.Result().Body(), &body); err != nil {
+			t.Fatalf("%s %s decode response: %v", route.method, route.path, err)
+		}
+		if body.Error.Code != route.code {
+			t.Fatalf("%s %s (%s route) error.code = %q, want %q", route.method, route.path, route.family, body.Error.Code, route.code)
 		}
 	}
 }
@@ -104,7 +92,6 @@ var transferErrorCases = []struct {
 	errorType string
 }{
 	{"invalid input", transferservice.ErrInvalidInput, 400, 10001, ""},
-	{"unauthenticated node", transferservice.ErrNodeUnauthenticated, 401, 11001, ""},
 	{"task not found", transferservice.ErrTaskNotFound, 404, 15101, "transfer_task_not_found"},
 	{"task forbidden", transferservice.ErrTaskForbidden, 403, 15102, "transfer_task_forbidden"},
 	{"task conflict", transferservice.ErrTaskConflict, 409, 15103, "transfer_task_conflict"},
@@ -183,8 +170,8 @@ func TestTheTransferErrorNamesAreTheFrozenOnes(t *testing.T) {
 		checked++
 	}
 	// A guard that read no names would pass against any file at all, including an
-	// empty one. Five are expected: the six frozen names less
-	// `local_transfer_node_unavailable`, which production answers, not this module.
+	// empty one. Five are expected: every name the contract declares for this
+	// module, and the table's unnamed arms are not among them.
 	if checked != 5 {
 		t.Fatalf("checked %d names, want 5: the loop is no longer covering the table", checked)
 	}

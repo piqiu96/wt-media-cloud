@@ -4,9 +4,6 @@ package model
 import "errors"
 
 var (
-	ErrAgentNotFound       = errors.New("agent not found")
-	ErrInvalidAgent        = errors.New("invalid agent")
-	ErrIncompatibleAgent   = errors.New("incompatible agent contract")
 	ErrTaskNotFound        = errors.New("task not found")
 	ErrNoPendingTask       = errors.New("no pending task")
 	ErrTaskLeaseTaken      = errors.New("task lease taken")
@@ -25,18 +22,6 @@ type Compatibility struct {
 	MinimumAgentContractRevision string   `json:"minimum_agent_contract_revision"`
 	CompatibleAgentMajorVersions []string `json:"compatible_agent_major_versions"`
 	Status                       string   `json:"status"`
-}
-
-type AgentNode struct {
-	AgentID              string   `json:"agent_id"`
-	Mode                 string   `json:"mode"`
-	Version              string   `json:"version"`
-	ContractMajorVersion string   `json:"contract_major_version"`
-	ContractRevision     string   `json:"contract_revision"`
-	Status               string   `json:"status"`
-	RegisteredAt         string   `json:"registered_at"`
-	LastHeartbeatAt      string   `json:"last_heartbeat_at"`
-	Capabilities         []string `json:"capabilities"`
 }
 
 type TaskStatus int

@@ -10,7 +10,6 @@ func TestCloudAgentModelTypesAreDeclaredInModelPackage(t *testing.T) {
 		name string
 		got  reflect.Type
 	}{
-		{name: "AgentNode", got: reflect.TypeFor[AgentNode]()},
 		{name: "Task", got: reflect.TypeFor[Task]()},
 		{name: "Compatibility", got: reflect.TypeFor[Compatibility]()},
 	}

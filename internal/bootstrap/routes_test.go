@@ -54,7 +54,7 @@ func TestRegisterModuleRoutesReachesEveryModule(t *testing.T) {
 	}{
 		{"cloudagent", consts.MethodGet, "/api/v1/cloud-agent/compatibility"},
 		{"identity", consts.MethodGet, "/api/v1/auth/me"},
-		{"runtimebinding", consts.MethodPost, "/api/v1/local-agent/binding-tickets"},
+		{"localagent", consts.MethodPost, "/api/v1/local-agent/agent-token"},
 		{"profileguard", consts.MethodPost, "/api/v1/local-agent/sensitive-tasks/task-1/preflight"},
 		{"profilebinding", consts.MethodGet, "/api/v1/bit-browser/profile-scans/7"},
 		{"mediaaccount", consts.MethodGet, "/api/v1/media-accounts"},

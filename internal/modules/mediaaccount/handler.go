@@ -50,10 +50,6 @@ type bindProfileRequest struct {
 	BrowserProfileID string `json:"browser_profile_id"`
 }
 
-type startAccountCheckRequest struct {
-	NodeID string `json:"node_id"`
-}
-
 type accountCheckResultRequest struct {
 	TaskID            string                            `json:"task_id"`
 	PlatformAccountID string                            `json:"platform_account_id"`
@@ -62,10 +58,6 @@ type accountCheckResultRequest struct {
 	LoginStatus       accountservice.LoginStatus        `json:"login_status"`
 	Message           string                            `json:"message"`
 	CheckItems        []accountservice.AccountCheckItem `json:"check_items"`
-}
-
-type startCookieReadRequest struct {
-	NodeID string `json:"node_id"`
 }
 
 type cookieReadResultRequest struct {
@@ -194,11 +186,7 @@ func StartMediaAccountCheck(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	var req startAccountCheckRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	start, err := accountservice.StartLocalAccountCheck(actor, c.Param("account_id"), accountservice.AccountCheckStartInput(req))
+	start, err := accountservice.StartLocalAccountCheck(actor, c.Param("account_id"), accountservice.AccountCheckStartInput{})
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
@@ -243,11 +231,7 @@ func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext
 	if !ok {
 		return
 	}
-	var req startCookieReadRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	start, err := accountservice.StartCookieRead(actor, c.Param("account_id"), accountservice.CookieReadStartInput{NodeID: req.NodeID})
+	start, err := accountservice.StartCookieRead(actor, c.Param("account_id"), accountservice.CookieReadStartInput{})
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return

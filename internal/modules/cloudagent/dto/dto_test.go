@@ -10,8 +10,6 @@ func TestCloudAgentDTOTypesAreDeclaredInDTOPackage(t *testing.T) {
 		name string
 		got  reflect.Type
 	}{
-		{name: "RegisterAgentRequest", got: reflect.TypeFor[RegisterAgentRequest]()},
-		{name: "HeartbeatRequest", got: reflect.TypeFor[HeartbeatRequest]()},
 		{name: "CreateTaskRequest", got: reflect.TypeFor[CreateTaskRequest]()},
 		{name: "ClaimTaskRequest", got: reflect.TypeFor[ClaimTaskRequest]()},
 		{name: "ReportTaskRequest", got: reflect.TypeFor[ReportTaskRequest]()},

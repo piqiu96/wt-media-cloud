@@ -364,7 +364,7 @@ func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testi
 		BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
 	}}
 
-	start, err := service.StartLocalAccountCheck(actor, account.ID, AccountCheckStartInput{NodeID: "node-1"})
+	start, err := service.StartLocalAccountCheck(actor, account.ID, AccountCheckStartInput{})
 	if err != nil {
 		t.Fatalf("StartLocalAccountCheck() error=%v", err)
 	}
@@ -375,7 +375,7 @@ func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testi
 		t.Fatalf("created sensitive tasks=%d, want 1", len(tasks.tasks))
 	}
 	task := tasks.tasks[0]
-	if task.Operation != profileguardservice.OperationAuthenticatedAccountCheck || task.NodeID != "node-1" || task.BitProfileID != "bit-profile-1" {
+	if task.Operation != profileguardservice.OperationAuthenticatedAccountCheck || task.BitProfileID != "bit-profile-1" {
 		t.Fatalf("task=%#v", task)
 	}
 }

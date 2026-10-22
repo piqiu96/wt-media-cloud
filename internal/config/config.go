@@ -103,6 +103,7 @@ type ClientsConfig struct {
 
 type CredentialsConfig struct {
 	Agent         AgentCredentialConfig
+	AgentToken    AgentTokenCredentialConfig
 	Douyin        DouyinCredentialConfig
 	ObjectStorage ObjectStorageCredentialConfig
 }
@@ -180,6 +181,14 @@ type ComposeWorkerConfig struct {
 
 type AgentCredentialConfig struct {
 	AuthToken string `toml:"auth_token"`
+}
+
+// AgentTokenCredentialConfig holds the HMAC key that signs stateless Local
+// Agent tokens. Unlike the outgoing Agent auth token, this secret is required:
+// without it the server cannot verify any Agent request, so startup fails
+// rather than silently serving an unauthenticated executor surface.
+type AgentTokenCredentialConfig struct {
+	Secret string `toml:"secret"`
 }
 
 type DouyinCredentialConfig struct {
@@ -323,6 +332,9 @@ func LoadFromDir(root string) (Config, error) {
 	if err := optionalTOML(filepath.Join(root, "credentials", "agent.toml"), &cfg.Credentials.Agent); err != nil {
 		return Config{}, err
 	}
+	if err := optionalTOML(filepath.Join(root, "credentials", "agent_token.toml"), &cfg.Credentials.AgentToken); err != nil {
+		return Config{}, err
+	}
 	if err := optionalTOML(filepath.Join(root, "credentials", "douyin.toml"), &cfg.Credentials.Douyin); err != nil {
 		return Config{}, err
 	}
@@ -361,6 +373,9 @@ func (c Config) Validate() error {
 	}
 	if (c.App.InitialAdmin.Username == "") != (c.App.InitialAdmin.Password == "") {
 		return errors.New("app.initial_admin username and password must be configured together")
+	}
+	if len(strings.TrimSpace(c.Credentials.AgentToken.Secret)) < 32 {
+		return errors.New("credentials.agent_token.secret must be at least 32 characters")
 	}
 	if err := validateDatabases(c.Databases); err != nil {
 		return err

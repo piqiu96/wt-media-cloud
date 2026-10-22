@@ -10,17 +10,12 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
 type updateProfileRequest struct {
 	CloudRemark    *string                               `json:"cloud_remark"`
 	BusinessStatus *profileservice.ProfileBusinessStatus `json:"business_status"`
-}
-
-type localSensitiveRequest struct {
-	NodeID string `json:"node_id"`
 }
 
 type assignProfileOwnerRequest struct {
@@ -34,14 +29,6 @@ func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	var input profileservice.SnapshotInput
 	if !api.DecodeJSON(c, &input) {
-		return
-	}
-	nodeID := strings.TrimSpace(input.NodeID)
-	if nodeID == "" {
-		writeProfileError(c, runtimeservice.ErrInvalidInput)
-		return
-	}
-	if !checkLocalTrust(c, actor.ID, nodeID) {
 		return
 	}
 	scan, err := profileservice.SubmitScan(actor, input)
@@ -66,14 +53,6 @@ func GetProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
-		return
-	}
-	nodeID, ok := decodeLocalSensitiveNode(c)
-	if !ok {
-		writeProfileError(c, runtimeservice.ErrInvalidInput)
-		return
-	}
-	if !checkLocalTrust(c, actor.ID, nodeID) {
 		return
 	}
 	scan, err := profileservice.ConfirmScan(actor, c.Param("scan_id"))
@@ -245,58 +224,14 @@ func parseProfileUserID(raw string) (identityservice.UserID, bool) {
 	return identityservice.UserID(parsed), true
 }
 
-func extractNodeID(input map[string]any) (string, bool) {
-	raw, ok := input["node_id"]
-	delete(input, "node_id")
-	if !ok {
-		return "", false
-	}
-	nodeID := strings.TrimSpace(strconvAny(raw))
-	return nodeID, nodeID != ""
-}
-
-func decodeLocalSensitiveNode(c *hertzapp.RequestContext) (string, bool) {
-	var req localSensitiveRequest
-	if !api.DecodeJSON(c, &req) {
-		return "", false
-	}
-	nodeID := strings.TrimSpace(req.NodeID)
-	return nodeID, nodeID != ""
-}
-
 func writeDesktopOnlyProfileOperation(c *hertzapp.RequestContext) {
 	api.Conflict(c, 23004, "浏览器窗口本机操作只能在Desktop执行；Cloud Web只展示已保存的窗口信息")
-}
-
-func checkLocalTrust(c *hertzapp.RequestContext, userID identityservice.UserID, nodeID string) bool {
-	if err := runtimeservice.CheckLocalTrust(userID, nodeID); err != nil {
-		writeProfileError(c, err)
-		return false
-	}
-	return true
-}
-
-func strconvAny(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		return ""
-	}
 }
 
 func writeProfileError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, profileservice.ErrInvalidInput):
 		api.BadRequest(c, 10001, "请求参数无效")
-	case errors.Is(err, runtimeservice.ErrInvalidInput):
-		api.BadRequest(c, 10001, "当前电脑缺少本地环境确认信息")
-	case errors.Is(err, runtimeservice.ErrBoundSessionInvalid), errors.Is(err, runtimeservice.ErrNodeCredentialInvalid):
-		api.Unauthorized(c, 11001, "当前电脑登录状态已失效，请重新登录 Desktop 并刷新本机状态")
-	case errors.Is(err, runtimeservice.ErrLocalTrustUnavailable), errors.Is(err, runtimeservice.ErrProfileOwnershipMismatch):
-		api.Conflict(c, 23003, "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口")
 	case errors.Is(err, profileservice.ErrForbidden):
 		api.Forbidden(c, 11003, "没有权限执行此 Profile 操作")
 	case errors.Is(err, profileservice.ErrIdentityUnverifiable):

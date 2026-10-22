@@ -602,6 +602,7 @@ func writeValidConfig(t *testing.T, root string) {
 	writeHTTPClient(t, root, "agent", "http", "127.0.0.1", 8765, "7s")
 	writeHTTPClient(t, root, "douyin", "https", "api.itfaba.com", 443, "30s")
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
+	writeConfigFile(t, root, "credentials/agent_token.toml", validAgentTokenCredentialTOML())
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
 	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\ncompose_interval = \"30s\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
 	writeConfigFile(t, root, "scheduler/compose.toml", validComposeWorkerTOML())
@@ -650,6 +651,10 @@ func validAppTOML(name string) string {
 
 func validAppYAMLIgnored(name string) string {
 	return "name: " + name + "\nserver:\n  http_addr: 127.0.0.1:1\n  session_cookie_secure: true\ninitial_admin:\n  username: \"\"\n  password: \"\"\n"
+}
+
+func validAgentTokenCredentialTOML() string {
+	return "secret = \"test-agent-token-secret-with-at-least-32-characters\"\n"
 }
 
 func writeDatabaseConfig(t *testing.T, root, fileName, name string) {

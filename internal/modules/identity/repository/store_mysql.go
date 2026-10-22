@@ -254,12 +254,9 @@ func deleteUser(db *gorm.DB, userID model.UserID) error {
         (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
         (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
         (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_binding_tickets WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_nodes WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM browser_profile_runtime_presence WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID,
 	).Scan(&references)
 	if err != nil {
 		return err
@@ -293,12 +290,9 @@ func deleteUserWithAudit(db *gorm.DB, userID model.UserID, event model.AuditEven
         (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
         (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
         (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_binding_tickets WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_nodes WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM browser_profile_runtime_presence WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID,
 	).Scan(&references); err != nil {
 		return err
 	}
@@ -815,6 +809,25 @@ func findSessionByTokenHash(db *gorm.DB, tokenHash string) (model.Session, bool,
 	row := queryRow(db,
 		`SELECT id, user_id, token_hash, client_type, created_at, expires_at, invalidated_at, invalidated_reason FROM user_sessions WHERE token_hash = ?`,
 		tokenHash,
+	)
+	session, err := scanSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Session{}, false, nil
+	}
+	if err != nil {
+		return model.Session{}, false, err
+	}
+	return session, true, nil
+}
+
+func FindSessionByID(sessionID string) (model.Session, bool, error) {
+	return findSessionByID(database.DB(), sessionID)
+}
+
+func findSessionByID(db *gorm.DB, sessionID string) (model.Session, bool, error) {
+	row := queryRow(db,
+		`SELECT id, user_id, token_hash, client_type, created_at, expires_at, invalidated_at, invalidated_reason FROM user_sessions WHERE id = ?`,
+		sessionID,
 	)
 	session, err := scanSession(row)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -357,17 +357,9 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, binding model.BitAccountBind
 		// BitBrowser and not referenced by any media account. Referenced windows
 		// are kept as local_missing so account bindings are not orphaned.
 		//
-		// Delete runtime presence first for ALL missing (non-archived) profiles so
-		// the FK from browser_profile_runtime_presence never blocks the profile
-		// delete. A correlated subquery inside a multi-table DELETE is unreliable,
-		// so the media-account guard lives only on the single-table profile delete.
+		// A correlated subquery inside a multi-table DELETE is unreliable, so the
+		// media-account guard lives only on the single-table profile delete.
 		cleanupArgs := append(append([]any{}, args...), model.ProfileArchived)
-		if _, err := execSQL(tx,
-			`DELETE rp FROM browser_profile_runtime_presence rp JOIN browser_profiles bp ON bp.id = rp.profile_id WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND bp.local_status <> ?`,
-			cleanupArgs...,
-		); err != nil {
-			return err
-		}
 		if _, err := execSQL(tx,
 			`DELETE bp FROM browser_profiles bp WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`,
 			cleanupArgs...,
@@ -512,14 +504,9 @@ func DeleteProfile(id string) error {
 
 func deleteProfile(db *gorm.DB, id string) error {
 	// Sync-delete: only called for disabled windows whose BitBrowser profile is
-	// gone. Removes stale runtime presence rows (the window no longer exists in
-	// BitBrowser) then the Cloud mirror record. Account/task/permit references
-	// are guarded in the service layer.
+	// gone. Account/task/permit references are guarded in the service layer.
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	if _, err := execSQL(tx, `DELETE FROM browser_profile_runtime_presence WHERE profile_id = ?`, id); err != nil {
-		return err
-	}
 	if _, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ?`, id); err != nil {
 		return err
 	}

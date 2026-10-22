@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent File Transfer API
-  version: 2026.10.13.1
+  version: 2026.10.23.1
   description: >-
     Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud
     preparation is never exposed to an Agent. A lease carries a short-lived single-object download grant
@@ -11,41 +11,41 @@ paths:
   /api/v1/cloud-agent/file-transfer-tasks/claim:
     post:
       operationId: claimLocalFileTransferTask
-      security: [{nodeBearer: []}]
-      summary: Atomically lease one pending transfer assigned to the authenticated local node.
+      security: [{agentBearer: []}]
+      summary: Atomically lease one pending transfer belonging to the user the Agent Token names.
       responses:
         '200':
           description: >-
             A lease with a short-lived single-object download grant, or an explicit no-task result. The
             lease is the only place a signed download URL appears; it is never stored.
           content: {application/json: {schema: {$ref: '#/components/schemas/ClaimResult'}}}
-        '401': {description: Node credential or bound user session is invalid.}
+        '401': {description: The Agent Token is missing, invalid, expired, or its Desktop session is no longer current (`AUTH_AGENT_TOKEN_*` / `AUTH_DESKTOP_REPLACED` / `DESKTOP_LOGIN_REQUIRED`).}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/heartbeat:
     post:
       operationId: heartbeatLocalFileTransferTask
-      security: [{nodeBearer: []}]
+      security: [{agentBearer: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Heartbeat'}}}
       responses:
         '200': {description: 'Lease remains valid. The response carries no task body; a renewed lease is implicit in the request succeeding.'}
-        '409': {description: Task is cancelled, terminal, or not leased by this node.}
+        '409': {description: Task is cancelled, terminal, or not leased by this attempt.}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/progress:
     post:
       operationId: reportLocalFileTransferProgress
-      security: [{nodeBearer: []}]
+      security: [{agentBearer: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Progress'}}}
       responses:
         '200': {description: 'Progress recorded. The response carries no task body. Progress does not renew the lease; only heartbeat does.'}
-        '409': {description: Task is cancelled, terminal, expired, or not leased by this node.}
+        '409': {description: Task is cancelled, terminal, expired, or not leased by this attempt.}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/complete:
     post:
       operationId: completeLocalFileTransferTask
-      security: [{nodeBearer: []}]
+      security: [{agentBearer: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody:
         required: true
@@ -54,31 +54,35 @@ paths:
         '200':
           description: 'Terminal result recorded after integrity validation. The body echoes what Cloud recorded, so an executor can confirm the outcome it produced.'
           content: {application/json: {schema: {$ref: '#/components/schemas/TransferTerminal'}}}
-        '409': {description: Terminal, cancelled, or wrong-node task.}
+        '409': {description: Terminal, cancelled, or not leased by this attempt.}
         '422': {description: 'Reported success lacks the expected size or SHA-256 of the leased task (error name `transfer_integrity_failed`).'}
 components:
   securitySchemes:
-    nodeBearer: {type: http, scheme: bearer}
+    agentBearer: {type: http, scheme: bearer, description: Signed, session-bound Agent Token; never a user session.}
   parameters:
     TaskID: {in: path, name: task_id, required: true, schema: {type: string}}
   schemas:
     Heartbeat:
       type: object
-      required: [completed_bytes]
-      properties: {completed_bytes: {type: integer, format: int64, minimum: 0}}
+      required: [attempt_id, completed_bytes]
+      properties:
+        attempt_id: {type: string, minLength: 1}
+        completed_bytes: {type: integer, format: int64, minimum: 0}
       additionalProperties: false
     Progress:
       type: object
-      required: [completed_bytes, bytes_per_second]
+      required: [attempt_id, completed_bytes, bytes_per_second]
       properties:
+        attempt_id: {type: string, minLength: 1}
         completed_bytes: {type: integer, format: int64, minimum: 0}
         bytes_per_second: {type: integer, format: int64, minimum: 0}
       additionalProperties: false
     Completion:
       type: object
-      required: [status]
+      required: [status, attempt_id]
       properties:
         status: {type: string, enum: [success, failed, cancelled]}
+        attempt_id: {type: string, minLength: 1}
         completed_bytes: {type: integer, format: int64, minimum: 0}
         sha256: {type: string, pattern: '^[A-Fa-f0-9]{64}$'}
         file_name:
@@ -101,9 +105,15 @@ components:
       additionalProperties: false
     LocalLease:
       type: object
-      required: [task_id, asset_type, asset_id, title, total_bytes, expected_sha256, lease_seconds, download_url, download_url_expires_at]
+      required: [task_id, attempt_id, asset_type, asset_id, title, total_bytes, expected_sha256, lease_seconds, download_url, download_url_expires_at]
       properties:
         task_id: {type: string}
+        attempt_id:
+          type: string
+          description: >-
+            The identifier of this claim. Every heartbeat, progress and completion for this lease must carry
+            it; Cloud refuses a report from an earlier attempt with `transfer_task_conflict` rather than
+            letting stale work settle the task.
         # 2026.10.13（CHG-20261013-085）：与业务侧 FileTransferTask 同一次加宽——成片
         # 租约的 title/game_name/published_at 语义见各自字段描述（成片无后两者时可缺省）。
         asset_type: {type: string, enum: [composite_output, material]}
@@ -153,7 +163,7 @@ components:
       required: [task]
       properties:
         task:
-          description: The leased task, or null when no eligible task is pending for this node.
+          description: The leased task, or null when no eligible task is pending for this user.
           oneOf:
             - {$ref: '#/components/schemas/LocalLease'}
             - {type: 'null'}

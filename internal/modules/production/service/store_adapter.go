@@ -11,7 +11,6 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 type mysqlStore struct{}
@@ -67,17 +66,10 @@ func (mysqlStore) MarkVideoNotPrepared(teamID identityservice.TeamID, materialID
 	return repository.MarkVideoNotPrepared(teamID, materialID, now)
 }
 
-// runtimeNodeResolver is the whole of this module's dependency on the
-// runtime-binding domain, and productionTransferCreator the whole of its
-// dependency on the transfer domain. Both are types rather than calls inside the
-// service so that a test answers them without a node table or a task table, and
-// so that the two module boundaries this module crosses are visible in one file.
-type runtimeNodeResolver struct{}
-
-func (runtimeNodeResolver) ResolveTrustedLocalNode(userID identityservice.UserID) (runtimeservice.AgentNode, error) {
-	return runtimeservice.ResolveTrustedLocalNode(userID)
-}
-
+// productionTransferCreator is the whole of this module's dependency on the
+// transfer domain. It is a type rather than a call inside the service so that a
+// test answers it without a task table, and so that the module boundary is
+// visible in one file.
 type productionTransferCreator struct{}
 
 func (productionTransferCreator) CreateUserDownload(input transferservice.CreateUserDownloadInput) (transferdto.Task, error) {

@@ -8,9 +8,8 @@ import (
 )
 
 type PreflightOutcome struct {
-	Outcome          model.Outcome `json:"outcome"`
-	PermitID         string        `json:"permit_id,omitempty"`
-	PermitCredential string        `json:"permit_credential,omitempty"`
-	ProfileID        string        `json:"profile_id"`
-	ExpiresAt        *time.Time    `json:"expires_at,omitempty"`
+	Outcome   model.Outcome `json:"outcome"`
+	PermitID  string        `json:"permit_id,omitempty"`
+	ProfileID string        `json:"profile_id"`
+	ExpiresAt *time.Time    `json:"expires_at,omitempty"`
 }

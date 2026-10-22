@@ -480,10 +480,6 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
 		return AccountCheckStart{}, ErrProfileUnavailable
 	}
-	nodeID := strings.TrimSpace(input.NodeID)
-	if nodeID == "" {
-		return AccountCheckStart{}, ErrInvalidInput
-	}
 	profileID, profileUserID, bitProfileID, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
 	if err != nil {
 		return AccountCheckStart{}, err
@@ -494,7 +490,7 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 	now := s.now()
 	taskID := s.newID("sensitive-account-check")
 	task := profileguardservice.SensitiveTask{
-		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
+		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID,
 		Operation: profileguardservice.OperationAuthenticatedAccountCheck, Status: profileguardservice.TaskAuthorized,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -529,10 +525,6 @@ func (s *accountService) StartCookieRead(actor identityservice.PublicUser, accou
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
 		return CookieReadStart{}, ErrProfileUnavailable
 	}
-	nodeID := strings.TrimSpace(input.NodeID)
-	if nodeID == "" {
-		return CookieReadStart{}, ErrInvalidInput
-	}
 	profileID, profileUserID, bitProfileID, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
 	if err != nil {
 		return CookieReadStart{}, err
@@ -543,7 +535,7 @@ func (s *accountService) StartCookieRead(actor identityservice.PublicUser, accou
 	now := s.now()
 	taskID := s.newID("sensitive-cookie-read")
 	task := profileguardservice.SensitiveTask{
-		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
+		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID,
 		Operation: profileguardservice.OperationCookieRead, Status: profileguardservice.TaskAuthorized,
 		CreatedAt: now, UpdatedAt: now,
 	}
