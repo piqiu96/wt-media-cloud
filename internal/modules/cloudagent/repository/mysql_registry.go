@@ -43,13 +43,11 @@ func Heartbeat(agentID string, req HeartbeatInput) (model.AgentNode, error) {
 }
 
 // heartbeat is pure presence: it updates the registry row and nothing else.
-// The old code additionally drained and replaced a local node when its bound
-// session was invalidated — contract v1, where session death revoked execution.
-// Under contract v2 the node is the execution-presence layer bound by device,
-// not by a login session, so a logged-out/replaced/expired session must not
-// revoke it (runtimebinding.authenticateCredential is the same split). Node
-// revocation now happens only where it belongs: unbinding the device or a
-// superseding registration for the same device.
+// The node is the execution-presence layer bound by device, not by a login
+// session, so a logged-out/replaced/expired session must not revoke it
+// (runtimebinding.authenticateCredential makes the same split). Node revocation
+// happens only when the device is unbound or a superseding registration
+// replaces it for the same device.
 func heartbeat(db *gorm.DB, agentID string, req HeartbeatInput) (model.AgentNode, error) {
 	status := req.Status
 	if status == "" {

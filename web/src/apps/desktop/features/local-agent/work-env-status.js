@@ -2,7 +2,7 @@
 // 二元结论（可工作 / 需检查），并给出每个阻断项的说明。
 //
 // 纯函数，便于 vitest 直测；组件（WorkEnvPill.vue）只负责写回响应式状态、轮询和渲染。
-// 取数也收在这里（loadWorkEnvInputs），因为「哪几项要刷」曾经是缺陷本身。
+// 取数也收在这里（loadWorkEnvInputs），保证「哪几项要刷」只有一个定义。
 
 import { createLocalAgentStatusPage } from './local-agent-status.js'
 import { localAgentStateFromStatus } from './service.js'
