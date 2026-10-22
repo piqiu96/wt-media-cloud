@@ -39,9 +39,9 @@ describe('my materials page', () => {
     expect(source).toContain('sort_by: sortBy.value, sort_order: sortOrder.value')
   })
 
-  // 这条守卫是给一个几乎发生过的 bug 的：筛选栏里有一个「文件状态」下拉，而过滤函数
-  // 只看了搜索词 —— 那个下拉会安静地什么都不做。状态筛选由 /my-materials 的
-  // video_status 参数完成，页面不再对返回行二次过滤，但控件必须与请求参数接线。
+  // 筛选栏有一个「文件状态」下拉；过滤函数若只看搜索词，这个控件会安静地什么都不做。
+  // 状态筛选由 /my-materials 的 video_status 参数完成，页面不再对返回行二次过滤，
+  // 但控件必须与请求参数接线。
   it('sends the file status filter it renders to the server', () => {
     expect(source).toContain('video_status: statusFilter.value')
     expect(source).toContain('v-model="statusFilter"')
@@ -49,8 +49,7 @@ describe('my materials page', () => {
   })
 
   /**
-   * 走查七轮（2026-09-30）推翻了「本页看不到已放弃的行」这条旧事实：列表接口不再
-   * 只取 `status = 'active'`，已放弃的关系照样返回，所以本页第一次有了「恢复使用」。
+   * 列表接口不只取 `status = 'active'`，已放弃的关系照样返回，所以本页有「恢复使用」。
    *
    * 恢复走**关系自己的端点**（`POST /material-usages/{id}/restore`），不是回素材库
    * 再点一次「加入我的素材」：那条命令按素材 id 走，对一个已经放弃过、又被别的入口
@@ -80,16 +79,15 @@ describe('my materials page', () => {
   })
 
   /**
-   * 走查七轮：行操作按「使用状态 × 下载状态」矩阵分支（CHG-069 任务 23，任务状态与业务
-   * 状态严格隔离），每行只给一个主操作。
+   * 行操作按「使用状态 × 下载状态」矩阵分支（任务状态与业务状态严格隔离），每行只给
+   * 一个主操作。
    *
-   * 规范 §5.6 与用户同轮裁定（「按钮按照超过 5 个才有更多按钮出现」）：本项目按钮数
-   * 上限是 3 个（详情 + 一个主操作 + 放弃使用），永远到不了 5，所以**没有「更多」**——
-   * 用户提示词里那套「3 个动作也收进更多」的写法按 §5.6 不采用。
+   * 规范 §5.6：本项目按钮数上限是 3 个（详情 + 一个主操作 + 放弃使用），永远到不了 5，
+   * 所以**没有「更多」**——「3 个动作也收进更多」的写法按 §5.6 不采用。
    *
-   * CHG-20261015-098 起已下载那一格再加一维：**本机实测还有没有那份文件**。有 → 不给
-   * 主操作（只剩 详情｜放弃使用）；实测没有 → 给「重新下载」。两个分支都由
-   * `needsRedownload` 判，与详情抽屉共用同一个判据（见下一条用例）。
+   * 已下载那一格再加一维：**本机实测还有没有那份文件**。有 → 不给主操作（只剩
+   * 详情｜放弃使用）；实测没有 → 给「重新下载」。两个分支都由 `needsRedownload` 判，
+   * 与详情抽屉共用同一个判据（见下一条用例）。
    */
   it('branches each row on the usage × download matrix, flat and never behind 更多', () => {
     const op = source.slice(source.indexOf('#op="{ row }"'), source.indexOf('</t-space>'))
@@ -136,9 +134,8 @@ describe('my materials page', () => {
     expect(source).toContain('已放弃使用')
   })
 
-  // 走查七轮用户提示词第一节：这一页不是收藏夹，副标题不该说「收藏」。
-  // CHG-20261015-098：这一页不再「进入后续生产」——合成的入口搬去了合成任务页，
-  // 副标题因此只说这里实际能做的事，诺言不多一句。
+  // 这一页不是收藏夹，副标题不该说「收藏」。合成的入口在合成任务页，这一页不承诺
+  // 「进入后续生产」，只说这里实际能做的事。
   it('describes the page by what it actually offers, not a favourites list', () => {
     expect(source).toContain('已加入的素材，在这里下载、查看使用状态与详情')
     expect(source).not.toContain('你收藏的素材')
@@ -149,8 +146,8 @@ describe('my materials page', () => {
    * 规范 §7.2：使用状态与文件状态并排、不合并——同一个素材可以同时是「使用中 + 准备失败」，
    * 压成一个混合状态最先丢掉的正是运营要做判断的那种组合。
    *
-   * 游戏这一列同时被收进「素材」格副行（与作者同格）：走查七轮把它从列里拿掉，
-   * 是因为列里的「游戏」和素材识别信息说的是同一件事，而列本身占了 100px。
+   * 游戏收进「素材」格副行（与作者同格），不单独占列：它与素材识别信息说的是同一件事，
+   * 而列本身占了 100px。
    */
   it('carries 使用状态 next to 文件状态 and folds the game into the 素材 cell', () => {
     expect(source).toContain("{ colKey: 'usage_status', title: '使用状态'")
@@ -176,8 +173,8 @@ describe('my materials page', () => {
     expect(source).toMatch(/client\.get\(row\.id\)[\s\S]{0,200}?usage_status: row\.usage_status/)
   })
 
-  // 抽屉按上下文给动作：我的素材上下文提供下载/重新下载，不再提供「加入我的素材」
-  // （它在这里就是自己），也不再提供合成（CHG-20261015-098 撤掉 @compose）。
+  // 抽屉按上下文给动作：我的素材上下文提供下载/重新下载，不提供「加入我的素材」
+  // （它在这里就是自己），也不提供合成。
   it('opens the drawer in mine mode with the actions of a relation, and no add', () => {
     expect(source).toContain('mode="mine"')
     expect(source).toContain('@download="download"')
@@ -187,9 +184,9 @@ describe('my materials page', () => {
     expect(source).not.toContain('@compose')
   })
 
-  // 「加入合成」的后端端点在 CHG-082 落地了，但入口在 CHG-20261015-098 又整条搬去了
-  // 合成任务页。这里钉住的是**没有任何残留**：既不能有一个说「已加入合成」的 toast
-  // （那是伪造的提交），也不能有一条指向合成页 `{ name: 'Compose' }` 的跳转。
+  // 创建合成任务的入口在合成任务页。这里钉住的是**没有任何残留**：既不能有一个说
+  // 「已加入合成」的 toast（那是伪造的提交），也不能有一条指向合成页 `{ name: 'Compose' }`
+  // 的跳转。
   it('leaves no compose affordance behind, faked or routed', () => {
     expect(source).not.toContain("{ name: 'Compose' }")
     expect(source).not.toContain('已加入合成')
@@ -198,9 +195,8 @@ describe('my materials page', () => {
     expect(source).toContain("import { useRoute } from 'vue-router'")
   })
 
-  // 走查修正（CHG-20260930-069）：与素材库同一条行形状 —— 素材 ID 第一列、封面随后，
-  // 标题蓝色可点跳来源平台落地页，作者、链接与体积在详情里；下载按钮只叫「下载」，
-  // 下面不挂提示小字。
+  // 与素材库同一条行形状 —— 素材 ID 第一列、封面随后，标题蓝色可点跳来源平台落地页，
+  // 作者、链接与体积在详情里；下载按钮只叫「下载」，下面不挂提示小字。
   it('shares the library row shape: id first, clickable title, no download hint', () => {
     const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
     const materialAt = source.indexOf("{ colKey: 'material', title: '素材'")
@@ -232,7 +228,7 @@ describe('my materials page', () => {
   })
 
   /**
-   * 「文件状态」列 = 纯 `download_status`（CHG-069 任务 23 裁定：不再回落 video_status）。
+   * 「文件状态」列 = 纯 `download_status`，不回落 `video_status`。
    *
    * 下载状态是**这条关系**的（后端按「最新一条 user_download 任务」派生），不是素材的：
    * 同一行素材对两个下载过不同次的人要显示不同状态，所以它随 usage 走、落在行对象上，
@@ -270,14 +266,13 @@ describe('my materials page', () => {
   })
 })
 
-  // CHG-20261015-098（用户裁定）：创建合成任务的入口**只在合成任务页**。我的素材这一页
-  // 曾经有工具条批量和行内「加入合成」两个口子（CHG-20261013-082），现在整条撤掉 ——
-  // 素材改为在合成任务页的创建抽屉里从「我的素材」中选。这里钉住的是净删除：任何一处
-  // 残留都会让同一个能力出现两个入口，而它们的行为迟早会不一致。
+  // 创建合成任务的入口**只在合成任务页**；素材在该页的创建抽屉里从「我的素材」中选。
+  // 这里钉住的是净删除：任何一处残留都会让同一个能力出现两个入口，而它们的行为迟早
+  // 会不一致。
   describe('compose task creation moved out (CHG-20261015-098)', () => {
     it('keeps no compose creation entry or dialog host', () => {
-      // 逐个词查的是**子串**：旧变量名 `createMaterials` 不能进这张表——它是这一页
-      // 一直在用的 `createMaterialsClient()` 的前缀，词表写宽了会把正当代码报成残留。
+      // 逐个词查的是**子串**：`createMaterials` 不能进这张表——它是 `createMaterialsClient()`
+      // 的前缀，词表写宽了会把正当代码报成残留。
       for (const gone of [
         '加入合成',
         '创建合成任务',
