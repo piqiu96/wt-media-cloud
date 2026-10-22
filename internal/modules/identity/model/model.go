@@ -11,6 +11,16 @@ import (
 var (
 	ErrAuthenticationFailed = errors.New("authentication failed")
 	ErrSessionInvalid       = errors.New("session is invalid")
+	ErrSessionInvalidated   = errors.New("session has been invalidated")
+	ErrSessionExpired       = errors.New("session has expired")
+	ErrDesktopReplaced      = errors.New("desktop session was replaced by another login")
+	ErrDesktopLoginRequired = errors.New("a desktop login is required")
+	ErrDesktopLoginConflict = errors.New("desktop login requires replacement confirmation")
+	// ErrSessionReplaceNeeded is the pre-068 name for the same conflict. It is
+	// kept only so existing internal callers keep compiling; no path treats it
+	// as a separate outcome.
+	ErrSessionReplaceNeeded = ErrDesktopLoginConflict
+	ErrSessionStateInvalid  = errors.New("multiple active desktop sessions exist")
 	ErrMissingCredentials   = errors.New("login username or password is empty")
 	ErrLoginInputInvalid    = errors.New("login username or password violates length limits")
 	ErrForbidden            = errors.New("operation is forbidden")
@@ -26,8 +36,23 @@ var (
 	ErrGameUnavailable      = errors.New("game is not available")
 	ErrPasswordTooShort     = errors.New("password is too short")
 	ErrBootstrapUnavailable = errors.New("initial admin cannot be created")
-	ErrSessionReplaceNeeded = errors.New("active session replacement requires confirmation")
 )
+
+// DesktopLoginConflictError carries the currently active Desktop session so
+// the client can resubmit with the exact row it is replacing. A stale id is
+// rejected the same way, which is what makes two concurrent confirmations
+// resolve to one winner without a version counter on users.
+type DesktopLoginConflictError struct {
+	ActiveSessionID string
+}
+
+func (e *DesktopLoginConflictError) Error() string {
+	return ErrDesktopLoginConflict.Error()
+}
+
+func (e *DesktopLoginConflictError) Is(target error) bool {
+	return target == ErrDesktopLoginConflict
+}
 
 type Role string
 
@@ -136,13 +161,31 @@ const (
 	ClientTypeDesktop ClientType = "desktop"
 )
 
+const (
+	SessionInvalidReasonLogout          = "logout"
+	SessionInvalidReasonPasswordChanged = "password_changed"
+	SessionInvalidReasonAdminReset      = "admin_reset"
+	SessionInvalidReasonUserDisabled    = "user_disabled"
+	SessionInvalidReasonForceLogout     = "force_logout"
+	SessionInvalidReasonDesktopReplaced = "desktop_replaced"
+	SessionInvalidReasonSuperseded      = "superseded"
+)
+
 type Session struct {
-	ID         string
-	UserID     UserID
-	TokenHash  string
-	ClientType ClientType
-	CreatedAt  time.Time
-	InvalidAt  *time.Time
+	ID                string
+	UserID            UserID
+	TokenHash         string
+	ClientType        ClientType
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+	InvalidAt         *time.Time
+	InvalidatedReason string
+}
+
+// SessionCreateResult reports whether the atomic session insert replaced an
+// active Desktop row, for audit and caller diagnostics.
+type SessionCreateResult struct {
+	ReplacedSessionID string
 }
 
 type AuditEvent = sharedidentity.AuditEvent

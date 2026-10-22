@@ -88,6 +88,14 @@ func authenticationFailureReason(credentialPresent bool, err error) string {
 		return "missing_credential"
 	case errors.Is(err, service.ErrAuthenticationFailed):
 		return "authentication_failed"
+	case errors.Is(err, service.ErrDesktopReplaced):
+		return "desktop_replaced"
+	case errors.Is(err, service.ErrSessionInvalidated):
+		return "session_invalidated"
+	case errors.Is(err, service.ErrSessionExpired):
+		return "session_expired"
+	case errors.Is(err, service.ErrDesktopLoginRequired):
+		return "desktop_login_required"
 	case errors.Is(err, service.ErrSessionInvalid):
 		return "session_invalid"
 	case errors.Is(err, service.ErrForbidden):
@@ -105,8 +113,12 @@ func sessionToken(c *hertzapp.RequestContext) string {
 }
 
 func writeAuthenticationError(c *hertzapp.RequestContext, err error) {
+	if failure, ok := service.DescribeAuthFailure(err); ok {
+		api.FailureCode(c, 401, 11001, failure.Message, failure.Code, nil, false, failure.RecoveryAction)
+		return
+	}
 	switch {
-	case errors.Is(err, service.ErrAuthenticationFailed), errors.Is(err, service.ErrSessionInvalid):
+	case errors.Is(err, service.ErrAuthenticationFailed):
 		api.Unauthorized(c, 11001, "请先登录或凭证已过期")
 	case errors.Is(err, service.ErrForbidden):
 		api.Forbidden(c, 11003, "没有权限执行此操作")

@@ -31,6 +31,10 @@ func Logout(token string) error {
 	return newService(mysqlStore{}).Logout(token)
 }
 
+func ForceLogout(actorID, userID UserID) error {
+	return newService(mysqlStore{}).ForceLogout(actorID, userID)
+}
+
 func SetUserStatus(actorID, userID UserID, status UserStatus) error {
 	return newService(mysqlStore{}).SetUserStatus(actorID, userID, status)
 }

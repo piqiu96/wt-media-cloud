@@ -19,9 +19,14 @@ type ApiResponse struct {
 
 type ApiError struct {
 	Type        string      `json:"type,omitempty"`
+	Code        string      `json:"code,omitempty"`
 	Details     interface{} `json:"details,omitempty"`
 	Retryable   bool        `json:"retryable,omitempty"`
 	FieldErrors interface{} `json:"field_errors,omitempty"`
+	// RecoveryAction tells the client which user-visible recovery to offer.
+	// It is deliberately separate from Retryable: a replaced Desktop login is
+	// not retryable, but it still has a recovery (log in again).
+	RecoveryAction string `json:"recovery_action,omitempty"`
 }
 
 // ---- Success Helpers ----
@@ -149,6 +154,20 @@ func Failure(c *hertzapp.RequestContext, httpStatus, errcode int, message string
 // where there is one.
 func FailureNamed(c *hertzapp.RequestContext, httpStatus, errcode int, message, errorType string) {
 	Failure(c, httpStatus, errcode, message, &ApiError{Type: errorType})
+}
+
+// FailureCode writes a typed failure whose `error.code` is the machine-readable
+// discriminator and whose `error.recovery_action` tells the client what to
+// offer next. `error.type` repeats the code so older readers that only know the
+// frozen name field still see something stable.
+func FailureCode(c *hertzapp.RequestContext, httpStatus, errcode int, message, code string, details interface{}, retryable bool, recoveryAction string) {
+	Failure(c, httpStatus, errcode, message, &ApiError{
+		Type:           code,
+		Code:           code,
+		Details:        details,
+		Retryable:      retryable,
+		RecoveryAction: recoveryAction,
+	})
 }
 
 // BadRequest writes HTTP 400.

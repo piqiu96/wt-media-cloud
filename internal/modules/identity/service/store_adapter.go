@@ -28,8 +28,8 @@ func (mysqlStore) UpdateOwnProfile(userID model.UserID, nickname, avatarID strin
 }
 func (mysqlStore) ListUsers() ([]model.User, error) { return repository.ListUsers() }
 func (mysqlStore) UpdateUser(user model.User) error { return repository.UpdateUser(user) }
-func (mysqlStore) UpdateUserAndInvalidateSessions(user model.User, event model.AuditEvent) error {
-	return repository.UpdateUserAndInvalidateSessions(user, event)
+func (mysqlStore) UpdateUserAndInvalidateSessions(user model.User, event model.AuditEvent, reason string) error {
+	return repository.UpdateUserAndInvalidateSessions(user, event, reason)
 }
 func (mysqlStore) DeleteUser(userID model.UserID) error { return repository.DeleteUser(userID) }
 func (mysqlStore) DeleteUserWithAudit(userID model.UserID, event model.AuditEvent) error {
@@ -83,20 +83,23 @@ func (mysqlStore) GameReferences(gameID string) (model.GameReferences, error) {
 func (mysqlStore) UserHasGameReferencesOutsideScope(userID model.UserID, gameIDs []string) (bool, error) {
 	return repository.UserHasGameReferencesOutsideScope(userID, gameIDs)
 }
-func (mysqlStore) CreateSession(session model.Session) error {
-	return repository.CreateSession(session)
+func (mysqlStore) CreateSession(session model.Session, replaceSessionID string) (model.SessionCreateResult, error) {
+	return repository.CreateSession(session, replaceSessionID)
 }
 func (mysqlStore) FindSessionByTokenHash(tokenHash string) (model.Session, bool, error) {
 	return repository.FindSessionByTokenHash(tokenHash)
 }
-func (mysqlStore) HasActiveSessionForClientType(userID model.UserID, clientType model.ClientType) (bool, error) {
-	return repository.HasActiveSessionForClientType(userID, clientType)
+func (mysqlStore) FindActiveDesktopSession(userID model.UserID, at time.Time) (model.Session, bool, error) {
+	return repository.FindActiveDesktopSession(userID, at)
 }
-func (mysqlStore) InvalidateUserSessionsForClientType(userID model.UserID, clientType model.ClientType, at time.Time) error {
-	return repository.InvalidateUserSessionsForClientType(userID, clientType, at)
+func (mysqlStore) InvalidateUserSessions(userID model.UserID, at time.Time, reason string) error {
+	return repository.InvalidateUserSessions(userID, at, reason)
 }
-func (mysqlStore) InvalidateSessionByID(sessionID string, at time.Time) error {
-	return repository.InvalidateSessionByID(sessionID, at)
+func (mysqlStore) InvalidateUserSessionsWithAudit(userID model.UserID, at time.Time, reason string, event model.AuditEvent) error {
+	return repository.InvalidateUserSessionsWithAudit(userID, at, reason, event)
+}
+func (mysqlStore) InvalidateSessionByID(sessionID string, at time.Time, reason string) error {
+	return repository.InvalidateSessionByID(sessionID, at, reason)
 }
 func (mysqlStore) AppendAudit(event model.AuditEvent) error { return repository.AppendAudit(event) }
 func (mysqlStore) ListAuditLogs(limit int) ([]model.AuditEvent, error) {
