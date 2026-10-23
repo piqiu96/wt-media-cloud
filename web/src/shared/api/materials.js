@@ -27,12 +27,12 @@ export function createMaterialsClient({ base = '/api/v1', fetch = globalThis.fet
     // 哪一行。两条路径最终落到同一行（uq_material_usages_user_material）。
     restoreUsage(usageId) { return api.post(`/material-usages/${usageId}/restore`, {}) },
     listMyMaterials(params = {}) { return api.get('/my-materials', params) },
-    // 202 恒定：此刻还没有任何字节被下载，任务在节点领取前一直是 pending。
+    // 202 恒定：此刻还没有任何字节被下载，任务在领取前一直是 pending。
     // 下一次诚实的进度来源是 GET /file-transfer-tasks，不是这个响应。
     async createDownload(id) {
       if (isDesktop()) {
-        const { ensureTrustedLocalAgent } = await import('../../apps/desktop/features/local-agent/init.js')
-        await ensureTrustedLocalAgent()
+        const { ensureAgentToken } = await import('../../apps/desktop/features/local-agent/init.js')
+        await ensureAgentToken()
       }
       return api.post(`/materials/${id}/downloads`, {})
     },

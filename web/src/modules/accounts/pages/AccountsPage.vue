@@ -7,7 +7,7 @@ import { createProfileBindingClient } from "../../../shared/api/profileBindings.
 import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
-import { cloudBaseUrl } from "../../../apps/desktop/features/local-agent/init.js"
+import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
@@ -50,7 +50,6 @@ const createError = ref("")
 
 const detailVisible = ref(false)
 const detailAccount = ref(null)
-const checkNotice = ref("")
 const checkFailure = ref("")
 const checkFailureEnv = ref(false)
 const readingCookie = ref(false)
@@ -76,9 +75,6 @@ const allTagsPopup = ref(null)
 
 const selectedAccountIds = ref([])
 const searchProfile = ref("")
-
-let lastRuntimeRefreshAt = 0
-let lastRuntimeStatus = null
 
 onMounted(async () => {
   try {
@@ -194,7 +190,6 @@ async function createAccount() {
 
 function openDetail(account) {
   detailAccount.value = account
-  checkNotice.value = ""
   checkFailure.value = ""
   checkFailureEnv.value = false
   detailVisible.value = true
@@ -479,17 +474,6 @@ function canOperateBoundWindow(account) {
   return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active" && profile.business_status !== "disabled"
 }
 
-function localTrustMessage(e) {
-  const message = String(e?.message || e || "")
-  if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
-    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境检测」页刷新本机状态后重试。"
-  }
-  if (message.includes("timed out") || message.includes("timeout")) {
-    return "BitBrowser窗口操作超时：Local Agent 已请求 BitBrowser，但 BitBrowser 未在限定时间内返回。请查看 Agent 日志确认是否已延迟打开，或稍后重试。"
-  }
-  return message || "本机操作失败，请查看 Agent 日志。"
-}
-
 async function desktopLocalAgentService() {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
     throw new Error("账号检查只能在 Desktop 客户端执行")
@@ -497,37 +481,9 @@ async function desktopLocalAgentService() {
   return createLocalAgentService({ invoke })
 }
 
-async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
-  const now = Date.now()
-  if (!force && lastRuntimeStatus?.node_id && now - lastRuntimeRefreshAt < 60_000) {
-    return lastRuntimeStatus
-  }
-  const localStatus = await service.status()
-  try {
-    const refreshed = await service.refreshRuntime({ cloudBaseUrl: await cloudBaseUrl() })
-    lastRuntimeStatus = refreshed
-    lastRuntimeRefreshAt = now
-    return refreshed
-  } catch (e) {
-    if (localStatus?.node_id) {
-      checkNotice.value = "本机状态已读取，Cloud可信状态刷新暂时失败；将继续由Cloud预检判断是否可执行。"
-      lastRuntimeStatus = localStatus
-      lastRuntimeRefreshAt = now
-      return localStatus
-    }
-    throw e
-  }
-}
-
 async function runSingleAccountCheck(account, service) {
-  const status = await refreshRuntimeWithCooldown(service)
-  const nodeId = status.node_id || ""
-  if (!nodeId) {
-    throw new Error("当前电脑尚未完成可信绑定，请先到「环境检测」页重新检测并绑定。")
-  }
-  const start = await accountClient.check(account.id, { nodeId })
+  const start = await accountClient.check(account.id)
   const localResult = await service.accountCheck({
-    cloudBaseUrl: await cloudBaseUrl(),
     taskId: start.task_id,
     bitProfileId: start.bit_profile_id,
     platform: start.platform,
@@ -551,12 +507,8 @@ async function readProfileCookieFor(account) {
   error.value = ""
   try {
     const service = await desktopLocalAgentService()
-    const status = await refreshRuntimeWithCooldown(service)
-    const nodeId = status.node_id || ""
-    if (!nodeId) throw new Error("当前电脑尚未完成可信绑定，请先到「环境检测」页重新检测并绑定。")
-    const start = await accountClient.startCookieReadSync(target.id, { nodeId })
+    const start = await accountClient.startCookieReadSync(target.id)
     const localResult = await service.cookieRead({
-      cloudBaseUrl: await cloudBaseUrl(),
       taskId: start.task_id,
       bitProfileId: start.bit_profile_id,
     })
@@ -636,7 +588,6 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     return
   }
   batchChecking.value = true
-  checkNotice.value = ""
   const initialResults = candidates.map(account => {
     if (!canCheckAccount(account)) {
       return { account, status: "skipped", message: executableText(account) }
@@ -691,7 +642,7 @@ async function openAccountProfile(account) {
     const result = await service.profileOpen(bitProfileId)
     feedback.toast.success(`已打开绑定窗口：${profile.name || result.bit_profile_id}`)
   } catch (e) {
-    feedback.toast.error(localTrustMessage(e))
+    feedback.toast.error(executionErrorMessage(e))
   } finally {
     operatingProfileId.value = ""
   }
@@ -711,7 +662,7 @@ async function closeAccountProfile(account) {
     const result = await service.profileClose(bitProfileId)
     feedback.toast.success(`已关闭绑定窗口：${profile.name || result.bit_profile_id}`)
   } catch (e) {
-    feedback.toast.error(localTrustMessage(e))
+    feedback.toast.error(executionErrorMessage(e))
   } finally {
     operatingProfileId.value = ""
   }
@@ -1119,7 +1070,6 @@ const columns = [
           <span v-if="item.message" class="check-item-msg">{{ item.message }}</span>
         </div>
       </div>
-      <FeedbackAlert v-if="checkNotice" :message="checkNotice" theme="info" style="margin-top:12px" />
       <FeedbackAlert v-if="checkFailure" theme="error" style="margin-top:12px">
         <template #message>{{ checkFailure }}</template>
         <template #operation>

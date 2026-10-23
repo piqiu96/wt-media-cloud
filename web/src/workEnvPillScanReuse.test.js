@@ -48,7 +48,7 @@ describe('work environment pill scan reuse', () => {
 
   it('carries the flag from the pill down to the invoke call', () => {
     expect(sliceBetween(pill, 'async function refreshAll', '// 背景刷新')).toContain(
-      'loadWorkEnvInputs({ session, devices, service, invoke, reuseScan })'
+      'loadWorkEnvInputs({ session, bitAccounts, service, reuseScan })'
     )
     expect(sliceBetween(pill, 'async function refresh(', 'async function manualCheck')).toContain(
       'refreshAll({ reuseScan })'
@@ -64,6 +64,6 @@ describe('work environment pill scan reuse', () => {
   it('defaults to a live scan when nobody asks', () => {
     // 缺省必须是实时：`PersonalInfoPage`、账号检查、绑定流程都不传这个参数。
     expect(service).toContain('async status({ reuseScan = false } = {})')
-    expect(status).toContain('export async function loadWorkEnvInputs({ session, devices, service, invoke, reuseScan = false })')
+    expect(status).toContain('export async function loadWorkEnvInputs({ session, bitAccounts, service, reuseScan = false })')
   })
 })

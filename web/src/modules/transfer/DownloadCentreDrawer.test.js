@@ -32,33 +32,6 @@ describe('download centre drawer', () => {
   })
 
   /**
-   * 「重取」（CHG-20261002-074 阶段 3）：悬置/可重取的行走**重取**，而不是「重新下载」。
-   *
-   * 两个按钮都在说「再来一次」，但重取要先处理「发给这台设备却没人领」的悬置行（取消再
-   * 发起）；可重取的行（解绑遗留）则是换机重投递的入口，为当前设备建新任务。它们互斥：
-   * 可重取的行给「重取」，其余终态行才给「重新下载」。
-   */
-  it('shows the re-take button under the fact the row computed', () => {
-    expect(source).toContain('v-if="row.canRetake"')
-    expect(source).toContain('@click="retake(row.task)"')
-    expect(source).toContain('v-else-if="row.canRedownload"')
-  })
-
-  // 重取悬置行先取消（pending 没有执行器，取消是立即终态）再重新发起；可重取行已是终态，
-  // 直接发起。两条都走与第一次点击完全相同的下载入口。
-  it('re-takes through the download entry point, cancelling a suspended task first', () => {
-    expect(source).toContain("if (task.status === 'pending') {")
-    expect(source).toContain('await client.cancelTask(task.id)')
-    expect(source).toContain('await createDownloadFor(task)')
-    expect(source).toContain('feedback.toast.error(createDownloadFailureMessage(e))')
-  })
-
-  // 新任务要出现在这张列表里，重取之后同样要刷新（与「重新下载」同一条理由）。
-  it('refreshes the list after re-taking', () => {
-    expect(source).toMatch(/async function retake\(task\) \{(.|\n)*?await load\(\)/)
-  })
-
-  /**
    * 从「历史」再打开面板也要取数。
    *
    * 面板每次收尾会自己落到「历史」（没有在跑的任务时），所以下一次打开时 `activeTab`
@@ -71,13 +44,6 @@ describe('download centre drawer', () => {
     expect(watcher).toContain("activeTab.value = 'active'")
     expect(watcher).not.toMatch(/activeTab\.value = 'active'\s*\n\s*return/)
     expect(watcher).toMatch(/load\(\)\.then\(/)
-  })
-
-  // 悬置行的「发给这台设备」由本机 device_id 认出：面板打开时先问 runtime，再穿给每一行。
-  it('asks the runtime for the local device id and feeds it into the rows', () => {
-    expect(source).toContain("await invoke('local_device_identity')")
-    expect(source).toContain('identity?.device_id')
-    expect(source).toContain('localDeviceId: localDeviceId.value,')
   })
 
   /**
@@ -96,7 +62,6 @@ describe('download centre drawer', () => {
   /**
    * 「重新下载」是**新建一条任务**，所以它必须走发起下载那个入口 —— 而入口由行的
    * asset_type 决定（CHG-20261013-085）：成片行走成片下载端点，素材行照旧走素材端点。
-   * 两条路都汇进同一个入口函数，重取与重新下载共用它。
    */
   it('re-downloads through the entry point the row names', () => {
     expect(source).toContain('await createDownloadFor(task)')

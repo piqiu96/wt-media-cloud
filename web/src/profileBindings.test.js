@@ -5,59 +5,44 @@ import { createProfileBindingClient } from './shared/api/profileBindings.js'
 const response = (data) => ({ ok: true, json: async () => ({ errcode: 0, data }) })
 
 describe('profile binding client', () => {
-  it('submits only normalized secret-free snapshot fields', async () => {
+  it('submits the Agent snapshot with its observation time and nothing secret', async () => {
     const fetch = vi.fn(async () => response({ id: 'scan-1', status: 'ready', diff: [] }))
     const client = createProfileBindingClient({ fetch })
-    const raw = { main_user_id: 'main-user-1', profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', status: 1, proxy_type: 'socks5', proxy_host: '127.0.0.1', proxy_port: 1080, remark: '测试窗口', cookie: 'secret', proxyPassword: 'secret' }] }
+    const raw = { main_user_id: 'main-user-1', observed_at: '2026-10-23T10:00:00Z', profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', status: 1, proxy_type: 'socks5', proxy_host: '127.0.0.1', proxy_port: 1080, remark: '测试窗口', cookie: 'secret', proxyPassword: 'secret' }] }
 
-    await client.submit(raw, { nodeId: 'node-1' })
+    await client.submit(raw)
 
     const body = JSON.parse(fetch.mock.calls[0][1].body)
     expect(body).toEqual({
       main_user_id: 'main-user-1',
-      node_id: 'node-1',
+      observed_at: '2026-10-23T10:00:00Z',
       profiles: [{ bit_profile_id: 'p1', main_user_id: 'main-user-1', profile_user_id: 'bit-user-1', name: '窗口', bit_status: '1', remark: '测试窗口', proxy_type: 'socks5', proxy_host: '127.0.0.1', proxy_port: 1080 }],
     })
     expect(fetch.mock.calls[0][1].credentials).toBe('include')
   })
 
-  it('confirms scans and lists profiles with cookie credentials', async () => {
+  it('confirms scans without a body and lists profiles with cookie credentials', async () => {
     const fetch = vi.fn(async () => response([]))
     const client = createProfileBindingClient({ fetch })
 
-    await client.confirm('scan-1', { nodeId: 'node-1' })
-    await client.confirmMainIdentityDirect('main-user-1')
+    await client.confirm('scan-1')
     await client.listProfiles()
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/bit-browser/profile-scans/scan-1/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ node_id: 'node-1' })
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/bit-browser/main-identity', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ main_user_id: 'main-user-1' })
-    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({})
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 
-  // 「比特账号绑定」自助入口是唯一的 overwrite 出口（CHG-20261002-074 阶段 3）：只有显式传入
-  // overwrite 时才随请求发送，缺省路径不发送 —— 服务端把「账号不一致」当作 23002 拒绝。
-  it('sends overwrite only when the deliberate self-service entry asks for it', async () => {
-    const fetch = vi.fn(async () => response({}))
-    const client = createProfileBindingClient({ fetch })
-
-    await client.confirmMainIdentityDirect('main-user-1', { overwrite: true })
-
-    expect(fetch).toHaveBeenCalledTimes(1)
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ main_user_id: 'main-user-1', overwrite: true })
-  })
-
-  it('sends node id for local sensitive profile entries', async () => {
+  it('creates and opens windows without naming a device or node', async () => {
     const fetch = vi.fn(async () => response({ task_id: 'task-1' }))
     const client = createProfileBindingClient({ fetch })
 
-    await client.createProfile({ name: '窗口一' }, { nodeId: 'node-1' })
-    await client.openProfile('profile-1', { nodeId: 'node-1' })
+    await client.createProfile({ name: '窗口一' })
+    await client.openProfile('profile-1')
     await client.assignProfileOwner('profile-1', 3)
 
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: '窗口一', node_id: 'node-1' })
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ node_id: 'node-1' })
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: '窗口一' })
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({})
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles/profile-1/assign-owner', expect.objectContaining({ method: 'POST', credentials: 'include' }))
     expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ user_id: 3 })
   })

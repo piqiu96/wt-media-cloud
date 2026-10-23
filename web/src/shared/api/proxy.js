@@ -63,8 +63,8 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
     previewLocalScan(scanId) {
       return api.post('/proxies/local-scan/preview', { scan_id: scanId })
     },
-    confirmLocalScan(scanId, nodeId) {
-      return api.post('/proxies/local-scan/confirm', { scan_id: scanId, node_id: nodeId })
+    confirmLocalScan(scanId) {
+      return api.post('/proxies/local-scan/confirm', { scan_id: scanId })
     },
   }
 }

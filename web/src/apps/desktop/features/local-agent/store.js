@@ -1,11 +1,10 @@
 import { localAgentStateFromStatus } from "./service.js";
 
 const INITIAL_STATE = Object.freeze({
-  nodeId: "",
   agentId: null,
   status: "unknown",
   bitbrowserStatus: "unknown",
-  mainUserId: "",
+  mainUserIdMasked: "",
   operatingSystem: "",
   cpuArchitecture: "",
   agentVersion: "",

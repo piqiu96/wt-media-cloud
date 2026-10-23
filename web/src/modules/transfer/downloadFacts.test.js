@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancel, canOpenFile, canRedownload, canRetake, downloadAssetKey, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isReclaimableAfterUnbind, isSuspendedOnDevice, isTerminal, needsCloudPreparation, needsRedownload, progressOf, taskState, withinDays } from './downloadFacts.js'
+import { canCancel, canOpenFile, canRedownload, downloadAssetKey, downloadedFileName, fileFact, filePresence, hasLiveTask, isFailed, isHistory, isTerminal, needsCloudPreparation, needsRedownload, progressOf, taskState, withinDays } from './downloadFacts.js'
 
 const task = (over = {}) => ({
   id: 't-1',
@@ -231,51 +231,6 @@ describe('re-downloading a material this machine has lost', () => {
 })
 
 /**
- * 「重取」（CHG-20261002-074 阶段 3）：悬置在这台设备上没人领的 pending 任务，或解绑时
- * 被标记可重取的终态行。前者要本机 device_id 才能认出（浏览器读不到 → 恒 false），后者
- * 恰恰是旧设备名下的任务，不需要本机 id。
- */
-describe('re-take', () => {
-  it('knows a pending task that is stuck on this device', () => {
-    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(true)
-    // 发给别的设备的不算「这台」。
-    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-A' }), 'dev-B')).toBe(false)
-    // 没有本机 device_id（浏览器）就认不出，不重取。
-    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-B' }), null)).toBe(false)
-    expect(isSuspendedOnDevice(task({ status: 'pending', assigned_device_id: 'dev-B' }))).toBe(false)
-    // 没有寻址设备 / 已经终态 / 正在跑，都不是「没人领的悬置」。
-    expect(isSuspendedOnDevice(task({ status: 'pending' }), 'dev-B')).toBe(false)
-    expect(isSuspendedOnDevice(task({ status: 'success', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(false)
-    expect(isSuspendedOnDevice(task({ status: 'running', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(false)
-  })
-
-  it('knows a cancelled row that UnbindDevice marked reclaimable', () => {
-    expect(isReclaimableAfterUnbind(task({ status: 'cancelled', error_code: 'device_unbound' }))).toBe(true)
-    // 手动取消、失败都不带这个标记。
-    expect(isReclaimableAfterUnbind(task({ status: 'cancelled' }))).toBe(false)
-    expect(isReclaimableAfterUnbind(task({ status: 'failed', error_code: 'device_unbound' }))).toBe(false)
-    expect(isReclaimableAfterUnbind(null)).toBe(false)
-  })
-
-  it('offers re-take for a reclaimable row no matter which device you are on', () => {
-    // 设备 A 领任务→解绑→设备 B 绑定后，这条在 B 上仍要能重取：认的是 device_unbound
-    // 标记，不是把当前设备拿去比。
-    expect(canRetake(task({ status: 'cancelled', error_code: 'device_unbound' }), 'dev-B')).toBe(true)
-    expect(canRetake(task({ status: 'cancelled', error_code: 'device_unbound' }))).toBe(true)
-  })
-
-  it('offers re-take for a suspended task only when we can identify this device', () => {
-    expect(canRetake(task({ status: 'pending', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(true)
-    // 浏览器读不到本机 device_id：悬置那一支不能认，退给可重取那一支（这里不是它）。
-    expect(canRetake(task({ status: 'pending', assigned_device_id: 'dev-B' }))).toBe(false)
-    // 成功的行、非素材的行都不重取。
-    expect(canRetake(task({ status: 'success', assigned_device_id: 'dev-B' }), 'dev-B')).toBe(false)
-    expect(canRetake(task({ status: 'cancelled', error_code: 'device_unbound', asset_type: 'compose_input' }), 'dev-B')).toBe(false)
-    expect(canRetake(null)).toBe(false)
-  })
-})
-
-/**
  * 「这个文件现在在哪儿」是**量出来的**。
  *
  * 走查报的第二条是「改了保存位置之后找不到文件了」，而那时的根因是没有任何地方记着
@@ -415,10 +370,8 @@ describe('composite output rows share the material projections', () => {
     expect(downloadedFileName([task({ asset_type: 'composite_output', status: 'failed', purpose: 'user_download', file_name: 'x.mp4' })], 5)).toBeNull()
   })
 
-  it('lets a failed or cancelled output row re-download and re-take', () => {
+  it('lets a failed or cancelled output row re-download', () => {
     expect(canRedownload(task({ asset_type: 'composite_output', asset_id: 5, status: 'failed' }))).toBe(true)
-    // 重取的行来源是解绑遗留（换机重投递），与素材同一套事实。
-    expect(canRetake(task({ asset_type: 'composite_output', asset_id: 5, status: 'cancelled', error_code: 'device_unbound' }), null)).toBe(true)
     // 终态规则对两种类型一视同仁：成功行仍然不给重新下载。
     expect(canRedownload(task({ asset_type: 'composite_output', asset_id: 5, status: 'success' }))).toBe(false)
   })

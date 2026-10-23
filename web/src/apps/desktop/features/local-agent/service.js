@@ -6,10 +6,9 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   health: "local_agent_health",
   start: "local_agent_start",
   stop: "local_agent_stop",
-  taskStatus: "local_agent_task_status",
-  bind: "local_agent_bind",
-  bindSession: "local_agent_bind_session",
-  refreshRuntime: "local_agent_refresh_runtime",
+  configureToken: "local_agent_configure_token",
+  tokenFacts: "local_agent_token_facts",
+  bitAccountBind: "local_agent_bit_account_bind",
   accountCheck: "local_agent_account_check",
   cookieRead: "local_agent_cookie_read",
   profileScan: "local_agent_profile_scan",
@@ -21,11 +20,10 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
 });
 
 const DEFAULT_STATUS = Object.freeze({
-  node_id: "",
   agent_id: "local-agent-dev",
   status: "stopped",
   bitbrowser_status: "unknown",
-  main_user_id: "",
+  main_user_id_masked: "",
   operating_system: "",
   cpu_architecture: "",
   agent_version: "",
@@ -42,11 +40,10 @@ function clone(value) {
 export function normalizeLocalAgentStatus(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
-    node_id: String(source.node_id ?? DEFAULT_STATUS.node_id),
     agent_id: String(source.agent_id ?? DEFAULT_STATUS.agent_id),
     status: String(source.status ?? DEFAULT_STATUS.status),
     bitbrowser_status: String(source.bitbrowser_status ?? DEFAULT_STATUS.bitbrowser_status),
-    main_user_id: String(source.main_user_id ?? DEFAULT_STATUS.main_user_id),
+    main_user_id_masked: String(source.main_user_id_masked ?? DEFAULT_STATUS.main_user_id_masked),
     operating_system: String(source.operating_system ?? DEFAULT_STATUS.operating_system),
     cpu_architecture: String(source.cpu_architecture ?? DEFAULT_STATUS.cpu_architecture),
     agent_version: String(source.agent_version ?? DEFAULT_STATUS.agent_version),
@@ -65,11 +62,10 @@ export function normalizeLocalAgentStatus(value) {
 export function localAgentStateFromStatus(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
-    nodeId: String(source.node_id ?? DEFAULT_STATUS.node_id),
     agentId: String(source.agent_id ?? DEFAULT_STATUS.agent_id),
     status: String(source.status ?? DEFAULT_STATUS.status),
     bitbrowserStatus: String(source.bitbrowser_status ?? DEFAULT_STATUS.bitbrowser_status),
-    mainUserId: String(source.main_user_id ?? DEFAULT_STATUS.main_user_id),
+    mainUserIdMasked: String(source.main_user_id_masked ?? DEFAULT_STATUS.main_user_id_masked),
     operatingSystem: String(source.operating_system ?? DEFAULT_STATUS.operating_system),
     cpuArchitecture: String(source.cpu_architecture ?? DEFAULT_STATUS.cpu_architecture),
     agentVersion: String(source.agent_version ?? DEFAULT_STATUS.agent_version),
@@ -77,16 +73,6 @@ export function localAgentStateFromStatus(value) {
     currentTaskProgress: source.current_task_progress ?? null,
     currentTaskStatus: source.current_task_status ?? null,
     pendingResultCount: Number(source.pending_result_count ?? 0),
-  };
-}
-
-export function normalizeBoundNode(value) {
-  const source = value && typeof value === "object" ? value : {};
-  return {
-    id: String(source.node_id ?? ""),
-    agent_id: String(source.agent_id ?? ""),
-    user_id: String(source.user_id ?? ""),
-    status: String(source.status ?? "unknown"),
   };
 }
 
@@ -116,36 +102,27 @@ export function createLocalAgentService({ invoke }) {
     async stop() {
       return invoke(LOCAL_AGENT_COMMANDS.stop);
     },
-    async taskStatus(taskId) {
-      return normalizeLocalAgentStatus(
-        await invoke(LOCAL_AGENT_COMMANDS.taskStatus, { taskId })
-      );
-    },
-    async bind() {
-      const result = await invoke(LOCAL_AGENT_COMMANDS.bind);
-      return normalizeBoundNode(result);
-    },
-    async bindSession({ bindingTicket, cloudBaseUrl, bindDevice = false }) {
-      const result = await invoke(LOCAL_AGENT_COMMANDS.bindSession, {
+    // 用当前 Desktop 会话向 Cloud 换一张 Agent Token，并交给本机 Agent。
+    // 只回事实（有没有、何时过期），Token 本身不进页面。
+    async configureToken({ cloudBaseUrl, sessionToken }) {
+      return invoke(LOCAL_AGENT_COMMANDS.configureToken, {
         args: {
-          binding_ticket: bindingTicket,
           cloud_base_url: cloudBaseUrl,
-          bind_device: bindDevice,
+          session_token: sessionToken,
         },
       });
-      return normalizeBoundNode(result);
     },
-    async refreshRuntime({ cloudBaseUrl }) {
-      return normalizeLocalAgentStatus(await invoke(LOCAL_AGENT_COMMANDS.refreshRuntime, {
-        args: {
-          cloud_base_url: cloudBaseUrl,
-        },
-      }));
+    async tokenFacts() {
+      return invoke(LOCAL_AGENT_COMMANDS.tokenFacts);
     },
-    async accountCheck({ cloudBaseUrl, taskId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
+    // 让 Agent 实读 BitBrowser 主账号并请 Cloud 绑定；`rebind` 只在用户明确
+    // 确认换绑时为真。失败时 reject 的是 Rust 的 `GuardRefusal`，按 `code` 分支。
+    async bitAccountBind({ rebind = false } = {}) {
+      return invoke(LOCAL_AGENT_COMMANDS.bitAccountBind, { rebind });
+    },
+    async accountCheck({ taskId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
       return invoke(LOCAL_AGENT_COMMANDS.accountCheck, {
         args: {
-          cloud_base_url: cloudBaseUrl,
           task_id: taskId,
           bit_profile_id: bitProfileId,
           platform,
@@ -153,10 +130,9 @@ export function createLocalAgentService({ invoke }) {
         },
       });
     },
-    async cookieRead({ cloudBaseUrl, taskId, bitProfileId }) {
+    async cookieRead({ taskId, bitProfileId }) {
       return invoke(LOCAL_AGENT_COMMANDS.cookieRead, {
         args: {
-          cloud_base_url: cloudBaseUrl,
           task_id: taskId,
           bit_profile_id: bitProfileId,
         },
@@ -214,18 +190,14 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
       });
       return clone(current);
     },
-    async taskStatus(_taskId) {
-      return clone({ ...current, current_task_id: _taskId });
+    async configureToken() {
+      return { configured: true, expires_at: null };
     },
-    async bind() {
-      return { id: "node-mock", agent_id: current.agent_id, user_id: "user-mock", status: "bound" };
+    async tokenFacts() {
+      return { configured: true, expires_at: null };
     },
-    async bindSession() {
-      current = normalizeLocalAgentStatus({ ...current, node_id: "node-mock" });
-      return { id: "node-mock", agent_id: current.agent_id, user_id: "user-mock", status: "online" };
-    },
-    async refreshRuntime() {
-      return clone(current);
+    async bitAccountBind() {
+      return { bound: true };
     },
     async accountCheck() {
       return {
@@ -237,25 +209,25 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
       };
     },
     async profileScan() {
-      return { main_user_id: current.main_user_id || "main-user-mock", profiles: [] };
+      return { main_user_id: "main-user-mock", observed_at: new Date().toISOString(), profiles: [] };
     },
     async profileGroups() {
       return { data: { groups: [{ id: "group-mock", name: "模拟分组" }] } };
     },
     async profileOpen(bitProfileId) {
-      return { bit_profile_id: bitProfileId, status: "opened", snapshot: { main_user_id: current.main_user_id || "main-user-mock", profiles: [] } };
+      return { bit_profile_id: bitProfileId, status: "opened", snapshot: { main_user_id: "main-user-mock", profiles: [] } };
     },
     async profileClose(bitProfileId) {
-      return { bit_profile_id: bitProfileId, status: "closed", snapshot: { main_user_id: current.main_user_id || "main-user-mock", profiles: [] } };
+      return { bit_profile_id: bitProfileId, status: "closed", snapshot: { main_user_id: "main-user-mock", profiles: [] } };
     },
     async profileCreate(profile) {
       return {
         bit_profile_id: "profile-created-mock",
         snapshot: {
-          main_user_id: current.main_user_id || "main-user-mock",
+          main_user_id: "main-user-mock",
           profiles: [{
             bit_profile_id: "profile-created-mock",
-            main_user_id: current.main_user_id || "main-user-mock",
+            main_user_id: "main-user-mock",
             profile_user_id: "bit-user-mock",
             name: profile.name,
             group_id: profile.group_id,
@@ -272,7 +244,7 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
           status: "verified",
         })),
         snapshot: {
-          main_user_id: current.main_user_id || "main-user-mock",
+          main_user_id: "main-user-mock",
           profiles,
         },
       };

@@ -95,12 +95,12 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response({ task_id: 'task-1' }))
     const client = createMediaAccountClient({ fetch })
 
-    await client.check('account-1', { nodeId: 'node-1' })
+    await client.check('account-1')
 
     expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts/account-1/check', expect.objectContaining({
       method: 'POST',
       credentials: 'include',
-      body: JSON.stringify({ node_id: 'node-1' }),
+      body: JSON.stringify({}),
     }))
 
     fetch.mockResolvedValueOnce(response({

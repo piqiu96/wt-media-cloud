@@ -9,14 +9,16 @@
  */
 
 export class ApiError extends Error {
-  constructor({ errcode = 99999, message = '未知错误', logid = '', type = '', details = null, retryable = false }) {
+  constructor({ errcode = 99999, message = '未知错误', logid = '', type = '', code = '', details = null, retryable = false, recovery_action = '' }) {
     super(message)
     this.name = 'ApiError'
     this.errcode = errcode
     this.logid = logid
     this.type = type
+    this.code = code
     this.details = details
     this.retryable = retryable
+    this.recovery_action = recovery_action
   }
 }
 
@@ -41,9 +43,20 @@ async function parseResponse(response) {
     message: body.message || '请求失败',
     logid: body.logid || '',
     type: apiErr.type || '',
+    code: apiErr.code || '',
     details: apiErr.details || null,
     retryable: !!apiErr.retryable,
+    recovery_action: apiErr.recovery_action || '',
   })
+}
+
+async function errorCodeOf(response) {
+  try {
+    const body = await response.clone().json()
+    return body?.error?.code || ''
+  } catch {
+    return ''
+  }
 }
 
 // Session token for the packaged Desktop WebView. The Desktop page runs on
@@ -140,7 +153,11 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
     if (response.status === 401 && !path.startsWith('/auth/login') && !onLoginPage) {
       setSessionToken('')
       const returnUrl = encodeURIComponent(win.location.pathname + win.location.search)
-      win.location.href = `/login?redirect=${returnUrl}`
+      // 只有被另一台 Desktop 替换才需要单独的落地文案；其余 401 仍是通用登录。
+      const reason = (await errorCodeOf(response)) === 'AUTH_DESKTOP_REPLACED'
+        ? '&reason=desktop-replaced'
+        : ''
+      win.location.href = `/login?redirect=${returnUrl}${reason}`
     }
 
     const result = await parseResponse(response)

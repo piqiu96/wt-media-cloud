@@ -21,11 +21,13 @@ const pageError = ref('')
 const usernameError = ref('')
 const passwordError = ref('')
 const replaceNeeded = ref(false)
+const activeSessionId = ref('')
 const loginAction = ref('')
 const version = ref('')
 
 function resetReplacePrompt() {
   replaceNeeded.value = false
+  activeSessionId.value = ''
   if (!submitting.value) {
     loginAction.value = ''
   }
@@ -39,7 +41,7 @@ function submitLogin() {
 }
 
 function submitReplacementLogin() {
-  return login({ replaceExisting: true })
+  return login({ replaceExisting: true, replaceSessionId: activeSessionId.value })
 }
 
 onMounted(async () => {
@@ -48,6 +50,9 @@ onMounted(async () => {
     pageError.value = '当前角色不能登录 Desktop，请使用 Cloud Web 管理。'
     loading.value = false
     return
+  }
+  if (new URLSearchParams(window.location.search).get('reason') === 'desktop-replaced') {
+    pageError.value = '你的账号已在另一台电脑登录。'
   }
   try {
     const user = await sessionClient.me()
@@ -58,8 +63,8 @@ onMounted(async () => {
     }
     router.push('/')
     if (isDesktop()) {
-      const { ensureTrustedLocalAgent } = await import('../../../apps/desktop/features/local-agent/init.js')
-      void ensureTrustedLocalAgent().catch((e) => console.info('本机执行状态待恢复', e?.message || e))
+      const { ensureAgentToken } = await import('../../../apps/desktop/features/local-agent/init.js')
+      void ensureAgentToken().catch((e) => console.info('本机执行状态待恢复', e?.message || e))
     }
   } catch {
     // Not logged in, show form
@@ -80,6 +85,7 @@ async function login(options = {}) {
   try {
     const user = await sessionClient.login(username.value, password.value, {
       replaceExisting,
+      replaceSessionId: replaceExisting ? activeSessionId.value : '',
     })
     if (isDesktop() && !canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
@@ -88,12 +94,16 @@ async function login(options = {}) {
     }
     router.push('/')
     if (isDesktop()) {
-      const { ensureTrustedLocalAgent } = await import('../../../apps/desktop/features/local-agent/init.js')
-      void ensureTrustedLocalAgent().catch((e) => console.info('本机执行状态待恢复', e?.message || e))
+      // 刚建立的 Desktop 会话与被替换的旧会话不是同一条，sidecar 里如果还握着旧凭证
+      // 就不能直接复用，必须换一张。
+      const { ensureAgentToken } = await import('../../../apps/desktop/features/local-agent/init.js')
+      void ensureAgentToken({ force: true }).catch((e) => console.info('本机执行凭证获取失败', e?.message || e))
     }
   } catch (e) {
     if (e.errcode === 20010) {
+      // 期间若另一台电脑又换了会话，这里拿到新的 session 行 ID，用户需再确认一次。
       replaceNeeded.value = true
+      activeSessionId.value = e?.details?.active_session_id || ''
       return
     }
     replaceNeeded.value = false
@@ -151,7 +161,7 @@ async function login(options = {}) {
     <FeedbackDialog
       v-model:visible="replaceNeeded"
       title="当前账号已有桌面端登录"
-      message="继续登录将替换旧会话。设备绑定和已绑定电脑的任务执行不受影响。"
+      message="继续登录会使另一台电脑退出登录；正在执行的任务不会中断。"
       confirm-text="继续登录"
       :pending="submitting"
       @confirm="submitReplacementLogin"
