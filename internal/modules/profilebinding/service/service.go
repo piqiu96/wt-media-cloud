@@ -250,6 +250,14 @@ func (s *Service) GetScan(actor identityservice.PublicUser, scanID string) (Prof
 // 写入路径：首次观察建立绑定，相同账号只刷新验证时间，不同账号必须由用户明确确认
 // 重绑。重绑不修改 browser_profiles，旧主账号的 Profile 原样保留，切回后自然恢复
 // 可见。
+// GetBitAccount 返回用户当前绑定的主账号；未绑定不是错误。
+func (s *Service) GetBitAccount(userID identityservice.UserID) (BitAccountBinding, bool, error) {
+	if userID <= 0 {
+		return BitAccountBinding{}, false, ErrForbidden
+	}
+	return s.store.FindBinding(userID)
+}
+
 func (s *Service) BindBitAccount(userID identityservice.UserID, input BitAccountBindInput) (BitAccountBinding, error) {
 	if userID <= 0 {
 		return BitAccountBinding{}, ErrForbidden

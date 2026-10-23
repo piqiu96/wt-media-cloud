@@ -12,6 +12,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/bit-browser/profile-scans/:scan_id", GetProfileScan)
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/confirm", ConfirmProfileScan)
 	h.POST("/api/v1/bit-browser/profile-scans/:scan_id/reject", RejectProfileScan)
+	h.GET("/api/v1/local-agent/bit-account", GetBitAccount)
 	h.POST("/api/v1/local-agent/bit-account/bind", localagent.RequireAgent(localagent.StrictMode), BindBitAccount)
 	h.GET("/api/v1/browser-profiles", ListBrowserProfiles)
 	h.POST("/api/v1/browser-profiles", CreateBrowserProfile)

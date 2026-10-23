@@ -21,6 +21,10 @@ func ConfirmScan(actor service.PublicUser, scanID string) (model.ProfileScan, er
 	return newService(mysqlStore{}).ConfirmScan(actor, scanID)
 }
 
+func GetBitAccount(userID service.UserID) (model.BitAccountBinding, bool, error) {
+	return newService(mysqlStore{}).GetBitAccount(userID)
+}
+
 func BindBitAccount(userID service.UserID, input dto.BitAccountBindInput) (model.BitAccountBinding, error) {
 	return newService(mysqlStore{}, WithObservedFreshFor(processObservedFreshFor)).BindBitAccount(userID, input)
 }

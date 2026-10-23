@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
@@ -83,6 +84,42 @@ func BindBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, binding)
 }
+
+// GetBitAccount 让页面看到当前账号绑定的是哪个 BitBrowser 主账号。
+// 只回掩码：完整主账号留在 Agent 与 Cloud 之间使用。
+type bitAccountView struct {
+	Bound            bool       `json:"bound"`
+	MainUserIDMasked string     `json:"main_user_id_masked,omitempty"`
+	BoundAt          *time.Time `json:"bound_at,omitempty"`
+	LastVerifiedAt   *time.Time `json:"last_verified_at,omitempty"`
+}
+
+func GetBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	binding, found, err := profileservice.GetBitAccount(actor.ID)
+	if err != nil {
+		writeProfileError(c, err)
+		return
+	}
+	view := bitAccountView{Bound: found}
+	if found {
+		view.MainUserIDMasked = maskMainUserID(binding.MainUserID)
+		view.BoundAt = binding.BoundAt
+		view.LastVerifiedAt = binding.LastVerifiedAt
+	}
+	api.Success(c, view)
+}
+
+func maskMainUserID(value string) string {
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
+}
+
 func RejectProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {

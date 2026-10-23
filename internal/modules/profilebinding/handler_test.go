@@ -8,6 +8,21 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
+func TestMaskMainUserIDKeepsOnlyTheEdges(t *testing.T) {
+	cases := map[string]string{
+		"":                     "****",
+		"short":                "****",
+		"12345678":             "****",
+		"123456789":            "1234****6789",
+		"main-user-abcdef1234": "main****1234",
+	}
+	for input, want := range cases {
+		if got := maskMainUserID(input); got != want {
+			t.Fatalf("maskMainUserID(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestRegisterRoutesBindsProfileEndpoints(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)
@@ -18,6 +33,7 @@ func TestRegisterRoutesBindsProfileEndpoints(t *testing.T) {
 		want   int
 	}{
 		{consts.MethodGet, "/api/v1/browser-profiles", consts.StatusUnauthorized},
+		{consts.MethodGet, "/api/v1/local-agent/bit-account", consts.StatusUnauthorized},
 		{consts.MethodPost, "/api/v1/local-agent/bit-account/bind", consts.StatusUnauthorized},
 		{consts.MethodPost, "/api/v1/bit-browser/main-identity", consts.StatusNotFound},
 		{consts.MethodPost, "/api/v1/bit-browser/profile-scans/scan-1/confirm-main-identity", consts.StatusNotFound},

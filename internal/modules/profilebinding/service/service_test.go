@@ -98,6 +98,27 @@ func TestSensitiveObservationCannotBypassFreshness(t *testing.T) {
 	}
 }
 
+func TestGetBitAccountReturnsBindingOrAbsence(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+
+	if _, found, err := service.GetBitAccount(1); err != nil || found {
+		t.Fatalf("unbound GetBitAccount = found %v, err %v", found, err)
+	}
+
+	bindMain(store, 1, "main-user-a")
+	binding, found, err := service.GetBitAccount(1)
+	if err != nil || !found {
+		t.Fatalf("bound GetBitAccount = found %v, err %v", found, err)
+	}
+	if binding.MainUserID != "main-user-a" {
+		t.Fatalf("main_user_id = %q", binding.MainUserID)
+	}
+	if _, _, err := service.GetBitAccount(0); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("zero user error = %v", err)
+	}
+}
+
 func TestBindBitAccountTransitions(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
