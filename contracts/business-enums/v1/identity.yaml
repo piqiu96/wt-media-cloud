@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.07.22.1"
+revision: "2026.10.23.1"
 roles:
   - admin
   - operator
@@ -7,3 +7,16 @@ roles:
 user_statuses:
   - enabled
   - disabled
+client_types:
+  - web
+  - desktop
+# Why a user_sessions row stopped authenticating. NULL means it is still valid.
+# `desktop_replaced` is the only one a Desktop takeover produces; ADR-0022.
+invalidated_reasons:
+  - logout
+  - password_changed
+  - admin_reset
+  - user_disabled
+  - force_logout
+  - desktop_replaced
+  - superseded

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.09.26.1"
+revision: "2026.10.23.1"
 
 asset_types: [material]
 purposes: [compose_input_prepare, user_download]

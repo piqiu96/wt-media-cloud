@@ -1,17 +1,28 @@
 schema_version: 1
-revision: "2026.10.02.1"
+revision: "2026.10.23.1"
+# Codes shared by the BitBrowser bind, the Profile scan/sync and Profile CRUD.
+# Profile reads and writes are scoped to `user_id + main_user_id`; anything outside that
+# pair is reported as not found rather than leaked.
 errors:
-  # 23002: the BitBrowser main identity cannot be verified, or the account the
-  # environment reports differs from the one the Cloud has bound to this user.
-  # Both are the user's own account-confirmation (身份确认) gate. The user can
-  # resolve them at the machine via "以当前环境为准" (main-identity confirm with
-  # overwrite=true); without that deliberate flag a mismatch is refused so one
-  # user's browser cannot silently take over another's binding.
-  bitbrowser_identity_unverifiable: {http_status: 409, code: 23002}
-  bitbrowser_identity_mismatch: {http_status: 409, code: 23002}
-  profile_scan_not_found: {http_status: 404}
-  profile_scan_expired: {http_status: 410}
-  profile_scan_not_ready: {http_status: 409}
+  # 23002: the live BitBrowser main account cannot be read, or differs from the one
+  # bound to this user. Fixing it is a deliberate rebind (`rebind=true`), never an
+  # automatic migration.
+  bit_identity_unverifiable: {http_status: 409, code: 23002, retryable: false, recovery_action: rebind_bitbrowser}
+  bit_main_user_mismatch: {http_status: 409, code: 23002, retryable: false, recovery_action: rebind_bitbrowser}
+  # 23008: the user has not bound a BitBrowser main account yet.
+  bit_not_bound: {http_status: 409, code: 23008, retryable: false, recovery_action: bind_bitbrowser}
+  # 23009: BitBrowser is not running, unreachable, or the Agent's observation is older
+  # than the freshness window.
+  bit_browser_offline: {http_status: 409, code: 23009, retryable: true, recovery_action: start_bitbrowser}
+  # 23010: the action needs a logged-in platform account the media account does not have.
+  profile_login_invalid: {http_status: 409, code: 23010, retryable: false, recovery_action: login_platform}
+  # 23011: a local file or directory the action needs is missing or unreadable.
+  file_prepare_failed: {http_status: 422, code: 23011, retryable: true, recovery_action: retry_prepare}
+  profile_not_found: {http_status: 404, code: 20004, retryable: false, recovery_action: choose_profile}
+  profile_assigned_to_other_user: {http_status: 403, code: 11003, retryable: false, recovery_action: choose_own_profile}
+  profile_scan_not_found: {http_status: 404, code: 20004}
+  profile_scan_expired: {http_status: 410, code: 20004}
+  profile_scan_not_ready: {http_status: 409, code: 20009}
+  profile_referenced: {http_status: 409, code: 20003}
+  profile_not_disabled: {http_status: 409, code: 20011}
   profile_store_error: {http_status: 500}
-  browser_profile_unavailable: {http_status: 409}
-  profile_platform_account_taken: {http_status: 409}

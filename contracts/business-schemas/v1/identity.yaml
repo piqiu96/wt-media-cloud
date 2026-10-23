@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.07.22.1"
+revision: "2026.10.23.1"
 schemas:
   PublicUser:
     type: object
@@ -15,6 +15,25 @@ schemas:
         type: array
         items: {type: string}
     forbidden_properties: [password, password_hash, session_token, token_hash]
+  UserSession:
+    type: object
+    description: >
+      The sole authentication fact. `users` holds no login state; a credential is valid
+      exactly while its row is unexpired and un-invalidated. A user may hold several web
+      rows and at most one valid desktop row.
+    required: [id, user_id, client_type, created_at, expires_at]
+    properties:
+      id: {type: string}
+      user_id: {type: integer, format: int64}
+      client_type: {type: string, enum: [web, desktop]}
+      created_at: {type: string, format: date-time}
+      expires_at: {type: string, format: date-time}
+      invalidated_at: {type: string, format: date-time, nullable: true}
+      invalidated_reason:
+        type: string
+        nullable: true
+        enum: [logout, password_changed, admin_reset, user_disabled, force_logout, desktop_replaced, superseded]
+    forbidden_properties: [token, token_hash]
   OperationTeam:
     type: object
     required: [id, name, created_at, updated_at]

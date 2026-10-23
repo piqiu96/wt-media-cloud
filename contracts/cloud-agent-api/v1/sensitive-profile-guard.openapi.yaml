@@ -1,12 +1,24 @@
 openapi: 3.1.0
 info:
   title: WT Media Sensitive Profile Guard API
-  version: 2026.07.14.6
+  version: 2026.10.23.1
+  description: >
+    Sensitive Profile operations keep a permit row, but the row is only a mutex: it says
+    one sensitive operation per Profile at a time. It is not a credential and grants no
+    authority — the Agent Token is the authentication, and `permit_id` belongs to the
+    token's user, so it cannot be used across users.
 paths:
   /api/v1/local-agent/sensitive-tasks/{task_id}/preflight:
     post:
       operationId: preflightSensitiveProfileTask
-      security: [{nodeBearer: []}]
+      security: [{agentBearer: []}]
+      summary: Admit a new sensitive Profile operation.
+      description: >
+        Strict-mode Agent Token. Runs the same execution preflight evaluator as every
+        other local operation, and then, if admission is granted, takes the Profile's
+        mutex. Failure codes and envelopes are the evaluator's (`BIT_NOT_BOUND`,
+        `BIT_MAIN_USER_MISMATCH`, `BIT_BROWSER_OFFLINE`, `PROFILE_NOT_FOUND`,
+        `PROFILE_ASSIGNED_TO_OTHER_USER`, ...).
       parameters:
         - in: path
           name: task_id
@@ -16,25 +28,25 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [node_id]
-              properties: {node_id: {type: string}}
-              additionalProperties: false
+            schema: {$ref: '#/components/schemas/PreflightRequest'}
       responses:
-        "200":
+        '200':
           description: Granted, waiting, or review-required outcome.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/PreflightEnvelope"}
-        "401": {description: Node/session credential invalid.}
-        "403": {description: Task assignment mismatch.}
-        "404": {description: Pre-authorized task not found.}
-        "409": {description: Fresh matching runtime unavailable.}
+              schema: {$ref: '#/components/schemas/PreflightEnvelope'}
+        '401': {description: Agent Token invalid, expired, or the desktop session was replaced.}
+        '403': {description: 'PROFILE_ASSIGNED_TO_OTHER_USER.'}
+        '404': {description: Sensitive task not found.}
+        '409': {description: Admission refused (BIT_BROWSER_OFFLINE, BIT_MAIN_USER_MISMATCH, profile busy, ...).}
   /api/v1/local-agent/sensitive-permits/{permit_id}/renew:
     post:
       operationId: renewSensitiveProfilePermit
-      security: [{nodeBearer: [], permitCredential: []}]
+      security: [{agentBearer: []}]
+      summary: Extend a held permit.
+      description: >
+        Report-safe Agent Token: a permit already granted must be renewable even if the
+        account signed in on another computer. The permit must belong to the token's user.
       parameters:
         - in: path
           name: permit_id
@@ -46,18 +58,22 @@ paths:
           application/json:
             schema:
               type: object
-              required: [node_id, lease_seconds]
+              required: [lease_seconds]
               properties:
-                node_id: {type: string}
                 lease_seconds: {type: integer, minimum: 1, maximum: 120}
               additionalProperties: false
       responses:
-        "200": {description: Active permit renewed, capped at two minutes.}
-        "401": {description: Node/session/permit credential invalid.}
+        '200': {description: Active permit renewed, capped at two minutes.}
+        '401': {description: Agent Token invalid or expired.}
+        '409': {description: Permit is no longer valid or belongs to another user (23003).}
   /api/v1/local-agent/sensitive-permits/{permit_id}/finish:
     post:
       operationId: finishSensitiveProfilePermit
-      security: [{nodeBearer: [], permitCredential: []}]
+      security: [{agentBearer: []}]
+      summary: Release a held permit.
+      description: >
+        Report-safe Agent Token. `completed` releases the mutex; `result_uncertain` moves
+        the operation to review-required.
       parameters:
         - in: path
           name: permit_id
@@ -69,22 +85,33 @@ paths:
           application/json:
             schema:
               type: object
-              required: [node_id, outcome]
+              required: [outcome]
               properties:
-                node_id: {type: string}
                 outcome: {type: string, enum: [completed, result_uncertain]}
               additionalProperties: false
       responses:
-        "200": {description: Permit cleanly released or moved to review-required.}
-        "401": {description: Node/session/permit credential invalid.}
+        '204': {description: Permit cleanly released or moved to review-required.}
+        '401': {description: Agent Token invalid or expired.}
+        '409': {description: Permit is no longer valid or belongs to another user (23003).}
 components:
   securitySchemes:
-    nodeBearer: {type: http, scheme: bearer}
-    permitCredential:
-      type: apiKey
-      in: header
-      name: X-Profile-Permit
+    agentBearer: {type: http, scheme: bearer}
   schemas:
+    PreflightRequest:
+      type: object
+      required: [facts]
+      additionalProperties: false
+      properties:
+        facts:
+          type: object
+          required: [bitbrowser_status, main_user_id, observed_at]
+          additionalProperties: false
+          properties:
+            bitbrowser_status: {type: string, enum: [running, stopped, unreachable]}
+            main_user_id: {type: string, description: Read from the running BitBrowser; compared with the bound account.}
+            observed_at: {type: string, format: date-time, description: When the Agent read the facts; stale observations are refused.}
+            profile_visible: {type: boolean}
+            files_ready: {type: boolean}
     PreflightEnvelope:
       type: object
       required: [data]
@@ -95,7 +122,6 @@ components:
           properties:
             outcome: {type: string, enum: [granted, waiting, review_required]}
             permit_id: {type: string}
-            permit_credential: {type: string, description: Returned only for a newly granted permit and never stored in plaintext.}
             profile_id: {type: string}
             expires_at: {type: string, format: date-time}
           additionalProperties: false
