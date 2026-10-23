@@ -26,12 +26,6 @@ schemas:
           carry it: it binds the report to the executor that took the lease. Empty until the task is first
           claimed, and cleared when a failed task is retried. It is a run identifier, not an execution
           credential.
-      claimed_by:
-        type: string
-        nullable: true
-        description: >-
-          Audit label of the process holding the lease; never an authentication subject. A claim is scoped
-          to the requesting user, so any of that user's machines may pick up a pending task.
       purpose: {type: string, enum: [compose_input_prepare, user_download]}
       execution_scope: {type: string, enum: [cloud, local_agent]}
       status: {type: string, enum: [pending, running, success, failed, cancelled]}
