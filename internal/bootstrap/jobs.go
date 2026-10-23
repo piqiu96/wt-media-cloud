@@ -25,6 +25,9 @@ func runSchedulerProcess() error {
 	runner.Register("task-recovery", cfg.Scheduler.TaskRecoveryInterval.Duration, func(ctx context.Context) error {
 		return jobs.RunTaskRecovery(ctx)
 	})
+	runner.Register("session-cleanup", cfg.Scheduler.SessionCleanupInterval.Duration, func(ctx context.Context) error {
+		return jobs.RunSessionCleanup(ctx)
+	})
 	runner.Start(ctx)
 	<-ctx.Done()
 	return nil

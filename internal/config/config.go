@@ -213,6 +213,10 @@ type SchedulerConfig struct {
 	WorkerBatchSize       int      `toml:"worker_batch_size"`
 	TaskRecoveryInterval  Duration `toml:"task_recovery_interval"`
 	TaskRecoveryBatchSize int      `toml:"task_recovery_batch_size"`
+
+	SessionCleanupInterval  Duration `toml:"session_cleanup_interval"`
+	SessionCleanupRetention Duration `toml:"session_cleanup_retention"`
+	SessionCleanupBatchSize int      `toml:"session_cleanup_batch_size"`
 }
 
 // Duration is a strict YAML duration parsed with time.ParseDuration.
@@ -433,6 +437,15 @@ func (c Config) Validate() error {
 	}
 	if c.Scheduler.TaskRecoveryBatchSize <= 0 {
 		return errors.New("scheduler.task_recovery_batch_size must be greater than zero")
+	}
+	if c.Scheduler.SessionCleanupInterval.Duration <= 0 {
+		return errors.New("scheduler.session_cleanup_interval must be greater than zero")
+	}
+	if c.Scheduler.SessionCleanupRetention.Duration <= 0 {
+		return errors.New("scheduler.session_cleanup_retention must be greater than zero")
+	}
+	if c.Scheduler.SessionCleanupBatchSize <= 0 {
+		return errors.New("scheduler.session_cleanup_batch_size must be greater than zero")
 	}
 	if err := validateObjectStorage(c.Storage.ObjectStorage, c.Credentials.ObjectStorage); err != nil {
 		return err

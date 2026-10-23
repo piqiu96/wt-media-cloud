@@ -5,3 +5,6 @@ worker_batch_size = 10
 worker_interval = '5s'
 task_recovery_interval = '30s'
 task_recovery_batch_size = 100
+session_cleanup_interval = '1h'
+session_cleanup_retention = '168h'
+session_cleanup_batch_size = 500
