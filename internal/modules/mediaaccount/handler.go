@@ -223,7 +223,11 @@ func ReadMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 		writeMediaAccountError(c, accountservice.ErrProfileUnavailable)
 		return
 	}
-	task := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{TaskType: cloudagentservice.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + id.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}})
+	task, err := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{TaskType: cloudagentservice.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + id.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}}, int64(actor.ID))
+	if err != nil {
+		api.InternalError(c, "任务创建失败")
+		return
+	}
 	api.Created(c, task)
 }
 func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext) {

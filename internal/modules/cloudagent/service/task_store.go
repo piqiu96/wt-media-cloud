@@ -6,13 +6,15 @@ import (
 )
 
 type (
-	TaskStatus        = model.TaskStatus
-	TaskType          = model.TaskType
-	Task              = model.Task
-	CreateTaskRequest = dto.CreateTaskRequest
-	ClaimTaskRequest  = dto.ClaimTaskRequest
-	ReportTaskRequest = dto.ReportTaskRequest
-	CancelTaskRequest = dto.CancelTaskRequest
+	TaskStatus          = model.TaskStatus
+	TaskType            = model.TaskType
+	Task                = model.Task
+	CreateTaskRequest   = dto.CreateTaskRequest
+	ClaimTaskRequest    = dto.ClaimTaskRequest
+	ReportTaskRequest   = dto.ReportTaskRequest
+	ActivityTaskRequest = dto.ActivityTaskRequest
+	CancelTaskRequest   = dto.CancelTaskRequest
+	RetryTaskRequest    = dto.RetryTaskRequest
 )
 
 const (
@@ -46,7 +48,10 @@ var (
 	ErrTaskAlreadyTerminal = model.ErrTaskAlreadyTerminal
 	ErrInvalidStatus       = model.ErrInvalidStatus
 	ErrInvalidTaskType     = model.ErrInvalidTaskType
+	ErrUnsupportedTaskType = model.ErrUnsupportedTaskType
 	ErrTaskNotRetryable    = model.ErrTaskNotRetryable
+	ErrStaleAttempt        = model.ErrStaleAttempt
+	ErrResultUnknownRetry  = model.ErrResultUnknownRetry
 )
 
 func ParseTaskStatus(value string) (TaskStatus, bool) {
@@ -77,28 +82,5 @@ func IsTerminal(status TaskStatus) bool {
 }
 
 func ParseTaskType(value string) (TaskType, bool) {
-	switch value {
-	case TaskTypeNoop.String():
-		return TaskTypeNoop, true
-	case TaskTypeCookieRead.String():
-		return TaskTypeCookieRead, true
-	case TaskTypeCookieWrite.String():
-		return TaskTypeCookieWrite, true
-	case TaskTypeAccountCheck.String():
-		return TaskTypeAccountCheck, true
-	case TaskTypeProfileCreate.String():
-		return TaskTypeProfileCreate, true
-	case TaskTypeProfileOpen.String():
-		return TaskTypeProfileOpen, true
-	case TaskTypeProfileClose.String():
-		return TaskTypeProfileClose, true
-	case TaskTypeProfileUpdate.String():
-		return TaskTypeProfileUpdate, true
-	case TaskTypeProxyCheck.String():
-		return TaskTypeProxyCheck, true
-	case TaskTypeProxyMutation.String():
-		return TaskTypeProxyMutation, true
-	default:
-		return TaskTypeNoop, false
-	}
+	return model.ParseTaskTypeValue(value)
 }

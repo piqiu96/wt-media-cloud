@@ -13,7 +13,9 @@ func TestCloudAgentServiceExposesPackageLevelOperations(t *testing.T) {
 		{name: "CreateTask", got: CreateTask},
 		{name: "ClaimTask", got: ClaimTask},
 		{name: "ReportTask", got: ReportTask},
+		{name: "ActivityTask", got: ActivityTask},
 		{name: "CancelTask", got: CancelTask},
+		{name: "RetryTask", got: RetryTask},
 	}
 	for _, test := range tests {
 		if reflect.TypeOf(test.got).Kind() != reflect.Func {

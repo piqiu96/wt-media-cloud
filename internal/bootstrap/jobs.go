@@ -22,6 +22,9 @@ func runSchedulerProcess() error {
 	runner.Register("proxy-expiry", cfg.Scheduler.ProxyExpiryInterval.Duration, func(ctx context.Context) error {
 		return jobs.RunProxyExpiry(ctx)
 	})
+	runner.Register("task-recovery", cfg.Scheduler.TaskRecoveryInterval.Duration, func(ctx context.Context) error {
+		return jobs.RunTaskRecovery(ctx)
+	})
 	runner.Start(ctx)
 	<-ctx.Done()
 	return nil

@@ -464,11 +464,15 @@ func CheckProxyInBackground(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
-	task := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{
+	task, err := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{
 		TaskType:       cloudagentservice.TaskTypeProxyCheck.String(),
 		IdempotencyKey: "proxy-check:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + proxy.ID + ":" + id.NewID("attempt"),
 		Payload:        map[string]any{"proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password},
-	})
+	}, int64(actor.ID))
+	if err != nil {
+		api.InternalError(c, "任务创建失败")
+		return
+	}
 	api.Created(c, task)
 }
 func AssignProxy(ctx context.Context, c *hertzapp.RequestContext) {

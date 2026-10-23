@@ -3,3 +3,5 @@ compose_interval = '30s'
 proxy_expiry_interval = '6h'
 worker_batch_size = 10
 worker_interval = '5s'
+task_recovery_interval = '30s'
+task_recovery_batch_size = 100

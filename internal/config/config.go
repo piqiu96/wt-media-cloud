@@ -206,11 +206,13 @@ type DouyinCredentialConfig struct {
 }
 
 type SchedulerConfig struct {
-	ProxyExpiryInterval Duration `toml:"proxy_expiry_interval"`
-	DiscoveryInterval   Duration `toml:"discovery_interval"`
-	ComposeInterval     Duration `toml:"compose_interval"`
-	WorkerInterval      Duration `toml:"worker_interval"`
-	WorkerBatchSize     int      `toml:"worker_batch_size"`
+	ProxyExpiryInterval   Duration `toml:"proxy_expiry_interval"`
+	DiscoveryInterval     Duration `toml:"discovery_interval"`
+	ComposeInterval       Duration `toml:"compose_interval"`
+	WorkerInterval        Duration `toml:"worker_interval"`
+	WorkerBatchSize       int      `toml:"worker_batch_size"`
+	TaskRecoveryInterval  Duration `toml:"task_recovery_interval"`
+	TaskRecoveryBatchSize int      `toml:"task_recovery_batch_size"`
 }
 
 // Duration is a strict YAML duration parsed with time.ParseDuration.
@@ -425,6 +427,12 @@ func (c Config) Validate() error {
 	}
 	if c.Scheduler.WorkerBatchSize <= 0 {
 		return errors.New("scheduler.worker_batch_size must be greater than zero")
+	}
+	if c.Scheduler.TaskRecoveryInterval.Duration <= 0 {
+		return errors.New("scheduler.task_recovery_interval must be greater than zero")
+	}
+	if c.Scheduler.TaskRecoveryBatchSize <= 0 {
+		return errors.New("scheduler.task_recovery_batch_size must be greater than zero")
 	}
 	if err := validateObjectStorage(c.Storage.ObjectStorage, c.Credentials.ObjectStorage); err != nil {
 		return err

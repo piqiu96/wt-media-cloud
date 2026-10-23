@@ -10,15 +10,12 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 )
 
-// The module's HTTP surface is pinned as a whole list rather than sampled. The
-// agent-facing routes require an Agent Token; retry and cancel are user
-// operations and stay on the session. A route deleted by accident and a route
-// kept by accident look the same in a diff.
+// 路由按完整列表固定：被误删和误留的路由在 diff 里看起来一样，只有整表比对能区分。
 func TestRegisterRoutesExposesOnlyTheAgentTaskSurface(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)
 
-	got := make([]string, 0, 6)
+	got := make([]string, 0, 8)
 	for _, route := range engine.Routes() {
 		got = append(got, route.Method+" "+route.Path)
 	}
@@ -27,6 +24,8 @@ func TestRegisterRoutesExposesOnlyTheAgentTaskSurface(t *testing.T) {
 	want := []string{
 		"GET /api/v1/cloud-agent/compatibility",
 		"GET /api/v1/cloud-agent/tasks/:task_id",
+		"GET /api/v1/tasks/:task_id",
+		"POST /api/v1/cloud-agent/tasks/:task_id/activity",
 		"POST /api/v1/cloud-agent/tasks/:task_id/cancel",
 		"POST /api/v1/cloud-agent/tasks/:task_id/report",
 		"POST /api/v1/cloud-agent/tasks/:task_id/retry",
@@ -40,10 +39,7 @@ func TestRegisterRoutesExposesOnlyTheAgentTaskSurface(t *testing.T) {
 	}
 }
 
-// The same route list proves nothing about which credential each route accepts.
-// Driven without credentials, the two groups must fail differently: an Agent
-// route demands an Agent Token, a user route demands a login session, and
-// neither accepts the other's credential kind.
+// 空凭证下两组路由必须给出不同的失败码，证明两种凭证不能互相代用。
 func TestAgentRoutesRefuseAnEmptyCredentialAsAnAgentToken(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)
@@ -56,8 +52,10 @@ func TestAgentRoutesRefuseAnEmptyCredentialAsAnAgentToken(t *testing.T) {
 		{"POST", "/api/v1/cloud-agent/tasks/claim", "AUTH_AGENT_TOKEN_INVALID"},
 		{"GET", "/api/v1/cloud-agent/tasks/task-1", "AUTH_AGENT_TOKEN_INVALID"},
 		{"POST", "/api/v1/cloud-agent/tasks/task-1/report", "AUTH_AGENT_TOKEN_INVALID"},
+		{"POST", "/api/v1/cloud-agent/tasks/task-1/activity", "AUTH_AGENT_TOKEN_INVALID"},
 		{"POST", "/api/v1/cloud-agent/tasks/task-1/cancel", "AUTH_SESSION_INVALID"},
 		{"POST", "/api/v1/cloud-agent/tasks/task-1/retry", "AUTH_SESSION_INVALID"},
+		{"GET", "/api/v1/tasks/task-1", "AUTH_SESSION_INVALID"},
 	} {
 		result := ut.PerformRequest(engine.Engine, testCase.method, testCase.path, nil)
 		if result.Result().StatusCode() != 401 {
