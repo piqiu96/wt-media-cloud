@@ -30,7 +30,7 @@ func TestProfileBindingMigrationKeepsScansAndProfilesSeparate(t *testing.T) {
 func TestListProfilesFiltersAndOrdersInSQL(t *testing.T) {
 	db, mock, closeDB := newProfileMockGORM(t)
 	defer closeDB()
-	mock.ExpectQuery(`SELECT .* FROM browser_profiles WHERE 1=1 AND user_id = \? AND id LIKE \? ESCAPE '!' AND name LIKE \? ESCAPE '!' AND \(group_id LIKE \? ESCAPE '!' OR group_name LIKE \? ESCAPE '!'\) AND bit_profile_id LIKE \? ESCAPE '!' AND remark LIKE \? ESCAPE '!' AND local_status = \? AND business_status = \? ORDER BY seq DESC, id DESC`).
+	mock.ExpectQuery(`SELECT bp\.id, .* FROM browser_profiles bp JOIN users u ON u\.id = bp\.user_id WHERE bp\.main_user_id = u\.bit_main_user_id AND bp\.user_id = \? AND bp\.id LIKE \? ESCAPE '!' AND bp\.name LIKE \? ESCAPE '!' AND \(bp\.group_id LIKE \? ESCAPE '!' OR bp\.group_name LIKE \? ESCAPE '!'\) AND bp\.bit_profile_id LIKE \? ESCAPE '!' AND bp\.remark LIKE \? ESCAPE '!' AND bp\.local_status = \? AND bp\.business_status = \? ORDER BY bp\.seq DESC, bp\.id DESC`).
 		WithArgs(sharedidentity.UserID(5), "%bp!_1%", "%窗口!_1%", "%分组!_1%", "%分组!_1%", "%bit!_1%", "%备注!_1%", "active", "enabled").
 		WillReturnRows(sqlmock.NewRows(strings.Split(profileColumnsSQL, ", ")))
 	items, err := listProfiles(db, ProfileListFilter{
@@ -63,6 +63,130 @@ func TestFindBindingUsesGORMAndMapsIdentity(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("SQL expectations: %v", err)
+	}
+}
+
+func TestBindBitAccountFirstBindWritesBindingAndAudit(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT bit_main_user_id, bit_account_bound_at FROM users WHERE id = ? FOR UPDATE")).
+		WithArgs(sharedidentity.UserID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id", "bit_account_bound_at"}).AddRow(nil, nil))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = ?, bit_account_last_verified_at = ?, updated_at = ? WHERE id = ?")).
+		WithArgs("main-user-a", model.BitAccountBound, now, now, now, sharedidentity.UserID(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO audit_logs").
+		WithArgs(sqlmock.AnyArg(), sharedidentity.UserID(1), model.AuditMainAccountBind, "user", sharedidentity.UserID(1), sqlmock.AnyArg(), now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	binding, err := bindBitAccount(db, 1, "main-user-a", false, now)
+	if err != nil {
+		t.Fatalf("bindBitAccount() error = %v", err)
+	}
+	if binding.MainUserID != "main-user-a" || binding.BoundAt == nil || !binding.BoundAt.Equal(now) {
+		t.Fatalf("binding = %#v", binding)
+	}
+}
+
+func TestBindBitAccountRefusesMismatchWithoutRebind(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT bit_main_user_id, bit_account_bound_at FROM users WHERE id = ? FOR UPDATE")).
+		WithArgs(sharedidentity.UserID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id", "bit_account_bound_at"}).AddRow("main-user-a", now))
+	mock.ExpectRollback()
+
+	if _, err := bindBitAccount(db, 1, "main-user-b", false, now); err != model.ErrBitMainUserMismatch {
+		t.Fatalf("bindBitAccount() error = %v, want ErrBitMainUserMismatch", err)
+	}
+}
+
+func TestBindBitAccountRebindKeepsThePreviousMainInTheAudit(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT bit_main_user_id, bit_account_bound_at FROM users WHERE id = ? FOR UPDATE")).
+		WithArgs(sharedidentity.UserID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id", "bit_account_bound_at"}).AddRow("main-user-a", now))
+	mock.ExpectExec("UPDATE users SET bit_main_user_id = ?").
+		WithArgs("main-user-b", model.BitAccountBound, now, now, now, sharedidentity.UserID(1)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO audit_logs").
+		WithArgs(sqlmock.AnyArg(), sharedidentity.UserID(1), model.AuditMainAccountRebind, "user", sharedidentity.UserID(1), sqlmock.AnyArg(), now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	binding, err := bindBitAccount(db, 1, "main-user-b", true, now)
+	if err != nil || binding.MainUserID != "main-user-b" {
+		t.Fatalf("bindBitAccount() binding=%#v error = %v", binding, err)
+	}
+}
+
+func TestApplyScanMarksMissingOnlyInsideTheCurrentMainScope(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	scan := model.ProfileScan{
+		ID: "scan-1", UserID: 1, MainUserID: "main-user-a", Status: model.ScanConfirmed,
+		Profiles: []model.BrowserProfile{{
+			ID: "bp-1", UserID: 1, BitProfileID: "bit-1", MainUserID: "main-user-a",
+			ProfileUserID: "bit-user-1", Name: "窗口一", LocalStatus: model.ProfileActive,
+		}},
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT bit_main_user_id FROM users WHERE id = ? FOR UPDATE")).
+		WithArgs(sharedidentity.UserID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id"}).AddRow("main-user-a"))
+	mock.ExpectExec("INSERT INTO browser_profiles").
+		WithArgs(sharedidentity.UserID(1), nil, "bit-1", "main-user-a", "bit-user-1", "窗口一", 0,
+			nil, nil, nil, nil, nil, nil, 0, nil, nil, "", model.ProfileBusinessEnabled, model.ProfileActive, now, time.Time{}, now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE browser_profiles SET local_status = ?").
+		WithArgs(model.ProfileLocalMissing, now, now, sharedidentity.UserID(1), "main-user-a", "bit-1", model.ProfileArchived).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE profile_sync_scans SET status = ?").
+		WithArgs(model.ScanConfirmed, now, "scan-1", sharedidentity.UserID(1), model.ScanReady).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO audit_logs").
+		WithArgs(sqlmock.AnyArg(), sharedidentity.UserID(1), "bitbrowser.profile_scan.confirm", "profile_sync_scan", "scan-1", sqlmock.AnyArg(), now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := applyScan(db, scan, now); err != nil {
+		t.Fatalf("applyScan() error = %v", err)
+	}
+}
+
+func TestApplyScanRejectsScanFromPreviousMainAccount(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT bit_main_user_id FROM users WHERE id = ? FOR UPDATE")).
+		WithArgs(sharedidentity.UserID(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id"}).AddRow("main-user-b"))
+	mock.ExpectRollback()
+
+	err := applyScan(db, model.ProfileScan{ID: "scan-1", UserID: 1, MainUserID: "main-user-a"}, now)
+	if err != model.ErrBitMainUserMismatch {
+		t.Fatalf("applyScan() error = %v, want ErrBitMainUserMismatch", err)
+	}
+}
+
+func TestGetProfileInScopeJoinsTheOwnerBinding(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	mock.ExpectQuery(`SELECT bp\.id, .* FROM browser_profiles bp JOIN users u ON u\.id = bp\.user_id WHERE bp\.id = \? AND bp\.main_user_id = u\.bit_main_user_id`).
+		WithArgs("bp-1").
+		WillReturnRows(sqlmock.NewRows(strings.Split(profileColumnsSQL, ", ")))
+	if _, found, err := getProfileInScope(db, "bp-1"); err != nil || found {
+		t.Fatalf("getProfileInScope() found=%v err=%v", found, err)
 	}
 }
 

@@ -9,17 +9,27 @@ import (
 )
 
 var (
-	ErrForbidden            = errors.New("profile binding operation is forbidden")
-	ErrInvalidInput         = errors.New("profile binding input is invalid")
-	ErrIdentityUnverifiable = errors.New("BitBrowser identity is unverifiable")
-	ErrIdentityMismatch     = errors.New("BitBrowser identity does not match the bound user")
-	ErrScanNotFound         = errors.New("profile scan was not found")
-	ErrScanNotReady         = errors.New("profile scan is not ready")
-	ErrScanExpired          = errors.New("profile scan has expired")
-	ErrProfileNotFound      = errors.New("browser profile was not found")
-	ErrProfileInactive      = errors.New("browser profile is not active")
-	ErrProfileReferenced    = errors.New("browser profile is still referenced")
-	ErrProfileNotDisabled   = errors.New("browser profile is not disabled")
+	ErrForbidden                  = errors.New("profile binding operation is forbidden")
+	ErrInvalidInput               = errors.New("profile binding input is invalid")
+	ErrIdentityUnverifiable       = errors.New("BitBrowser identity is unverifiable")
+	ErrBitNotBound                = errors.New("BitBrowser main account is not bound")
+	ErrBitBrowserOffline          = errors.New("BitBrowser observation is stale")
+	ErrBitMainUserMismatch        = errors.New("BitBrowser main account does not match the bound account")
+	ErrScanNotFound               = errors.New("profile scan was not found")
+	ErrScanNotReady               = errors.New("profile scan is not ready")
+	ErrScanExpired                = errors.New("profile scan has expired")
+	ErrProfileNotFound            = errors.New("browser profile was not found")
+	ErrProfileAssignedToOtherUser = errors.New("browser profile belongs to another user")
+	ErrProfileInactive            = errors.New("browser profile is not active")
+	ErrProfileReferenced          = errors.New("browser profile is still referenced")
+	ErrProfileNotDisabled         = errors.New("browser profile is not disabled")
+)
+
+// 主账号绑定只由 Local Agent 的 bind 端点写入，审计动作与绑定模型放在一起。
+const (
+	AuditMainAccountBind   = "bitbrowser.main_account.bind"
+	AuditMainAccountRebind = "bitbrowser.main_account.rebind"
+	AuditMainAccountVerify = "bitbrowser.main_account.verify"
 )
 
 type BitAccountStatus string

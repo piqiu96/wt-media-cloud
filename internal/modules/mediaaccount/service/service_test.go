@@ -299,7 +299,7 @@ func TestServiceRejectsTaggingAnotherUsersAccount(t *testing.T) {
 
 func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 	store := newMemoryStore()
-	resolver := &fakeProfileResolver{profiles: map[string]identityservice.UserID{"profile-1": 1, "profile-2": 2}, inactive: map[string]bool{}}
+	resolver := &fakeProfileResolver{profiles: map[string]identityservice.UserID{"profile-1": 1, "profile-2": 2}, inactive: map[string]bool{}, outOfScope: map[string]bool{}}
 	service := newTestServiceWithProfiles(store, resolver)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformDouyin})
@@ -316,7 +316,7 @@ func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 	if _, err := service.BindProfile(actor, second.ID, "profile-1"); !errors.Is(err, ErrProfilePlatformTaken) {
 		t.Fatalf("same platform bind error = %v", err)
 	}
-	if _, err := service.BindProfile(actor, second.ID, "profile-2"); !errors.Is(err, ErrForbidden) {
+	if _, err := service.BindProfile(actor, second.ID, "profile-2"); !errors.Is(err, ErrProfileAssignedToOtherUser) {
 		t.Fatalf("cross-user bind error = %v", err)
 	}
 	resolver.inactive["profile-3"] = true
@@ -324,11 +324,19 @@ func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 	if _, err := service.BindProfile(actor, second.ID, "profile-3"); !errors.Is(err, ErrProfileUnavailable) {
 		t.Fatalf("inactive bind error = %v", err)
 	}
+	resolver.outOfScope["profile-4"] = true
+	resolver.profiles["profile-4"] = 1
+	if _, err := service.BindProfile(actor, second.ID, "profile-4"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("out-of-scope bind error = %v", err)
+	}
+	if _, err := service.BindProfile(actor, second.ID, "missing"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("missing bind error = %v", err)
+	}
 }
 
 func TestServiceUnbindsProfileAndRejectsDisabledBinding(t *testing.T) {
 	store := newMemoryStore()
-	resolver := &fakeProfileResolver{profiles: map[string]identityservice.UserID{"profile-1": 1}, inactive: map[string]bool{}}
+	resolver := &fakeProfileResolver{profiles: map[string]identityservice.UserID{"profile-1": 1}, inactive: map[string]bool{}, outOfScope: map[string]bool{}}
 	service := newTestServiceWithProfiles(store, resolver)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	account, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili})
@@ -953,13 +961,14 @@ func matchesTags(accountTags map[string]struct{}, anyTags, allTags, excludeTags 
 }
 
 type fakeProfileResolver struct {
-	profiles map[string]identityservice.UserID
-	inactive map[string]bool
+	profiles   map[string]identityservice.UserID
+	inactive   map[string]bool
+	outOfScope map[string]bool
 }
 
-func (r *fakeProfileResolver) ResolveProfile(profileID string) (userID identityservice.UserID, active bool, found bool, err error) {
+func (r *fakeProfileResolver) ResolveProfile(profileID string) (userID identityservice.UserID, active bool, inScope bool, found bool, err error) {
 	userID, found = r.profiles[profileID]
-	return userID, !r.inactive[profileID], found, nil
+	return userID, !r.inactive[profileID], !r.outOfScope[profileID], found, nil
 }
 
 type fakeProfileFact struct {
@@ -967,6 +976,7 @@ type fakeProfileFact struct {
 	userID       identityservice.UserID
 	bitProfileID string
 	active       bool
+	outOfScope   bool
 }
 
 type fakeProfileProxyFact struct {
@@ -982,9 +992,9 @@ type fakeProfileFacts struct {
 	proxyFacts map[string]fakeProfileProxyFact
 }
 
-func (r *fakeProfileFacts) ResolveProfileForAccountCheck(profileID string) (string, identityservice.UserID, string, bool, bool, error) {
+func (r *fakeProfileFacts) ResolveProfileForAccountCheck(profileID string) (string, identityservice.UserID, string, bool, bool, bool, error) {
 	profile, found := r.profiles[profileID]
-	return profile.id, profile.userID, profile.bitProfileID, profile.active, found, nil
+	return profile.id, profile.userID, profile.bitProfileID, !profile.outOfScope, profile.active, found, nil
 }
 
 func (r *fakeProfileFacts) ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {

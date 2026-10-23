@@ -145,7 +145,7 @@ func TestInitializeWorkerInitializesOnlyDouyinHTTPClient(t *testing.T) {
 // 500 instead of checking a credential.
 func TestInitializeServerPlanCarriesStorageAndTheAgentTokenSigner(t *testing.T) {
 	names := resourceStepNames(serverResourcePlan())
-	want := []string{"config", "agent_token", "logger", "metrics", "tracing", "database", "storage", "clients"}
+	want := []string{"config", "agent_token", "bit_browser", "logger", "metrics", "tracing", "database", "storage", "clients"}
 	assertOrder(t, names, want)
 }
 

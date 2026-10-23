@@ -16,6 +16,15 @@ import (
 
 const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, proxy_id, remark, cloud_remark, business_status, local_status, last_synced_at, created_at, updated_at`
 
+// profileColumnsWithPrefix 给每一列加上表别名，供需要 join users 的查询使用。
+func profileColumnsWithPrefix(alias string) string {
+	columns := strings.Split(profileColumnsSQL, ", ")
+	for index := range columns {
+		columns[index] = alias + "." + columns[index]
+	}
+	return strings.Join(columns, ", ")
+}
+
 func FindBinding(userID sharedidentity.UserID) (model.BitAccountBinding, bool, error) {
 	return findBinding(database.DB(), userID)
 }
@@ -66,8 +75,8 @@ func findBinding(db *gorm.DB, userID sharedidentity.UserID) (model.BitAccountBin
 	return binding, true, nil
 }
 
-// ProfileListFilter carries the list page's filters. The running state is not
-// here: it comes from the Desktop runtime, not from the cloud row.
+// ProfileListFilter 是列表页的筛选条件。运行态不在这里：它来自 Desktop 运行时，
+// 不来自 Cloud 数据行。
 type ProfileListFilter struct {
 	UserID         sharedidentity.UserID
 	ID             string
@@ -84,43 +93,45 @@ func ListProfiles(filter ProfileListFilter) ([]model.BrowserProfile, error) {
 }
 
 func listProfiles(db *gorm.DB, filter ProfileListFilter) ([]model.BrowserProfile, error) {
-	query := `SELECT ` + profileColumnsSQL + ` FROM browser_profiles WHERE 1=1`
+	// join 是作用域的另一半：只有 main_user_id 仍等于所有者当前绑定时行才可见。
+	// 旧主账号下的行继续保留，但在重新绑定该主账号之前不会出现在任何正常查询中。
+	query := `SELECT ` + profileColumnsWithPrefix("bp") + ` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.main_user_id = u.bit_main_user_id`
 	args := make([]any, 0, 10)
 	if filter.UserID > 0 {
-		query += ` AND user_id = ?`
+		query += ` AND bp.user_id = ?`
 		args = append(args, filter.UserID)
 	}
 	if filter.ID != "" {
-		query += ` AND id LIKE ? ESCAPE '!'`
+		query += ` AND bp.id LIKE ? ESCAPE '!'`
 		args = append(args, profileLikeContains(filter.ID))
 	}
 	if filter.Name != "" {
-		query += ` AND name LIKE ? ESCAPE '!'`
+		query += ` AND bp.name LIKE ? ESCAPE '!'`
 		args = append(args, profileLikeContains(filter.Name))
 	}
 	if filter.Group != "" {
 		like := profileLikeContains(filter.Group)
-		query += ` AND (group_id LIKE ? ESCAPE '!' OR group_name LIKE ? ESCAPE '!')`
+		query += ` AND (bp.group_id LIKE ? ESCAPE '!' OR bp.group_name LIKE ? ESCAPE '!')`
 		args = append(args, like, like)
 	}
 	if filter.BitProfileID != "" {
-		query += ` AND bit_profile_id LIKE ? ESCAPE '!'`
+		query += ` AND bp.bit_profile_id LIKE ? ESCAPE '!'`
 		args = append(args, profileLikeContains(filter.BitProfileID))
 	}
 	if filter.Remark != "" {
-		query += ` AND remark LIKE ? ESCAPE '!'`
+		query += ` AND bp.remark LIKE ? ESCAPE '!'`
 		args = append(args, profileLikeContains(filter.Remark))
 	}
 	if filter.LocalStatus != "" {
-		query += ` AND local_status = ?`
+		query += ` AND bp.local_status = ?`
 		args = append(args, filter.LocalStatus)
 	}
 	if filter.BusinessStatus != "" {
-		query += ` AND business_status = ?`
+		query += ` AND bp.business_status = ?`
 		args = append(args, filter.BusinessStatus)
 	}
 	// BitBrowser scans keep the scanned order; the page shows the newest first.
-	query += ` ORDER BY seq DESC, id DESC`
+	query += ` ORDER BY bp.seq DESC, bp.id DESC`
 	return listProfilesByQuery(db, query, args...)
 }
 
@@ -145,46 +156,54 @@ func listProfilesByQuery(db *gorm.DB, query string, args ...any) ([]model.Browse
 	return profiles, rows.Err()
 }
 
-func ResolveProfile(profileID string) (sharedidentity.UserID, bool, bool, error) {
+// ResolveProfile 同时返回 Profile 是否存在、以及是否仍在其所有者当前主账号作用域内。
+// 两个答案都要给调用方：旧主账号下的 Profile 不能执行，但也不属于其他用户。
+func ResolveProfile(profileID string) (sharedidentity.UserID, bool, bool, bool, error) {
 	return resolveProfile(database.DB(), profileID)
 }
 
-func resolveProfile(db *gorm.DB, profileID string) (sharedidentity.UserID, bool, bool, error) {
+func resolveProfile(db *gorm.DB, profileID string) (sharedidentity.UserID, bool, bool, bool, error) {
 	var userID sharedidentity.UserID
 	var status model.ProfileLocalStatus
-	err := queryRow(db, `SELECT user_id, local_status FROM browser_profiles WHERE id = ?`, profileID).Scan(&userID, &status)
+	var inScope bool
+	err := queryRow(db,
+		`SELECT bp.user_id, bp.local_status, IFNULL(bp.main_user_id = u.bit_main_user_id, 0) FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ?`,
+		profileID,
+	).Scan(&userID, &status, &inScope)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, false, nil
+		return 0, false, false, false, nil
 	}
 	if err != nil {
-		return 0, false, false, err
+		return 0, false, false, false, err
 	}
-	return userID, status == model.ProfileActive, true, nil
+	return userID, status == model.ProfileActive, inScope, true, nil
 }
 
-func ResolveProfileForAccountCheck(profileID string) (string, sharedidentity.UserID, string, bool, bool, error) {
+func ResolveProfileForAccountCheck(profileID string) (string, sharedidentity.UserID, string, bool, bool, bool, error) {
 	return resolveProfileForAccountCheck(database.DB(), profileID)
 }
 
-func resolveProfileForAccountCheck(db *gorm.DB, profileID string) (string, sharedidentity.UserID, string, bool, bool, error) {
+func resolveProfileForAccountCheck(db *gorm.DB, profileID string) (string, sharedidentity.UserID, string, bool, bool, bool, error) {
 	var id string
 	var userID sharedidentity.UserID
 	var bitProfileID string
 	var status model.ProfileLocalStatus
-	err := queryRow(db, `SELECT id, user_id, bit_profile_id, local_status FROM browser_profiles WHERE id = ?`, profileID).
-		Scan(&id, &userID, &bitProfileID, &status)
+	var inScope bool
+	err := queryRow(db,
+		`SELECT bp.id, bp.user_id, bp.bit_profile_id, bp.local_status, IFNULL(bp.main_user_id = u.bit_main_user_id, 0) FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ?`,
+		profileID,
+	).Scan(&id, &userID, &bitProfileID, &status, &inScope)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", 0, "", false, false, nil
+		return "", 0, "", false, false, false, nil
 	}
 	if err != nil {
-		return "", 0, "", false, false, err
+		return "", 0, "", false, false, false, err
 	}
-	return id, userID, bitProfileID, status == model.ProfileActive, true, nil
+	return id, userID, bitProfileID, inScope, status == model.ProfileActive, true, nil
 }
 
-// ResolveProxyForAccountCheck returns only the proxy health facts needed to
-// render media-account check items. Proxy credentials and source URLs are not
-// selected or returned from this cross-module read model.
+// ResolveProxyForAccountCheck 只返回渲染媒体账号检测项所需的代理健康事实。
+// 这个跨模块读模型不查询、也不返回代理凭据与来源 URL。
 func ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
 	return resolveProxyForAccountCheck(database.DB(), profileID)
 }
@@ -194,8 +213,9 @@ func resolveProxyForAccountCheck(db *gorm.DB, profileID string) (string, string,
 	var expiresAt sql.NullTime
 	err := queryRow(db, `SELECT bp.proxy_id, pc.business_status, pc.last_check_result, pc.expires_at
 		FROM browser_profiles bp
+		JOIN users u ON u.id = bp.user_id
 		JOIN proxy_configs pc ON pc.id = bp.proxy_id
-		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.proxy_id <> ''`, profileID).
+		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.proxy_id <> '' AND bp.main_user_id = u.bit_main_user_id`, profileID).
 		Scan(&proxyID, &businessStatus, &lastCheckResult, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", "", nil, false, nil
@@ -217,6 +237,27 @@ func GetProfile(profileID string) (model.BrowserProfile, bool, error) {
 
 func getProfile(db *gorm.DB, profileID string) (model.BrowserProfile, bool, error) {
 	row := queryRow(db, `SELECT `+profileColumnsSQL+` FROM browser_profiles WHERE id = ?`, profileID)
+	profile, err := scanProfile(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.BrowserProfile{}, false, nil
+	}
+	if err != nil {
+		return model.BrowserProfile{}, false, err
+	}
+	return profile, true, nil
+}
+
+// GetProfileInScope 只在 Profile 仍属于其所有者当前绑定的 BitBrowser 主账号时返回。
+// 旧主账号下的行保留在表中，但正常读取不可见。
+func GetProfileInScope(profileID string) (model.BrowserProfile, bool, error) {
+	return getProfileInScope(database.DB(), profileID)
+}
+
+func getProfileInScope(db *gorm.DB, profileID string) (model.BrowserProfile, bool, error) {
+	row := queryRow(db,
+		`SELECT `+profileColumnsWithPrefix("bp")+` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.main_user_id = u.bit_main_user_id`,
+		profileID,
+	)
 	profile, err := scanProfile(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.BrowserProfile{}, false, nil
@@ -312,29 +353,108 @@ func findScan(db *gorm.DB, scanID string) (model.ProfileScan, bool, error) {
 	return scan, true, nil
 }
 
-func ApplyScan(scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	return applyScan(database.DB(), scan, binding, at, bindingAuditAction)
+// BindBitAccount 以行锁串行化同一用户的绑定写入，保证并发观察不会相互覆盖。
+func BindBitAccount(userID sharedidentity.UserID, mainUserID string, rebind bool, at time.Time) (model.BitAccountBinding, error) {
+	return bindBitAccount(database.DB(), userID, mainUserID, rebind, at)
 }
 
-func applyScan(db *gorm.DB, scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, bindingAuditAction string) error {
+func bindBitAccount(db *gorm.DB, userID sharedidentity.UserID, mainUserID string, rebind bool, at time.Time) (model.BitAccountBinding, error) {
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	result, err := execSQL(tx,
-		`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`,
-		binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID,
-	)
+	var current sql.NullString
+	var boundAt sql.NullTime
+	err := queryRow(tx, `SELECT bit_main_user_id, bit_account_bound_at FROM users WHERE id = ? FOR UPDATE`, userID).
+		Scan(&current, &boundAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.BitAccountBinding{}, model.ErrForbidden
+	}
+	if err != nil {
+		return model.BitAccountBinding{}, err
+	}
+	action := model.AuditMainAccountBind
+	result := "bound"
+	previous := ""
+	firstBoundAt := at
+	switch {
+	case !current.Valid || current.String == "":
+		if _, err := execSQL(tx,
+			`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = ?, bit_account_last_verified_at = ?, updated_at = ? WHERE id = ?`,
+			mainUserID, model.BitAccountBound, at, at, at, userID,
+		); err != nil {
+			return model.BitAccountBinding{}, err
+		}
+	case current.String == mainUserID:
+		// 主账号未变时只刷新验证时间，首次绑定时间保持原值。历史行可能没有
+		// bound_at，这里顺手补齐，返回值和数据库才不会各说一套。
+		action, result = model.AuditMainAccountVerify, "verified"
+		if boundAt.Valid {
+			firstBoundAt = boundAt.Time
+		}
+		if _, err := execSQL(tx,
+			`UPDATE users SET bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ?`,
+			model.BitAccountBound, at, at, at, userID,
+		); err != nil {
+			return model.BitAccountBinding{}, err
+		}
+	case !rebind:
+		return model.BitAccountBinding{}, model.ErrBitMainUserMismatch
+	default:
+		action, result, previous = model.AuditMainAccountRebind, "rebound", current.String
+		if _, err := execSQL(tx,
+			`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = ?, bit_account_last_verified_at = ?, updated_at = ? WHERE id = ?`,
+			mainUserID, model.BitAccountBound, at, at, at, userID,
+		); err != nil {
+			return model.BitAccountBinding{}, err
+		}
+	}
+	summaryFields := map[string]any{"main_user_id": mainUserID, "result": result}
+	if previous != "" {
+		summaryFields["previous_main_user_id"] = previous
+	}
+	summary, _ := json.Marshal(summaryFields)
+	if _, err := execSQL(tx,
+		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id.NewID("audit"), userID, action, "user", userID, summary, at,
+	); err != nil {
+		return model.BitAccountBinding{}, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return model.BitAccountBinding{}, err
+	}
+	return model.BitAccountBinding{
+		UserID: userID, MainUserID: mainUserID, Status: model.BitAccountBound,
+		BoundAt: &firstBoundAt, LastVerifiedAt: &at,
+	}, nil
+}
+
+func ApplyScan(scan model.ProfileScan, at time.Time) error {
+	return applyScan(database.DB(), scan, at)
+}
+
+func applyScan(db *gorm.DB, scan model.ProfileScan, at time.Time) error {
+	tx := db.Begin()
+	defer rollbackTx(tx)
+	// 提交扫描前再次核对绑定：扫描暂存期间用户可能已重绑，旧扫描不能写入新主账号。
+	var boundMain sql.NullString
+	err := queryRow(tx, `SELECT bit_main_user_id FROM users WHERE id = ? FOR UPDATE`, scan.UserID).Scan(&boundMain)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.ErrForbidden
+	}
 	if err != nil {
 		return err
 	}
-	if result == 0 {
-		return model.ErrIdentityMismatch
+	if !boundMain.Valid || boundMain.String == "" {
+		return model.ErrBitNotBound
+	}
+	if boundMain.String != scan.MainUserID {
+		return model.ErrBitMainUserMismatch
 	}
 	for _, profile := range scan.Profiles {
-		// id is omitted (NULL) so MySQL auto-increments; upsert matches on the
-		// existing UNIQUE(user_id, bit_profile_id) key. business_status and
-		// cloud_remark are Cloud-side and are preserved on duplicate.
+		// 唯一键是 (user_id, main_user_id, bit_profile_id)：同一 bit_profile_id 在
+		// 不同主账号下会插入新行。business_status 与 cloud_remark 属于 Cloud 侧，
+		// 重复时不覆盖。
 		if _, err := execSQL(tx,
-			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE main_user_id = VALUES(main_user_id), profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), remark = VALUES(remark), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
+			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), remark = VALUES(remark), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
 			profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
 			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
 			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nil, nullIfEmpty(profile.Remark),
@@ -349,37 +469,21 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, binding model.BitAccountBind
 	}
 	notIn := placeholders(len(bitIDs))
 	if len(bitIDs) > 0 {
-		args := []any{scan.UserID}
-		for _, bitID := range bitIDs {
-			args = append(args, bitID)
-		}
-		// Accepting a scan cleans up Cloud records for windows that are gone from
-		// BitBrowser and not referenced by any media account. Referenced windows
-		// are kept as local_missing so account bindings are not orphaned.
-		//
-		// A correlated subquery inside a multi-table DELETE is unreliable, so the
-		// media-account guard lives only on the single-table profile delete.
-		cleanupArgs := append(append([]any{}, args...), model.ProfileArchived)
-		if _, err := execSQL(tx,
-			`DELETE bp FROM browser_profiles bp WHERE bp.user_id = ? AND bp.bit_profile_id NOT IN (`+notIn+`) AND NOT EXISTS (SELECT 1 FROM media_accounts ma WHERE ma.browser_profile_id = bp.id) AND bp.local_status <> ?`,
-			cleanupArgs...,
-		); err != nil {
-			return err
-		}
-		// Remaining missing windows (with account references) are marked local_missing.
-		markArgs := []any{model.ProfileLocalMissing, at, at, scan.UserID}
+		// 缺失窗口只标记 local_missing，且只作用于同一 user + main。不删除行：
+		// 切回旧主账号时这些 Profile 需要恢复可见，媒体账号引用也不能被清空。
+		markArgs := []any{model.ProfileLocalMissing, at, at, scan.UserID, scan.MainUserID}
 		for _, bitID := range bitIDs {
 			markArgs = append(markArgs, bitID)
 		}
 		markArgs = append(markArgs, model.ProfileArchived)
 		if _, err := execSQL(tx,
-			`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND local_status <> ?`,
+			`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND main_user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND local_status <> ?`,
 			markArgs...,
 		); err != nil {
 			return err
 		}
 	}
-	result, err = execSQL(tx,
+	result, err := execSQL(tx,
 		`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`,
 		model.ScanConfirmed, at, scan.ID, scan.UserID, model.ScanReady,
 	)
@@ -393,77 +497,6 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, binding model.BitAccountBind
 	if _, err := execSQL(tx,
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id.NewID("audit"), scan.UserID, "bitbrowser.profile_scan.confirm", "profile_sync_scan", scan.ID, summary, at,
-	); err != nil {
-		return err
-	}
-	bindingSummary, _ := json.Marshal(map[string]any{"main_user_id": scan.MainUserID, "profile_count": len(scan.Profiles), "result": "verified"})
-	if _, err := execSQL(tx,
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.NewID("audit"), scan.UserID, bindingAuditAction, "user", scan.UserID, bindingSummary, at,
-	); err != nil {
-		return err
-	}
-	return tx.Commit().Error
-}
-
-func ConfirmMainIdentity(scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	return confirmMainIdentity(database.DB(), scan, binding, at, bindingAuditAction)
-}
-
-func confirmMainIdentity(db *gorm.DB, scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	result, err := execSQL(tx,
-		`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`,
-		binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID,
-	)
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return model.ErrIdentityMismatch
-	}
-	result, err = execSQL(tx,
-		`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`,
-		model.ScanConfirmed, at, scan.ID, scan.UserID, model.ScanReady,
-	)
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return model.ErrScanNotReady
-	}
-	bindingSummary, _ := json.Marshal(map[string]any{"main_user_id": scan.MainUserID, "profile_count": len(scan.Profiles), "result": "identity_verified", "identity_only": true})
-	if _, err := execSQL(tx,
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.NewID("audit"), scan.UserID, bindingAuditAction, "user", scan.UserID, bindingSummary, at,
-	); err != nil {
-		return err
-	}
-	return tx.Commit().Error
-}
-
-func ConfirmMainIdentityDirect(binding model.BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	return confirmMainIdentityDirect(database.DB(), binding, at, bindingAuditAction)
-}
-
-func confirmMainIdentityDirect(db *gorm.DB, binding model.BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	result, err := execSQL(tx,
-		`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = COALESCE(bit_account_bound_at, ?), bit_account_last_verified_at = ?, updated_at = ? WHERE id = ? AND (bit_main_user_id IS NULL OR bit_main_user_id = ?)`,
-		binding.MainUserID, binding.Status, binding.BoundAt, binding.LastVerifiedAt, at, binding.UserID, binding.MainUserID,
-	)
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return model.ErrIdentityMismatch
-	}
-	bindingSummary, _ := json.Marshal(map[string]any{"main_user_id": binding.MainUserID, "result": "identity_verified", "identity_only": true})
-	if _, err := execSQL(tx,
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.NewID("audit"), binding.UserID, bindingAuditAction, "user", binding.UserID, bindingSummary, at,
 	); err != nil {
 		return err
 	}
@@ -503,8 +536,8 @@ func DeleteProfile(id string) error {
 }
 
 func deleteProfile(db *gorm.DB, id string) error {
-	// Sync-delete: only called for disabled windows whose BitBrowser profile is
-	// gone. Account/task/permit references are guarded in the service layer.
+	// 只用于删除 BitBrowser 侧已消失的停用窗口；账号/任务/permit 引用由
+	// service 层先行拦截。
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	if _, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ?`, id); err != nil {

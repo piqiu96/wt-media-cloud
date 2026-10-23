@@ -19,6 +19,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
+	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
@@ -39,6 +40,7 @@ func serverResourcePlan() []resourceStep {
 	return []resourceStep{
 		configResource(),
 		agentTokenResource(),
+		bitBrowserResource(),
 		loggerResource(),
 		metricsResource(),
 		tracingResource(),
@@ -150,6 +152,17 @@ func agentTokenResource() resourceStep {
 			}
 			agenttoken.Configure(signer)
 			return func() error { return nil }, nil
+		},
+	}
+}
+
+// bitBrowserResource 安装 BitBrowser 观察的有效窗口。零值保留包内默认值。
+func bitBrowserResource() resourceStep {
+	return resourceStep{
+		name: "bit_browser",
+		open: func() (func() error, error) {
+			profileservice.ConfigureObservedFreshFor(config.Get().App.BitBrowser.ObservationFreshFor.Duration)
+			return nil, nil
 		},
 	}
 }

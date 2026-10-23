@@ -42,11 +42,19 @@ type AppConfig struct {
 	Name         string             `toml:"name"`
 	Server       ServerConfig       `toml:"server"`
 	InitialAdmin InitialAdminConfig `toml:"initial_admin"`
+	BitBrowser   BitBrowserConfig   `toml:"bitbrowser"`
 }
 
 type ServerConfig struct {
 	HTTPAddr            string `toml:"http_addr"`
 	SessionCookieSecure bool   `toml:"session_cookie_secure"`
+}
+
+// BitBrowserConfig 保存 BitBrowser 观测的时效设置。
+type BitBrowserConfig struct {
+	// ObservationFreshFor 是 Agent 的 observed_at 仍可用于判断本机状态的最大年龄。
+	// 零值表示使用包内默认值。
+	ObservationFreshFor Duration `toml:"observation_fresh_for"`
 }
 
 type InitialAdminConfig struct {
@@ -166,9 +174,9 @@ type ComposeWorkerConfig struct {
 	// NodeID names this worker in compose_tasks.claimed_node_id — the value
 	// every conditional lifecycle write is keyed by. A deployment runs one
 	// compose worker, so a stable configured number is the identity.
-	NodeID            int64    `toml:"node_id"`
-	Concurrency       int      `toml:"concurrency"`
-	GlobalConcurrency int      `toml:"global_concurrency"`
+	NodeID            int64 `toml:"node_id"`
+	Concurrency       int   `toml:"concurrency"`
+	GlobalConcurrency int   `toml:"global_concurrency"`
 	// MinFreeBytes is the free-space floor on the workspace volume: below it
 	// the worker stops claiming until space recovers.
 	MinFreeBytes      int64    `toml:"min_free_bytes"`
@@ -376,6 +384,9 @@ func (c Config) Validate() error {
 	}
 	if len(strings.TrimSpace(c.Credentials.AgentToken.Secret)) < 32 {
 		return errors.New("credentials.agent_token.secret must be at least 32 characters")
+	}
+	if c.App.BitBrowser.ObservationFreshFor.Duration < 0 {
+		return errors.New("app.bitbrowser.observation_fresh_for must not be negative")
 	}
 	if err := validateDatabases(c.Databases); err != nil {
 		return err

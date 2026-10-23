@@ -10,7 +10,7 @@ import (
 )
 
 func SubmitScan(actor service.PublicUser, input dto.SnapshotInput) (model.ProfileScan, error) {
-	return newService(mysqlStore{}).SubmitScan(actor, input)
+	return newService(mysqlStore{}, WithObservedFreshFor(processObservedFreshFor)).SubmitScan(actor, input)
 }
 
 func GetScan(actor service.PublicUser, scanID string) (model.ProfileScan, error) {
@@ -21,12 +21,8 @@ func ConfirmScan(actor service.PublicUser, scanID string) (model.ProfileScan, er
 	return newService(mysqlStore{}).ConfirmScan(actor, scanID)
 }
 
-func ConfirmMainIdentity(actor service.PublicUser, scanID string) (model.ProfileScan, error) {
-	return newService(mysqlStore{}).ConfirmMainIdentity(actor, scanID)
-}
-
-func ConfirmMainIdentityDirect(actor service.PublicUser, input dto.MainIdentityInput) (model.BitAccountBinding, error) {
-	return newService(mysqlStore{}).ConfirmMainIdentityDirect(actor, input)
+func BindBitAccount(userID service.UserID, input dto.BitAccountBindInput) (model.BitAccountBinding, error) {
+	return newService(mysqlStore{}, WithObservedFreshFor(processObservedFreshFor)).BindBitAccount(userID, input)
 }
 
 func RejectScan(actor service.PublicUser, scanID string) error {
@@ -53,11 +49,11 @@ func GetActiveProfile(actor service.PublicUser, profileID string) (model.Browser
 	return newService(mysqlStore{}).GetActiveProfile(actor, profileID)
 }
 
-func ResolveProfile(profileID string) (service.UserID, bool, bool, error) {
+func ResolveProfile(profileID string) (service.UserID, bool, bool, bool, error) {
 	return repository.ResolveProfile(profileID)
 }
 
-func ResolveProfileForAccountCheck(profileID string) (string, service.UserID, string, bool, bool, error) {
+func ResolveProfileForAccountCheck(profileID string) (string, service.UserID, string, bool, bool, bool, error) {
 	return repository.ResolveProfileForAccountCheck(profileID)
 }
 

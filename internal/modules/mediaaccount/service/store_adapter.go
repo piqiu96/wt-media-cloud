@@ -66,13 +66,13 @@ func (mysqlStore) DeleteGroup(id string) error                { return repositor
 
 type productionProfileResolver struct{}
 
-func (productionProfileResolver) ResolveProfile(profileID string) (identityservice.UserID, bool, bool, error) {
+func (productionProfileResolver) ResolveProfile(profileID string) (identityservice.UserID, bool, bool, bool, error) {
 	return profilebindingservice.ResolveProfile(profileID)
 }
 
 type productionProfileFactResolver struct{}
 
-func (productionProfileFactResolver) ResolveProfileForAccountCheck(profileID string) (string, identityservice.UserID, string, bool, bool, error) {
+func (productionProfileFactResolver) ResolveProfileForAccountCheck(profileID string) (string, identityservice.UserID, string, bool, bool, bool, error) {
 	return profilebindingservice.ResolveProfileForAccountCheck(profileID)
 }
 func (productionProfileFactResolver) ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {

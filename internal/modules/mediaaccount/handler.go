@@ -406,6 +406,10 @@ func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 		api.Conflict(c, 23001, "此浏览器环境已绑定其他平台账号")
 	case errors.Is(err, accountservice.ErrProfileUnavailable):
 		api.Conflict(c, 23001, "浏览器环境不可用")
+	case errors.Is(err, accountservice.ErrProfileNotFound):
+		api.FailureCode(c, 404, 20004, "未找到对应的浏览器环境", "PROFILE_NOT_FOUND", nil, false, "choose_profile")
+	case errors.Is(err, accountservice.ErrProfileAssignedToOtherUser):
+		api.FailureCode(c, 403, 11003, "浏览器环境属于其他用户", "PROFILE_ASSIGNED_TO_OTHER_USER", nil, false, "choose_own_profile")
 	case errors.Is(err, accountservice.ErrInvalidInput):
 		api.BadRequest(c, 10001, "媒体账号信息格式错误")
 	default:
