@@ -19,18 +19,26 @@ UPDATE tasks SET attempt_id = CONCAT('legacy:', task_id) WHERE attempt_id IS NUL
 UPDATE tasks SET last_report_at = COALESCE(updated_at, created_at) WHERE last_report_at IS NULL;
 
 -- 旧任务能从执行物反查归属的，尽量保留给原用户。
+-- 历史 payload 里的 id 可能是非数字的外部串（如旧的 profile uuid）；这类值只跳过，
+-- 否则与 BIGINT 隐式比较会在严格模式下报 1292 并让整个迁移失败。
 UPDATE tasks t
-    JOIN media_accounts ma ON ma.id = JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.account_id'))
+    JOIN media_accounts ma
+      ON JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.account_id')) REGEXP '^[0-9]+$'
+     AND ma.id = CAST(JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.account_id')) AS UNSIGNED)
 SET t.user_id = ma.user_id
 WHERE t.user_id IS NULL;
 
 UPDATE tasks t
-    JOIN browser_profiles bp ON bp.id = JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.cloud_profile_id'))
+    JOIN browser_profiles bp
+      ON JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.cloud_profile_id')) REGEXP '^[0-9]+$'
+     AND bp.id = CAST(JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.cloud_profile_id')) AS UNSIGNED)
 SET t.user_id = bp.user_id
 WHERE t.user_id IS NULL;
 
 UPDATE tasks t
-    JOIN browser_profiles bp ON bp.id = JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.profile_id'))
+    JOIN browser_profiles bp
+      ON JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.profile_id')) REGEXP '^[0-9]+$'
+     AND bp.id = CAST(JSON_UNQUOTE(JSON_EXTRACT(t.payload_json, '$.profile_id')) AS UNSIGNED)
 SET t.user_id = bp.user_id
 WHERE t.user_id IS NULL;
 
