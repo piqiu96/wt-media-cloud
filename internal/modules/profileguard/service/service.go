@@ -1,16 +1,14 @@
-// Package profileguard owns Cloud preflight permits for sensitive Profile tasks.
+// Package profileguard 为敏感 Profile 任务发放互斥许可。
 //
-// A permit is a mutual-exclusion lock, not a credential. It guarantees that one
-// sensitive operation at a time runs against a Profile; the caller is
-// authenticated by its Agent Token (strict for a new preflight, report-safe for
-// renew/finish), and the permit is scoped to that token's user. There is no
-// node identity and no second secret to present.
+// 许可只是同一 Profile 上的互斥锁，不是凭证：调用方由 Agent Token 认证，许可
+// 按 Token 用户归属，没有节点身份，也没有第二个需要出示的秘密。
 package service
 
 import (
 	"strings"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
@@ -64,9 +62,15 @@ const (
 
 type Store interface {
 	FindAuthorizedTask(taskID string) (SensitiveTask, bool, error)
+	LoadCloudFacts(userID int64, profileID, mediaAccountID string) (executionpreflight.CloudFacts, error)
 	AcquirePermit(task SensitiveTask, permit Permit, at time.Time) (PreflightOutcome, error)
 	RenewPermit(permitID string, userID identityservice.UserID, at, expiresAt time.Time) (time.Time, error)
 	FinishPermit(permitID string, userID identityservice.UserID, outcome FinishOutcome, at time.Time) error
+}
+
+type PreflightInput struct {
+	AgentFacts          executionpreflight.AgentFacts
+	DesktopSessionValid bool
 }
 
 type Service struct {
@@ -93,10 +97,9 @@ func newService(store Store, options ...Option) *Service {
 	return service
 }
 
-// Preflight takes the per-Profile lock for a task belonging to the token's user.
-// A task belonging to somebody else answers not-found, so the endpoint cannot be
-// used to probe which task ids exist.
-func (s *Service) Preflight(userID identityservice.UserID, taskID string) (PreflightOutcome, error) {
+// Preflight 先走统一准入检查，再取 Profile 互斥锁。别人的任务返回 not-found，
+// 端点不能用来探测任务 id。
+func (s *Service) Preflight(userID identityservice.UserID, taskID string, input PreflightInput) (PreflightOutcome, error) {
 	if userID <= 0 || strings.TrimSpace(taskID) == "" {
 		return PreflightOutcome{}, ErrInvalidInput
 	}
@@ -107,8 +110,26 @@ func (s *Service) Preflight(userID identityservice.UserID, taskID string) (Prefl
 	if !found || task.Status != TaskAuthorized || task.UserID != userID {
 		return PreflightOutcome{}, ErrTaskNotFound
 	}
-	if !validOperation(task.Operation) {
+	action, ok := executionpreflight.ActionForSensitiveOperation(string(task.Operation))
+	if !ok {
 		return PreflightOutcome{}, ErrTaskAssignmentMismatch
+	}
+	cloudFacts, err := s.store.LoadCloudFacts(int64(userID), task.ProfileID, "")
+	if err != nil {
+		return PreflightOutcome{}, err
+	}
+	cloudFacts.DesktopSessionValid = input.DesktopSessionValid
+	if failure := executionpreflight.Evaluate(executionpreflight.Request{
+		Mode:             executionpreflight.ModeNewOperation,
+		Action:           action,
+		UserID:           int64(userID),
+		ProfileID:        task.ProfileID,
+		Cloud:            cloudFacts,
+		Agent:            input.AgentFacts,
+		Now:              s.now(),
+		ObservedFreshFor: executionpreflight.ObservedFreshFor(),
+	}); failure != nil {
+		return PreflightOutcome{}, failure
 	}
 	now := s.now()
 	permit := Permit{
@@ -119,8 +140,7 @@ func (s *Service) Preflight(userID identityservice.UserID, taskID string) (Prefl
 	return s.store.AcquirePermit(task, permit, now)
 }
 
-// Renew extends a permit the same user holds. The user check is what keeps a
-// permit id from acting as a cross-user bearer: knowing the id is not enough.
+// Renew 只延长同一用户持有的许可；知道 permit id 本身不足以跨用户使用。
 func (s *Service) Renew(userID identityservice.UserID, permitID string, extension time.Duration) (time.Time, error) {
 	if userID <= 0 || strings.TrimSpace(permitID) == "" {
 		return time.Time{}, ErrInvalidInput
@@ -138,14 +158,4 @@ func (s *Service) Finish(userID identityservice.UserID, permitID string, outcome
 		return ErrInvalidInput
 	}
 	return s.store.FinishPermit(permitID, userID, outcome, s.now())
-}
-
-func validOperation(operation SensitiveOperation) bool {
-	switch operation {
-	case OperationAssistedPublication, OperationInteraction, OperationAuthenticatedAccountCheck,
-		OperationCookieRead, OperationCookieWrite, OperationProfileMutation, OperationProxyMutation:
-		return true
-	default:
-		return false
-	}
 }

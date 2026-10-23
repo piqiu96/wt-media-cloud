@@ -1,5 +1,5 @@
-// Package localagent owns the Cloud side of the Local Agent contract: issuing
-// the session-bound Agent Token and authenticating Agent API calls with it.
+// Package localagent 负责 Cloud 侧的 Local Agent 契约：签发会话绑定的 Agent Token，
+// 并用它认证 Agent API 调用。
 package localagent
 
 import (
@@ -14,27 +14,23 @@ import (
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
-// Mode selects how much session state an Agent call must prove.
+// Mode 决定一次 Agent 调用要证明多少会话状态。
 type Mode int
 
 const (
-	// StrictMode gates new work: the token's sid must still be the user's one
-	// active Desktop session and the user must still be enabled.
+	// StrictMode 管新工作：Token 的 sid 必须仍是该用户当前有效的 Desktop 会话，
+	// 用户也必须仍启用。
 	StrictMode Mode = iota
-	// ReportSafeMode gates completion of work already claimed. It verifies only
-	// the token itself; task ownership is checked by the handler. A replaced
-	// Desktop must still be able to finish what it already started.
+	// ReportSafeMode 管已领取工作的收尾：只验 Token 本身，任务归属由 handler 校验。
+	// 被替换的 Desktop 仍须能收尾它已经开始的活。
 	ReportSafeMode
 )
 
 const agentContextKey = "local_agent_auth"
 
-// resolveDesktopSession is the identity lookup strict mode performs. A variable
-// so the takeover branches can be driven without a database; the process uses
-// the real identity service.
+// resolveDesktopSession 是严格档的会话查询；测试可替换，进程使用真实 identity 服务。
 var resolveDesktopSession = identityservice.AuthenticateAgentSession
 
-// AgentAuth is the resolved caller of an Agent API.
 type AgentAuth struct {
 	Claims  agenttoken.Claims
 	Mode    Mode
@@ -42,16 +38,37 @@ type AgentAuth struct {
 	User    identityservice.PublicUser
 }
 
-// RequireAgent rejects requests that carry anything other than a valid Agent
-// Token. A user session is deliberately not accepted here: the two credential
-// kinds must not be interchangeable.
+// SessionFailure 是会话不再有效的原因。
+type SessionFailure struct {
+	Code           string
+	Message        string
+	RecoveryAction string
+}
+
+// CheckDesktopSession 验证 Token 的 sid 仍是该用户当前有效的 Desktop 会话。
+// 上报档路由在请求发起新工作时自行调用（严格档由中间件调用）。
+func CheckDesktopSession(claims agenttoken.Claims) (AgentAuth, *SessionFailure, error) {
+	sessionContext, err := resolveDesktopSession(claims.SessionID)
+	if err != nil {
+		if failure, described := identityservice.DescribeAuthFailure(err); described {
+			return AgentAuth{}, &SessionFailure{Code: failure.Code, Message: failure.Message, RecoveryAction: failure.RecoveryAction}, nil
+		}
+		return AgentAuth{}, nil, err
+	}
+	// 签名已把 sub 与 sid 绑在一起，但 Token 也不能认证成会话以外的用户。
+	if int64(sessionContext.User.ID) != claims.UserID || sessionContext.Session.ID != claims.SessionID {
+		return AgentAuth{}, &SessionFailure{Code: "AUTH_AGENT_TOKEN_INVALID", Message: "Agent 凭证与登录会话不一致", RecoveryAction: "reissue_agent_token"}, nil
+	}
+	return AgentAuth{Claims: claims, Session: sessionContext.Session, User: sessionContext.User}, nil, nil
+}
+
+// RequireAgent 只接受有效的 Agent Token；用户 session 不能在这里使用，两种凭证不可互代。
 func RequireAgent(mode Mode) hertzapp.HandlerFunc {
 	return func(ctx context.Context, c *hertzapp.RequestContext) {
 		auth, ok := authenticate(ctx, c, mode)
 		if !ok {
-			// Hertz's chain keeps calling handlers after a middleware returns;
-			// only Abort stops it. Without this the handler would run behind a
-			// rejected token and write a second body.
+			// Hertz 的 handler 链在中间件返回后仍会继续，只有 Abort 能停住；
+			// 否则 handler 会在被拒的凭证后运行并写第二个响应体。
 			c.Abort()
 			return
 		}
@@ -60,7 +77,7 @@ func RequireAgent(mode Mode) hertzapp.HandlerFunc {
 	}
 }
 
-// AgentAuthFrom returns the authentication installed by RequireAgent.
+// AgentAuthFrom 返回 RequireAgent 安装的认证信息。
 func AgentAuthFrom(c *hertzapp.RequestContext) (AgentAuth, bool) {
 	cached, exists := c.Get(agentContextKey)
 	if !exists {
@@ -92,29 +109,20 @@ func authenticate(_ context.Context, c *hertzapp.RequestContext, mode Mode) (Age
 		writeAgentError(c, "AUTH_AGENT_TOKEN_INVALID", "Agent 凭证无效", false, "reissue_agent_token")
 		return AgentAuth{}, false
 	}
-	auth := AgentAuth{Claims: claims, Mode: mode}
 	if mode == ReportSafeMode {
-		return auth, true
+		return AgentAuth{Claims: claims, Mode: mode}, true
 	}
-
-	sessionContext, err := resolveDesktopSession(claims.SessionID)
+	auth, failure, err := CheckDesktopSession(claims)
 	if err != nil {
-		if failure, described := identityservice.DescribeAuthFailure(err); described {
-			writeAgentError(c, failure.Code, failure.Message, false, failure.RecoveryAction)
-			return AgentAuth{}, false
-		}
 		hlog.Errorf("module=local_agent result=error path=%s error=%v", string(c.Path()), err)
 		api.InternalError(c, "Agent 凭证校验失败")
 		return AgentAuth{}, false
 	}
-	// The signature already binds sub and sid together, but a token must never
-	// authenticate a different user than the session it names.
-	if int64(sessionContext.User.ID) != claims.UserID || sessionContext.Session.ID != claims.SessionID {
-		writeAgentError(c, "AUTH_AGENT_TOKEN_INVALID", "Agent 凭证与登录会话不一致", false, "reissue_agent_token")
+	if failure != nil {
+		writeAgentError(c, failure.Code, failure.Message, false, failure.RecoveryAction)
 		return AgentAuth{}, false
 	}
-	auth.Session = sessionContext.Session
-	auth.User = sessionContext.User
+	auth.Mode = mode
 	return auth, true
 }
 

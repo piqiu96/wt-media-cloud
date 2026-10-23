@@ -1,4 +1,4 @@
-// Package profileguard exposes the module's HTTP surface.
+// Package profileguard 暴露敏感 Profile 守卫的 HTTP 接口。
 package profileguard
 
 import (
@@ -7,11 +7,16 @@ import (
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	guardservice "github.com/wt-media/wt-media-cloud/internal/modules/profileguard/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
+
+type preflightRequest struct {
+	Facts executionpreflight.FactsInput `json:"facts"`
+}
 
 type renewRequest struct {
 	LeaseSeconds int `json:"lease_seconds"`
@@ -21,15 +26,21 @@ type finishRequest struct {
 	Outcome guardservice.FinishOutcome `json:"outcome"`
 }
 
-// Preflight is a new operation: the strict token proves the Desktop session is
-// still current, and the permit it takes belongs to the token's user.
+// Preflight 是新操作：严格档证明 Desktop 会话仍是当前会话，许可归 Token 用户。
 func Preflight(ctx context.Context, c *hertzapp.RequestContext) {
 	auth, ok := localagent.AgentAuthFrom(c)
 	if !ok {
 		api.InternalError(c, "Profile 守卫服务内部错误")
 		return
 	}
-	outcome, err := guardservice.Preflight(authUserID(auth), c.Param("task_id"))
+	var req preflightRequest
+	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {
+		return
+	}
+	outcome, err := guardservice.Preflight(authUserID(auth), c.Param("task_id"), guardservice.PreflightInput{
+		AgentFacts:          req.Facts.AgentFacts(),
+		DesktopSessionValid: true,
+	})
 	if err != nil {
 		writeGuardError(c, err)
 		return
@@ -37,10 +48,8 @@ func Preflight(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, outcome)
 }
 
-// Renew and Finish are report-safe: the permit is already held, and the work it
-// guards must be able to finish even after the account has logged in elsewhere.
-// The permit id alone is not a credential — the token's user has to match the
-// row.
+// Renew 与 Finish 走上报档：许可已经持有，即使账号在别处登录，也要能收尾。
+// permit id 不是凭证，Token 用户必须与许可行一致。
 func Renew(_ context.Context, c *hertzapp.RequestContext) {
 	auth, ok := localagent.AgentAuthFrom(c)
 	if !ok {
@@ -81,6 +90,11 @@ func authUserID(auth localagent.AgentAuth) identityservice.UserID {
 }
 
 func writeGuardError(c *hertzapp.RequestContext, err error) {
+	var failure *executionpreflight.Failure
+	if errors.As(err, &failure) {
+		executionpreflight.WriteFailure(c, failure)
+		return
+	}
 	switch {
 	case errors.Is(err, guardservice.ErrPermitInvalid):
 		api.ConflictNamed(c, 23003, "Profile 操作许可已失效", "profile_permit_invalid")

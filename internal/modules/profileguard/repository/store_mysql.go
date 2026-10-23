@@ -45,31 +45,18 @@ func AcquirePermit(task model.SensitiveTask, permit model.Permit, at time.Time) 
 	return acquirePermit(database.DB(), task, permit, at)
 }
 
+// acquirePermit 只负责 Profile 上的互斥：环境与账号检查已由统一准入完成，
+// 这里不再重复，也不再发放独立凭证。
 func acquirePermit(db *gorm.DB, task model.SensitiveTask, permit model.Permit, at time.Time) (PreflightOutcome, error) {
 	outcome := PreflightOutcome{}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		// 行锁串行化同一 Profile 的敏感操作；查不到说明 Profile 已被删除。
 		var profileID string
 		if err := tx.Raw(`SELECT id FROM browser_profiles WHERE id = ? FOR UPDATE`, task.ProfileID).Row().Scan(&profileID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return model.ErrRuntimeUnavailable
 			}
 			return err
-		}
-		var validCount int
-		if err := tx.Raw(`SELECT COUNT(*) FROM sensitive_browser_tasks t
-			JOIN browser_profiles bp ON bp.id = t.profile_id
-			JOIN users u ON u.id = t.user_id
-			WHERE t.id = ? AND t.user_id = ? AND t.profile_id = ? AND t.operation = ?
-			AND t.bit_profile_id = ? AND t.status = 'authorized' AND bp.local_status = 'active'
-			AND bp.user_id = u.id
-			AND bp.bit_profile_id = t.bit_profile_id AND bp.main_user_id = u.bit_main_user_id
-			AND u.status = 'enabled'`,
-			task.ID, task.UserID, task.ProfileID, task.Operation, task.BitProfileID,
-		).Row().Scan(&validCount); err != nil {
-			return err
-		}
-		if validCount != 1 {
-			return model.ErrRuntimeUnavailable
 		}
 
 		var priorID string

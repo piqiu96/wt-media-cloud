@@ -80,8 +80,7 @@ func issueProbe(t *testing.T) issueResult {
 	}
 }
 
-// The issued token's exp is the session's expires_at and nothing else: that is
-// what keeps a login from outliving the Agent credential it produced.
+// Token 的 exp 只能是会话的 expires_at：登录不会比它签出的 Agent 凭证活得更久。
 func TestIssueAgentTokenBindsTheTokenToTheDesktopSession(t *testing.T) {
 	signer := configureSigner(t)
 	stubIssuedAudit(t, nil)
@@ -104,8 +103,7 @@ func TestIssueAgentTokenBindsTheTokenToTheDesktopSession(t *testing.T) {
 	}
 }
 
-// A web login must not yield an Agent credential: the token speaks for one
-// Desktop session, and a browser session is not one.
+// Web 登录不能换来 Agent 凭证：Token 代表一个 Desktop 会话，浏览器会话不是。
 func TestIssueAgentTokenRefusesAWebSession(t *testing.T) {
 	configureSigner(t)
 	recorded := stubIssuedAudit(t, nil)
@@ -136,8 +134,7 @@ func TestIssueAgentTokenRequiresASession(t *testing.T) {
 	}
 }
 
-// Issuing without a signer would hand out tokens nobody can verify, so it must
-// fail instead of returning an empty credential.
+// 没有 signer 时签发等于发出谁都验不了的凭证，必须失败而不是返回空串。
 func TestIssueAgentTokenFailsWhenTheSignerIsNotConfigured(t *testing.T) {
 	agenttoken.Configure(nil)
 	stubIssuedAudit(t, nil)
@@ -149,8 +146,8 @@ func TestIssueAgentTokenFailsWhenTheSignerIsNotConfigured(t *testing.T) {
 	}
 }
 
-// The audit records which session the token was issued for; a failed audit must
-// fail the request rather than leave an unlogged credential in the wild.
+// 审计记录 Token 是为哪个会话签发的；审计写不进去时请求必须失败，
+// 不能留下无记录的凭证。
 func TestIssueAgentTokenFailsWhenTheAuditCannotBeWritten(t *testing.T) {
 	configureSigner(t)
 	recorded := stubIssuedAudit(t, errors.New("audit store unavailable"))

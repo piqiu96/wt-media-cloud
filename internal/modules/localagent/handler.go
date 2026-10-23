@@ -11,19 +11,14 @@ import (
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
-// authenticateSession resolves the caller's user session. A variable so the
-// Desktop-only rule can be driven without a database; the process uses the real
-// middleware.
+// authenticateSession 是测试接缝：进程用真实中间件，用例不必连数据库。
 var authenticateSession = middleware.AuthenticateRequestContext
 
-// recordTokenIssued writes the issuance audit event. A variable for the same
-// reason: the audit store is the database, and the decision under test is what
-// gets issued, not how it is logged.
+// recordTokenIssued 同样可替换：审计写库失败必须让签发失败，而用例不关心审计如何落库。
 var recordTokenIssued = identityservice.AuditAgentTokenIssued
 
-// IssueAgentToken exchanges the caller's Desktop session for a signed Agent
-// Token. Web sessions are refused: the token exists to let one computer's
-// Local Agent act for the Desktop login that is currently valid on it.
+// IssueAgentToken 用 Desktop 会话换取签名 Agent Token。Web 会话被拒绝：
+// Token 让本机 Agent 代表这台电脑当前有效的 Desktop 登录行事。
 func IssueAgentToken(_ context.Context, c *hertzapp.RequestContext) {
 	authContext, ok := authenticateSession(c)
 	if !ok {

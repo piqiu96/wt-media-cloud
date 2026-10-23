@@ -1,4 +1,4 @@
-// Package profileguard exposes the module's HTTP surface.
+// Package profileguard 暴露敏感 Profile 守卫的 HTTP 接口。
 package profileguard
 
 import (
@@ -6,12 +6,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 )
 
-// RegisterRoutes installs the module's root handlers.
-//
-// Preflight admits a new sensitive operation and requires the strict token.
-// Renew and finish complete an operation already permitted, so they use the
-// report-safe token: a replaced Desktop must still be able to release the lock
-// it holds rather than leaving the Profile blocked until the permit expires.
+// RegisterRoutes：preflight 准入新操作，用严格档；renew/finish 收尾已持有的许可，
+// 用上报档，否则被替换的 Desktop 无法释放锁，Profile 会一直被占到许可过期。
 func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/local-agent/sensitive-tasks/:task_id/preflight", localagent.RequireAgent(localagent.StrictMode), Preflight)
 	h.POST("/api/v1/local-agent/sensitive-permits/:permit_id/renew", localagent.RequireAgent(localagent.ReportSafeMode), Renew)

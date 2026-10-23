@@ -5,12 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 )
 
 type fakeStore struct {
 	task           SensitiveTask
 	taskFound      bool
+	cloudFacts     executionpreflight.CloudFacts
 	acquireOutcome PreflightOutcome
 	storedPermit   Permit
 	finishPermitID string
@@ -22,6 +24,10 @@ type fakeStore struct {
 
 func (s *fakeStore) FindAuthorizedTask(taskID string) (SensitiveTask, bool, error) {
 	return s.task, s.taskFound && s.task.ID == taskID, nil
+}
+
+func (s *fakeStore) LoadCloudFacts(int64, string, string) (executionpreflight.CloudFacts, error) {
+	return s.cloudFacts, nil
 }
 
 func (s *fakeStore) AcquirePermit(task SensitiveTask, permit Permit, _ time.Time) (PreflightOutcome, error) {
@@ -54,15 +60,30 @@ func authorizedTask() SensitiveTask {
 	return SensitiveTask{ID: "task-1", UserID: identityservice.UserID(1), ProfileID: "profile-1", BitProfileID: "bit-profile-1", Operation: OperationInteraction, Status: TaskAuthorized}
 }
 
-// The permit is a lock, so what it has to get right is whose lock it is: the
-// task's user, its Profile and its operation from the task row, never from the
-// caller's request.
+func greenCloudFacts() executionpreflight.CloudFacts {
+	return executionpreflight.CloudFacts{
+		UserEnabled:   true,
+		BitMainUserID: "main-1",
+		Profile:       executionpreflight.ProfileFacts{Found: true, OwnedByUser: true, MainUserID: "main-1", LocalStatus: "active"},
+		MediaAccount:  executionpreflight.MediaAccountFacts{Found: true, LoginStatus: "normal"},
+	}
+}
+
+func liveAgentFacts(now time.Time) executionpreflight.AgentFacts {
+	return executionpreflight.AgentFacts{BitBrowserRunning: true, MainUserID: "main-1", ObservedAt: now, ProfileVisible: true, FilesReady: true}
+}
+
+func greenPreflightInput(now time.Time) PreflightInput {
+	return PreflightInput{AgentFacts: liveAgentFacts(now), DesktopSessionValid: true}
+}
+
+// 许可必须记在任务行上：用户、Profile 和操作都取自任务，不取请求。
 func TestPreflightTakesTheLockForTheTasksUser(t *testing.T) {
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
-	store := &fakeStore{task: authorizedTask(), taskFound: true}
+	store := &fakeStore{task: authorizedTask(), taskFound: true, cloudFacts: greenCloudFacts()}
 	service := testProfileGuard(store, &now)
 
-	grant, err := service.Preflight(identityservice.UserID(1), "task-1")
+	grant, err := service.Preflight(identityservice.UserID(1), "task-1", greenPreflightInput(now))
 	if err != nil {
 		t.Fatalf("Preflight() error = %v", err)
 	}
@@ -79,14 +100,13 @@ func TestPreflightTakesTheLockForTheTasksUser(t *testing.T) {
 	}
 }
 
-// A permit id must not work as a cross-user bearer: the endpoint answers a task
-// belonging to somebody else as not-found, so it cannot be used to probe ids.
+// 别人的任务按 not-found 处理，既不能取锁，也不能被用来探测任务 id。
 func TestPreflightRefusesATaskOfAnotherUser(t *testing.T) {
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
-	store := &fakeStore{task: authorizedTask(), taskFound: true}
+	store := &fakeStore{task: authorizedTask(), taskFound: true, cloudFacts: greenCloudFacts()}
 	service := testProfileGuard(store, &now)
 
-	if _, err := service.Preflight(identityservice.UserID(2), "task-1"); !errors.Is(err, ErrTaskNotFound) {
+	if _, err := service.Preflight(identityservice.UserID(2), "task-1", greenPreflightInput(now)); !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("Preflight() error = %v, want ErrTaskNotFound", err)
 	}
 	if store.storedPermit.ID != "" {
@@ -98,19 +118,36 @@ func TestPreflightRefusesAnUnknownOperation(t *testing.T) {
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 	task := authorizedTask()
 	task.Operation = "unknown"
-	store := &fakeStore{task: task, taskFound: true}
+	store := &fakeStore{task: task, taskFound: true, cloudFacts: greenCloudFacts()}
 	service := testProfileGuard(store, &now)
 
-	if _, err := service.Preflight(identityservice.UserID(1), "task-1"); !errors.Is(err, ErrTaskAssignmentMismatch) {
+	if _, err := service.Preflight(identityservice.UserID(1), "task-1", greenPreflightInput(now)); !errors.Is(err, ErrTaskAssignmentMismatch) {
 		t.Fatalf("Preflight() error = %v, want ErrTaskAssignmentMismatch", err)
+	}
+}
+
+// 统一准入的失败要带具体错误码透传，且不能留下许可。
+func TestPreflightStopsAtTheUnifiedChecksWithoutTakingAPermit(t *testing.T) {
+	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
+	store := &fakeStore{task: authorizedTask(), taskFound: true, cloudFacts: greenCloudFacts()}
+	input := greenPreflightInput(now)
+	input.AgentFacts.ObservedAt = now.Add(-time.Hour)
+
+	_, err := testProfileGuard(store, &now).Preflight(identityservice.UserID(1), "task-1", input)
+	var failure *executionpreflight.Failure
+	if !errors.As(err, &failure) || failure.Code != "BIT_BROWSER_OFFLINE" {
+		t.Fatalf("Preflight() error = %v, want BIT_BROWSER_OFFLINE", err)
+	}
+	if store.storedPermit.ID != "" {
+		t.Fatal("a refused preflight still took a permit")
 	}
 }
 
 func TestPreflightReturnsWaitingOrReviewWithoutAPermit(t *testing.T) {
 	now := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 	for _, outcome := range []Outcome{OutcomeWaiting, OutcomeReviewRequired} {
-		store := &fakeStore{task: authorizedTask(), taskFound: true, acquireOutcome: PreflightOutcome{Outcome: outcome, ProfileID: "profile-1"}}
-		grant, err := testProfileGuard(store, &now).Preflight(identityservice.UserID(1), "task-1")
+		store := &fakeStore{task: authorizedTask(), taskFound: true, cloudFacts: greenCloudFacts(), acquireOutcome: PreflightOutcome{Outcome: outcome, ProfileID: "profile-1"}}
+		grant, err := testProfileGuard(store, &now).Preflight(identityservice.UserID(1), "task-1", greenPreflightInput(now))
 		if err != nil || grant.Outcome != outcome || grant.PermitID != "" {
 			t.Fatalf("outcome=%s grant=%+v error=%v", outcome, grant, err)
 		}

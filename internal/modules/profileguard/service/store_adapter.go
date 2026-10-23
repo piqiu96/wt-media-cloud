@@ -3,6 +3,7 @@ package service
 import (
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
@@ -13,6 +14,9 @@ type mysqlStore struct{}
 
 func (mysqlStore) FindAuthorizedTask(taskID string) (model.SensitiveTask, bool, error) {
 	return repository.FindAuthorizedTask(taskID)
+}
+func (mysqlStore) LoadCloudFacts(userID int64, profileID, mediaAccountID string) (executionpreflight.CloudFacts, error) {
+	return executionpreflight.LoadCloudFacts(userID, profileID, mediaAccountID)
 }
 func (mysqlStore) AcquirePermit(task model.SensitiveTask, permit model.Permit, at time.Time) (dto.PreflightOutcome, error) {
 	outcome, err := repository.AcquirePermit(task, permit, at)

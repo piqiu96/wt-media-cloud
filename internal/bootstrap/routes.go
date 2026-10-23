@@ -12,6 +12,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -39,17 +40,15 @@ func registerRoutes(engine *server.Hertz) error {
 	return registerCloudWeb(engine, paths.Web)
 }
 
-// registerModuleRoutes installs every module's HTTP surface, and nothing else.
+// registerModuleRoutes 只安装各模块的 HTTP 路由。
 //
-// It is split out of `registerRoutes` so that the module list is reachable from a
-// test: `registerRoutes` itself reads the configuration and bootstraps an admin
-// account, so anything asserted through it would be asserting against a database.
-// The list is the whole content of this function, and a module missing from it
-// serves 404 on every route it owns without any other symptom.
+// 单独拆出来是为了让测试能拿到完整模块列表：registerRoutes 会读配置并初始化管理员，
+// 从它入口断言就等于在断言数据库。这里漏掉一个模块，它所有的路由都会 404，没有其他症状。
 func registerModuleRoutes(engine *server.Hertz) {
 	cloudagent.RegisterRoutes(engine)
 	identity.RegisterRoutes(engine)
 	localagent.RegisterRoutes(engine)
+	executionpreflight.RegisterRoutes(engine)
 	profileguard.RegisterRoutes(engine)
 	profilebinding.RegisterRoutes(engine)
 	mediaaccount.RegisterRoutes(engine)

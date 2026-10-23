@@ -9,9 +9,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
-// The guard endpoints accept an Agent Token and nothing else — not an empty
-// credential, not a user session. The empty request proves both that the routes
-// are bound and that the credential kind is enforced ahead of the handler.
+// 守卫端点只接受 Agent Token：空凭证和用户 session 都不行。空请求同时证明
+// 路由已绑定，以及凭证类型在 handler 之前就被强制。
 func TestRegisterRoutesBindsGuardEndpointsBehindTheAgentToken(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)

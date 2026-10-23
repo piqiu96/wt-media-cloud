@@ -19,6 +19,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
@@ -140,8 +141,8 @@ func configResource() resourceStep {
 	}
 }
 
-// agentTokenResource publishes the Agent Token signer. Only the HTTP process
-// issues and verifies tokens, so scheduler and worker plans do not load it.
+// agentTokenResource 发布 Agent Token 签名器。只有 HTTP 进程签发和验签，
+// 所以 scheduler 与 worker 计划不加载它。
 func agentTokenResource() resourceStep {
 	return resourceStep{
 		name: "agent_token",
@@ -161,7 +162,9 @@ func bitBrowserResource() resourceStep {
 	return resourceStep{
 		name: "bit_browser",
 		open: func() (func() error, error) {
-			profileservice.ConfigureObservedFreshFor(config.Get().App.BitBrowser.ObservationFreshFor.Duration)
+			freshFor := config.Get().App.BitBrowser.ObservationFreshFor.Duration
+			profileservice.ConfigureObservedFreshFor(freshFor)
+			executionpreflight.ConfigureObservedFreshFor(freshFor)
 			return nil, nil
 		},
 	}

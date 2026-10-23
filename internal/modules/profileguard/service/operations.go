@@ -9,8 +9,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/repository"
 )
 
-func Preflight(userID identityservice.UserID, taskID string) (dto.PreflightOutcome, error) {
-	return newService(mysqlStore{}).Preflight(userID, taskID)
+func Preflight(userID identityservice.UserID, taskID string, input PreflightInput) (dto.PreflightOutcome, error) {
+	return newService(mysqlStore{}).Preflight(userID, taskID, input)
 }
 
 func Renew(userID identityservice.UserID, permitID string, extension time.Duration) (time.Time, error) {

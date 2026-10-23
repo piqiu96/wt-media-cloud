@@ -84,9 +84,8 @@ func probe(t *testing.T, mode Mode, token string) probeResult {
 	return probeResult{handled: handled, auth: seen, status: result.Result().StatusCode(), code: envelope.Error.Code}
 }
 
-// A rejected credential must stop the chain, not merely write a body: the
-// handler running behind a failed check would act for an unauthenticated
-// caller and append a second JSON document to the response.
+// 被拒的凭证必须停住 handler 链，而不只是写响应体：否则 handler 会替未认证调用方
+// 执行，并追加第二份 JSON。
 func TestRequireAgentStopsTheChainWhenTheCredentialIsMissing(t *testing.T) {
 	configureSigner(t)
 	result := probe(t, StrictMode, "")
@@ -115,9 +114,8 @@ func TestRequireAgentRejectsAnExpiredToken(t *testing.T) {
 	}
 }
 
-// Strict mode gates new work, so a Desktop that has been replaced must lose it:
-// the token is still signed and unexpired, but its session is no longer the
-// user's current one.
+// 严格档决定新工作：被替换的 Desktop 必须失去它——Token 仍签名有效、未过期，
+// 但 sid 已不是该用户当前的会话。
 func TestStrictModeRefusesANewOperationAfterTheDesktopIsReplaced(t *testing.T) {
 	signer := configureSigner(t)
 	token, _, _ := signer.Issue(9, "session-1", testNow.Add(time.Hour))
@@ -166,8 +164,7 @@ func TestStrictModeCarriesTheSessionAndUserToTheHandler(t *testing.T) {
 	}
 }
 
-// Reporting already-claimed work must survive a takeover: the token is the only
-// proof, and the task's own user and attempt decide whether the report lands.
+// 已领取工作的上报必须跨过抢占：Token 是唯一凭证，任务归属和 attempt 决定上报是否落库。
 func TestReportSafeModeAcceptsAReportAfterTheDesktopIsReplaced(t *testing.T) {
 	signer := configureSigner(t)
 	token, claims, _ := signer.Issue(9, "session-1", testNow.Add(time.Hour))
@@ -184,7 +181,7 @@ func TestReportSafeModeAcceptsAReportAfterTheDesktopIsReplaced(t *testing.T) {
 	}
 }
 
-// Report-safe mode must not consult the session at all — not even to read it.
+// 上报档完全不查会话——连读都不读。
 func TestReportSafeModeDoesNotConsultTheDesktopSession(t *testing.T) {
 	signer := configureSigner(t)
 	token, _, _ := signer.Issue(9, "session-1", testNow.Add(time.Hour))
