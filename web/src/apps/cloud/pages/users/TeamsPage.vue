@@ -24,8 +24,8 @@ const pagedTeams = computed(() => {
 })
 
 const columns = [
-  { colKey: 'id', title: '分组ID', width: 100 },
-  { colKey: 'name', title: '分组名称', width: 240 },
+  { colKey: 'id', title: '团队ID', width: 100 },
+  { colKey: 'name', title: '团队名称', width: 240 },
   { colKey: 'user_count', title: '用户数', width: 100 },
   { colKey: 'operations', title: '操作', width: 180, fixed: 'right' },
 ]
@@ -38,7 +38,7 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    // 关键字（分组 ID 精确 / 名称片段）由服务端过滤，页面只做分页切片。
+    // 关键字（团队 ID 精确 / 名称片段）由服务端过滤，页面只做分页切片。
     const [teamRows, userRows] = await Promise.all([client.listTeams({ keyword: keyword.value.trim() }), client.listUsers()])
     users.value = userRows || []
     teams.value = (teamRows || []).map((team) => ({
@@ -47,7 +47,7 @@ async function loadAll() {
     }))
     pagination.value.current = 1
   } catch (e) {
-    error.value = e.message || '加载运营分组失败'
+    error.value = e.message || '加载运营团队失败'
   } finally {
     loading.value = false
   }
@@ -83,7 +83,7 @@ async function saveTeam() {
     dialogVisible.value = false
     await loadAll()
   } catch (e) {
-    error.value = e.message || '保存运营分组失败'
+    error.value = e.message || '保存运营团队失败'
   } finally {
     saving.value = false
   }
@@ -91,15 +91,15 @@ async function saveTeam() {
 
 async function deleteTeam(team) {
   if (team.user_count > 0) {
-    error.value = `该分组下还有 ${team.user_count} 个用户，不能删除，请先转移用户`
+    error.value = `该团队下还有 ${team.user_count} 个用户，不能删除，请先转移用户`
     return
   }
-  if (!await feedback.confirmWarning({ title: '删除运营分组', message: `确定删除运营分组 ${team.name}？只有空分组可以删除。`, confirmText: '删除', danger: true })) return
+  if (!await feedback.confirmWarning({ title: '删除运营团队', message: `确定删除运营团队 ${team.name}？只有空团队可以删除。`, confirmText: '删除', danger: true })) return
   try {
     await client.deleteTeam(team.id)
     await loadAll()
   } catch (e) {
-    error.value = e.message || '删除运营分组失败'
+    error.value = e.message || '删除运营团队失败'
   }
 }
 </script>
@@ -107,16 +107,16 @@ async function deleteTeam(team) {
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
     <div class="wt-resource-page">
-    <ResourcePageHeader title="运营分组" description="管理运营人员的分组归属">
+    <ResourcePageHeader title="运营团队" description="管理运营人员的团队归属">
       <template #actions>
-        <t-button theme="primary" @click="openCreate">新增分组</t-button>
+        <t-button theme="primary" @click="openCreate">新增团队</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <ResourceCard class="system-resource-card">
       <div class="filter-bar">
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="keyword" placeholder="分组 ID / 名称" clearable @enter="search" /></label>
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="keyword" placeholder="团队 ID / 名称" clearable @enter="search" /></label>
         <div class="wt-filter-actions"><t-button theme="primary" @click="search">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
       </div>
       <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedTeams" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
@@ -131,8 +131,8 @@ async function deleteTeam(team) {
         <t-pagination v-model:current="pagination.current" v-model:page-size="pagination.pageSize" :total="teams.length" :page-size-options="[10, 20, 50]" />
       </div>
     </ResourceCard>
-    <t-dialog v-model:visible="dialogVisible" :header="editingTeam ? '重命名运营分组' : '新增运营分组'" :confirm-btn="{ loading: saving }" @confirm="saveTeam">
-      <t-form><t-form-item label="分组名称"><t-input v-model="teamName" /></t-form-item></t-form>
+    <t-dialog v-model:visible="dialogVisible" :header="editingTeam ? '重命名运营团队' : '新增运营团队'" :confirm-btn="{ loading: saving }" @confirm="saveTeam">
+      <t-form><t-form-item label="团队名称"><t-input v-model="teamName" /></t-form-item></t-form>
     </t-dialog>
     </div>
   </t-loading>

@@ -39,7 +39,7 @@ const columns = [
   { colKey: 'id', title: 'UID', width: 90 },
   { colKey: 'username', title: '用户名', width: 150 },
   { colKey: 'role', title: '角色', width: 120 },
-  { colKey: 'team_name', title: '运营分组', width: 140 },
+  { colKey: 'team_name', title: '运营团队', width: 140 },
   { colKey: 'game_ids', title: '游戏范围', width: 220 },
   { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'operations', title: '操作', width: 280, fixed: 'right' },
@@ -120,7 +120,7 @@ async function saveUser() {
     return
   }
   if (requiresScope.value && !userForm.value.teamId) {
-    error.value = '普通运营和高级运营必须选择运营分组'
+    error.value = '普通运营和高级运营必须选择运营团队'
     return
   }
   if (requiresScope.value && !userForm.value.gameIds.length) {
@@ -217,7 +217,7 @@ function gameScopeText(gameIds) {
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
     <div class="wt-resource-page">
-    <ResourcePageHeader title="用户管理" description="管理用户权限、运营分组与游戏范围">
+    <ResourcePageHeader title="用户管理" description="管理用户权限、运营团队与游戏范围">
       <template #actions>
         <t-button theme="primary" @click="openCreateUser">新增用户</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
@@ -233,7 +233,7 @@ function gameScopeText(gameIds) {
           <t-option value="senior_operator" label="高级运营" />
           <t-option value="operator" label="普通运营" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">运营分组</span><t-select v-model="filters.teamId" placeholder="全部" clearable>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="filters.teamId" placeholder="全部" clearable>
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.gameId" placeholder="全部" clearable>
@@ -276,7 +276,7 @@ function gameScopeText(gameIds) {
             <t-option value="operator" label="普通运营" />
           </t-select>
         </t-form-item>
-        <t-form-item v-if="requiresScope" label="运营分组">
+        <t-form-item v-if="requiresScope" label="运营团队">
           <t-select v-model="userForm.teamId"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select>
         </t-form-item>
         <t-form-item v-if="requiresScope" label="游戏范围">

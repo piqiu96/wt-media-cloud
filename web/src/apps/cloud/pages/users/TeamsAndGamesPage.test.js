@@ -8,14 +8,14 @@ const appLayoutSource = readFileSync(new URL('../../../../layout/AppLayout.vue',
 describe('M2-A3 management pages', () => {
   it('splits team and game management into cloud-only menu entries', () => {
     expect(appLayoutSource).toContain('用户管理')
-    expect(appLayoutSource).toContain('运营分组')
+    expect(appLayoutSource).toContain('运营团队')
     expect(appLayoutSource).toContain('游戏管理')
     expect(appLayoutSource).toContain("'/operation-teams'")
     expect(appLayoutSource).toContain("'/games'")
   })
 
   it('gives operation team page search/list/pagination basics', () => {
-    for (const required of ['运营分组', '综合搜索', '分组 ID / 名称', '查询', '重置', '用户数', 't-table', 't-pagination', '该分组下还有']) {
+    for (const required of ['运营团队', '综合搜索', '团队 ID / 名称', '查询', '重置', '用户数', 't-table', 't-pagination', '该团队下还有']) {
       expect(teamsSource).toContain(required)
     }
     expect(teamsSource).toContain(':disabled="row.user_count > 0"')

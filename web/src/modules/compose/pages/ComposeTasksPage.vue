@@ -177,14 +177,14 @@ async function loadTemplates() {
   try { templates.value = await client.listTemplates() || [] } catch { templates.value = [] }
 }
 
-// 关联抽屉要用的两张表：游戏名与分组名。读不到只影响那两行的说法，不拦页面。
+// 关联抽屉要用的两张表：游戏名与团队名。读不到只影响那两行的说法，不拦页面。
 async function loadLookups() {
   const [gameRows, teamRows] = await Promise.all([client.listGames().catch(() => []), client.listTeams().catch(() => [])])
   games.value = Array.isArray(gameRows) ? gameRows : []
   teams.value = Array.isArray(teamRows) ? teamRows : []
 }
 function gameLabel(id) { return games.value.find((game) => game.id === id)?.name || String(id ?? '—') }
-function teamLabel(id) { return teams.value.find((team) => team.id === id)?.name || (id === undefined || id === null ? '—' : `分组 ${id}`) }
+function teamLabel(id) { return teams.value.find((team) => team.id === id)?.name || (id === undefined || id === null ? '—' : `团队 ${id}`) }
 
 // —— 状态自动刷新 ——
 // 列表这一份：有排队中/处理中的任务就每 5 秒重读一次，跑完最后一单就自己停。

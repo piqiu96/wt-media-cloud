@@ -235,7 +235,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    // 团队列表所有角色都可读（服务端仅要求登录），编辑/详情要把 team_id 映射成分组名；
+    // 团队列表所有角色都可读（服务端仅要求登录），编辑/详情要把 team_id 映射成团队名；
     // 管理员的创建表单另用它选目标团队。
     currentUser.value = await sessionClient.me()
     const [strategyRows, templateRows, gameRows, teamRows] = await Promise.all([
@@ -574,7 +574,7 @@ function gameName(id) {
 }
 
 function teamName(id) {
-  return teams.value.find((team) => team.id === id)?.name || `分组 ${id}`
+  return teams.value.find((team) => team.id === id)?.name || `团队 ${id}`
 }
 
 function validGuideURL(value) {

@@ -5,7 +5,7 @@ const source = readFileSync(new URL('./UsersPage.vue', import.meta.url), 'utf8')
 
 describe('UsersPage product surface', () => {
   it('shows numeric UID, filters, pagination, edit operations and one-time password result', () => {
-    for (const required of ['用户管理', 'UID', '用户名', '运营分组', '角色', '查询', '重置', '编辑用户', '重置密码', '一次性密码', '停用', '删除', 't-pagination']) {
+    for (const required of ['用户管理', 'UID', '用户名', '运营团队', '角色', '查询', '重置', '编辑用户', '重置密码', '一次性密码', '停用', '删除', 't-pagination']) {
       expect(source).toContain(required)
     }
   })

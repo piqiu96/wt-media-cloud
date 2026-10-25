@@ -7,7 +7,7 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 // 策略详情的只读正文：合成策略页的「使用范围 / 合成配置」两段，单列出来给任务详情里的
 // 关联策略抽屉复用（交互规范 §9.4：复用已有详情能力，不复制第二套业务详情）。
 //
-// 团队与游戏的名称由宿主解析后传进来 —— 两处宿主各有一份自己的分组/游戏表，组件不认识它们。
+// 团队与游戏的名称由宿主解析后传进来 —— 两处宿主各有一份自己的团队/游戏表，组件不认识它们。
 const props = defineProps({
   strategy: { type: Object, required: true },
   team: { type: String, default: '' },

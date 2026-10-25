@@ -600,9 +600,9 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, identityservice.ErrUsernameTaken):
 		api.Conflict(c, 20001, "用户名已被使用")
 	case errors.Is(err, identityservice.ErrTeamNameTaken):
-		api.Conflict(c, 20002, "分组名称已被使用")
+		api.Conflict(c, 20002, "团队名称已被使用")
 	case errors.Is(err, identityservice.ErrTeamInUse):
-		api.Conflict(c, 20003, "该分组下还有用户或业务引用，不能删除，请先转移用户")
+		api.Conflict(c, 20003, "该团队下还有用户或业务引用，不能删除，请先转移用户")
 	case errors.Is(err, identityservice.ErrGameIDTaken):
 		api.Conflict(c, 20006, "游戏ID已被使用")
 	case errors.Is(err, identityservice.ErrInvalidGameID):
@@ -616,7 +616,7 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, identityservice.ErrPasswordTooShort):
 		api.BadRequest(c, 10003, "密码至少需要6位")
 	case errors.Is(err, identityservice.ErrInvalidInput), errors.Is(err, identityservice.ErrBootstrapUnavailable):
-		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、分组、游戏ID或状态")
+		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、团队、游戏ID或状态")
 	default:
 		if failure, ok := identityservice.DescribeAuthFailure(err); ok {
 			api.FailureCode(c, 401, 11001, failure.Message, failure.Code, nil, false, failure.RecoveryAction)
