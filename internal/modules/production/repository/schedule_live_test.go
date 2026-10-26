@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -28,8 +29,8 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 	if _, err := (ComposeScheduleStore{}).DueStrategyIDs(time.Now().UTC()); err != nil {
 		t.Fatalf("due strategy scan: %v", err)
 	}
-	var strategyID int64
-	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN users u ON u.id = s.operator_id AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = s.team_id JOIN user_game_scopes g ON g.user_id = u.id AND g.game_id = s.game_id WHERE s.status = 'enabled' AND t.status = 'active' ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
+	var sourceID int64
+	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN users u ON u.id = s.operator_id AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = s.team_id JOIN user_game_scopes g ON g.user_id = u.id AND g.game_id = s.game_id WHERE s.status = 'enabled' AND t.status = 'active' AND EXISTS (SELECT 1 FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = s.team_id AND sc.game_id = s.game_id AND m.status = 'available') ORDER BY s.id LIMIT 1`).Row().Scan(&sourceID)
 	if err != nil {
 		t.Skipf("no active strategy with an available operator: %v", err)
 	}
@@ -42,7 +43,21 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 	due := now.Add(-time.Minute)
 	schedule := model.ComposeSchedule{Mode: "interval", IntervalMinutes: 30, Timezone: "Asia/Shanghai"}
 	scheduleJSON, _ := json.Marshal(schedule)
-	if err := tx.Exec(`UPDATE compose_strategies SET execution_mode = 'scheduled', schedule_json = ?, next_run_at = ? WHERE id = ?`, scheduleJSON, due, strategyID).Error; err != nil {
+	// The live database already holds real run history, so the run assertions
+	// need a strategy whose history this test owns. The fixture copies the
+	// team, operator, game and template of an eligible strategy and adds a
+	// match-all rule; the surrounding transaction removes it again.
+	rules, err := json.Marshal([]model.ComposePriorityRule{{Priority: 1, Action: "match", Logic: "all", Conditions: []model.ComposeCondition{{Field: "like_count", Operator: "gte", Value: json.RawMessage(`0`)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("CHG105-live-schedule-%d", time.Now().UnixNano())
+	insert := tx.Exec(`INSERT INTO compose_strategies (team_id, game_id, operator_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at) SELECT team_id, game_id, operator_id, compose_template_id, compose_template_version, ?, config_json, 'scheduled', ?, ?, 1, 2, ?, 'enabled', created_by, updated_by, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) FROM compose_strategies WHERE id = ?`, name, scheduleJSON, rules, due, sourceID)
+	if insert.Error != nil || insert.RowsAffected != 1 {
+		t.Fatalf("create fixture strategy from %d: rows=%d err=%v", sourceID, insert.RowsAffected, insert.Error)
+	}
+	var strategyID int64
+	if err := tx.Raw(`SELECT id FROM compose_strategies WHERE name = ?`, name).Row().Scan(&strategyID); err != nil {
 		t.Fatal(err)
 	}
 	calculate := func(_ model.ComposeStrategy, at time.Time) (*time.Time, error) {
