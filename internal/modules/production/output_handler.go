@@ -46,6 +46,11 @@ func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
+	teamID, operatorID, scope, err := parseComposeListScope(c)
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片筛选参数无效："+err.Error(), "compose_output_invalid")
+		return
+	}
 	from, before, err := parseComposeCreatedRange(strings.TrimSpace(c.Query("created_from")), strings.TrimSpace(c.Query("created_before")))
 	if err != nil {
 		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片时间范围无效", "compose_output_invalid")
@@ -54,6 +59,7 @@ func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
 	items, err := productionservice.ListComposeOutputs(current, productionservice.ListComposeOutputsInput{
 		PublishStatus: c.Query("publish_status"), Source: strings.TrimSpace(c.Query("source")),
 		Search: strings.TrimSpace(c.Query("search")), TriggerType: strings.TrimSpace(c.Query("trigger_type")),
+		TeamID: teamID, OperatorID: operatorID, OperatorScope: scope,
 		CreatedFrom: from, CreatedBefore: before,
 	})
 	if err != nil {

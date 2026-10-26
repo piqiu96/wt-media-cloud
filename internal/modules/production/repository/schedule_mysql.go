@@ -275,6 +275,14 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 			result.Skipped = append(result.Skipped, model.ComposeScheduleSkip{Reason: "creator_disabled"})
 			return finishComposeScheduleRun(tx, strategy, result, now, manual, options.NextRun)
 		}
+		operatorAvailable, err := composeOperatorAvailable(tx, strategy)
+		if err != nil {
+			return err
+		}
+		if !operatorAvailable {
+			result.Skipped = append(result.Skipped, model.ComposeScheduleSkip{Reason: "operator_unavailable"})
+			return finishComposeScheduleRun(tx, strategy, result, now, manual, options.NextRun)
+		}
 		var templateCode, templateStatus string
 		if err := tx.Raw(`SELECT code, status FROM compose_templates WHERE id = ? AND version = ?`, strategy.TemplateID, strategy.TemplateVersion).Row().Scan(&templateCode, &templateStatus); err != nil {
 			return err
@@ -315,7 +323,7 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 			pool = append(pool, candidate)
 		}
 		created, skipped, err := executeComposePriorityRules(strategy.PriorityRules, pool, now, strategy.SingleLimit, strategy.DailyLimit-dailyCount, func(candidate scheduleCandidate) (bool, error) {
-			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, TriggerType: trigger,
+			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, OperatorID: strategy.OperatorID, TriggerType: trigger,
 				DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, strategy.Name),
 				MaterialID:  candidate.MaterialID, MaterialUsageID: candidate.UsageID, StrategyID: strategy.ID,
 				TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: append(json.RawMessage(nil), strategy.Config...),
@@ -394,6 +402,19 @@ func executeComposePriorityRules(rules []model.ComposePriorityRule, pool []sched
 		}
 	}
 	return created, skipped, nil
+}
+
+// composeOperatorAvailable is the scheduler's copy of the strategy operator
+// gate: an enabled operator or senior operator in the strategy's team whose
+// responsible games include the strategy's game. A NULL operator is a legacy
+// row that has not been assigned; it is skipped rather than guessed.
+func composeOperatorAvailable(tx *gorm.DB, strategy model.ComposeStrategy) (bool, error) {
+	if strategy.OperatorID == nil || *strategy.OperatorID <= 0 {
+		return false, nil
+	}
+	var count int
+	err := tx.Raw(`SELECT COUNT(*) FROM users u JOIN user_game_scopes s ON s.user_id = u.id WHERE u.id = ? AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = ? AND s.game_id = ?`, *strategy.OperatorID, strategy.TeamID, strategy.GameID).Row().Scan(&count)
+	return count > 0, err
 }
 
 func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) ([]scheduleCandidate, error) {

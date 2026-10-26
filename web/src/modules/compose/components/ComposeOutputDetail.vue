@@ -83,6 +83,7 @@ function retryPreview() {
           <div class="output-detail__wide"><span class="output-detail__label">标题</span><strong>{{ title }}</strong></div>
           <div><span class="output-detail__label">成片 ID</span><strong>{{ detail.output.id }}</strong></div>
           <div><span class="output-detail__label">生成方式</span><strong>{{ generationLabel(triggerType) }}</strong></div>
+          <div><span class="output-detail__label">负责人</span><strong>{{ detail.output.operator_name || '未记录' }}</strong></div>
           <div><span class="output-detail__label">生成时间</span><strong>{{ formatDateTime(detail.output.created_at) }}</strong></div>
           <div><span class="output-detail__label">视频时长</span><strong>{{ formatDurationMs(detail.output.media?.duration_ms) }}</strong></div>
         </div>

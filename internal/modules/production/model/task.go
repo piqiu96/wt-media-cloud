@@ -68,6 +68,8 @@ type ComposeTask struct {
 	DisplayName     string            `json:"display_name" gorm:"column:display_name"`
 	TeamID          int64             `json:"team_id"`
 	GameID          string            `json:"game_id"`
+	OperatorID      *int64            `json:"operator_id"`
+	OperatorName    string            `json:"operator_name" gorm:"-"`
 	TriggerType     string            `json:"trigger_type"`
 	MaterialID      int64             `json:"material_id"`
 	MaterialUsageID int64             `json:"material_usage_id" gorm:"column:material_usage_id"`
@@ -199,6 +201,8 @@ type CompositeOutput struct {
 	ID              int64           `json:"id"`
 	TeamID          int64           `json:"team_id"`
 	GameID          string          `json:"game_id"`
+	OperatorID      *int64          `json:"operator_id"`
+	OperatorName    string          `json:"operator_name" gorm:"-"`
 	MaterialID      int64           `json:"material_id"`
 	MaterialUsageID int64           `json:"material_usage_id" gorm:"column:material_usage_id"`
 	TaskID          int64           `json:"compose_task_id" gorm:"column:compose_task_id"`

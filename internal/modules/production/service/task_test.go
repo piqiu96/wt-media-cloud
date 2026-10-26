@@ -194,7 +194,7 @@ func composeTaskFixture() (*ComposeTaskService, *taskMemoryStore, *strategyMemor
 	team := identity.TeamID(7)
 	definition := executor.BasicCutV1()
 	strategies := &strategyMemoryStore{
-		items:    []model.ComposeStrategy{{ID: 5, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "切段", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), Status: "enabled", CreatedBy: 9}},
+		items:    []model.ComposeStrategy{{ID: 5, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "切段", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 9}},
 		template: model.ComposeTemplate{ID: 3, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"},
 	}
 	materials := &taskMaterialMemoryStore{items: []model.Material{
@@ -481,6 +481,7 @@ func TestCreateComposeTasksRejectsKeyClaimedByAnotherUser(t *testing.T) {
 	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, GameID: "delta", Status: model.ComposeTaskPending, RequestKey: "rk-taken-001", CreatedBy: 9})
 	other := actor
 	other.ID = 10
+	other.Role = identity.RoleSeniorOperator
 	res, err := svc.Create(other, CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-taken-001"}}})
 	if err != nil || len(res.Failed) != 1 || !errors.Is(res.Failed[0].Err, ErrComposeTaskForbidden) {
 		t.Fatalf("res=%+v err=%v", res, err)
@@ -822,7 +823,7 @@ func TestListComposeTasksScopesByRole(t *testing.T) {
 	if _, err := svc.List(actor, ListComposeTasksInput{Status: "pending"}); err != nil {
 		t.Fatalf("list err=%v", err)
 	}
-	if tasks.lastFilter.CreatedBy != 9 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 1 || tasks.lastFilter.GameIDs[0] != "delta" || tasks.lastFilter.Status != model.ComposeTaskPending {
+	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 9 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 1 || tasks.lastFilter.GameIDs[0] != "delta" || tasks.lastFilter.Status != model.ComposeTaskPending {
 		t.Fatalf("operator filter = %+v", tasks.lastFilter)
 	}
 
@@ -831,15 +832,27 @@ func TestListComposeTasksScopesByRole(t *testing.T) {
 	if _, err := svc.List(senior, ListComposeTasksInput{}); err != nil {
 		t.Fatalf("senior list err=%v", err)
 	}
-	if tasks.lastFilter.CreatedBy != 0 || tasks.lastFilter.TeamID != 7 {
-		t.Fatalf("senior filter = %+v", tasks.lastFilter)
+	if tasks.lastFilter.OperatorID != 11 || tasks.lastFilter.IncludeUnownedCreatedBy != 11 || tasks.lastFilter.TeamID != 7 {
+		t.Fatalf("senior default filter = %+v", tasks.lastFilter)
+	}
+	if _, err := svc.List(senior, ListComposeTasksInput{OperatorScope: "team"}); err != nil {
+		t.Fatalf("senior team list err=%v", err)
+	}
+	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 {
+		t.Fatalf("senior team filter = %+v", tasks.lastFilter)
+	}
+	if _, err := svc.List(senior, ListComposeTasksInput{OperatorID: 9}); err != nil {
+		t.Fatalf("senior operator list err=%v", err)
+	}
+	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 {
+		t.Fatalf("senior named-operator filter = %+v", tasks.lastFilter)
 	}
 
 	admin := identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
 	if _, err := svc.List(admin, ListComposeTasksInput{}); err != nil {
 		t.Fatalf("admin list err=%v", err)
 	}
-	if tasks.lastFilter.TeamID != 0 || tasks.lastFilter.CreatedBy != 0 {
+	if tasks.lastFilter.TeamID != 0 || tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 {
 		t.Fatalf("admin filter = %+v", tasks.lastFilter)
 	}
 
@@ -847,5 +860,62 @@ func TestListComposeTasksScopesByRole(t *testing.T) {
 	disabled.Status = identity.UserStatusDisabled
 	if _, err := svc.List(disabled, ListComposeTasksInput{}); !errors.Is(err, ErrComposeTaskForbidden) {
 		t.Fatalf("disabled actor error = %v", err)
+	}
+}
+
+func TestCreateComposeTasksSnapshotsTheStrategyOperator(t *testing.T) {
+	svc, tasks, strategies, _, actor := composeTaskFixture()
+	team := identity.TeamID(7)
+	svc.operators = func() ([]identity.PublicUser, error) {
+		return []identity.PublicUser{{ID: 9, Username: "op9", Nickname: "九号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}}, nil
+	}
+	input := CreateComposeTasksInput{StrategyID: 5, OperatorID: 10, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-op-0001"}}}
+	if _, err := svc.Create(actor, input); !errors.Is(err, ErrComposeTaskInvalid) || tasks.creates != 0 {
+		t.Fatalf("forged operator err=%v creates=%d", err, tasks.creates)
+	}
+	input.OperatorID = 9
+	res, err := svc.Create(actor, input)
+	if err != nil || len(res.Created) != 1 || res.Created[0].OperatorID == nil || *res.Created[0].OperatorID != 9 || res.Created[0].OperatorName != "九号" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	strategies.items[0].OperatorID = nil
+	input.Items[0].RequestKey = "rk-op-0002"
+	// An ordinary operator cannot even read an unassigned strategy; a senior can
+	// and meets the explicit "no operator" gate.
+	senior := actor
+	senior.Role = identity.RoleSeniorOperator
+	if _, err := svc.Create(senior, input); !errors.Is(err, ErrComposeTaskInvalid) {
+		t.Fatalf("unassigned strategy error = %v", err)
+	}
+}
+
+func TestComposeTaskOperatorMineKeepsLegacyCreatorRowsVisible(t *testing.T) {
+	svc, tasks, _, _, actor := composeTaskFixture()
+	tasks.tasks = []model.ComposeTask{
+		{ID: 601, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 9},
+		{ID: 602, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 10},
+		{ID: 603, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(10)},
+	}
+	if _, err := svc.Get(actor, 601); err != nil {
+		t.Fatalf("legacy row for its creator must stay visible: %v", err)
+	}
+	for _, id := range []int64{602, 603} {
+		if _, err := svc.Get(actor, id); !errors.Is(err, ErrComposeTaskNotFound) {
+			t.Fatalf("task %d error = %v", id, err)
+		}
+	}
+}
+
+func TestComposeTaskListRefusesForeignOperatorFilters(t *testing.T) {
+	svc, _, _, _, actor := composeTaskFixture()
+	for _, input := range []ListComposeTasksInput{
+		{OperatorScope: "team"},
+		{OperatorScope: "all"},
+		{OperatorID: 10},
+		{TeamID: 8},
+	} {
+		if _, err := svc.List(actor, input); !errors.Is(err, ErrComposeTaskForbidden) {
+			t.Fatalf("input=%+v err=%v", input, err)
+		}
 	}
 }

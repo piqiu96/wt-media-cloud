@@ -8,7 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-var outputRowColumns = []string{"id", "team_id", "game_id", "material_id", "material_usage_id", "compose_task_id", "compose_strategy_id", "template_code", "template_version", "object_key", "file_size_bytes", "sha256", "media_json", "publish_status", "created_by", "created_at", "updated_at"}
+var outputRowColumns = []string{"id", "team_id", "game_id", "operator_id", "material_id", "material_usage_id", "compose_task_id", "compose_strategy_id", "template_code", "template_version", "object_key", "file_size_bytes", "sha256", "media_json", "publish_status", "created_by", "created_at", "updated_at"}
 
 func TestListComposeOutputsSearchesFactsAndTriggerInSQL(t *testing.T) {
 	from := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
@@ -45,4 +45,28 @@ func TestListComposeOutputsScopesSourceAndDateInSQL(t *testing.T) {
 			assertExpectations(t, mock)
 		})
 	}
+}
+
+func TestListComposeOutputsMineAlsoMatchesUnownedCreatorRows(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(`AND \(operator_id = \? OR \(operator_id IS NULL AND created_by = \?\)\)`).
+		WithArgs(int64(7), "delta", int64(9), int64(9)).
+		WillReturnRows(sqlmock.NewRows(outputRowColumns))
+	items, err := listComposeOutputs(db, ComposeOutputFilter{TeamID: 7, GameIDs: []string{"delta"}, OperatorID: 9, IncludeUnownedCreatedBy: 9})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestListComposeOutputsExplicitOperatorDoesNotFallBackToCreator(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(`AND operator_id = \? ORDER BY id DESC`).
+		WithArgs(int64(7), "delta", int64(9)).
+		WillReturnRows(sqlmock.NewRows(outputRowColumns))
+	items, err := listComposeOutputs(db, ComposeOutputFilter{TeamID: 7, GameIDs: []string{"delta"}, OperatorID: 9})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	assertExpectations(t, mock)
 }

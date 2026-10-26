@@ -25,6 +25,7 @@ var (
 type CreateStrategyInput struct {
 	TeamID          int64                       `json:"team_id"`
 	GameID          string                      `json:"game_id"`
+	OperatorID      int64                       `json:"operator_id"`
 	Name            string                      `json:"name"`
 	TemplateID      int64                       `json:"compose_template_id"`
 	TemplateVersion uint32                      `json:"compose_template_version"`
@@ -37,6 +38,7 @@ type CreateStrategyInput struct {
 }
 
 type UpdateStrategyInput struct {
+	OperatorID    int64                       `json:"operator_id"`
 	Name          string                      `json:"name"`
 	Config        json.RawMessage             `json:"config"`
 	ExecutionMode string                      `json:"execution_mode"`
@@ -57,6 +59,7 @@ type StrategyRepository interface {
 type StrategyService struct {
 	store       StrategyRepository
 	resolveGame func(string) (identity.OperationGame, bool, error)
+	operators   func() ([]identity.PublicUser, error)
 	now         func() time.Time
 }
 
@@ -65,7 +68,9 @@ func NewStrategyService(store StrategyRepository, resolveGame func(string) (iden
 }
 
 func wiredStrategyService() *StrategyService {
-	return NewStrategyService(repository.StrategyStore{}, identity.ResolveGame)
+	service := NewStrategyService(repository.StrategyStore{}, identity.ResolveGame)
+	service.operators = identity.ListUsers
+	return service
 }
 
 // ComposeStrategyListQuery carries the list page's filters. Pagination stays
@@ -120,7 +125,14 @@ func (s *StrategyService) List(actor identity.PublicUser, query ComposeStrategyL
 		filter.TeamID = int64(*actor.TeamID)
 		filter.GameIDs = actor.GameIDs
 	}
-	return s.store.List(filter)
+	if actor.Role == identity.RoleOperator {
+		filter.OperatorID = int64(actor.ID)
+	}
+	items, err := s.store.List(filter)
+	if err != nil {
+		return nil, err
+	}
+	return s.withOperatorNames(items)
 }
 
 func (s *StrategyService) Get(actor identity.PublicUser, id int64) (model.ComposeStrategy, error) {
@@ -139,7 +151,7 @@ func (s *StrategyService) Get(actor identity.PublicUser, id int64) (model.Compos
 			return model.ComposeStrategy{}, err
 		}
 	}
-	return item, nil
+	return s.withOperatorName(item)
 }
 
 func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategyInput) (model.ComposeStrategy, error) {
@@ -169,6 +181,14 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 	if !found || game.Status != identity.GameStatusEnabled {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: game is unavailable", ErrStrategyInvalid)
 	}
+	if input.OperatorID <= 0 {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: operator_id is required", ErrStrategyInvalid)
+	}
+	if _, ok, err := resolveComposeOperator(s.operators, teamID, input.GameID, input.OperatorID); err != nil {
+		return model.ComposeStrategy{}, err
+	} else if !ok {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: operator must be an enabled team operator responsible for the game", ErrStrategyInvalid)
+	}
 	if err := s.validateConfig(input.TemplateID, input.TemplateVersion, input.Config, true); err != nil {
 		return model.ComposeStrategy{}, err
 	}
@@ -182,12 +202,17 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 	if err != nil {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: priority_rules are invalid", ErrStrategyInvalid)
 	}
-	item := model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), ExecutionMode: input.ExecutionMode, Schedule: input.Schedule, PriorityRules: input.PriorityRules, RulesJSON: rulesJSON, SingleLimit: input.SingleLimit, DailyLimit: input.DailyLimit, Status: model.ComposeStrategyEnabled, CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}
+	operatorID := input.OperatorID
+	item := model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, OperatorID: &operatorID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), ExecutionMode: input.ExecutionMode, Schedule: input.Schedule, PriorityRules: input.PriorityRules, RulesJSON: rulesJSON, SingleLimit: input.SingleLimit, DailyLimit: input.DailyLimit, Status: model.ComposeStrategyEnabled, CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}
 	item.NextRunAt, err = nextRunForStrategy(item, s.now())
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	return s.store.CreateAudited(item, "compose_strategy.create")
+	stored, err := s.store.CreateAudited(item, "compose_strategy.create")
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	return s.withOperatorName(stored)
 }
 
 func (s *StrategyService) Update(actor identity.PublicUser, id int64, input UpdateStrategyInput) (model.ComposeStrategy, error) {
@@ -197,6 +222,22 @@ func (s *StrategyService) Update(actor identity.PublicUser, id int64, input Upda
 	}
 	if err := validateStrategyFields(input.Name); err != nil {
 		return model.ComposeStrategy{}, err
+	}
+	operatorID := int64(0)
+	if item.OperatorID != nil {
+		operatorID = *item.OperatorID
+	}
+	if input.OperatorID > 0 {
+		operatorID = input.OperatorID
+	}
+	// An enabled strategy must stay runnable: an edit that leaves it enabled
+	// with no valid assignee would be a strategy that can never execute.
+	if item.Status == model.ComposeStrategyEnabled {
+		if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.GameID, operatorID); err != nil {
+			return model.ComposeStrategy{}, err
+		} else if !ok {
+			return model.ComposeStrategy{}, fmt.Errorf("%w: operator must be an enabled team operator responsible for the game", ErrStrategyInvalid)
+		}
 	}
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, input.Config, false); err != nil {
 		return model.ComposeStrategy{}, err
@@ -214,11 +255,19 @@ func (s *StrategyService) Update(actor identity.PublicUser, id int64, input Upda
 	item.Name, item.Config, item.UpdatedBy = strings.TrimSpace(input.Name), append(json.RawMessage(nil), input.Config...), int64(actor.ID)
 	item.ExecutionMode, item.Schedule, item.PriorityRules, item.RulesJSON = input.ExecutionMode, input.Schedule, input.PriorityRules, rulesJSON
 	item.SingleLimit, item.DailyLimit = input.SingleLimit, input.DailyLimit
+	if input.OperatorID > 0 {
+		value := input.OperatorID
+		item.OperatorID = &value
+	}
 	item.NextRunAt, err = nextRunForStrategy(item, s.now())
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	return s.store.UpdateAudited(item, "compose_strategy.update")
+	stored, err := s.store.UpdateAudited(item, "compose_strategy.update")
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	return s.withOperatorName(stored)
 }
 
 func (s *StrategyService) Copy(actor identity.PublicUser, id int64, name string) (model.ComposeStrategy, error) {
@@ -229,12 +278,24 @@ func (s *StrategyService) Copy(actor identity.PublicUser, id int64, name string)
 	if err := validateStrategyFields(name); err != nil {
 		return model.ComposeStrategy{}, err
 	}
+	if item.OperatorID == nil {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: assign an operator before copying", ErrStrategyInvalid)
+	}
+	if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.GameID, *item.OperatorID); err != nil {
+		return model.ComposeStrategy{}, err
+	} else if !ok {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: the strategy's operator is no longer available", ErrStrategyInvalid)
+	}
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, item.Config, true); err != nil {
 		return model.ComposeStrategy{}, err
 	}
 	item.ID, item.Name, item.Status, item.CreatedBy, item.UpdatedBy = 0, strings.TrimSpace(name), model.ComposeStrategyEnabled, int64(actor.ID), int64(actor.ID)
 	item.ExecutionMode, item.Schedule, item.ScheduleJSON, item.NextRunAt = model.ComposeExecutionManual, nil, nil, nil
-	return s.store.CreateAudited(item, "compose_strategy.copy")
+	stored, err := s.store.CreateAudited(item, "compose_strategy.copy")
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	return s.withOperatorName(stored)
 }
 
 func (s *StrategyService) SetStatus(actor identity.PublicUser, id int64, status string) (model.ComposeStrategy, error) {
@@ -252,13 +313,26 @@ func (s *StrategyService) SetStatus(actor identity.PublicUser, id int64, status 
 		if err := model.ValidateComposePriorityRules(item.PriorityRules); err != nil {
 			return model.ComposeStrategy{}, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
 		}
+		operatorID := int64(0)
+		if item.OperatorID != nil {
+			operatorID = *item.OperatorID
+		}
+		if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.GameID, operatorID); err != nil {
+			return model.ComposeStrategy{}, err
+		} else if !ok {
+			return model.ComposeStrategy{}, fmt.Errorf("%w: assign an available operator before enabling", ErrStrategyInvalid)
+		}
 	}
 	item.Status, item.UpdatedBy = status, int64(actor.ID)
 	item.NextRunAt, err = nextRunForStrategy(item, s.now())
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	return s.store.UpdateAudited(item, "compose_strategy.status")
+	stored, err := s.store.UpdateAudited(item, "compose_strategy.status")
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	return s.withOperatorName(stored)
 }
 
 func (s *StrategyService) managed(actor identity.PublicUser, id int64) (model.ComposeStrategy, error) {
@@ -302,9 +376,39 @@ func canReadStrategy(actor identity.PublicUser, item model.ComposeStrategy) bool
 		return false
 	}
 	if actor.Role == identity.RoleOperator {
-		return item.Status == model.ComposeStrategyEnabled
+		return item.Status == model.ComposeStrategyEnabled && item.OperatorID != nil && *item.OperatorID == int64(actor.ID)
 	}
 	return actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleAdmin
+}
+
+func (s *StrategyService) withOperatorName(item model.ComposeStrategy) (model.ComposeStrategy, error) {
+	items, err := s.withOperatorNames([]model.ComposeStrategy{item})
+	if err != nil {
+		return model.ComposeStrategy{}, err
+	}
+	return items[0], nil
+}
+
+// withOperatorNames resolves every row's operator in one directory read. Rows
+// without an operator keep an empty name: the page shows 未记录 rather than
+// presenting the creator as the operator.
+func (s *StrategyService) withOperatorNames(items []model.ComposeStrategy) ([]model.ComposeStrategy, error) {
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.OperatorID != nil {
+			ids = append(ids, *item.OperatorID)
+		}
+	}
+	names, err := composeOperatorNameLookup(s.operators, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].OperatorID != nil {
+			items[i].OperatorName = names[*items[i].OperatorID]
+		}
+	}
+	return items, nil
 }
 
 func validateStrategyFields(name string) error {

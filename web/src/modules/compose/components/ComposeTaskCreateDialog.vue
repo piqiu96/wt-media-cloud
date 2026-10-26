@@ -102,6 +102,7 @@ const strategyOptions = computed(() => strategies.value
 
 const selectedStrategy = computed(() => strategies.value.find((item) => item.id === strategyId.value) || null)
 const strategyName = computed(() => selectedStrategy.value?.name || '尚未选择')
+const strategyOperatorName = computed(() => selectedStrategy.value?.operator_name || '未记录')
 const strategyConfig = computed(() => selectedStrategy.value?.config || {})
 
 const fields = computed(() => {
@@ -250,6 +251,11 @@ async function submit() {
     strategyError.value = '请选择合成策略'
     return
   }
+  // 任务负责人必须来自策略；负责人失效/未指派的策略服务端也会拒，先在这里说清原因。
+  if (!selectedStrategy.value?.operator_id) {
+    strategyError.value = '该策略尚未指定负责人，请先在合成策略页补选后再创建'
+    return
+  }
   // 本地拦住的就是服务端会拒的那几种情况（值填反、低于下限、必填为空），
   // 拦下来就不发请求，运营看到的是中文，而不是执行器的英文原文。
   overrideErrors.value = validateOverrides(fields.value, strategyConfig.value, overrides.value)
@@ -262,6 +268,7 @@ async function submit() {
   try {
     const body = {
       strategy_id: strategyId.value,
+      operator_id: selectedStrategy.value.operator_id,
       items: selected.value.map((material) => ({ material_id: material.id, request_key: requestKeys.value[material.id] })),
     }
     if (taskName.value.trim()) body.name = taskName.value.trim()
@@ -422,6 +429,7 @@ async function submit() {
           <div class="compose-create__confirm-grid">
             <div><span class="compose-create__confirm-label">将创建任务</span><span>{{ selected.length }} 条</span></div>
             <div><span class="compose-create__confirm-label">合成策略</span><span>{{ strategyName }}</span></div>
+            <div><span class="compose-create__confirm-label">负责人</span><span>{{ strategyOperatorName }}</span></div>
             <div><span class="compose-create__confirm-label">任务名称</span><span>{{ nameSummary }}</span></div>
             <div><span class="compose-create__confirm-label">覆盖参数</span><span>{{ overrideSummary.length ? overrideSummary.join('，') : '未覆盖，使用策略里保存的值' }}</span></div>
           </div>

@@ -29,6 +29,16 @@ describe('compose task create drawer', () => {
     expect(source).toContain('只列出「我的素材」里使用中的素材')
   })
 
+  // 负责人必须来自策略（M4-I）：提交时把它一起发出去，策略随后被改负责人时服务端
+  // 会拒掉这次创建而不是悄悄换人；未指派负责人的策略在这里就拦下并说明去哪里补。
+  it('carries the strategy operator into the task and refuses an unassigned strategy', () => {
+    expect(source).toContain('operator_id: selectedStrategy.value.operator_id')
+    expect(source).toContain("if (!selectedStrategy.value?.operator_id)")
+    expect(source).toContain('该策略尚未指定负责人，请先在合成策略页补选后再创建')
+    expect(source).toContain('compose-create__confirm-label">负责人')
+    expect(source).toContain("selectedStrategy.value?.operator_name || '未记录'")
+  })
+
   // 策略排在第 1 段：素材是否已经用过是按策略算的，先选它这块才有意义。
   it('lays the form out in the four fixed sections, strategy first', () => {
     const sections = [...source.matchAll(/compose-create__title"><span>(\d)<\/span>\s*([^<]+)</g)]

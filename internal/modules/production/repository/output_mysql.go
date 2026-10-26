@@ -19,18 +19,21 @@ import (
 // list is scoped: admins pass nothing, everyone else passes their team, games
 // and (for operators) the created-by narrowing.
 type ComposeOutputFilter struct {
-	TeamID        int64
-	GameIDs       []string
-	CreatedBy     int64
-	PublishStatus string
-	Source        string
-	Search        string
-	TriggerType   string
-	CreatedFrom   time.Time
-	CreatedBefore time.Time
+	TeamID     int64
+	OperatorID int64
+	// IncludeUnownedCreatedBy mirrors ComposeTaskFilter: historical outputs
+	// without an operator remain visible to their creator under "mine".
+	IncludeUnownedCreatedBy int64
+	GameIDs                 []string
+	PublishStatus           string
+	Source                  string
+	Search                  string
+	TriggerType             string
+	CreatedFrom             time.Time
+	CreatedBefore           time.Time
 }
 
-const composeOutputColumns = `id, team_id, game_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at`
+const composeOutputColumns = `id, team_id, game_id, operator_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at`
 
 // ComposeOutputStore reads the verified-output asset table and archives rows.
 // Writes to this table belong to the worker's success transaction; the only
@@ -62,9 +65,14 @@ func listComposeOutputs(db *gorm.DB, filter ComposeOutputFilter) ([]model.Compos
 			args = append(args, id)
 		}
 	}
-	if filter.CreatedBy > 0 {
-		query += ` AND created_by = ?`
-		args = append(args, filter.CreatedBy)
+	if filter.OperatorID > 0 {
+		if filter.IncludeUnownedCreatedBy == filter.OperatorID {
+			query += ` AND (operator_id = ? OR (operator_id IS NULL AND created_by = ?))`
+			args = append(args, filter.OperatorID, filter.IncludeUnownedCreatedBy)
+		} else {
+			query += ` AND operator_id = ?`
+			args = append(args, filter.OperatorID)
+		}
 	}
 	if filter.PublishStatus != "" {
 		query += ` AND publish_status = ?`
@@ -158,9 +166,14 @@ type composeOutputScanner interface{ Scan(...any) error }
 func scanComposeOutput(row composeOutputScanner) (model.CompositeOutput, error) {
 	var item model.CompositeOutput
 	var media []byte
-	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &item.MaterialID, &item.MaterialUsageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	var operatorID sql.NullInt64
+	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &operatorID, &item.MaterialID, &item.MaterialUsageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.CompositeOutput{}, err
+	}
+	if operatorID.Valid {
+		value := operatorID.Int64
+		item.OperatorID = &value
 	}
 	item.Media = media
 	return item, nil

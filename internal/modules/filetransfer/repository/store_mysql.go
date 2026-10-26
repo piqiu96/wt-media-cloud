@@ -469,11 +469,16 @@ func failDependentsOfTerminalTasks(db *gorm.DB, now time.Time) (int64, error) {
 // On a collision the surviving row keeps its own id — the caller's freshly
 // generated id was never written — so reading by id would report a missing task
 // for a request that succeeded.
+// createTaskStatement is shared with its test because sqlmock matches the
+// statement text without parsing it: a stray placeholder would pass the mock
+// and only fail against MySQL.
+const createTaskStatement = `INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id = id`
+
 func createTask(db *gorm.DB, input CreateTaskInput, now time.Time) (model.Task, error) {
 	if err := validateCreateInput(input); err != nil {
 		return model.Task{}, err
 	}
-	if err := db.Exec(`INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id`, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
+	if err := db.Exec(createTaskStatement, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
 		return model.Task{}, err
 	}
 	return selectTask(db, "dedupe_key = ?", input.DedupeKey)

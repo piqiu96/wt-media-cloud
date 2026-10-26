@@ -40,9 +40,44 @@ func TestVisibleTaskListExcludesHiddenRowsAtQueryBoundary(t *testing.T) {
 
 const testSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+// The insert carried one more placeholder than the columns it names: sqlmock
+// matched the statement text, so the first place the mismatch surfaced was
+// MySQL, where every transfer creation failed. Count the values against the
+// columns and keep the mocks out of it.
+func TestCreateTaskStatementBindsOneValuePerColumn(t *testing.T) {
+	statement := createTaskStatement
+	columnsAt := strings.Index(statement, "(")
+	columnsEnd := strings.Index(statement, ")")
+	valuesAt := strings.Index(statement, "VALUES (")
+	valuesEnd := strings.Index(statement, ") ON DUPLICATE")
+	if columnsAt < 0 || columnsEnd < 0 || valuesAt < 0 || valuesEnd < 0 {
+		t.Fatalf("statement shape changed: %s", statement)
+	}
+	columns := strings.Split(statement[columnsAt+1:columnsEnd], ",")
+	values := statement[valuesAt+len("VALUES (") : valuesEnd]
+	if len(columns) != sqlValueCount(values) {
+		t.Fatalf("statement names %d columns but binds %d values: %s", len(columns), sqlValueCount(values), statement)
+	}
+}
+
+// sqlValueCount counts the comma-separated top-level values of a SQL list:
+// placeholders and the quoted literals mixed in with them.
+func sqlValueCount(list string) int {
+	count, quoted := 1, false
+	for _, r := range list {
+		switch {
+		case r == '\'':
+			quoted = !quoted
+		case r == ',' && !quoted:
+			count++
+		}
+	}
+	return count
+}
+
 func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+	mock.ExpectExec(regexp.QuoteMeta(createTaskStatement)).
 		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, nil)
@@ -67,7 +102,7 @@ func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 // that the returned task is the pre-existing row with the *other* id.
 func TestCreateTaskReadsBackTheExistingRowWhenTheDedupeKeyIsTaken(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+	mock.ExpectExec(regexp.QuoteMeta(createTaskStatement)).
 		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"id": "transfer-1", "status": "running"})
@@ -598,7 +633,7 @@ func TestCreateTaskAllowsAWaitingDownloadButNeverALeasableFactlessOne(t *testing
 	input.SourceObjectKey = ""
 	input.TotalBytes = 0
 	input.ExpectedSHA256 = ""
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+	mock.ExpectExec(regexp.QuoteMeta(createTaskStatement)).
 		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, nil, "user_download", "local_agent", int64(9), "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"dependency_task_id": "prepare-1", "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
@@ -906,7 +941,6 @@ const (
 	// on, so the same row is reachable from any machine that user logs in on.
 	// `latestUserDownloadStatuses` uses the same scope for the same reason.
 	latestUserDownloadSQL = "SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1"
-	insertTaskSQL         = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
 	// The preparation count is the same shape as the download count minus the user:
 	// a preparation belongs to the material, so scoping it to a user would let one
 	// user's click start a second download of a video another user is already
@@ -926,7 +960,7 @@ func expectUserDownloadCount(mock sqlmock.Sqlmock, finished int64) {
 }
 
 func expectUserDownloadInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string) {
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+	mock.ExpectExec(regexp.QuoteMeta(createTaskStatement)).
 		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
@@ -958,7 +992,7 @@ func expectMaterialPrepareCount(mock sqlmock.Sqlmock, finished int64) {
 // passing it lets a test arm the statement for the row a *removed* guard would
 // insert, so that the guard is what refuses rather than the mock.
 func expectMaterialPrepareInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string, dependency any) {
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+	mock.ExpectExec(regexp.QuoteMeta(createTaskStatement)).
 		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, nil, "compose_input_prepare", "cloud", int64(9), dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
@@ -1116,7 +1150,7 @@ func TestCreateUserDownloadTaskCarriesTheAssetType(t *testing.T) {
 	// edit, and the material key at this generation (frozen in the test above)
 	// is a different value by construction.
 	const outputKey = "9eed0c10fa5fb05c789aca482398f69d543c2ab5c7605b5368150436e9710ac6"
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
+	mock.ExpectExec(regexp.QuoteMeta(createTaskStatement)).
 		WithArgs("transfer-1", int64(7), "composite_output", int64(42), "成片-42", nil, nil, "compose-outputs/55/output.mp4", "user_download", "local_agent", int64(9), nil, outputKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, outputKey, testNow, nil)

@@ -14,10 +14,11 @@ import (
 	"gorm.io/gorm"
 )
 
-const strategyColumns = `id, team_id, game_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at`
+const strategyColumns = `id, team_id, game_id, operator_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at`
 
 type StrategyFilter struct {
 	TeamID     int64
+	OperatorID int64
 	GameIDs    []string
 	ActiveOnly bool
 	Search     string
@@ -96,7 +97,7 @@ func updateComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, actio
 		}
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_strategies SET name = ?, config_json = ?, execution_mode = ?, schedule_json = ?, priority_rules_json = ?, single_limit = ?, daily_limit = ?, next_run_at = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND game_id = ?`, item.Name, item.Config, item.ExecutionMode, scheduleJSON, item.RulesJSON, item.SingleLimit, item.DailyLimit, item.NextRunAt, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.GameID)
+		result := tx.Exec(`UPDATE compose_strategies SET name = ?, operator_id = ?, config_json = ?, execution_mode = ?, schedule_json = ?, priority_rules_json = ?, single_limit = ?, daily_limit = ?, next_run_at = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND game_id = ?`, item.Name, item.OperatorID, item.Config, item.ExecutionMode, scheduleJSON, item.RulesJSON, item.SingleLimit, item.DailyLimit, item.NextRunAt, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.GameID)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -119,7 +120,7 @@ func updateComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, actio
 }
 
 func appendStrategyAudit(tx *gorm.DB, item model.ComposeStrategy, action string, now time.Time) error {
-	summary, err := json.Marshal(map[string]any{"team_id": item.TeamID, "game_id": item.GameID, "status": item.Status, "execution_mode": item.ExecutionMode})
+	summary, err := json.Marshal(map[string]any{"team_id": item.TeamID, "game_id": item.GameID, "operator_id": item.OperatorID, "status": item.Status, "execution_mode": item.ExecutionMode})
 	if err != nil {
 		return err
 	}
@@ -146,11 +147,15 @@ func (StrategyStore) List(filter StrategyFilter) ([]model.ComposeStrategy, error
 }
 
 func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeStrategy, error) {
-	query := `SELECT s.id, s.team_id, s.game_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.execution_mode, s.schedule_json, s.priority_rules_json, s.single_limit, s.daily_limit, s.next_run_at, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
-	args := make([]any, 0, len(filter.GameIDs)+2)
+	query := `SELECT s.id, s.team_id, s.game_id, s.operator_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.execution_mode, s.schedule_json, s.priority_rules_json, s.single_limit, s.daily_limit, s.next_run_at, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
+	args := make([]any, 0, len(filter.GameIDs)+3)
 	if filter.TeamID > 0 {
 		query += ` AND s.team_id = ?`
 		args = append(args, filter.TeamID)
+	}
+	if filter.OperatorID > 0 {
+		query += ` AND s.operator_id = ?`
+		args = append(args, filter.OperatorID)
 	}
 	if len(filter.GameIDs) > 0 {
 		query += ` AND s.game_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.GameIDs)), ",") + `)`
@@ -203,9 +208,14 @@ func scanComposeStrategy(row strategyScanner) (model.ComposeStrategy, error) {
 	var schedule []byte
 	var rules []byte
 	var nextRun sql.NullTime
-	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &item.TemplateID, &item.TemplateVersion, &item.Name, &config, &item.ExecutionMode, &schedule, &rules, &item.SingleLimit, &item.DailyLimit, &nextRun, &item.Status, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
+	var operatorID sql.NullInt64
+	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &operatorID, &item.TemplateID, &item.TemplateVersion, &item.Name, &config, &item.ExecutionMode, &schedule, &rules, &item.SingleLimit, &item.DailyLimit, &nextRun, &item.Status, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.ComposeStrategy{}, err
+	}
+	if operatorID.Valid {
+		value := operatorID.Int64
+		item.OperatorID = &value
 	}
 	if !json.Valid(config) {
 		return model.ComposeStrategy{}, fmt.Errorf("strategy %d has invalid config_json", item.ID)

@@ -268,7 +268,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	}
 	media, _ := json.Marshal(map[string]int64{"duration_ms": output.DurationMS})
 	out := model.CompositeOutput{
-		TeamID: task.TeamID, GameID: task.GameID,
+		TeamID: task.TeamID, GameID: task.GameID, OperatorID: task.OperatorID,
 		MaterialID: task.MaterialID, MaterialUsageID: task.MaterialUsageID,
 		TaskID: task.ID, StrategyID: task.StrategyID,
 		TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion,

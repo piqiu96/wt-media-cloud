@@ -126,7 +126,7 @@ func TestListComposeOutputsScopesLikeTheTaskPage(t *testing.T) {
 		t.Fatalf("filters = %d", len(store.filters))
 	}
 	filter := store.filters[0]
-	if filter.TeamID != 7 || len(filter.GameIDs) != 1 || filter.GameIDs[0] != "delta" || filter.CreatedBy != 9 {
+	if filter.TeamID != 7 || len(filter.GameIDs) != 1 || filter.GameIDs[0] != "delta" || filter.OperatorID != 9 || filter.IncludeUnownedCreatedBy != 9 {
 		t.Fatalf("operator filter = %+v", filter)
 	}
 	if filter.PublishStatus != "pending_publish" {
@@ -154,12 +154,12 @@ func TestListComposeOutputsSeniorSeesTeamScopeNotOnlyOwn(t *testing.T) {
 	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
 	store := &outputMemoryStore{}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
-	if _, err := svc.List(senior, ListComposeOutputsInput{}); err != nil {
+	if _, err := svc.List(senior, ListComposeOutputsInput{OperatorScope: "team"}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	filter := store.filters[0]
-	if filter.CreatedBy != 0 {
-		t.Fatalf("senior filter must not narrow to created_by: %+v", filter)
+	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 {
+		t.Fatalf("senior team scope must not narrow to an operator: %+v", filter)
 	}
 }
 
@@ -308,5 +308,55 @@ func TestCreateOutputDownloadRefusesAnOutputOutsideTheActorsScope(t *testing.T) 
 	}
 	if transfers.count != 0 {
 		t.Fatal("a refused download still reached the transfer module")
+	}
+}
+
+func TestComposeOutputOperatorMineKeepsLegacyCreatorRowsVisible(t *testing.T) {
+	team := identity.TeamID(7)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	legacy := outputFixture(1)
+	foreignLegacy := outputFixture(2)
+	foreignLegacy.CreatedBy = 10
+	assignedToOther := outputFixture(3)
+	assignedToOther.OperatorID = operatorIDPtr(10)
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{legacy, foreignLegacy, assignedToOther}}
+	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
+	if _, err := svc.Get(operator, 1); err != nil {
+		t.Fatalf("legacy output for its creator must stay visible: %v", err)
+	}
+	for _, id := range []int64{2, 3} {
+		if _, err := svc.Get(operator, id); !errors.Is(err, ErrComposeOutputNotFound) {
+			t.Fatalf("output %d error = %v", id, err)
+		}
+	}
+}
+
+func TestComposeOutputListRefusesForeignOperatorFiltersAndDecoratesNames(t *testing.T) {
+	team := identity.TeamID(7)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	assigned := outputFixture(1)
+	assigned.OperatorID = operatorIDPtr(9)
+	legacy := outputFixture(2)
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{assigned, legacy}}
+	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
+	svc.operators = func() ([]identity.PublicUser, error) {
+		return []identity.PublicUser{{ID: 9, Username: "op9", Nickname: "九号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}}, nil
+	}
+	items, err := svc.List(operator, ListComposeOutputsInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].OperatorName != "九号" || items[1].OperatorName != "" {
+		t.Fatalf("operator names = %q / %q", items[0].OperatorName, items[1].OperatorName)
+	}
+	for _, input := range []ListComposeOutputsInput{
+		{OperatorScope: "team"},
+		{OperatorScope: "all"},
+		{OperatorID: 10},
+		{TeamID: 8},
+	} {
+		if _, err := svc.List(operator, input); !errors.Is(err, ErrComposeOutputForbidden) {
+			t.Fatalf("input=%+v err=%v", input, err)
+		}
 	}
 }

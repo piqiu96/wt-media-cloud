@@ -28,18 +28,23 @@ describe('output management page', () => {
     expect(source).toContain('下载任务提交失败')
   })
 
-  it('sends search and trigger filters to the backend and keeps only the local download overlay', () => {
+  it('sends search, trigger and operator filters to the backend and keeps only the local download overlay', () => {
     expect(source).toContain('params.search = filters.value.search.trim()')
     expect(source).toContain('params.trigger_type = filters.value.trigger')
+    expect(source).toContain('v-model="filters.operator"')
+    expect(source).toContain('params.operator_id = namedOperator')
+    expect(source).toContain('params.team_id = Number(filters.value.team_id)')
+    expect(source).toContain("if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'")
     expect(source).not.toContain('matchesOutputSearch')
     expect(source).not.toContain('searchedMaterials')
     expect(source).toContain("!filters.value.download || downloadFor(row).key === filters.value.download")
   })
 
-  it('shows asset, source, strategy, generation and real download facts in the list', () => {
-    for (const key of ['output', 'material_id', 'strategy', 'trigger', 'download_status', 'created_at']) {
+  it('shows asset, source, strategy, operator, generation and real download facts in the list', () => {
+    for (const key of ['output', 'material_id', 'strategy', 'operator', 'trigger', 'download_status', 'created_at']) {
       expect(source).toContain(`<template #${key}=`)
     }
+    expect(source).toContain("row.operator_name || '未记录'")
     expect(source).toContain('titleFor(row)')
     expect(source).toContain('generationLabel(triggerFor(row))')
     expect(source).toContain('downloadFor(row).label')

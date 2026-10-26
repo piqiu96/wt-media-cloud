@@ -166,7 +166,7 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 	step := closingCommitStep(now)
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `composite_outputs`").
-		WithArgs(int64(7), "delta", int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
+		WithArgs(int64(7), "delta", nil, int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
 		WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").
 		WithArgs("outputs/final", int64(55), now, now, int64(77), int64(9), 1, now).

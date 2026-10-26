@@ -25,7 +25,8 @@ type ComposeSchedulerService struct {
 	strategies interface {
 		Find(int64) (model.ComposeStrategy, bool, error)
 	}
-	now func() time.Time
+	operators func() ([]identity.PublicUser, error)
+	now       func() time.Time
 }
 
 func NewComposeSchedulerService(store ComposeScheduleRepository, strategies interface {
@@ -39,7 +40,9 @@ func RunDueComposeSchedules(now time.Time) (int, error) {
 }
 
 func RunComposeStrategyNow(actor identity.PublicUser, strategyID int64, requestKey string) (model.ComposeScheduleRun, error) {
-	return NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{}).RunNow(actor, strategyID, requestKey)
+	service := NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{})
+	service.operators = identity.ListUsers
+	return service.RunNow(actor, strategyID, requestKey)
 }
 
 func ListComposeStrategyRuns(actor identity.PublicUser, strategyID int64) ([]model.ComposeScheduleRun, error) {
@@ -151,6 +154,15 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 	}
 	if strategy.Status != model.ComposeStrategyEnabled {
 		return model.ComposeScheduleRun{}, fmt.Errorf("%w: strategy is disabled", ErrStrategyInvalid)
+	}
+	operatorID := int64(0)
+	if strategy.OperatorID != nil {
+		operatorID = *strategy.OperatorID
+	}
+	if _, ok, err := resolveComposeOperator(s.operators, strategy.TeamID, strategy.GameID, operatorID); err != nil {
+		return model.ComposeScheduleRun{}, err
+	} else if !ok {
+		return model.ComposeScheduleRun{}, fmt.Errorf("%w: strategy operator is unavailable", ErrStrategyInvalid)
 	}
 	if err := model.ValidateComposePriorityRules(strategy.PriorityRules); err != nil {
 		return model.ComposeScheduleRun{}, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
