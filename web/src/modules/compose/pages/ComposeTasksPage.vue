@@ -36,9 +36,11 @@ const strategies = ref([])
 const templates = ref([])
 const games = ref([])
 const teams = ref([])
+const operatorOptions = ref([])
+const operatorsLoading = ref(false)
 const loading = ref(false)
 const error = ref('')
-const filters = ref({ status: '', trigger_type: '', compose_strategy_id: '', created_range: [] })
+const filters = ref({ status: '', trigger_type: '', compose_strategy_id: '', created_range: [], team_id: '', operator: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 const createVisible = ref(false)
 
@@ -61,6 +63,7 @@ const columns = computed(() => [
   { colKey: 'trigger_type', title: '触发方式', width: 100 },
   { colKey: 'material_id', title: '关联素材', width: 140 },
   { colKey: 'strategy', title: '合成策略', width: 180 },
+  { colKey: 'operator', title: '负责人', width: 110 },
   { colKey: 'output', title: '生成成片', width: 120 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'created_at', title: '创建时间', width: 150 },
@@ -135,6 +138,17 @@ async function load({ quiet = false } = {}) {
     if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type
     if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id
     Object.assign(params, createdRangeParams(filters.value.created_range))
+    // 负责人筛选与服务端同一套 scope：普通运营不发（服务端固定本人）；高级运营默认
+    // 我的，可切团队全部或指定运营；管理员默认全部，按团队收窄。
+    const namedOperator = filters.value.operator.startsWith('op:') ? Number(filters.value.operator.slice(3)) : 0
+    if (isAdmin.value) {
+      if (filters.value.team_id) params.team_id = Number(filters.value.team_id)
+      if (namedOperator) params.operator_id = namedOperator
+      else if (filters.value.team_id) params.operator_scope = 'team'
+    } else if (isSenior.value) {
+      if (namedOperator) params.operator_id = namedOperator
+      else if (filters.value.operator === 'team') params.operator_scope = 'team'
+    }
     const data = await client.listComposeTasks(params)
     rows.value = Array.isArray(data) ? data : []
     if (!quiet) pagination.value.current = 1
@@ -147,7 +161,7 @@ async function load({ quiet = false } = {}) {
 }
 
 function reset() {
-  filters.value = { status: '', trigger_type: '', compose_strategy_id: '', created_range: [] }
+  filters.value = { status: '', trigger_type: '', compose_strategy_id: '', created_range: [], team_id: '', operator: '' }
   load()
 }
 
@@ -186,6 +200,31 @@ async function loadLookups() {
 function gameLabel(id) { return games.value.find((game) => game.id === id)?.name || String(id ?? '—') }
 function teamLabel(id) { return teams.value.find((team) => team.id === id)?.name || (id === undefined || id === null ? '—' : `团队 ${id}`) }
 
+// 负责人候选目录：高级运营固定本团队，管理员按所选团队取；普通运营没有这个筛选。
+async function loadOperators() {
+  if (!canFilterOperators.value) return
+  if (isAdmin.value && !filters.value.team_id) {
+    operatorOptions.value = []
+    filters.value.operator = ''
+    return
+  }
+  operatorsLoading.value = true
+  try {
+    const data = await client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })
+    operatorOptions.value = Array.isArray(data) ? data : []
+    if (filters.value.operator.startsWith('op:') && !operatorOptions.value.some((option) => filters.value.operator === `op:${option.id}`)) filters.value.operator = ''
+  } catch {
+    operatorOptions.value = []
+  } finally {
+    operatorsLoading.value = false
+  }
+}
+
+function onTeamFilterChange() {
+  filters.value.operator = ''
+  loadOperators()
+}
+
 // —— 状态自动刷新 ——
 // 列表这一份：有排队中/处理中的任务就每 5 秒重读一次，跑完最后一单就自己停。
 const listPolling = useTaskPolling(() => load({ quiet: true }))
@@ -205,6 +244,14 @@ const attemptsError = ref('')
 const currentUser = ref(null)
 const canRetry = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))
 const canReviewUncertain = computed(() => currentUser.value?.role === 'admin')
+const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const canFilterOperators = computed(() => isSenior.value || isAdmin.value)
+const operatorFilterOptions = computed(() => {
+  const options = []
+  if (isSenior.value) options.push({ value: 'mine', label: '我的' }, { value: 'team', label: '团队全部' })
+  return options.concat(operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
+})
 const reviews = ref([])
 const reviewsError = ref('')
 const reviewBusy = ref(false)
@@ -450,6 +497,9 @@ onMounted(() => {
   // 只为藏/显重试按钮；读失败不拦页面，角色判定由服务端兜底。
   sessionClient.me().then((me) => {
     currentUser.value = me
+    // 高级运营的服务端默认就是「我」；把它显式放上下拉，页面说的事实才和查询一致。
+    if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'
+    loadOperators()
     if (detail.value) loadReviews(detail.value.id)
   }).catch(() => {})
   const taskID = String(route.query.task_id || '')
@@ -469,8 +519,12 @@ onMounted(() => {
       </ResourcePageHeader>
       <ResourceCard class="compose-tasks-card">
         <div class="filter-bar">
-          <!-- 顺序按运营找任务时的顺序：先认策略，再认是谁触发的，然后才轮到状态与时间。 -->
+          <!-- 顺序按运营找任务时的顺序：先认团队/策略，再认负责人，然后才是触发方式、状态与时间。 -->
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="filters.team_id" clearable placeholder="全部" @change="onTeamFilterChange">
+            <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
+          </t-select></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" :clearable="!isSenior" :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="人工创建" /><t-option value="scheduled" label="策略自动" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
@@ -486,6 +540,7 @@ onMounted(() => {
             <template #trigger_type="{ row }">{{ triggerText(row) }}</template>
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link></template>
             <template #strategy="{ row }"><t-link class="compose-strategy-link" theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link></template>
+            <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
@@ -514,6 +569,7 @@ onMounted(() => {
                     <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
                     <div><span class="compose-detail__label">触发方式</span><span>{{ triggerText(detail) }}</span></div>
                     <div><span class="compose-detail__label">创建人 ID</span><span>{{ detail.created_by }}</span></div>
+                    <div><span class="compose-detail__label">负责人</span><span>{{ detail.operator_name || '未记录' }}</span></div>
                     <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
                     <div><span class="compose-detail__label">当前状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusText(detail)" /></div>
                     <!-- 失败原因就写在任务信息里：找「为什么失败」的人先看的就是这一段，不必

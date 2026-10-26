@@ -12,9 +12,9 @@ const read = pageReader(import.meta.url)
 const FILES = ['ComposeStrategyPage.vue', 'ComposeTasksPage.vue', 'MyOutputsPage.vue']
 
 const TABLES = [
-  { file: 'ComposeStrategyPage.vue', name: 'columns', count: 8 },
-  { file: 'ComposeTasksPage.vue', name: 'columns', count: 9 },
-  { file: 'MyOutputsPage.vue', name: 'columns', count: 9 },
+  { file: 'ComposeStrategyPage.vue', name: 'columns', count: 9 },
+  { file: 'ComposeTasksPage.vue', name: 'columns', count: 10 },
+  { file: 'MyOutputsPage.vue', name: 'columns', count: 10 },
 ]
 
 describe('compose list page conventions', () => {

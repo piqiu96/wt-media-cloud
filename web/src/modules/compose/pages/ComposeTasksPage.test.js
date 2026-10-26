@@ -26,6 +26,20 @@ describe('compose tasks page', () => {
     expect(source).toContain('v-model="filters.created_range"')
   })
 
+  // 负责人筛选（M4-I）：普通运营没有这个控件（服务端固定本人）；高级运营默认「我的」，
+  // 可切团队全部或指定运营；管理员先选团队。页面选项和查询参数说同一件事。
+  it('wires the operator filter to the same scopes the server authorizes', () => {
+    expect(source).toContain('v-model="filters.operator"')
+    expect(source).toContain('v-if="canFilterOperators"')
+    expect(source).toContain("if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'")
+    expect(source).toContain('params.operator_id = namedOperator')
+    expect(source).toContain("else if (filters.value.operator === 'team') params.operator_scope = 'team'")
+    expect(source).toContain('params.team_id = Number(filters.value.team_id)')
+    expect(source).toContain('client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })')
+    expect(source).toContain("row.operator_name || '未记录'")
+    expect(source).toContain('<span class="compose-detail__label">负责人</span>')
+  })
+
   // 执行阶段是过程信息，只在详情里；列表放决策信息，进度百分比一律不进列表。
   it('renders the five formal task statuses and keeps the stage out of the list', () => {
     expect(source).toContain("pending: '排队中'")
@@ -49,10 +63,10 @@ describe('compose tasks page', () => {
     expect(source).toContain(':label="statusText(detail)"')
   })
 
-  // 列序固定：识别 → 来源 → 结果 → 状态 → 时间 → 操作。
-  it('declares the nine columns in the fixed order', () => {
+  // 列序固定：识别 → 来源（含负责人）→ 结果 → 状态 → 时间 → 操作。
+  it('declares the ten columns in the fixed order', () => {
     const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))
-    const order = ['id', 'name', 'trigger_type', 'material_id', 'strategy', 'output', 'status', 'created_at', 'op']
+    const order = ['id', 'name', 'trigger_type', 'material_id', 'strategy', 'operator', 'output', 'status', 'created_at', 'op']
     // 分母可见：列数对不上说明列结构被改过，立刻失败而不是让后面的顺序断言空转。
     expect((columns.match(/colKey:/g) || [])).toHaveLength(order.length)
     for (let index = 1; index < order.length; index += 1) {
@@ -124,17 +138,20 @@ describe('compose tasks page', () => {
     expect(source).not.toContain("width: 130, fixed: 'right'")
   })
 
-  // 顺序即查找顺序：先认策略，再认谁触发的，然后才是状态与时间；策略名长，仍占宽位。
-  // 逐项按 label 文本定位（不是裸词 indexOf），顺序写错时这里一定红。
-  it('orders the filter bar 合成策略 → 触发方式 → 状态 → 创建时间', () => {
+  // 顺序即查找顺序：先认团队/策略，再认负责人，然后才是触发方式、状态与时间；
+  // 策略名长，仍占宽位。逐项按 label 文本定位（不是裸词 indexOf），顺序写错时这里一定红。
+  it('orders the filter bar 团队 → 合成策略 → 负责人 → 触发方式 → 状态 → 创建时间', () => {
     const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
     expect(bar).not.toContain('<t-space')
     const labels = [...bar.matchAll(/wt-filter-field__label">([^<]+)</g)].map((match) => match[1])
-    expect(labels).toEqual(['合成策略', '触发方式', '状态', '创建时间'])
+    expect(labels).toEqual(['团队', '合成策略', '负责人', '触发方式', '状态', '创建时间'])
     const fields = bar.match(/wt-filter-field[^"]*"/g) || []
     expect(fields.filter((entry) => entry.includes('wt-filter-field--wide'))).toHaveLength(1)
-    // 宽位归策略，且它就是第一个字段。
-    expect(fields[0]).toContain('wt-filter-field--wide')
+    // 宽位只归策略（团队、负责人都是窄字段）：宽类之后先出现策略标题，再出现负责人标题。
+    const wideAt = bar.indexOf('wt-filter-field--wide')
+    const strategyAt = bar.indexOf('合成策略', wideAt)
+    expect(strategyAt).toBeGreaterThan(wideAt)
+    expect(bar.indexOf('负责人', wideAt)).toBeGreaterThan(strategyAt)
     expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
   })
 

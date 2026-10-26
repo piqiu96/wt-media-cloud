@@ -51,6 +51,19 @@ describe('compose strategy page', () => {
     expect(source).not.toMatch(/<t-option v-for="operator in conditionOperators/)
   })
 
+  // 负责人是策略的必填归属（M4-I）：候选由团队＋游戏决定，创建和更新都必须提交；
+  // 历史行没有可靠来源，列表与详情都显示“未记录”，不拿创建人冒充。
+  it('binds a required operator and renders unrecorded history honestly', () => {
+    expect(source).toContain('client.listComposeOperators({ team_id: teamID, game_id: gameID })')
+    expect(source).toContain("if (!form.value.operator_id) {")
+    expect(source).toContain('operator_id: Number(form.value.operator_id)')
+    expect(source).toContain('colKey: \'operator\'')
+    expect(source).toContain("row.operator_name || '未记录'")
+    expect(source).toContain('v-model="form.operator_id"')
+    const summary = readFileSync(new URL('../components/ComposeStrategySummary.vue', import.meta.url), 'utf8')
+    expect(summary).toContain("strategy.operator_name || '未记录'")
+  })
+
   // 批次结果归集（CHG-20261015-095）：统计由服务端 GROUP BY 给出，页面不二次
   // 推算；批次按运行记录的计划时间懒加载，部分失败要能逐素材看到。
   it('reads run batches lazily and renders server-side counts per material', () => {

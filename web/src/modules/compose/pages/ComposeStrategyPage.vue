@@ -25,6 +25,10 @@ const rows = ref([])
 const templates = ref([])
 const games = ref([])
 const teams = ref([])
+const operatorOptions = ref([])
+const operatorsLoading = ref(false)
+const operatorError = ref('')
+let operatorSequence = 0
 const currentUser = ref(null)
 const loading = ref(false)
 const error = ref('')
@@ -33,6 +37,8 @@ const error = ref('')
 // 普通运营只读。页面据此藏写入口；真正的授权判定在 Service 层，藏按钮只是少一次必失败请求。
 const canManage = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
+// 高级运营的团队由服务端固定，管理员的团队来自表单。
+const operatorTeamReady = computed(() => Boolean(isAdmin.value ? form.value.team_id : currentUser.value?.team_id))
 
 const visible = ref(false)
 const saving = ref(false)
@@ -186,6 +192,7 @@ const columns = computed(() => [
   { colKey: 'template', title: '合成模板', width: 180 },
   { colKey: 'game', title: '所属游戏', width: 130 },
   { colKey: 'team', title: '所属团队', width: 130 },
+  { colKey: 'operator', title: '负责人', width: 120 },
   { colKey: 'schedule', title: '执行计划', width: 150 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '执行', '复制'] : ['详情']), fixed: 'right' },
@@ -258,6 +265,7 @@ function defaultForm() {
   return {
     team_id: '',
     game_id: '',
+    operator_id: '',
     name: '',
     compose_template_id: '',
     configFallback: null,
@@ -268,6 +276,38 @@ function defaultForm() {
     daily_limit: 1,
   }
 }
+
+// 负责人候选只由团队＋游戏决定（服务端同一条有效性规则）。编辑既有策略时团队和游戏
+// 不可改，直接用行上的值；新建时管理员先选团队、所有人先选游戏。
+async function loadOperatorOptions() {
+  const sequence = ++operatorSequence
+  const teamID = isAdmin.value ? Number(form.value.team_id) || 0 : Number(currentUser.value?.team_id) || 0
+  const gameID = form.value.game_id
+  operatorError.value = ''
+  if (!teamID || !gameID) {
+    operatorOptions.value = []
+    operatorsLoading.value = false
+    return
+  }
+  operatorsLoading.value = true
+  try {
+    const options = await client.listComposeOperators({ team_id: teamID, game_id: gameID })
+    if (sequence !== operatorSequence) return
+    operatorOptions.value = Array.isArray(options) ? options : []
+    // 原来选的人已不在候选里（停用／改团队／不再负责该游戏）就不再声称已指派。
+    if (form.value.operator_id && !operatorOptions.value.some((option) => option.id === Number(form.value.operator_id))) form.value.operator_id = ''
+  } catch (e) {
+    if (sequence !== operatorSequence) return
+    operatorOptions.value = []
+    operatorError.value = e?.message || '负责人读取失败'
+  } finally {
+    if (sequence === operatorSequence) operatorsLoading.value = false
+  }
+}
+
+watch(() => [visible.value, form.value.team_id, form.value.game_id], () => {
+  if (visible.value) loadOperatorOptions()
+})
 
 watch(() => [visible.value, form.value.execution_mode, form.value.schedule.mode, form.value.schedule.interval_minutes, form.value.schedule.daily_time, form.value.schedule.timezone], async () => {
   const sequence = ++previewSequence
@@ -299,6 +339,8 @@ function resetFilters() {
 function openCreate() {
   editingID.value = null
   form.value = defaultForm()
+  operatorOptions.value = []
+  operatorError.value = ''
   templateParams.value = {}
   clearParamErrors()
   nameError.value = ''
@@ -311,6 +353,7 @@ function openEdit(row) {
   form.value = {
     team_id: row.team_id,
     game_id: row.game_id,
+    operator_id: row.operator_id || '',
     name: row.name,
     compose_template_id: row.compose_template_id,
     configFallback: templates.value.some((item) => item.id === row.compose_template_id) ? null : row.config,
@@ -469,6 +512,10 @@ async function save() {
     feedback.toast.error('请选择合成模板')
     return
   }
+  if (!form.value.operator_id) {
+    operatorError.value = '请选择负责人'
+    return
+  }
   const fields = formSchemaFields.value
   if (!fields.length) {
     feedback.toast.error('模板参数未就绪，请重新选择合成模板')
@@ -544,12 +591,13 @@ async function save() {
   saving.value = true
   try {
     if (editingID.value) {
-      await client.updateStrategy(editingID.value, { name, config, ...execution })
+      await client.updateStrategy(editingID.value, { name, config, operator_id: Number(form.value.operator_id), ...execution })
     } else {
       const template = templates.value.find((item) => item.id === Number(form.value.compose_template_id))
       const payload = {
         game_id: form.value.game_id,
         name,
+        operator_id: Number(form.value.operator_id),
         compose_template_id: template.id,
         compose_template_version: template.version,
         config,
@@ -654,6 +702,8 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             </template>
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #team="{ row }">{{ teamName(row.team_id) }}</template>
+            <!-- 历史策略没有负责人来源：显示“未记录”，不拿创建人冒充。 -->
+            <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #template="{ row }">{{ templateLabel(templates, row.compose_template_id) }}</template>
             <template #status="{ row }">
               <t-switch v-if="canManage" :value="row.status === 'enabled'" :label="['启用', '停用']" :loading="statusPendingID === row.id" :disabled="statusPendingID !== null" @change="(value) => toggleStatus(row, value)" />
@@ -704,6 +754,16 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                   <t-form-item label="所属团队"><strong class="strategy-readonly">{{ teamName(form.team_id) }}</strong></t-form-item>
                   <t-form-item label="所属游戏"><strong class="strategy-readonly">{{ gameName(form.game_id) }}</strong></t-form-item>
                 </template>
+                <!-- 负责人是策略的必填归属：任务与成片都从这里继承。候选跟着团队＋游戏走。 -->
+                <t-form-item label="负责人" required-mark>
+                  <div class="strategy-field">
+                    <t-select v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="!form.game_id || !operatorTeamReady" :placeholder="!form.game_id ? '先选择游戏' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
+                      <t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" />
+                    </t-select>
+                    <p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p>
+                    <p v-else-if="form.game_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与游戏下没有可指派的运营</p>
+                  </div>
+                </t-form-item>
                 <t-form-item label="合成模板" required-mark>
                   <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange">
                     <t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" />

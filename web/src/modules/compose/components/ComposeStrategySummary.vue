@@ -43,6 +43,7 @@ const guideName = computed(() => {
         <div class="strategy-overview-field"><span>状态</span><strong>{{ strategy.status === 'enabled' ? '已启用' : '已停用' }}</strong></div>
         <div class="strategy-overview-field"><span>所属团队</span><strong>{{ team || '—' }}</strong></div>
         <div class="strategy-overview-field"><span>所属游戏</span><strong>{{ game || '—' }}</strong></div>
+        <div class="strategy-overview-field"><span>负责人</span><strong>{{ strategy.operator_name || '未记录' }}</strong></div>
         <div class="strategy-overview-field"><span>合成模板</span><strong>{{ templateLabel(templates, strategy.compose_template_id) }}</strong></div>
         <div class="strategy-overview-field"><span>创建时间</span><strong>{{ formatDateTime(strategy.created_at) }}</strong></div>
         <div class="strategy-overview-field"><span>修改时间</span><strong>{{ formatDateTime(strategy.updated_at) }}</strong></div>
@@ -71,6 +72,7 @@ const guideName = computed(() => {
       <div class="strategy-detail-grid">
         <div class="strategy-drawer__field"><span>所属团队</span><strong>{{ team }}</strong></div>
         <div class="strategy-drawer__field"><span>所属游戏</span><strong>{{ game }}</strong></div>
+        <div class="strategy-drawer__field"><span>负责人</span><strong>{{ strategy.operator_name || '未记录' }}</strong></div>
       </div>
     </section>
     <section v-if="configFields.length || guideUrl" class="strategy-detail-card">
