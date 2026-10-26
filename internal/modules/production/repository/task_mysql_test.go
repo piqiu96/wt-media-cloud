@@ -217,7 +217,6 @@ func TestLockComposeTaskMaterialTakesTheStrategyRowFirst(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
-
 // One query for the drawer's whole candidate list: every requested id comes
 // back, ascending, with the pairs that never ran filled in as zeros. The
 // expected SQL pins all four status counts — a dropped one (cancelled was the

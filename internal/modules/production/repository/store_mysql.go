@@ -25,14 +25,14 @@ type CreateUsageInput struct {
 }
 
 type MaterialFilter struct {
-	TeamID  *identity.TeamID
-	GameIDs []string
-	Search  string
-	Limit   int
-	GameID string
+	TeamID      *identity.TeamID
+	GameIDs     []string
+	Search      string
+	Limit       int
+	GameID      string
 	VideoStatus string
-	SortBy string
-	SortOrder string
+	SortBy      string
+	SortOrder   string
 }
 
 const materialProjectionColumns = `m.id, m.team_id, s.game_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at`
@@ -103,8 +103,14 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 		conditions = append(conditions, "(CAST(m.id AS CHAR) = ? OR m.title LIKE ? OR s.platform_content_id LIKE ? OR s.author_name LIKE ?)")
 		args = append(args, search, like, like, like)
 	}
-	if filter.GameID != "" { conditions = append(conditions, "s.game_id = ?"); args = append(args, filter.GameID) }
-	if filter.VideoStatus != "" { conditions = append(conditions, "m.video_status = ?"); args = append(args, filter.VideoStatus) }
+	if filter.GameID != "" {
+		conditions = append(conditions, "s.game_id = ?")
+		args = append(args, filter.GameID)
+	}
+	if filter.VideoStatus != "" {
+		conditions = append(conditions, "m.video_status = ?")
+		args = append(args, filter.VideoStatus)
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 200
@@ -115,9 +121,13 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 	}
 	sortColumns := map[string]string{"id": "m.id", "published_at": "s.published_at", "created_at": "m.created_at", "updated_at": "m.updated_at"}
 	sortColumn := sortColumns[filter.SortBy]
-	if sortColumn == "" { sortColumn = "s.published_at" }
+	if sortColumn == "" {
+		sortColumn = "s.published_at"
+	}
 	sortOrder := "DESC"
-	if strings.EqualFold(filter.SortOrder, "asc") { sortOrder = "ASC" }
+	if strings.EqualFold(filter.SortOrder, "asc") {
+		sortOrder = "ASC"
+	}
 	query += fmt.Sprintf(" ORDER BY %s %s, m.id DESC LIMIT %d", sortColumn, sortOrder, limit)
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
