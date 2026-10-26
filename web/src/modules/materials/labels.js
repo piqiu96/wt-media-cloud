@@ -1,5 +1,3 @@
-import { formatDate } from '../../shared/utils/datetime.js'
-
 // 素材的状态与展示文案。
 //
 // 四种视频状态直接来自冻结的 `video_status` enum（contracts/business-schemas/v1/
@@ -184,32 +182,50 @@ export function nextStepHint(material) {
   }
 }
 
-// ── 使用情况 ──────────────────────────────────────────────────────────────
+// ── 素材库的三个使用维度 ────────────────────────────────────────────────
 //
-// 列表的「使用情况」列与详情的「使用情况」卡读的同一份协议，形状是 `material.usage`：
+// 加入状态是当前查看者自己的关系（`usage_status` / `added_at`），我的使用是当前
+// 查看者有没有做过成功成片（`my_usage`），使用情况是本团队全部成功成片的汇总
+// （`usage`）。三者各自回答一个问题，服务端分别投影，页面不互相推导：
 //
-//   clip_count         已生产成片数
-//   published_count    已发布数
-//   last_produced_at   最近生产时间（ISO）
-//   last_published_at  最近发布时间（ISO）
-//   duplicate_risk     normal | suspected    重复风险
+//   usage.output_count    本团队全部成功成片数
+//   usage.operator_count  有负责人的成功成片去重人数
+//   usage.operators       仅高级运营/管理员返回 [{id, name, output_count}]
 //
-// `usage` 还没有数据（要跨成片与发布聚合）。这里把键名定死，好让后端照着填 ——
-// 键名对不上就是一次静默的空格子，没有东西会报错。
-export const USAGE_FIELDS = ['clip_count', 'published_count', 'last_produced_at', 'last_published_at', 'duplicate_risk']
+// 历史成片没有负责人时仍计入 output_count，但不计入 operator_count，也不回填
+// `created_by`。页面把这段差额说成「未记录负责人」，而不是猜一个人。
+// 发布相关口径属于 M6，这里的 `usage` 不包含任何发布事实。
 
-export const DUPLICATE_RISKS = ['normal', 'suspected']
+export const JOIN_FILTERS = [
+  { value: 'joined', label: '已加入' },
+  { value: 'not_joined', label: '未加入' },
+]
 
-const DUPLICATE_RISK_LABELS = { normal: '正常', suspected: '疑似重复' }
+export const MY_USAGE_FILTERS = [
+  { value: 'used', label: '已使用' },
+  { value: 'unused', label: '未使用' },
+]
 
-const DUPLICATE_RISK_TONES = { normal: 'success', suspected: 'danger' }
+export const TEAM_USAGE_FILTERS = [
+  { value: 'used', label: '有人用过' },
+  { value: 'unused', label: '无人用过' },
+]
 
-export function duplicateRiskLabel(value) {
-  return DUPLICATE_RISK_LABELS[value] || value || '-'
+/** 素材库里的加入状态：active=已加入，removed=已移出，无关系=未加入。 */
+export function joinStatus(material) {
+  if (material?.usage_status === 'active') return { label: '已加入', tone: 'success' }
+  if (material?.usage_status === 'removed') return { label: '已移出', tone: 'neutral' }
+  return { label: '未加入', tone: 'neutral' }
 }
 
-export function duplicateRiskTone(value) {
-  return DUPLICATE_RISK_TONES[value] || 'neutral'
+const MY_USAGE_LABELS = { used: '已使用', unused: '未使用' }
+
+export function myUsageLabel(value) {
+  return MY_USAGE_LABELS[value] || value || '-'
+}
+
+export function myUsageTone(value) {
+  return value === 'used' ? 'info' : 'neutral'
 }
 
 // 0 是数据，缺省不是：0 说的是「一条成片都没生产」，缺省说的是「这个字段还没来」。
@@ -219,28 +235,71 @@ function usageCount(value) {
   return Number(value).toLocaleString()
 }
 
-/** 列表那一格的两行。读不到 usage 时立的是骨架（`-`），不是猜测值。 */
-export function usageLines(material) {
-  const usage = material?.usage || {}
+function operatorNames(usage) {
+  return Array.isArray(usage?.operators) ? usage.operators.map((operator) => operator?.name || '未记录姓名') : null
+}
+
+/**
+ * 列表「使用情况」那一格的两行：第一行是成片与人数，第二行是姓名（能拿到时）。
+ * 没有成功成片就说「暂无成功成片」；普通运营拿不到姓名时明说不可见，不画空白。
+ */
+export function usageSummaryLines(material) {
+  const usage = material?.usage
+  if (!usage || usage.output_count === undefined || usage.output_count === null) {
+    return { counts: '—', names: '—' }
+  }
+  const outputs = Number(usage.output_count) || 0
+  if (outputs === 0) return { counts: '暂无成功成片', names: '—' }
+  const operators = Number(usage.operator_count) || 0
+  if (operators === 0) return { counts: `成片 ${usageCount(outputs)} · 负责人未记录`, names: '—' }
+  const names = operatorNames(usage)
   return {
-    counts: `成片 ${usageCount(usage.clip_count)} · 发布 ${usageCount(usage.published_count)}`,
-    recent: `最近发布 ${formatDate(usage.last_published_at)}`,
+    counts: `成片 ${usageCount(outputs)} · 使用 ${usageCount(operators)} 人`,
+    names: names && names.length ? names.join('、') : '姓名不可见',
   }
 }
 
-/** 详情「使用情况」卡的五个事实，顺序即设计图的顺序。`tone` 只挂在重复风险上。 */
+/**
+ * 详情「使用情况」卡的三个事实。高级运营/管理员额外看到「未记录负责人的成片」
+ * 那一项：它是 output_count 减去有负责人的成片数，只在拿到 operators 时才能算，
+ * 所以普通运营不会看到这一项，也不会看到一行猜出来的 0。
+ */
 export function usageFacts(material) {
-  const usage = material?.usage || {}
-  return [
-    { key: 'clip_count', label: '已生产成片', value: usageCount(usage.clip_count) },
-    { key: 'published_count', label: '已发布', value: usageCount(usage.published_count) },
-    { key: 'last_produced_at', label: '最近生产', value: formatDate(usage.last_produced_at) },
-    { key: 'last_published_at', label: '最近发布', value: formatDate(usage.last_published_at) },
+  const usage = material?.usage
+  const names = operatorNames(usage)
+  const facts = [
+    { key: 'output_count', label: '成功成片', value: usageCount(usage?.output_count) },
+    { key: 'operator_count', label: '使用人数', value: usageCount(usage?.operator_count) },
     {
-      key: 'duplicate_risk',
-      label: '重复风险',
-      value: duplicateRiskLabel(usage.duplicate_risk),
-      tone: duplicateRiskTone(usage.duplicate_risk),
+      key: 'operators',
+      label: '使用人',
+      value: names === null
+        ? (Number(usage?.operator_count) > 0 ? '姓名不可见' : '—')
+        : (names.length ? names.join('、') : '—'),
     },
   ]
+  if (names !== null) {
+    const knownOutputs = (usage?.operators || []).reduce((sum, operator) => sum + Number(operator?.output_count || 0), 0)
+    const unknown = Number(usage?.output_count || 0) - knownOutputs
+    if (unknown > 0) {
+      facts.push({ key: 'unknown_operator', label: '未记录负责人的成片', value: usageCount(unknown) })
+    }
+  }
+  return facts
+}
+
+/**
+ * 素材库上下文里的「下一步」。这一页不提供本机下载入口，所以提示不能指向
+ * 「下载到本机」：已加入的去看「我的素材」，未加入的先加入。
+ */
+export function libraryNextStepHint(material) {
+  if (material?.usage_status === 'removed') return '已移出我的素材，可重新加入'
+  if (material?.usage_status === 'active') {
+    return material?.video_status === 'ready'
+      ? '已加入我的素材，可在「我的素材」下载或用于合成'
+      : '已加入我的素材；文件准备完成后可在「我的素材」下载'
+  }
+  return material?.video_status === 'ready'
+    ? '加入我的素材后可下载，并在合成任务页选用'
+    : '加入我的素材；文件准备完成后可下载'
 }

@@ -11,12 +11,10 @@ function sliceBetween(text, start, end) {
   return text.slice(from, to)
 }
 
-// 「素材库不提供下载」这条规则管的是**行操作**，不是整页：加入成功的即时反馈里
-// 可以给一步「立即下载」（走查四轮，2026-09-30 用户裁定）。所以这条断言量的是
-// 行操作那一块，而不是整份源码。
-// 切的终点是 `</t-space>` 而不是第一个 `</template>`：走查五轮给这一格加了
-// `<template v-else>—</template>`，按 `</template>` 切会把动作条从「—」处剪断，
-// 量到的就不再是行操作那一块了。
+// 「素材库不提供下载」这条规则管的是**行操作与即时反馈**：CHG-104 起素材库不再有
+// 任何本机下载入口，下载只从「我的素材」发起（服务端也只认那边的关系）。
+// 切的终点是 `</t-space>` 而不是第一个 `</template>`：操作格里有嵌套的
+// `<template v-else>—</template>`，按 `</template>` 切会把动作条从「—」处剪断。
 const opBlock = sliceBetween(source, '#op=', '</t-space>')
 
 describe('material library page', () => {
@@ -39,19 +37,53 @@ describe('material library page', () => {
     expect(source).toContain('await client.get(Number(raw))')
     // 单条接口，而不是在行里找：深链必须能打开分页外或筛选外的那一条。
     expect(source).toContain('async function openFromQuery()')
-    expect(source).toMatch(/onMounted\(\(\) => \{[^}]*openFromQuery\(\)/s)
+    // 挂载时会话要先到（默认游戏筛选依赖它），深链的打开跟着走。
+    expect(source).toMatch(/onMounted\(async \(\) => \{[\s\S]*openFromQuery\(\)/)
   })
 
-  // 搜索、游戏、视频状态与排序都由服务端读 query；页面不再对返回行做二次过滤。
-  // 页面也不得凭空出现一个「团队」下拉 —— 团队范围由会话决定，给了也筛不动。
-  it('sends search, game, status and sorting to the server', () => {
-    expect(source).toContain("client.list({ search: search.value, game_id: gameFilter.value, video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })")
+  // 所有筛选都由服务端读 query；页面不再对返回行做二次过滤。
+  // 团队范围由服务端按角色决定：普通运营/高级运营固定本团队，只有管理员的 `team_id`
+  // 才是「目标团队」。页面必须把团队与游戏都交上去，游戏只是筛选而不是可见边界。
+  it('sends every list filter to the server exactly once', () => {
+    expect(source).toMatch(/client\.list\(\{[\s\S]*?search: search\.value/)
+    for (const param of [
+      'team_id: teamFilter.value',
+      'game_ids: gameFilters.value',
+      'joined: joinedFilter.value',
+      'my_usage: myUsageFilter.value',
+      'team_usage: teamUsageFilter.value',
+      'video_status: statusFilter.value',
+      'sort_by: sortBy.value',
+      'sort_order: sortOrder.value',
+    ]) {
+      expect(source, `列表请求必须带上 ${param}`).toContain(param)
+    }
+    expect(source.match(/client\.list\(/g)).toHaveLength(1)
     expect(source).not.toContain('filteredRows')
     expect(source).not.toContain('row.video_status === statusFilter.value')
-    expect(source).not.toContain('row.game_id === gameFilter.value')
-    // 筛选项只列已加载数据里出现过的游戏：列一个点下去没有任何行的选项是同一种误导。
+    expect(source).not.toContain('row.game_id === gameFilters.value')
+  })
+
+  // 普通运营与高级运营进页面时，游戏多选默认本人负责的游戏；管理员默认不筛（读所选团队）。
+  // 游戏选项来自全量 enabled 字典加上已加载行里出现过的游戏：清空筛选后其他游戏的素材
+  // 会进入结果，选项也要跟着出现，否则那些行只能显示 id。
+  it('defaults the game selection to the games this viewer is responsible for', () => {
+    expect(source).toContain('function responsibleGames()')
+    expect(source).toContain("currentUser.value?.role === 'admin'")
+    expect(source).toContain('return Array.isArray(currentUser.value?.game_ids) ? [...currentUser.value.game_ids] : []')
+    expect(source).toContain('gameFilters.value = responsibleGames()')
+    expect(source).toContain("users.listGames({ scope: 'all', status: 'enabled' })")
     expect(source).toContain('const gameOptions = computed')
-    expect(source).toContain('new Set(rows.value.map((row) => row.game_id).filter(Boolean))')
+    expect(source).toContain('for (const row of rows.value)')
+  })
+
+  // 团队筛选只在管理员手里出现，其余角色连入口都没有：团队是服务端给的边界，
+  // 给一颗筛不动的下拉就是「看起来能跨团队」。
+  it('shows the team filter to admins only and loads the directory for it', () => {
+    expect(source).toContain('const isAdmin = computed(() => currentUser.value?.role === \'admin\')')
+    expect(source).toContain('v-if="isAdmin"')
+    expect(source).toContain('users.listTeams()')
+    expect(source).toMatch(/async function loadTeams\(\) \{\s*if \(!isAdmin\.value\) return/)
   })
 
   it('defaults to published_at descending and lets ID/time columns toggle the order', () => {
@@ -63,7 +95,6 @@ describe('material library page', () => {
     expect(source).toContain("sortBy.value = sort?.sortBy || 'published_at'")
     expect(source).toContain("sortOrder.value = sort?.descending === false ? 'asc' : 'desc'")
     expect(source).toContain('@sort-change="changeSort"')
-    expect(source).toContain('sort_by: sortBy.value, sort_order: sortOrder.value')
   })
 
   it('adds to my materials through the one idempotent command', () => {
@@ -101,8 +132,8 @@ describe('material library page', () => {
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })
 
-  // 列名换成了「文件状态」，因为它描述的是源视频文件的准备进度，不是这条素材的业务状态
-  // （业务状态维度本轮不存在，见 change.md §3）。取值没换，仍是 video_status 四态。
+  // 列名换成了「文件状态」，因为它描述的是源视频文件的准备进度，不是这条素材的业务状态。
+  // 取值没换，仍是 video_status 四态。
   it('names the video status column 文件状态 and keeps the four-state labels', () => {
     expect(source).toContain("{ colKey: 'video_status', title: '文件状态'")
     expect(source).not.toContain("title: '视频状态'")
@@ -111,76 +142,70 @@ describe('material library page', () => {
   })
 
   /**
-   * 走查三轮裁定「素材库不提供下载入口」，走查四轮把它收窄到**行与详情抽屉**：
-   * 加入成功的即时反馈可以给一步「立即下载」（用户 2026-09-30 裁定）。
+   * CHG-104：素材库一个本机下载入口都不给 —— 行、详情抽屉、加入成功的反馈都没有。
+   * 下载只从「我的素材」发起，服务端也只认那边的关系；素材库这边留一颗「下载」，
+   * 点下去必然被拒（直接调下载接口要 403），那比没有按钮更糟。
    *
-   * 所以这条断言量的是行操作那一块 + 抽屉绑定，不是整份源码 —— 整份源码里现在
-   * 确实有 `createDownload`，那是反馈里的那一步。
+   * 反馈里给的是「去我的素材」这一步：加进去之后，下载在那边的行上做。
    */
-  it('offers no download in the row or the drawer, only on the add-success toast', () => {
+  it('offers no local download anywhere on the library page', () => {
     expect(opBlock).not.toContain('下载')
+    expect(source).not.toContain('createDownload')
+    expect(source).not.toContain('downloadErrors')
     expect(source).not.toContain('@download')
-    expect(source).not.toContain('downloadCentre')
+    expect(source).not.toContain('downloadNow')
     const toast = sliceBetween(source, 'function notifyAdded(', '\n}')
-    expect(toast).toContain('立即下载')
+    expect(toast).toContain('feedback.toast.success')
+    expect(toast).toContain('已加入我的素材')
+    expect(toast).toContain('去我的素材')
+    expect(toast).not.toContain('下载')
   })
 
-  // 「已加入 → 去我的素材」需要知道每行的加入状态。列表接口不返回它，但
-  // `/api/v1/my-materials` 已经能全量取回当前用户的关系，join 一次即可——
-  // 不为此新增后端字段（2026-09-30 用户裁定）。
-  it('reads my materials so a row knows it is already joined', () => {
-    expect(source).toContain('await client.listMyMaterials()')
-    expect(source).toContain('usage.material_id')
-    expect(source).toContain('const mineIds = ref(')
-    expect(source).toMatch(/onMounted\(\(\) => \{[\s\S]*loadMine\(\)/)
+  // 「已加入 → 去我的素材」「已移出 → 重新加入」都读服务端投影的 `usage_status`，
+  // 不再拉一次 `/my-materials` 在客户端 join。团队版的关系查询是服务端的事，
+  // 页面再拼一份，等于维护第二个真值来源。
+  it('reads the viewer relation from the server projection instead of joining my materials', () => {
+    expect(source).toContain('row.usage_status')
+    expect(source).toContain('<template #joined="{ row }">')
+    expect(source).toContain('joinStatus(row).tone')
+    expect(source).toContain('joinStatus(row).label')
+    expect(source).not.toContain('listMyMaterials')
+    expect(source).not.toContain('mineIds')
+    expect(source).not.toContain('isMine(')
   })
 
   // 走查四轮（用户裁定 + 设计图）：已加入的行主操作是「去我的素材」，
-  // 未加入的行仍是「加入我的素材」。两个主操作互斥。
-  it('swaps the row primary action to 去我的素材 once the material is joined', () => {
+  // 未加入的行仍是「加入我的素材」，已移出的行是「重新加入」。三个主操作互斥。
+  it('swaps the row primary action with the viewer relation', () => {
     expect(opBlock).toContain('@click="openDetail(row)">详情</t-button>')
     expect(opBlock).not.toContain('>查看</t-button>')
-    expect(opBlock).toContain('@click="addToMine(row)">加入我的素材</t-button>')
+    expect(opBlock).toContain("row.usage_status !== 'active'")
+    expect(opBlock).toContain("row.usage_status === 'removed' ? '重新加入' : '加入我的素材'")
+    expect(opBlock).toContain('@click="addToMine(row)"')
     expect(opBlock).toContain('@click="goToMyMaterials()">去我的素材</t-button>')
-    expect(source).toMatch(/canAdd\(row\) && !isMine\(row\)[\s\S]{0,200}?addToMine\(row\)/)
-    expect(source).toMatch(/v-else-if="isMine\(row\)"[\s\S]{0,200}?goToMyMaterials\(\)/)
+    expect(source).toMatch(/v-else-if="row\.usage_status === 'active'"[\s\S]{0,120}?goToMyMaterials\(\)/)
     // 跳转目标就是「我的素材」页，两个端同名（cloud / desktop router 都是 MyMaterial）。
     expect(source).toContain("{ name: 'MyMaterial' }")
   })
 
-  // 走查四轮：加入成功的反馈里给两个下一步。「立即下载」只在文件已就绪时出现——
-  // 未就绪时那颗按钮必然换来一个 409，而不是一次下载。
-  it('offers 立即下载 and 去我的素材 on the add-success toast', () => {
-    const toast = sliceBetween(source, 'function notifyAdded(', '\n}')
-    expect(toast).toContain('feedback.toast.success')
-    expect(toast).toContain('已加入我的素材')
-    expect(toast).toContain('立即下载')
-    expect(toast).toContain('去我的素材')
-    expect(toast).toContain("row.video_status === 'ready'")
-    expect(toast).toContain('downloadNow(row)')
-    // 「立即下载」走的是与「我的素材」同一颗命令，不另开一条下载路径；
-    // 409 的两种拒绝只能靠 error.type 区分，翻译件也是同一份。
-    const downloadFn = sliceBetween(source, 'async function downloadNow(', '\n}')
-    expect(downloadFn).toContain('client.createDownload(row.id)')
-    expect(downloadFn).toContain('createDownloadFailureMessage')
-    expect(source).toContain("from '../../transfer/downloadErrors.js'")
-  })
-
-  // 反馈发出去之后行要立刻翻转，不能让运营再点一次刷新才看见「去我的素材」。
-  it('flips the row to 去我的素材 without a reload', () => {
-    expect(source).toMatch(/mineIds\.value\.add\(row\.id\)/)
+  // 加入成功之后重读列表，让加入状态、我的使用与操作按钮一起翻过来：
+  // 只在本行改一个本地标记，会让三列里恰好只有一列说真话。
+  it('re-reads the list after joining so every projected field flips together', () => {
+    const add = sliceBetween(source, 'async function addToMine(', '\n}')
+    expect(add).toContain('await client.addUsage(row.id)')
+    expect(add).toContain('await load()')
+    expect(add).toContain('notifyAdded()')
   })
 
   // 详情抽屉是两页共用的一个组件：各写一份的结局是同一个素材在两页显示得不一样，
-  // 且没有任何东西会报错。走查三轮：抽屉按上下文给动作——素材库上下文只有
-  // 「加入我的素材」，不提供下载；走查四轮补上「已加入」时的「去我的素材」。
+  // 且没有任何东西会报错。素材库上下文按服务端投影的加入状态决定页脚主操作。
   it('uses the shared material detail drawer in library mode', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
     expect(source).toContain('mode="library"')
     expect(source).toContain('@add="addToMine"')
     expect(source).toContain('@go-mine="goToMyMaterials"')
-    expect(source).toContain(':mine="isMine(detail)"')
+    expect(source).toContain(':mine="detail?.usage_status === \'active\'"')
     expect(source).not.toContain('material-detail-drawer')
   })
 
@@ -194,20 +219,36 @@ describe('material library page', () => {
     expect(source).toContain('materialStatusTone(row.status)')
   })
 
-  // 设计图里「使用情况」在素材状态与文件状态之后、入库时间之前，两行：
-  // 成片/发布 计数，与最近发布时间。
-  it('puts the usage column between the file status and 入库时间', () => {
-    expect(source).toContain("{ colKey: 'usage', title: '使用情况'")
+  /**
+   * CHG-104：三个使用维度各自成列，依次排在文件状态之后、入库时间之前。
+   *
+   * 加入状态回答「当前这个人有没有把这条素材放进自己的工作集」；我的使用回答
+   * 「当前这个人有没有用它做出过成功成片」；使用情况回答「本团队有没有人用它做出过
+   * 成功成片、都是谁」。三个问题各有自己的真值来源（关系表 / 成片表按本人 / 成片表按
+   * 团队），合成一列就是把三个答案压成一个数，规范 §7.2 明令不得合并。
+   */
+  it('puts 加入状态, 我的使用 and 使用情况 between the file status and 入库时间', () => {
+    const joinedAt = source.indexOf("{ colKey: 'joined'")
+    const myUsageAt = source.indexOf("{ colKey: 'my_usage'")
     const usageAt = source.indexOf("{ colKey: 'usage'")
-    expect(usageAt).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(source).toContain("{ colKey: 'joined', title: '加入状态'")
+    expect(source).toContain("{ colKey: 'my_usage', title: '我的使用'")
+    expect(source).toContain("{ colKey: 'usage', title: '使用情况'")
+    expect(joinedAt).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(joinedAt).toBeLessThan(myUsageAt)
+    expect(myUsageAt).toBeLessThan(usageAt)
     expect(usageAt).toBeLessThan(source.indexOf("{ colKey: 'created_at'"))
-    expect(source).toContain('usageLines(row)')
+    expect(source).toContain('myUsageTone(row.my_usage)')
+    expect(source).toContain('myUsageLabel(row.my_usage)')
+    expect(source).toContain('<template #usage="{ row }">')
+    expect(source).toContain('usageSummaryLines(row).counts')
+    expect(source).toContain('usageSummaryLines(row).names')
   })
 
   /**
-   * 服务端还没有 `status` / `usage` 这两个字段（第五章「素材状态和生命周期」未落，
-   * change.md §3 明确不做）。用户 2026-09-30 裁定：先把样式与协议立起来，数据打通后
-   * 再同步过来。所以这两列此刻渲染的是**占位**，不是编造的状态。
+   * 服务端还没有 `status` 字段（第五章「素材状态和生命周期」未落，change.md §3 明确不做）。
+   * 用户 2026-09-30 裁定：先把样式与协议立起来，数据打通后再同步过来。所以这一列此刻
+   * 渲染的是**占位**，不是编造的状态。
    *
    * 「编造」的具体形状就是 `row.status || 'available'` 这类兜底——它看起来像容错，
    * 实际是把一条读不到状态的素材静默画成「可用」，而「可用」正是能触发「加入我的素材」
@@ -225,17 +266,13 @@ describe('material library page', () => {
   /**
    * 规范 §16.2 / 设计图要点④：暂停与下架**禁止新增领取**。
    *
-   * 这是设计图里最后一条没落地的操作规则：已暂停的行原本照样挂着一颗「加入我的素材」，
-   * 点下去会被服务端拒绝 —— 一颗必然失败的按钮比没有按钮更糟，它花掉一次点击和一次
-   * 错误提示来解释一件页面上本来就能看清的事。
-   *
    * 禁止的是**新增**，不是导航：已加入的行无论什么状态都还能去「我的素材」——
    * §16.2 那句「历史关系和结果继续保留」说的正是这个。
    */
   it('refuses a new add on a paused or delisted material but keeps the navigation', () => {
     expect(source).toContain('function canAdd(row)')
     expect(source).toMatch(/canAdd\(row\)[\s\S]{0,140}?row\.status === 'available'/)
-    expect(source).toMatch(/v-else-if="isMine\(row\)"/)
+    expect(source).toMatch(/v-else-if="row\.usage_status === 'active'"/)
     // 没有可做主操作时画「—」，而不是留一颗必然被拒绝的按钮。
     expect(opBlock).toContain('<template v-else>—</template>')
   })

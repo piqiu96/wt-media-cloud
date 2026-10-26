@@ -1,25 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import {
   DOWNLOAD_STATUSES,
-  DUPLICATE_RISKS,
+  JOIN_FILTERS,
   MATERIAL_STATUSES,
-  USAGE_FIELDS,
+  MY_USAGE_FILTERS,
+  TEAM_USAGE_FILTERS,
   USAGE_STATUSES,
   VIDEO_STATUSES,
   downloadActionLabel,
   downloadStatusLabel,
   downloadStatusTone,
-  duplicateRiskLabel,
-  duplicateRiskTone,
   gameName,
+  joinStatus,
+  libraryNextStepHint,
   materialStatusLabel,
   materialStatusTone,
+  myUsageLabel,
+  myUsageTone,
   nextStepHint,
   shortDigest,
   usageFacts,
-  usageLines,
   usageStatusLabel,
   usageStatusTone,
+  usageSummaryLines,
   videoStatusLabel,
   videoStatusTone,
 } from './labels.js'
@@ -131,57 +134,84 @@ describe('material status dimension', () => {
   })
 })
 
-// 使用情况：列表「使用情况」列与详情「使用情况」卡共读同一份协议。
-describe('usage protocol', () => {
-  it('declares the fields the list and the detail both read', () => {
-    expect(USAGE_FIELDS).toEqual([
-      'clip_count', 'published_count', 'last_produced_at', 'last_published_at', 'duplicate_risk',
-    ])
-    expect(DUPLICATE_RISKS).toEqual(['normal', 'suspected'])
+// 素材库的三个使用维度：加入状态是查看者自己的关系，我的使用是查看者是否做过
+// 成功成片，使用情况是本团队成功成片的汇总。发布相关口径属于 M6，这里不出现。
+describe('library usage dimensions', () => {
+  it('offers the server-side filters with user-facing labels', () => {
+    expect(JOIN_FILTERS.map((item) => item.value)).toEqual(['joined', 'not_joined'])
+    expect(MY_USAGE_FILTERS.map((item) => item.value)).toEqual(['used', 'unused'])
+    expect(TEAM_USAGE_FILTERS.map((item) => item.value)).toEqual(['used', 'unused'])
+    expect(JOIN_FILTERS.map((item) => item.label)).toEqual(['已加入', '未加入'])
   })
 
-  it('renders the two list lines the design draws', () => {
-    const row = { usage: { clip_count: 12, published_count: 8, last_published_at: '2025-09-20T05:17:00Z' } }
-    expect(usageLines(row).counts).toBe('成片 12 · 发布 8')
-    expect(usageLines(row).recent).toBe('最近发布 2025/9/20')
+  it('reads 加入状态 from the viewer relation, not from a stored lifecycle', () => {
+    expect(joinStatus({ usage_status: 'active' })).toEqual({ label: '已加入', tone: 'success' })
+    expect(joinStatus({ usage_status: 'removed' })).toEqual({ label: '已移出', tone: 'neutral' })
+    expect(joinStatus({})).toEqual({ label: '未加入', tone: 'neutral' })
+    expect(joinStatus(undefined)).toEqual({ label: '未加入', tone: 'neutral' })
   })
 
-  // 0 是数据，缺省不是：0 说的是「一条成片都没生产」，缺省说的是「这个字段还没来」。
-  // 把两者画成同一个样子，运营就分不清「没做过」和「还没统计」。
-  it('keeps 0 a number and only an absent value a dash', () => {
-    const zero = { usage: { clip_count: 0, published_count: 0 } }
-    expect(usageLines(zero).counts).toBe('成片 0 · 发布 0')
-    expect(usageLines(zero).recent).toBe('最近发布 -')
+  it('names 我的使用 from successful outputs only', () => {
+    expect(myUsageLabel('used')).toBe('已使用')
+    expect(myUsageLabel('unused')).toBe('未使用')
+    expect(myUsageLabel(undefined)).toBe('-')
+    expect(myUsageTone('used')).toBe('info')
+    expect(myUsageTone('unused')).toBe('neutral')
   })
 
-  it('stands up the skeleton rather than a guess while the field does not exist yet', () => {
-    expect(usageLines({}).counts).toBe('成片 - · 发布 -')
-    expect(usageLines(undefined).counts).toBe('成片 - · 发布 -')
-    expect(usageLines({}).recent).toBe('最近发布 -')
+  it('summarises the team usage into counts and names', () => {
+    const row = {
+      usage: {
+        output_count: 12,
+        operator_count: 2,
+        operators: [{ id: 9, name: '张三', output_count: 8 }, { id: 11, name: '李四', output_count: 4 }],
+      },
+    }
+    expect(usageSummaryLines(row)).toEqual({ counts: '成片 12 · 使用 2 人', names: '张三、李四' })
+    // 普通运营只拿到计数：姓名不可见，而不是空白或被猜出来。
+    expect(usageSummaryLines({ usage: { output_count: 12, operator_count: 2 } }))
+      .toEqual({ counts: '成片 12 · 使用 2 人', names: '姓名不可见' })
   })
 
-  it('lays the five facts of the detail card in the designed order', () => {
+  // 历史成片没有负责人：计入成片总数，但不计入使用人数，也不编一个人名。
+  it('counts historical outputs without inventing an operator', () => {
+    expect(usageSummaryLines({ usage: { output_count: 3, operator_count: 0 } }))
+      .toEqual({ counts: '成片 3 · 负责人未记录', names: '—' })
+    expect(usageSummaryLines({ usage: { output_count: 0, operator_count: 0 } }))
+      .toEqual({ counts: '暂无成功成片', names: '—' })
+    // 没有 usage 与「usage 是 0」是两件事：前者是协议还没来，后者是查过了没有。
+    expect(usageSummaryLines({})).toEqual({ counts: '—', names: '—' })
+    expect(usageSummaryLines(undefined)).toEqual({ counts: '—', names: '—' })
+  })
+
+  it('lays the detail facts out with the unknown-operator remainder', () => {
     const facts = usageFacts({
       usage: {
-        clip_count: 7213,
-        published_count: 8,
-        last_produced_at: '2025-09-18T05:00:00Z',
-        last_published_at: '2025-09-20T05:17:00Z',
-        duplicate_risk: 'normal',
+        output_count: 7,
+        operator_count: 2,
+        operators: [{ id: 9, name: '张三', output_count: 4 }, { id: 11, name: '李四', output_count: 1 }],
       },
     })
-    expect(facts.map((fact) => fact.label)).toEqual(['已生产成片', '已发布', '最近生产', '最近发布', '重复风险'])
-    expect(facts.map((fact) => fact.value)).toEqual(['7,213', '8', '2025/9/18', '2025/9/20', '正常'])
-    // 四个数量/时间事实是普通文字，只有重复风险是一颗有色的徽章。
-    expect(facts[4].tone).toBe('success')
-    expect(facts.slice(0, 4).every((fact) => fact.tone === undefined)).toBe(true)
+    expect(facts.map((fact) => fact.label)).toEqual(['成功成片', '使用人数', '使用人', '未记录负责人的成片'])
+    expect(facts.map((fact) => fact.value)).toEqual(['7', '2', '张三、李四', '2'])
   })
 
-  it('does not paint a risk badge green before the server says it is normal', () => {
-    expect(duplicateRiskLabel(undefined)).toBe('-')
-    expect(duplicateRiskLabel('mystery')).toBe('mystery')
-    expect(duplicateRiskTone(undefined)).toBe('neutral')
-    expect(duplicateRiskTone('suspected')).toBe('danger')
+  it('does not claim a remainder when the names are hidden', () => {
+    const facts = usageFacts({ usage: { output_count: 7, operator_count: 2 } })
+    expect(facts.map((fact) => fact.label)).toEqual(['成功成片', '使用人数', '使用人'])
+    expect(facts[2].value).toBe('姓名不可见')
+    // 0 是数据，缺省不是：0 画 0，缺省画 -。
+    expect(usageFacts({ usage: { output_count: 0, operator_count: 0 } }).map((fact) => fact.value))
+      .toEqual(['0', '0', '—'])
+    expect(usageFacts({}).map((fact) => fact.value)).toEqual(['-', '-', '—'])
+  })
+
+  it('points the library next step at joining or My Materials, never at a local download', () => {
+    expect(libraryNextStepHint({ usage_status: 'removed', video_status: 'ready' })).toBe('已移出我的素材，可重新加入')
+    expect(libraryNextStepHint({ usage_status: 'active', video_status: 'ready' })).toContain('「我的素材」下载')
+    expect(libraryNextStepHint({ usage_status: 'active', video_status: 'not_downloaded' })).toContain('文件准备完成后')
+    expect(libraryNextStepHint({ video_status: 'ready' })).toBe('加入我的素材后可下载，并在合成任务页选用')
+    expect(libraryNextStepHint({})).toBe('加入我的素材；文件准备完成后可下载')
   })
 })
 
@@ -204,8 +234,9 @@ describe('usage status dimension', () => {
     expect(usageStatusTone('active')).toBe('success')
   })
 
-  // 读不到不等于「在使用」：素材库列表不带这个字段（那是别人的关系），而「使用中」正是
-  // 唯一能触发下载与加入合成的那个取值。缺值兜底成它，就是替服务端宣布了一条关系。
+  // 读不到不等于「在使用」：「使用中」正是唯一能触发下载与加入合成的那个取值。
+  // 缺值兜底成它，就是替服务端宣布了一条关系。素材库那一侧另有 joinStatus：
+  // 同一个 usage_status，在素材库说「已加入 / 已移出」，在我的素材说「使用中 / 已放弃」。
   it('never reads a missing field as 使用中', () => {
     expect(usageStatusLabel(undefined)).toBe('-')
     expect(usageStatusLabel('')).toBe('-')
