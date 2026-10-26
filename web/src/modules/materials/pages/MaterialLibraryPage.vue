@@ -22,7 +22,9 @@ import {
   materialStatusTone,
   myUsageLabel,
   myUsageTone,
-  usageSummaryLines,
+  usageOperators,
+  usageOutputCount,
+  usageSummary,
   videoStatusLabel,
   videoStatusTone,
 } from '../labels.js'
@@ -53,15 +55,27 @@ const currentUser = ref(null)
 const detailVisible = ref(false)
 const detail = ref(null)
 const detailLoading = ref(false)
+const usageVisible = ref(false)
+const usageMaterial = ref(null)
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
+// 使用情况是团队汇总事实：普通运营不渲染列、筛选和详情段，只有高级运营/管理员能看。
+const canViewUsage = computed(() => isAdmin.value || isSenior.value)
 
 // 普通运营与高级运营进入页面时，游戏多选默认本人负责的游戏；管理员默认不筛，
 // 读的是所选团队（未选则跨团队）的库。清空筛选即可看到本团队全部游戏。
 function responsibleGames() {
   if (isAdmin.value) return []
   return Array.isArray(currentUser.value?.game_ids) ? [...currentUser.value.game_ids] : []
+}
+
+// 默认勾选只取「本人负责 ∩ 已启用」：游戏管理里停用的游戏不进选项，选中它
+// 只会得到一个永远空的筛选；字典还没读到时也不预选，避免选中不在选项里的 id。
+function defaultGameFilters() {
+  const enabled = new Set(games.value.map((game) => game.id))
+  return responsibleGames().filter((id) => enabled.has(id))
 }
 
 // 每一列都必须声明 width，不许只写 minWidth —— 理由与实测数据见
@@ -72,6 +86,7 @@ function responsibleGames() {
 // 成片）、使用情况（本团队成功成片汇总）。它们不是同一个问题的不同画法，规范 §7.2
 // 明令不得合并。缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到
 // 状态的素材画成「可用」。
+// 使用情况是团队汇总：普通运营既没有姓名也没有这一列的入口，连表头都不出现。
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 360 },
@@ -86,8 +101,12 @@ const columns = [
   { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
 
+const tableColumns = computed(() => (
+  canViewUsage.value ? columns : columns.filter((col) => col.colKey !== 'usage')
+))
+
 const tableScroll = computed(() => ({
-  x: `${columns.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
+  x: `${tableColumns.value.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
 }))
 
 const pagedRows = computed(() => {
@@ -95,16 +114,9 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
-// 筛选项只列**本人负责的游戏，加上已加载数据里真的出现过**的游戏：给一个点下去
-// 没有任何行的选项，与「筛了但服务端没筛」是同一种误导。清空筛选后，本团队其他
-// 游戏的素材进入结果，选项也随之出现。
-const gameOptions = computed(() => {
-  const ids = new Set(responsibleGames())
-  for (const row of rows.value) {
-    if (row.game_id) ids.add(row.game_id)
-  }
-  return [...ids].map((id) => ({ id, name: gameName(games.value, id) }))
-})
+// 选项是游戏管理里已启用的全量游戏，不是本人负责的那几个，也不依赖当前页加载过
+// 哪些行：默认勾选只决定第一次看到什么，能筛到哪些游戏由游戏管理决定。
+const gameOptions = computed(() => games.value.map((game) => ({ id: game.id, name: game.name })))
 
 async function load() {
   loading.value = true
@@ -144,10 +156,10 @@ async function loadGames() {
 }
 
 // 角色与本人游戏范围来自会话，只用于默认筛选；服务端仍然自己决定团队边界。
+// 默认勾选要等游戏字典一起到齐后再算（见 onMounted），这里不提前写 gameFilters。
 async function loadSession() {
   try {
     currentUser.value = await sessionClient.me()
-    gameFilters.value = responsibleGames()
   } catch {
     // 读不到会话时不给默认游戏筛选：服务端按团队返回，少一层缩小是安全的方向。
     currentUser.value = null
@@ -243,8 +255,13 @@ function reset() {
   myUsageFilter.value = ''
   teamUsageFilter.value = ''
   teamFilter.value = ''
-  gameFilters.value = responsibleGames()
+  gameFilters.value = defaultGameFilters()
   load()
+}
+
+function openUsage(row) {
+  usageMaterial.value = row
+  usageVisible.value = true
 }
 
 function changeSort(sort) {
@@ -254,9 +271,10 @@ function changeSort(sort) {
 }
 
 onMounted(async () => {
-  await loadSession()
+  // 默认勾选 = 本人负责 ∩ 游戏管理启用；两者都到齐后先算出筛选，再取列表。
+  await Promise.all([loadSession(), loadGames()])
+  gameFilters.value = defaultGameFilters()
   load()
-  loadGames()
   loadTeams()
   openFromQuery()
 })
@@ -278,12 +296,12 @@ onMounted(async () => {
           <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilters" multiple clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+          <label v-if="canViewUsage" class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="tableColumns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面 + 标题 + 来源平台合成一格；标题跳来源平台落地页，没有则退回普通文本。 -->
             <template #material="{ row }">
@@ -306,11 +324,10 @@ onMounted(async () => {
             <!-- 加入状态读服务端投影：active=已加入，removed=已移出，无关系=未加入。 -->
             <template #joined="{ row }"><ResourceStatusBadge :tone="joinStatus(row).tone" :label="joinStatus(row).label" /></template>
             <template #my_usage="{ row }"><ResourceStatusBadge :tone="myUsageTone(row.my_usage)" :label="myUsageLabel(row.my_usage)" /></template>
+            <!-- 一行摘要，整格可点开明细；没有成功成片就只画 —，不弹一个空弹窗。 -->
             <template #usage="{ row }">
-              <div class="usage-cell">
-                <span class="usage-cell__counts">{{ usageSummaryLines(row).counts }}</span>
-                <span class="usage-cell__recent">{{ usageSummaryLines(row).names }}</span>
-              </div>
+              <button v-if="usageOutputCount(row)" type="button" class="usage-cell" @click="openUsage(row)">{{ usageSummary(row) }}</button>
+              <span v-else class="usage-cell usage-cell--empty">—</span>
             </template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
@@ -336,10 +353,23 @@ onMounted(async () => {
         :loading="detailLoading"
         :games="games"
         :mine="detail?.usage_status === 'active'"
+        :show-usage="canViewUsage"
         mode="library"
         @add="addToMine"
         @go-mine="goToMyMaterials"
       />
+
+      <t-dialog v-model:visible="usageVisible" header="使用情况" width="420px" :footer="false">
+        <div v-if="usageMaterial" class="usage-detail">
+          <p class="usage-detail__total">成功成片 {{ usageOutputCount(usageMaterial) }}</p>
+          <ul v-if="usageOperators(usageMaterial).length" class="usage-detail__list">
+            <li v-for="operator in usageOperators(usageMaterial)" :key="operator.id" class="usage-detail__row">
+              <span class="usage-detail__name">{{ operator.name }}</span>
+              <span class="usage-detail__count">成片 {{ operator.output_count }}</span>
+            </li>
+          </ul>
+        </div>
+      </t-dialog>
     </div>
   </t-loading>
 </template>
@@ -350,10 +380,17 @@ onMounted(async () => {
 .material-cell__cover { width: 56px; height: 36px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .material-cell__source { color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* 两行都不折行：行高跟着数据变，一张表里每行不一样高，扫描成本立刻上去。 */
-.usage-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.usage-cell__counts { color: var(--wt-text-primary); font-size: 13px; white-space: nowrap; }
-.usage-cell__recent { color: var(--wt-text-tertiary); font-size: 12px; white-space: nowrap; }
+/* 一行不折行：行高跟着数据变，一张表里每行不一样高，扫描成本立刻上去。 */
+.usage-cell { display: block; max-width: 100%; padding: 0; border: 0; background: none; color: var(--wt-primary); font: inherit; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.usage-cell--empty { color: var(--wt-text-secondary); cursor: default; }
+.usage-cell:not(.usage-cell--empty):hover, .usage-cell:not(.usage-cell--empty):focus-visible { text-decoration: underline; }
+/* 使用人可能很多：弹窗列表自己滚动，不把弹窗撑出屏幕。 */
+.usage-detail__total { margin: 0 0 12px; color: var(--wt-text-primary); font-size: 13px; }
+.usage-detail__list { max-height: 280px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.usage-detail__row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px dashed var(--wt-border); }
+.usage-detail__row:first-child { border-top: 0; }
+.usage-detail__name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.usage-detail__count { flex: none; color: var(--wt-text-tertiary); font-size: 12px; }
 /* 颜色只写在 span 分支上，免得覆盖 .wt-primary-link 的主题色。 */
 .material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 span.material-title { color: var(--wt-text-primary); }

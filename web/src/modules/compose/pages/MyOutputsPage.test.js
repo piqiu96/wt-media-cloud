@@ -38,6 +38,10 @@ describe('output management page', () => {
     expect(source).not.toContain("filters.value.operator = 'mine'")
     expect(source).not.toContain('params.operator_scope')
     expect(source).toContain('if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator')
+    expect(source).toContain('const namedOperator = operatorIdFromOption(filters.value.operator)')
+    // 清空下拉给的是 undefined，不是空串：解析和“选项是否还在”都必须走守卫。
+    expect(source).toContain('missingOperatorOption(filters.value.operator, operatorFilterOptions.value)')
+    expect(source).not.toContain('filters.value.operator.startsWith')
     expect(source).toContain('params.team_id = Number(filters.value.team_id)')
     expect(source).not.toContain(':clearable="!isSenior"')
     expect(source).not.toContain('matchesOutputSearch')
@@ -45,15 +49,32 @@ describe('output management page', () => {
     expect(source).toContain("!filters.value.download || downloadFor(row).key === filters.value.download")
   })
 
-  it('shows asset, source, strategy, operator, generation and real download facts in the list', () => {
-    for (const key of ['output', 'material_id', 'strategy', 'operator', 'trigger', 'download_status', 'created_at']) {
+  it('shows asset, source, game, strategy, operator, generation and real download facts in the list', () => {
+    for (const key of ['output', 'material_id', 'game', 'strategy', 'operator', 'trigger', 'download_status', 'created_at']) {
       expect(source).toContain(`<template #${key}=`)
     }
+    expect(source).toContain('gameName(row.game_id)')
     expect(source).toContain("row.operator_name || '未记录'")
     expect(source).toContain('titleFor(row)')
     expect(source).toContain('generationLabel(triggerFor(row))')
     expect(source).toContain('downloadFor(row).label')
     expect(source).toContain('filteredRows.length')
+    // 游戏列紧跟来源素材，早于策略；筛选与列说的是同一个字段。
+    expect(source.indexOf("{ colKey: 'game'")).toBeGreaterThan(source.indexOf("{ colKey: 'material_id'"))
+    expect(source.indexOf("{ colKey: 'game'")).toBeLessThan(source.indexOf("{ colKey: 'strategy'"))
+  })
+
+  // 游戏筛选只列游戏管理启用项；普通运营再与本人负责游戏取交集（他不负责的游戏
+  // 本来就没有成片可读）。名称字典另取全量，停用游戏的历史成片仍显示名字。
+  it('filters by an enabled game and sends game_id to the server', () => {
+    expect(source).toContain('v-model="filters.game_id"')
+    expect(source).toContain(':options="gameFilterOptions"')
+    expect(source).toContain('if (filters.value.game_id) params.game_id = filters.value.game_id')
+    expect(source).toContain("game_id: ''")
+    expect(source).toContain('const gameFilterOptions = computed')
+    expect(source).toContain('isAdmin.value || isSenior.value || own.has(game.id)')
+    expect(source).toContain("client.listGames({ scope: 'all' })")
+    expect(source).toContain("client.listGames({ scope: 'all', status: 'enabled' })")
   })
 
   it('uses the existing outlined row actions and keeps local opening inside file information', () => {

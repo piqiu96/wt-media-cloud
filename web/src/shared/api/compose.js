@@ -11,8 +11,9 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     listStrategies(filters = {}) { return api.get('/compose-strategies', { search: filters.search, game_id: filters.game_id, template_id: filters.template_id, status: filters.status }) },
     // 管理员创建策略时要选目标团队；高级运营的团队由服务端固定。
     listTeams() { return api.get('/operation-teams') },
-    // 游戏列表用于展示映射和创建表单下拉，与素材/内容池页共用同一端点。
-    listGames() { return api.get('/games') },
+    // 游戏列表用于展示映射和筛选/创建表单下拉，与素材/内容池页共用同一端点。
+    // 成片页要区分「名称字典（全量）」与「筛选项（仅启用）」，所以参数要能透传。
+    listGames(filters = {}) { return api.get('/games', { keyword: filters.keyword, status: filters.status, scope: filters.scope }) },
     // 可指派负责人目录（M4-I）：高级运营固定本团队，管理员必须给 team_id；
     // 策略表单带 game_id 收窄到负责该游戏的人，任务/成片筛选只按团队。
     listComposeOperators(filters = {}) { return api.get('/compose-operators', { team_id: filters.team_id, game_id: filters.game_id }) },

@@ -20,9 +20,11 @@ import {
   nextStepHint,
   shortDigest,
   usageFacts,
+  usageOperators,
+  usageOutputCount,
   usageStatusLabel,
   usageStatusTone,
-  usageSummaryLines,
+  usageSummary,
   videoStatusLabel,
   videoStatusTone,
 } from './labels.js'
@@ -159,7 +161,7 @@ describe('library usage dimensions', () => {
     expect(myUsageTone('unused')).toBe('neutral')
   })
 
-  it('summarises the team usage into counts and names', () => {
+  it('summarises the team usage into one line', () => {
     const row = {
       usage: {
         output_count: 12,
@@ -167,24 +169,27 @@ describe('library usage dimensions', () => {
         operators: [{ id: 9, name: '张三', output_count: 8 }, { id: 11, name: '李四', output_count: 4 }],
       },
     }
-    expect(usageSummaryLines(row)).toEqual({ counts: '成片 12 · 使用 2 人', names: '张三、李四' })
-    // 普通运营只拿到计数：姓名不可见，而不是空白或被猜出来。
-    expect(usageSummaryLines({ usage: { output_count: 12, operator_count: 2 } }))
-      .toEqual({ counts: '成片 12 · 使用 2 人', names: '姓名不可见' })
+    expect(usageSummary(row)).toBe('成片 12 · 使用 2 人')
+    // 名单只进弹窗；摘要不因为读不到姓名就改口。
+    expect(usageSummary({ usage: { output_count: 12, operator_count: 2 } })).toBe('成片 12 · 使用 2 人')
+    expect(usageOperators(row).map((operator) => operator.name)).toEqual(['张三', '李四'])
+    expect(usageOperators({ usage: { output_count: 12, operator_count: 2 } })).toEqual([])
   })
 
-  // 历史成片没有负责人：计入成片总数，但不计入使用人数，也不编一个人名。
-  it('counts historical outputs without inventing an operator', () => {
-    expect(usageSummaryLines({ usage: { output_count: 3, operator_count: 0 } }))
-      .toEqual({ counts: '成片 3 · 负责人未记录', names: '—' })
-    expect(usageSummaryLines({ usage: { output_count: 0, operator_count: 0 } }))
-      .toEqual({ counts: '暂无成功成片', names: '—' })
-    // 没有 usage 与「usage 是 0」是两件事：前者是协议还没来，后者是查过了没有。
-    expect(usageSummaryLines({})).toEqual({ counts: '—', names: '—' })
-    expect(usageSummaryLines(undefined)).toEqual({ counts: '—', names: '—' })
+  // 历史成片没有负责人：只写成片数，不写「负责人未记录」，也没有第二行。
+  it('writes only the output count when no operator is known', () => {
+    expect(usageSummary({ usage: { output_count: 3, operator_count: 0 } })).toBe('成片 3')
+    expect(usageSummary({ usage: { output_count: 0, operator_count: 0 } })).toBe('—')
+    // 没有 usage 与「usage 是 0」是两件事，但页面都只能画 —。
+    expect(usageSummary({})).toBe('—')
+    expect(usageSummary(undefined)).toBe('—')
+    expect(usageOutputCount({ usage: { output_count: 3 } })).toBe(3)
+    expect(usageOutputCount({ usage: { output_count: 0 } })).toBe(0)
+    expect(usageOutputCount({})).toBeNull()
+    expect(usageOutputCount(undefined)).toBeNull()
   })
 
-  it('lays the detail facts out with the unknown-operator remainder', () => {
+  it('lists only the facts that carry a value', () => {
     const facts = usageFacts({
       usage: {
         output_count: 7,
@@ -192,18 +197,18 @@ describe('library usage dimensions', () => {
         operators: [{ id: 9, name: '张三', output_count: 4 }, { id: 11, name: '李四', output_count: 1 }],
       },
     })
-    expect(facts.map((fact) => fact.label)).toEqual(['成功成片', '使用人数', '使用人', '未记录负责人的成片'])
-    expect(facts.map((fact) => fact.value)).toEqual(['7', '2', '张三、李四', '2'])
+    expect(facts.map((fact) => fact.label)).toEqual(['成功成片', '使用人数', '使用人'])
+    expect(facts.map((fact) => fact.value)).toEqual(['7', '2', '张三、李四'])
   })
 
-  it('does not claim a remainder when the names are hidden', () => {
-    const facts = usageFacts({ usage: { output_count: 7, operator_count: 2 } })
-    expect(facts.map((fact) => fact.label)).toEqual(['成功成片', '使用人数', '使用人'])
-    expect(facts[2].value).toBe('姓名不可见')
-    // 0 是数据，缺省不是：0 画 0，缺省画 -。
-    expect(usageFacts({ usage: { output_count: 0, operator_count: 0 } }).map((fact) => fact.value))
-      .toEqual(['0', '0', '—'])
-    expect(usageFacts({}).map((fact) => fact.value)).toEqual(['-', '-', '—'])
+  it('drops the usage section entirely when there is nothing to say', () => {
+    // 有数没人：只留成功成片，不补「未记录负责人的成片」。
+    expect(usageFacts({ usage: { output_count: 3, operator_count: 0 } }).map((fact) => fact.label))
+      .toEqual(['成功成片'])
+    // 0 与缺省都不渲染；0 之前的「0 是数据」现在由列表的 — 承担，详情不摆空事实。
+    expect(usageFacts({ usage: { output_count: 0, operator_count: 0 } })).toEqual([])
+    expect(usageFacts({})).toEqual([])
+    expect(usageFacts(undefined)).toEqual([])
   })
 
   it('points the library next step at joining or My Materials, never at a local download', () => {

@@ -65,16 +65,24 @@ describe('material library page', () => {
   })
 
   // 普通运营与高级运营进页面时，游戏多选默认本人负责的游戏；管理员默认不筛（读所选团队）。
-  // 游戏选项来自全量 enabled 字典加上已加载行里出现过的游戏：清空筛选后其他游戏的素材
-  // 会进入结果，选项也要跟着出现，否则那些行只能显示 id。
-  it('defaults the game selection to the games this viewer is responsible for', () => {
+  // 选项是游戏管理里已启用的全量游戏：本人负责只决定默认勾选，不限制能筛到哪些游戏。
+  it('offers every enabled game and defaults to the responsible ones', () => {
     expect(source).toContain('function responsibleGames()')
     expect(source).toContain("currentUser.value?.role === 'admin'")
     expect(source).toContain('return Array.isArray(currentUser.value?.game_ids) ? [...currentUser.value.game_ids] : []')
-    expect(source).toContain('gameFilters.value = responsibleGames()')
+    expect(source).toContain('function defaultGameFilters()')
+    expect(source).toContain('const enabled = new Set(games.value.map((game) => game.id))')
+    expect(source).toContain('return responsibleGames().filter((id) => enabled.has(id))')
+    expect(source).toContain('gameFilters.value = defaultGameFilters()')
     expect(source).toContain("users.listGames({ scope: 'all', status: 'enabled' })")
     expect(source).toContain('const gameOptions = computed')
-    expect(source).toContain('for (const row of rows.value)')
+    expect(source).toContain('games.value.map((game) => ({ id: game.id, name: game.name }))')
+    // 列表要等会话与游戏字典一起到齐再取：默认项不能引用还没加载的选项。
+    expect(source).toContain('await Promise.all([loadSession(), loadGames()])')
+    expect(source.indexOf('await Promise.all([loadSession(), loadGames()])')).toBeLessThan(source.indexOf('load()\n  loadTeams()'))
+    // 选项不再从已加载的行里补。
+    expect(source).not.toContain('for (const row of rows.value)')
+    expect(source).not.toContain('gameName(games.value, id)')
   })
 
   // 团队筛选只在管理员手里出现，其余角色连入口都没有：团队是服务端给的边界，
@@ -203,6 +211,7 @@ describe('material library page', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
     expect(source).toContain('mode="library"')
+    expect(source).toContain(':show-usage="canViewUsage"')
     expect(source).toContain('@add="addToMine"')
     expect(source).toContain('@go-mine="goToMyMaterials"')
     expect(source).toContain(':mine="detail?.usage_status === \'active\'"')
@@ -240,9 +249,30 @@ describe('material library page', () => {
     expect(usageAt).toBeLessThan(source.indexOf("{ colKey: 'created_at'"))
     expect(source).toContain('myUsageTone(row.my_usage)')
     expect(source).toContain('myUsageLabel(row.my_usage)')
+  })
+
+  // 使用情况对普通运营完全不存在：列、筛选、详情段都不渲染；高级运营/管理员只有
+  // 一行可点摘要，明细进弹窗。没有已知使用人时也不写占位文案。
+  it('shows usage to seniors and admins only, behind a one-line summary and a dialog', () => {
+    expect(source).toContain("const isSenior = computed(() => currentUser.value?.role === 'senior_operator')")
+    expect(source).toContain('const canViewUsage = computed(() => isAdmin.value || isSenior.value)')
+    expect(source).toContain("canViewUsage.value ? columns : columns.filter((col) => col.colKey !== 'usage')")
+    expect(source).toContain('<label v-if="canViewUsage"')
     expect(source).toContain('<template #usage="{ row }">')
-    expect(source).toContain('usageSummaryLines(row).counts')
-    expect(source).toContain('usageSummaryLines(row).names')
+    expect(source).toContain('usageSummary(row)')
+    expect(source).toContain('@click="openUsage(row)"')
+    expect(source).toContain('成功成片 {{ usageOutputCount(usageMaterial) }}')
+    expect(source).toContain('v-for="operator in usageOperators(usageMaterial)"')
+    expect(source).toContain("{{ operator.name }}")
+    expect(source).toContain("成片 {{ operator.output_count }}")
+    // 多人时列表自己滚动，第二行不会被挤出弹窗。
+    expect(source).toContain('.usage-detail__list { max-height: 280px;')
+    expect(source).toContain('overflow-y: auto')
+    // 不再有那三句占位文案，也不再有第二行姓名。
+    for (const gone of ['暂无成功成片', '负责人未记录', '姓名不可见', 'usageSummaryLines']) {
+      expect(source, `不该再有 ${gone}`).not.toContain(gone)
+    }
+    expect(source).toContain(':show-usage="canViewUsage"')
   })
 
   /**

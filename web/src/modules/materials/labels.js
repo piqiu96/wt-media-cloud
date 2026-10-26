@@ -235,56 +235,45 @@ function usageCount(value) {
   return Number(value).toLocaleString()
 }
 
-function operatorNames(usage) {
-  return Array.isArray(usage?.operators) ? usage.operators.map((operator) => operator?.name || '未记录姓名') : null
+/** 成功成片数；缺字段与「查过了是 0」分开：返回 null 表示这一项还没有事实。 */
+export function usageOutputCount(material) {
+  const value = material?.usage?.output_count
+  if (value === undefined || value === null) return null
+  return Number(value) || 0
 }
 
-/**
- * 列表「使用情况」那一格的两行：第一行是成片与人数，第二行是姓名（能拿到时）。
- * 没有成功成片就说「暂无成功成片」；普通运营拿不到姓名时明说不可见，不画空白。
- */
-export function usageSummaryLines(material) {
+/** 已知使用人；普通运营的读模型不带这份明细，这里自然返回空数组。 */
+export function usageOperators(material) {
   const usage = material?.usage
-  if (!usage || usage.output_count === undefined || usage.output_count === null) {
-    return { counts: '—', names: '—' }
-  }
-  const outputs = Number(usage.output_count) || 0
-  if (outputs === 0) return { counts: '暂无成功成片', names: '—' }
-  const operators = Number(usage.operator_count) || 0
-  if (operators === 0) return { counts: `成片 ${usageCount(outputs)} · 负责人未记录`, names: '—' }
-  const names = operatorNames(usage)
-  return {
-    counts: `成片 ${usageCount(outputs)} · 使用 ${usageCount(operators)} 人`,
-    names: names && names.length ? names.join('、') : '姓名不可见',
-  }
+  if (!Array.isArray(usage?.operators)) return []
+  return usage.operators.filter((operator) => operator?.name)
 }
 
 /**
- * 详情「使用情况」卡的三个事实。高级运营/管理员额外看到「未记录负责人的成片」
- * 那一项：它是 output_count 减去有负责人的成片数，只在拿到 operators 时才能算，
- * 所以普通运营不会看到这一项，也不会看到一行猜出来的 0。
+ * 列表「使用情况」一格只写一行：没有成功成片就是 —，有数没人只写「成片 N」，
+ * 有已知使用人才补人数。点击展开的明细在弹窗里，列表不再用第二行塞姓名。
+ */
+export function usageSummary(material) {
+  const outputs = usageOutputCount(material)
+  if (outputs === null || outputs === 0) return '—'
+  const operators = Number(material?.usage?.operator_count) || 0
+  if (operators === 0) return `成片 ${usageCount(outputs)}`
+  return `成片 ${usageCount(outputs)} · 使用 ${usageCount(operators)} 人`
+}
+
+/**
+ * 详情「使用情况」的事实只列有值的项：没有数据整段不渲染，有数但没人就只留
+ * 成功成片，不写「负责人未记录」「姓名不可见」这类占位。
  */
 export function usageFacts(material) {
+  const outputs = usageOutputCount(material)
+  if (outputs === null || outputs === 0) return []
   const usage = material?.usage
-  const names = operatorNames(usage)
-  const facts = [
-    { key: 'output_count', label: '成功成片', value: usageCount(usage?.output_count) },
-    { key: 'operator_count', label: '使用人数', value: usageCount(usage?.operator_count) },
-    {
-      key: 'operators',
-      label: '使用人',
-      value: names === null
-        ? (Number(usage?.operator_count) > 0 ? '姓名不可见' : '—')
-        : (names.length ? names.join('、') : '—'),
-    },
-  ]
-  if (names !== null) {
-    const knownOutputs = (usage?.operators || []).reduce((sum, operator) => sum + Number(operator?.output_count || 0), 0)
-    const unknown = Number(usage?.output_count || 0) - knownOutputs
-    if (unknown > 0) {
-      facts.push({ key: 'unknown_operator', label: '未记录负责人的成片', value: usageCount(unknown) })
-    }
-  }
+  const facts = [{ key: 'output_count', label: '成功成片', value: usageCount(outputs) }]
+  const operators = Number(usage?.operator_count) || 0
+  if (operators > 0) facts.push({ key: 'operator_count', label: '使用人数', value: usageCount(operators) })
+  const names = usageOperators(material).map((operator) => operator.name)
+  if (names.length) facts.push({ key: 'operators', label: '使用人', value: names.join('、') })
   return facts
 }
 
