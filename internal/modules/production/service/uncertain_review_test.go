@@ -36,23 +36,74 @@ func (f *uncertainReviewMemory) ListUncertainReviews(int64) ([]model.ComposeUnce
 	return f.reviews, nil
 }
 
-func TestUncertainReviewRequiresAdminAndExplicitEvidence(t *testing.T) {
-	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "game-a", Status: model.ComposeTaskFailed, ErrorCode: "execution_uncertain", AttemptCount: 1}
+func uncertainTask() model.ComposeTask {
+	operatorID := int64(10)
+	return model.ComposeTask{
+		ID: 77, TeamID: 7, GameID: "game-a", OperatorID: &operatorID,
+		Status: model.ComposeTaskFailed, ErrorCode: "execution_uncertain", AttemptCount: 1,
+	}
+}
+
+func uncertainInput() ResolveComposeUncertainInput {
+	return ResolveComposeUncertainInput{OldExecutionStopped: true, NoOutputCommitted: true, Evidence: "核对 Worker 节点进程已退出，数据库没有成片记录"}
+}
+
+func TestSameTeamSeniorResolvesUncertainExecution(t *testing.T) {
+	task := uncertainTask()
 	store := &uncertainReviewMemory{task: &task}
 	svc := NewComposeUncertainReviewService(store)
-	input := ResolveComposeUncertainInput{OldExecutionStopped: true, NoOutputCommitted: true, Evidence: "核对 Worker 节点进程已退出，数据库没有成片记录"}
-	admin := identity.PublicUser{ID: 9, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
 	team := identity.TeamID(7)
 	senior := identity.PublicUser{ID: 10, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
-	if _, err := svc.Resolve(senior, 77, input); !errors.Is(err, ErrComposeTaskForbidden) {
-		t.Fatalf("senior review: %v", err)
+	input := uncertainInput()
+
+	resolved, err := svc.Resolve(senior, 77, input)
+	if err != nil || resolved.Task.Status != model.ComposeTaskPending || resolved.Review.ActorUserID != 10 || store.called != 1 {
+		t.Fatalf("senior resolve=%+v called=%d err=%v", resolved, store.called, err)
 	}
-	if _, err := svc.List(senior, 77); !errors.Is(err, ErrComposeTaskForbidden) {
-		t.Fatalf("senior review history: %v", err)
+	reviews, err := svc.List(senior, 77)
+	if err != nil || len(reviews) != 1 || reviews[0].Evidence != input.Evidence {
+		t.Fatalf("senior history=%+v err=%v", reviews, err)
 	}
+	if _, err := svc.Resolve(senior, 77, input); !errors.Is(err, ErrComposeTaskNotRetryable) || store.called != 2 {
+		t.Fatalf("duplicate review: called=%d err=%v", store.called, err)
+	}
+}
+
+func TestUncertainReviewRefusesOperatorsAndOtherTeams(t *testing.T) {
+	team := identity.TeamID(7)
+	otherTeam := identity.TeamID(8)
+	operator := identity.PublicUser{ID: 10, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+	seniorElsewhere := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &otherTeam, GameIDs: []string{"game-a"}}
+
+	task := uncertainTask()
+	store := &uncertainReviewMemory{task: &task}
+	svc := NewComposeUncertainReviewService(store)
+	// The operator can read this task (it is theirs), but reviewing is not reading.
+	if _, err := svc.Resolve(operator, 77, uncertainInput()); !errors.Is(err, ErrComposeTaskForbidden) {
+		t.Fatalf("operator review: %v", err)
+	}
+	if _, err := svc.List(operator, 77); !errors.Is(err, ErrComposeTaskForbidden) {
+		t.Fatalf("operator review history: %v", err)
+	}
+	if store.called != 0 {
+		t.Fatalf("refused reviews wrote %d times", store.called)
+	}
+	if _, err := svc.Resolve(seniorElsewhere, 77, uncertainInput()); !errors.Is(err, ErrComposeTaskNotFound) {
+		t.Fatalf("other-team senior review: %v", err)
+	}
+	if _, err := svc.List(seniorElsewhere, 77); !errors.Is(err, ErrComposeTaskNotFound) {
+		t.Fatalf("other-team senior history: %v", err)
+	}
+}
+
+func TestUncertainReviewKeepsTheEvidenceAndConfirmationRules(t *testing.T) {
+	task := uncertainTask()
+	store := &uncertainReviewMemory{task: &task}
+	svc := NewComposeUncertainReviewService(store)
+	admin := identity.PublicUser{ID: 9, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
 	for _, invalid := range []ResolveComposeUncertainInput{
-		{NoOutputCommitted: true, Evidence: input.Evidence},
-		{OldExecutionStopped: true, Evidence: input.Evidence},
+		{NoOutputCommitted: true, Evidence: uncertainInput().Evidence},
+		{OldExecutionStopped: true, Evidence: uncertainInput().Evidence},
 		{OldExecutionStopped: true, NoOutputCommitted: true, Evidence: "太短"},
 		{OldExecutionStopped: true, NoOutputCommitted: true, Evidence: "已检查 https://secret.example/signed-token"},
 	} {
@@ -63,15 +114,8 @@ func TestUncertainReviewRequiresAdminAndExplicitEvidence(t *testing.T) {
 	if store.called != 0 {
 		t.Fatalf("invalid input wrote %d times", store.called)
 	}
-	resolved, err := svc.Resolve(admin, 77, input)
+	resolved, err := svc.Resolve(admin, 77, uncertainInput())
 	if err != nil || resolved.Task.Status != model.ComposeTaskPending || resolved.Review.Attempt != 1 || store.called != 1 {
-		t.Fatalf("resolve=%+v called=%d err=%v", resolved, store.called, err)
-	}
-	if _, err := svc.Resolve(admin, 77, input); !errors.Is(err, ErrComposeTaskNotRetryable) || store.called != 2 {
-		t.Fatalf("duplicate review: called=%d err=%v", store.called, err)
-	}
-	reviews, err := svc.List(admin, 77)
-	if err != nil || len(reviews) != 1 || reviews[0].Evidence != input.Evidence {
-		t.Fatalf("admin history=%+v err=%v", reviews, err)
+		t.Fatalf("admin resolve=%+v called=%d err=%v", resolved, store.called, err)
 	}
 }

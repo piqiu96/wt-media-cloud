@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.26.2
+  version: 2026.10.27.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -301,8 +301,8 @@ paths:
         and message are cleared (they stay on the closed attempt rows), an audit
         record is written, and a source=manual attempt row is opened. Accepted:
         a cancelled task, or a failed task other than execution_uncertain — an
-        uncertain outcome has its own administrator verification path and must
-        not be re-run around it. Anything else answers 409 (PRD §5.8.4/§5.8.5).
+        uncertain outcome has its own human verification path and must not be
+        re-run around it. Anything else answers 409 (PRD §5.8.4/§5.8.5).
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       responses:
@@ -313,25 +313,26 @@ paths:
   /api/v1/compose-tasks/{task_id}/uncertain-review:
     get:
       operationId: listComposeUncertainReviews
-      summary: Read administrator verification records for one visible task.
-      description: Admin only. Returns records in attempt order; an empty list means the execution_uncertain failure is still awaiting verification. Records are human declarations, not automated process checks.
+      summary: Read human verification records for one visible task.
+      description: Admins and same-team senior operators only. Returns records in attempt order; an empty list means the execution_uncertain failure is still awaiting verification. Records are human declarations, not automated process checks.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       responses:
         '200': {description: '[ComposeUncertainReview] for the task.'}
-        '403': {description: Actor is not an admin (named compose_task_forbidden).}
+        '403': {description: Actor is neither an admin nor a same-team senior operator (named compose_task_forbidden).}
         '404': {description: Task absent or outside the actor's scope.}
     post:
       operationId: resolveComposeUncertain
-      summary: Administrator verifies an uncertain execution and retries the same task.
+      summary: Verify an uncertain execution and retry the same task.
       description: >-
-        Admin only. The administrator must independently verify that the old FFmpeg
-        process has stopped and no output has been committed, then provide a
-        reviewable evidence note. A guarded transaction records the declaration,
-        audit event and manual next attempt, and requeues only a currently
-        failed/execution_uncertain task with no composite output. This endpoint
-        does not claim to verify the external process automatically. An unverified
-        task remains failed/execution_uncertain and cannot use ordinary retry.
+        Admins and same-team senior operators only. The reviewer must independently
+        verify that the old FFmpeg process has stopped and no output has been
+        committed, then provide a reviewable evidence note. A guarded transaction
+        records the declaration, audit event and manual next attempt, and requeues
+        only a currently failed/execution_uncertain task with no composite output.
+        This endpoint does not claim to verify the external process automatically.
+        An unverified task remains failed/execution_uncertain and cannot use
+        ordinary retry.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody:
@@ -342,7 +343,7 @@ paths:
       responses:
         '200': {description: ComposeUncertainResolution with the current task projection and persisted review; a Worker may already have claimed the requeued task.}
         '400': {description: Missing verification declarations or invalid evidence note (named compose_task_invalid).}
-        '403': {description: Actor is not an admin (named compose_task_forbidden).}
+        '403': {description: Actor is neither an admin nor a same-team senior operator (named compose_task_forbidden).}
         '404': {description: Task absent or outside the actor's scope.}
         '409': {description: Task changed, was already resolved, or has a committed output (named compose_task_not_retryable).}
   /api/v1/compose-tasks/{task_id}/cancel:
@@ -370,9 +371,10 @@ paths:
       summary: List compose outputs visible in the current user's scope.
       description: >-
         The my-outputs page. Scope follows the compose-task shape — admins see
-        everything, senior operators default to their own operator assignment and
-        may widen to their team, operators only outputs assigned to them (and,
-        for historical rows, ones they created while unassigned). The response
+        everything or one named team, senior operators see every game of their
+        team, operators only outputs assigned to them (and, for historical rows,
+        ones they created while unassigned) inside the games they cover. The
+        game_id filter only narrows that scope; it never widens it. The response
         never carries an object address; previews go through the video-url
         endpoint.
       security: [{sessionCookie: []}]
@@ -381,14 +383,16 @@ paths:
         - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
         - {in: query, name: search, required: false, description: Output ID, source material ID/title, or strategy name substring., schema: {type: string, maxLength: 100}}
         - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, scheduled]}}
+        - {in: query, name: game_id, required: false, description: Exact game of the output. A narrowing filter, not a grant; an ordinary operator naming a game they do not cover answers 403., schema: {type: string, maxLength: 32}}
         - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
         - {$ref: '#/components/parameters/CreatedFrom'}
         - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
-        '200': {description: '[ComposeOutput] — newest first, optional source and time filters.'}
+        '200': {description: '[ComposeOutput] — newest first, optional source, game and time filters.'}
         '400': {description: Invalid filter (named compose_output_invalid).}
+        '403': {description: game_id is outside an ordinary operator's covered games (named compose_output_forbidden).}
   /api/v1/compose-outputs/{output_id}:
     get:
       operationId: getComposeOutput
@@ -922,8 +926,8 @@ components:
       additionalProperties: false
       required: [old_execution_stopped, no_output_committed, evidence]
       properties:
-        old_execution_stopped: {type: boolean, const: true, description: Administrator verified the old FFmpeg process is stopped.}
-        no_output_committed: {type: boolean, const: true, description: Administrator verified no output was committed.}
+        old_execution_stopped: {type: boolean, const: true, description: Reviewer verified the old FFmpeg process is stopped.}
+        no_output_committed: {type: boolean, const: true, description: Reviewer verified no output was committed.}
         evidence: {type: string, minLength: 20, maxLength: 2000, description: Reviewable verification note; do not include credentials or signed URLs.}
     ComposeUncertainReview:
       type: object
@@ -934,7 +938,7 @@ components:
         compose_task_id: {type: integer, format: int64}
         attempt: {type: integer, minimum: 1, description: The uncertain attempt reviewed before manual retry.}
         actor_user_id: {type: integer, format: int64}
-        evidence: {type: string, description: Administrator's verification note, not automated proof.}
+        evidence: {type: string, description: Reviewer's verification note, not automated proof.}
         created_at: {type: string, format: date-time}
     ComposeUncertainResolution:
       type: object

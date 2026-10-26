@@ -59,6 +59,7 @@ func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
 	items, err := productionservice.ListComposeOutputs(current, productionservice.ListComposeOutputsInput{
 		PublishStatus: c.Query("publish_status"), Source: strings.TrimSpace(c.Query("source")),
 		Search: strings.TrimSpace(c.Query("search")), TriggerType: strings.TrimSpace(c.Query("trigger_type")),
+		GameID: strings.TrimSpace(c.Query("game_id")),
 		TeamID: teamID, OperatorID: operatorID, OperatorScope: scope,
 		CreatedFrom: from, CreatedBefore: before,
 	})
