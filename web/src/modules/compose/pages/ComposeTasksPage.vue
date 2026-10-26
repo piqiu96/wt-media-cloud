@@ -712,8 +712,8 @@ onMounted(() => {
 .compose-detail__grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--wt-text-primary); overflow-wrap: anywhere; }
 .compose-detail__label { color: var(--wt-text-tertiary); font-size: 12px; }
 .compose-detail__snapshot-fields { margin-top: 16px; }
-/* 失败态一律用 --wt-danger：语义表 tokens.css 里的 --wt-status-error 从未被任何入口引入，运行时取不到值；
-   这支红与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
+/* 失败态用 --wt-danger：它定义在入口加载的 design-token.css 里，
+   且与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
 .compose-detail__failure-reason { color: var(--wt-danger); font-weight: 500; }
 .compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__grid + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__section > .compose-detail__hint + .compose-detail__grid { margin-top: 12px; }

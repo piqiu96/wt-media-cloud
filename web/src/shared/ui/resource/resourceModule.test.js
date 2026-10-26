@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const resourceRoot = new URL('./', import.meta.url)
@@ -13,6 +13,37 @@ describe('operation resource design primitives', () => {
     expect(cloudEntry).toContain('resource-module.css')
     expect(desktopEntry).toContain('design-token.css')
     expect(desktopEntry).toContain('resource-module.css')
+  })
+
+  // 状态色必须来自入口真正加载的样式表。曾经有一支 --wt-status-* 语义表从未被
+  // 任何入口引入，页面取不到值却让字符串断言全绿；这里把“定义在哪”钉住。
+  it('serves status colors from the stylesheet both entries import', () => {
+    const tokens = read('../../../styles/design-token.css')
+
+    expect(tokens).toContain('--wt-success: #16A34A')
+    expect(tokens).toContain('--wt-warning: #D97706')
+    expect(tokens).toContain('--wt-danger: #DC2626')
+    expect(existsSync(new URL('../../styles/tokens.css', resourceRoot))).toBe(false)
+  })
+
+  it('keeps no unloaded status token definitions', () => {
+    const srcRoot = new URL('../../../', import.meta.url)
+    const files = readdirSync(srcRoot, { recursive: true })
+      .map(String)
+      .filter((file) => /\.(vue|css|js|ts)$/.test(file))
+    // 反向对照：扫不到文件就说明这条断言在空转。
+    expect(files.length).toBeGreaterThan(100)
+
+    const statusDefs = []
+    const primaryDefs = []
+    for (const file of files) {
+      const text = readFileSync(new URL(file, srcRoot), 'utf8')
+      if (/--wt-status-[a-z-]+\s*:/.test(text)) statusDefs.push(file)
+      if (/--wt-primary\s*:/.test(text)) primaryDefs.push(file)
+    }
+
+    expect(statusDefs).toEqual([])
+    expect(primaryDefs).toContain('styles/design-token.css')
   })
 
   it('provides token-backed presentation components for resource pages', () => {
