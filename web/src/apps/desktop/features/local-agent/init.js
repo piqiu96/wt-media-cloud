@@ -22,6 +22,13 @@ export async function startDesktopLocalAgent({ tauri = isTauri(), invokeImpl = i
   return true
 }
 
+// 高级运营和管理员登录 Desktop 时，本机 Agent 不能继续以任何旧会话工作。
+export async function stopDesktopLocalAgent({ tauri = isTauri(), invokeImpl = invoke } = {}) {
+  if (!tauri) return false
+  await createLocalAgentService({ invoke: invokeImpl }).stop()
+  return true
+}
+
 // The command that answers "where is Cloud". One definition for the WebView
 // side; the Rust side spells it in `commands/public_config.rs`.
 export const PUBLIC_CONFIG_COMMAND = "get_public_config"

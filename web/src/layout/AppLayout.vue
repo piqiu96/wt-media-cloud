@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { isDesktop } from '../utils.js'
+import { canUseLocalAgent, isDesktop } from '../utils.js'
 import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
 import DownloadCentreDrawer from '../modules/transfer/DownloadCentreDrawer.vue'
@@ -62,6 +62,9 @@ const desktopItems = [
 
 const adminOnlyPaths = new Set(['/users', '/operation-teams', '/games'])
 const desktopHiddenPaths = new Set(['/users', '/operation-teams', '/games'])
+// M2 本机资源只属于普通运营；其他角色在 Desktop 里看不到这些入口。
+const localOnlyPaths = new Set(['/accounts', '/account-opening', '/browser-windows', '/proxies'])
+const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))
 
 async function refreshUser() {
   try {
@@ -81,11 +84,16 @@ const allItems = computed(() => {
   const hiddenPaths = new Set()
   if (isDesktop()) {
     for (const path of desktopHiddenPaths) hiddenPaths.add(path)
+    if (!localAgentAllowed.value) {
+      for (const path of localOnlyPaths) hiddenPaths.add(path)
+    }
   }
   if (currentUser.value?.role !== 'admin') {
     for (const path of adminOnlyPaths) hiddenPaths.add(path)
   }
-  const sourceItems = isDesktop() ? [...menuItems, ...desktopItems] : menuItems
+  const sourceItems = isDesktop()
+    ? [...menuItems, ...(localAgentAllowed.value ? desktopItems : [])]
+    : menuItems
   return sourceItems
     .map((item) => {
       if (!item.children) return hiddenPaths.has(item.path) ? null : item
@@ -195,7 +203,7 @@ async function logout() {
             成片导出，它不属于其中任何一页。面板本身只有一份（modules/transfer），
             页面用 `useDownloadCentre().open()` 把它叫出来。
           -->
-          <WorkEnvPill v-if="isDesktop()" />
+          <WorkEnvPill v-if="isDesktop() && localAgentAllowed" />
           <t-button variant="text" @click="downloadCentre.open">
             <t-icon name="download" />
             下载中心

@@ -3,8 +3,8 @@ import { createPinia } from "pinia"
 import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
 import App from "./App.vue"
-import { canUseDesktop } from "../../utils.js"
-import { cloudBaseUrl, startDesktopLocalAgent } from "./features/local-agent/init.js"
+import { canUseDesktop, canUseLocalAgent } from "../../utils.js"
+import { cloudBaseUrl, startDesktopLocalAgent, stopDesktopLocalAgent } from "./features/local-agent/init.js"
 import { setDesktopCloudOrigin } from "../../shared/api/http.js"
 import { installWebviewErrorReporting } from "./webviewErrors.js"
 import "tdesign-vue-next/es/style/index.css"
@@ -25,13 +25,23 @@ app.use(pinia)
 app.use(TDesign)
 app.use(router)
 
-// The release shell owns the Local Agent lifecycle. This invokes only the
-// Tauri Rust bridge; browser previews remain side-effect free.
-// This entrypoint is compiled only for the Desktop shell, so do not depend on
-// heuristic WebView globals to decide whether the Rust bridge is available.
-void startDesktopLocalAgent({ tauri: true }).catch((error) => {
-  console.warn("Local Agent startup failed; use the environment page to retry.", error)
-})
+// 本机 Agent 只在普通运营登录时启动。角色切换（含退出后换号）时重新同步一次，
+// 避免高级运营／管理员继承上一段会话留下的 sidecar。
+let syncedAgentUser = ""
+async function syncLocalAgentFor(user: { id?: number; role?: string }) {
+  const key = `${user?.id ?? ""}:${user?.role ?? ""}`
+  if (key === syncedAgentUser) return
+  syncedAgentUser = key
+  if (canUseLocalAgent(user)) {
+    await startDesktopLocalAgent({ tauri: true }).catch((error) => {
+      console.warn("Local Agent startup failed; use the environment page to retry.", error)
+    })
+    return
+  }
+  await stopDesktopLocalAgent({ tauri: true }).catch((error) => {
+    console.warn("Local Agent stop failed.", error)
+  })
+}
 
 // Auth guard
 router.beforeEach(async (to, from, next) => {
@@ -53,6 +63,12 @@ router.beforeEach(async (to, from, next) => {
     if (!canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
       next("/login?desktop_role_forbidden=1")
+      return
+    }
+    void syncLocalAgentFor(user)
+    // M2 本机资源（账号、开户、浏览器窗口、代理）只对普通运营开放。
+    if (to.meta?.localOnly && !canUseLocalAgent(user)) {
+      next("/content-pool")
       return
     }
     next()

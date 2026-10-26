@@ -28,6 +28,12 @@ func IssueAgentToken(_ context.Context, c *hertzapp.RequestContext) {
 		api.FailureCode(c, 401, 11001, "请先在 Desktop 登录", "DESKTOP_LOGIN_REQUIRED", nil, false, "login_desktop")
 		return
 	}
+	// Agent Token 代表这台电脑执行本机浏览器任务，只属于普通运营；
+	// 高级运营和管理员可以登录 Desktop 使用共用页面，但不能取得本机执行凭证。
+	if authContext.User.Role != identityservice.RoleOperator {
+		api.FailureCode(c, 403, 11003, "本机执行仅支持普通运营账号", "DESKTOP_ROLE_FORBIDDEN", nil, false, "use_cloud_web")
+		return
+	}
 	signer, err := agenttoken.Current()
 	if err != nil {
 		hlog.Errorf("module=local_agent result=error reason=signer_unavailable")

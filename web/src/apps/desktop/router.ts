@@ -27,10 +27,11 @@ export const desktopRoutes = [
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
-      { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue") },
-      { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue") },
-      { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue") },
-      { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue") },
+      // M2 本机资源：只有普通运营可以进入，其余角色由 main.ts 的路由守卫拦回内容池。
+      { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue"), meta: { localOnly: true } },
+      { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue"), meta: { localOnly: true } },
+      { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue"), meta: { localOnly: true } },
+      { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue"), meta: { localOnly: true } },
       // Desktop 独有页面
       { path: "logs", name: "LocalLogs", component: () => import("./features/local-logs/LocalLogsPage.vue") },
       { path: "settings", name: "LocalSettings", component: () => import("./features/local-settings/LocalSettingsPage.vue") },
