@@ -21,7 +21,7 @@ func sqlmockIDRows(ids ...int64) *sqlmock.Rows {
 func modelStatusRunning() model.ComposeTaskStatus { return model.ComposeTaskRunning }
 
 func composeOutputFixture(taskID int64) model.CompositeOutput {
-	return model.CompositeOutput{TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, TaskID: taskID, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "outputs/final", FileSizeBytes: 1024, SHA256: "abc", Media: json.RawMessage(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 11}
+	return model.CompositeOutput{TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: int64Ptr(9), TaskID: taskID, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "outputs/final", FileSizeBytes: 1024, SHA256: "abc", Media: json.RawMessage(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 11}
 }
 
 // CHG-20261013-083 (M4-C5): the worker lifecycle writes. Each test pins the

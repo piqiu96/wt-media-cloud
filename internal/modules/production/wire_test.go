@@ -414,6 +414,57 @@ func TestTheComposeTaskResponseMatchesTheOpenAPISchema(t *testing.T) {
 	}
 }
 
+// The run-tasks endpoint returns the service's own JSON. The page renders the
+// run's counts as-is, so both the envelope keys and the five count fields have
+// to be declared — a missing count would read as zero.
+func TestTheComposeBatchViewResponseMatchesTheOpenAPISchema(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read compose batch view openapi: %v", err)
+	}
+	var parsed struct {
+		Components struct {
+			Schemas struct {
+				View struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+					Required   []string             `yaml:"required"`
+				} `yaml:"ComposeBatchView"`
+				Counts struct {
+					Properties map[string]yaml.Node `yaml:"properties"`
+					Required   []string             `yaml:"required"`
+				} `yaml:"ComposeBatchCounts"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("parse compose batch view openapi: %v", err)
+	}
+	view := parsed.Components.Schemas.View.Properties
+	if len(view) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeBatchView properties")
+	}
+	if got, want := marshalledKeys(t, productionservice.ComposeBatchView{}), schemaPropertyNames(view); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeBatchView keys = %v, contract = %v", got, want)
+	}
+	for _, key := range []string{"run", "tasks", "counts"} {
+		if !containsString(parsed.Components.Schemas.View.Required, key) {
+			t.Errorf("ComposeBatchView must require %q", key)
+		}
+	}
+	counts := parsed.Components.Schemas.Counts.Properties
+	if len(counts) == 0 {
+		t.Fatal("the OpenAPI file declares no ComposeBatchCounts properties")
+	}
+	if got, want := marshalledKeys(t, model.ComposeBatchCounts{}), schemaPropertyNames(counts); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeBatchCounts keys = %v, contract = %v", got, want)
+	}
+	for _, key := range []string{"pending", "running", "success", "failed", "cancelled"} {
+		if !containsString(parsed.Components.Schemas.Counts.Required, key) {
+			t.Errorf("ComposeBatchCounts must require %q", key)
+		}
+	}
+}
+
 // The compose output projection must never carry the object key — the address
 // stays server-side and previews go through the presigned video-url endpoint.
 func TestTheComposeOutputResponseMatchesTheOpenAPISchema(t *testing.T) {

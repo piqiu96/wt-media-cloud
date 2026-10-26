@@ -273,7 +273,7 @@ func attemptFixture(t *testing.T) (ComposeExecutorDeps, *lifecycleFake, *storeFa
 		Runner: runner, GrantTTL: time.Minute, Client: memClient(store),
 	}
 	task := model.ComposeTask{
-		ID: 77, TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: 9,
+		ID: 77, TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: ptrInt64(9),
 		StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1,
 		ConfigSnapshot: json.RawMessage(`{"start_seconds":0,"end_seconds":1}`),
 		Status:         model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9),
@@ -301,7 +301,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 		t.Fatal("no output committed")
 	}
 	out := lifecycle.committed
-	if out.TaskID != 77 || out.MaterialID != 42 || out.MaterialUsageID != 9 || out.TemplateCode != "basic_cut" || out.TemplateVersion != 1 {
+	if out.TaskID != 77 || out.MaterialID != 42 || usageIDValue(out.MaterialUsageID) != 9 || out.TemplateCode != "basic_cut" || out.TemplateVersion != 1 {
 		t.Fatalf("committed=%+v", out)
 	}
 	if out.ObjectKey != "compose-outputs/77/1/output.mp4" || out.PublishStatus != "pending_publish" {
@@ -399,7 +399,7 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 			return os.WriteFile(path, guide, 0o600)
 		},
 	}
-	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1, AttemptCount: 1,
+	task := model.ComposeTask{ID: 77, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: ptrInt64(9), StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1, AttemptCount: 1,
 		ConfigSnapshot: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), Status: model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9), CreatedBy: 11}
 	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptSuccess {
 		t.Fatalf("outcome=%s failed=%v released=%v", outcome, lifecycle.failed, lifecycle.released)

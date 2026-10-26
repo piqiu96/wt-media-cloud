@@ -89,7 +89,7 @@ func TestStrategyOperatorReadsAvailableTeamStrategyButCannotWrite(t *testing.T) 
 	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 99}}
 	actor.Role = identity.RoleOperator
 	items, err := svc.List(actor, ComposeStrategyListQuery{})
-	if err != nil || len(items) != 1 || store.lastFilter.TeamID != 7 || !store.lastFilter.ActiveOnly {
+	if err != nil || len(items) != 1 || store.lastFilter.TeamID != 7 || !store.lastFilter.ActiveOnly || len(store.lastFilter.GameIDs) != 1 || store.lastFilter.GameIDs[0] != "delta" || store.lastFilter.OperatorID != 9 {
 		t.Fatalf("items=%v filter=%+v err=%v", items, store.lastFilter, err)
 	}
 	_, err = svc.Create(actor, CreateStrategyInput{})
@@ -98,11 +98,55 @@ func TestStrategyOperatorReadsAvailableTeamStrategyButCannotWrite(t *testing.T) 
 	}
 }
 
-func TestStrategySeniorCannotWriteOutsideGame(t *testing.T) {
+func TestStrategySeniorManagesEveryGameOfTheirTeam(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	_, err := svc.Create(actor, CreateStrategyInput{GameID: "other", OperatorID: 9, Name: "x", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`)})
-	if !errors.Is(err, ErrStrategyForbidden) || store.writes != 0 {
+	other := identity.PublicUser{ID: 10, Username: "operator10", Nickname: "十号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: actor.TeamID, GameIDs: []string{"other"}}
+	svc.operators = func() ([]identity.PublicUser, error) { return []identity.PublicUser{actor, other}, nil }
+	created, err := svc.Create(actor, CreateStrategyInput{GameID: "other", OperatorID: 10, Name: "跨游戏", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2})
+	if err != nil || created.GameID != "other" || created.TeamID != 7 {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	otherTeam := identity.TeamID(8)
+	actor.TeamID = &otherTeam
+	_, err = svc.Create(actor, CreateStrategyInput{TeamID: 7, GameID: "other", OperatorID: 10, Name: "x", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2})
+	if !errors.Is(err, ErrStrategyForbidden) || store.writes != 1 {
 		t.Fatalf("error=%v writes=%d", err, store.writes)
+	}
+}
+
+func TestStrategySeniorScopeIsTheTeamNotTheirOwnGames(t *testing.T) {
+	svc, store, actor := strategyFixture()
+	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "other", Status: "enabled", OperatorID: operatorIDPtr(9)}}
+	items, err := svc.List(actor, ComposeStrategyListQuery{})
+	if err != nil || len(items) != 1 || store.lastFilter.TeamID != 7 || len(store.lastFilter.GameIDs) != 0 {
+		t.Fatalf("items=%v filter=%+v err=%v", items, store.lastFilter, err)
+	}
+	if _, err := svc.Get(actor, 4); err != nil {
+		t.Fatalf("senior reads another game of the team: %v", err)
+	}
+	actor.GameIDs = nil
+	if _, err := svc.List(actor, ComposeStrategyListQuery{}); err != nil || len(items) != 1 {
+		t.Fatalf("senior without game assignments still lists the team: items=%v err=%v", items, err)
+	}
+	if _, err := svc.Get(actor, 4); err != nil {
+		t.Fatalf("senior without game assignments still reads the team: %v", err)
+	}
+
+	actor.Role = identity.RoleOperator
+	actor.GameIDs = []string{"delta"}
+	if _, err := svc.Get(actor, 4); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("ordinary operator must stay inside their games: %v", err)
+	}
+
+	actor.Role = identity.RoleSeniorOperator
+	actor.GameIDs = []string{"delta"}
+	otherTeam := identity.TeamID(8)
+	actor.TeamID = &otherTeam
+	if _, err := svc.Get(actor, 4); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("senior must not read another team's strategy: %v", err)
+	}
+	if _, err = svc.List(actor, ComposeStrategyListQuery{}); err != nil || store.lastFilter.TeamID != 8 {
+		t.Fatalf("cross-team list filter=%+v err=%v", store.lastFilter, err)
 	}
 }
 

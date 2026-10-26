@@ -67,7 +67,7 @@ func (s *taskMemoryStore) CreateForUsage(item model.ComposeTask, _ string) (mode
 			s.creates++
 			s.nextID++
 			item.ID = s.nextID
-			item.MaterialUsageID = usage.ID
+			item.MaterialUsageID = ptrInt64(usage.ID)
 			s.tasks = append(s.tasks, item)
 			return item, true, nil
 		}
@@ -243,14 +243,14 @@ func TestCreateComposeTasksCreatesPerItemWithMergedSnapshot(t *testing.T) {
 	if first.DisplayName != "素材一 · 切段" {
 		t.Fatalf("task name must capture creation-time material and strategy: %q", first.DisplayName)
 	}
-	if first.MaterialID != 42 || first.MaterialUsageID != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.GameID != "delta" || first.TemplateCode != "basic_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
+	if first.MaterialID != 42 || usageIDValue(first.MaterialUsageID) != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.GameID != "delta" || first.TemplateCode != "basic_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
 		t.Fatalf("first task facts drifted: %+v", first)
 	}
 	snapshot := composeTaskSnapshot(t, first.ConfigSnapshot)
 	if snapshot["start_seconds"] != float64(5) || snapshot["end_seconds"] != float64(10) {
 		t.Fatalf("merge did not layer override over strategy config: %v", snapshot)
 	}
-	if second := res.Created[1]; second.MaterialID != 43 || second.MaterialUsageID != 92 {
+	if second := res.Created[1]; second.MaterialID != 43 || usageIDValue(second.MaterialUsageID) != 92 {
 		t.Fatalf("second task facts drifted: %+v", second)
 	}
 }

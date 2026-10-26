@@ -37,7 +37,7 @@ func expectMaterialGuardFree(mock sqlmock.Sqlmock, strategyID, materialID int64)
 func TestCreateComposeTaskPersistsAndReadsBack(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
-	task := model.ComposeTask{TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: json.RawMessage(`{"start_seconds":0,"end_seconds":1}`), Status: model.ComposeTaskPending, RequestKey: "rk-123", CreatedBy: 11}
+	task := model.ComposeTask{TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: int64Ptr(9), StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: json.RawMessage(`{"start_seconds":0,"end_seconds":1}`), Status: model.ComposeTaskPending, RequestKey: "rk-123", CreatedBy: 11}
 	mock.ExpectBegin()
 	// GORM writes every column, including the nil claim/lease/heartbeat and
 	// empty execution projection — the full 31-arg list pins that shape.
@@ -58,7 +58,7 @@ func TestCreateComposeTaskPersistsAndReadsBack(t *testing.T) {
 func TestCreateComposeTaskRollsBackWhenAuditFails(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
-	task := model.ComposeTask{TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: 9, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: json.RawMessage(`{}`), Status: model.ComposeTaskPending, RequestKey: "rk-1", CreatedBy: 11}
+	task := model.ComposeTask{TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: int64Ptr(9), StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: json.RawMessage(`{}`), Status: model.ComposeTaskPending, RequestKey: "rk-1", CreatedBy: 11}
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `compose_tasks`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO audit_logs").WillReturnError(errors.New("audit unavailable"))
@@ -126,7 +126,7 @@ func TestCreateForUsageChecksUsageInsideTransaction(t *testing.T) {
 	mock.ExpectCommit()
 	mock.ExpectQuery("SELECT .* FROM compose_tasks WHERE id = \\?").WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows(composeTaskRowColumns).AddRow(composeTaskRow(77, "pending", now)...))
 	created, found, err := createForUsage(db, item, "compose_task.create", now)
-	if err != nil || !found || created.ID != 77 || created.MaterialUsageID != 9 {
+	if err != nil || !found || created.ID != 77 || created.MaterialUsageID == nil || *created.MaterialUsageID != 9 {
 		t.Fatalf("created=%+v found=%v err=%v", created, found, err)
 	}
 	assertExpectations(t, mock)

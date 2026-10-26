@@ -135,7 +135,7 @@ function retryPreview() {
           <div class="output-detail__grid">
             <div class="output-detail__wide"><span class="output-detail__label">素材名称</span><strong>{{ detail.trace.material.title || '—' }}</strong></div>
             <div><span class="output-detail__label">素材 ID</span><t-link v-if="linkable" theme="primary" @click="emit('open-material', detail.trace.material.id)">{{ detail.trace.material.id }}</t-link><strong v-else>{{ detail.trace.material.id }}</strong></div>
-            <div><span class="output-detail__label">素材使用</span><strong>{{ detail.trace.material_usage.id }} · {{ usageStatusLabel(detail.trace.material_usage.status) || detail.trace.material_usage.status || '—' }}</strong></div>
+            <div><span class="output-detail__label">素材使用</span><strong v-if="detail.trace?.material_usage">{{ detail.trace.material_usage.id }} · {{ usageStatusLabel(detail.trace.material_usage.status) || detail.trace.material_usage.status || '—' }}</strong><strong v-else>—</strong></div>
           </div>
         </section>
         <section class="output-detail__panel">
