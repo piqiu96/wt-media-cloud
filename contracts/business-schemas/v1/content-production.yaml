@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.14.3"
+revision: "2026.10.26.1"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -90,6 +90,38 @@ schemas:
       status: {type: string, enum: [available, paused, delisted]}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
+      # 以下四个键只出现在素材库列表与详情读取里，是「当前查看者」的投影，不是素材自己的
+      # 事实：两个人读同一行可能看到不同的值。没有关系时 usage_status 与 added_at 都不出现；
+      # removed 表示关系还在、用户已移出，在素材库口径里等同于未加入。
+      usage_status: {type: string, enum: [active, removed], description: 当前查看者自己的素材关系状态；没有关系时该键不出现。}
+      added_at: {type: string, format: date-time, description: 当前查看者这条关系建立的时间；没有关系时该键不出现。}
+      my_usage:
+        type: string
+        enum: [used, unused]
+        description: >-
+          当前查看者是否是至少一条成功成片的负责人。只按成功成片计算：失败、取消、
+          等待中的成片都不算；移出素材关系后，历史成功成片仍然算「已使用」。
+      usage:
+        type: object
+        description: >-
+          当前团队在这条素材上的成功成片事实，按 (素材, 团队) 聚合，跨团队不合并。
+          output_count 统计所有成功成片；operator_count 只统计有负责人的成片 ——
+          历史行没有负责人时仍计入前者的总数，但不计为「有人用过」，也不回填。
+          operators 只返回给高级运营与管理员，普通运营只拿到两个计数。
+        required: [output_count, operator_count]
+        properties:
+          output_count: {type: integer, format: int64, minimum: 0}
+          operator_count: {type: integer, format: int64, minimum: 0}
+          operators:
+            type: array
+            description: 有负责人的成功成片按操作人分组；普通运营看不到该键。
+            items:
+              type: object
+              required: [id, output_count]
+              properties:
+                id: {type: integer, format: int64}
+                name: {type: string, description: 姓名目录里查不到时该键不出现。}
+                output_count: {type: integer, format: int64, minimum: 0}
       game_id: {type: string, description: 素材未归游戏时该键不出现。}
       author_name: {type: string, description: 为空时该键不出现。}
       # 封面与作者主页是来源行自己的两个链接（CHG-20260930-069）：投影在读取时 JOIN

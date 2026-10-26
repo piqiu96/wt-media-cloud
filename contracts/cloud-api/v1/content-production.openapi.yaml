@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.26.1
+  version: 2026.10.26.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -458,19 +458,43 @@ paths:
   /api/v1/materials:
     get:
       operationId: listMaterials
-      summary: List materials visible in the current user's team and game scope.
+      summary: List the team's public material library, optionally narrowed by game and usage dimensions.
+      description: >-
+        The library is the team's public selection pool, not each operator's own
+        working set. An ordinary or senior operator sees every material in their
+        team regardless of which games they are responsible for; a game is a
+        filter, not a visibility boundary. An administrator must name the target
+        team to read one team's library. Each material carries the viewer's own
+        relation (`usage_status` / `added_at`), whether the viewer has produced a
+        successful output from it (`my_usage`), and the team's known use
+        (`usage`). Those three dimensions are independent and are also accepted
+        as filters. "My Materials" remains the personal working set and is read
+        from `/api/v1/my-materials`.
       security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: search, required: false, description: Material ID, title, platform content ID or author name substring., schema: {type: string, maxLength: 100}}
+        - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: game_ids, required: false, description: One or more exact game IDs, comma separated (at most 50). Narrows the list; it does not restrict visibility., schema: {type: string}}
+        - {in: query, name: game_id, required: false, description: Legacy single exact game ID, combined with `game_ids` when both are present., schema: {type: string}}
+        - {in: query, name: joined, required: false, description: '`joined`: the viewer has an active material usage. `not_joined`: no active usage, which includes a relation that was removed.', schema: {type: string, enum: [joined, not_joined]}}
+        - {in: query, name: my_usage, required: false, description: '`used`: the viewer is the operator of at least one successful composite output. `unused`: no such output.', schema: {type: string, enum: [used, unused]}}
+        - {in: query, name: team_usage, required: false, description: '`used`: at least one successful composite output has a known operator. `unused`: no such output. Historical outputs without an operator count as an output but not as known use.', schema: {type: string, enum: [used, unused]}}
+        - {in: query, name: video_status, required: false, description: Exact source-video preparation state., schema: {type: string, enum: [not_downloaded, downloading, ready, failed]}}
+        - {in: query, name: sort_by, required: false, schema: {type: string, enum: [id, published_at, created_at, updated_at], default: published_at}}
+        - {in: query, name: sort_order, required: false, schema: {type: string, enum: [asc, desc], default: desc}}
       responses:
-        '200': {description: Visible materials and their video preparation projection.}
+        '200': {description: Visible materials with their video preparation projection, the viewer's relation and the team's use summary.}
+        '400': {description: Invalid filter value.}
+        '403': {description: Actor is disabled or names another team.}
   /api/v1/materials/{material_id}:
     get:
       operationId: getMaterial
-      summary: Read one visible material.
+      summary: Read one visible material with the viewer's relation and the team's use summary.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/MaterialID'}]
       responses:
         '200': {description: Visible material.}
-        '403': {description: Material is outside the actor's scope.}
+        '403': {description: Material is outside the actor's team.}
         '404': {description: Material does not exist.}
   /api/v1/materials/{material_id}/usages:
     post:
@@ -544,16 +568,25 @@ paths:
   /api/v1/materials/{material_id}/downloads:
     post:
       operationId: createMaterialDownload
-      summary: Create one current-session Local Agent user-download transfer task.
+      summary: Create one current-session Local Agent user-download transfer task from the viewer's own working set.
+      description: >-
+        Downloading the original video is a personal action from "My Materials",
+        not a library action. A material visible in the team's public library is
+        not enough: the current user's material usage must be active, so a
+        direct call without one fails closed with `material_usage_forbidden`.
+        The Cloud worker's source-preparation path does not pass through this
+        route and keeps working without a user.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/MaterialID'}]
       responses:
         '202': {description: A pending local-agent file transfer task.}
+        '403': {description: Material is outside the actor's team, or the actor has no active material usage (named material_usage_forbidden).}
+        '404': {description: Material does not exist.}
+        '409': {description: No prepared source is available and none can be prepared (named material_unavailable), or no bound Local Agent node is available.}
         # The refusal is the binding, not the heartbeat. A bound node whose machine is
         # asleep yields a queueing task instead: reachability is answered when a lease is
         # claimed, not guessed at click time. (It read "No fresh bound Local Agent node"
         # before 2026.09.27, which is what the Desktop bind/refresh button used to reset.)
-        '409': {description: No bound Local Agent node is available.}
 components:
   schemas:
     ComposeTemplate:
