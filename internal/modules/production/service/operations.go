@@ -19,7 +19,9 @@ func AddUsage(actor identityservice.PublicUser, materialID int64) (model.Materia
 
 // newWiredService assembles the module's real dependencies, in one place.
 func newWiredService() *Service {
-	return NewService(mysqlStore{}, productionTransferCreator{}, productionObjectLinker{})
+	service := NewService(mysqlStore{}, productionTransferCreator{}, productionObjectLinker{})
+	service.operators = identityservice.ListUsers
+	return service
 }
 
 func VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID int64) (string, error) {

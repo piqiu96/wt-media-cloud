@@ -36,6 +36,31 @@ const (
 	MaterialDelisted  MaterialStatus = "delisted"
 )
 
+// My usage is a projection over successful outputs, not a stored state: it
+// exists only for the current viewer and only while their own output row does.
+const (
+	MaterialMyUsageUsed   = "used"
+	MaterialMyUsageUnused = "unused"
+)
+
+// MaterialOperatorUse is one known operator's successful-output count on a
+// material. It is returned only to seniors and admins; ordinary operators get
+// the counts without names.
+type MaterialOperatorUse struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name,omitempty"`
+	OutputCount int64  `json:"output_count"`
+}
+
+// MaterialUsageSummary is the team-scoped use fact of one material. OutputCount
+// counts every successful output; OperatorCount counts only known operators, so
+// historical rows with no operator still add to the former and not the latter.
+type MaterialUsageSummary struct {
+	OutputCount   int64                 `json:"output_count"`
+	OperatorCount int64                 `json:"operator_count"`
+	Operators     []MaterialOperatorUse `json:"operators,omitempty"`
+}
+
 // Material is the production projection of an M3 source material. It contains
 // a Cloud-owned readiness projection, never a user-local file location.
 type Material struct {
@@ -62,22 +87,33 @@ type Material struct {
 	AuthorHomeURL string `json:"author_home_url,omitempty"`
 	// The source row's content-pool statistics, joined in at read time like the
 	// links above: crawl-time decision data for the detail drawer (CHG-20260930-069).
-	ViewCount       int64          `json:"view_count"`
-	LikeCount       int64          `json:"like_count"`
-	FavoriteCount   int64          `json:"favorite_count"`
-	CommentCount    int64          `json:"comment_count"`
-	ShareCount      int64          `json:"share_count"`
-	PublishedAt     *time.Time     `json:"published_at,omitempty"`
-	Status          MaterialStatus `json:"status"`
-	VideoStatus     VideoStatus    `json:"video_status"`
-	SourceObjectKey string         `json:"-"`
-	VideoSizeBytes  *int64         `json:"video_size_bytes,omitempty"`
-	VideoSHA256     string         `json:"video_sha256,omitempty"`
-	VideoMedia      map[string]any `json:"media_summary,omitempty"`
-	VideoError      string         `json:"last_error,omitempty"`
-	VideoPreparedAt *time.Time     `json:"video_prepared_at,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ViewCount     int64          `json:"view_count"`
+	LikeCount     int64          `json:"like_count"`
+	FavoriteCount int64          `json:"favorite_count"`
+	CommentCount  int64          `json:"comment_count"`
+	ShareCount    int64          `json:"share_count"`
+	PublishedAt   *time.Time     `json:"published_at,omitempty"`
+	Status        MaterialStatus `json:"status"`
+	VideoStatus   VideoStatus    `json:"video_status"`
+	// UsageStatus and AddedAt are the viewing user's own relation, not a fact
+	// about the material: two operators read the same row and may see different
+	// values. Absent means no relation at all; `removed` is an existing relation
+	// the user gave up, which counts as not joined on the library page.
+	UsageStatus MaterialUsageStatus `json:"usage_status,omitempty"`
+	AddedAt     *time.Time          `json:"added_at,omitempty"`
+	// MyUsage answers whether this viewer is the operator of at least one
+	// successful output. Usage is the team-scoped summary both the counts and
+	// the names come from; names are only filled for seniors and admins.
+	MyUsage         string                `json:"my_usage,omitempty"`
+	Usage           *MaterialUsageSummary `json:"usage,omitempty"`
+	SourceObjectKey string                `json:"-"`
+	VideoSizeBytes  *int64                `json:"video_size_bytes,omitempty"`
+	VideoSHA256     string                `json:"video_sha256,omitempty"`
+	VideoMedia      map[string]any        `json:"media_summary,omitempty"`
+	VideoError      string                `json:"last_error,omitempty"`
+	VideoPreparedAt *time.Time            `json:"video_prepared_at,omitempty"`
+	CreatedAt       time.Time             `json:"created_at"`
+	UpdatedAt       time.Time             `json:"updated_at"`
 }
 
 // MaterialUsage is the sole durable relationship behind “My Materials”.

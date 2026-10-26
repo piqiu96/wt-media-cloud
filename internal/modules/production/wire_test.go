@@ -82,6 +82,7 @@ func readyMaterial() model.Material {
 	game := "other"
 	author := "作者"
 	published := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	added := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	size := int64(4096)
 	prepared := time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC)
 	return model.Material{
@@ -103,6 +104,14 @@ func readyMaterial() model.Material {
 		PublishedAt:     &published,
 		Status:          model.MaterialAvailable,
 		VideoStatus:     model.VideoReady,
+		UsageStatus:     model.MaterialUsageActive,
+		AddedAt:         &added,
+		MyUsage:         model.MaterialMyUsageUsed,
+		Usage: &model.MaterialUsageSummary{
+			OutputCount:   2,
+			OperatorCount: 1,
+			Operators:     []model.MaterialOperatorUse{{ID: 9, Name: "张三", OutputCount: 2}},
+		},
 		VideoSizeBytes:  &size,
 		VideoSHA256:     "0f343b0931126a20f133d67c2b018a3b",
 		VideoMedia:      map[string]any{"duration_ms": 15000},
@@ -123,8 +132,9 @@ func TestMaterialBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 		t.Fatal("contract has no Material schema")
 	}
 	want := schemaPropertyNames(schema.Properties)
-	if len(want) != 25 {
-		t.Fatalf("Material declares %d properties, want the measured 25: %v", len(want), want)
+	// 29 = 25（素材自身与来源投影）+ 4（查看者关系与团队使用投影，CHG-20261026-104）。
+	if len(want) != 29 {
+		t.Fatalf("Material declares %d properties, want the measured 29: %v", len(want), want)
 	}
 
 	if got := marshalledKeys(t, readyMaterial()); !reflect.DeepEqual(got, want) {

@@ -62,12 +62,76 @@ func parseComposeListScope(c *hertzapp.RequestContext) (int64, int64, string, er
 	return teamID, operatorID, scope, nil
 }
 
+const materialGameFilterLimit = 50
+
+// parseMaterialListFilter reads the library's filters. The service still owns
+// the scope decision; this only turns the query string into typed values and
+// refuses shapes that cannot mean anything.
+func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFilter, error) {
+	filter := repository.MaterialFilter{
+		Search:      strings.TrimSpace(c.Query("search")),
+		GameID:      strings.TrimSpace(c.Query("game_id")),
+		VideoStatus: strings.TrimSpace(c.Query("video_status")),
+		SortBy:      strings.TrimSpace(c.Query("sort_by")),
+		SortOrder:   strings.TrimSpace(c.Query("sort_order")),
+	}
+	if raw := strings.TrimSpace(c.Query("team_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			return repository.MaterialFilter{}, errors.New("team_id 无效")
+		}
+		teamID := identityservice.TeamID(value)
+		filter.TeamID = &teamID
+	}
+	if raw := strings.TrimSpace(c.Query("game_ids")); raw != "" {
+		seen := make(map[string]struct{})
+		for _, part := range strings.Split(raw, ",") {
+			gameID := strings.TrimSpace(part)
+			if gameID == "" {
+				continue
+			}
+			if _, ok := seen[gameID]; ok {
+				continue
+			}
+			seen[gameID] = struct{}{}
+			filter.GameIDs = append(filter.GameIDs, gameID)
+		}
+		if len(filter.GameIDs) > materialGameFilterLimit {
+			return repository.MaterialFilter{}, errors.New("game_ids 过多")
+		}
+	}
+	for _, enum := range []struct {
+		query string
+		value *string
+		valid map[string]struct{}
+	}{
+		{"joined", &filter.Joined, map[string]struct{}{"joined": {}, "not_joined": {}}},
+		{"my_usage", &filter.MyUsage, map[string]struct{}{"used": {}, "unused": {}}},
+		{"team_usage", &filter.TeamUsage, map[string]struct{}{"used": {}, "unused": {}}},
+	} {
+		raw := strings.TrimSpace(c.Query(enum.query))
+		if raw == "" {
+			continue
+		}
+		if _, ok := enum.valid[raw]; !ok {
+			return repository.MaterialFilter{}, errors.New(enum.query + " 无效")
+		}
+		*enum.value = raw
+	}
+	return filter, nil
+}
+
 func ListMaterials(_ context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
 		return
 	}
-	items, err := productionservice.ListMaterialsFiltered(actor, repository.MaterialFilter{Search: strings.TrimSpace(c.Query("search")), GameID: c.Query("game_id"), VideoStatus: c.Query("video_status"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")})
+	filter, err := parseMaterialListFilter(c)
+	if err != nil {
+		api.BadRequest(c, 15001, "素材筛选参数无效")
+		return
+	}
+	items, err := productionservice.ListMaterialsFiltered(actor, filter)
 	if err != nil {
 		writeProductionError(c, err)
 		return
