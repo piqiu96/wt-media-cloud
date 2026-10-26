@@ -166,14 +166,18 @@ type composeOutputScanner interface{ Scan(...any) error }
 func scanComposeOutput(row composeOutputScanner) (model.CompositeOutput, error) {
 	var item model.CompositeOutput
 	var media []byte
-	var operatorID sql.NullInt64
-	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &operatorID, &item.MaterialID, &item.MaterialUsageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	var operatorID, usageID sql.NullInt64
+	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &operatorID, &item.MaterialID, &usageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.CompositeOutput{}, err
 	}
 	if operatorID.Valid {
 		value := operatorID.Int64
 		item.OperatorID = &value
+	}
+	if usageID.Valid {
+		value := usageID.Int64
+		item.MaterialUsageID = &value
 	}
 	item.Media = media
 	return item, nil

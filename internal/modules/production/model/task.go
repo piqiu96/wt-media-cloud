@@ -72,7 +72,7 @@ type ComposeTask struct {
 	OperatorName    string            `json:"operator_name" gorm:"-"`
 	TriggerType     string            `json:"trigger_type"`
 	MaterialID      int64             `json:"material_id"`
-	MaterialUsageID int64             `json:"material_usage_id" gorm:"column:material_usage_id"`
+	MaterialUsageID *int64            `json:"material_usage_id" gorm:"column:material_usage_id"`
 	StrategyID      int64             `json:"compose_strategy_id" gorm:"column:compose_strategy_id"`
 	TemplateCode    string            `json:"template_code" gorm:"column:template_code"`
 	TemplateVersion uint32            `json:"template_version" gorm:"column:template_version"`
@@ -204,7 +204,7 @@ type CompositeOutput struct {
 	OperatorID      *int64          `json:"operator_id"`
 	OperatorName    string          `json:"operator_name" gorm:"-"`
 	MaterialID      int64           `json:"material_id"`
-	MaterialUsageID int64           `json:"material_usage_id" gorm:"column:material_usage_id"`
+	MaterialUsageID *int64          `json:"material_usage_id" gorm:"column:material_usage_id"`
 	TaskID          int64           `json:"compose_task_id" gorm:"column:compose_task_id"`
 	StrategyID      int64           `json:"compose_strategy_id" gorm:"column:compose_strategy_id"`
 	TemplateCode    string          `json:"template_code" gorm:"column:template_code"`

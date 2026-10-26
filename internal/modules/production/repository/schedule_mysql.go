@@ -325,7 +325,7 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 		created, skipped, err := executeComposePriorityRules(strategy.PriorityRules, pool, now, strategy.SingleLimit, strategy.DailyLimit-dailyCount, func(candidate scheduleCandidate) (bool, error) {
 			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, OperatorID: strategy.OperatorID, TriggerType: trigger,
 				DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, strategy.Name),
-				MaterialID:  candidate.MaterialID, MaterialUsageID: candidate.UsageID, StrategyID: strategy.ID,
+				MaterialID:  candidate.MaterialID, MaterialUsageID: &candidate.UsageID, StrategyID: strategy.ID,
 				TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: append(json.RawMessage(nil), strategy.Config...),
 				Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, candidate.MaterialID), CreatedBy: strategy.CreatedBy}
 			if err := tx.SavePoint("compose_candidate").Error; err != nil {

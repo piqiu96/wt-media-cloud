@@ -96,7 +96,7 @@ type ComposeOutputTraceTask struct {
 
 type ComposeOutputTrace struct {
 	Material      ComposeOutputTraceMaterial `json:"material"`
-	MaterialUsage ComposeOutputTraceUsage    `json:"material_usage"`
+	MaterialUsage *ComposeOutputTraceUsage   `json:"material_usage"`
 	Strategy      ComposeOutputTraceStrategy `json:"strategy"`
 	ComposeTask   ComposeOutputTraceTask     `json:"compose_task"`
 }
@@ -264,10 +264,12 @@ func (s *ComposeOutputService) Get(actor identity.PublicUser, id int64) (Compose
 	} else if found {
 		detail.Trace.Material = ComposeOutputTraceMaterial{ID: material.ID, Title: material.Title}
 	}
-	if usage, found, err := s.usages.FindUsage(output.MaterialUsageID); err != nil {
-		return ComposeOutputDetail{}, err
-	} else if found {
-		detail.Trace.MaterialUsage = ComposeOutputTraceUsage{ID: usage.ID, Status: string(usage.Status)}
+	if output.MaterialUsageID != nil {
+		if usage, found, err := s.usages.FindUsage(*output.MaterialUsageID); err != nil {
+			return ComposeOutputDetail{}, err
+		} else if found {
+			detail.Trace.MaterialUsage = &ComposeOutputTraceUsage{ID: usage.ID, Status: string(usage.Status)}
+		}
 	}
 	if strategy, found, err := s.strategies.Find(output.StrategyID); err != nil {
 		return ComposeOutputDetail{}, err

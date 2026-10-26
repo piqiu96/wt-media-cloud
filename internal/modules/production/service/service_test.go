@@ -596,6 +596,13 @@ func TestListMaterialsAnswersAnUnusedMaterialWithZeroCounts(t *testing.T) {
 
 func ptrInt64(value int64) *int64 { return &value }
 
+func usageIDValue(id *int64) int64 {
+	if id == nil {
+		return 0
+	}
+	return *id
+}
+
 func TestListMyMaterialsReturnsOnlyUsagesWithCurrentlyVisibleMaterials(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-a"

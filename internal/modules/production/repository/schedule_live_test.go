@@ -64,11 +64,15 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 		t.Fatalf("task count=%d want=%d err=%v", taskCount, first.CreatedCount, err)
 	}
 	if first.CreatedCount > 0 {
-		var materialID, usageID int64
+		var materialID int64
+		var usageID sql.NullInt64
 		if err := tx.Raw(`SELECT material_id, material_usage_id FROM compose_tasks WHERE compose_strategy_id = ? AND schedule_slot = ? LIMIT 1`, strategyID, first.ScheduleSlot).Row().Scan(&materialID, &usageID); err != nil {
 			t.Fatal(err)
 		}
-		candidate := scheduleCandidate{MaterialID: materialID, UsageID: usageID, GameID: sql.NullString{String: "", Valid: false}, Status: "available"}
+		candidate := scheduleCandidate{MaterialID: materialID, GameID: sql.NullString{String: "", Valid: false}, Status: "available"}
+		if usageID.Valid {
+			candidate.UsageID = usageID.Int64
+		}
 		if err := tx.Raw(`SELECT sc.game_id FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.id = ?`, materialID).Row().Scan(&candidate.GameID); err != nil {
 			t.Fatal(err)
 		}

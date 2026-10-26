@@ -818,7 +818,7 @@ components:
         operator_id: {type: [integer, 'null'], format: int64, description: Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by.}
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         material_id: {type: integer, format: int64}
-        material_usage_id: {type: integer, format: int64}
+        material_usage_id: {type: [integer, 'null'], format: int64, description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.}
         compose_task_id: {type: integer, format: int64}
         compose_strategy_id: {type: integer, format: int64}
         template_code: {type: string}
@@ -836,7 +836,7 @@ components:
       required: [material, material_usage, strategy, compose_task]
       properties:
         material: {type: object, required: [id, title], properties: {id: {type: integer, format: int64}, title: {type: string}}}
-        material_usage: {type: object, required: [id, status], properties: {id: {type: integer, format: int64}, status: {type: string, description: active or removed — the usage is history, not a live requirement.}}}
+        material_usage: {type: [object, 'null'], required: [id, status], properties: {id: {type: integer, format: int64}, status: {type: string, description: active or removed — the usage is history, not a live requirement.}}, description: Null when the output came from a scheduled task over the team material pool; the key stays, the value is null.}
         strategy: {type: object, required: [id, name, template_code, template_version, config_snapshot], properties: {id: {type: integer, format: int64}, name: {type: string}, template_code: {type: string}, template_version: {type: integer, minimum: 1}, config_snapshot: {type: object, description: The task's frozen snapshot, not the strategy's current config.}}}
         compose_task: {type: object, required: [id, status, config_snapshot, created_at], properties: {id: {type: integer, format: int64}, status: {type: string}, config_snapshot: {type: object}, created_at: {type: string, format: date-time}}}
     ComposeOutputDetail:
@@ -858,7 +858,7 @@ components:
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         trigger_type: {type: string, enum: [manual, scheduled]}
         material_id: {type: integer, format: int64}
-        material_usage_id: {type: integer, format: int64}
+        material_usage_id: {type: [integer, 'null'], format: int64, description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.}
         compose_strategy_id: {type: integer, format: int64}
         template_code: {type: string}
         template_version: {type: integer, minimum: 1}

@@ -37,6 +37,15 @@ describe('compose output detail', () => {
     for (const label of ['基本信息', '来源追踪', '配置快照']) expect(html).toContain(label)
   })
 
+  it('renders a dash for a scheduled output that carries no personal usage', async () => {
+    const scheduled = { ...detail, trace: { ...detail.trace, material_usage: null } }
+    const html = await render({ detail: scheduled, tab: 'source' })
+    const usage = html.slice(html.indexOf('素材使用'), html.indexOf('生产记录'))
+    expect(usage).toContain('—')
+    expect(usage).not.toContain('undefined')
+    expect(usage).not.toContain('9 ·')
+  })
+
   it('renders only the panels the host allows and keeps signed URLs out of readable snapshots', async () => {
     const html = await render({ detail, tab: 'source', tabs: ['basic', 'source'] })
     expect(html).toContain('来源追踪')

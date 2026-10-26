@@ -89,7 +89,7 @@ func (f *outputLinkerFake) PresignObjectURL(_ context.Context, key string) (stri
 }
 
 func outputFixture(id int64) model.CompositeOutput {
-	return model.CompositeOutput{ID: id, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: 9, TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
+	return model.CompositeOutput{ID: id, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
 }
 
 func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks *outputTaskFake, linker *outputLinkerFake) *ComposeOutputService {
@@ -251,6 +251,27 @@ func TestGetComposeOutputDetailTracesSources(t *testing.T) {
 	}
 	if detail.Trace.Strategy.ConfigSnapshot != nil && detail.Trace.Strategy.Name == "" {
 		t.Fatalf("strategy trace incomplete: %+v", detail.Trace.Strategy)
+	}
+}
+
+// A scheduled output never references a personal usage; the trace must stay
+// empty instead of falling back to some other row or panicking on the nil id.
+func TestGetComposeOutputDetailLeavesUsageTraceEmptyForPoolOutputs(t *testing.T) {
+	team := identity.TeamID(7)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	output := outputFixture(1)
+	output.MaterialUsageID = nil
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{output}}
+	traces := &outputTraceFakes{material: model.Material{ID: 42, Title: "素材甲"}, usage: model.MaterialUsage{ID: 9, Status: "active"}, strategy: model.ComposeStrategy{ID: 3, Name: "策略"}}
+	tasks := &outputTaskFake{task: model.ComposeTask{ID: 55, Status: model.ComposeTaskSuccess}}
+	svc := newOutputService(store, traces, tasks, &outputLinkerFake{})
+
+	detail, err := svc.Get(operator, 1)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if detail.Trace.MaterialUsage != nil {
+		t.Fatalf("pool output must not resolve a usage: %+v", detail.Trace.MaterialUsage)
 	}
 }
 

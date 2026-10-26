@@ -117,7 +117,7 @@ func TestLiveStrategyRulesRoundTripAndImmediateRun(t *testing.T) {
 	}
 	key := "local-rule-proof-failure"
 	runKey := scheduleRunKey(failureStrategy.ID, time.Time{}, key)
-	blockerTask := model.ComposeTask{TeamID: teamID, GameID: gameID, TriggerType: "manual", DisplayName: "占位任务", MaterialID: firstMaterial, MaterialUsageID: firstUsage, StrategyID: blocker.ID, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: strategy.Config, Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, firstMaterial), CreatedBy: userID}
+	blockerTask := model.ComposeTask{TeamID: teamID, GameID: gameID, TriggerType: "manual", DisplayName: "占位任务", MaterialID: firstMaterial, MaterialUsageID: int64Ptr(firstUsage), StrategyID: blocker.ID, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: strategy.Config, Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, firstMaterial), CreatedBy: userID}
 	if err := composeTaskInsertWithAudit(tx, &blockerTask, "compose_task.schedule", userID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}

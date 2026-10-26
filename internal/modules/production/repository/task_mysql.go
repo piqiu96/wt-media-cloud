@@ -172,7 +172,7 @@ func createForUsage(db *gorm.DB, item model.ComposeTask, action string, now time
 		if err != nil || !found {
 			return err
 		}
-		item.MaterialUsageID = usage.ID
+		item.MaterialUsageID = &usage.ID
 		if err := lockComposeTaskMaterial(tx, item.StrategyID, item.MaterialID); err != nil {
 			return err
 		}
@@ -396,15 +396,19 @@ type composeTaskScanner interface{ Scan(...any) error }
 func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 	var item model.ComposeTask
 	var snapshot []byte
-	var operatorID, claimedNode, compositeOutput sql.NullInt64
+	var operatorID, usageID, claimedNode, compositeOutput sql.NullInt64
 	var leaseExpires, heartbeat, nextAttempt, started, finished sql.NullTime
-	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.GameID, &operatorID, &item.TriggerType, &item.MaterialID, &item.MaterialUsageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.GameID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.ComposeTask{}, err
 	}
 	if operatorID.Valid {
 		value := operatorID.Int64
 		item.OperatorID = &value
+	}
+	if usageID.Valid {
+		value := usageID.Int64
+		item.MaterialUsageID = &value
 	}
 	if !json.Valid(snapshot) {
 		return model.ComposeTask{}, fmt.Errorf("compose task %d has invalid config_snapshot_json", item.ID)
