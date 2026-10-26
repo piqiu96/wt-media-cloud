@@ -373,6 +373,7 @@ async function runBatchWindow(targets, action) {
   error.value = ""
   let ok = 0
   let failed = 0
+  let firstFailure = ""
   try {
     const localAgent = await desktopLocalAgentService()
     for (const profile of targets) {
@@ -387,11 +388,13 @@ async function runBatchWindow(targets, action) {
           openStates.value[profile.id] = false
         }
         ok += 1
-      } catch {
+      } catch (e) {
         failed += 1
+        firstFailure ||= executionErrorMessage(e)
       }
     }
     taskNotice.value = `批量${action === "open" ? "打开" : "关闭"}完成：成功 ${ok} 个，失败 ${failed} 个。`
+    if (firstFailure) error.value = firstFailure
   } catch (e) {
     error.value = executionErrorMessage(e)
   } finally {
@@ -601,7 +604,7 @@ async function triggerScan() {
     if (e?.code === 'BIT_MAIN_USER_MISMATCH') {
       identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
     }
-    error.value = e.message
+    error.value = executionErrorMessage(e)
   } finally {
     scanning.value = false
   }
