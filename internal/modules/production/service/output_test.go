@@ -154,12 +154,27 @@ func TestListComposeOutputsSeniorSeesTeamScopeNotOnlyOwn(t *testing.T) {
 	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
 	store := &outputMemoryStore{}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
-	if _, err := svc.List(senior, ListComposeOutputsInput{OperatorScope: "team"}); err != nil {
+	if _, err := svc.List(senior, ListComposeOutputsInput{}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	filter := store.filters[0]
-	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 {
-		t.Fatalf("senior team scope must not narrow to an operator: %+v", filter)
+	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 || len(filter.GameIDs) != 0 {
+		t.Fatalf("senior default scope must be the whole team and every game: %+v", filter)
+	}
+}
+
+func TestComposeOutputSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
+	team := identity.TeamID(7)
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"omega"}}
+	otherTeam := outputFixture(2)
+	otherTeam.TeamID = 8
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1), otherTeam}}
+	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
+	if _, err := svc.Get(senior, 1); err != nil {
+		t.Fatalf("senior must read a same-team output in another game: %v", err)
+	}
+	if _, err := svc.Get(senior, 2); !errors.Is(err, ErrComposeOutputNotFound) {
+		t.Fatalf("senior must not read another team's output: %v", err)
 	}
 }
 

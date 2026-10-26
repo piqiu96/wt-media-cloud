@@ -207,7 +207,9 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 		return nil, fmt.Errorf("%w: %v", ErrComposeOutputInvalid, err)
 	}
 	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
-	if actor.Role != identity.RoleAdmin {
+	// Operators stay inside the games they cover; seniors and admins see every
+	// game of the team they are allowed to read.
+	if actor.Role == identity.RoleOperator {
 		filter.GameIDs = actor.GameIDs
 	}
 	items, err := s.outputs.List(filter)
@@ -381,12 +383,18 @@ func (s *ComposeOutputService) withOperatorName(item model.CompositeOutput) (mod
 }
 
 // canReadComposeOutput scopes the page like canReadComposeTask: admins see
-// everything, seniors their team-and-game scope, operators only their own.
+// everything, seniors every game of their team, operators only their own.
 func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput) bool {
 	if actor.Role == identity.RoleAdmin {
 		return true
 	}
 	if actor.TeamID == nil || int64(*actor.TeamID) != item.TeamID {
+		return false
+	}
+	if actor.Role == identity.RoleSeniorOperator {
+		return true
+	}
+	if actor.Role != identity.RoleOperator {
 		return false
 	}
 	inGame := false
@@ -398,10 +406,7 @@ func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput)
 	if !inGame {
 		return false
 	}
-	if actor.Role == identity.RoleOperator {
-		// Same fallback as tasks: a historical row with no operator stays
-		// reachable by its creator without being attributed to them.
-		return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
-	}
-	return actor.Role == identity.RoleSeniorOperator
+	// Same fallback as tasks: a historical row with no operator stays
+	// reachable by its creator without being attributed to them.
+	return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
 }
