@@ -28,6 +28,9 @@ type ListComposeOutputsInput struct {
 	Source        string    `json:"source"`
 	Search        string    `json:"search"`
 	TriggerType   string    `json:"trigger_type"`
+	TeamID        int64     `json:"team_id"`
+	OperatorID    int64     `json:"operator_id"`
+	OperatorScope string    `json:"operator_scope"`
 	CreatedFrom   time.Time `json:"created_from"`
 	CreatedBefore time.Time `json:"created_before"`
 }
@@ -108,6 +111,7 @@ type ComposeOutputService struct {
 	strategies composeOutputTraceStrategySource
 	tasks      composeOutputTraceTaskSource
 	links      composeOutputLinker
+	operators  func() ([]identity.PublicUser, error)
 	// transfers is the download path's only dependency: a consumer-side
 	// interface narrowed to the one call a download of an already-verified object
 	// needs — an output is never prepared in the cloud, so this service has no
@@ -137,7 +141,9 @@ func NewComposeOutputService(outputs ComposeOutputRepository, materials composeO
 }
 
 func wiredComposeOutputService() *ComposeOutputService {
-	return NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{}, productionTransferCreator{})
+	service := NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{}, productionTransferCreator{})
+	service.operators = identity.ListUsers
+	return service
 }
 
 func ListComposeOutputs(actor identity.PublicUser, input ListComposeOutputsInput) ([]model.CompositeOutput, error) {
@@ -193,20 +199,41 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 			return nil, fmt.Errorf("%w: unknown trigger_type %s", ErrComposeOutputInvalid, input.TriggerType)
 		}
 	}
-	if actor.Role != identity.RoleAdmin {
-		if actor.Role != identity.RoleOperator && actor.Role != identity.RoleSeniorOperator {
+	scope, err := resolveComposeListScope(actor, input.TeamID, input.OperatorID, input.OperatorScope)
+	if err != nil {
+		if errors.Is(err, errComposeScopeForbidden) {
 			return nil, ErrComposeOutputForbidden
 		}
-		if actor.TeamID == nil || len(actor.GameIDs) == 0 {
-			return []model.CompositeOutput{}, nil
-		}
-		filter.TeamID = int64(*actor.TeamID)
+		return nil, fmt.Errorf("%w: %v", ErrComposeOutputInvalid, err)
+	}
+	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
+	if actor.Role != identity.RoleAdmin {
 		filter.GameIDs = actor.GameIDs
-		if actor.Role == identity.RoleOperator {
-			filter.CreatedBy = int64(actor.ID)
+	}
+	items, err := s.outputs.List(filter)
+	if err != nil {
+		return nil, err
+	}
+	return s.withOperatorNames(items)
+}
+
+func (s *ComposeOutputService) withOperatorNames(items []model.CompositeOutput) ([]model.CompositeOutput, error) {
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.OperatorID != nil {
+			ids = append(ids, *item.OperatorID)
 		}
 	}
-	return s.outputs.List(filter)
+	names, err := composeOperatorNameLookup(s.operators, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].OperatorID != nil {
+			items[i].OperatorName = names[*items[i].OperatorID]
+		}
+	}
+	return items, nil
 }
 
 // Get reads one output with its source chain. The chain is a read-side
@@ -267,7 +294,7 @@ func (s *ComposeOutputService) Archive(actor identity.PublicUser, id int64) (mod
 	if !found {
 		return model.CompositeOutput{}, ErrComposeOutputNotFound
 	}
-	return stored, nil
+	return s.withOperatorName(stored)
 }
 
 // VideoURL answers the preview grant — the detail drawer's link, deliberately
@@ -342,7 +369,15 @@ func (s *ComposeOutputService) readable(actor identity.PublicUser, id int64) (mo
 	if !found || !canReadComposeOutput(actor, output) {
 		return model.CompositeOutput{}, ErrComposeOutputNotFound
 	}
-	return output, nil
+	return s.withOperatorName(output)
+}
+
+func (s *ComposeOutputService) withOperatorName(item model.CompositeOutput) (model.CompositeOutput, error) {
+	items, err := s.withOperatorNames([]model.CompositeOutput{item})
+	if err != nil {
+		return model.CompositeOutput{}, err
+	}
+	return items[0], nil
 }
 
 // canReadComposeOutput scopes the page like canReadComposeTask: admins see
@@ -364,7 +399,9 @@ func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput)
 		return false
 	}
 	if actor.Role == identity.RoleOperator {
-		return item.CreatedBy == int64(actor.ID)
+		// Same fallback as tasks: a historical row with no operator stays
+		// reachable by its creator without being attributed to them.
+		return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
 	}
 	return actor.Role == identity.RoleSeniorOperator
 }

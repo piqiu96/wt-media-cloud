@@ -29,6 +29,9 @@ type CreateComposeTaskItemInput struct {
 
 type CreateComposeTasksInput struct {
 	StrategyID int64 `json:"strategy_id"`
+	// OperatorID is optional on the wire; when present it must name the
+	// strategy's own operator, because a task snapshots that assignment.
+	OperatorID int64 `json:"operator_id"`
 	// Name is the operator's label for this batch. Blank keeps the derived
 	// material · strategy name; otherwise the whole batch shares it, numbered
 	// in submission order (model.ComposeTaskBatchDisplayName).
@@ -41,6 +44,9 @@ type ListComposeTasksInput struct {
 	Status        string    `json:"status"`
 	TriggerType   string    `json:"trigger_type"`
 	StrategyID    int64     `json:"compose_strategy_id"`
+	TeamID        int64     `json:"team_id"`
+	OperatorID    int64     `json:"operator_id"`
+	OperatorScope string    `json:"operator_scope"`
 	CreatedFrom   time.Time `json:"created_from"`
 	CreatedBefore time.Time `json:"created_before"`
 }
@@ -85,6 +91,7 @@ type ComposeTaskService struct {
 	tasks      ComposeTaskRepository
 	strategies composeTaskStrategySource
 	materials  composeTaskMaterialSource
+	operators  func() ([]identity.PublicUser, error)
 }
 
 func NewComposeTaskService(tasks ComposeTaskRepository, strategies composeTaskStrategySource, materials composeTaskMaterialSource) *ComposeTaskService {
@@ -92,7 +99,9 @@ func NewComposeTaskService(tasks ComposeTaskRepository, strategies composeTaskSt
 }
 
 func wiredComposeTaskService() *ComposeTaskService {
-	return NewComposeTaskService(repository.ComposeTaskStore{}, repository.StrategyStore{}, mysqlStore{})
+	service := NewComposeTaskService(repository.ComposeTaskStore{}, repository.StrategyStore{}, mysqlStore{})
+	service.operators = identity.ListUsers
+	return service
 }
 
 func ListComposeTasks(actor identity.PublicUser, input ListComposeTasksInput) ([]model.ComposeTask, error) {
@@ -207,6 +216,12 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 	if strategy.Status != model.ComposeStrategyEnabled {
 		return CreateComposeTasksResult{}, fmt.Errorf("%w: strategy is not active", ErrComposeTaskInvalid)
 	}
+	if strategy.OperatorID == nil {
+		return CreateComposeTasksResult{}, fmt.Errorf("%w: strategy has no operator assigned", ErrComposeTaskInvalid)
+	}
+	if input.OperatorID > 0 && input.OperatorID != *strategy.OperatorID {
+		return CreateComposeTasksResult{}, fmt.Errorf("%w: operator_id must match the strategy's operator", ErrComposeTaskInvalid)
+	}
 	template, err := s.usableTemplate(strategy)
 	if err != nil {
 		return CreateComposeTasksResult{}, err
@@ -245,7 +260,7 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 			return CreateComposeTasksResult{}, ErrComposeTaskNotFound
 		}
 		task := model.ComposeTask{
-			TeamID: strategy.TeamID, GameID: strategy.GameID, TriggerType: "manual",
+			TeamID: strategy.TeamID, GameID: strategy.GameID, OperatorID: strategy.OperatorID, TriggerType: "manual",
 			DisplayName: model.ComposeTaskBatchDisplayName(input.Name, index, len(input.Items), material.Title, item.MaterialID, strategy.Name),
 			MaterialID:  item.MaterialID, StrategyID: strategy.ID,
 			TemplateCode: template.Code, TemplateVersion: strategy.TemplateVersion,
@@ -269,6 +284,12 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 		}
 		res.Created = append(res.Created, created)
 	}
+	// The tasks are already written; a directory read failure must not turn a
+	// successful create into an error the page would retry. Names fall back to
+	// empty and the page still has operator_id.
+	if decorated, err := s.withOperatorNames(res.Created); err == nil {
+		res.Created = decorated
+	}
 	return res, nil
 }
 
@@ -280,7 +301,7 @@ func (s *ComposeTaskService) Get(actor identity.PublicUser, id int64) (model.Com
 	if !found || !canReadComposeTask(actor, item) {
 		return model.ComposeTask{}, ErrComposeTaskNotFound
 	}
-	return item, nil
+	return s.withOperatorName(item)
 }
 
 func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTasksInput) ([]model.ComposeTask, error) {
@@ -303,20 +324,49 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 			return nil, fmt.Errorf("%w: unknown status %s", ErrComposeTaskInvalid, input.Status)
 		}
 	}
-	if actor.Role != identity.RoleAdmin {
-		if actor.Role != identity.RoleOperator && actor.Role != identity.RoleSeniorOperator {
+	scope, err := resolveComposeListScope(actor, input.TeamID, input.OperatorID, input.OperatorScope)
+	if err != nil {
+		if errors.Is(err, errComposeScopeForbidden) {
 			return nil, ErrComposeTaskForbidden
 		}
-		if actor.TeamID == nil || len(actor.GameIDs) == 0 {
-			return []model.ComposeTask{}, nil
-		}
-		filter.TeamID = int64(*actor.TeamID)
+		return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
+	}
+	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
+	if actor.Role != identity.RoleAdmin {
 		filter.GameIDs = actor.GameIDs
-		if actor.Role == identity.RoleOperator {
-			filter.CreatedBy = int64(actor.ID)
+	}
+	items, err := s.tasks.List(filter)
+	if err != nil {
+		return nil, err
+	}
+	return s.withOperatorNames(items)
+}
+
+func (s *ComposeTaskService) withOperatorName(item model.ComposeTask) (model.ComposeTask, error) {
+	items, err := s.withOperatorNames([]model.ComposeTask{item})
+	if err != nil {
+		return model.ComposeTask{}, err
+	}
+	return items[0], nil
+}
+
+func (s *ComposeTaskService) withOperatorNames(items []model.ComposeTask) ([]model.ComposeTask, error) {
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.OperatorID != nil {
+			ids = append(ids, *item.OperatorID)
 		}
 	}
-	return s.tasks.List(filter)
+	names, err := composeOperatorNameLookup(s.operators, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].OperatorID != nil {
+			items[i].OperatorName = names[*items[i].OperatorID]
+		}
+	}
+	return items, nil
 }
 
 // ComposeMaterialStateLimit bounds one material-states read. The create drawer
@@ -427,7 +477,9 @@ func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool 
 		return false
 	}
 	if actor.Role == identity.RoleOperator {
-		return item.CreatedBy == int64(actor.ID)
+		// Historical rows have no operator. Their creator still reaches them,
+		// but the row is not attributed to the creator.
+		return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
 	}
 	return actor.Role == identity.RoleSeniorOperator
 }

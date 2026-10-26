@@ -141,9 +141,10 @@ func TestComposeSchedulerContinuesAfterOneStrategyFails(t *testing.T) {
 func TestComposeRunNowChecksActorAndUsesStableRequestKey(t *testing.T) {
 	_, strategies, actor := strategyFixture()
 	schedule := model.ComposeSchedule{Mode: "manual", Timezone: "Asia/Shanghai"}
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled", ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Schedule: &schedule}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled", OperatorID: operatorIDPtr(9), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Schedule: &schedule}}
 	store := &scheduleFake{}
 	svc := NewComposeSchedulerService(store, strategies)
+	svc.operators = func() ([]identity.PublicUser, error) { return []identity.PublicUser{actor}, nil }
 	actor.Role = identity.RoleOperator
 	if _, err := svc.RunNow(actor, 11, "request-001"); !errors.Is(err, ErrStrategyForbidden) {
 		t.Fatalf("operator error=%v", err)
@@ -154,5 +155,22 @@ func TestComposeRunNowChecksActorAndUsesStableRequestKey(t *testing.T) {
 	}
 	if _, err := svc.RunNow(actor, 11, "request-001"); err != nil || len(store.options) != 1 || store.options[0].ManualKey != "request-001" {
 		t.Fatalf("run error=%v options=%+v", err, store.options)
+	}
+}
+
+func TestComposeRunNowRefusesAnUnavailableOperatorBeforeRunning(t *testing.T) {
+	_, strategies, actor := strategyFixture()
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled", OperatorID: operatorIDPtr(10), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}}
+	store := &scheduleFake{}
+	svc := NewComposeSchedulerService(store, strategies)
+	team := identity.TeamID(7)
+	svc.operators = func() ([]identity.PublicUser, error) {
+		return []identity.PublicUser{{ID: 9, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}}, nil
+	}
+	if _, err := svc.RunNow(actor, 11, "request-001"); !errors.Is(err, ErrStrategyInvalid) {
+		t.Fatalf("unavailable operator error = %v", err)
+	}
+	if len(store.options) != 0 {
+		t.Fatalf("a refused run must not reach the store: %+v", store.options)
 	}
 }

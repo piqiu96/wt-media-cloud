@@ -9,6 +9,8 @@ type ComposeStrategy struct {
 	ID              int64                 `json:"id"`
 	TeamID          int64                 `json:"team_id"`
 	GameID          string                `json:"game_id"`
+	OperatorID      *int64                `json:"operator_id"`
+	OperatorName    string                `json:"operator_name" gorm:"-"`
 	TemplateID      int64                 `json:"compose_template_id" gorm:"column:compose_template_id"`
 	TemplateVersion uint32                `json:"compose_template_version" gorm:"column:compose_template_version"`
 	Name            string                `json:"name"`

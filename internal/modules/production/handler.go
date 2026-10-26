@@ -36,6 +36,32 @@ func usageID(c *hertzapp.RequestContext) (int64, bool) {
 	return value, true
 }
 
+// parseComposeListScope reads the optional team/operator narrowing the task and
+// output lists share. It parses only; the service decides whether this actor
+// may use the combination and answers its own sentinel.
+func parseComposeListScope(c *hertzapp.RequestContext) (int64, int64, string, error) {
+	var teamID, operatorID int64
+	if raw := strings.TrimSpace(c.Query("team_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			return 0, 0, "", errors.New("team_id 无效")
+		}
+		teamID = value
+	}
+	if raw := strings.TrimSpace(c.Query("operator_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			return 0, 0, "", errors.New("operator_id 无效")
+		}
+		operatorID = value
+	}
+	scope := strings.TrimSpace(c.Query("operator_scope"))
+	if scope != "" && scope != "mine" && scope != "team" && scope != "all" {
+		return 0, 0, "", errors.New("operator_scope 无效")
+	}
+	return teamID, operatorID, scope, nil
+}
+
 func ListMaterials(_ context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
