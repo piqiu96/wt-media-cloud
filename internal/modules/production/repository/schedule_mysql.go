@@ -201,7 +201,6 @@ func scheduledTaskKey(runKey string, materialID int64) string {
 }
 
 type scheduleCandidate struct {
-	UsageID       int64
 	MaterialID    int64
 	GameID        sql.NullString
 	Status        string
@@ -325,7 +324,7 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 		created, skipped, err := executeComposePriorityRules(strategy.PriorityRules, pool, now, strategy.SingleLimit, strategy.DailyLimit-dailyCount, func(candidate scheduleCandidate) (bool, error) {
 			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, OperatorID: strategy.OperatorID, TriggerType: trigger,
 				DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, strategy.Name),
-				MaterialID:  candidate.MaterialID, MaterialUsageID: &candidate.UsageID, StrategyID: strategy.ID,
+				MaterialID:  candidate.MaterialID, StrategyID: strategy.ID,
 				TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: append(json.RawMessage(nil), strategy.Config...),
 				Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, candidate.MaterialID), CreatedBy: strategy.CreatedBy}
 			if err := tx.SavePoint("compose_candidate").Error; err != nil {
@@ -417,8 +416,13 @@ func composeOperatorAvailable(tx *gorm.DB, strategy model.ComposeStrategy) (bool
 	return count > 0, err
 }
 
+// listComposeScheduleCandidates reads the strategy team's material pool. A
+// personal usage row is not required: scheduled production belongs to the
+// strategy operator, and neither the creator's nor the operator's "my
+// materials" list is touched. The game is kept in the row for the other_game
+// skip reason, not as a WHERE clause, so candidate_count keeps its meaning.
 func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) ([]scheduleCandidate, error) {
-	rows, err := tx.Raw(`SELECT mu.id, mu.material_id, sc.game_id, m.status, m.title, sc.published_at, sc.like_count, sc.favorite_count FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.user_id = ? AND mu.team_id = ? AND m.team_id = ? AND mu.status = 'active' ORDER BY mu.id`, strategy.CreatedBy, strategy.TeamID, strategy.TeamID).Rows()
+	rows, err := tx.Raw(`SELECT m.id, sc.game_id, m.status, m.title, sc.published_at, sc.like_count, sc.favorite_count FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? ORDER BY m.id`, strategy.TeamID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +430,7 @@ func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) 
 	result := make([]scheduleCandidate, 0)
 	for rows.Next() {
 		var item scheduleCandidate
-		if err := rows.Scan(&item.UsageID, &item.MaterialID, &item.GameID, &item.Status, &item.Title, &item.PublishedAt, &item.LikeCount, &item.FavoriteCount); err != nil {
+		if err := rows.Scan(&item.MaterialID, &item.GameID, &item.Status, &item.Title, &item.PublishedAt, &item.LikeCount, &item.FavoriteCount); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

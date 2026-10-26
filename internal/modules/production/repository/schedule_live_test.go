@@ -29,9 +29,9 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 		t.Fatalf("due strategy scan: %v", err)
 	}
 	var strategyID int64
-	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN material_usages mu ON mu.user_id = s.created_by AND mu.team_id = s.team_id AND mu.status = 'active' WHERE s.status = 'enabled' AND t.status = 'active' GROUP BY s.id ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
+	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN users u ON u.id = s.operator_id AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = s.team_id JOIN user_game_scopes g ON g.user_id = u.id AND g.game_id = s.game_id WHERE s.status = 'enabled' AND t.status = 'active' ORDER BY s.id LIMIT 1`).Row().Scan(&strategyID)
 	if err != nil {
-		t.Skipf("no active strategy with creator usages: %v", err)
+		t.Skipf("no active strategy with an available operator: %v", err)
 	}
 	tx := database.DB().Begin()
 	if tx.Error != nil {
@@ -69,10 +69,10 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 		if err := tx.Raw(`SELECT material_id, material_usage_id FROM compose_tasks WHERE compose_strategy_id = ? AND schedule_slot = ? LIMIT 1`, strategyID, first.ScheduleSlot).Row().Scan(&materialID, &usageID); err != nil {
 			t.Fatal(err)
 		}
-		candidate := scheduleCandidate{MaterialID: materialID, GameID: sql.NullString{String: "", Valid: false}, Status: "available"}
 		if usageID.Valid {
-			candidate.UsageID = usageID.Int64
+			t.Fatalf("scheduled task must not reference a personal usage, got %d", usageID.Int64)
 		}
+		candidate := scheduleCandidate{MaterialID: materialID, GameID: sql.NullString{String: "", Valid: false}, Status: "available"}
 		if err := tx.Raw(`SELECT sc.game_id FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.id = ?`, materialID).Row().Scan(&candidate.GameID); err != nil {
 			t.Fatal(err)
 		}
