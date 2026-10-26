@@ -143,3 +143,82 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 		t.Fatalf("next run=%v err=%v", nextRun, err)
 	}
 }
+
+// The quotas and the operator gate are part of the same run path, so they are
+// measured on real rows: a strategy with single_limit=1 and daily_limit=1
+// creates one task on its first immediate run, and the second immediate run
+// records daily_limit for every remaining pair instead of creating another.
+// A strategy with no operator records operator_unavailable and no task.
+func TestLiveComposeScheduleQuotaAndOperatorGate(t *testing.T) {
+	if os.Getenv("WT_MEDIA_TEST_LIVE_DB") != "1" {
+		t.Skip("set WT_MEDIA_TEST_LIVE_DB=1 after migrations")
+	}
+	config.MustInitializeRuntimePaths()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Initialize(cfg.Databases); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	var sourceID int64
+	err = database.DB().Raw(`SELECT s.id FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version JOIN users u ON u.id = s.operator_id AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = s.team_id JOIN user_game_scopes g ON g.user_id = u.id AND g.game_id = s.game_id WHERE s.status = 'enabled' AND t.status = 'active' AND EXISTS (SELECT 1 FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = s.team_id AND sc.game_id = s.game_id AND m.status = 'available') ORDER BY s.id LIMIT 1`).Row().Scan(&sourceID)
+	if err != nil {
+		t.Skipf("no active strategy with an available operator and a team material: %v", err)
+	}
+	tx := database.DB().Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	t.Cleanup(func() { _ = tx.Rollback().Error })
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	rules, err := json.Marshal([]model.ComposePriorityRule{{Priority: 1, Action: "match", Logic: "all", Conditions: []model.ComposeCondition{{Field: "like_count", Operator: "gte", Value: json.RawMessage(`0`)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert := func(operator string, singleLimit, dailyLimit int) int64 {
+		name := fmt.Sprintf("CHG105-live-%s-%d", operator, time.Now().UnixNano())
+		result := tx.Exec(`INSERT INTO compose_strategies (team_id, game_id, operator_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at) SELECT team_id, game_id, `+operator+`, compose_template_id, compose_template_version, ?, config_json, 'manual', NULL, ?, ?, ?, NULL, 'enabled', created_by, updated_by, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) FROM compose_strategies WHERE id = ?`, name, rules, singleLimit, dailyLimit, sourceID)
+		if result.Error != nil || result.RowsAffected != 1 {
+			t.Fatalf("create %s fixture: rows=%d err=%v", operator, result.RowsAffected, result.Error)
+		}
+		var id int64
+		if err := tx.Raw(`SELECT id FROM compose_strategies WHERE name = ?`, name).Row().Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	noAdvance := func(_ model.ComposeStrategy, _ time.Time) (*time.Time, error) {
+		t.Fatal("an immediate run must not advance the schedule")
+		return nil, nil
+	}
+	quotaID := insert("operator_id", 1, 1)
+	first, processed, err := runComposeSchedule(tx, ScheduleRunOptions{StrategyID: quotaID, Now: now, ManualKey: "live-quota-001", NextRun: noAdvance})
+	if err != nil || !processed || first.CreatedCount != 1 {
+		t.Fatalf("quota first run=%+v processed=%v err=%v", first, processed, err)
+	}
+	second, processed, err := runComposeSchedule(tx, ScheduleRunOptions{StrategyID: quotaID, Now: now, ManualKey: "live-quota-002", NextRun: noAdvance})
+	if err != nil || !processed || second.CreatedCount != 0 {
+		t.Fatalf("quota second run=%+v processed=%v err=%v", second, processed, err)
+	}
+	dailyLimited := 0
+	for _, skipped := range second.Skipped {
+		if skipped.Reason == "daily_limit" {
+			dailyLimited++
+		}
+	}
+	if dailyLimited == 0 {
+		t.Fatalf("second immediate run must record daily_limit, got %v", second.Skipped)
+	}
+	missingID := insert("NULL", 1, 1)
+	missing, processed, err := runComposeSchedule(tx, ScheduleRunOptions{StrategyID: missingID, Now: now, ManualKey: "live-no-operator-001", NextRun: noAdvance})
+	if err != nil || !processed || missing.CreatedCount != 0 || len(missing.Skipped) != 1 || missing.Skipped[0].Reason != "operator_unavailable" {
+		t.Fatalf("missing operator run=%+v processed=%v err=%v", missing, processed, err)
+	}
+	var missingTasks int
+	if err := tx.Raw(`SELECT COUNT(*) FROM compose_tasks WHERE compose_strategy_id = ?`, missingID).Row().Scan(&missingTasks); err != nil || missingTasks != 0 {
+		t.Fatalf("missing operator created %d tasks: %v", missingTasks, err)
+	}
+	t.Logf("quota strategy=%d first=%d second=%d daily_limited=%d; missing operator strategy=%d skipped=%v", quotaID, first.CreatedCount, second.CreatedCount, dailyLimited, missingID, missing.Skipped)
+}
