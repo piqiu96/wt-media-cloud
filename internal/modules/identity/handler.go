@@ -379,7 +379,13 @@ func ListGames(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	games, err := identityservice.ListGames(actor.ID)
+	var games []identityservice.OperationGame
+	var err error
+	if strings.TrimSpace(c.Query("scope")) == "all" {
+		games, err = identityservice.ListAllGames(actor.ID)
+	} else {
+		games, err = identityservice.ListGames(actor.ID)
+	}
 	if err != nil {
 		writeIdentityError(c, err)
 		return

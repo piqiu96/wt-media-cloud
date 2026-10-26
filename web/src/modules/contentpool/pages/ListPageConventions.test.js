@@ -18,8 +18,8 @@ const FILES = ['ContentPoolPage.vue', 'DiscoveryStrategiesPage.vue', 'CrawlTasks
 const TABLES = [
   { file: 'ContentPoolPage.vue', name: 'columns', count: 16 },
   { file: 'ContentPoolPage.vue', name: 'resultColumns', count: 9 },
-  { file: 'DiscoveryStrategiesPage.vue', name: 'columns', count: 12 },
-  { file: 'CrawlTasksPage.vue', name: 'columns', count: 11 },
+  { file: 'DiscoveryStrategiesPage.vue', name: 'columns', count: 13 },
+  { file: 'CrawlTasksPage.vue', name: 'columns', count: 12 },
   { file: 'CrawlTasksPage.vue', name: 'resultColumns', count: 7 },
 ]
 

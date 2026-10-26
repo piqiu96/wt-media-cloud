@@ -4,6 +4,8 @@ import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
+import { createSessionClient } from '../../../shared/api/session.js'
+import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -11,9 +13,14 @@ import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 
 const client = createDiscoveryClient()
+const session = createSessionClient()
+const users = createUsersClient()
 const route = useRoute()
 const router = useRouter()
 const rows = ref([])
+const teams = ref([])
+const currentUser = ref(null)
+const teamFilter = ref('')
 const loading = ref(false)
 const error = ref('')
 const detail = ref(null)
@@ -27,6 +34,10 @@ const strategyDrawer = ref(null)
 const filters = ref({ search: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
+// 任务异常处置（重试）与策略管理同属高级运营／管理员职责。
+const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUser.value?.role))
+
 // 每一列都必须声明 width，**不许只写 minWidth**。
 //
 // 实测（用户实机截图按表头左边界间距反推）：本页三列只有 minWidth 的
@@ -38,6 +49,7 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '任务名称', width: 220 },
   { colKey: 'strategy', title: '任务来源', width: 160 },
+  { colKey: 'team', title: '运营团队', width: 120 },
   { colKey: 'game', title: '游戏', width: 110 },
   { colKey: 'trigger', title: '触发方式', width: 90 },
   // 竖排后列宽只由最宽的那一项决定：实测最宽是「自动素材 9,999,999」，
@@ -74,6 +86,7 @@ const pagedRows = computed(() => {
 watch(filters, () => { pagination.value.current = 1 }, { deep: true })
 
 onMounted(async () => {
+  await loadContext()
   await load()
   const taskID = Number(route.query.task_id || 0)
   if (taskID > 0) {
@@ -82,17 +95,29 @@ onMounted(async () => {
   }
 })
 
+async function loadContext() {
+  try {
+    currentUser.value = await session.me()
+    if (isAdmin.value) {
+      const data = await users.listTeams()
+      teams.value = Array.isArray(data) ? data : []
+    }
+  } catch {
+    currentUser.value = null
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
     const strategyID = Number(route.query.strategy_id || 0)
     // 从策略详情跳进来时锁定来源策略，其余筛选交给后端。
-    const params = { strategy_id: strategyID > 0 ? strategyID : undefined, search: filters.value.search.trim(), status: filters.value.status }
+    const params = { strategy_id: strategyID > 0 ? strategyID : undefined, search: filters.value.search.trim(), status: filters.value.status, team_id: teamFilter.value || undefined }
     const data = await client.listTasks(params)
     rows.value = Array.isArray(data) ? data : []
     pagination.value.current = 1
-    const gameRows = await client.listGames()
+    const gameRows = await client.listGames({ scope: 'all' })
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
     error.value = e.message || '任务加载失败'
@@ -158,6 +183,14 @@ function gameName(id) {
   const game = games.value.find((item) => item.id === id)
   return game?.name || id || '-'
 }
+
+function teamName(id) {
+  if (currentUser.value?.team_id != null && String(currentUser.value.team_id) === String(id)) return currentUser.value.team_name || '-'
+  const team = teams.value.find((item) => String(item.id) === String(id))
+  return team?.name || '-'
+}
+
+function changeTeamFilter() { load() }
 
 function formatThreshold(value) {
   const n = Number(value || 0)
@@ -315,6 +348,7 @@ function hasFailed(task) {
       <ResourceCard class="task-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">任务名称 / 来源策略</span><t-input v-model="filters.search" clearable placeholder="搜索任务名称 / 来源策略" @enter="load" /></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="success" label="成功" />
             <t-option value="partial_success" label="部分成功" />
@@ -333,6 +367,7 @@ function hasFailed(task) {
               <a v-if="isStrategyTask(row)" class="task-source-link" @click="openStrategy(row)">{{ sourceName(row) }}</a>
               <span v-else>{{ sourceName(row) }}</span>
             </template>
+            <template #team="{ row }">{{ teamName(row.team_id) }}</template>
             <template #game="{ row }">{{ gameName(row.snapshot?.game_id) }}</template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
             <template #found="{ row }"><MetricList :items="foundStats(row)" /></template>
@@ -342,7 +377,7 @@ function hasFailed(task) {
             <template #op="{ row }">
               <t-space size="small">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="open(row)">详情</t-button>
-                <t-button v-if="hasFailed(row)" size="small" theme="primary" @click="retry(row)">重试</t-button>
+                <t-button v-if="canManage && hasFailed(row)" size="small" theme="primary" @click="retry(row)">重试</t-button>
               </t-space>
             </template>
           </t-table>
@@ -350,7 +385,7 @@ function hasFailed(task) {
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <t-drawer :close-btn="true" v-model:visible="visible" header="挖掘任务详情" size="min(92vw, 760px)" :footer="Boolean(detail && hasFailed(detail))">
+      <t-drawer :close-btn="true" v-model:visible="visible" header="挖掘任务详情" size="min(92vw, 760px)" :footer="Boolean(canManage && detail && hasFailed(detail))">
         <div v-if="detail" class="task-detail">
           <div class="detail-head">
             <h3 class="task-title">{{ taskName(detail) }}</h3>
@@ -424,7 +459,7 @@ function hasFailed(task) {
           </t-tabs>
         </div>
         <template #footer>
-          <t-button v-if="detail && hasFailed(detail)" theme="primary" :loading="retrying" @click="retry(detail)">重试</t-button>
+          <t-button v-if="canManage && detail && hasFailed(detail)" theme="primary" :loading="retrying" @click="retry(detail)">重试</t-button>
         </template>
       </t-drawer>
 

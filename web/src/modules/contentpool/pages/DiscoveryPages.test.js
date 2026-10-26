@@ -112,6 +112,40 @@ describe('discovery strategy and task pages', () => {
     expect(source).not.toContain('关联原任务')
   })
 
+  it('keeps strategy and task writes with senior operators while hiding them from operators', () => {
+    const strategies = read('DiscoveryStrategiesPage.vue')
+    expect(strategies).toContain("const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUser.value?.role))")
+    expect(strategies).toContain('v-if="canManage" theme="primary" @click="openCreate"')
+    expect(strategies).toContain('v-if="canManage" size="small" theme="primary"')
+    expect(strategies).toContain('v-if="canManage" size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)"')
+    expect(strategies).toContain('v-if="canManage" trigger="click"')
+    expect(strategies).toContain('if (!editingID.value && isAdmin.value && !form.value.team_id)')
+
+    const tasks = read('CrawlTasksPage.vue')
+    expect(tasks).toContain("const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUser.value?.role))")
+    expect(tasks).toContain('v-if="canManage && hasFailed(row)"')
+    expect(tasks).toContain('v-if="canManage && detail && hasFailed(detail)"')
+  })
+
+  it('lets admins pick a team and shows the team column, using the full game catalog', () => {
+    for (const page of ['DiscoveryStrategiesPage.vue', 'CrawlTasksPage.vue']) {
+      const source = read(page)
+      expect(source).toContain('createSessionClient')
+      expect(source).toContain('const isAdmin = computed')
+      expect(source).toContain('v-if="isAdmin"')
+      expect(source).toContain('v-model="teamFilter"')
+      expect(source).toContain("colKey: 'team'")
+      expect(source).toContain('teamName(row.team_id)')
+      expect(source).toContain("listGames({ scope: 'all' })")
+    }
+    const strategies = read('DiscoveryStrategiesPage.vue')
+    expect(strategies).toContain('teamId: teamFilter.value || undefined')
+    expect(strategies).toContain('v-if="isAdmin && !editingID" label="目标团队" required-mark')
+    expect(strategies).toContain('if (!payload.team_id || editingID.value) delete payload.team_id')
+    const tasks = read('CrawlTasksPage.vue')
+    expect(tasks).toContain('team_id: teamFilter.value || undefined')
+  })
+
   it('sends both discovery list filters to the backend instead of filtering locally', () => {
     const strategies = read('DiscoveryStrategiesPage.vue')
     expect(strategies).toContain('client.listStrategies(query)')
@@ -131,7 +165,7 @@ describe('discovery strategy and task pages', () => {
       expect(source).toContain('<t-pagination')
     }
     const tasks = read('CrawlTasksPage.vue')
-    expect(tasks).toContain(':footer="Boolean(detail && hasFailed(detail))"')
+    expect(tasks).toContain(':footer="Boolean(canManage && detail && hasFailed(detail))"')
     expect(tasks).toContain('<template #footer>')
     expect(tasks).toContain('@click="retry(detail)">重试</t-button>')
   })

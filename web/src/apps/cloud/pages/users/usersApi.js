@@ -41,6 +41,7 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
       return api.get('/games', {
         keyword: filters.keyword,
         status: filters.status,
+        scope: filters.scope,
       })
     },
     getGameReferences(gameId) {
