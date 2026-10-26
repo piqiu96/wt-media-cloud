@@ -832,19 +832,19 @@ func TestListComposeTasksScopesByRole(t *testing.T) {
 	if _, err := svc.List(senior, ListComposeTasksInput{}); err != nil {
 		t.Fatalf("senior list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 11 || tasks.lastFilter.IncludeUnownedCreatedBy != 11 || tasks.lastFilter.TeamID != 7 {
+	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 0 {
 		t.Fatalf("senior default filter = %+v", tasks.lastFilter)
 	}
 	if _, err := svc.List(senior, ListComposeTasksInput{OperatorScope: "team"}); err != nil {
 		t.Fatalf("senior team list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 {
+	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 0 {
 		t.Fatalf("senior team filter = %+v", tasks.lastFilter)
 	}
 	if _, err := svc.List(senior, ListComposeTasksInput{OperatorID: 9}); err != nil {
 		t.Fatalf("senior operator list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 {
+	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || len(tasks.lastFilter.GameIDs) != 0 {
 		t.Fatalf("senior named-operator filter = %+v", tasks.lastFilter)
 	}
 
@@ -886,6 +886,22 @@ func TestCreateComposeTasksSnapshotsTheStrategyOperator(t *testing.T) {
 	senior.Role = identity.RoleSeniorOperator
 	if _, err := svc.Create(senior, input); !errors.Is(err, ErrComposeTaskInvalid) {
 		t.Fatalf("unassigned strategy error = %v", err)
+	}
+}
+
+func TestComposeTaskSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
+	svc, tasks, _, _, _ := composeTaskFixture()
+	team := identity.TeamID(7)
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	tasks.tasks = []model.ComposeTask{
+		{ID: 611, TeamID: 7, GameID: "omega", Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(9)},
+		{ID: 612, TeamID: 8, GameID: "omega", Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(9)},
+	}
+	if _, err := svc.Get(senior, 611); err != nil {
+		t.Fatalf("senior must read a teammate's task in another game of the same team: %v", err)
+	}
+	if _, err := svc.Get(senior, 612); !errors.Is(err, ErrComposeTaskNotFound) {
+		t.Fatalf("senior must not read another team's task: %v", err)
 	}
 }
 

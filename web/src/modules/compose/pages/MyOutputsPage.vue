@@ -13,6 +13,7 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createdRangeParams } from '../createdRange.js'
+import { missingOperatorOption, operatorIdFromOption } from '../operatorFilter.js'
 import { formatBytes, formatDurationMs } from '../../../shared/utils/units.js'
 import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
@@ -45,13 +46,14 @@ const downloadKnown = ref(false)
 const strategies = ref([])
 const teams = ref([])
 const games = ref([])
+const enabledGames = ref([])
 const templates = ref([])
 const loading = ref(false)
 const error = ref('')
 const currentUser = ref(null)
 const operatorOptions = ref([])
 const operatorsLoading = ref(false)
-const filters = ref({ search: '', trigger: '', download: '', created_range: [], team_id: '', operator: '' })
+const filters = ref({ search: '', trigger: '', download: '', created_range: [], team_id: '', game_id: '', operator: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 const selectedRowKeys = ref([])
 const batchDownloading = ref(false)
@@ -71,10 +73,15 @@ const taskStatusTones = { pending: 'warning', running: 'info', success: 'success
 const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const canFilterOperators = computed(() => isSenior.value || isAdmin.value)
-const operatorFilterOptions = computed(() => {
-  const options = []
-  if (isSenior.value) options.push({ value: 'mine', label: '我的' }, { value: 'team', label: '团队全部' })
-  return options.concat(operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
+// 负责人候选只有本团队启用的成员（含本人）：未选择就是团队全部，不造伪选项。
+const operatorFilterOptions = computed(() => operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
+// 游戏选项只取游戏管理里启用的游戏；普通运营再与本人负责游戏取交集，
+// 因为他本来就只能读这些游戏的成片，列出点下去必空的游戏是一种误导。
+const gameFilterOptions = computed(() => {
+  const own = new Set(Array.isArray(currentUser.value?.game_ids) ? currentUser.value.game_ids : [])
+  return enabledGames.value
+    .filter((game) => isAdmin.value || isSenior.value || own.has(game.id))
+    .map((game) => ({ value: game.id, label: game.name }))
 })
 
 const columns = computed(() => [
@@ -82,6 +89,7 @@ const columns = computed(() => [
   { colKey: 'id', title: '成片 ID', width: 90 },
   { colKey: 'output', title: '成片', width: 260 },
   { colKey: 'material_id', title: '来源素材', width: 190 },
+  { colKey: 'game', title: '游戏', width: 100 },
   { colKey: 'strategy', title: '合成策略', width: 180 },
   { colKey: 'operator', title: '负责人', width: 110 },
   { colKey: 'trigger', title: '生成方式', width: 95 },
@@ -121,7 +129,7 @@ async function loadOperators() {
   try {
     const data = await client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })
     operatorOptions.value = Array.isArray(data) ? data : []
-    if (filters.value.operator.startsWith('op:') && !operatorOptions.value.some((option) => filters.value.operator === `op:${option.id}`)) filters.value.operator = ''
+    if (missingOperatorOption(filters.value.operator, operatorFilterOptions.value)) filters.value.operator = ''
   } catch {
     operatorOptions.value = []
   } finally {
@@ -167,18 +175,21 @@ async function refreshDownloadFacts() {
 }
 
 async function loadLookups() {
-  const [materialRows, strategyRows, composeTasks, teamRows, gameRows] = await Promise.all([
+  const [materialRows, strategyRows, composeTasks, teamRows, gameRows, enabledGameRows] = await Promise.all([
     materialsClient.list().catch(() => []),
     client.listStrategies().catch(() => []),
     client.listComposeTasks({}).catch(() => []),
     client.listTeams().catch(() => []),
-    client.listGames().catch(() => []),
+    // 名称字典要全量（停用游戏的历史成片也能显示名字）；筛选项另取启用游戏。
+    client.listGames({ scope: 'all' }).catch(() => []),
+    client.listGames({ scope: 'all', status: 'enabled' }).catch(() => []),
   ])
   materials.value = [...new Map([...materials.value, ...(Array.isArray(materialRows) ? materialRows : [])].map((item) => [item.id, item])).values()]
   strategies.value = Array.isArray(strategyRows) ? strategyRows : []
   taskRows.value = Array.isArray(composeTasks) ? composeTasks : []
   teams.value = Array.isArray(teamRows) ? teamRows : []
   games.value = Array.isArray(gameRows) ? gameRows : []
+  enabledGames.value = Array.isArray(enabledGameRows) ? enabledGameRows : []
   lookupsReady.value = true
 }
 
@@ -213,17 +224,12 @@ async function load({ resetPage = false } = {}) {
     // 不再二次拉素材列表再在本地匹配。
     params.search = filters.value.search.trim()
     params.trigger_type = filters.value.trigger
-    // 负责人筛选与服务端同一套 scope，和任务页一致：普通运营不发；高级运营默认我的，
-    // 可切团队全部或指定运营；管理员默认全部，按团队收窄。
-    const namedOperator = filters.value.operator.startsWith('op:') ? Number(filters.value.operator.slice(3)) : 0
-    if (isAdmin.value) {
-      if (filters.value.team_id) params.team_id = Number(filters.value.team_id)
-      if (namedOperator) params.operator_id = namedOperator
-      else if (filters.value.team_id) params.operator_scope = 'team'
-    } else if (isSenior.value) {
-      if (namedOperator) params.operator_id = namedOperator
-      else if (filters.value.operator === 'team') params.operator_scope = 'team'
-    }
+    // 负责人筛选与任务页一致：普通运营没有这个控件（服务端固定本人）；
+    // 高级运营不发参数就是本团队全部，选中成员只发 operator_id；管理员按团队筛选。
+    const namedOperator = operatorIdFromOption(filters.value.operator)
+    if (filters.value.game_id) params.game_id = filters.value.game_id
+    if (isAdmin.value && filters.value.team_id) params.team_id = Number(filters.value.team_id)
+    if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator
     const data = await client.listComposeOutputs(params)
     rows.value = Array.isArray(data) ? data : []
     if (resetPage) pagination.value.current = 1
@@ -237,7 +243,7 @@ async function load({ resetPage = false } = {}) {
 }
 
 function reset() {
-  filters.value = { search: '', trigger: '', download: '', created_range: [], team_id: '', operator: '' }
+  filters.value = { search: '', trigger: '', download: '', created_range: [], team_id: '', game_id: '', operator: '' }
   load({ resetPage: true })
 }
 
@@ -396,7 +402,6 @@ onMounted(() => {
   // 只为负责人筛选：读失败不拦页面，服务端仍按角色默认范围返回。
   sessionClient.me().then((me) => {
     currentUser.value = me
-    if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'
     loadOperators()
   }).catch(() => {})
   downloadPoller = setInterval(() => {
@@ -423,7 +428,8 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="filters.team_id" clearable placeholder="全部" @change="onTeamFilterChange">
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
           </t-select></label>
-          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" :clearable="!isSenior" :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" :options="gameFilterOptions" clearable placeholder="全部" /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">生成方式</span><t-select v-model="filters.trigger" :options="triggerOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">下载状态</span><t-select v-model="filters.download" :options="downloadOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
@@ -450,6 +456,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
               </div>
             </template>
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link><span class="output-related-cell__sub output-source-title">{{ materialFor(row)?.title || '—' }}</span></template>
+            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #strategy="{ row }">
               <div class="output-related-cell">
                 <t-link theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link>

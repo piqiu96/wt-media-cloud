@@ -5,17 +5,34 @@ import { computed, h, onMounted, ref } from 'vue'
 import { Button as TButton } from 'tdesign-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
+import { createSessionClient } from '../../../shared/api/session.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
-import { VIDEO_STATUSES, gameName, materialStatusLabel, materialStatusTone, usageLines, videoStatusLabel, videoStatusTone } from '../labels.js'
+import {
+  JOIN_FILTERS,
+  MY_USAGE_FILTERS,
+  TEAM_USAGE_FILTERS,
+  VIDEO_STATUSES,
+  gameName,
+  joinStatus,
+  materialStatusLabel,
+  materialStatusTone,
+  myUsageLabel,
+  myUsageTone,
+  usageOperators,
+  usageOutputCount,
+  usageSummary,
+  videoStatusLabel,
+  videoStatusTone,
+} from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 
 const client = createMaterialsClient()
+const sessionClient = createSessionClient()
 const users = createUsersClient()
 const route = useRoute()
 const router = useRouter()
@@ -25,40 +42,71 @@ const loading = ref(false)
 const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
 const statusFilter = ref('')
-const gameFilter = ref('')
+const joinedFilter = ref('')
+const myUsageFilter = ref('')
+const teamUsageFilter = ref('')
+const teamFilter = ref('')
+const gameFilters = ref([])
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
 const games = ref([])
+const teams = ref([])
+const currentUser = ref(null)
 const detailVisible = ref(false)
 const detail = ref(null)
 const detailLoading = ref(false)
+const usageVisible = ref(false)
+const usageMaterial = ref(null)
 const pagination = ref({ current: 1, pageSize: 20 })
 
-// 每行的「已加入我的素材」状态。列表接口不返回它（`material` 上没有「领取人」字段，
-// 关系在 `material_usages` 里），但 `/api/v1/my-materials` 已经能全量取回当前用户的
-// 关系，按素材 id join 一次就有 —— 不为此新增后端字段（2026-09-30 用户裁定）。
-const mineIds = ref(new Set())
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
+// 使用情况是团队汇总事实：普通运营不渲染列、筛选和详情段，只有高级运营/管理员能看。
+const canViewUsage = computed(() => isAdmin.value || isSenior.value)
+
+// 普通运营与高级运营进入页面时，游戏多选默认本人负责的游戏；管理员默认不筛，
+// 读的是所选团队（未选则跨团队）的库。清空筛选即可看到本团队全部游戏。
+function responsibleGames() {
+  if (isAdmin.value) return []
+  return Array.isArray(currentUser.value?.game_ids) ? [...currentUser.value.game_ids] : []
+}
+
+// 默认勾选只取「本人负责 ∩ 已启用」：游戏管理里停用的游戏不进选项，选中它
+// 只会得到一个永远空的筛选；字典还没读到时也不预选，避免选中不在选项里的 id。
+function defaultGameFilters() {
+  const enabled = new Set(games.value.map((game) => game.id))
+  return responsibleGames().filter((id) => enabled.has(id))
+}
 
 // 每一列都必须声明 width，不许只写 minWidth —— 理由与实测数据见
 // shared/testing/listPageConventions.js 里那条断言上面的说明（WebKit 的 fixed 布局下
 // minWidth 不产生确定列宽，这些列会被压成「剩余空间列」）。
 // 素材 ID 是第一业务列（规范 §5.1，用户裁定保留）；游戏不并进「素材」副行，它有自己的一列。
-// 两个状态维度并排（规范 §7.2）：素材状态已有真值（materials.status），使用情况还没有。
-// 缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到状态的素材画成「可用」。
+// 三个使用维度各自成列：加入状态（查看者自己的关系）、我的使用（查看者是否做过成功
+// 成片）、使用情况（本团队成功成片汇总）。它们不是同一个问题的不同画法，规范 §7.2
+// 明令不得合并。缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到
+// 状态的素材画成「可用」。
+// 使用情况是团队汇总：普通运营既没有姓名也没有这一列的入口，连表头都不出现。
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 360 },
   { colKey: 'game', title: '游戏', width: 100 },
   { colKey: 'material_status', title: '素材状态', width: 100 },
   { colKey: 'video_status', title: '文件状态', width: 100 },
-  { colKey: 'usage', title: '使用情况', width: 170 },
+  { colKey: 'joined', title: '加入状态', width: 100 },
+  { colKey: 'my_usage', title: '我的使用', width: 100 },
+  { colKey: 'usage', title: '使用情况', width: 200 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
   { colKey: 'created_at', title: '入库时间', width: 105, sorter: true },
   { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
 
+const tableColumns = computed(() => (
+  canViewUsage.value ? columns : columns.filter((col) => col.colKey !== 'usage')
+))
+
 const tableScroll = computed(() => ({
-  x: `${columns.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
+  x: `${tableColumns.value.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
 }))
 
 const pagedRows = computed(() => {
@@ -66,18 +114,25 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
-// 筛选项只列**已加载数据里真的出现过**的游戏：列一个点下去没有任何行的选项，
-// 与「筛了但服务端没筛」是同一种误导。
-const gameOptions = computed(() => {
-  const used = [...new Set(rows.value.map((row) => row.game_id).filter(Boolean))]
-  return used.map((id) => ({ id, name: gameName(games.value, id) }))
-})
+// 选项是游戏管理里已启用的全量游戏，不是本人负责的那几个，也不依赖当前页加载过
+// 哪些行：默认勾选只决定第一次看到什么，能筛到哪些游戏由游戏管理决定。
+const gameOptions = computed(() => games.value.map((game) => ({ id: game.id, name: game.name })))
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await client.list({ search: search.value, game_id: gameFilter.value, video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
+    const data = await client.list({
+      search: search.value,
+      team_id: teamFilter.value,
+      game_ids: gameFilters.value,
+      joined: joinedFilter.value,
+      my_usage: myUsageFilter.value,
+      team_usage: teamUsageFilter.value,
+      video_status: statusFilter.value,
+      sort_by: sortBy.value,
+      sort_order: sortOrder.value,
+    })
     rows.value = Array.isArray(data) ? data : []
     pagination.value.current = 1
   } catch (e) {
@@ -89,7 +144,9 @@ async function load() {
 
 async function loadGames() {
   try {
-    const data = await users.listGames()
+    // 游戏只做筛选，不再是可见边界；名字字典用全量 enabled 游戏，
+    // 否则清空筛选后出现的其他游戏只能显示 id。
+    const data = await users.listGames({ scope: 'all', status: 'enabled' })
     games.value = Array.isArray(data) ? data : []
   } catch {
     // 游戏名只是展示：拿不到就退回 id（labels.js 的 gameName 已经这么做了），
@@ -98,19 +155,25 @@ async function loadGames() {
   }
 }
 
-// 拿不到关系列表只影响「去我的素材」这个分支：退回「加入我的素材」是对的，
-// 那条命令是幂等的（已存在时服务端返回 200 而不是再建一条），不会因此多出关系。
-async function loadMine() {
+// 角色与本人游戏范围来自会话，只用于默认筛选；服务端仍然自己决定团队边界。
+// 默认勾选要等游戏字典一起到齐后再算（见 onMounted），这里不提前写 gameFilters。
+async function loadSession() {
   try {
-    const data = await client.listMyMaterials()
-    mineIds.value = new Set((Array.isArray(data) ? data : []).map((usage) => usage.material_id))
+    currentUser.value = await sessionClient.me()
   } catch {
-    mineIds.value = new Set()
+    // 读不到会话时不给默认游戏筛选：服务端按团队返回，少一层缩小是安全的方向。
+    currentUser.value = null
   }
 }
 
-function isMine(row) {
-  return Boolean(row?.id) && mineIds.value.has(row.id)
+async function loadTeams() {
+  if (!isAdmin.value) return
+  try {
+    const data = await users.listTeams()
+    teams.value = Array.isArray(data) ? data : []
+  } catch {
+    teams.value = []
+  }
 }
 
 // 规范 §16.2：暂停与下架禁止新增领取，已领取的行仍给「去我的素材」。
@@ -155,38 +218,19 @@ async function openDetail(row) {
 }
 
 /**
- * 加入成功后的即时反馈（2026-09-30 走查四轮，用户裁定）。
- *
- * 这是素材库上下文里**唯一**出现「下载」的地方：行与详情抽屉都不提供下载入口，
- * 但刚做完「领取」这个动作时，下一步几乎必然是「取文件」，让人先跳到「我的素材」
- * 再点一次是把一次跳转换一个说法而已。所以两颗按钮：一步下载（仅文件已就绪时出现，
- * 未就绪时它必然换来一个 409）与去「我的素材」。
+ * 加入成功后的即时反馈。素材库不提供本机下载入口（要下载请去「我的素材」），
+ * 所以这里只给一个「去我的素材」的下一步，不再是「立即下载」。
  */
-function notifyAdded(row) {
-  const actions = [
-    h('span', { class: 'material-added-toast__text' }, '已加入我的素材'),
-  ]
-  if (row.video_status === 'ready') {
-    actions.push(h(TButton, {
-      size: 'small', theme: 'primary', variant: 'text', onClick: () => downloadNow(row),
-    }, '立即下载'))
-  }
-  actions.push(h(TButton, {
-    size: 'small', theme: 'primary', variant: 'text', onClick: goToMyMaterials,
-  }, '去我的素材'))
+function notifyAdded() {
   feedback.toast.success({
-    content: () => h('div', { class: 'material-added-toast' }, actions),
+    content: () => h('div', { class: 'material-added-toast' }, [
+      h('span', { class: 'material-added-toast__text' }, '已加入我的素材'),
+      h(TButton, {
+        size: 'small', theme: 'primary', variant: 'text', onClick: goToMyMaterials,
+      }, '去我的素材'),
+    ]),
     duration: 5000,
   })
-}
-
-async function downloadNow(row) {
-  try {
-    await client.createDownload(row.id)
-    feedback.toast.success('已开始下载')
-  } catch (e) {
-    feedback.toast.error(createDownloadFailureMessage(e))
-  }
 }
 
 async function addToMine(row) {
@@ -195,10 +239,10 @@ async function addToMine(row) {
     // http.js 两种都返回 data，所以这里不该也无法分支。恢复就是这一条命令：
     // 冻结合同里没有单独的恢复端点。
     await client.addUsage(row.id)
-    // 立刻翻成「去我的素材」，不让运营再刷新一次才看见结果。返回 200 时它本来
-    // 就已经在这个集合里，重复 add 无害。
-    mineIds.value.add(row.id)
-    notifyAdded(row)
+    // 重新读取列表，让加入状态、我的使用与操作按钮一起翻过来；不靠本地改一行
+    // 假装服务端已经投影过。
+    await load()
+    notifyAdded()
   } catch (e) {
     feedback.toast.error(e?.message || '加入我的素材失败')
   }
@@ -207,8 +251,17 @@ async function addToMine(row) {
 function reset() {
   search.value = ''
   statusFilter.value = ''
-  gameFilter.value = ''
+  joinedFilter.value = ''
+  myUsageFilter.value = ''
+  teamUsageFilter.value = ''
+  teamFilter.value = ''
+  gameFilters.value = defaultGameFilters()
   load()
+}
+
+function openUsage(row) {
+  usageMaterial.value = row
+  usageVisible.value = true
 }
 
 function changeSort(sort) {
@@ -217,10 +270,12 @@ function changeSort(sort) {
   load()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 默认勾选 = 本人负责 ∩ 游戏管理启用；两者都到齐后先算出筛选，再取列表。
+  await Promise.all([loadSession(), loadGames()])
+  gameFilters.value = defaultGameFilters()
   load()
-  loadGames()
-  loadMine()
+  loadTeams()
   openFromQuery()
 })
 </script>
@@ -229,7 +284,7 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page material-library-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="素材库" description="云端的原素材：加入我的素材后即可下载到本机">
+      <ResourcePageHeader title="素材库" description="团队公共素材池：加入「我的素材」后可下载到本机并用于合成">
         <template #actions>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
@@ -237,12 +292,16 @@ onMounted(() => {
       <ResourceCard class="material-table-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="teamFilter" clearable placeholder="全部"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilters" multiple clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
+          <label v-if="canViewUsage" class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="tableColumns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面 + 标题 + 来源平台合成一格；标题跳来源平台落地页，没有则退回普通文本。 -->
             <template #material="{ row }">
@@ -262,21 +321,24 @@ onMounted(() => {
               <template v-else>—</template>
             </template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
+            <!-- 加入状态读服务端投影：active=已加入，removed=已移出，无关系=未加入。 -->
+            <template #joined="{ row }"><ResourceStatusBadge :tone="joinStatus(row).tone" :label="joinStatus(row).label" /></template>
+            <template #my_usage="{ row }"><ResourceStatusBadge :tone="myUsageTone(row.my_usage)" :label="myUsageLabel(row.my_usage)" /></template>
+            <!-- 一行摘要，整格可点开明细；没有成功成片就只画 —，不弹一个空弹窗。 -->
             <template #usage="{ row }">
-              <div class="usage-cell">
-                <span class="usage-cell__counts">{{ usageLines(row).counts }}</span>
-                <span class="usage-cell__recent">{{ usageLines(row).recent }}</span>
-              </div>
+              <button v-if="usageOutputCount(row)" type="button" class="usage-cell" @click="openUsage(row)">{{ usageSummary(row) }}</button>
+              <span v-else class="usage-cell usage-cell--empty">—</span>
             </template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <template #op="{ row }">
-              <!-- 详情 | 单一主操作；已加入的行换成「去我的素材」，不再给必然空转的「加入」。 -->
+              <!-- 详情 | 单一主操作；已加入的行换成「去我的素材」，不再给必然空转的「加入」。
+                   已移出的行给「重新加入」：服务端的同一条 upsert 会把它恢复成 active。 -->
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button v-if="canAdd(row) && !isMine(row)" size="small" theme="primary" @click="addToMine(row)">加入我的素材</t-button>
-                <t-button v-else-if="isMine(row)" size="small" theme="primary" @click="goToMyMaterials()">去我的素材</t-button>
-                <!-- 暂停/下架且未领取：没有可做的主操作，画 — 而不是留一颗会被拒的按钮。 -->
+                <t-button v-if="canAdd(row) && row.usage_status !== 'active'" size="small" theme="primary" @click="addToMine(row)">{{ row.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
+                <t-button v-else-if="row.usage_status === 'active'" size="small" theme="primary" @click="goToMyMaterials()">去我的素材</t-button>
+                <!-- 暂停/下架且未加入：没有可做的主操作，画 — 而不是留一颗会被拒的按钮。 -->
                 <template v-else>—</template>
               </t-space>
             </template>
@@ -290,11 +352,24 @@ onMounted(() => {
         :material="detail"
         :loading="detailLoading"
         :games="games"
-        :mine="isMine(detail)"
+        :mine="detail?.usage_status === 'active'"
+        :show-usage="canViewUsage"
         mode="library"
         @add="addToMine"
         @go-mine="goToMyMaterials"
       />
+
+      <t-dialog v-model:visible="usageVisible" header="使用情况" width="420px" :footer="false">
+        <div v-if="usageMaterial" class="usage-detail">
+          <p class="usage-detail__total">成功成片 {{ usageOutputCount(usageMaterial) }}</p>
+          <ul v-if="usageOperators(usageMaterial).length" class="usage-detail__list">
+            <li v-for="operator in usageOperators(usageMaterial)" :key="operator.id" class="usage-detail__row">
+              <span class="usage-detail__name">{{ operator.name }}</span>
+              <span class="usage-detail__count">成片 {{ operator.output_count }}</span>
+            </li>
+          </ul>
+        </div>
+      </t-dialog>
     </div>
   </t-loading>
 </template>
@@ -305,10 +380,17 @@ onMounted(() => {
 .material-cell__cover { width: 56px; height: 36px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .material-cell__source { color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* 两行都不折行：行高跟着数据变，一张表里每行不一样高，扫描成本立刻上去。 */
-.usage-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.usage-cell__counts { color: var(--wt-text-primary); font-size: 13px; white-space: nowrap; }
-.usage-cell__recent { color: var(--wt-text-tertiary); font-size: 12px; white-space: nowrap; }
+/* 一行不折行：行高跟着数据变，一张表里每行不一样高，扫描成本立刻上去。 */
+.usage-cell { display: block; max-width: 100%; padding: 0; border: 0; background: none; color: var(--wt-primary); font: inherit; font-size: 13px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.usage-cell--empty { color: var(--wt-text-secondary); cursor: default; }
+.usage-cell:not(.usage-cell--empty):hover, .usage-cell:not(.usage-cell--empty):focus-visible { text-decoration: underline; }
+/* 使用人可能很多：弹窗列表自己滚动，不把弹窗撑出屏幕。 */
+.usage-detail__total { margin: 0 0 12px; color: var(--wt-text-primary); font-size: 13px; }
+.usage-detail__list { max-height: 280px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.usage-detail__row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px dashed var(--wt-border); }
+.usage-detail__row:first-child { border-top: 0; }
+.usage-detail__name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.usage-detail__count { flex: none; color: var(--wt-text-tertiary); font-size: 12px; }
 /* 颜色只写在 span 分支上，免得覆盖 .wt-primary-link 的主题色。 */
 .material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 span.material-title { color: var(--wt-text-primary); }

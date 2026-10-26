@@ -80,6 +80,8 @@ describe('material detail drawer', () => {
     expect(source).toMatch(/v-if="mode === 'mine'"/)
     expect(source).toMatch(/mode === 'library' && !mine/)
     expect(source).toMatch(/mode === 'library' && mine/)
+    // 已移出的关系再点一次同一条 upsert 就是恢复，文案要说出来。
+    expect(source).toContain("material.usage_status === 'removed' ? '重新加入' : '加入我的素材'")
     // mine 上下文的主操作文案由下载状态驱动（任务 23）：failed 是「重新下载」，其余是「下载」。
     expect(source).toContain("$emit('download', material)\">{{ downloadActionLabel(downloadStatus) }}")
   })
@@ -93,7 +95,10 @@ describe('material detail drawer', () => {
     // 取标题的标记而不是裸词：裸词会先量到注释里的那一次，直接判反。
     const titles = [...template.matchAll(/class="detail-card__title"[^>]*>\s*([^<]+)/g)]
       .map((m) => m[1].trim())
-    expect(titles).toEqual(['当前进度 / 使用情况', '文件信息', '来源信息', '来源内容池统计', '基本信息'])
+    expect(titles).toEqual([
+      "{{ mode === 'library' && showUsage ? '当前进度 / 使用情况' : '当前进度' }}",
+      '文件信息', '来源信息', '来源内容池统计', '基本信息',
+    ])
   })
 
   // 量到 CSS 而不只量类名：类名是零成本的，样式才是用户看得见的那一半。
@@ -120,15 +125,20 @@ describe('material detail drawer', () => {
    */
   it('opens the body with 当前进度 / 使用情况 and keeps the rest in the prompt order', () => {
     const body = sliceBetween(template, 'detail-workspace', '<template #footer>')
-    expect(body).toContain('nextStepHint(material)')
-    expect(body).toContain('usageFacts(material)')
+    // 文案按上下文分派：素材库说「加入 / 去我的素材」，我的素材说「恢复 / 下载」。
+    expect(body).toContain('{{ nextStep }}')
+    expect(source).toContain('libraryNextStepHint(props.material)')
+    expect(source).toContain('nextStepHint(props.material)')
+    expect(body).toContain('usageRows')
     // 量标题标记而不是裸词：裸词会先量到正文注释里的那一次，读数就成了注释的函数。
+    // 第一段标题随权限变化（使用情况只给高级运营/管理员），这里量固定的前半句。
     const cards = [...body.matchAll(/<h4 class="detail-card__title">\s*([^<\n]*)/g)]
       .map((m) => ({ title: m[1].trim(), at: m.index }))
     const at = (title) => cards.find((card) => card.title === title)?.at ?? -1
-    expect(at('当前进度 / 使用情况')).toBeGreaterThan(-1)
+    const first = "{{ mode === 'library' && showUsage ? '当前进度 / 使用情况' : '当前进度' }}"
+    expect(at(first)).toBeGreaterThan(-1)
     expect(at('基本信息')).toBeGreaterThan(at('来源内容池统计'))
-    expect(at('当前进度 / 使用情况')).toBeLessThan(at('文件信息'))
+    expect(at(first)).toBeLessThan(at('文件信息'))
     expect(at('文件信息')).toBeLessThan(at('来源信息'))
     expect(at('来源信息')).toBeLessThan(at('来源内容池统计'))
   })
@@ -137,19 +147,33 @@ describe('material detail drawer', () => {
   // 文件状态徽章是「下载状态优先、video_status 兜底」的组合（与我的素材页同语义），
   // 单测钉在组合函数上（下方「derives the file state」组）。
   it('states the file state, the usage state, the join time and the next step', () => {
-    const card = sliceBetween(template, 'class="detail-card__title">当前进度 / 使用情况', '<h4 class="detail-card__title">')
+    const card = sliceBetween(template, 'class="detail-card__title">{{ mode', '<h4 class="detail-card__title">')
     expect(card).toContain('fileStatus.tone')
     expect(card).toContain('fileStatus.label')
     expect(card).toContain('usageStatusLabel(material.usage_status)')
     expect(card).toContain('formatDateTime(material.added_at)')
-    expect(card).toContain('nextStepHint(material)')
-    // 加入时间是关系自己的时间，素材库上下文没有它——缺值画 —，不是画入库时间冒充。
-    expect(card).toContain("material.added_at ? formatDateTime(material.added_at) : '—'")
+    expect(card).toContain('{{ nextStep }}')
   })
 
-  // 使用状态读不到画 —：素材库上下文打开的详情就属于这种，而那不等于「使用中」。
+  // 两个上下文的第一段说不同的话：我的素材读关系状态（使用中/已放弃），素材库读
+  // 查看者关系（加入状态）与本人使用。CHG-104 之前素材库这一段也画「使用中」，
+  // 那是把「我加没加」说成「这条素材有没有人用」，两个问题一个词。
+  it('swaps the first card between the relation state and the viewer relation', () => {
+    const card = sliceBetween(template, 'class="detail-card__title">{{ mode', '<h4 class="detail-card__title">')
+    expect(card).toMatch(/v-if="mode === 'mine'"><dt>使用状态/)
+    expect(card).toContain('<dt>加入状态</dt>')
+    expect(card).toContain('join.tone')
+    expect(card).toContain('<dt>我的使用</dt>')
+    expect(card).toContain('myUsageLabel(material.my_usage)')
+    // 加入时间是关系自己的时间，素材库上下文没有它——缺值画 —，不是画入库时间冒充。
+    expect(card).toContain("material.added_at ? formatDateTime(material.added_at) : '—'")
+    // 团队成片汇总只在素材库上下文且有权看时出现；我的素材与普通运营都不携带它。
+    expect(card).toContain('v-if="mode === \'library\' && showUsage && usageRows.length" class="detail-usage"')
+  })
+
+  // 使用状态读不到画 —：我的素材里关系读不到不等于「使用中」。
   it('does not paint 使用中 on a relation it cannot read', () => {
-    const card = sliceBetween(template, 'class="detail-card__title">当前进度 / 使用情况', '<h4 class="detail-card__title">')
+    const card = sliceBetween(template, 'class="detail-card__title">{{ mode', '<h4 class="detail-card__title">')
     expect(card).toContain('v-if="material.usage_status"')
     expect(card).toMatch(/<template v-else>—<\/template>/)
   })
@@ -235,7 +259,7 @@ describe('material detail drawer', () => {
     }
     expect(guarded).toEqual([
       ['前往素材页面', 'readonly'],
-      ['加入我的素材', 'library'],
+      ["{{ material.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}", 'library'],
       ['去我的素材', 'library'],
       ['恢复使用', 'mine'],
       ['重新下载', 'mine'],
@@ -286,11 +310,14 @@ describe('material detail drawer', () => {
    * 使用状态徽章只在读得到时出：素材库上下文打开的这个抽屉没有关系那一维，
    * 画一颗「使用中」就是替服务端宣布了一条它没说过的关系。
    */
-  it('adds the usage badge to the small badge row, without a full-width status bar', () => {
+  it('adds the usage badges to the small badge row, without a full-width status bar', () => {
     const hero = sliceBetween(template, 'detail-hero', 'detail-card')
+    // 我的素材读关系状态；素材库读查看者关系与本人使用，两个上下文不混用文案。
     expect(hero).toContain('usageStatusLabel(material.usage_status)')
-    expect(hero).toContain('v-if="material.usage_status"')
-    // 三颗徽章都在同一个 flex 行里——「不是色块」的判据是它们还在那个容器里。
+    expect(hero).toContain('v-if="mode === \'mine\' && material.usage_status"')
+    expect(hero).toContain('v-else-if="mode === \'library\'"')
+    expect(hero).toContain('myUsageLabel(material.my_usage)')
+    // 徽章都在同一个 flex 行里——「不是色块」的判据是它们还在那个容器里。
     expect(source).toMatch(/\.detail-badges \{[^}]*display: flex/)
   })
 

@@ -19,8 +19,12 @@ import {
   downloadStatusLabel,
   downloadStatusTone,
   gameName,
+  joinStatus,
+  libraryNextStepHint,
   materialStatusLabel,
   materialStatusTone,
+  myUsageLabel,
+  myUsageTone,
   nextStepHint,
   shortDigest,
   usageFacts,
@@ -41,11 +45,19 @@ const props = defineProps({
   showPageLink: { type: Boolean, default: true },
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
+  // 团队使用汇总只给高级运营/管理员；普通运营在素材库上下文连这一段都不渲染。
+  showUsage: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel'])
 
 const client = createMaterialsClient()
 const transfer = createFileTransferClient()
+
+// 素材库上下文里，`usage_status` 是「当前查看者加没加入」，不是「使用中/已放弃」；
+// 我的素材继续用关系自己的两档文案。两边共用一份数据，但说给用户的话不同。
+const join = computed(() => joinStatus(props.material))
+const nextStep = computed(() => (props.mode === 'mine' ? nextStepHint(props.material) : libraryNextStepHint(props.material)))
+const usageRows = computed(() => usageFacts(props.material))
 // 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
 // `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
 const localFile = ref(null)
@@ -241,13 +253,15 @@ async function openDirectory() {
               <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
               <template v-else>{{ material.author_name }}</template>
             </p>
-            <!-- 走查七轮：小型 Badge 组，不是横跨整页的状态色块（§7.1）。使用状态只在
-                 读得到时出——素材库上下文打开的这个抽屉没有关系那一维，画一颗「使用中」
-                 就是替服务端宣布一条它没说过的关系。 -->
+            <!-- 走查七轮：小型 Badge 组，不是横跨整页的状态色块（§7.1）。素材库读的是
+                 加入状态（active/removed/无关系），我的素材读的是关系状态（使用中/已放弃）；
+                 两个上下文说同一份数据的不同问题，不能把文案混用。 -->
             <div class="detail-badges">
-              <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
+              <ResourceStatusBadge v-if="mode === 'mine' && material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
+              <ResourceStatusBadge v-else-if="mode === 'library'" :tone="join.tone" :label="join.label" />
               <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
               <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
+              <ResourceStatusBadge v-if="mode === 'library' && material.my_usage" :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" />
               <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
             </div>
           </div>
@@ -256,18 +270,24 @@ async function openDirectory() {
         <!-- 首段回答「我现在处理到哪一步，下一步是什么」（走查七轮用户提示词）：两个状态
              维度 + 加入时间 + 一句下一步，使用情况的五个事实跟在下面（协议见 labels.js）。 -->
         <section class="detail-card">
-          <h4 class="detail-card__title">当前进度 / 使用情况</h4>
-          <dl class="detail-card__grid detail-card__grid--4">
+          <h4 class="detail-card__title">{{ mode === 'library' && showUsage ? '当前进度 / 使用情况' : '当前进度' }}</h4>
+          <dl class="detail-card__grid" :class="mode === 'library' ? 'detail-card__grid--5' : 'detail-card__grid--4'">
             <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></dd></div>
-            <div><dt>使用状态</dt><dd>
+            <div v-if="mode === 'mine'"><dt>使用状态</dt><dd>
               <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
               <template v-else>—</template>
             </dd></div>
+            <template v-else>
+              <div><dt>加入状态</dt><dd><ResourceStatusBadge :tone="join.tone" :label="join.label" /></dd></div>
+              <div><dt>我的使用</dt><dd><ResourceStatusBadge :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" /></dd></div>
+            </template>
             <div><dt>加入时间</dt><dd>{{ material.added_at ? formatDateTime(material.added_at) : '—' }}</dd></div>
-            <div><dt>下一步</dt><dd>{{ nextStepHint(material) }}</dd></div>
+            <div><dt>下一步</dt><dd>{{ nextStep }}</dd></div>
           </dl>
-          <div class="detail-usage">
-            <div v-for="fact in usageFacts(material)" :key="fact.key" class="detail-usage__item">
+          <!-- 使用情况只在素材库上下文且查看者有权看时显示：我的素材读的是关系与
+               下载，普通运营不携带团队成片汇总；没有事实就整段不渲染。 -->
+          <div v-if="mode === 'library' && showUsage && usageRows.length" class="detail-usage">
+            <div v-for="fact in usageRows" :key="fact.key" class="detail-usage__item">
               <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
               <strong v-else>{{ fact.value }}</strong>
               <span class="detail-usage__label">{{ fact.label }}</span>
@@ -371,7 +391,7 @@ async function openDirectory() {
       <div v-if="material" class="material-detail__actions">
         <!-- 只读上下文（关联实体引用）只给一个明确命名的前往入口：它不改路由，用户自己点才跳。 -->
         <t-button v-if="mode === 'readonly' && showPageLink" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
-        <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">加入我的素材</t-button>
+        <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">{{ material.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
         <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
         <!-- 我的素材这一组由「使用状态 × 下载状态 × 本机文件」矩阵驱动（CHG-069 任务 23，
              与行内同一张表）：已放弃只给恢复；使用中按下载状态给一步主操作 —— 下载中不给
@@ -407,6 +427,7 @@ async function openDirectory() {
 .detail-card__grid { display: grid; gap: 12px 16px; margin: 0; }
 .detail-card__grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .detail-card__grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.detail-card__grid--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .detail-card__grid dt { color: var(--wt-text-tertiary); font-size: 12px; }
 .detail-card__grid dd { margin: 5px 0 0; color: var(--wt-text-primary); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 /* 使用情况的五个事实与上面那行进度事实同卡不同组：一条虚线分开，不另起一张卡。 */

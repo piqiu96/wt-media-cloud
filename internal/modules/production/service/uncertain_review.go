@@ -45,7 +45,11 @@ func ListComposeUncertainReviews(actor identity.PublicUser, taskID int64) ([]mod
 	return wiredComposeUncertainReviewService().List(actor, taskID)
 }
 
-func (s *ComposeUncertainReviewService) visibleAdminTask(actor identity.PublicUser, taskID int64) (model.ComposeTask, error) {
+// visibleReviewTask applies the read scope first (a task the actor cannot read
+// answers 404), then the review-role gate: admins and same-team senior
+// operators may review an uncertain execution. Operators who can read the task
+// still get 403 — reading is not reviewing.
+func (s *ComposeUncertainReviewService) visibleReviewTask(actor identity.PublicUser, taskID int64) (model.ComposeTask, error) {
 	item, found, err := s.store.Find(taskID)
 	if err != nil {
 		return model.ComposeTask{}, err
@@ -53,14 +57,14 @@ func (s *ComposeUncertainReviewService) visibleAdminTask(actor identity.PublicUs
 	if !found || !canReadComposeTask(actor, item) {
 		return model.ComposeTask{}, ErrComposeTaskNotFound
 	}
-	if actor.Role != identity.RoleAdmin {
+	if actor.Role != identity.RoleAdmin && actor.Role != identity.RoleSeniorOperator {
 		return model.ComposeTask{}, ErrComposeTaskForbidden
 	}
 	return item, nil
 }
 
 func (s *ComposeUncertainReviewService) Resolve(actor identity.PublicUser, taskID int64, input ResolveComposeUncertainInput) (ComposeUncertainResolution, error) {
-	if _, err := s.visibleAdminTask(actor, taskID); err != nil {
+	if _, err := s.visibleReviewTask(actor, taskID); err != nil {
 		return ComposeUncertainResolution{}, err
 	}
 	evidence := strings.TrimSpace(input.Evidence)
@@ -86,7 +90,7 @@ func (s *ComposeUncertainReviewService) Resolve(actor identity.PublicUser, taskI
 }
 
 func (s *ComposeUncertainReviewService) List(actor identity.PublicUser, taskID int64) ([]model.ComposeUncertainReview, error) {
-	if _, err := s.visibleAdminTask(actor, taskID); err != nil {
+	if _, err := s.visibleReviewTask(actor, taskID); err != nil {
 		return nil, err
 	}
 	return s.store.ListUncertainReviews(taskID)

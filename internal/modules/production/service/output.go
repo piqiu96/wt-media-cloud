@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ type ListComposeOutputsInput struct {
 	Source        string    `json:"source"`
 	Search        string    `json:"search"`
 	TriggerType   string    `json:"trigger_type"`
+	GameID        string    `json:"game_id"`
 	TeamID        int64     `json:"team_id"`
 	OperatorID    int64     `json:"operator_id"`
 	OperatorScope string    `json:"operator_scope"`
@@ -166,10 +168,11 @@ func CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task
 	return wiredComposeOutputService().CreateOutputDownload(actor, id)
 }
 
-// List scopes the page exactly like the compose-task list — admins everything,
-// seniors their team-and-game scope, operators only what they created (PRD
-// §5.10.2/§5.10.3). A caller without a scope answers an empty page rather than
-// an error, because the scope is legitimate and simply contains nothing.
+// List scopes the page exactly like the compose-task list — admins the target
+// team or every team, seniors their whole team, operators only what they
+// created inside the games they cover (PRD §5.10.2/§5.10.3). A caller without
+// a scope answers an empty page rather than an error, because the scope is
+// legitimate and simply contains nothing.
 func (s *ComposeOutputService) List(actor identity.PublicUser, input ListComposeOutputsInput) ([]model.CompositeOutput, error) {
 	if actor.Status != identity.UserStatusEnabled {
 		return nil, ErrComposeOutputForbidden
@@ -207,7 +210,18 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 		return nil, fmt.Errorf("%w: %v", ErrComposeOutputInvalid, err)
 	}
 	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
-	if actor.Role != identity.RoleAdmin {
+	gameID := strings.TrimSpace(input.GameID)
+	if len([]rune(gameID)) > 32 {
+		return nil, fmt.Errorf("%w: game_id is too long", ErrComposeOutputInvalid)
+	}
+	// The game is a narrowing filter, never a grant: an operator may only name a
+	// game they cover, and everyone else still reads within the team scope above.
+	if gameID != "" {
+		if actor.Role == identity.RoleOperator && !slices.Contains(actor.GameIDs, gameID) {
+			return nil, ErrComposeOutputForbidden
+		}
+		filter.GameIDs = []string{gameID}
+	} else if actor.Role == identity.RoleOperator {
 		filter.GameIDs = actor.GameIDs
 	}
 	items, err := s.outputs.List(filter)
@@ -381,12 +395,18 @@ func (s *ComposeOutputService) withOperatorName(item model.CompositeOutput) (mod
 }
 
 // canReadComposeOutput scopes the page like canReadComposeTask: admins see
-// everything, seniors their team-and-game scope, operators only their own.
+// everything, seniors every game of their team, operators only their own.
 func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput) bool {
 	if actor.Role == identity.RoleAdmin {
 		return true
 	}
 	if actor.TeamID == nil || int64(*actor.TeamID) != item.TeamID {
+		return false
+	}
+	if actor.Role == identity.RoleSeniorOperator {
+		return true
+	}
+	if actor.Role != identity.RoleOperator {
 		return false
 	}
 	inGame := false
@@ -398,10 +418,7 @@ func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput)
 	if !inGame {
 		return false
 	}
-	if actor.Role == identity.RoleOperator {
-		// Same fallback as tasks: a historical row with no operator stays
-		// reachable by its creator without being attributed to them.
-		return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
-	}
-	return actor.Role == identity.RoleSeniorOperator
+	// Same fallback as tasks: a historical row with no operator stays
+	// reachable by its creator without being attributed to them.
+	return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
 }

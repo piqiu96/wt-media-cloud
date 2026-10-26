@@ -876,6 +876,134 @@ func TestVideoProjectionWritesRefuseAnIncompleteScope(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
+// The library's three usage dimensions are independent predicates, and the
+// team is repeated on the output join: a successful output from another team's
+// copy of the same external work must never make this team's material look
+// used. The joined relation is the viewer's and only an active row counts.
+func TestListMaterialsAppliesTheUsageDimensionsAsIndependentPredicates(t *testing.T) {
+	team := identity.TeamID(7)
+	db, mock := newMockGORM(t)
+	fragment := func(parts ...string) string {
+		quoted := make([]string, 0, len(parts))
+		for _, part := range parts {
+			quoted = append(quoted, regexp.QuoteMeta(part))
+		}
+		return strings.Join(quoted, ".*")
+	}
+	mock.ExpectQuery(fragment(
+		"FROM materials m JOIN source_contents s ON s.id = m.source_content_id",
+		"m.team_id = ?",
+		"s.game_id IN (?,?)",
+		"EXISTS (SELECT 1 FROM material_usages u WHERE u.material_id = m.id AND u.user_id = ? AND u.status = 'active')",
+		"EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id = ?)",
+		"NOT EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id IS NOT NULL)",
+	)).WithArgs(int64(7), "game-a", "game-b", int64(9), int64(9)).
+		WillReturnRows(sqlmock.NewRows(materialColumns()))
+
+	if _, err := listMaterials(db, MaterialFilter{
+		TeamID:    &team,
+		GameIDs:   []string{"game-a", "game-b"},
+		Joined:    "joined",
+		MyUsage:   "used",
+		TeamUsage: "unused",
+		UserID:    identity.UserID(9),
+	}); err != nil {
+		t.Fatalf("listMaterials() error = %v", err)
+	}
+	assertExpectations(t, mock)
+
+	// The opposite arms are separate because each NOT EXISTS is a different
+	// question; a filter that only ever built the positive predicates would pass
+	// the arm above.
+	db, mock = newMockGORM(t)
+	mock.ExpectQuery(fragment(
+		"FROM materials m JOIN source_contents s ON s.id = m.source_content_id",
+		"NOT EXISTS (SELECT 1 FROM material_usages u WHERE u.material_id = m.id AND u.user_id = ? AND u.status = 'active')",
+		"NOT EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id = ?)",
+		"EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id IS NOT NULL)",
+	)).WithArgs(int64(9), int64(9)).
+		WillReturnRows(sqlmock.NewRows(materialColumns()))
+
+	if _, err := listMaterials(db, MaterialFilter{Joined: "not_joined", MyUsage: "unused", TeamUsage: "used", UserID: identity.UserID(9)}); err != nil {
+		t.Fatalf("listMaterials() error = %v", err)
+	}
+	assertExpectations(t, mock)
+}
+
+// One material's history can hold both named and historical unnamed outputs.
+// The count is per material and operator, so the caller can add the unnamed
+// rows to the total without inventing a person for them.
+func TestListMaterialOutputFactsKeepsUnknownOperatorsOutOfTheGrouping(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT o.material_id, o.operator_id, COUNT(*) FROM composite_outputs o JOIN materials m ON m.id = o.material_id AND m.team_id = o.team_id WHERE o.material_id IN (?,?) GROUP BY o.material_id, o.operator_id ORDER BY o.material_id, o.operator_id")).
+		WithArgs(int64(42), int64(30)).
+		WillReturnRows(sqlmock.NewRows([]string{"material_id", "operator_id", "count"}).
+			AddRow(int64(42), nil, int64(3)).
+			AddRow(int64(42), int64(9), int64(2)).
+			AddRow(int64(30), int64(9), int64(1)))
+
+	facts, err := listMaterialOutputFacts(db, []int64{42, 30, 42})
+	if err != nil {
+		t.Fatalf("listMaterialOutputFacts() error = %v", err)
+	}
+	if len(facts) != 3 {
+		t.Fatalf("facts = %+v, want three (material, operator) groups", facts)
+	}
+	if facts[0].MaterialID != 42 || facts[0].OperatorID != nil || facts[0].OutputCount != 3 {
+		t.Fatalf("the historical group = %+v, want a nil operator with three outputs", facts[0])
+	}
+	if facts[1].OperatorID == nil || *facts[1].OperatorID != 9 || facts[1].OutputCount != 2 {
+		t.Fatalf("the named group = %+v, want operator 9 with two outputs", facts[1])
+	}
+	assertExpectations(t, mock)
+}
+
+// A removed relation is still a relation: the library asks for both states so
+// the page can show 已移出 with the original added time.
+func TestListUsageRelationsReadsBothStatesForTheViewer(t *testing.T) {
+	db, mock := newMockGORM(t)
+	added := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT material_id, status, created_at FROM material_usages WHERE user_id = ? AND material_id IN (?,?) ORDER BY material_id")).
+		WithArgs(int64(9), int64(42), int64(30)).
+		WillReturnRows(sqlmock.NewRows([]string{"material_id", "status", "created_at"}).
+			AddRow(int64(30), "removed", added).
+			AddRow(int64(42), "active", added))
+
+	relations, err := listUsageRelations(db, identity.UserID(9), []int64{42, 30, 42})
+	if err != nil {
+		t.Fatalf("listUsageRelations() error = %v", err)
+	}
+	if len(relations) != 2 || relations[0].MaterialID != 30 || relations[0].Status != model.MaterialUsageRemoved || !relations[0].CreatedAt.Equal(added) {
+		t.Fatalf("relations = %+v, want both rows with their original state", relations)
+	}
+	assertExpectations(t, mock)
+}
+
+// The gate answers only for an active relation. A removed row and no row are
+// the same refusal; the download route turns both into the same 403.
+func TestHasActiveUsageAnswersOnlyForAnActiveRelation(t *testing.T) {
+	const statement = "SELECT 1 FROM material_usages WHERE material_id = ? AND user_id = ? AND status = 'active' LIMIT 1"
+	db, mock := newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta(statement)).
+		WithArgs(int64(42), int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+	active, err := hasActiveUsage(db, 42, identity.UserID(9))
+	if err != nil || !active {
+		t.Fatalf("hasActiveUsage() = %v, %v; want true", active, err)
+	}
+	assertExpectations(t, mock)
+
+	db, mock = newMockGORM(t)
+	mock.ExpectQuery(regexp.QuoteMeta(statement)).
+		WithArgs(int64(42), int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"1"}))
+	active, err = hasActiveUsage(db, 42, identity.UserID(9))
+	if err != nil || active {
+		t.Fatalf("hasActiveUsage() = %v, %v; want false and no error", active, err)
+	}
+	assertExpectations(t, mock)
+}
+
 func usageColumns() []string {
 	return []string{"id", "team_id", "material_id", "user_id", "status", "removed_at", "created_at", "updated_at"}
 }

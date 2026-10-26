@@ -33,6 +33,33 @@ type MaterialFilter struct {
 	VideoStatus string
 	SortBy      string
 	SortOrder   string
+	// UserID is the viewer whose personal relation and success facts the
+	// `joined` / `my_usage` filters read. It is not a scope: team scope stays
+	// TeamID, and this only decides which of the actor's own rows match.
+	UserID identity.UserID
+	// Joined, MyUsage and TeamUsage are the three independent usage dimensions
+	// the library filters by (§5.3.6). Each is "", "used"/"unused" or
+	// "joined"/"not_joined"; the service validates the values.
+	Joined    string
+	MyUsage   string
+	TeamUsage string
+}
+
+// MaterialOutputFact is one (material, operator) group of successful outputs.
+// OperatorID is nil for historical rows written before the operator fact
+// existed; they count as output but cannot name a person.
+type MaterialOutputFact struct {
+	MaterialID  int64
+	OperatorID  *int64
+	OutputCount int64
+}
+
+// MaterialUsageRelation is the viewer's own relation to one material. Removal
+// keeps the same row, so `removed` is a real answer rather than an absence.
+type MaterialUsageRelation struct {
+	MaterialID int64
+	Status     model.MaterialUsageStatus
+	CreatedAt  time.Time
 }
 
 const materialProjectionColumns = `m.id, m.team_id, s.game_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at`
@@ -111,6 +138,35 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 		conditions = append(conditions, "m.video_status = ?")
 		args = append(args, filter.VideoStatus)
 	}
+	// The three usage dimensions are independent of each other and of the game
+	// filter, so each is its own EXISTS and they combine with AND. None of them
+	// rewrites material state: a given-up relation still counts as not joined,
+	// while its successful outputs remain history.
+	switch filter.Joined {
+	case "joined":
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM material_usages u WHERE u.material_id = m.id AND u.user_id = ? AND u.status = 'active')")
+		args = append(args, filter.UserID)
+	case "not_joined":
+		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM material_usages u WHERE u.material_id = m.id AND u.user_id = ? AND u.status = 'active')")
+		args = append(args, filter.UserID)
+	}
+	switch filter.MyUsage {
+	case "used":
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id = ?)")
+		args = append(args, filter.UserID)
+	case "unused":
+		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id = ?)")
+		args = append(args, filter.UserID)
+	}
+	// "someone used it" needs a known operator: a historical output without one
+	// proves a success but names no responsible person, so it is counted in the
+	// output total and not treated as this dimension's yes.
+	switch filter.TeamUsage {
+	case "used":
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id IS NOT NULL)")
+	case "unused":
+		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id IS NOT NULL)")
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 200
@@ -143,6 +199,116 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// ListMaterialOutputFacts groups successful outputs by material and operator.
+// The join repeats the team on both sides so a material and an output that do
+// not belong to the same team can never be added together: the same external
+// work materialized in two teams is two rows with two separate histories.
+func ListMaterialOutputFacts(materialIDs []int64) ([]MaterialOutputFact, error) {
+	return listMaterialOutputFacts(database.DB(), materialIDs)
+}
+
+func listMaterialOutputFacts(db *gorm.DB, materialIDs []int64) ([]MaterialOutputFact, error) {
+	ids := uniquePositiveIDs(materialIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.Raw(`SELECT o.material_id, o.operator_id, COUNT(*) FROM composite_outputs o JOIN materials m ON m.id = o.material_id AND m.team_id = o.team_id WHERE o.material_id IN (`+placeholders+`) GROUP BY o.material_id, o.operator_id ORDER BY o.material_id, o.operator_id`, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]MaterialOutputFact, 0)
+	for rows.Next() {
+		var item MaterialOutputFact
+		var operatorID sql.NullInt64
+		if err := rows.Scan(&item.MaterialID, &operatorID, &item.OutputCount); err != nil {
+			return nil, err
+		}
+		if operatorID.Valid {
+			value := operatorID.Int64
+			item.OperatorID = &value
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ListUsageRelations answers the viewer's own relation rows for the given
+// materials, in both states. This is a read of the caller's rows, not a scope
+// check: visibility is settled before the caller asks.
+func ListUsageRelations(userID identity.UserID, materialIDs []int64) ([]MaterialUsageRelation, error) {
+	return listUsageRelations(database.DB(), userID, materialIDs)
+}
+
+func listUsageRelations(db *gorm.DB, userID identity.UserID, materialIDs []int64) ([]MaterialUsageRelation, error) {
+	if userID <= 0 {
+		return nil, fmt.Errorf("invalid material usage user")
+	}
+	ids := uniquePositiveIDs(materialIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, userID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := db.Raw(`SELECT material_id, status, created_at FROM material_usages WHERE user_id = ? AND material_id IN (`+placeholders+`) ORDER BY material_id`, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]MaterialUsageRelation, 0)
+	for rows.Next() {
+		var item MaterialUsageRelation
+		if err := rows.Scan(&item.MaterialID, &item.Status, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// HasActiveUsage is the personal gate on the download route: only the current
+// user's in-use relation lets a material be downloaded to this machine.
+func HasActiveUsage(materialID int64, userID identity.UserID) (bool, error) {
+	return hasActiveUsage(database.DB(), materialID, userID)
+}
+
+func hasActiveUsage(db *gorm.DB, materialID int64, userID identity.UserID) (bool, error) {
+	if materialID <= 0 || userID <= 0 {
+		return false, fmt.Errorf("invalid material usage lookup")
+	}
+	var one int
+	err := db.Raw(`SELECT 1 FROM material_usages WHERE material_id = ? AND user_id = ? AND status = 'active' LIMIT 1`, materialID, userID).Row().Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func uniquePositiveIDs(ids []int64) []int64 {
+	seen := make(map[int64]struct{}, len(ids))
+	unique := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
 }
 
 // CreateOrRestoreUsage atomically creates the sole usage row or restores its

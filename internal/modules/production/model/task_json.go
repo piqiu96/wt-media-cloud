@@ -28,7 +28,7 @@ func safeComposeErrorMessage(code, message string) string {
 	case "execution_failed":
 		return "执行失败"
 	default:
-		return "执行异常，请联系管理员查看诊断摘要"
+		return "执行异常，请联系高级运营或管理员查看诊断摘要"
 	}
 }
 

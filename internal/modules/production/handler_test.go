@@ -17,6 +17,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	model "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 )
 
@@ -168,21 +169,55 @@ func TestTheDownloadConflictCarriesItsFrozenName(t *testing.T) {
 
 // The names above are copies of what `contracts/cloud-error-codes/` publishes, and
 // a copy nothing checks is a copy that drifts. This reads the frozen files and
-// asserts each name is declared there as a 409, so a contract revision that
-// renames one fails here rather than in a client.
+// asserts each name is declared there with its frozen status, so a contract revision that
+// renames one, or moves it to another status, fails here rather than in a client.
 func TestTheDownloadConflictNameIsTheFrozenOne(t *testing.T) {
-	for file, names := range map[string][]string{
-		"content-production.yaml": {"material_unavailable"},
+	for file, names := range map[string]map[string]string{
+		"content-production.yaml": {
+			"material_unavailable":     "409",
+			"material_usage_forbidden": "403",
+		},
 	} {
 		content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-error-codes", "v1", file))
 		if err != nil {
 			t.Fatalf("read frozen error codes: %v", err)
 		}
-		for _, name := range names {
-			if !strings.Contains(string(content), name+": {http_status: 409}") {
-				t.Errorf("%s does not declare %s as a 409", file, name)
+		for name, status := range names {
+			if !strings.Contains(string(content), name+": {http_status: "+status+"}") {
+				t.Errorf("%s does not declare %s as a %s", file, name, status)
 			}
 		}
+	}
+}
+
+// Downloading a visible library material without the viewer's own relation is a
+// 403 with its own name, not the team-scope 15002: the frontend branches on the
+// name to say "add it to My Materials" rather than "outside your team". The
+// route itself needs a session and MySQL, so the mapping is driven directly.
+func TestTheDownloadUsageGateCarriesItsFrozenName(t *testing.T) {
+	engine := server.New()
+	engine.POST("/probe", func(_ context.Context, c *hertzapp.RequestContext) {
+		writeProductionError(c, productionservice.ErrUsageForbidden)
+	})
+	result := ut.PerformRequest(engine.Engine, consts.MethodPost, "/probe", nil)
+
+	if got := result.Result().StatusCode(); got != consts.StatusForbidden {
+		t.Fatalf("status = %d, want 403", got)
+	}
+	var body struct {
+		ErrCode int `json:"errcode"`
+		Error   *struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(result.Result().Body(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.ErrCode != 15007 {
+		t.Fatalf("errcode = %d, want 15007", body.ErrCode)
+	}
+	if body.Error == nil || body.Error.Type != "material_usage_forbidden" {
+		t.Fatalf("error.type = %+v, want material_usage_forbidden", body.Error)
 	}
 }
 
@@ -340,6 +375,7 @@ func TestComposeTaskErrorCarriesTheFrozenPairs(t *testing.T) {
 		{"forbidden", productionservice.ErrComposeTaskForbidden, consts.StatusForbidden, 15215, "compose_task_forbidden"},
 		{"missing", productionservice.ErrComposeTaskNotFound, consts.StatusNotFound, 15216, "compose_task_not_found"},
 		{"not cancellable", productionservice.ErrComposeTaskNotCancellable, consts.StatusConflict, 15217, "compose_task_not_cancellable"},
+		{"not retryable", productionservice.ErrComposeTaskNotRetryable, consts.StatusConflict, 15217, "compose_task_not_retryable"},
 		{"conflict", productionservice.ErrComposeTaskConflict, consts.StatusConflict, 15219, "compose_task_conflict"},
 		{"template unavailable", productionservice.ErrStrategyTemplateUnavailable, consts.StatusConflict, 15213, "compose_template_unavailable"},
 	} {
@@ -490,6 +526,55 @@ func TestParseMaterialStateIDs(t *testing.T) {
 	atLimit := over[:productionservice.ComposeMaterialStateLimit]
 	if got, err := parseMaterialStateIDs(strings.Join(atLimit, ",")); err != nil || len(got) != productionservice.ComposeMaterialStateLimit {
 		t.Fatalf("at the limit: %d ids, err=%v", len(got), err)
+	}
+}
+
+// The library's filters arrive as query parameters, and the scope decision is
+// the service's. Parsing still has to refuse values that cannot mean anything,
+// or a typo would silently return the whole team's library.
+func TestParseMaterialListFilter(t *testing.T) {
+	parse := func(raw string) (filter repository.MaterialFilter, err error) {
+		ctx := hertzapp.NewContext(0)
+		ctx.Request.SetRequestURI("/api/v1/materials?" + raw)
+		return parseMaterialListFilter(ctx)
+	}
+
+	filter, err := parse("team_id=8&game_ids=game-a,%20game-b,game-a&game_id=legacy&joined=joined&my_usage=used&team_usage=unused&search=%20demo%20&video_status=ready")
+	if err != nil {
+		t.Fatalf("parseMaterialListFilter() error = %v", err)
+	}
+	if filter.TeamID == nil || *filter.TeamID != 8 || !slices.Equal(filter.GameIDs, []string{"game-a", "game-b"}) || filter.GameID != "legacy" {
+		t.Fatalf("filter = %+v, want the named team, deduplicated games and the legacy single game", filter)
+	}
+	if filter.Joined != "joined" || filter.MyUsage != "used" || filter.TeamUsage != "unused" || filter.Search != "demo" || filter.VideoStatus != "ready" {
+		t.Fatalf("filter = %+v, want every parsed dimension", filter)
+	}
+
+	if empty, err := parse(""); err != nil || empty.TeamID != nil || len(empty.GameIDs) != 0 || empty.Joined != "" {
+		t.Fatalf("an absent query parsed to %+v, %v", empty, err)
+	}
+
+	for _, raw := range []string{
+		"team_id=0",
+		"team_id=abc",
+		"joined=all",
+		"my_usage=used_up",
+		"team_usage=none",
+	} {
+		if _, err := parse(raw); err == nil {
+			t.Fatalf("%q parsed, want a refusal", raw)
+		}
+	}
+
+	games := make([]string, materialGameFilterLimit+1)
+	for i := range games {
+		games[i] = "game-" + strconv.Itoa(i)
+	}
+	if _, err := parse("game_ids=" + strings.Join(games, ",")); err == nil {
+		t.Fatalf("%d games must be rejected", len(games))
+	}
+	if filter, err := parse("game_ids=" + strings.Join(games[:materialGameFilterLimit], ",")); err != nil || len(filter.GameIDs) != materialGameFilterLimit {
+		t.Fatalf("at the limit: %d games, err=%v", len(filter.GameIDs), err)
 	}
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,12 +155,82 @@ func TestListComposeOutputsSeniorSeesTeamScopeNotOnlyOwn(t *testing.T) {
 	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
 	store := &outputMemoryStore{}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
-	if _, err := svc.List(senior, ListComposeOutputsInput{OperatorScope: "team"}); err != nil {
+	if _, err := svc.List(senior, ListComposeOutputsInput{}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	filter := store.filters[0]
-	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 {
-		t.Fatalf("senior team scope must not narrow to an operator: %+v", filter)
+	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 || len(filter.GameIDs) != 0 {
+		t.Fatalf("senior default scope must be the whole team and every game: %+v", filter)
+	}
+}
+
+func TestListComposeOutputsNarrowsByGameWithoutWideningTheScope(t *testing.T) {
+	team := identity.TeamID(7)
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta", "omega"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	admin := identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled, TeamID: &team}
+
+	store := &outputMemoryStore{}
+	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
+	if _, err := svc.List(operator, ListComposeOutputsInput{GameID: "omega"}); err != nil {
+		t.Fatalf("operator own game: %v", err)
+	}
+	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 1 || got.GameIDs[0] != "omega" || got.TeamID != 7 || got.OperatorID != 9 {
+		t.Fatalf("operator game filter = %+v", got)
+	}
+
+	// A foreign game is refused rather than silently widened back to the actor's games.
+	before := len(store.filters)
+	if _, err := svc.List(operator, ListComposeOutputsInput{GameID: "jql"}); !errors.Is(err, ErrComposeOutputForbidden) {
+		t.Fatalf("operator foreign game = %v", err)
+	}
+	if len(store.filters) != before {
+		t.Fatal("a refused game must not reach the store")
+	}
+
+	// Empty game keeps the role's original scope.
+	if _, err := svc.List(operator, ListComposeOutputsInput{}); err != nil {
+		t.Fatalf("operator without game: %v", err)
+	}
+	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 2 || got.GameIDs[0] != "delta" || got.GameIDs[1] != "omega" {
+		t.Fatalf("operator default games = %+v", got)
+	}
+
+	// Seniors and admins may name any game; the team filter still does the narrowing.
+	if _, err := svc.List(senior, ListComposeOutputsInput{GameID: "omega"}); err != nil {
+		t.Fatalf("senior any game: %v", err)
+	}
+	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 1 || got.GameIDs[0] != "omega" || got.TeamID != 7 {
+		t.Fatalf("senior game filter = %+v", got)
+	}
+	if _, err := svc.List(admin, ListComposeOutputsInput{GameID: "omega"}); err != nil {
+		t.Fatalf("admin any game: %v", err)
+	}
+	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 1 || got.GameIDs[0] != "omega" {
+		t.Fatalf("admin game filter = %+v", got)
+	}
+
+	before = len(store.filters)
+	if _, err := svc.List(admin, ListComposeOutputsInput{GameID: strings.Repeat("a", 33)}); !errors.Is(err, ErrComposeOutputInvalid) {
+		t.Fatalf("overlong game = %v", err)
+	}
+	if len(store.filters) != before {
+		t.Fatal("an invalid game must not reach the store")
+	}
+}
+
+func TestComposeOutputSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
+	team := identity.TeamID(7)
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"omega"}}
+	otherTeam := outputFixture(2)
+	otherTeam.TeamID = 8
+	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1), otherTeam}}
+	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
+	if _, err := svc.Get(senior, 1); err != nil {
+		t.Fatalf("senior must read a same-team output in another game: %v", err)
+	}
+	if _, err := svc.Get(senior, 2); !errors.Is(err, ErrComposeOutputNotFound) {
+		t.Fatalf("senior must not read another team's output: %v", err)
 	}
 }
 

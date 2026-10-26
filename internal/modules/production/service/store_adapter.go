@@ -23,6 +23,18 @@ func (mysqlStore) ListMaterials(filter repository.MaterialFilter) ([]model.Mater
 	return repository.ListMaterials(filter)
 }
 
+func (mysqlStore) ListUsageRelations(userID identityservice.UserID, materialIDs []int64) ([]repository.MaterialUsageRelation, error) {
+	return repository.ListUsageRelations(userID, materialIDs)
+}
+
+func (mysqlStore) ListMaterialOutputFacts(materialIDs []int64) ([]repository.MaterialOutputFact, error) {
+	return repository.ListMaterialOutputFacts(materialIDs)
+}
+
+func (mysqlStore) HasActiveUsage(materialID int64, userID identityservice.UserID) (bool, error) {
+	return repository.HasActiveUsage(materialID, userID)
+}
+
 func (mysqlStore) CreateOrRestoreUsage(input repository.CreateUsageInput, now time.Time) (model.MaterialUsage, bool, error) {
 	return repository.CreateOrRestoreUsage(input, now)
 }

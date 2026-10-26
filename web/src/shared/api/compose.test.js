@@ -59,16 +59,18 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[9][0]).toBe('/api/v1/operation-teams')
   })
 
-  // 页面用游戏列表做「游戏 ID → 名称」的展示映射和创建表单下拉，与素材/内容池页
-  // 共用同一个 /games 端点。这里钉住方法存在且不带参数——状态过滤交给服务端语义，
-  // 客户端不替它想象。
-  it('lists games from the shared games endpoint', async () => {
+  // 页面用游戏列表做「游戏 ID → 名称」的展示映射和筛选/创建表单下拉，与素材/内容池页
+  // 共用同一个 /games 端点。成片页需要「全量名称 + 仅启用选项」两种读法，所以参数必须透传。
+  it('lists games from the shared games endpoint with its filters', async () => {
     const fetch = vi.fn().mockResolvedValue(ok([{ id: 'naruto', name: '火影' }]))
     const client = createComposeClient({ fetch })
 
     await expect(client.listGames()).resolves.toEqual([{ id: 'naruto', name: '火影' }])
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/games')
     expect(fetch.mock.calls[0][1].method).toBe('GET')
+
+    await client.listGames({ scope: 'all', status: 'enabled' })
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/games?status=enabled&scope=all')
   })
 
   it('reads strategy schedule run history', async () => {

@@ -52,6 +52,21 @@ type memoryStore struct {
 	findCount int
 	refind    *model.Material
 
+	// relations and facts are the two batch reads the library page decorates from.
+	// Both default to empty — no relation, no successful output — which is the
+	// honest starting state of a new material.
+	relations    []repository.MaterialUsageRelation
+	relationsFor sharedidentity.UserID
+	relationsIDs []int64
+	facts        []repository.MaterialOutputFact
+	factsIDs     []int64
+
+	// usageMissing is the download gate's refusal. It is opt-in because most
+	// download tests are about what happens after the gate; the gate's own test
+	// sets it, so a service that stopped asking would answer a queued task there.
+	usageMissing bool
+	usageChecks  []int64
+
 	// preparing defaults to false for the same reason the other doubles refuse by
 	// default: a test that expects the projection to have moved has to say so.
 	preparing     bool
@@ -261,6 +276,19 @@ func (s *memoryStore) ListMaterials(filter repository.MaterialFilter) ([]model.M
 	s.filter = filter
 	return []model.Material{s.material}, nil
 }
+func (s *memoryStore) ListUsageRelations(userID sharedidentity.UserID, materialIDs []int64) ([]repository.MaterialUsageRelation, error) {
+	s.relationsFor = userID
+	s.relationsIDs = append([]int64(nil), materialIDs...)
+	return s.relations, nil
+}
+func (s *memoryStore) ListMaterialOutputFacts(materialIDs []int64) ([]repository.MaterialOutputFact, error) {
+	s.factsIDs = append([]int64(nil), materialIDs...)
+	return s.facts, nil
+}
+func (s *memoryStore) HasActiveUsage(materialID int64, _ sharedidentity.UserID) (bool, error) {
+	s.usageChecks = append(s.usageChecks, materialID)
+	return !s.usageMissing, nil
+}
 func (s *memoryStore) ListUsages(userID sharedidentity.UserID) ([]model.MaterialUsage, error) {
 	s.listedFor = userID
 	return s.usages, nil
@@ -284,12 +312,28 @@ func (s *memoryStore) RestoreUsageByID(usageID int64, userID sharedidentity.User
 	return nil
 }
 
-func TestAddUsageRejectsMaterialOutsideActorGameScope(t *testing.T) {
+// A game is a filter, not a visibility boundary (§5.3.3): an operator may join
+// a material in their team even when someone else is responsible for its game.
+func TestAddUsageAllowsAnotherGameInTheActorsTeam(t *testing.T) {
 	team := service.TeamID(7)
 	game := "game-b"
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, createdUsage: true}
 	svc := testService(store)
 	_, _, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	if err != nil {
+		t.Fatalf("AddUsage() error = %v, want the team's other game to be allowed", err)
+	}
+	if store.created.MaterialID != 42 || store.created.TeamID != team {
+		t.Fatalf("store creation = %+v, want the team's material", store.created)
+	}
+}
+
+func TestAddUsageRejectsAMaterialInAnotherTeam(t *testing.T) {
+	team := service.TeamID(7)
+	otherTeam := service.TeamID(8)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: otherTeam}}
+	svc := testService(store)
+	_, _, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team}, 42)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("AddUsage() error = %v, want ErrForbidden", err)
 	}
@@ -339,19 +383,218 @@ func TestAddUsageReportsAnAlreadyActiveRelationAsNotCreated(t *testing.T) {
 	}
 }
 
-func TestListMaterialsProjectsTheActorTeamAndGameScopeIntoTheStoreQuery(t *testing.T) {
+// Detail, add and download share this visibility check. The team is the
+// boundary; the actor's responsible games are not, so an operator sees a
+// material of another game in the same team and an admin crosses teams. A
+// senior is still pinned to their own team.
+func TestGetMaterialScopesVisibilityByTeamNotGame(t *testing.T) {
 	team := service.TeamID(7)
+	otherTeam := service.TeamID(8)
 	game := "game-a"
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+	for _, testCase := range []struct {
+		name    string
+		actor   service.PublicUser
+		wantErr bool
+	}{
+		{"operator other game in team", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, false},
+		{"operator other team", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam}, true},
+		{"senior other game in team", service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, false},
+		{"senior other team", service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam}, true},
+		{"admin across teams", service.PublicUser{ID: 1, Role: service.RoleAdmin, Status: service.UserStatusEnabled}, false},
+		{"disabled", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusDisabled, TeamID: &team}, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+			svc := testService(store)
+			_, err := svc.GetMaterial(testCase.actor, 42)
+			if testCase.wantErr {
+				if !errors.Is(err, ErrForbidden) {
+					t.Fatalf("GetMaterial() error = %v, want ErrForbidden", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetMaterial() error = %v", err)
+			}
+		})
+	}
+}
+
+// The library query is scoped by team, not by the actor's responsible games.
+// Games travel only because the caller asked to narrow to them, and the viewer
+// travels so the store can answer the relation and usage filters.
+func TestListMaterialsScopesTheQueryByTeamAndLeavesGamesAsFilters(t *testing.T) {
+	team := service.TeamID(7)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}}
 	svc := testService(store)
-	items, err := svc.ListMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a", "game-b"}}, "demo")
+	filter := repository.MaterialFilter{GameIDs: []string{"game-a", "game-b"}, Search: "demo", Joined: "not_joined"}
+	items, err := svc.ListMaterialsFiltered(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, filter)
+	if err != nil {
+		t.Fatalf("ListMaterialsFiltered() error = %v", err)
+	}
+	if len(items) != 1 || store.filter.TeamID == nil || *store.filter.TeamID != team {
+		t.Fatalf("items=%+v filter=%+v", items, store.filter)
+	}
+	if !slices.Equal(store.filter.GameIDs, []string{"game-a", "game-b"}) || store.filter.Search != "demo" || store.filter.Joined != "not_joined" || store.filter.UserID != 9 {
+		t.Fatalf("the caller's filters were not carried through: %+v", store.filter)
+	}
+}
+
+func TestListMaterialsRefusesAnotherTeamsFilter(t *testing.T) {
+	team := service.TeamID(7)
+	otherTeam := service.TeamID(8)
+	store := &memoryStore{found: true}
+	svc := testService(store)
+	_, err := svc.ListMaterialsFiltered(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team}, repository.MaterialFilter{TeamID: &otherTeam})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListMaterialsFiltered() error = %v, want ErrForbidden", err)
+	}
+	if store.filter.TeamID != nil {
+		t.Fatalf("the store was queried for a refused team: %+v", store.filter)
+	}
+}
+
+func TestListMaterialsLetsAnAdminChooseTheTargetTeam(t *testing.T) {
+	target := service.TeamID(8)
+	store := &memoryStore{found: true}
+	svc := testService(store)
+	if _, err := svc.ListMaterialsFiltered(service.PublicUser{ID: 1, Role: service.RoleAdmin, Status: service.UserStatusEnabled}, repository.MaterialFilter{TeamID: &target}); err != nil {
+		t.Fatalf("ListMaterialsFiltered() error = %v", err)
+	}
+	if store.filter.TeamID == nil || *store.filter.TeamID != target || store.filter.UserID != 1 {
+		t.Fatalf("admin filter = %+v, want the named team and the admin as viewer", store.filter)
+	}
+}
+
+// An admin who names no team reads across teams. The returned rows carry their
+// own team, so a store query that silently pinned one team would hide the rest
+// without any row looking wrong.
+func TestListMaterialsLetsAnAdminReadAcrossTeamsWhenNoTeamIsNamed(t *testing.T) {
+	store := &memoryStore{found: true}
+	svc := testService(store)
+	if _, err := svc.ListMaterialsFiltered(service.PublicUser{ID: 1, Role: service.RoleAdmin, Status: service.UserStatusEnabled}, repository.MaterialFilter{}); err != nil {
+		t.Fatalf("ListMaterialsFiltered() error = %v", err)
+	}
+	if store.filter.TeamID != nil {
+		t.Fatalf("admin filter = %+v, want no team scope", store.filter)
+	}
+}
+
+// A senior operator reads every game of their own team. The games they are
+// responsible for narrow a request when they ask, but they must not narrow the
+// team behind their back (§5.3.3); another team stays refused and is not even
+// queried.
+func TestListMaterialsLetsASeniorReadEveryGameOfTheirTeam(t *testing.T) {
+	team := service.TeamID(7)
+	otherTeam := service.TeamID(8)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}}
+	svc := testService(store)
+	senior := service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+
+	if _, err := svc.ListMaterialsFiltered(senior, repository.MaterialFilter{}); err != nil {
+		t.Fatalf("ListMaterialsFiltered() error = %v", err)
+	}
+	if store.filter.TeamID == nil || *store.filter.TeamID != team || len(store.filter.GameIDs) != 0 {
+		t.Fatalf("senior filter = %+v, want the whole team and no game scope", store.filter)
+	}
+
+	store.factsIDs = nil
+	if _, err := svc.ListMaterialsFiltered(senior, repository.MaterialFilter{TeamID: &otherTeam}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListMaterialsFiltered(other team) error = %v, want ErrForbidden", err)
+	}
+	if len(store.factsIDs) != 0 {
+		t.Fatalf("the store was queried for a refused team: %v", store.factsIDs)
+	}
+}
+
+// The three usage dimensions come from batch reads: one relation row per
+// material for the viewer, one successful-output count per operator. A
+// historical output with no operator still counts as use but is not a person,
+// and ordinary operators get counts without names.
+func TestListMaterialsDecoratesTheViewersRelationAndTheTeamsUsage(t *testing.T) {
+	team := service.TeamID(7)
+	material := model.Material{ID: 42, TeamID: team}
+	added := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	store := &memoryStore{
+		found:    true,
+		material: material,
+		relations: []repository.MaterialUsageRelation{
+			{MaterialID: 42, Status: model.MaterialUsageRemoved, CreatedAt: added},
+		},
+		facts: []repository.MaterialOutputFact{
+			{MaterialID: 42, OperatorID: ptrInt64(9), OutputCount: 2},
+			{MaterialID: 42, OperatorID: ptrInt64(11), OutputCount: 1},
+			{MaterialID: 42, OutputCount: 3},
+		},
+	}
+	svc := testService(store)
+
+	items, err := svc.ListMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team}, "")
 	if err != nil {
 		t.Fatalf("ListMaterials() error = %v", err)
 	}
-	if len(items) != 1 || store.filter.TeamID == nil || *store.filter.TeamID != team || len(store.filter.GameIDs) != 2 || store.filter.Search != "demo" {
-		t.Fatalf("items=%+v filter=%+v", items, store.filter)
+	item := items[0]
+	if item.UsageStatus != model.MaterialUsageRemoved || item.AddedAt == nil || !item.AddedAt.Equal(added) {
+		t.Fatalf("relation projection = %+v, want removed with its original added time", item)
+	}
+	if item.MyUsage != model.MaterialMyUsageUsed {
+		t.Fatalf("MyUsage = %q, want used: the viewer has a successful output", item.MyUsage)
+	}
+	if item.Usage == nil || item.Usage.OutputCount != 6 || item.Usage.OperatorCount != 2 {
+		t.Fatalf("Usage = %+v, want 6 outputs by 2 known operators", item.Usage)
+	}
+	if item.Usage.Operators != nil {
+		t.Fatalf("ordinary operators must not receive the operator names: %+v", item.Usage.Operators)
+	}
+	if !slices.Equal(store.factsIDs, []int64{42}) || store.relationsFor != 9 || !slices.Equal(store.relationsIDs, []int64{42}) {
+		t.Fatalf("batch reads were asked for %v / %d %v", store.factsIDs, store.relationsFor, store.relationsIDs)
+	}
+
+	svc.operators = func() ([]service.PublicUser, error) {
+		return []service.PublicUser{{ID: 9, Username: "operator-a"}, {ID: 11, Nickname: "运营乙"}}, nil
+	}
+	items, err = svc.ListMaterials(service.PublicUser{ID: 1, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team}, "")
+	if err != nil {
+		t.Fatalf("ListMaterials() error = %v", err)
+	}
+	usage := items[0].Usage
+	if usage == nil || usage.OperatorCount != 2 || len(usage.Operators) != 2 {
+		t.Fatalf("senior usage = %+v, want both known operators", usage)
+	}
+	if usage.Operators[0].Name != "operator-a" || usage.Operators[1].Name != "运营乙" {
+		t.Fatalf("operator names = %+v, want the directory names", usage.Operators)
+	}
+
+	items, err = svc.ListMaterials(service.PublicUser{ID: 1, Role: service.RoleAdmin, Status: service.UserStatusEnabled}, "")
+	if err != nil {
+		t.Fatalf("ListMaterials() error = %v", err)
+	}
+	if items[0].Usage == nil || len(items[0].Usage.Operators) != 2 || items[0].Usage.Operators[1].Name != "运营乙" {
+		t.Fatalf("admin usage = %+v, want the same directory names", items[0].Usage)
 	}
 }
+
+// A material nobody has produced from yet still carries a summary — zero
+// counts — so the page can render the third column without guessing from an
+// absent field.
+func TestListMaterialsAnswersAnUnusedMaterialWithZeroCounts(t *testing.T) {
+	team := service.TeamID(7)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}}
+	svc := testService(store)
+	items, err := svc.ListMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team}, "")
+	if err != nil {
+		t.Fatalf("ListMaterials() error = %v", err)
+	}
+	item := items[0]
+	if item.MyUsage != model.MaterialMyUsageUnused || item.UsageStatus != "" || item.AddedAt != nil {
+		t.Fatalf("unused projection = %+v, want unused and no relation", item)
+	}
+	if item.Usage == nil || item.Usage.OutputCount != 0 || item.Usage.OperatorCount != 0 || len(item.Usage.Operators) != 0 {
+		t.Fatalf("Usage = %+v, want an all-zero summary", item.Usage)
+	}
+}
+
+func ptrInt64(value int64) *int64 { return &value }
 
 func TestListMyMaterialsReturnsOnlyUsagesWithCurrentlyVisibleMaterials(t *testing.T) {
 	team := service.TeamID(7)
@@ -472,10 +715,12 @@ func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T)
 	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
 	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
 
-	// Out of scope: the game range is the actor's, not the material's.
+	// Out of scope: the material's team is the boundary, and this actor is in
+	// another one.
+	otherTeam := service.TeamID(8)
 	store := &memoryStore{found: true, material: ready}
 	svc := testService(store)
-	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, 42); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam, GameIDs: []string{"game-a"}}, 42); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("out-of-scope VideoURL() error = %v, want ErrForbidden", err)
 	}
 
@@ -618,11 +863,11 @@ func TestVideoURLReportsABucketCheckFailure(t *testing.T) {
 
 func TestRemoveUsageChecksTheMaterialScopeBeforeSoftRemoval(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-b"
+	otherTeam := service.TeamID(8)
 	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}, usages: []model.MaterialUsage{usage}}
 	svc := testService(store)
-	err := svc.RemoveUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 5)
+	err := svc.RemoveUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam}, 5)
 	if !errors.Is(err, ErrForbidden) || store.removed != 0 {
 		t.Fatalf("err=%v removed=%d", err, store.removed)
 	}
@@ -709,10 +954,11 @@ func TestListMyMaterialsKeepsTheGivenUpRelationWithItsOwnState(t *testing.T) {
 }
 
 func TestRestoreUsageChecksTheMaterialScopeBeforeRestoration(t *testing.T) {
-	team, game := service.TeamID(7), "game-b"
+	team := service.TeamID(7)
+	otherTeam := service.TeamID(8)
 	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageRemoved}
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
-	err := testService(store).RestoreUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 5)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}, usages: []model.MaterialUsage{usage}}
+	err := testService(store).RestoreUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam}, 5)
 	if !errors.Is(err, ErrForbidden) || store.restored != 0 {
 		t.Fatalf("err=%v restored=%d", err, store.restored)
 	}
@@ -825,6 +1071,40 @@ func TestCreateDownloadAddressesTheTaskToTheActor(t *testing.T) {
 	}
 }
 
+// The library is team-public, but the original video is personal: downloading
+// it is an action from "My Materials" (§5.3.4). A direct API call by a viewer
+// with no active relation must fail closed, before anything is queued.
+func TestCreateDownloadRequiresTheActorsActiveUsage(t *testing.T) {
+	team, game := service.TeamID(7), "game-a"
+
+	store := &memoryStore{found: true, material: readyMaterial(team, game), usageMissing: true}
+	transfers := &stubTransfers{}
+	svc := NewService(store, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); !errors.Is(err, ErrUsageForbidden) {
+		t.Fatalf("CreateDownload() error = %v, want ErrUsageForbidden", err)
+	}
+	if transfers.count != 0 || transfers.prepareCount != 0 || store.preparedCount != 0 {
+		t.Fatalf("a refused download queued work: downloads=%d preparations=%d projection=%d", transfers.count, transfers.prepareCount, store.preparedCount)
+	}
+	if !slices.Equal(store.usageChecks, []int64{42}) {
+		t.Fatalf("usage checks = %v, want the material asked about", store.usageChecks)
+	}
+
+	// The allowed arm is what makes the refusal meaningful: the same viewer with
+	// an active relation gets the task, and the relation was actually consulted.
+	store = &memoryStore{found: true, material: readyMaterial(team, game)}
+	transfers = &stubTransfers{}
+	svc = NewService(store, transfers, &stubLinks{})
+	svc.resolveGame = stubResolveGame
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
+		t.Fatalf("CreateDownload() error = %v, want the relation to allow it", err)
+	}
+	if transfers.count != 1 || !slices.Equal(store.usageChecks, []int64{42}) {
+		t.Fatalf("downloads=%d usage checks=%v, want one download after the relation check", transfers.count, store.usageChecks)
+	}
+}
+
 // The refusals, each asserted separately because they are different things to
 // tell the user: not yours to see, not ready yet, not there at all. Collapsing
 // any two of them would answer 404 or 500 where the frozen contract publishes a
@@ -848,8 +1128,8 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 			want:        ErrInvalidInput,
 		},
 		{
-			name:     "outside the actor's scope",
-			material: func() model.Material { m := readyMaterial(team, "game-b"); return m }(),
+			name:     "outside the actor's team",
+			material: func() model.Material { m := readyMaterial(service.TeamID(8), "game-b"); return m }(),
 			found:    true,
 			want:     ErrForbidden,
 		},

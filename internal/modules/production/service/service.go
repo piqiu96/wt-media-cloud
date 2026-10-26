@@ -44,6 +44,12 @@ var (
 type Store interface {
 	FindMaterial(int64) (model.Material, bool, error)
 	ListMaterials(repository.MaterialFilter) ([]model.Material, error)
+	// ListUsageRelations and ListMaterialOutputFacts fill the library's three
+	// usage dimensions in one batch per page rather than one query per row.
+	ListUsageRelations(identityservice.UserID, []int64) ([]repository.MaterialUsageRelation, error)
+	ListMaterialOutputFacts([]int64) ([]repository.MaterialOutputFact, error)
+	// HasActiveUsage is the personal gate on downloading a material.
+	HasActiveUsage(int64, identityservice.UserID) (bool, error)
 	CreateOrRestoreUsage(repository.CreateUsageInput, time.Time) (model.MaterialUsage, bool, error)
 	ListUsages(identityservice.UserID) ([]model.MaterialUsage, error)
 	FindUsageForUser(int64, identityservice.UserID) (model.MaterialUsage, bool, error)
@@ -139,6 +145,10 @@ type Service struct {
 	// resolveGame names the game a download is filed under. It is a field so the
 	// unit tests can stub the store call; the constructor installs the real one.
 	resolveGame func(gameID string) (string, bool, error)
+	// operators is the identity directory the usage summary reads names from.
+	// It stays nil in unit tests that only exercise counts; the wired service
+	// installs the real lookup.
+	operators func() ([]identityservice.PublicUser, error)
 }
 
 func NewService(store Store, transfers TransferCreator, links ObjectLinker) *Service {
@@ -151,7 +161,23 @@ func NewService(store Store, transfers TransferCreator, links ObjectLinker) *Ser
 	}
 }
 
+// GetMaterial is the actor-facing read: visibility first, then the usage
+// dimensions the detail drawer shows. Internal callers that only need the
+// material's own facts use getMaterial, so a download or a relation write does
+// not pay for a usage summary it never reads.
 func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64) (model.Material, error) {
+	material, err := s.getMaterial(actor, materialID)
+	if err != nil {
+		return model.Material{}, err
+	}
+	items, err := s.decorateMaterials(actor, []model.Material{material})
+	if err != nil {
+		return model.Material{}, err
+	}
+	return items[0], nil
+}
+
+func (s *Service) getMaterial(actor identityservice.PublicUser, materialID int64) (model.Material, error) {
 	if materialID <= 0 {
 		return model.Material{}, ErrInvalidInput
 	}
@@ -175,7 +201,7 @@ func (s *Service) GetMaterial(actor identityservice.PublicUser, materialID int64
 // is really in the bucket (409 if not — a `ready` row can outlive its object),
 // and only then a signature.
 func (s *Service) VideoURL(ctx context.Context, actor identityservice.PublicUser, materialID int64) (string, error) {
-	material, err := s.GetMaterial(actor, materialID)
+	material, err := s.getMaterial(actor, materialID)
 	if err != nil {
 		return "", err
 	}
@@ -208,7 +234,7 @@ func (s *Service) VideoURL(ctx context.Context, actor identityservice.PublicUser
 // identical either way, so a caller that had to infer it from the body would be
 // guessing.
 func (s *Service) AddUsage(actor identityservice.PublicUser, materialID int64) (model.MaterialUsage, bool, error) {
-	material, err := s.GetMaterial(actor, materialID)
+	material, err := s.getMaterial(actor, materialID)
 	if err != nil {
 		return model.MaterialUsage{}, false, err
 	}
@@ -223,19 +249,110 @@ func (s *Service) ListMaterials(actor identityservice.PublicUser, search string)
 	return s.ListMaterialsFiltered(actor, repository.MaterialFilter{Search: search})
 }
 
+// ListMaterialsFiltered reads the team's public library. A game is a filter,
+// not a visibility boundary (§5.3.3): an ordinary operator sees every game in
+// their team and may narrow the list to the games they are responsible for.
+// The team itself is still enforced server-side — an ordinary or senior
+// operator cannot ask for another team, and an admin may name the target team.
 func (s *Service) ListMaterialsFiltered(actor identityservice.PublicUser, filter repository.MaterialFilter) ([]model.Material, error) {
 	if actor.Status != identityservice.UserStatusEnabled {
 		return nil, ErrForbidden
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
-	if actor.Role != identityservice.RoleAdmin {
-		if actor.TeamID == nil || len(actor.GameIDs) == 0 {
+	switch actor.Role {
+	case identityservice.RoleAdmin:
+		// The target team is whatever the request named; absent means all teams,
+		// which is the admin's own reading scope.
+	case identityservice.RoleOperator, identityservice.RoleSeniorOperator:
+		if actor.TeamID == nil {
+			return nil, ErrForbidden
+		}
+		if filter.TeamID != nil && *filter.TeamID != *actor.TeamID {
 			return nil, ErrForbidden
 		}
 		filter.TeamID = actor.TeamID
-		filter.GameIDs = append([]string(nil), actor.GameIDs...)
+	default:
+		return nil, ErrForbidden
 	}
-	return s.store.ListMaterials(filter)
+	filter.UserID = actor.ID
+	items, err := s.store.ListMaterials(filter)
+	if err != nil {
+		return nil, err
+	}
+	return s.decorateMaterials(actor, items)
+}
+
+// decorateMaterials fills the viewer's relation and the team's successful-output
+// facts onto a page of materials. Two batch reads cover the page; names are a
+// directory read only for the roles allowed to see them.
+func (s *Service) decorateMaterials(actor identityservice.PublicUser, items []model.Material) ([]model.Material, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	relations, err := s.store.ListUsageRelations(actor.ID, ids)
+	if err != nil {
+		return nil, err
+	}
+	facts, err := s.store.ListMaterialOutputFacts(ids)
+	if err != nil {
+		return nil, err
+	}
+	relationsByMaterial := make(map[int64]repository.MaterialUsageRelation, len(relations))
+	for _, relation := range relations {
+		relationsByMaterial[relation.MaterialID] = relation
+	}
+	summaryByMaterial := make(map[int64]*model.MaterialUsageSummary, len(ids))
+	var operatorIDs []int64
+	for _, fact := range facts {
+		summary := summaryByMaterial[fact.MaterialID]
+		if summary == nil {
+			summary = &model.MaterialUsageSummary{}
+			summaryByMaterial[fact.MaterialID] = summary
+		}
+		summary.OutputCount += fact.OutputCount
+		if fact.OperatorID == nil {
+			continue
+		}
+		summary.OperatorCount++
+		summary.Operators = append(summary.Operators, model.MaterialOperatorUse{ID: *fact.OperatorID, OutputCount: fact.OutputCount})
+		operatorIDs = append(operatorIDs, *fact.OperatorID)
+	}
+	names := map[int64]string(nil)
+	if actor.Role == identityservice.RoleSeniorOperator || actor.Role == identityservice.RoleAdmin {
+		names, err = composeOperatorNameLookup(s.operators, operatorIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for i := range items {
+		item := &items[i]
+		if relation, ok := relationsByMaterial[item.ID]; ok {
+			item.UsageStatus = relation.Status
+			addedAt := relation.CreatedAt
+			item.AddedAt = &addedAt
+		}
+		item.MyUsage = model.MaterialMyUsageUnused
+		summary := summaryByMaterial[item.ID]
+		if summary == nil {
+			summary = &model.MaterialUsageSummary{}
+		}
+		item.Usage = summary
+		for j := range summary.Operators {
+			operator := &summary.Operators[j]
+			if operator.ID == int64(actor.ID) {
+				item.MyUsage = model.MaterialMyUsageUsed
+			}
+			operator.Name = names[operator.ID]
+		}
+		if actor.Role != identityservice.RoleSeniorOperator && actor.Role != identityservice.RoleAdmin {
+			summary.Operators = nil
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) ListMyMaterials(actor identityservice.PublicUser) ([]model.MaterialUsage, error) {
@@ -309,7 +426,7 @@ func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) e
 	if !found {
 		return ErrUsageNotFound
 	}
-	material, err := s.GetMaterial(actor, usage.MaterialID)
+	material, err := s.getMaterial(actor, usage.MaterialID)
 	if err != nil {
 		return err
 	}
@@ -350,7 +467,7 @@ func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) 
 	if !found {
 		return ErrUsageNotFound
 	}
-	material, err := s.GetMaterial(actor, usage.MaterialID)
+	material, err := s.getMaterial(actor, usage.MaterialID)
 	if err != nil {
 		return err
 	}
@@ -389,9 +506,21 @@ func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) 
 // The download belongs to the user, not to a machine: any Desktop the actor logs
 // in on can claim it, and nothing is assigned here.
 func (s *Service) CreateDownload(ctx context.Context, actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
-	material, err := s.GetMaterial(actor, materialID)
+	material, err := s.getMaterial(actor, materialID)
 	if err != nil {
 		return transferdto.Task{}, err
+	}
+	// Downloading the original video is a personal action from "My Materials",
+	// not a library action (§5.3.4). A visible material alone is not enough:
+	// the current user's relation must be in use, so a removed relation or a
+	// direct API call without one fails closed. The Cloud worker's preparation
+	// path does not pass through here and keeps working without a user.
+	inUse, err := s.store.HasActiveUsage(material.ID, actor.ID)
+	if err != nil {
+		return transferdto.Task{}, fmt.Errorf("check material %d usage for user %d: %w", material.ID, actor.ID, err)
+	}
+	if !inUse {
+		return transferdto.Task{}, ErrUsageForbidden
 	}
 	// `ready` is a projection, so a ready row still has to prove its object is
 	// in the bucket before this route promises a download: the incident this
@@ -473,7 +602,7 @@ func (s *Service) CreateDownload(ctx context.Context, actor identityservice.Publ
 			// case a wait would hold a file back that can be fetched now. Only a fresh
 			// read tells the two apart, and guessing wrong on the second strands a
 			// download.
-			refreshed, readErr := s.GetMaterial(actor, materialID)
+			refreshed, readErr := s.getMaterial(actor, materialID)
 			if readErr != nil {
 				return transferdto.Task{}, readErr
 			}
@@ -649,6 +778,10 @@ func videoFacts(material model.Material) (string, int64, string, error) {
 	return material.SourceObjectKey, *material.VideoSizeBytes, material.VideoSHA256, nil
 }
 
+// canAccessMaterial is the team boundary, not a game boundary: the library is
+// the team's public pool (§5.3.3), and a material's game is only a filter. An
+// admin reads across teams and may narrow the list by target team. A material
+// without a game is visible too — it is still the team's material.
 func canAccessMaterial(actor identityservice.PublicUser, material model.Material) bool {
 	if actor.Status != identityservice.UserStatusEnabled {
 		return false
@@ -656,13 +789,5 @@ func canAccessMaterial(actor identityservice.PublicUser, material model.Material
 	if actor.Role == identityservice.RoleAdmin {
 		return true
 	}
-	if actor.TeamID == nil || *actor.TeamID != material.TeamID || material.GameID == nil {
-		return false
-	}
-	for _, gameID := range actor.GameIDs {
-		if strings.TrimSpace(gameID) == *material.GameID {
-			return true
-		}
-	}
-	return false
+	return actor.TeamID != nil && *actor.TeamID == material.TeamID
 }

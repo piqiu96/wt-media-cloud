@@ -72,8 +72,12 @@ func TestComposeListScopePerRole(t *testing.T) {
 
 	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
 	scope, err = resolveComposeListScope(senior, 0, 0, "")
-	if err != nil || scope.TeamID != 7 || scope.OperatorID != 11 || scope.IncludeUnowned != 11 {
+	if err != nil || scope.TeamID != 7 || scope.OperatorID != 0 || scope.IncludeUnowned != 0 {
 		t.Fatalf("senior default scope=%+v err=%v", scope, err)
+	}
+	scope, err = resolveComposeListScope(senior, 0, 0, "mine")
+	if err != nil || scope.TeamID != 7 || scope.OperatorID != 11 || scope.IncludeUnowned != 11 {
+		t.Fatalf("senior explicit mine scope=%+v err=%v", scope, err)
 	}
 	scope, err = resolveComposeListScope(senior, 0, 0, "team")
 	if err != nil || scope.OperatorID != 0 || scope.IncludeUnowned != 0 || scope.TeamID != 7 {

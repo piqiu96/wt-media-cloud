@@ -332,7 +332,9 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 		return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
 	}
 	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
-	if actor.Role != identity.RoleAdmin {
+	// Operators stay inside the games they cover; seniors and admins see every
+	// game of the team they are allowed to read.
+	if actor.Role == identity.RoleOperator {
 		filter.GameIDs = actor.GameIDs
 	}
 	items, err := s.tasks.List(filter)
@@ -456,7 +458,8 @@ func (s *ComposeTaskService) Cancel(actor identity.PublicUser, id int64) (model.
 }
 
 // canReadComposeTask scopes the page: admins see everything, seniors see
-// their team-and-game scope, operators only their own tasks.
+// every game of their team, operators only their own tasks inside the games
+// they cover.
 func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool {
 	if actor.Status != identity.UserStatusEnabled {
 		return false
@@ -465,6 +468,12 @@ func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool 
 		return true
 	}
 	if actor.TeamID == nil || int64(*actor.TeamID) != item.TeamID {
+		return false
+	}
+	if actor.Role == identity.RoleSeniorOperator {
+		return true
+	}
+	if actor.Role != identity.RoleOperator {
 		return false
 	}
 	inGame := false
@@ -476,12 +485,9 @@ func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool 
 	if !inGame {
 		return false
 	}
-	if actor.Role == identity.RoleOperator {
-		// Historical rows have no operator. Their creator still reaches them,
-		// but the row is not attributed to the creator.
-		return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
-	}
-	return actor.Role == identity.RoleSeniorOperator
+	// Historical rows have no operator. Their creator still reaches them,
+	// but the row is not attributed to the creator.
+	return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
 }
 
 // materialFailure returns the named rejection for one material, or nil when it

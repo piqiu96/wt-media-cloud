@@ -15,6 +15,7 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { formatDurationMs } from '../../../shared/utils/units.js'
 import { attemptSteps, stepMetricsText } from '../attemptSteps.js'
 import { createdRangeParams } from '../createdRange.js'
+import { missingOperatorOption, operatorIdFromOption } from '../operatorFilter.js'
 import { UNCERTAIN_CODE, isRetryableTask, retryHint } from '../retryPolicy.js'
 import { reviewReady, safeComposeError } from '../uncertainReview.js'
 import { schemaFields } from '../schemaFields.js'
@@ -138,17 +139,11 @@ async function load({ quiet = false } = {}) {
     if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type
     if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id
     Object.assign(params, createdRangeParams(filters.value.created_range))
-    // 负责人筛选与服务端同一套 scope：普通运营不发（服务端固定本人）；高级运营默认
-    // 我的，可切团队全部或指定运营；管理员默认全部，按团队收窄。
-    const namedOperator = filters.value.operator.startsWith('op:') ? Number(filters.value.operator.slice(3)) : 0
-    if (isAdmin.value) {
-      if (filters.value.team_id) params.team_id = Number(filters.value.team_id)
-      if (namedOperator) params.operator_id = namedOperator
-      else if (filters.value.team_id) params.operator_scope = 'team'
-    } else if (isSenior.value) {
-      if (namedOperator) params.operator_id = namedOperator
-      else if (filters.value.operator === 'team') params.operator_scope = 'team'
-    }
+    // 负责人筛选只按团队成员收窄：普通运营没有这个控件（服务端固定本人）；
+    // 高级运营不发参数就是本团队全部，选中成员只发 operator_id；管理员按团队筛选。
+    const namedOperator = operatorIdFromOption(filters.value.operator)
+    if (isAdmin.value && filters.value.team_id) params.team_id = Number(filters.value.team_id)
+    if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator
     const data = await client.listComposeTasks(params)
     rows.value = Array.isArray(data) ? data : []
     if (!quiet) pagination.value.current = 1
@@ -212,7 +207,7 @@ async function loadOperators() {
   try {
     const data = await client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })
     operatorOptions.value = Array.isArray(data) ? data : []
-    if (filters.value.operator.startsWith('op:') && !operatorOptions.value.some((option) => filters.value.operator === `op:${option.id}`)) filters.value.operator = ''
+    if (missingOperatorOption(filters.value.operator, operatorFilterOptions.value)) filters.value.operator = ''
   } catch {
     operatorOptions.value = []
   } finally {
@@ -243,15 +238,12 @@ const attemptsError = ref('')
 // 藏按钮只是少一次必失败请求。
 const currentUser = ref(null)
 const canRetry = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))
-const canReviewUncertain = computed(() => currentUser.value?.role === 'admin')
+const canReviewUncertain = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))
 const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const canFilterOperators = computed(() => isSenior.value || isAdmin.value)
-const operatorFilterOptions = computed(() => {
-  const options = []
-  if (isSenior.value) options.push({ value: 'mine', label: '我的' }, { value: 'team', label: '团队全部' })
-  return options.concat(operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
-})
+// 负责人候选只有本团队启用的成员（含本人）：未选择就是团队全部，不造伪选项。
+const operatorFilterOptions = computed(() => operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
 const reviews = ref([])
 const reviewsError = ref('')
 const reviewBusy = ref(false)
@@ -497,8 +489,6 @@ onMounted(() => {
   // 只为藏/显重试按钮；读失败不拦页面，角色判定由服务端兜底。
   sessionClient.me().then((me) => {
     currentUser.value = me
-    // 高级运营的服务端默认就是「我」；把它显式放上下拉，页面说的事实才和查询一致。
-    if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'
     loadOperators()
     if (detail.value) loadReviews(detail.value.id)
   }).catch(() => {})
@@ -524,7 +514,7 @@ onMounted(() => {
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
           </t-select></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
-          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" :clearable="!isSenior" :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="人工创建" /><t-option value="scheduled" label="策略自动" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
@@ -614,9 +604,10 @@ onMounted(() => {
                 </div>
               </t-tab-panel>
               <t-tab-panel value="attempts" label="执行记录">
-                <div v-if="detail.error_code || detail.error_message" class="compose-detail__section">
+                <!-- 已成功的任务可能留着上一次失败的 error_code：只有当前仍是失败时才谈失败原因。 -->
+                <div v-if="detail.status === 'failed' && (detail.error_code || detail.error_message)" class="compose-detail__section">
                   <h4>失败原因</h4>
-                  <FeedbackAlert theme="error" :message="detail.error_code === 'execution_uncertain' ? '上次执行结果不明确，等待管理员核对。系统尚未确认旧进程已经停止。' : safeComposeError(detail.error_code)" />
+                  <FeedbackAlert theme="error" :message="detail.error_code === 'execution_uncertain' ? '上次执行结果不明确，等待人工核对。系统尚未确认旧进程已经停止。' : safeComposeError(detail.error_code)" />
                   <!-- 与概览里那一句同源（retryPolicy），同一件事不并存两种说法。 -->
                   <p v-if="retryHint(detail, canRetry)" class="compose-detail__hint">{{ retryHint(detail, canRetry) }}</p>
                   <p v-else-if="detail.status === 'failed' && detail.error_code === 'execution_failed'" class="compose-detail__hint">请根据失败原因判断是否重试。</p>
@@ -646,31 +637,31 @@ onMounted(() => {
                       <p v-if="attempt.outcome === 'success'" class="compose-detail__attempt-meta">本次执行成功，输出校验完成<span v-if="outputID(detail)">，生成成片 {{ outputID(detail) }}</span>。</p>
                       <template v-if="attempt.outcome === 'failed'">
                         <p class="compose-detail__attempt-meta">失败阶段：{{ stageLabels[attempt.stage] || '阶段未记录' }}</p>
-                        <p class="compose-detail__attempt-err">失败原因：{{ attempt.error_code === 'execution_uncertain' ? '执行结果不明确，需管理员人工核对' : safeComposeError(attempt.error_code) }}</p>
+                        <p class="compose-detail__attempt-err">失败原因：{{ attempt.error_code === 'execution_uncertain' ? '执行结果不明确，需人工核对' : safeComposeError(attempt.error_code) }}</p>
                         <p class="compose-detail__attempt-meta">可重试：{{ attempt.error_code === UNCERTAIN_CODE ? '不可直接重试' : '可由高级运营提交重试' }}</p>
                       </template>
                     </div>
                     <template v-if="canReviewUncertain">
                       <FeedbackAlert v-if="reviewsError" theme="error" :message="reviewsError" />
                       <div v-for="review in reviews" :key="review.id" class="compose-detail__attempt">
-                        <strong>第 {{ review.attempt }} 次结果不明确 · 管理员核对</strong>
-                        <p class="compose-detail__attempt-meta">管理员 {{ review.actor_user_id }} · {{ formatDateTime(review.created_at) }}</p>
+                        <strong>第 {{ review.attempt }} 次结果不明确 · 人工核对</strong>
+                        <p class="compose-detail__attempt-meta">核对人 {{ review.actor_user_id }} · {{ formatDateTime(review.created_at) }}</p>
                         <p class="compose-detail__review-evidence">{{ review.evidence }}</p>
                       </div>
                     </template>
                   </template>
                 </div>
                 <div v-if="detail.status === 'failed' && detail.error_code === 'execution_uncertain'" class="compose-detail__section compose-detail__review">
-                  <h4>待管理员核对</h4>
+                  <h4>待人工核对</h4>
                   <p class="compose-detail__hint">租约过期不代表进程已停止。请在原 Worker 节点和成片记录中人工核查；无法确认时保持当前失败状态。</p>
                   <template v-if="canReviewUncertain">
                     <t-checkbox v-model="reviewInput.oldExecutionStopped">我已核实旧 FFmpeg 已停止</t-checkbox>
                     <t-checkbox v-model="reviewInput.noOutputCommitted">我已核实没有已提交成片</t-checkbox>
                     <t-textarea v-model="reviewInput.evidence" :maxlength="2000" placeholder="记录核对依据（至少 20 字，不要填写凭据或签名链接）" />
                     <t-button theme="primary" :disabled="!reviewValid || reviewBusy" :loading="reviewBusy" @click="resolveUncertain">记录核对并人工重试</t-button>
-                    <p class="compose-detail__hint">此操作记录管理员声明并重新排队；系统无法自动证明旧进程已停止。</p>
+                    <p class="compose-detail__hint">此操作记录核对人声明并重新排队；系统无法自动证明旧进程已停止。</p>
                   </template>
-                  <p v-else class="compose-detail__hint">请联系管理员核对，当前任务不会自动重试。</p>
+                  <p v-else class="compose-detail__hint">请联系高级运营或管理员核对，当前任务不会自动重试。</p>
                 </div>
               </t-tab-panel>
               <t-tab-panel value="snapshot" label="配置快照">

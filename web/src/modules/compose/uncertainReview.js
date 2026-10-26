@@ -17,7 +17,7 @@ const errorLabels = {
 }
 
 export function safeComposeError(code) {
-  return errorLabels[code] || '执行异常，请联系管理员查看诊断摘要'
+  return errorLabels[code] || '执行异常，请联系高级运营或管理员查看诊断摘要'
 }
 
 // Only allowlisted fields enter the summary. Raw FFmpeg output, object keys,

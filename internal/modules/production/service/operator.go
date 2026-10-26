@@ -158,9 +158,8 @@ type composeListScope struct {
 
 // resolveComposeListScope applies one rule set to both production lists.
 // Ordinary operators are pinned to themselves and may not ask for anything
-// else; seniors default to themselves and may widen to their team or to one
-// named operator; admins default to everything and may narrow by team or
-// operator.
+// else; seniors default to their whole team and may narrow to one named
+// operator; admins default to everything and may narrow by team or operator.
 func resolveComposeListScope(actor identity.PublicUser, teamID, operatorID int64, scope string) (composeListScope, error) {
 	if actor.Status != identity.UserStatusEnabled {
 		return composeListScope{}, errComposeScopeForbidden
@@ -173,6 +172,8 @@ func resolveComposeListScope(actor identity.PublicUser, teamID, operatorID int64
 		switch actor.Role {
 		case identity.RoleAdmin:
 			scope = "all"
+		case identity.RoleSeniorOperator:
+			scope = "team"
 		default:
 			scope = "mine"
 		}

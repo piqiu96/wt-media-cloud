@@ -26,15 +26,23 @@ describe('compose tasks page', () => {
     expect(source).toContain('v-model="filters.created_range"')
   })
 
-  // 负责人筛选（M4-I）：普通运营没有这个控件（服务端固定本人）；高级运营默认「我的」，
-  // 可切团队全部或指定运营；管理员先选团队。页面选项和查询参数说同一件事。
-  it('wires the operator filter to the same scopes the server authorizes', () => {
+  // 负责人筛选（CHG-104 T-08）：团队成员本身就是候选项，未选择即本团队全部；
+  // 不再有「我的／团队全部」伪选项，页面也不再发送 operator_scope。
+  it('lists team members as the only operator options and narrows by operator_id', () => {
     expect(source).toContain('v-model="filters.operator"')
     expect(source).toContain('v-if="canFilterOperators"')
-    expect(source).toContain("if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'")
-    expect(source).toContain('params.operator_id = namedOperator')
-    expect(source).toContain("else if (filters.value.operator === 'team') params.operator_scope = 'team'")
+    expect(source).toContain('operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name }))')
+    expect(source).not.toContain("value: 'mine'")
+    expect(source).not.toContain("value: 'team'")
+    expect(source).not.toContain("filters.value.operator = 'mine'")
+    expect(source).not.toContain('params.operator_scope')
+    expect(source).toContain('if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator')
+    expect(source).toContain('const namedOperator = operatorIdFromOption(filters.value.operator)')
+    // 清空下拉给的是 undefined，不是空串：解析和“选项是否还在”都必须走守卫。
+    expect(source).toContain('missingOperatorOption(filters.value.operator, operatorFilterOptions.value)')
+    expect(source).not.toContain('filters.value.operator.startsWith')
     expect(source).toContain('params.team_id = Number(filters.value.team_id)')
+    expect(source).not.toContain(':clearable="!isSenior"')
     expect(source).toContain('client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })')
     expect(source).toContain("row.operator_name || '未记录'")
     expect(source).toContain('<span class="compose-detail__label">负责人</span>')
@@ -199,7 +207,7 @@ describe('compose tasks page', () => {
     expect(dialog).not.toContain('清零')
   })
 
-  it('shows uncertain execution as pending administrator review and records explicit verification', () => {
+  it('lets seniors and admins review an uncertain execution with explicit verification', () => {
     expect(source).toContain("detail.error_code === 'execution_uncertain'")
     expect(source).toContain('旧 FFmpeg 已停止')
     expect(source).toContain('没有已提交成片')
@@ -207,6 +215,20 @@ describe('compose tasks page', () => {
     expect(source).toContain('client.resolveComposeUncertain(')
     expect(source).toContain('client.listComposeUncertainReviews(')
     expect(source).toContain('失败阶段：')
+    // 同团队高级运营也能核对，不再是管理员专属。
+    expect(source).toContain("const canReviewUncertain = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))")
+    expect(source).toContain('<h4>待人工核对</h4>')
+    expect(source).toContain('核对人 {{ review.actor_user_id }}')
+    expect(source).not.toContain('待管理员核对')
+    expect(source).not.toContain('仅管理员')
+    expect(source).not.toContain('管理员才能核对')
+  })
+
+  // 已成功的任务可能保留上一次失败的 error_code（例如 329 第 1 次不明确、第 2 次成功）：
+  // 详情里不能再挂一条「待核对」告警，执行记录照常保留那次失败。
+  it('does not show a stale failure block on a successful task', () => {
+    expect(source).toContain("v-if=\"detail.status === 'failed' && (detail.error_code || detail.error_message)\"")
+    expect(source).toContain("v-if=\"detail.status === 'failed' && detail.error_code === 'execution_uncertain'\"")
   })
 
   // 详情头只有「任务详情 + ×」：不放 Hero 大卡，也不放任何业务按钮。
