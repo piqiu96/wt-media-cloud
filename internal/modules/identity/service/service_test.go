@@ -468,6 +468,55 @@ func TestAdminGameListIncludesReferenceSummaryAndDetails(t *testing.T) {
 	}
 }
 
+func TestListAllGamesReturnsEnabledCatalogForOperators(t *testing.T) {
+	store := newGameMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team := mustCreateTeam(t, service, admin.ID, "火影组")
+	naruto, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateGame(admin.ID, "delta", "三角洲", ""); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := service.CreateGame(admin.ID, "retired", "停用游戏", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateGame(admin.ID, retired.ID, retired.Name, GameStatusDisabled, ""); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-catalog", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{naruto.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assigned, err := service.ListGames(operator.ID)
+	if err != nil || len(assigned) != 1 || assigned[0].ID != naruto.ID {
+		t.Fatalf("assigned games = %#v, err=%v", assigned, err)
+	}
+	catalog, err := service.ListAllGames(operator.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != 2 {
+		t.Fatalf("catalog = %#v, want two enabled games", catalog)
+	}
+	for _, game := range catalog {
+		if game.ID == retired.ID || game.Status != GameStatusEnabled {
+			t.Fatalf("catalog leaked a disabled game: %#v", game)
+		}
+	}
+	adminCatalog, err := service.ListAllGames(admin.ID)
+	if err != nil || len(adminCatalog) != 3 {
+		t.Fatalf("admin catalog = %#v, err=%v, want all three games", adminCatalog, err)
+	}
+}
+
 func TestUserGameScopeCannotDropReferencedAccountGame(t *testing.T) {
 	store := newGameMemoryStore()
 	service := NewService(store)

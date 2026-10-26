@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { createSessionClient } from '../../../shared/api/session.js'
-import { canUseDesktop, isDesktop } from '../../../utils.js'
+import { canUseDesktop, canUseLocalAgent, isDesktop } from '../../../utils.js'
 import { resolveAppVersion } from '../../../shared/utils/appVersion.js'
 import BrandLogo from '../../../shared/ui/BrandLogo.vue'
 import { feedback } from '../../../shared/ui/feedback/index.js'
@@ -47,7 +47,7 @@ function submitReplacementLogin() {
 onMounted(async () => {
   version.value = await resolveAppVersion()
   if (isDesktop() && new URLSearchParams(window.location.search).has('desktop_role_forbidden')) {
-    pageError.value = '当前角色不能登录 Desktop，请使用 Cloud Web 管理。'
+    pageError.value = '当前角色不能登录 Desktop，请联系管理员。'
     loading.value = false
     return
   }
@@ -58,13 +58,17 @@ onMounted(async () => {
     const user = await sessionClient.me()
     if (isDesktop() && !canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
-      pageError.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+      pageError.value = '当前角色不能登录 Desktop，请联系管理员。'
       return
     }
     router.push('/')
     if (isDesktop()) {
-      const { ensureAgentToken } = await import('../../../apps/desktop/features/local-agent/init.js')
-      void ensureAgentToken().catch((e) => console.info('本机执行状态待恢复', e?.message || e))
+      const { ensureAgentToken, stopDesktopLocalAgent } = await import('../../../apps/desktop/features/local-agent/init.js')
+      if (canUseLocalAgent(user)) {
+        void ensureAgentToken().catch((e) => console.info('本机执行状态待恢复', e?.message || e))
+      } else {
+        void stopDesktopLocalAgent().catch((e) => console.info('本机执行已停用', e?.message || e))
+      }
     }
   } catch {
     // Not logged in, show form
@@ -89,14 +93,19 @@ async function login(options = {}) {
     })
     if (isDesktop() && !canUseDesktop(user)) {
       await sessionClient.logout().catch(() => {})
-      pageError.value = '管理员和高级运营不能登录 Desktop，请使用 Cloud Web 管理。'
+      pageError.value = '当前角色不能登录 Desktop，请联系管理员。'
       return
     }
     router.push('/')
     if (isDesktop()) {
+      const { ensureAgentToken, stopDesktopLocalAgent } = await import('../../../apps/desktop/features/local-agent/init.js')
+      if (!canUseLocalAgent(user)) {
+        // 高级运营和管理员可以登录 Desktop，但本机 Agent 不参与他们的会话。
+        void stopDesktopLocalAgent().catch((e) => console.info('本机执行已停用', e?.message || e))
+        return
+      }
       // 刚建立的 Desktop 会话与被替换的旧会话不是同一条，sidecar 里如果还握着旧凭证
       // 就不能直接复用，必须换一张。
-      const { ensureAgentToken } = await import('../../../apps/desktop/features/local-agent/init.js')
       void ensureAgentToken({ force: true }).catch((e) => console.info('本机执行凭证获取失败', e?.message || e))
     }
   } catch (e) {

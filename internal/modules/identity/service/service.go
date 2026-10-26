@@ -755,6 +755,17 @@ func (s *Service) CreateGame(actorID UserID, id, name, remark string) (Operation
 }
 
 func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
+	return s.listGames(actorID, true)
+}
+
+// ListAllGames returns the global game dictionary for pages where the game is a
+// filter rather than an authorization boundary. Non-admins still only see
+// enabled games, but not just the games assigned to them.
+func (s *Service) ListAllGames(actorID UserID) ([]OperationGame, error) {
+	return s.listGames(actorID, false)
+}
+
+func (s *Service) listGames(actorID UserID, assignedOnly bool) ([]OperationGame, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return nil, err
@@ -773,9 +784,13 @@ func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
 	if !isAdmin(actor) {
 		enabled := make([]OperationGame, 0, len(games))
 		for _, game := range games {
-			if game.Status == GameStatusEnabled && containsGame(actor.GameIDs, game.ID) {
-				enabled = append(enabled, game)
+			if game.Status != GameStatusEnabled {
+				continue
 			}
+			if assignedOnly && !containsGame(actor.GameIDs, game.ID) {
+				continue
+			}
+			enabled = append(enabled, game)
 		}
 		return enabled, nil
 	}

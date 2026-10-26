@@ -5,6 +5,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
+import { createSessionClient } from '../../../shared/api/session.js'
+import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatGrid from '../../../shared/ui/resource/ResourceStatGrid.vue'
@@ -15,10 +17,15 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
 
 const client = createDiscoveryClient()
+const session = createSessionClient()
+const users = createUsersClient()
 const route = useRoute()
 const rows = ref([])
 const tasks = ref([])
 const games = ref([])
+const teams = ref([])
+const currentUser = ref(null)
+const teamFilter = ref('')
 const loading = ref(false)
 const error = ref('')
 const visible = ref(false)
@@ -37,6 +44,10 @@ const authorTarget = ref(null)
 // 筛选走列表接口（search/type/status），页面只对返回行做分页切片。
 const filters = ref({ search: '', type: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
+
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
+// 普通运营可看策略与任务，写操作和异常处置属于高级运营／管理员职责。
+const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUser.value?.role))
 
 const conditionFields = [
   { label: '发布时间', value: 'published_at' },
@@ -76,6 +87,7 @@ function changeConditionOperator(condition) { condition.value = ['gte', 'lt'].in
 const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', width: 180 },
+  { colKey: 'team', title: '运营团队', width: 120 },
   { colKey: 'game', title: '游戏', width: 120 },
   { colKey: 'type', title: '类型', width: 90 },
   { colKey: 'rule', title: '挖掘规则', width: 130 },
@@ -129,6 +141,7 @@ const stats = computed(() => {
 })
 
 onMounted(async () => {
+  await loadContext()
   await load()
   const id = Number(route.query.strategy_id || 0)
   if (id > 0) {
@@ -137,9 +150,22 @@ onMounted(async () => {
   }
 })
 
+async function loadContext() {
+  try {
+    currentUser.value = await session.me()
+    if (isAdmin.value) {
+      const data = await users.listTeams()
+      teams.value = Array.isArray(data) ? data : []
+    }
+  } catch {
+    currentUser.value = null
+  }
+}
+
 function defaultForm() {
   return {
     name: '',
+    team_id: '',
     game_id: '',
     strategy_type: 'keyword',
     platform: 'douyin',
@@ -160,8 +186,8 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const query = { search: String(filters.value.search || '').trim(), type: filters.value.type, status: filters.value.status }
-    const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(query), client.listTasks(), client.listGames()])
+    const query = { search: String(filters.value.search || '').trim(), type: filters.value.type, status: filters.value.status, teamId: teamFilter.value || undefined }
+    const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(query), client.listTasks({ team_id: teamFilter.value || undefined }), client.listGames({ scope: 'all' })])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
     pagination.value.current = 1
     tasks.value = Array.isArray(taskRows) ? taskRows : []
@@ -200,6 +226,7 @@ function fillForm(row) {
   const config = row.config || {}
   form.value = {
     name: row.name,
+    team_id: row.team_id || '',
     game_id: row.game_id || '',
     strategy_type: row.strategy_type,
     platform: row.platform,
@@ -269,6 +296,10 @@ async function save() {
     feedback.toast.error('请输入策略名称')
     return
   }
+  if (!editingID.value && isAdmin.value && !form.value.team_id) {
+    feedback.toast.error('请选择目标团队')
+    return
+  }
   const materialRules = Array.isArray(form.value.config.material_rules) ? form.value.config.material_rules : []
   const rulesError = materialRulesError(materialRules)
   if (rulesError) {
@@ -293,6 +324,8 @@ async function save() {
     config.keywords = Array.isArray(config.keywords) ? config.keywords.map((item) => String(item).trim()).filter(Boolean) : []
     config.authors = Array.isArray(config.authors) ? config.authors.map((item) => String(item).trim()).filter(Boolean) : []
     const payload = { ...form.value, config }
+    // team_id 只用于管理员新建时指定目标团队；空串会被后端按整数解码失败，更新也不改团队。
+    if (!payload.team_id || editingID.value) delete payload.team_id
     if (editingID.value) await client.updateStrategy(editingID.value, payload)
     else await client.createStrategy(payload)
     visible.value = false
@@ -350,6 +383,14 @@ function gameName(id) {
   const game = games.value.find((item) => item.id === id)
   return game?.name || '-'
 }
+
+function teamName(id) {
+  if (currentUser.value?.team_id != null && String(currentUser.value.team_id) === String(id)) return currentUser.value.team_name || '-'
+  const team = teams.value.find((item) => String(item.id) === String(id))
+  return team?.name || '-'
+}
+
+function changeTeamFilter() { load() }
 
 function typeLabel(type) {
   return type === 'author' ? '作者' : '关键词'
@@ -420,7 +461,7 @@ function latestStats(row) {
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘策略" description="配置内容发现规则，让系统自动帮你找到优质内容">
         <template #actions>
-          <t-button theme="primary" @click="openCreate">新增策略</t-button>
+          <t-button v-if="canManage" theme="primary" @click="openCreate">新增策略</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
@@ -430,6 +471,7 @@ function latestStats(row) {
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称或 ID" @enter="load" /></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">策略类型</span><t-select v-model="filters.type" clearable placeholder="全部">
             <t-option value="keyword" label="关键词" />
             <t-option value="author" label="作者" />
@@ -442,6 +484,7 @@ function latestStats(row) {
         </div>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘策略">
+            <template #team="{ row }">{{ teamName(row.team_id) }}</template>
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #type="{ row }">{{ typeLabel(row.strategy_type) }}</template>
             <template #rule="{ row }">
@@ -458,10 +501,10 @@ function latestStats(row) {
             <template #op="{ row }">
               <t-space size="small">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button size="small" theme="primary" :disabled="row.status !== 'enabled' || isRunning(row) || row.strategy_type === 'author'" @click="run(row)">执行</t-button>
+                <t-button v-if="canManage" size="small" theme="primary" :disabled="row.status !== 'enabled' || isRunning(row) || row.strategy_type === 'author'" @click="run(row)">执行</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="$router.push(`/crawl-tasks?strategy_id=${row.id}`)">任务</t-button>
-                <t-button size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)" @click="openEdit(row)">编辑</t-button>
-                <t-dropdown trigger="click">
+                <t-button v-if="canManage" size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)" @click="openEdit(row)">编辑</t-button>
+                <t-dropdown v-if="canManage" trigger="click">
                   <t-button size="small" class="wt-secondary-button" variant="outline">更多</t-button>
                   <t-dropdown-menu>
                     <t-dropdown-item @click="openCopy(row)">复制</t-dropdown-item>
@@ -482,6 +525,7 @@ function latestStats(row) {
               <div class="strategy-section__title"><span class="strategy-no">①</span>基础信息<small>配置策略基本属性和内容归属，用于管理和数据统计</small></div>
               <t-form label-width="88px">
                 <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
+                <t-form-item v-if="isAdmin && !editingID" label="目标团队" required-mark><t-select v-model="form.team_id" placeholder="选择运营团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
                 <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
                 <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
                 <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>

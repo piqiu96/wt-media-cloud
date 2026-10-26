@@ -9,6 +9,7 @@ import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import { bitAccountDiffers as computeBitAccountDiffers } from '../../../apps/desktop/features/local-agent/work-env-status.js'
 import { createLocalAgentStatusPage } from '../../../apps/desktop/features/local-agent/local-agent-status.js'
 import { localAgentStateFromStatus } from '../../../apps/desktop/features/local-agent/service.js'
+import { canUseLocalAgent } from '../../../utils.js'
 import { avatarOptions } from '../../../shared/ui/systemAvatars.js'
 import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
@@ -31,6 +32,7 @@ const bindingBusy = ref(false)
 const confirmRebind = ref(false)
 const error = ref('')
 const inDesktop = typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
+const localAgentAllowed = computed(() => canUseLocalAgent(user.value))
 // 管理员不受团队/游戏限制；运营展示自己被授权的游戏名称（找不到名称时退化为 ID）。
 const gameScopeLabel = computed(() => {
   if (user.value?.role === 'admin') return '全部游戏'
@@ -69,12 +71,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [currentUser, currentBinding, gameRows] = await Promise.all([session.me(), bitAccounts.get(), usersClient.listGames({ status: 'enabled' }).catch(() => [])])
+    const [currentUser, gameRows] = await Promise.all([session.me(), usersClient.listGames({ status: 'enabled' }).catch(() => [])])
     user.value = currentUser
     nickname.value = currentUser.nickname || currentUser.username
     avatarId.value = currentUser.avatar_id || 'sky'
     games.value = Array.isArray(gameRows) ? gameRows : []
-    binding.value = currentBinding
+    // 本机 Agent 与比特账号绑定只属于普通运营；管理角色不读取这类本机信息。
+    if (!canUseLocalAgent(currentUser)) return
+    binding.value = await bitAccounts.get()
     if (inDesktop) {
       const [agentResult, deviceResult] = await Promise.allSettled([
         invoke('local_agent_status'),
@@ -154,7 +158,7 @@ async function bindAccount({ rebind = false } = {}) {
           <t-button theme="primary" :loading="saving" @click="saveProfile">保存</t-button>
         </section>
 
-        <section class="device-card">
+        <section v-if="localAgentAllowed" class="device-card">
           <div class="section-title"><div><h2>比特浏览器</h2><p>每个账号绑定一个比特浏览器主账号，只有该账号下的窗口能执行任务。</p></div><span class="status-pill" :class="binding?.bound ? 'is-bound' : 'is-unbound'">{{ binding?.bound ? '已绑定' : '未绑定' }}</span></div>
           <div class="device-hero"><span class="device-icon"><t-icon name="user-circle" /></span><div><strong>{{ bindingTitle }}</strong><span>{{ bindingSummary }}</span></div></div>
           <dl class="device-details">
@@ -184,7 +188,7 @@ async function bindAccount({ rebind = false } = {}) {
       <FeedbackAlert v-if="error" class="feedback" :message="error" theme="error" />
     </t-loading>
 
-    <t-dialog v-model:visible="confirmRebind" header="换绑为当前比特浏览器账号" :footer="false" :close-on-overlay-click="false">
+    <t-dialog v-if="localAgentAllowed" v-model:visible="confirmRebind" header="换绑为当前比特浏览器账号" :footer="false" :close-on-overlay-click="false">
       <p class="dialog-note">把当前比特浏览器登录的账号（{{ localAccountMasked || '未读取到' }}）设为绑定账号后：</p>
       <ul class="dialog-list">
         <li>这台电脑的比特浏览器窗口按新账号归属，只有新账号下的窗口能执行任务；</li>

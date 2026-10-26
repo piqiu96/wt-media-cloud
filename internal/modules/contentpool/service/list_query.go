@@ -9,12 +9,14 @@ import (
 // repository. They stay here (not in repository) so the service interface does
 // not leak the persistence package; the MySQL adapter translates them.
 type StrategyListQuery struct {
+	TeamID *identityservice.TeamID
 	Search string
 	Type   string
 	Status string
 }
 
 type CrawlTaskListQuery struct {
+	TeamID     *identityservice.TeamID
 	Search     string
 	Status     string
 	StrategyID *int64

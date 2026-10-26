@@ -91,6 +91,21 @@ describe('content pool page', () => {
     expect(source).toContain('team.name')
   })
 
+  it('defaults the game filter to the user game scope and offers the full catalog', () => {
+    expect(source).toContain('const gameFilter = ref([])')
+    expect(source).toContain('const isAdmin = computed')
+    expect(source).toContain('function defaultGameIDs()')
+    expect(source).toContain('gameFilter.value = defaultGameIDs()')
+    expect(source).toContain("users.listGames({ scope: 'all' })")
+    expect(source).toContain('game_ids: gameFilter.value.length ? gameFilter.value : undefined')
+    expect(source).toContain('team_id: teamFilter.value || undefined')
+    expect(source).toContain('function changeTeamFilter()')
+    expect(source).toContain('gameFilter.value = []')
+    expect(source).toContain('v-model="gameFilter"')
+    expect(source).toContain('v-model="teamFilter"')
+    expect(source).toContain('v-if="isAdmin"')
+  })
+
   it('imports only the results selected by the user', () => {
     expect(source).toContain('manualResults.value.filter')
     expect(source).toContain('items: selected')

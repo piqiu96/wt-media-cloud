@@ -87,6 +87,40 @@ func contentID(c *hertzapp.RequestContext, name, message string) (int64, bool) {
 	return value, true
 }
 
+func parseGameIDs(raw string) ([]string, bool) {
+	gameIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, value := range strings.Split(raw, ",") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		gameIDs = append(gameIDs, value)
+	}
+	if len(gameIDs) > 50 {
+		return nil, false
+	}
+	return gameIDs, true
+}
+
+func teamQuery(c *hertzapp.RequestContext) (*identityservice.TeamID, bool) {
+	raw := strings.TrimSpace(c.Query("team_id"))
+	if raw == "" {
+		return nil, true
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		api.BadRequest(c, 10001, "团队参数无效")
+		return nil, false
+	}
+	team := identityservice.TeamID(value)
+	return &team, true
+}
+
 func ListContent(_ context.Context, c *hertzapp.RequestContext) {
 	actor, ok := actor(c)
 	if !ok {
@@ -103,6 +137,14 @@ func ListContent(_ context.Context, c *hertzapp.RequestContext) {
 		team = &teamValue
 	}
 	filter := dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search"), PublishedFrom: c.Query("published_from"), PublishedTo: c.Query("published_to"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")}
+	if raw := strings.TrimSpace(c.Query("game_ids")); raw != "" {
+		gameIDs, valid := parseGameIDs(raw)
+		if !valid {
+			api.BadRequest(c, 10001, "游戏筛选无效")
+			return
+		}
+		filter.GameIDs = gameIDs
+	}
 	if raw := strings.TrimSpace(c.Query("content_id")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || value <= 0 {
@@ -342,7 +384,12 @@ func ListDiscoveryStrategies(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
+	team, ok := teamQuery(c)
+	if !ok {
+		return
+	}
 	items, err := contentservice.ListStrategiesFiltered(actor, contentservice.StrategyListQuery{
+		TeamID: team,
 		Search: strings.TrimSpace(c.Query("search")),
 		Type:   strings.TrimSpace(c.Query("type")),
 		Status: strings.TrimSpace(c.Query("status")),
@@ -365,7 +412,7 @@ func CreateDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	team := identityservice.TeamID(0)
 	if request.TeamID != nil {
 		team = *request.TeamID
-	} else if actor.TeamID != nil {
+	} else if actor.Role != identityservice.RoleAdmin && actor.TeamID != nil {
 		team = *actor.TeamID
 	}
 	item, err := contentservice.CreateStrategy(actor, model.DiscoveryStrategy{TeamID: team, GameID: request.GameID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
@@ -453,6 +500,10 @@ func ListCrawlTasks(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
+	team, ok := teamQuery(c)
+	if !ok {
+		return
+	}
 	var strategyID *int64
 	if raw := strings.TrimSpace(c.Query("strategy_id")); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
@@ -463,6 +514,7 @@ func ListCrawlTasks(_ context.Context, c *hertzapp.RequestContext) {
 		strategyID = &id
 	}
 	items, err := contentservice.ListCrawlTasksFiltered(actor, contentservice.CrawlTaskListQuery{
+		TeamID:     team,
 		Search:     strings.TrimSpace(c.Query("search")),
 		Status:     strings.TrimSpace(c.Query("status")),
 		StrategyID: strategyID,
@@ -559,6 +611,8 @@ func writeDiscoveryError(c *hertzapp.RequestContext, err error) {
 		api.NotFound(c, 14004, "挖掘任务不存在")
 	case errors.Is(err, contentservice.ErrDiscoveryInvalid):
 		api.BadRequest(c, 14006, "挖掘参数无效")
+	case errors.Is(err, contentservice.ErrTeamRequired):
+		api.BadRequest(c, 14009, "请选择目标团队")
 	case errors.Is(err, contentservice.ErrStrategyDuplicate):
 		api.Conflict(c, 14007, "策略名称已存在")
 	case errors.Is(err, contentservice.ErrDiscoverySelection):

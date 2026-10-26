@@ -43,7 +43,7 @@ func stubIssuedAudit(t *testing.T, err error) *[]string {
 
 func desktopSession(expiresAt time.Time) identityservice.AuthContext {
 	return identityservice.AuthContext{
-		User: identityservice.PublicUser{ID: 9, Username: "operator", Status: "enabled"},
+		User: identityservice.PublicUser{ID: 9, Username: "operator", Role: identityservice.RoleOperator, Status: "enabled"},
 		Session: identityservice.Session{
 			ID: "session-desktop", UserID: 9, ClientType: identityservice.ClientTypeDesktop, ExpiresAt: expiresAt,
 		},
@@ -120,6 +120,30 @@ func TestIssueAgentTokenRefusesAWebSession(t *testing.T) {
 	}
 	if len(*recorded) != 0 {
 		t.Fatal("a refused issuance was audited as issued")
+	}
+}
+
+// 高级运营和管理员可以登录 Desktop 使用共用页面，但不能取得本机执行凭证。
+func TestIssueAgentTokenRefusesNonOperatorDesktopRoles(t *testing.T) {
+	for _, role := range []identityservice.Role{identityservice.RoleSeniorOperator, identityservice.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) {
+			configureSigner(t)
+			recorded := stubIssuedAudit(t, nil)
+			desktop := desktopSession(testNow.Add(time.Hour))
+			desktop.User.Role = role
+			stubSession(t, func() (identityservice.AuthContext, bool) { return desktop, true })
+
+			result := issueProbe(t)
+			if result.status != consts.StatusForbidden || result.code != "DESKTOP_ROLE_FORBIDDEN" {
+				t.Fatalf("status = %d, code = %q", result.status, result.code)
+			}
+			if result.token != "" {
+				t.Fatalf("%s received an Agent Token", role)
+			}
+			if len(*recorded) != 0 {
+				t.Fatalf("%s refused issuance was audited as issued", role)
+			}
+		})
 	}
 }
 

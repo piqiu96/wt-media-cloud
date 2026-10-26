@@ -9,6 +9,7 @@ import (
 type Filter struct {
 	ID            *int64
 	TeamID        *identity.TeamID
+	GameIDs       []string
 	Platform      string
 	Status        model.Status
 	SourceType    string
