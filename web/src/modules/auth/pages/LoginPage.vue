@@ -118,6 +118,8 @@ async function login(options = {}) {
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
     <main class="login-shell">
+      <img class="login-backdrop" src="/images/login/backdrop.png" alt="" aria-hidden="true" />
+      <img class="login-illustration" src="/images/login/illustration.png" alt="" aria-hidden="true" />
       <header class="login-topbar">
         <router-link v-if="!isDesktop()" to="/home" class="brand-link" aria-label="起飞官网"><BrandLogo /></router-link>
         <BrandLogo v-else />
@@ -172,6 +174,7 @@ async function login(options = {}) {
 <style scoped>
 /* 官网品牌色、渐变与卡片样式从共享 Token 读取。 */
 .login-shell{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:100vh;overflow:hidden;background:var(--wt-brand-surface);color:var(--wt-brand-ink);font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif}
+.login-backdrop,.login-illustration{display:none;pointer-events:none}
 
 .login-topbar,.login-layout{position:relative;z-index:2}
 .login-topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 2% 0}
@@ -227,8 +230,9 @@ async function login(options = {}) {
 
 /* 桌面插画独立于文字和表单，避免把视觉稿中的文字作为位图拉伸。 */
 @media(min-width:761px){
-  .login-shell{height:100vh;min-height:700px;overflow-y:auto;background:#dceeff url('/images/login/backdrop.png') center / 100% 100% no-repeat}
-  .login-shell::before{content:"";position:absolute;z-index:1;left:3%;top:34.7%;width:min(max(57.5vw,100vh),82vw);aspect-ratio:1812/868;background:url('/images/login/illustration.png') center / contain no-repeat;pointer-events:none}
+  .login-shell{height:100vh;min-height:700px;overflow-y:auto;background:#dceeff}
+  .login-backdrop{display:block;position:absolute;z-index:0;inset:0;width:100%;height:100%;object-fit:fill}
+  .login-illustration{display:block;position:absolute;z-index:1;left:3%;top:34.7%;width:min(max(57.5vw,100vh),82vw);aspect-ratio:1812/868;object-fit:contain}
   .login-topbar{position:absolute;inset:0 0 auto;z-index:4}
   .login-topbar :deep(.brand-logo){gap:10px}
   .login-topbar :deep(.brand-logo__mark){width:50px;height:50px}

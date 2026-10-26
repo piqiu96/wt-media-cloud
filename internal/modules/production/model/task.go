@@ -154,19 +154,19 @@ type ComposeAttemptStepMetrics struct {
 // JSON_ARRAY_APPEND and ListAttempts decodes it by hand, so the field is
 // mapped out of gorm's view (`gorm:"-"`) on purpose.
 type ComposeTaskAttempt struct {
-	ID           int64                   `json:"id"`
-	TaskID       int64                   `json:"compose_task_id" gorm:"column:task_id"`
-	Attempt      int                     `json:"attempt" gorm:"column:attempt"`
-	Source       string                  `json:"source" gorm:"column:source"`
-	StartedAt    *time.Time              `json:"started_at" gorm:"column:started_at"`
-	FinishedAt   *time.Time              `json:"finished_at" gorm:"column:finished_at"`
-	Outcome      string                  `json:"outcome" gorm:"column:outcome"`
-	Stage        string                  `json:"stage" gorm:"column:stage"`
-	ErrorCode    string                  `json:"error_code" gorm:"column:error_code"`
-	ErrorMessage string                  `json:"error_message" gorm:"column:error_message"`
+	ID           int64                    `json:"id"`
+	TaskID       int64                    `json:"compose_task_id" gorm:"column:task_id"`
+	Attempt      int                      `json:"attempt" gorm:"column:attempt"`
+	Source       string                   `json:"source" gorm:"column:source"`
+	StartedAt    *time.Time               `json:"started_at" gorm:"column:started_at"`
+	FinishedAt   *time.Time               `json:"finished_at" gorm:"column:finished_at"`
+	Outcome      string                   `json:"outcome" gorm:"column:outcome"`
+	Stage        string                   `json:"stage" gorm:"column:stage"`
+	ErrorCode    string                   `json:"error_code" gorm:"column:error_code"`
+	ErrorMessage string                   `json:"error_message" gorm:"column:error_message"`
 	Steps        []ComposeTaskAttemptStep `json:"steps" gorm:"-"`
-	CreatedAt    time.Time               `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt    time.Time               `json:"updated_at" gorm:"column:updated_at"`
+	CreatedAt    time.Time                `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt    time.Time                `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (ComposeTaskAttempt) TableName() string { return "compose_task_attempts" }
