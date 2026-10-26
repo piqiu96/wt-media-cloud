@@ -266,14 +266,9 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 		}
 		result = model.ComposeScheduleRun{RunKey: runKey, StrategyID: strategy.ID, TriggerType: trigger, ScheduleSlot: slot, Skipped: []model.ComposeScheduleSkip{}, CreatedAt: now}
 		processed = true
-		var creatorStatus string
-		if err := tx.Raw(`SELECT status FROM users WHERE id = ?`, strategy.CreatedBy).Row().Scan(&creatorStatus); err != nil {
-			return err
-		}
-		if creatorStatus != "enabled" {
-			result.Skipped = append(result.Skipped, model.ComposeScheduleSkip{Reason: "creator_disabled"})
-			return finishComposeScheduleRun(tx, strategy, result, now, manual, options.NextRun)
-		}
+		// The creator is only the audit origin of the strategy. Production must
+		// not stop because that person was disabled; the operator gate below is
+		// the only personnel check.
 		operatorAvailable, err := composeOperatorAvailable(tx, strategy)
 		if err != nil {
 			return err

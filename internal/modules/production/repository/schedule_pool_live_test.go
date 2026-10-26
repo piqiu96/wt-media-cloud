@@ -167,6 +167,40 @@ func TestLiveComposeScheduleReadsTheTeamPoolWithoutPersonalUsages(t *testing.T) 
 		t.Fatalf("second run must skip the produced pair as previously_run: %v", repeat.Skipped)
 	}
 
+	// The creator is only the audit origin. Disabling that person must not stop
+	// an otherwise valid strategy from producing.
+	rulesJSON, _ = json.Marshal(rules)
+	disabledCreatorStrategy, err := createComposeStrategyAudited(tx, model.ComposeStrategy{
+		TeamID: teamID, GameID: gameID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1,
+		Name: "禁用创建者验证", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`),
+		ExecutionMode: model.ComposeExecutionManual, PriorityRules: rules, RulesJSON: rulesJSON,
+		SingleLimit: 1, DailyLimit: 1, Status: model.ComposeStrategyEnabled,
+		CreatedBy: creatorID, UpdatedBy: creatorID,
+	}, "compose_strategy.create", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Exec(`UPDATE users SET status = 'disabled' WHERE id = ?`, creatorID).Error; err != nil {
+		t.Fatal(err)
+	}
+	disabledRun, processed, err := runComposeSchedule(tx, ScheduleRunOptions{StrategyID: disabledCreatorStrategy.ID, Now: now, ManualKey: "t03-creator-disabled-001", NextRun: noAdvance})
+	if err != nil || !processed || disabledRun.CreatedCount != 1 {
+		t.Fatalf("disabled creator run=%+v processed=%v err=%v", disabledRun, processed, err)
+	}
+	for _, skipped := range disabledRun.Skipped {
+		if skipped.Reason == "creator_disabled" {
+			t.Fatalf("a disabled creator must not block the run: %v", disabledRun.Skipped)
+		}
+	}
+	var disabledTaskCreator int64
+	if err := tx.Raw(`SELECT created_by FROM compose_tasks WHERE compose_strategy_id = ?`, disabledCreatorStrategy.ID).Row().Scan(&disabledTaskCreator); err != nil {
+		t.Fatal(err)
+	}
+	if disabledTaskCreator != creatorID {
+		t.Fatalf("task created_by=%d want the disabled creator %d", disabledTaskCreator, creatorID)
+	}
+	t.Logf("disabled creator strategy=%d created=%d task_created_by=%d", disabledCreatorStrategy.ID, disabledRun.CreatedCount, disabledTaskCreator)
+
 	manual, written, err := createForUsage(tx, model.ComposeTask{
 		TeamID: teamID, GameID: usageGame, OperatorID: &operatorID, TriggerType: "manual",
 		MaterialID: usageMaterialID, StrategyID: stored.ID, TemplateCode: "basic_cut", TemplateVersion: 1,

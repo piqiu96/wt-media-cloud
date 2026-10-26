@@ -119,11 +119,18 @@ func (s *StrategyService) List(actor identity.PublicUser, query ComposeStrategyL
 		if actor.Role != identity.RoleOperator && actor.Role != identity.RoleSeniorOperator {
 			return nil, ErrStrategyForbidden
 		}
-		if actor.TeamID == nil || len(actor.GameIDs) == 0 {
+		if actor.TeamID == nil {
 			return []model.ComposeStrategy{}, nil
 		}
 		filter.TeamID = int64(*actor.TeamID)
-		filter.GameIDs = actor.GameIDs
+		// A senior operator manages every game of the team; an ordinary
+		// operator stays inside the games assigned to them.
+		if actor.Role == identity.RoleOperator {
+			if len(actor.GameIDs) == 0 {
+				return []model.ComposeStrategy{}, nil
+			}
+			filter.GameIDs = actor.GameIDs
+		}
 	}
 	if actor.Role == identity.RoleOperator {
 		filter.OperatorID = int64(actor.ID)
@@ -362,6 +369,11 @@ func inGameScope(actor identity.PublicUser, teamID int64, gameID string) bool {
 	}
 	if actor.TeamID == nil || int64(*actor.TeamID) != teamID {
 		return false
+	}
+	// Senior operators manage every game of their team; the game only binds
+	// the strategy's operator, not the person who manages the strategy.
+	if actor.Role == identity.RoleSeniorOperator {
+		return true
 	}
 	for _, id := range actor.GameIDs {
 		if id == gameID {

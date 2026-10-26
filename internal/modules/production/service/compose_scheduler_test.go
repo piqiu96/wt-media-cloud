@@ -86,8 +86,13 @@ func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 		t.Fatalf("missing strategy error=%v", err)
 	}
 	actor.GameIDs = []string{"other"}
+	if _, err := svc.Batch(actor, 11, slot); err != nil {
+		t.Fatalf("senior manages every game of the team: %v", err)
+	}
+	otherTeam := identity.TeamID(8)
+	actor.TeamID = &otherTeam
 	if _, err := svc.Batch(actor, 11, slot); !errors.Is(err, ErrStrategyNotFound) {
-		t.Fatalf("out-of-scope error=%v", err)
+		t.Fatalf("cross-team error=%v", err)
 	}
 	if _, err := svc.Batch(actor, 11, time.Time{}); !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("empty slot error=%v", err)
@@ -107,8 +112,13 @@ func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 		t.Fatalf("missing strategy error=%v", err)
 	}
 	actor.GameIDs = []string{"other"}
+	if _, err := svc.ListRuns(actor, 11); err != nil {
+		t.Fatalf("senior manages every game of the team: %v", err)
+	}
+	otherTeam := identity.TeamID(8)
+	actor.TeamID = &otherTeam
 	if _, err := svc.ListRuns(actor, 11); !errors.Is(err, ErrStrategyNotFound) {
-		t.Fatalf("out-of-scope error=%v", err)
+		t.Fatalf("cross-team error=%v", err)
 	}
 }
 
@@ -124,8 +134,13 @@ func TestComposeScheduleRunHistoryScopesAndPassesFilters(t *testing.T) {
 		t.Fatalf("page=%+v options=%+v err=%v", page, store.historyOptions, err)
 	}
 	actor.GameIDs = []string{"other"}
+	if _, err := svc.RunHistory(actor, 11, options); err != nil {
+		t.Fatalf("senior manages every game of the team: %v", err)
+	}
+	otherTeam := identity.TeamID(8)
+	actor.TeamID = &otherTeam
 	if _, err := svc.RunHistory(actor, 11, options); !errors.Is(err, ErrStrategyNotFound) {
-		t.Fatalf("out-of-scope error=%v", err)
+		t.Fatalf("cross-team error=%v", err)
 	}
 }
 
@@ -155,6 +170,23 @@ func TestComposeRunNowChecksActorAndUsesStableRequestKey(t *testing.T) {
 	}
 	if _, err := svc.RunNow(actor, 11, "request-001"); err != nil || len(store.options) != 1 || store.options[0].ManualKey != "request-001" {
 		t.Fatalf("run error=%v options=%+v", err, store.options)
+	}
+}
+
+func TestComposeRunNowUsesTheSeniorTeamScope(t *testing.T) {
+	_, strategies, actor := strategyFixture()
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "other", Status: "enabled", OperatorID: operatorIDPtr(10), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}}
+	store := &scheduleFake{}
+	svc := NewComposeSchedulerService(store, strategies)
+	other := identity.PublicUser{ID: 10, Username: "operator10", Nickname: "十号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: actor.TeamID, GameIDs: []string{"other"}}
+	svc.operators = func() ([]identity.PublicUser, error) { return []identity.PublicUser{actor, other}, nil }
+	if _, err := svc.RunNow(actor, 11, "request-001"); err != nil || len(store.options) != 1 {
+		t.Fatalf("senior runs another game of the team: err=%v options=%+v", err, store.options)
+	}
+	otherTeam := identity.TeamID(8)
+	actor.TeamID = &otherTeam
+	if _, err := svc.RunNow(actor, 11, "request-002"); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("cross-team error=%v", err)
 	}
 }
 
