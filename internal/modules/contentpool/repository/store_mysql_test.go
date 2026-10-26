@@ -90,3 +90,17 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSourceViewConditionsBuildsGameMultiSelect(t *testing.T) {
+	conditions, args := sourceViewConditions(Filter{GameIDs: []string{"hy", "sjz"}})
+	if len(conditions) != 1 || conditions[0] != "s.game_id IN (?,?)" {
+		t.Fatalf("conditions = %#v, want game IN clause", conditions)
+	}
+	if len(args) != 2 || args[0] != "hy" || args[1] != "sjz" {
+		t.Fatalf("args = %#v, want hy and sjz", args)
+	}
+	empty, emptyArgs := sourceViewConditions(Filter{GameIDs: []string{"", "  "}})
+	if len(empty) != 0 || len(emptyArgs) != 0 {
+		t.Fatalf("blank game ids should not filter: conditions=%#v args=%#v", empty, emptyArgs)
+	}
+}

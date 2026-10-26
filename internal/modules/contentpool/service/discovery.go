@@ -142,6 +142,7 @@ func (s *discoveryService) createStrategy(actor identityservice.PublicUser, inpu
 	if input.Config == nil {
 		input.Config = map[string]any{}
 	}
+	input.GameID = defaultGameID(input.GameID)
 	if !validStrategy(input) || !normalizeMaterialConfig(input.Config) {
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
@@ -225,7 +226,7 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
 	current.Name, current.StrategyType, current.Platform, current.Config, current.Schedule, current.Timezone, current.Status, current.UpdatedAt = strings.TrimSpace(input.Name), input.StrategyType, input.Platform, input.Config, input.Schedule, input.Timezone, input.Status, s.now()
-	current.GameID = input.GameID
+	current.GameID = defaultGameID(input.GameID)
 	actorID := actor.ID
 	current.UpdatedBy = &actorID
 	return s.store.UpdateStrategy(current)

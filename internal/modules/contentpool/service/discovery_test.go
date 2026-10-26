@@ -488,6 +488,26 @@ func TestAdminStrategyCreationRequiresExplicitTeam(t *testing.T) {
 	}
 }
 
+func TestStrategyDefaultsGameToOther(t *testing.T) {
+	service := NewDiscoveryService(newDiscoveryMemory(), NewService(newMemoryStore()))
+	team := identityservice.TeamID(7)
+	senior := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
+	created, err := service.CreateStrategy(senior, DiscoveryStrategy{TeamID: team, Name: "no-game", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	if err != nil {
+		t.Fatalf("create strategy: %v", err)
+	}
+	if created.GameID == nil || *created.GameID != "other" {
+		t.Fatalf("strategy game_id = %v, want other", created.GameID)
+	}
+	updated, err := service.UpdateStrategy(senior, created.ID, DiscoveryStrategy{Name: "still-no-game", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	if err != nil {
+		t.Fatalf("update strategy: %v", err)
+	}
+	if updated.GameID == nil || *updated.GameID != "other" {
+		t.Fatalf("updated strategy game_id = %v, want other", updated.GameID)
+	}
+}
+
 func TestAdminManualRunUsesExplicitTeamScope(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))

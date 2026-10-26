@@ -95,6 +95,12 @@ func sourceViewConditions(filter Filter) ([]string, []any) {
 		conditions = append(conditions, "s.team_id = ?")
 		args = append(args, *filter.TeamID)
 	}
+	if gameIDs := nonEmptyGameIDs(filter.GameIDs); len(gameIDs) > 0 {
+		conditions = append(conditions, "s.game_id IN (?"+strings.Repeat(",?", len(gameIDs)-1)+")")
+		for _, gameID := range gameIDs {
+			args = append(args, gameID)
+		}
+	}
 	if filter.Platform != "" {
 		conditions = append(conditions, "s.platform = ?")
 		args = append(args, filter.Platform)
@@ -343,6 +349,22 @@ func nullableStringPtr(value *string) any {
 		return nil
 	}
 	return *value
+}
+func nonEmptyGameIDs(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 func nullIfEmpty(value string) any {
 	if strings.TrimSpace(value) == "" {

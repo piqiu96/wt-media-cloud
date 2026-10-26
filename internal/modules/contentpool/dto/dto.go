@@ -39,6 +39,7 @@ type SourceInput struct {
 type Filter struct {
 	ID            *int64
 	TeamID        *sharedidentity.TeamID
+	GameIDs       []string
 	Platform      string
 	Status        model.Status
 	SourceType    string
