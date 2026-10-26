@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.26.1"
+revision: "2026.10.27.1"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -58,7 +58,7 @@ schemas:
       timezone: {type: string}
       per_run_limit: {type: integer, minimum: 1, maximum: 100}
       daily_limit: {type: integer, minimum: 1, maximum: 1000}
-      material_scope: {type: string, enum: [creator_usages]}
+      material_scope: {type: string, enum: [team_materials, creator_usages], description: "team_materials is the current execution semantics: scheduled production reads the strategy team's material pool. creator_usages is the historical persisted value and remains accepted; existing schedule_json is not rewritten."}
   ComposeScheduleRun:
     type: object
     required: [run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]

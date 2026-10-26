@@ -102,11 +102,16 @@ func (s *ComposeSchedulerService) Batch(actor identity.PublicUser, strategyID in
 	if !found || !canReadStrategy(actor, strategy) {
 		return ComposeBatchView{}, ErrStrategyNotFound
 	}
-	tasks, counts, err := s.store.BatchTasks(strategyID, slot)
+	run, found, err := s.store.FindRun(strategyID, slot)
 	if err != nil {
 		return ComposeBatchView{}, err
 	}
-	run, _, err := s.store.FindRun(strategyID, slot)
+	if !found {
+		// A slot with no run has no batch to read; returning a zero-valued run
+		// would render as a real batch with an empty key in the page.
+		return ComposeBatchView{}, ErrStrategyNotFound
+	}
+	tasks, counts, err := s.store.BatchTasks(strategyID, slot)
 	if err != nil {
 		return ComposeBatchView{}, err
 	}

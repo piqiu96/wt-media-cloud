@@ -97,6 +97,16 @@ func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 	if _, err := svc.Batch(actor, 11, time.Time{}); !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("empty slot error=%v", err)
 	}
+	noRun := &scheduleBatchFake{tasks: []model.ComposeTask{{ID: 1}}}
+	svc = NewComposeSchedulerService(noRun, strategies)
+	strategyTeam := identity.TeamID(7)
+	actor.TeamID = &strategyTeam
+	if _, err := svc.Batch(actor, 11, slot); !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("slot without a run must be not found: %v", err)
+	}
+	if !noRun.slot.IsZero() {
+		t.Fatalf("a slot without a run must not read its tasks: %v", noRun.slot)
+	}
 }
 
 func TestComposeScheduleRunsScopedReadback(t *testing.T) {

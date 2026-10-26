@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.27.1
+  version: 2026.10.27.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -188,6 +188,29 @@ paths:
                   data: {$ref: '#/components/schemas/ComposeScheduleRunHistoryPage'}
         '400': {description: Invalid pagination or filters.}
         '404': {description: Strategy absent or outside the actor's scope.}
+  /api/v1/compose-strategies/{strategy_id}/runs/tasks:
+    get:
+      operationId: listComposeStrategyRunTasks
+      summary: Read one schedule run's tasks and per-status counts in the actor's strategy scope.
+      description: >-
+        Returns the persisted run for the requested slot, every task it created
+        for that slot, and counts read from those rows. A slot with no run is a
+        404 — the page must not render an empty zero-valued run.
+      security: [{sessionCookie: []}]
+      parameters:
+        - {$ref: '#/components/parameters/StrategyID'}
+        - {in: query, name: schedule_slot, required: true, schema: {type: string, format: date-time}, description: RFC3339 plan time of the run; the same slot stored on the run and its tasks.}
+      responses:
+        '200':
+          description: The run, its tasks and per-status counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/ComposeBatchView'}
+        '400': {description: Missing or non-RFC3339 schedule_slot.}
+        '404': {description: Strategy absent or outside the actor's scope, or no run exists for the slot.}
   /api/v1/compose-strategies/{strategy_id}/material-states:
     get:
       operationId: listComposeStrategyMaterialStates
@@ -725,6 +748,22 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ComposeScheduleRun'}
         - {type: object, required: [failed_count], properties: {failed_count: {type: integer, minimum: 0}}}
+    ComposeBatchCounts:
+      type: object
+      required: [pending, running, success, failed, cancelled]
+      properties:
+        pending: {type: integer, minimum: 0, description: Tasks of this run still waiting for a worker.}
+        running: {type: integer, minimum: 0, description: Tasks of this run currently executing.}
+        success: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+        cancelled: {type: integer, minimum: 0}
+    ComposeBatchView:
+      type: object
+      required: [run, tasks, counts]
+      properties:
+        run: {$ref: '#/components/schemas/ComposeScheduleRun'}
+        tasks: {type: array, items: {$ref: '#/components/schemas/ComposeTask'}, description: 'Every task the run created for its slot, ordered by material_id.'}
+        counts: {$ref: '#/components/schemas/ComposeBatchCounts'}
     CreateComposeStrategy:
       type: object
       additionalProperties: false
