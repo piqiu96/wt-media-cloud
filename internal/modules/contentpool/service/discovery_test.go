@@ -167,7 +167,7 @@ func TestDiscoveryRunQueuesThenWorkerExecutesCloudCrawler(t *testing.T) {
 	content := NewService(newMemoryStore())
 	service := NewDiscoveryService(store, content)
 	team := identityservice.TeamID(7)
-	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled})
+	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestDiscoveryRunQueuesThenWorkerExecutesCloudCrawler(t *testing.T) {
 		}
 		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "run-1", "title": "run"}}}, nil
 	}))
-	run, err := service.CreateRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, strategy.ID)
+	run, err := service.CreateRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, strategy.ID)
 	if err != nil || run.TaskID != "" || run.TeamID != team || run.Status != CrawlPending {
 		t.Fatalf("run=%+v err=%v", run, err)
 	}
@@ -195,7 +195,7 @@ func TestDeleteStrategyScopesByTeamAndReportsMissing(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "待删", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestDeleteStrategyScopesByTeamAndReportsMissing(t *testing.T) {
 		t.Fatalf("missing strategy err=%v, want ErrStrategyNotFound", err)
 	}
 	other := identityservice.TeamID(8)
-	if _, err := service.CreateStrategy(identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &other}, DiscoveryStrategy{TeamID: other, Name: "越权", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "x"}}); err != nil {
+	if _, err := service.CreateStrategy(identityservice.PublicUser{ID: 3, Role: identityservice.RoleSeniorOperator, TeamID: &other}, DiscoveryStrategy{TeamID: other, Name: "越权", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "x"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range store.strategies {
@@ -277,7 +277,7 @@ func TestHistoricalManualTaskConfirmationStillWorks(t *testing.T) {
 	if len(contentStore.items) != 0 || len(updated.Results) != 2 || updated.Stats.Found != 2 {
 		t.Fatalf("expected unpromoted search results, content=%d task=%+v", len(contentStore.items), updated)
 	}
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	if _, err := service.ConfirmResults(actor, task.ID, []string{"a2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestRunDueUsesStrategyTimezone(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
-	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, DiscoveryStrategy{TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled})
+	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, DiscoveryStrategy{TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestWorkerClaimsPendingTaskOnlyOnce(t *testing.T) {
 		return CrawlerResult{}, nil
 	}))
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "one", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +355,7 @@ func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
 	team := identityservice.TeamID(9)
-	actor := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 3, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	created, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "old", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"one"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -363,6 +363,128 @@ func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {
 	updated, err := service.UpdateStrategy(actor, created.ID, DiscoveryStrategy{Name: "new", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"two"}}, Status: StrategyEnabled})
 	if err != nil || updated.Name != "new" || updated.TeamID != team || updated.Status != StrategyEnabled {
 		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+}
+
+func TestOrdinaryOperatorCannotManageDiscoveryWrites(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) {
+		return CrawlerResult{}, nil
+	}))
+	team := identityservice.TeamID(7)
+	senior := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
+	operator := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &team}
+	strategy, err := service.CreateStrategy(senior, DiscoveryStrategy{TeamID: team, Name: "managed", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes := map[string]func() error{
+		"create": func() error {
+			_, err := service.CreateStrategy(operator, DiscoveryStrategy{TeamID: team, Name: "forged", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+			return err
+		},
+		"update": func() error {
+			_, err := service.UpdateStrategy(operator, strategy.ID, DiscoveryStrategy{Name: "forged", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+			return err
+		},
+		"status": func() error {
+			_, err := service.SetStrategyStatus(operator, strategy.ID, StrategyDisabled)
+			return err
+		},
+		"delete": func() error { return service.DeleteStrategy(operator, strategy.ID) },
+		"run":    func() error { _, err := service.CreateRun(operator, strategy.ID); return err },
+	}
+	for name, call := range writes {
+		if err := call(); !errors.Is(err, ErrDiscoveryForbidden) {
+			t.Fatalf("%s as operator err=%v, want ErrDiscoveryForbidden", name, err)
+		}
+	}
+	if current, ok, _ := store.FindStrategy(strategy.ID); !ok || current.Status != StrategyEnabled || current.Name != "managed" {
+		t.Fatalf("strategy changed by rejected writes: ok=%v strategy=%+v", ok, current)
+	}
+	if len(store.tasks) != 0 {
+		t.Fatalf("rejected writes created crawl tasks: %+v", store.tasks)
+	}
+
+	failed, _ := store.CreateCrawlTask(CrawlTask{TeamID: team, Status: CrawlFailed, Snapshot: map[string]any{}, Results: []map[string]any{{"platform_content_id": "a1", "processing_status": "failed"}}})
+	if _, err := service.retryFailed(operator, failed.ID); !errors.Is(err, ErrDiscoveryForbidden) {
+		t.Fatalf("retry as operator err=%v, want ErrDiscoveryForbidden", err)
+	}
+	success, _ := store.CreateCrawlTask(CrawlTask{TeamID: team, Status: CrawlSuccess, Snapshot: map[string]any{"operation": "keyword"}, Results: []map[string]any{{"platform_content_id": "a2", "processing_status": "pending"}}})
+	if _, err := service.ConfirmResults(operator, success.ID, []string{"a2"}); !errors.Is(err, ErrDiscoveryForbidden) {
+		t.Fatalf("confirm as operator err=%v, want ErrDiscoveryForbidden", err)
+	}
+	if _, err := service.retryFailed(senior, failed.ID); err != nil {
+		t.Fatalf("retry as senior err=%v", err)
+	}
+}
+
+func TestDiscoveryListsHonorRequestedTeamAndRole(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()))
+	teamA, teamB := identityservice.TeamID(7), identityservice.TeamID(8)
+	seniorA := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &teamA}
+	seniorB := identityservice.PublicUser{ID: 3, Role: identityservice.RoleSeniorOperator, TeamID: &teamB}
+	operatorA := identityservice.PublicUser{ID: 4, Role: identityservice.RoleOperator, TeamID: &teamA}
+	admin := identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}
+	for _, input := range []struct {
+		actor identityservice.PublicUser
+		team  identityservice.TeamID
+		name  string
+	}{
+		{seniorA, teamA, "a"}, {seniorB, teamB, "b"},
+	} {
+		if _, err := service.CreateStrategy(input.actor, DiscoveryStrategy{TeamID: input.team, Name: input.name, StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.CreateCrawlTask(CrawlTask{TeamID: teamA, Status: CrawlPending, Snapshot: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateCrawlTask(CrawlTask{TeamID: teamB, Status: CrawlPending, Snapshot: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+
+	allStrategies, err := service.listStrategiesFiltered(admin, StrategyListQuery{})
+	if err != nil || len(allStrategies) != 2 {
+		t.Fatalf("admin all strategies=%d err=%v", len(allStrategies), err)
+	}
+	teamAStrategies, err := service.listStrategiesFiltered(admin, StrategyListQuery{TeamID: &teamA})
+	if err != nil || len(teamAStrategies) != 1 || teamAStrategies[0].TeamID != teamA {
+		t.Fatalf("admin team A strategies=%+v err=%v", teamAStrategies, err)
+	}
+	if _, err := service.listStrategiesFiltered(seniorA, StrategyListQuery{TeamID: &teamB}); !errors.Is(err, ErrDiscoveryForbidden) {
+		t.Fatalf("senior cross-team list err=%v, want forbidden", err)
+	}
+	operatorStrategies, err := service.listStrategiesFiltered(operatorA, StrategyListQuery{})
+	if err != nil || len(operatorStrategies) != 1 || operatorStrategies[0].TeamID != teamA {
+		t.Fatalf("operator strategies=%+v err=%v", operatorStrategies, err)
+	}
+
+	allTasks, err := service.listCrawlTasksFiltered(admin, CrawlTaskListQuery{})
+	if err != nil || len(allTasks) != 2 {
+		t.Fatalf("admin all tasks=%d err=%v", len(allTasks), err)
+	}
+	teamBTasks, err := service.listCrawlTasksFiltered(admin, CrawlTaskListQuery{TeamID: &teamB})
+	if err != nil || len(teamBTasks) != 1 || teamBTasks[0].TeamID != teamB {
+		t.Fatalf("admin team B tasks=%+v err=%v", teamBTasks, err)
+	}
+	if _, err := service.listCrawlTasksFiltered(seniorA, CrawlTaskListQuery{TeamID: &teamB}); !errors.Is(err, ErrDiscoveryForbidden) {
+		t.Fatalf("senior cross-team task list err=%v, want forbidden", err)
+	}
+}
+
+func TestAdminStrategyCreationRequiresExplicitTeam(t *testing.T) {
+	store := newDiscoveryMemory()
+	service := NewDiscoveryService(store, NewService(newMemoryStore()))
+	team := identityservice.TeamID(7)
+	admin := identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}
+	if _, err := service.CreateStrategy(admin, DiscoveryStrategy{Name: "no-team", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); !errors.Is(err, ErrTeamRequired) {
+		t.Fatalf("admin without team err=%v, want ErrTeamRequired", err)
+	}
+	created, err := service.CreateStrategy(admin, DiscoveryStrategy{TeamID: team, Name: "with-team", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	if err != nil || created.TeamID != team {
+		t.Fatalf("admin with team created=%+v err=%v", created, err)
 	}
 }
 
@@ -385,7 +507,7 @@ func TestStrategyMaterialRulesValidationAndSnapshot(t *testing.T) {
 		return CrawlerResult{}, nil
 	}))
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	base := func() DiscoveryStrategy {
 		return DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Status: StrategyEnabled}
 	}
@@ -476,7 +598,7 @@ func TestRunDueNeverCrawls(t *testing.T) {
 	svc := NewDiscoveryService(store, NewService(newMemoryStore()), explodingCrawler{})
 	team := identityservice.TeamID(7)
 	strategy, err := svc.CreateStrategy(
-		identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team},
+		identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team},
 		DiscoveryStrategy{TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled},
 	)
 	if err != nil {

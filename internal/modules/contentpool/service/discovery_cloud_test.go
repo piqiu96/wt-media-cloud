@@ -31,7 +31,7 @@ func TestCreateRunQueuesAndWorkerProjectsSource(t *testing.T) {
 	crawler := &cloudCrawlerStub{}
 	service := NewDiscoveryService(store, NewService(contentStore), crawler)
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
 		TeamID: team, Name: "Cloud 热点", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled,
@@ -72,7 +72,7 @@ func TestWorkerProjectsTaskResultDetails(t *testing.T) {
 	crawler := &cloudCrawlerStub{}
 	service := NewDiscoveryService(store, NewService(contentStore), crawler)
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
 		TeamID: team, Name: "指标策略", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{"keyword": "三角洲", "auto_material": false}, Status: StrategyEnabled,
@@ -126,7 +126,7 @@ func TestAutomaticMaterializationUsesTaskThresholdSnapshot(t *testing.T) {
 	crawler := &cloudCrawlerStub{}
 	service := NewDiscoveryService(store, NewService(contentStore), crawler)
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
 		TeamID: team, Name: "自动素材", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{
@@ -172,7 +172,7 @@ func TestAutomaticMaterializationSupportsORRule(t *testing.T) {
 	crawler := &cloudCrawlerStub{}
 	service := NewDiscoveryService(store, NewService(contentStore), crawler)
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
 		TeamID: team, Name: "OR 素材", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{
@@ -203,7 +203,7 @@ func TestAutomaticMaterializationUsesRuleGroups(t *testing.T) {
 	crawler := &cloudCrawlerStub{}
 	service := NewDiscoveryService(store, NewService(contentStore), crawler)
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
 		TeamID: team, Name: "规则组素材", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{
@@ -259,7 +259,7 @@ func TestRetryFailedUsesPublishedAtForDateRules(t *testing.T) {
 		return CrawlerResult{}, nil
 	}))
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	oldTime := time.Now().UTC().Add(-72 * time.Hour)
 	freshTime := time.Now().UTC().Add(-time.Hour)
 	oldSource, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-old", SourceType: "strategy", LikeCount: 12000, PublishedAt: &oldTime})
@@ -314,7 +314,7 @@ func TestRetryFailedOnlyProcessesFailedItems(t *testing.T) {
 		return CrawlerResult{}, nil
 	}))
 	team := identityservice.TeamID(7)
-	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	source, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-failed", SourceType: "strategy", LikeCount: 12000, FavoriteCount: 700})
 	if err != nil {
 		t.Fatal(err)

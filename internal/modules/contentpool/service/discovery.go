@@ -39,6 +39,7 @@ var (
 	ErrCrawlTaskNotFound  = errors.New("crawl task not found")
 	ErrDiscoveryForbidden = errors.New("discovery operation is forbidden")
 	ErrDiscoveryInvalid   = errors.New("discovery input is invalid")
+	ErrTeamRequired       = errors.New("discovery team is required")
 	ErrStrategyDuplicate  = errors.New("discovery strategy already exists")
 	ErrDiscoverySelection = errors.New("discovery result selection is invalid")
 )
@@ -84,6 +85,19 @@ func (s *discoveryService) scope(actor identityservice.PublicUser, team *identit
 	return &v, nil
 }
 
+// canManageDiscovery keeps strategy and crawl-task exceptions with senior
+// operators and admins; ordinary operators process the content pool itself.
+func canManageDiscovery(actor identityservice.PublicUser) bool {
+	return actor.Role == identityservice.RoleAdmin || actor.Role == identityservice.RoleSeniorOperator
+}
+
+func requireDiscoveryManager(actor identityservice.PublicUser) error {
+	if !canManageDiscovery(actor) {
+		return ErrDiscoveryForbidden
+	}
+	return nil
+}
+
 func (s *discoveryService) listStrategies(actor identityservice.PublicUser) ([]model.DiscoveryStrategy, error) {
 	team, err := s.scope(actor, nil)
 	if err != nil {
@@ -93,7 +107,7 @@ func (s *discoveryService) listStrategies(actor identityservice.PublicUser) ([]m
 }
 
 func (s *discoveryService) listStrategiesFiltered(actor identityservice.PublicUser, query StrategyListQuery) ([]model.DiscoveryStrategy, error) {
-	team, err := s.scope(actor, nil)
+	team, err := s.scope(actor, query.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +129,15 @@ func normalizeMaterialConfig(config map[string]any) bool {
 }
 
 func (s *discoveryService) createStrategy(actor identityservice.PublicUser, input model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return model.DiscoveryStrategy{}, err
+	}
 	team, err := s.scope(actor, &input.TeamID)
 	if err != nil {
 		return model.DiscoveryStrategy{}, err
 	}
-	if team == nil {
-		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
+	if team == nil || *team == 0 {
+		return model.DiscoveryStrategy{}, ErrTeamRequired
 	}
 	if input.Config == nil {
 		input.Config = map[string]any{}
@@ -152,6 +169,9 @@ func (s *discoveryService) createStrategy(actor identityservice.PublicUser, inpu
 }
 
 func (s *discoveryService) setStrategyStatus(actor identityservice.PublicUser, id int64, status model.StrategyStatus) (model.DiscoveryStrategy, error) {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return model.DiscoveryStrategy{}, err
+	}
 	item, ok, err := s.store.FindStrategy(id)
 	if err != nil {
 		return model.DiscoveryStrategy{}, err
@@ -173,6 +193,9 @@ func (s *discoveryService) setStrategyStatus(actor identityservice.PublicUser, i
 }
 
 func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id int64, input model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return model.DiscoveryStrategy{}, err
+	}
 	current, ok, err := s.store.FindStrategy(id)
 	if err != nil {
 		return model.DiscoveryStrategy{}, err
@@ -209,6 +232,9 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 }
 
 func (s *discoveryService) deleteStrategy(actor identityservice.PublicUser, id int64) error {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return err
+	}
 	item, ok, err := s.store.FindStrategy(id)
 	if err != nil {
 		return err
@@ -223,6 +249,9 @@ func (s *discoveryService) deleteStrategy(actor identityservice.PublicUser, id i
 }
 
 func (s *discoveryService) createRun(actor identityservice.PublicUser, strategyID int64, scheduleKey string) (model.CrawlTask, error) {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return model.CrawlTask{}, err
+	}
 	strategy, ok, err := s.store.FindStrategy(strategyID)
 	if err != nil {
 		return model.CrawlTask{}, err
@@ -396,6 +425,9 @@ func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map
 }
 
 func (s *discoveryService) retryFailed(actor identityservice.PublicUser, id int64) (model.CrawlTask, error) {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return model.CrawlTask{}, err
+	}
 	task, ok, err := s.store.FindCrawlTask(id)
 	if err != nil {
 		return model.CrawlTask{}, err
@@ -584,7 +616,7 @@ func (s *discoveryService) listCrawlTasks(actor identityservice.PublicUser, stra
 }
 
 func (s *discoveryService) listCrawlTasksFiltered(actor identityservice.PublicUser, query CrawlTaskListQuery) ([]model.CrawlTask, error) {
-	team, err := s.scope(actor, nil)
+	team, err := s.scope(actor, query.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -602,6 +634,9 @@ func (s *discoveryService) getCrawlTask(actor identityservice.PublicUser, id int
 }
 
 func (s *discoveryService) confirmResults(actor identityservice.PublicUser, id int64, ids []string) (model.CrawlTask, error) {
+	if err := requireDiscoveryManager(actor); err != nil {
+		return model.CrawlTask{}, err
+	}
 	if len(ids) == 0 || len(ids) > 500 {
 		return model.CrawlTask{}, ErrDiscoverySelection
 	}
