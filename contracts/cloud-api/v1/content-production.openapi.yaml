@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.21.1
+  version: 2026.10.26.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -12,10 +12,28 @@ paths:
       responses:
         '200': {description: Published active template versions.}
         '403': {description: Actor cannot read the template catalog.}
+  /api/v1/compose-operators:
+    get:
+      operationId: listComposeOperators
+      summary: List the people a strategy at one team may be assigned to.
+      description: >-
+        Senior operators name only their own team; administrators must pass the
+        target team. An ordinary operator has no directory (403). A person is
+        eligible when enabled, holds the operator or senior_operator role and
+        belongs to the team; a game_id narrows the result to people responsible
+        for that game.
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: team_id, required: false, description: Required for administrators; senior operators may omit it and are pinned to their own team., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: game_id, required: false, description: Optional exact game ID; the strategy form passes the game it will bind., schema: {type: string}}
+      responses:
+        '200': {description: '[ComposeOperatorOption] sorted by display name.'}
+        '400': {description: Missing or invalid team (named compose_operator_invalid).}
+        '403': {description: Actor is an ordinary operator or names another team (named compose_operator_forbidden).}
   /api/v1/compose-strategies:
     get:
       operationId: listComposeStrategies
-      summary: List strategies in the actor's team and game scope; operators see only enabled strategies.
+      summary: List strategies in the actor's team and game scope; an ordinary operator sees only enabled strategies assigned to them.
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: search, required: false, description: Strategy name substring, or exact strategy ID when numeric., schema: {type: string, maxLength: 100}}
@@ -242,6 +260,9 @@ paths:
         - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
         - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, scheduled]}}
         - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
         - {$ref: '#/components/parameters/CreatedFrom'}
         - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
@@ -349,15 +370,20 @@ paths:
       summary: List compose outputs visible in the current user's scope.
       description: >-
         The my-outputs page. Scope follows the compose-task shape — admins see
-        everything, senior operators their team-and-game scope, operators only
-        outputs they created. The response never carries an object address;
-        previews go through the video-url endpoint.
+        everything, senior operators default to their own operator assignment and
+        may widen to their team, operators only outputs assigned to them (and,
+        for historical rows, ones they created while unassigned). The response
+        never carries an object address; previews go through the video-url
+        endpoint.
       security: [{sessionCookie: []}]
       parameters:
         - {$ref: '#/components/parameters/OutputStatus'}
         - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
         - {in: query, name: search, required: false, description: Output ID, source material ID/title, or strategy name substring., schema: {type: string, maxLength: 100}}
         - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, scheduled]}}
+        - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
         - {$ref: '#/components/parameters/CreatedFrom'}
         - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
@@ -557,13 +583,24 @@ components:
         insert_seconds: {type: integer, minimum: 0}
         guide_duration_seconds: {type: integer, minimum: 0, description: Zero uses the whole guide video.}
         max_duration_seconds: {type: integer, minimum: 0, description: Zero has no output duration limit.}
+    ComposeOperatorOption:
+      type: object
+      additionalProperties: false
+      required: [id, username, nickname, display_name]
+      properties:
+        id: {type: integer, format: int64}
+        username: {type: string}
+        nickname: {type: string}
+        display_name: {type: string, description: Nickname when set, otherwise username.}
     ComposeStrategy:
       type: object
-      required: [id, team_id, game_id, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
+      required: [id, team_id, game_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
         game_id: {type: string}
+        operator_id: {type: [integer, 'null'], format: int64, description: Null on historical rows written before assignment existed; never backfilled from created_by.}
+        operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         name: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
@@ -654,10 +691,11 @@ components:
     CreateComposeStrategy:
       type: object
       additionalProperties: false
-      required: [game_id, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
+      required: [game_id, operator_id, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
       properties:
         team_id: {type: integer, format: int64, description: Required for administrators; senior operators use their own team.}
         game_id: {type: string}
+        operator_id: {type: integer, format: int64, minimum: 1, description: An enabled operator or senior_operator on the team who is responsible for the game.}
         name: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
@@ -675,6 +713,7 @@ components:
       additionalProperties: false
       required: [name, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
       properties:
+        operator_id: {type: integer, format: int64, minimum: 1, description: Optional reassignment; omitted keeps the current operator. An enabled strategy must end the edit with a valid assignee.}
         name: {type: string}
         config:
           oneOf:
@@ -703,6 +742,7 @@ components:
       required: [strategy_id, items]
       properties:
         strategy_id: {type: integer, format: int64}
+        operator_id: {type: integer, format: int64, minimum: 1, description: Optional echo of the strategy's operator. When present it must equal that operator; the task always snapshots the strategy's assignment.}
         name:
           type: string
           maxLength: 60
@@ -733,11 +773,13 @@ components:
     ComposeOutput:
       type: object
       additionalProperties: false
-      required: [id, team_id, game_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, file_size_bytes, sha256, media, publish_status, created_by, created_at, updated_at]
+      required: [id, team_id, game_id, operator_id, operator_name, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, file_size_bytes, sha256, media, publish_status, created_by, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
         game_id: {type: string}
+        operator_id: {type: [integer, 'null'], format: int64, description: Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by.}
+        operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         material_id: {type: integer, format: int64}
         material_usage_id: {type: integer, format: int64}
         compose_task_id: {type: integer, format: int64}
@@ -769,12 +811,14 @@ components:
         trace: {$ref: '#/components/schemas/ComposeOutputTrace'}
     ComposeTask:
       type: object
-      required: [id, team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
+      required: [id, team_id, game_id, operator_id, operator_name, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         display_name: {type: string, description: Creation-time material title and strategy name; empty for legacy tasks that cannot be safely reconstructed.}
         team_id: {type: integer, format: int64}
         game_id: {type: string}
+        operator_id: {type: [integer, 'null'], format: int64, description: The strategy's operator at creation time, frozen on the task; null on historical rows, never backfilled from created_by.}
+        operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         trigger_type: {type: string, enum: [manual, scheduled]}
         material_id: {type: integer, format: int64}
         material_usage_id: {type: integer, format: int64}
