@@ -138,17 +138,11 @@ async function load({ quiet = false } = {}) {
     if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type
     if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id
     Object.assign(params, createdRangeParams(filters.value.created_range))
-    // 负责人筛选与服务端同一套 scope：普通运营不发（服务端固定本人）；高级运营默认
-    // 我的，可切团队全部或指定运营；管理员默认全部，按团队收窄。
+    // 负责人筛选只按团队成员收窄：普通运营没有这个控件（服务端固定本人）；
+    // 高级运营不发参数就是本团队全部，选中成员只发 operator_id；管理员按团队筛选。
     const namedOperator = filters.value.operator.startsWith('op:') ? Number(filters.value.operator.slice(3)) : 0
-    if (isAdmin.value) {
-      if (filters.value.team_id) params.team_id = Number(filters.value.team_id)
-      if (namedOperator) params.operator_id = namedOperator
-      else if (filters.value.team_id) params.operator_scope = 'team'
-    } else if (isSenior.value) {
-      if (namedOperator) params.operator_id = namedOperator
-      else if (filters.value.operator === 'team') params.operator_scope = 'team'
-    }
+    if (isAdmin.value && filters.value.team_id) params.team_id = Number(filters.value.team_id)
+    if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator
     const data = await client.listComposeTasks(params)
     rows.value = Array.isArray(data) ? data : []
     if (!quiet) pagination.value.current = 1
@@ -247,11 +241,8 @@ const canReviewUncertain = computed(() => currentUser.value?.role === 'admin')
 const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const canFilterOperators = computed(() => isSenior.value || isAdmin.value)
-const operatorFilterOptions = computed(() => {
-  const options = []
-  if (isSenior.value) options.push({ value: 'mine', label: '我的' }, { value: 'team', label: '团队全部' })
-  return options.concat(operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
-})
+// 负责人候选只有本团队启用的成员（含本人）：未选择就是团队全部，不造伪选项。
+const operatorFilterOptions = computed(() => operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
 const reviews = ref([])
 const reviewsError = ref('')
 const reviewBusy = ref(false)
@@ -497,8 +488,6 @@ onMounted(() => {
   // 只为藏/显重试按钮；读失败不拦页面，角色判定由服务端兜底。
   sessionClient.me().then((me) => {
     currentUser.value = me
-    // 高级运营的服务端默认就是「我」；把它显式放上下拉，页面说的事实才和查询一致。
-    if (isSenior.value && !filters.value.operator) filters.value.operator = 'mine'
     loadOperators()
     if (detail.value) loadReviews(detail.value.id)
   }).catch(() => {})
@@ -524,7 +513,7 @@ onMounted(() => {
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
           </t-select></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
-          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" :clearable="!isSenior" :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="人工创建" /><t-option value="scheduled" label="策略自动" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
