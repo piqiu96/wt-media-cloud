@@ -1,0 +1,1 @@
+secret = {{WT_MEDIA_AGENT_TOKEN_SECRET}}

@@ -68,9 +68,9 @@ func TestLoginReportsDistinctInputErrorsBeforeCredentialCheck(t *testing.T) {
 	}
 }
 
-func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T) {
+func TestNewDesktopLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T) {
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	tokens := []string{"session-first", "session-second"}
+	tokens := []string{"session-first", "session-conflict", "session-second"}
 	service := NewService(
 		NewMemoryStore(),
 		WithClock(func() time.Time { return now }),
@@ -85,12 +85,12 @@ func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T
 		t.Fatalf("BootstrapAdmin() error = %v", err)
 	}
 
-	first, err := service.Login("admin", "a-long-initial-password")
+	first, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{ClientType: ClientTypeDesktop})
 	if err != nil {
-		t.Fatalf("first Login() error = %v", err)
+		t.Fatalf("first LoginWithOptions() error = %v", err)
 	}
-	if _, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{}); !errors.Is(err, ErrSessionReplaceNeeded) {
-		t.Fatalf("unconfirmed LoginWithOptions() error = %v, want ErrSessionReplaceNeeded", err)
+	if _, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{ClientType: ClientTypeDesktop}); !errors.Is(err, ErrDesktopLoginConflict) {
+		t.Fatalf("unconfirmed LoginWithOptions() error = %v, want ErrDesktopLoginConflict", err)
 	}
 	stillActive, err := service.Authenticate(first.Token)
 	if err != nil {
@@ -99,7 +99,11 @@ func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T
 	if stillActive.Username != "admin" {
 		t.Fatalf("stillActive = %+v", stillActive)
 	}
-	second, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{ReplaceExisting: true})
+	second, err := service.LoginWithOptions("admin", "a-long-initial-password", LoginOptions{
+		ClientType:       ClientTypeDesktop,
+		ReplaceExisting:  true,
+		ReplaceSessionID: first.SessionID,
+	})
 	if err != nil {
 		t.Fatalf("confirmed LoginWithOptions() error = %v", err)
 	}
@@ -107,8 +111,8 @@ func TestNewLoginRequiresConfirmationBeforeInvalidatingPriorSession(t *testing.T
 		t.Fatalf("replacement login reused token %q", first.Token)
 	}
 
-	if _, err := service.Authenticate(first.Token); !errors.Is(err, ErrSessionInvalid) {
-		t.Fatalf("Authenticate(first token) error = %v, want ErrSessionInvalid", err)
+	if _, err := service.Authenticate(first.Token); !errors.Is(err, ErrDesktopReplaced) {
+		t.Fatalf("Authenticate(first token) error = %v, want ErrDesktopReplaced", err)
 	}
 	actor, err := service.Authenticate(second.Token)
 	if err != nil {
@@ -521,8 +525,8 @@ func TestUpdateUserAccessTransfersCurrentTeamAndInvalidatesSession(t *testing.T)
 	if updated.TeamID == nil || *updated.TeamID != newTeam.ID || updated.Role != RoleSeniorOperator {
 		t.Fatalf("updated = %+v", updated)
 	}
-	if _, err := service.Authenticate(login.Token); !errors.Is(err, ErrSessionInvalid) {
-		t.Fatalf("Authenticate(old session) error = %v, want ErrSessionInvalid", err)
+	if _, err := service.Authenticate(login.Token); !errors.Is(err, ErrSessionInvalidated) {
+		t.Fatalf("Authenticate(old session) error = %v, want ErrSessionInvalidated", err)
 	}
 }
 
@@ -563,8 +567,8 @@ func TestUpdateUserCommitsAccessAndStatusTogetherAndInvalidatesSession(t *testin
 	if updated.Role != RoleSeniorOperator || updated.Status != UserStatusDisabled || updated.TeamID == nil || *updated.TeamID != newTeam.ID {
 		t.Fatalf("updated = %+v", updated)
 	}
-	if _, err := service.Authenticate(login.Token); !errors.Is(err, ErrSessionInvalid) {
-		t.Fatalf("Authenticate(old session) error = %v, want ErrSessionInvalid", err)
+	if _, err := service.Authenticate(login.Token); !errors.Is(err, ErrSessionInvalidated) {
+		t.Fatalf("Authenticate(old session) error = %v, want ErrSessionInvalidated", err)
 	}
 }
 
@@ -815,21 +819,21 @@ func (s *failingIdentityStore) AppendAudit(event AuditEvent) error {
 	return s.Store.AppendAudit(event)
 }
 
-func (s *failingIdentityStore) InvalidateUserSessionsForClientType(userID UserID, clientType ClientType, at time.Time) error {
+func (s *failingIdentityStore) InvalidateUserSessions(userID UserID, at time.Time, reason string) error {
 	if s.failInvalidate {
 		return errors.New("session invalidation unavailable")
 	}
-	return s.Store.InvalidateUserSessionsForClientType(userID, clientType, at)
+	return s.Store.InvalidateUserSessions(userID, at, reason)
 }
 
-func (s *failingIdentityStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent) error {
+func (s *failingIdentityStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent, reason string) error {
 	if s.failAudit {
 		return errors.New("audit unavailable")
 	}
 	if s.failInvalidate {
 		return errors.New("session invalidation unavailable")
 	}
-	return s.Store.UpdateUserAndInvalidateSessions(user, event)
+	return s.Store.UpdateUserAndInvalidateSessions(user, event, reason)
 }
 
 func TestUpdateUserAccessFailureDoesNotLeaveChangedAccessWithLiveSession(t *testing.T) {

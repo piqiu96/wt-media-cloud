@@ -9,8 +9,8 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
+	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
@@ -204,8 +204,6 @@ func writeProductionError(c *hertzapp.RequestContext, err error) {
 		api.ForbiddenNamed(c, 15007, "没有权限操作该素材关系", "material_usage_forbidden")
 	case errors.Is(err, productionservice.ErrMaterialUnavailable):
 		api.ConflictNamed(c, 15005, "素材视频尚未准备好", "material_unavailable")
-	case errors.Is(err, productionservice.ErrLocalNodeUnavailable):
-		api.ConflictNamed(c, 15105, "本机没有可用的下载节点", "local_transfer_node_unavailable")
 	case errors.Is(err, productionservice.ErrUsageNotFound):
 		api.NotFound(c, 15006, "我的素材中不存在该记录")
 	case errors.Is(err, productionservice.ErrNotFound):

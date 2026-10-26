@@ -9,7 +9,7 @@ export const TERMINAL_STATUSES = ['success', 'failed', 'cancelled']
 
 /**
  * 下载中心放行的资产类型（CHG-20261013-085）：成片与素材共用同一张传输表、同一个
- * 执行器与同一套行投影，所以文件名投影、重新下载与重取三个门都按这份名单放行。
+ * 执行器与同一套行投影，所以文件名投影与重新下载都按这份名单放行。
  * `compose_input_prepare` 这类中间产物仍然进不来 —— 它们的 id 是别的东西的 id。
  */
 export const DOWNLOADABLE_ASSET_TYPES = ['material', 'composite_output']
@@ -238,43 +238,6 @@ export function needsRedownload(downloadStatus, presence) {
  */
 export function assetFallbackTitle(task) {
   return task?.asset_type === 'composite_output' ? `成片 ${task.asset_id}` : `素材 ${task.asset_id}`
-}
-
-/**
- * 悬置（suspended）：任务已寻址到**这台**设备，却从没被任何执行器领走。
- *
- * 阶段 2 起任务按 `assigned_node_id` 领（claim 匹配节点，不是设备），而节点是一次注册
- * 实例：桌面重启、重注册都会铸出新节点，旧节点被替换后它名下还没人领的 pending 任务就
- * 永远没有执行器了。能认出「这台设备」的是任务创建时写入的持久化 `assigned_device_id`
- * 与本机的 device_id。浏览器读不到本机，所以 `localDeviceId` 缺省为 null 时这条恒为
- * false —— 读不到就不该断言。
- */
-export function isSuspendedOnDevice(task, localDeviceId) {
-  if (task?.status !== 'pending') return false
-  return !!localDeviceId && !!task?.assigned_device_id && task.assigned_device_id === localDeviceId
-}
-
-/**
- * 可重取（reclaimable）：解绑时被 `UnbindDevice` 标记「设备已解绑，可重新下载」的终态行
- * （`cancelled` + `error_code = 'device_unbound'`）。
- *
- * 换机重投递就是这条：设备 A 领任务→解绑→设备 B 绑定后，A 名下没跑完的任务被标成它；
- * 在 B 上「重取」重新发起下载，设备维度的去重键把 B 当成新目的地，得到一条新任务。它
- * **不需要**本机 device_id —— 要重取的恰恰是旧设备名下的任务，拿当前设备去比反而认不出。
- */
-export function isReclaimableAfterUnbind(task) {
-  return task?.status === 'cancelled' && task?.error_code === 'device_unbound'
-}
-
-/**
- * 「重取」：悬置在**这台**设备上的 pending 任务，或解绑后被标记可重取的终态行。
- *
- * 与「重新下载」的差别在语义：重新下载只回答终态行的「再来一次」；重取回答的是「这条该由
- * 这台机器执行的下载还悬着/还躺在上家机器那里，把它重新驱动起来」。
- */
-export function canRetake(task, localDeviceId) {
-  if (!DOWNLOADABLE_ASSET_TYPES.includes(task?.asset_type) || !task?.asset_id) return false
-  return isSuspendedOnDevice(task, localDeviceId) || isReclaimableAfterUnbind(task)
 }
 
 export function canCancel(task) {

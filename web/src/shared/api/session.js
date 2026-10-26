@@ -8,6 +8,7 @@ export function createSessionClient({ base = '/api/v1', fetch = globalThis.fetch
         username,
         password,
         replace_existing: !!options.replaceExisting,
+        ...(options.replaceSessionId ? { replace_session_id: options.replaceSessionId } : {}),
       })
       // Packaged Desktop login returns { user, token }; store the token for the
       // X-Session-Token header. Cloud Web returns the user directly (cookie auth).

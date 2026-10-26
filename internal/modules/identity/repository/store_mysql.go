@@ -193,17 +193,17 @@ func updateUser(db *gorm.DB, user model.User) error {
 	return tx.Commit().Error
 }
 
-func UpdateUserAndInvalidateSessions(user model.User, event model.AuditEvent) error {
-	return updateUserAndInvalidateSessions(database.DB(), user, event)
+func UpdateUserAndInvalidateSessions(user model.User, event model.AuditEvent, reason string) error {
+	return updateUserAndInvalidateSessions(database.DB(), user, event, reason)
 }
 
-func updateUserAndInvalidateSessions(db *gorm.DB, user model.User, event model.AuditEvent) error {
+func updateUserAndInvalidateSessions(db *gorm.DB, user model.User, event model.AuditEvent, reason string) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	if err := updateUserTx(tx, user); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, `UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND invalidated_at IS NULL`, user.UpdatedAt, user.ID); err != nil {
+	if _, err := execSQL(tx, `UPDATE user_sessions SET invalidated_at = ?, invalidated_reason = ? WHERE user_id = ? AND invalidated_at IS NULL`, user.UpdatedAt, reason, user.ID); err != nil {
 		return err
 	}
 	if err := appendAuditTx(tx, event); err != nil {
@@ -254,12 +254,9 @@ func deleteUser(db *gorm.DB, userID model.UserID) error {
         (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
         (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
         (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_binding_tickets WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_nodes WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM browser_profile_runtime_presence WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID,
 	).Scan(&references)
 	if err != nil {
 		return err
@@ -293,12 +290,9 @@ func deleteUserWithAudit(db *gorm.DB, userID model.UserID, event model.AuditEven
         (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
         (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
         (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_binding_tickets WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM local_agent_nodes WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM browser_profile_runtime_presence WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
         (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, userID,
+		userID, userID, userID, userID, userID, userID, userID, userID,
 	).Scan(&references); err != nil {
 		return err
 	}
@@ -726,16 +720,85 @@ func userHasGameReferencesOutsideScope(db *gorm.DB, userID model.UserID, gameIDs
 	return exists, err
 }
 
-func CreateSession(session model.Session) error {
-	return createSession(database.DB(), session)
+func CreateSession(session model.Session, replaceSessionID string) (model.SessionCreateResult, error) {
+	return createSession(database.DB(), session, replaceSessionID)
 }
 
-func createSession(db *gorm.DB, session model.Session) error {
+func createSession(db *gorm.DB, session model.Session, replaceSessionID string) (model.SessionCreateResult, error) {
+	tx := db.Begin()
+	defer rollbackTx(tx)
+	result := model.SessionCreateResult{}
+
+	if session.ClientType == model.ClientTypeDesktop {
+		// The user row is the per-user mutex for Desktop conflict resolution.
+		// It is locked, not modified: no authentication state is stored on users.
+		var lockedUserID model.UserID
+		if err := queryRow(tx, `SELECT id FROM users WHERE id = ? FOR UPDATE`, session.UserID).Scan(&lockedUserID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return model.SessionCreateResult{}, model.ErrAuthenticationFailed
+			}
+			return model.SessionCreateResult{}, err
+		}
+		active, err := activeDesktopSessions(tx, session.UserID, session.CreatedAt, true)
+		if err != nil {
+			return model.SessionCreateResult{}, err
+		}
+		if len(active) > 1 {
+			return model.SessionCreateResult{}, model.ErrSessionStateInvalid
+		}
+		if len(active) == 1 {
+			if replaceSessionID != active[0].ID {
+				return model.SessionCreateResult{}, &model.DesktopLoginConflictError{ActiveSessionID: active[0].ID}
+			}
+			if _, err := execSQL(tx,
+				`UPDATE user_sessions SET invalidated_at = ?, invalidated_reason = ? WHERE id = ? AND invalidated_at IS NULL`,
+				session.CreatedAt, model.SessionInvalidReasonDesktopReplaced, active[0].ID,
+			); err != nil {
+				return model.SessionCreateResult{}, err
+			}
+			result.ReplacedSessionID = active[0].ID
+		}
+	}
+
+	if err := insertSession(tx, session); err != nil {
+		return model.SessionCreateResult{}, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return model.SessionCreateResult{}, err
+	}
+	return result, nil
+}
+
+func insertSession(db *gorm.DB, session model.Session) error {
 	_, err := execSQL(db,
-		`INSERT INTO user_sessions (id, user_id, token_hash, client_type, created_at, invalidated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		session.ID, session.UserID, session.TokenHash, session.ClientType, session.CreatedAt, session.InvalidAt,
+		`INSERT INTO user_sessions (id, user_id, token_hash, client_type, created_at, expires_at, invalidated_at, invalidated_reason) VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		session.ID, session.UserID, session.TokenHash, session.ClientType, session.CreatedAt, session.ExpiresAt, session.InvalidAt, session.InvalidatedReason,
 	)
 	return err
+}
+
+func activeDesktopSessions(db *gorm.DB, userID model.UserID, at time.Time, forUpdate bool) ([]model.Session, error) {
+	query := `SELECT id, user_id, token_hash, client_type, created_at, expires_at, invalidated_at, invalidated_reason
+		FROM user_sessions
+		WHERE user_id = ? AND client_type = ? AND invalidated_at IS NULL AND expires_at > ?
+		ORDER BY created_at DESC, id DESC`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	rows, err := queryRows(db, query, userID, model.ClientTypeDesktop, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []model.Session
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
 }
 
 func FindSessionByTokenHash(tokenHash string) (model.Session, bool, error) {
@@ -743,60 +806,122 @@ func FindSessionByTokenHash(tokenHash string) (model.Session, bool, error) {
 }
 
 func findSessionByTokenHash(db *gorm.DB, tokenHash string) (model.Session, bool, error) {
-	var session model.Session
-	var invalidatedAt sql.NullTime
-	var clientType string
-	err := queryRow(db,
-		`SELECT id, user_id, token_hash, client_type, created_at, invalidated_at FROM user_sessions WHERE token_hash = ?`,
+	row := queryRow(db,
+		`SELECT id, user_id, token_hash, client_type, created_at, expires_at, invalidated_at, invalidated_reason FROM user_sessions WHERE token_hash = ?`,
 		tokenHash,
-	).Scan(&session.ID, &session.UserID, &session.TokenHash, &clientType, &session.CreatedAt, &invalidatedAt)
+	)
+	session, err := scanSession(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Session{}, false, nil
 	}
 	if err != nil {
 		return model.Session{}, false, err
 	}
+	return session, true, nil
+}
+
+func FindSessionByID(sessionID string) (model.Session, bool, error) {
+	return findSessionByID(database.DB(), sessionID)
+}
+
+func findSessionByID(db *gorm.DB, sessionID string) (model.Session, bool, error) {
+	row := queryRow(db,
+		`SELECT id, user_id, token_hash, client_type, created_at, expires_at, invalidated_at, invalidated_reason FROM user_sessions WHERE id = ?`,
+		sessionID,
+	)
+	session, err := scanSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Session{}, false, nil
+	}
+	if err != nil {
+		return model.Session{}, false, err
+	}
+	return session, true, nil
+}
+
+func FindActiveDesktopSession(userID model.UserID, at time.Time) (model.Session, bool, error) {
+	return findActiveDesktopSession(database.DB(), userID, at)
+}
+
+func findActiveDesktopSession(db *gorm.DB, userID model.UserID, at time.Time) (model.Session, bool, error) {
+	sessions, err := activeDesktopSessions(db, userID, at, false)
+	if err != nil {
+		return model.Session{}, false, err
+	}
+	if len(sessions) > 1 {
+		return model.Session{}, false, model.ErrSessionStateInvalid
+	}
+	if len(sessions) == 0 {
+		return model.Session{}, false, nil
+	}
+	return sessions[0], true, nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSession(row rowScanner) (model.Session, error) {
+	var session model.Session
+	var clientType string
+	var invalidatedAt sql.NullTime
+	var invalidatedReason sql.NullString
+	if err := row.Scan(
+		&session.ID, &session.UserID, &session.TokenHash, &clientType, &session.CreatedAt,
+		&session.ExpiresAt, &invalidatedAt, &invalidatedReason,
+	); err != nil {
+		return model.Session{}, err
+	}
 	session.ClientType = model.ClientType(clientType)
 	if invalidatedAt.Valid {
 		at := invalidatedAt.Time
 		session.InvalidAt = &at
 	}
-	return session, true, nil
+	if invalidatedReason.Valid {
+		session.InvalidatedReason = invalidatedReason.String
+	}
+	return session, nil
 }
 
-func HasActiveSessionForClientType(userID model.UserID, clientType model.ClientType) (bool, error) {
-	return hasActiveSessionForClientType(database.DB(), userID, clientType)
+func InvalidateUserSessions(userID model.UserID, at time.Time, reason string) error {
+	return invalidateUserSessions(database.DB(), userID, at, reason)
 }
 
-func hasActiveSessionForClientType(db *gorm.DB, userID model.UserID, clientType model.ClientType) (bool, error) {
-	var count int
-	err := queryRow(db,
-		`SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND client_type = ? AND invalidated_at IS NULL`,
-		userID, clientType,
-	).Scan(&count)
-	return count > 0, err
-}
-
-func InvalidateUserSessionsForClientType(userID model.UserID, clientType model.ClientType, at time.Time) error {
-	return invalidateUserSessionsForClientType(database.DB(), userID, clientType, at)
-}
-
-func invalidateUserSessionsForClientType(db *gorm.DB, userID model.UserID, clientType model.ClientType, at time.Time) error {
+func invalidateUserSessions(db *gorm.DB, userID model.UserID, at time.Time, reason string) error {
 	_, err := execSQL(db,
-		`UPDATE user_sessions SET invalidated_at = ? WHERE user_id = ? AND client_type = ? AND invalidated_at IS NULL`,
-		at, userID, clientType,
+		`UPDATE user_sessions SET invalidated_at = ?, invalidated_reason = ? WHERE user_id = ? AND invalidated_at IS NULL`,
+		at, reason, userID,
 	)
 	return err
 }
 
-func InvalidateSessionByID(sessionID string, at time.Time) error {
-	return invalidateSessionByID(database.DB(), sessionID, at)
+func InvalidateUserSessionsWithAudit(userID model.UserID, at time.Time, reason string, event model.AuditEvent) error {
+	return invalidateUserSessionsWithAudit(database.DB(), userID, at, reason, event)
 }
 
-func invalidateSessionByID(db *gorm.DB, sessionID string, at time.Time) error {
+func invalidateUserSessionsWithAudit(db *gorm.DB, userID model.UserID, at time.Time, reason string, event model.AuditEvent) error {
+	tx := db.Begin()
+	defer rollbackTx(tx)
+	if _, err := execSQL(tx,
+		`UPDATE user_sessions SET invalidated_at = ?, invalidated_reason = ? WHERE user_id = ? AND invalidated_at IS NULL`,
+		at, reason, userID,
+	); err != nil {
+		return err
+	}
+	if err := appendAuditTx(tx, event); err != nil {
+		return err
+	}
+	return tx.Commit().Error
+}
+
+func InvalidateSessionByID(sessionID string, at time.Time, reason string) error {
+	return invalidateSessionByID(database.DB(), sessionID, at, reason)
+}
+
+func invalidateSessionByID(db *gorm.DB, sessionID string, at time.Time, reason string) error {
 	_, err := execSQL(db,
-		`UPDATE user_sessions SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL`,
-		at, sessionID,
+		`UPDATE user_sessions SET invalidated_at = ?, invalidated_reason = ? WHERE id = ? AND invalidated_at IS NULL`,
+		at, reason, sessionID,
 	)
 	return err
 }

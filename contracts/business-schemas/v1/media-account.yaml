@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.07.22.1"
+revision: "2026.10.23.1"
 schemas:
   MediaAccount:
     type: object
@@ -13,7 +13,13 @@ schemas:
       platform_account_id: {type: string, nullable: true}
       name: {type: string, nullable: true}
       avatar_url: {type: string, nullable: true}
-      browser_profile_id: {type: string, nullable: true}
+      browser_profile_id:
+        type: string
+        nullable: true
+        description: >-
+          Kept as a plain reference. When the referenced Profile is outside the caller's
+          `user_id + main_user_id` scope the Web shows "未找到对应的浏览器环境" and execution
+          answers PROFILE_NOT_FOUND; it becomes reachable again if the user switches back.
       identification_status: {type: string, enum: [pending_identification, identified, duplicate]}
       duplicate_of_account_id: {type: string, nullable: true}
       business_status: {type: string, enum: [enabled, disabled, retired]}

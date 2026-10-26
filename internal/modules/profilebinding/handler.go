@@ -5,22 +5,19 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
 type updateProfileRequest struct {
 	CloudRemark    *string                               `json:"cloud_remark"`
 	BusinessStatus *profileservice.ProfileBusinessStatus `json:"business_status"`
-}
-
-type localSensitiveRequest struct {
-	NodeID string `json:"node_id"`
 }
 
 type assignProfileOwnerRequest struct {
@@ -34,14 +31,6 @@ func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	var input profileservice.SnapshotInput
 	if !api.DecodeJSON(c, &input) {
-		return
-	}
-	nodeID := strings.TrimSpace(input.NodeID)
-	if nodeID == "" {
-		writeProfileError(c, runtimeservice.ErrInvalidInput)
-		return
-	}
-	if !checkLocalTrust(c, actor.ID, nodeID) {
 		return
 	}
 	scan, err := profileservice.SubmitScan(actor, input)
@@ -68,14 +57,6 @@ func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	nodeID, ok := decodeLocalSensitiveNode(c)
-	if !ok {
-		writeProfileError(c, runtimeservice.ErrInvalidInput)
-		return
-	}
-	if !checkLocalTrust(c, actor.ID, nodeID) {
-		return
-	}
 	scan, err := profileservice.ConfirmScan(actor, c.Param("scan_id"))
 	if err != nil {
 		writeProfileError(c, err)
@@ -83,34 +64,62 @@ func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, scan)
 }
-func ConfirmScanMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
+
+// BindBitAccount 只接受 Agent Token 严格档。主账号是 Local Agent 从 BitBrowser
+// 实读的事实，用户 session 与请求体都不能建立绑定。
+func BindBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
+	auth, ok := localagent.AgentAuthFrom(c)
 	if !ok {
+		api.FailureCode(c, 401, 11001, "Agent 凭证无效", "AUTH_AGENT_TOKEN_INVALID", nil, false, "reissue_agent_token")
 		return
 	}
-	scan, err := profileservice.ConfirmMainIdentity(actor, c.Param("scan_id"))
-	if err != nil {
-		writeProfileError(c, err)
-		return
-	}
-	api.Success(c, scan)
-}
-func ConfirmMainIdentity(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var input profileservice.MainIdentityInput
+	var input profileservice.BitAccountBindInput
 	if !api.DecodeJSON(c, &input) {
 		return
 	}
-	binding, err := profileservice.ConfirmMainIdentityDirect(actor, input)
+	binding, err := profileservice.BindBitAccount(identityservice.UserID(auth.Claims.UserID), input)
 	if err != nil {
 		writeProfileError(c, err)
 		return
 	}
 	api.Success(c, binding)
 }
+
+// GetBitAccount 让页面看到当前账号绑定的是哪个 BitBrowser 主账号。
+// 只回掩码：完整主账号留在 Agent 与 Cloud 之间使用。
+type bitAccountView struct {
+	Bound            bool       `json:"bound"`
+	MainUserIDMasked string     `json:"main_user_id_masked,omitempty"`
+	BoundAt          *time.Time `json:"bound_at,omitempty"`
+	LastVerifiedAt   *time.Time `json:"last_verified_at,omitempty"`
+}
+
+func GetBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	binding, found, err := profileservice.GetBitAccount(actor.ID)
+	if err != nil {
+		writeProfileError(c, err)
+		return
+	}
+	view := bitAccountView{Bound: found}
+	if found {
+		view.MainUserIDMasked = maskMainUserID(binding.MainUserID)
+		view.BoundAt = binding.BoundAt
+		view.LastVerifiedAt = binding.LastVerifiedAt
+	}
+	api.Success(c, view)
+}
+
+func maskMainUserID(value string) string {
+	if len(value) <= 8 {
+		return "****"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
+}
+
 func RejectProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -237,72 +246,24 @@ func DeleteBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
 	api.NoContent(c)
 }
 
-func parseProfileUserID(raw string) (identityservice.UserID, bool) {
-	parsed, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || parsed <= 0 {
-		return 0, false
-	}
-	return identityservice.UserID(parsed), true
-}
-
-func extractNodeID(input map[string]any) (string, bool) {
-	raw, ok := input["node_id"]
-	delete(input, "node_id")
-	if !ok {
-		return "", false
-	}
-	nodeID := strings.TrimSpace(strconvAny(raw))
-	return nodeID, nodeID != ""
-}
-
-func decodeLocalSensitiveNode(c *hertzapp.RequestContext) (string, bool) {
-	var req localSensitiveRequest
-	if !api.DecodeJSON(c, &req) {
-		return "", false
-	}
-	nodeID := strings.TrimSpace(req.NodeID)
-	return nodeID, nodeID != ""
-}
-
 func writeDesktopOnlyProfileOperation(c *hertzapp.RequestContext) {
 	api.Conflict(c, 23004, "浏览器窗口本机操作只能在Desktop执行；Cloud Web只展示已保存的窗口信息")
-}
-
-func checkLocalTrust(c *hertzapp.RequestContext, userID identityservice.UserID, nodeID string) bool {
-	if err := runtimeservice.CheckLocalTrust(userID, nodeID); err != nil {
-		writeProfileError(c, err)
-		return false
-	}
-	return true
-}
-
-func strconvAny(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		return ""
-	}
 }
 
 func writeProfileError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, profileservice.ErrInvalidInput):
 		api.BadRequest(c, 10001, "请求参数无效")
-	case errors.Is(err, runtimeservice.ErrInvalidInput):
-		api.BadRequest(c, 10001, "当前电脑缺少本地环境确认信息")
-	case errors.Is(err, runtimeservice.ErrBoundSessionInvalid), errors.Is(err, runtimeservice.ErrNodeCredentialInvalid):
-		api.Unauthorized(c, 11001, "当前电脑登录状态已失效，请重新登录 Desktop 并刷新本机状态")
-	case errors.Is(err, runtimeservice.ErrLocalTrustUnavailable), errors.Is(err, runtimeservice.ErrProfileOwnershipMismatch):
-		api.Conflict(c, 23003, "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口")
 	case errors.Is(err, profileservice.ErrForbidden):
 		api.Forbidden(c, 11003, "没有权限执行此 Profile 操作")
 	case errors.Is(err, profileservice.ErrIdentityUnverifiable):
-		api.Conflict(c, 23002, "BitBrowser Profile 身份无法验证")
-	case errors.Is(err, profileservice.ErrIdentityMismatch):
-		api.Conflict(c, 23002, "当前比特浏览器登录账号与系统绑定账号不一致")
+		api.FailureCode(c, 409, 23002, "BitBrowser Profile 身份无法验证", "BIT_MAIN_USER_MISMATCH", nil, false, "rebind_bitbrowser")
+	case errors.Is(err, profileservice.ErrBitNotBound):
+		api.FailureCode(c, 409, 23008, "尚未绑定 BitBrowser 主账号", "BIT_NOT_BOUND", nil, false, "bind_bitbrowser")
+	case errors.Is(err, profileservice.ErrBitBrowserOffline):
+		api.FailureCode(c, 409, 23009, "BitBrowser 未运行或观察已过期", "BIT_BROWSER_OFFLINE", nil, true, "start_bitbrowser")
+	case errors.Is(err, profileservice.ErrBitMainUserMismatch):
+		api.FailureCode(c, 409, 23002, "当前比特浏览器登录账号与系统绑定账号不一致", "BIT_MAIN_USER_MISMATCH", nil, false, "rebind_bitbrowser")
 	case errors.Is(err, profileservice.ErrScanNotFound), errors.Is(err, profileservice.ErrProfileNotFound):
 		api.NotFound(c, 20004, "Profile 扫描或 Profile 不存在")
 	case errors.Is(err, profileservice.ErrScanExpired):

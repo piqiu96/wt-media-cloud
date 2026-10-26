@@ -1,12 +1,14 @@
 openapi: 3.1.0
 info:
   title: WT Media Universal Task Schema
-  version: 2026.07.15.1
+  version: 2026.10.23.1
   description: >
-    M1-R1 Cloud-owned formal task schema contract. Defines the universal task
-    model, status state machine, task types, report contract, and error codes.
-    All non-noop business executors must lock this contract revision before
-    treating task payloads and results as formal contracts.
+    The formal shape of one asynchronous task. A task belongs to a user, not to a
+    machine: there is no device, node or desktop field, and no state that tracks which
+    computer is running it. Each claim produces an `attempt_id`; `last_report_at` is
+    maintained by the Agent task runtime and read by the Cloud timeout scanner.
+    The HTTP routes that create, claim, report on and settle tasks are in
+    `cloud-agent-api/v1/task-lease.openapi.yaml` and `task-report.openapi.yaml`.
 paths: {}
 components:
   schemas:
@@ -20,10 +22,9 @@ components:
         - failed
         - cancelled
       description: >
-        Formal task lifecycle state machine.
         pending → leased → running → succeeded
                     running → failed
-                    leased → pending (lease expired)
+                    leased → pending (lease expired, claimed again)
                     (any non-terminal) → cancelled
 
     TaskType:
@@ -33,122 +34,114 @@ components:
         - cookie_read_task
         - cookie_write_task
         - account_check_task
+        - profile_create_task
+        - profile_open_task
+        - profile_close_task
+        - profile_update_task
+        - proxy_check_task
+        - proxy_mutation_task
       description: >
-        Registered task type enumeration. Additional types are added by
-        contract revision bumps as business executors are introduced.
+        Registered task types. An unknown or empty type is refused with
+        UNSUPPORTED_TASK_TYPE; it is never downgraded to `noop_task`.
+
+    TaskStatusSettledBy:
+      type: string
+      enum: [agent, timeout, user, legacy]
+      description: >
+        Who wrote the terminal state: the executor (`agent`), the timeout scanner
+        (`timeout`), the user cancelling (`user`), or the migration of a row that
+        predates the runtime (`legacy`).
 
     Task:
       type: object
-      required:
-        - task_id
-        - task_type
-        - status
-        - created_at
+      required: [task_id, task_type, status, attempt, created_at]
       properties:
-        task_id:
-          type: string
-          description: Unique task identifier, e.g. "task_a1b2c3d4".
-        task_type:
-          $ref: "#/components/schemas/TaskType"
-        status:
-          $ref: "#/components/schemas/TaskStatus"
-        idempotency_key:
+        task_id: {type: string, description: 'e.g. "task_a1b2c3d4".'}
+        task_type: {$ref: '#/components/schemas/TaskType'}
+        status: {$ref: '#/components/schemas/TaskStatus'}
+        user_id:
+          type: integer
+          format: int64
+          description: Owner. Omitted only for historical rows created before tasks were user-scoped.
+        attempt:
+          type: integer
+          description: Increments on every claim. `0` before the first claim.
+        attempt_id:
           type: string
           description: >
-            Optional client-provided key. When present, a Create with the same
-            key returns the existing task instead of creating a duplicate.
+            Identifies the current claim. Every report must carry it; a report whose
+            id differs from this one is STALE_ATTEMPT.
+        idempotency_key:
+          type: string
+          description: Unique per user on `(user_id, idempotency_key)`.
         agent_id:
           type: string
-          description: Agent that currently holds or last held this task lease.
-        created_at:
+          description: Audit label of the process that claimed the task. Not an identity and not used for authorization.
+        created_at: {type: string, format: date-time}
+        started_at:
           type: string
           format: date-time
-          description: Timestamp of task creation (RFC 3339).
+          description: Set by the first `running` report, not by the claim.
+        last_report_at:
+          type: string
+          format: date-time
+          description: Refreshed by running reports and by activity. The timeout scanner compares it with now - execution_timeout_seconds.
+        finished_at: {type: string, format: date-time}
         lease_expires_at:
           type: string
           format: date-time
-          description: Expiration timestamp of the current lease (RFC 3339).
-        progress:
-          type: integer
-          minimum: 0
-          maximum: 100
-          description: Progress percentage from 0-100.
-        message:
-          type: string
-          description: Human-readable status or error message.
-        updated_at:
-          type: string
-          format: date-time
-          description: Timestamp of last status update (RFC 3339).
+          description: A `leased` task past this moment may be claimed again by the same user.
+        progress: {type: integer, minimum: 0, maximum: 100}
+        message: {type: string}
+        updated_at: {type: string, format: date-time}
         error_code:
           type: string
-          description: >
-            Machine-readable error code set when status is 'failed'.
-            Defined by the executor that produced the failure.
-
-    CreateTaskRequest:
-      type: object
-      properties:
-        task_type:
-          $ref: "#/components/schemas/TaskType"
-          description: >
-            Task type discriminator. Defaults to noop_task when omitted.
-        idempotency_key:
-          type: string
-          description: Optional idempotency key for safe retry.
-
-    ClaimTaskRequest:
-      type: object
-      required:
-        - agent_id
-      properties:
-        agent_id:
-          type: string
-          description: Registered agent identifier.
-        lease_seconds:
+          description: Set when failed. For timeout settlements this is EXECUTION_INTERRUPTED or RESULT_UNKNOWN.
+        error_message: {type: string}
+        execution_timeout_seconds:
           type: integer
-          minimum: 1
-          default: 60
-          description: Requested lease duration in seconds.
-
-    ReportTaskRequest:
-      type: object
-      required:
-        - agent_id
-        - status
-      properties:
-        agent_id:
-          type: string
-        status:
-          $ref: "#/components/schemas/TaskStatus"
-        progress:
-          type: integer
-          minimum: 0
-          maximum: 100
-        message:
-          type: string
-        error_code:
-          type: string
+          description: Silent-execution budget for this type, fixed at creation.
+        external_side_effect:
+          type: boolean
           description: >
-            Required when status is 'failed'. Identifies the executor-level
-            error condition.
-
-    CancelTaskRequest:
-      type: object
-      properties:
-        message:
+            True when a run can change state outside Cloud. A time-out of such a task
+            is RESULT_UNKNOWN and cannot be retried without explicit confirmation.
+        retryable: {type: boolean}
+        recovery_action:
           type: string
-          description: Reason for cancellation.
+          description: 'e.g. retry, check_platform_state.'
+        settled_by: {$ref: '#/components/schemas/TaskStatusSettledBy'}
+        payload:
+          type: object
+          description: Task input. Secrets are redacted before the task leaves Cloud.
+        result:
+          type: object
+          description: Terminal payload, projected once for succeeded tasks.
 
-    TaskErrorCode:
-      type: string
-      enum:
-        - task_not_found
-        - no_pending_task
-        - task_lease_taken
-        - invalid_task
-        - task_agent_mismatch
-        - task_already_terminal
-        - invalid_task_status
-        - invalid_task_type
-      description: Sentinel error codes for the universal task model.
+    TaskTypeDefaults:
+      type: object
+      description: |
+        Timeout and side-effect defaults written when a task of each type is created.
+        A type without a row takes 300 seconds and no external side effect.
+
+        | task_type | execution_timeout_seconds | external_side_effect |
+        | --- | ---: | --- |
+        | noop_task | 300 | false |
+        | cookie_read_task | 300 | false |
+        | cookie_write_task | 300 | true |
+        | account_check_task | 300 | false |
+        | profile_create_task | 300 | true |
+        | profile_open_task | 120 | false |
+        | profile_close_task | 120 | false |
+        | profile_update_task | 300 | true |
+        | proxy_check_task | 300 | false |
+        | proxy_mutation_task | 300 | true |
+      additionalProperties:
+        $ref: '#/components/schemas/TaskTypeSpec'
+    TaskTypeSpec:
+      type: object
+      required: [execution_timeout_seconds, external_side_effect]
+      additionalProperties: false
+      properties:
+        execution_timeout_seconds: {type: integer, minimum: 1}
+        external_side_effect: {type: boolean}

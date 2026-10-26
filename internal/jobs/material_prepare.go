@@ -128,7 +128,7 @@ type MaterialProjection interface {
 type TransferQueue interface {
 	ClaimCloudTask(workerID string, now time.Time, lease time.Duration) (transfermodel.Task, bool, error)
 	GetTask(taskID string) (transfermodel.Task, error)
-	HeartbeatTask(taskID, nodeID string, now time.Time, lease time.Duration) (bool, error)
+	HeartbeatTask(taskID, claimedBy, attemptID string, now time.Time, lease time.Duration) (bool, error)
 	HandOverDependencies(prepareTaskID string, facts transferrepo.DependencyFacts, now time.Time) (int64, error)
 	CompleteTask(input transferrepo.CompletionInput, now time.Time) (bool, error)
 	FailTask(input transferrepo.FailureInput, now time.Time) (bool, error)
@@ -212,7 +212,7 @@ func (p *Preparer) run(ctx context.Context, task transfermodel.Task) {
 			p.record(task, "interrupted", message)
 			return
 		}
-		held, heartbeatErr := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, p.now(), p.lease())
+		held, heartbeatErr := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, task.AttemptID, p.now(), p.lease())
 		if heartbeatErr == nil && !held {
 			p.settleLostLease(task, errLeaseLost)
 			return
@@ -313,7 +313,7 @@ func (p *Preparer) fetchPreparation(ctx context.Context, task transfermodel.Task
 	if err == nil || !retryablePrepareFailure(code) || errors.Is(err, errLeaseLost) || ctx.Err() != nil {
 		return fetched, code, err
 	}
-	held, heartbeatErr := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, p.now(), p.lease())
+	held, heartbeatErr := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, task.AttemptID, p.now(), p.lease())
 	if heartbeatErr != nil {
 		// A retry that cannot prove the lease is ours would race a possible new
 		// owner. End with the first failure's reason; failBeforeReady reports the
@@ -373,10 +373,11 @@ func (p *Preparer) finish(task transfermodel.Task, download download, facts prod
 		return
 	}
 	completed, err := p.Transfers.CompleteTask(transferrepo.CompletionInput{
-		TaskID: task.ID,
-		NodeID: p.WorkerID,
-		Bytes:  download.size,
-		SHA256: download.digest,
+		TaskID:    task.ID,
+		ClaimedBy: p.WorkerID,
+		AttemptID: task.AttemptID,
+		Bytes:     download.size,
+		SHA256:    download.digest,
 		// Written with the completion so a download inserted after the hand-over
 		// can be repaired from this row (see AttachCompletedDependency).
 		SourceObjectKey: facts.ObjectKey,
@@ -486,7 +487,7 @@ func (p *Preparer) copyBody(ctx context.Context, task transfermodel.Task, body i
 				return size, fmt.Errorf("write the staged file: %w", writeErr)
 			}
 			if now := p.now(); now.Sub(last) >= interval {
-				held, err := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, now, p.lease())
+				held, err := p.Transfers.HeartbeatTask(task.ID, p.WorkerID, task.AttemptID, now, p.lease())
 				if err != nil {
 					// A heartbeat that could not be sent is a real failure, not a lost
 					// lease: nothing said this worker had been replaced. The task fails,
@@ -610,7 +611,8 @@ func (p *Preparer) confirm(ctx context.Context, key string, size int64) error {
 func (p *Preparer) failTask(task transfermodel.Task, code, message string) (bool, error) {
 	return p.Transfers.FailTask(transferrepo.FailureInput{
 		TaskID:       task.ID,
-		NodeID:       p.WorkerID,
+		ClaimedBy:    p.WorkerID,
+		AttemptID:    task.AttemptID,
 		Status:       transfermodel.StatusFailed,
 		ErrorCode:    code,
 		ErrorMessage: message,
@@ -672,7 +674,8 @@ func (p *Preparer) settleLostLease(task transfermodel.Task, cause error) {
 	message := failureText(cause.Error())
 	written, err := p.Transfers.FailTask(transferrepo.FailureInput{
 		TaskID:       task.ID,
-		NodeID:       p.WorkerID,
+		ClaimedBy:    p.WorkerID,
+		AttemptID:    task.AttemptID,
 		Status:       status,
 		ErrorCode:    code,
 		ErrorMessage: message,
@@ -834,8 +837,9 @@ func NewPreparer() *Preparer {
 	}
 }
 
-// cloudWorkerID names this process in `claimed_by_node_id`, the column every
-// conditional update uses to decide who owns a task.
+// cloudWorkerID names this process in `claimed_by`, the audit label every
+// conditional update uses together with the attempt id to decide who owns a
+// task.
 //
 // It carries the host, the pid and a random suffix: the first two make a stuck
 // lease traceable to a machine, and the suffix keeps two workers on one host from
@@ -888,8 +892,8 @@ func (transferQueue) GetTask(taskID string) (transfermodel.Task, error) {
 	return transferrepo.GetTask(taskID)
 }
 
-func (transferQueue) HeartbeatTask(taskID, nodeID string, now time.Time, lease time.Duration) (bool, error) {
-	return transferrepo.HeartbeatTask(taskID, nodeID, now, lease)
+func (transferQueue) HeartbeatTask(taskID, claimedBy, attemptID string, now time.Time, lease time.Duration) (bool, error) {
+	return transferrepo.HeartbeatTask(taskID, claimedBy, attemptID, now, lease)
 }
 
 func (transferQueue) HandOverDependencies(prepareTaskID string, facts transferrepo.DependencyFacts, now time.Time) (int64, error) {

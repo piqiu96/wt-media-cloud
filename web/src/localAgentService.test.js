@@ -5,12 +5,17 @@ import { startDesktopLocalAgent } from './apps/desktop/features/local-agent/init
 
 describe('local agent desktop service', () => {
   it('starts the Agent through Tauri only when Desktop is available', async () => {
-    const invoke = vi.fn(async () => 'sidecar_started')
+    const invoke = vi.fn(async (command) => {
+      if (command === LOCAL_AGENT_COMMANDS.tokenFacts) return { configured: false, expires_at: null }
+      return 'sidecar_started'
+    })
 
     await expect(startDesktopLocalAgent({ tauri: true, invokeImpl: invoke })).resolves.toBe(true)
     await expect(startDesktopLocalAgent({ tauri: false, invokeImpl: invoke })).resolves.toBe(false)
-    expect(invoke).toHaveBeenCalledTimes(1)
-    expect(invoke).toHaveBeenCalledWith(LOCAL_AGENT_COMMANDS.start)
+    expect(invoke).toHaveBeenNthCalledWith(1, LOCAL_AGENT_COMMANDS.start)
+    // 启动后补一次凭证：先只读问 Agent 手里有没有，未登录时不会发换取请求。
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(LOCAL_AGENT_COMMANDS.tokenFacts))
+    expect(invoke).not.toHaveBeenCalledWith(LOCAL_AGENT_COMMANDS.configureToken, expect.anything())
   })
 
   it('proxies profile scan through Tauri invoke', async () => {
@@ -47,7 +52,6 @@ describe('local agent desktop service', () => {
       if (command === LOCAL_AGENT_COMMANDS.accountCheck) {
         expect(args).toEqual({
           args: {
-            cloud_base_url: 'http://127.0.0.1:5176',
             task_id: 'task-1',
             bit_profile_id: 'bit-profile-1',
             platform: 'bilibili',
@@ -61,7 +65,6 @@ describe('local agent desktop service', () => {
     const service = createLocalAgentService({ invoke })
 
     await expect(service.accountCheck({
-      cloudBaseUrl: 'http://127.0.0.1:5176',
       taskId: 'task-1',
       bitProfileId: 'bit-profile-1',
       platform: 'bilibili',
@@ -101,25 +104,37 @@ describe('local agent desktop service', () => {
     })
   })
 
-  it('proxies runtime refresh through Tauri invoke without exposing node credentials', async () => {
-    const status = { node_id: 'node-1', agent_id: 'local-agent-dev', status: 'idle' }
+  it('exchanges a Desktop session for an execution credential and says only whether one is held', async () => {
+    const facts = { configured: true, expires_at: 1800000000 }
     const invoke = vi.fn(async (command, args) => {
-      if (command === LOCAL_AGENT_COMMANDS.refreshRuntime) {
+      if (command === LOCAL_AGENT_COMMANDS.configureToken) {
         expect(args).toEqual({
           args: {
-            cloud_base_url: 'http://127.0.0.1:8188',
+            cloud_base_url: 'https://cloud.example.test',
+            session_token: 'session-token-1',
           },
         })
-        return status
+        return facts
       }
+      if (command === LOCAL_AGENT_COMMANDS.tokenFacts) return { configured: false, expires_at: null }
       return {}
     })
     const service = createLocalAgentService({ invoke })
 
-    await expect(service.refreshRuntime({
-      cloudBaseUrl: 'http://127.0.0.1:8188',
-    })).resolves.toEqual(expect.objectContaining({ node_id: 'node-1' }))
-    expect(invoke).toHaveBeenCalledWith('local_agent_refresh_runtime', expect.any(Object))
+    await expect(service.tokenFacts()).resolves.toEqual({ configured: false, expires_at: null })
+    await expect(service.configureToken({
+      cloudBaseUrl: 'https://cloud.example.test',
+      sessionToken: 'session-token-1',
+    })).resolves.toEqual(facts)
+    expect(JSON.stringify(facts)).not.toContain('session-token-1')
+  })
+
+  it('asks the Agent to bind the current BitBrowser account, carrying only the user intent', async () => {
+    const invoke = vi.fn(async () => ({ bound: true }))
+    const service = createLocalAgentService({ invoke })
+
+    await expect(service.bitAccountBind({ rebind: true })).resolves.toEqual({ bound: true })
+    expect(invoke).toHaveBeenCalledWith('local_agent_bit_account_bind', { rebind: true })
   })
 })
 

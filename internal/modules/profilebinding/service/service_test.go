@@ -9,15 +9,22 @@ import (
 	"time"
 
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/model"
 )
+
+var testNow = time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 
 func TestSubmitScanStagesDiffWithoutFormalMutation(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := profileActor("user-1")
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow}); err != nil {
+		t.Fatalf("BindBitAccount() error = %v", err)
+	}
 
 	scan, err := service.SubmitScan(actor, SnapshotInput{
 		MainUserID: "main-user-1",
+		ObservedAt: testNow,
 		Profiles:   []ProfileInput{{BitProfileID: "bit-profile-1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一", Seq: 1}},
 	})
 	if err != nil {
@@ -26,20 +33,23 @@ func TestSubmitScanStagesDiffWithoutFormalMutation(t *testing.T) {
 	if scan.Status != ScanReady || len(scan.Diff) != 1 || scan.Diff[0].Kind != DiffAdded {
 		t.Fatalf("scan = %#v", scan)
 	}
-	if len(store.profiles) != 0 || len(store.bindings) != 0 {
-		t.Fatalf("formal state changed before confirmation: profiles=%v bindings=%v", store.profiles, store.bindings)
+	if len(store.profiles) != 0 {
+		t.Fatalf("profiles changed before confirmation: %v", store.profiles)
 	}
 }
 
 func TestSubmitScanRejectsUnverifiableIdentity(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := profileActor("user-1")
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow}); err != nil {
+		t.Fatalf("BindBitAccount() error = %v", err)
+	}
 	cases := []SnapshotInput{
-		{MainUserID: "main-user-1"},
-		{MainUserID: "", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: ""}}},
-		{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-2"}}},
-		{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "", MainUserID: "main-user-1"}}},
-		{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}}},
+		{MainUserID: "main-user-1", ObservedAt: testNow},
+		{MainUserID: "", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: ""}}},
+		{MainUserID: "main-user-1", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-2"}}},
+		{MainUserID: "main-user-1", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "", MainUserID: "main-user-1"}}},
+		{MainUserID: "main-user-1", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}}},
 	}
 	for _, input := range cases {
 		if _, err := service.SubmitScan(actor, input); !errors.Is(err, ErrIdentityUnverifiable) {
@@ -48,34 +58,182 @@ func TestSubmitScanRejectsUnverifiableIdentity(t *testing.T) {
 	}
 }
 
-func TestSubmitScanRejectsExistingBindingMismatch(t *testing.T) {
-	store := newMemoryStore()
-	store.bindings[1] = BitAccountBinding{UserID: 1, MainUserID: "main-user-1", Status: BitAccountBound}
-	service := newTestService(store)
+func TestSubmitScanRequiresBindingFreshObservationAndMatchingMain(t *testing.T) {
+	actor := profileActor("user-1")
+	profiles := []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}}
 
-	_, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
-		MainUserID: "main-user-2",
-		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-2", MainUserID: "main-user-2"}},
-	})
-	if !errors.Is(err, ErrIdentityMismatch) {
-		t.Fatalf("SubmitScan() error = %v", err)
+	unbound := newMemoryStore()
+	if _, err := newTestService(unbound).SubmitScan(actor, SnapshotInput{MainUserID: "main-user-1", ObservedAt: testNow, Profiles: profiles}); !errors.Is(err, ErrBitNotBound) {
+		t.Fatalf("SubmitScan(unbound) error = %v", err)
 	}
-	if len(store.scans) != 0 {
-		t.Fatal("mismatched scan was staged")
+
+	stale := newMemoryStore()
+	bound := newTestService(stale)
+	if _, err := bound.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bound.SubmitScan(actor, SnapshotInput{MainUserID: "main-user-1", ObservedAt: testNow.Add(-3 * time.Minute), Profiles: profiles}); !errors.Is(err, ErrBitBrowserOffline) {
+		t.Fatalf("SubmitScan(stale) error = %v", err)
+	}
+	if _, err := bound.SubmitScan(actor, SnapshotInput{MainUserID: "main-user-2", ObservedAt: testNow, Profiles: profiles}); !errors.Is(err, ErrBitMainUserMismatch) {
+		t.Fatalf("SubmitScan(mismatch) error = %v", err)
+	}
+	if len(stale.scans) != 0 {
+		t.Fatal("rejected scan was staged")
 	}
 }
 
-func TestConfirmMainIdentityDirectRejectsSilentRebind(t *testing.T) {
+func TestSensitiveObservationCannotBypassFreshness(t *testing.T) {
 	store := newMemoryStore()
-	store.bindings[1] = BitAccountBinding{UserID: 1, MainUserID: "main-user-a", Status: BitAccountBound}
+	service := newTestService(store)
+	actor := profileActor("user-1")
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1"}); !errors.Is(err, ErrBitBrowserOffline) {
+		t.Fatalf("BindBitAccount(no observed_at) error = %v", err)
+	}
+	if _, err := service.SubmitScan(actor, SnapshotInput{MainUserID: "main-user-1", Profiles: []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}}}); !errors.Is(err, ErrBitBrowserOffline) {
+		t.Fatalf("SubmitScan(no observed_at) error = %v", err)
+	}
+}
+
+func TestGetBitAccountReturnsBindingOrAbsence(t *testing.T) {
+	store := newMemoryStore()
 	service := newTestService(store)
 
-	_, err := service.ConfirmMainIdentityDirect(profileActor("user-1"), MainIdentityInput{MainUserID: "main-user-b"})
-	if !errors.Is(err, ErrIdentityMismatch) {
-		t.Fatalf("ConfirmMainIdentityDirect() error=%v, want ErrIdentityMismatch", err)
+	if _, found, err := service.GetBitAccount(1); err != nil || found {
+		t.Fatalf("unbound GetBitAccount = found %v, err %v", found, err)
 	}
-	if got := store.bindings[1].MainUserID; got != "main-user-a" {
-		t.Fatalf("binding was silently changed to %q", got)
+
+	bindMain(store, 1, "main-user-a")
+	binding, found, err := service.GetBitAccount(1)
+	if err != nil || !found {
+		t.Fatalf("bound GetBitAccount = found %v, err %v", found, err)
+	}
+	if binding.MainUserID != "main-user-a" {
+		t.Fatalf("main_user_id = %q", binding.MainUserID)
+	}
+	if _, _, err := service.GetBitAccount(0); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("zero user error = %v", err)
+	}
+}
+
+func TestBindBitAccountTransitions(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := profileActor("user-1")
+
+	bound, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-a", ObservedAt: testNow})
+	if err != nil {
+		t.Fatalf("first bind error = %v", err)
+	}
+	if bound.MainUserID != "main-user-a" || bound.BoundAt == nil || bound.LastVerifiedAt == nil {
+		t.Fatalf("bound = %#v", bound)
+	}
+	if store.bindings[actor.ID].MainUserID != "main-user-a" {
+		t.Fatal("first bind was not stored")
+	}
+
+	later := testNow.Add(time.Minute)
+	laterService := newTestServiceAt(store, later)
+	verified, err := laterService.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-a", ObservedAt: later})
+	if err != nil {
+		t.Fatalf("verify error = %v", err)
+	}
+	if !verified.BoundAt.Equal(testNow) || !verified.LastVerifiedAt.Equal(later) {
+		t.Fatalf("verify changed bound_at: %#v", verified)
+	}
+
+	_, err = laterService.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-b", ObservedAt: later})
+	if !errors.Is(err, ErrBitMainUserMismatch) {
+		t.Fatalf("mismatch error = %v, want ErrBitMainUserMismatch", err)
+	}
+	if got := store.bindings[actor.ID].MainUserID; got != "main-user-a" {
+		t.Fatalf("mismatch silently changed binding to %q", got)
+	}
+
+	rebound, err := laterService.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-b", ObservedAt: later, Rebind: true})
+	if err != nil {
+		t.Fatalf("rebind error = %v", err)
+	}
+	if rebound.MainUserID != "main-user-b" || !rebound.BoundAt.Equal(later) {
+		t.Fatalf("rebound = %#v", rebound)
+	}
+	if got := store.bindings[actor.ID].MainUserID; got != "main-user-b" {
+		t.Fatalf("rebind stored %q, want main-user-b", got)
+	}
+
+	actions := make([]string, 0, len(store.audits))
+	for _, event := range store.audits {
+		actions = append(actions, event.Action)
+	}
+	want := []string{model.AuditMainAccountBind, model.AuditMainAccountVerify, model.AuditMainAccountRebind}
+	if strings.Join(actions, ",") != strings.Join(want, ",") {
+		t.Fatalf("binding audits = %v, want %v", actions, want)
+	}
+}
+
+func TestRebindKeepsOtherMainProfilesAndSwitchingBackRestoresThem(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := profileActor("user-1")
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-a", ObservedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	scan, err := service.SubmitScan(actor, SnapshotInput{
+		MainUserID: "main-user-a",
+		ObservedAt: testNow,
+		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-a", Name: "旧主窗口"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmScan(actor, scan.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-b", ObservedAt: testNow, Rebind: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	visible, err := service.ListProfiles(actor, 0, ProfileListFilter{})
+	if err != nil {
+		t.Fatalf("ListProfiles(after rebind) error = %v", err)
+	}
+	if len(visible) != 0 {
+		t.Fatalf("old-main profiles still visible after rebind: %#v", visible)
+	}
+	if got := len(store.profileList(actor.ID)); got != 1 {
+		t.Fatalf("rebind deleted old-main profiles: %d rows", got)
+	}
+
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-a", ObservedAt: testNow, Rebind: true}); err != nil {
+		t.Fatal(err)
+	}
+	visible, err = service.ListProfiles(actor, 0, ProfileListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].BitProfileID != "p1" {
+		t.Fatalf("switching back did not restore the old profile: %#v", visible)
+	}
+}
+
+func TestListsRequireBindingForSelfButNotForSeniorPeeking(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	operator := profileActor("user-1")
+
+	if _, err := service.ListProfiles(operator, 0, ProfileListFilter{}); !errors.Is(err, ErrBitNotBound) {
+		t.Fatalf("ListProfiles(unbound self) error = %v", err)
+	}
+	teamA := identityservice.TeamID(10)
+	senior := identityservice.PublicUser{ID: 9, Role: identityservice.RoleSeniorOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamA}
+	store.profiles["p"] = BrowserProfile{ID: "p", UserID: 2, TeamID: &teamA, MainUserID: "main-user-2", LocalStatus: ProfileActive}
+	store.bindings[2] = BitAccountBinding{UserID: 2, MainUserID: "main-user-2", Status: BitAccountBound}
+	profiles, err := service.ListProfiles(senior, 0, ProfileListFilter{})
+	if err != nil || len(profiles) != 1 {
+		t.Fatalf("ListProfiles(senior) profiles=%#v error=%v", profiles, err)
 	}
 }
 
@@ -83,8 +241,10 @@ func TestSeniorCanViewButCannotMutateSameTeamProfileCloudRecord(t *testing.T) {
 	store := newMemoryStore()
 	teamA := identityservice.TeamID(10)
 	teamB := identityservice.TeamID(20)
-	store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA, LocalStatus: ProfileActive}
-	store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB, LocalStatus: ProfileActive}
+	bindMain(store, 2, "main-user-2")
+	bindMain(store, 3, "main-user-3")
+	store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA, MainUserID: "main-user-2", LocalStatus: ProfileActive}
+	store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB, MainUserID: "main-user-3", LocalStatus: ProfileActive}
 	service := newTestService(store)
 	actor := identityservice.PublicUser{ID: 1, Role: identityservice.RoleSeniorOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamA}
 
@@ -113,9 +273,12 @@ func TestDefaultProfileListAppliesRoleVisibility(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newMemoryStore()
-			store.profiles["own"] = BrowserProfile{ID: "own", UserID: 1, TeamID: &teamA}
-			store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA}
-			store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB}
+			bindMain(store, 1, "main-user-1")
+			bindMain(store, 2, "main-user-2")
+			bindMain(store, 3, "main-user-3")
+			store.profiles["own"] = BrowserProfile{ID: "own", UserID: 1, TeamID: &teamA, MainUserID: "main-user-1"}
+			store.profiles["same-team"] = BrowserProfile{ID: "same-team", UserID: 2, TeamID: &teamA, MainUserID: "main-user-2"}
+			store.profiles["other-team"] = BrowserProfile{ID: "other-team", UserID: 3, TeamID: &teamB, MainUserID: "main-user-3"}
 			profiles, err := newTestService(store).ListProfiles(tc.actor, 0, ProfileListFilter{})
 			if err != nil {
 				t.Fatal(err)
@@ -140,7 +303,8 @@ func TestProfileOwnerAndAdminCanSyncDeleteDisabledProfile(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := newMemoryStore()
 			teamID := identityservice.TeamID(2)
-			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessDisabled, LocalStatus: ProfileLocalMissing}
+			bindMain(store, 2, "main-user-2")
+			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-2", BusinessStatus: ProfileBusinessDisabled, LocalStatus: ProfileLocalMissing}
 			if err := newTestService(store).DeleteProfile(actor, "profile"); err != nil {
 				t.Fatalf("DeleteProfile() error=%v", err)
 			}
@@ -154,20 +318,40 @@ func TestProfileOwnerAndAdminCanSyncDeleteDisabledProfile(t *testing.T) {
 func TestProfileSyncDeleteRejectsEnabledProfile(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identityservice.TeamID(2)
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessEnabled, LocalStatus: ProfileActive}
+	bindMain(store, 2, "main-user-2")
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-2", BusinessStatus: ProfileBusinessEnabled, LocalStatus: ProfileActive}
 	err := newTestService(store).DeleteProfile(profileActor("user-2"), "profile")
-	if err == nil {
-		t.Fatal("DeleteProfile() on enabled profile succeeded, want ErrProfileNotDisabled")
+	if !errors.Is(err, ErrProfileNotDisabled) {
+		t.Fatalf("DeleteProfile() error=%v, want ErrProfileNotDisabled", err)
 	}
 	if _, ok := store.profiles["profile"]; !ok {
 		t.Fatal("enabled profile was removed despite rejection")
 	}
 }
 
+func TestOutOfMainScopeProfileIsNotFound(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identityservice.TeamID(2)
+	bindMain(store, 2, "main-user-2")
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-old", BusinessStatus: ProfileBusinessEnabled, LocalStatus: ProfileActive}
+	service := newTestService(store)
+
+	if _, err := service.GetActiveProfile(profileActor("user-2"), "profile"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("GetActiveProfile(out of scope) error=%v, want ErrProfileNotFound", err)
+	}
+	if _, err := service.UpdateProfile(profileActor("user-2"), "profile", nil, nil); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("UpdateProfile(out of scope) error=%v, want ErrProfileNotFound", err)
+	}
+	if err := service.DeleteProfile(profileActor("user-2"), "profile"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("DeleteProfile(out of scope) error=%v, want ErrProfileNotFound", err)
+	}
+}
+
 func TestServiceUpdateProfileCloudRemarkAndBusinessStatus(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identityservice.TeamID(2)
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BusinessStatus: ProfileBusinessEnabled, Remark: "比特备注", CloudRemark: "旧备注"}
+	bindMain(store, 2, "main-user-2")
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-2", BusinessStatus: ProfileBusinessEnabled, Remark: "比特备注", CloudRemark: "旧备注"}
 	service := newTestService(store)
 
 	cloudRemark := "新备注"
@@ -188,7 +372,9 @@ func TestAdminCanAssignUnreferencedProfileToOperator(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identityservice.TeamID(10)
 	targetTeamID := identityservice.TeamID(20)
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BitProfileID: "bit-profile-1", LocalStatus: ProfileActive}
+	bindMain(store, 2, "main-user-shared")
+	bindMain(store, 3, "main-user-shared")
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-shared", BitProfileID: "bit-profile-1", LocalStatus: ProfileActive}
 	service := newTestService(store)
 	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 	target := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, Status: identityservice.UserStatusEnabled, TeamID: &targetTeamID}
@@ -208,14 +394,14 @@ func TestAdminCanAssignUnreferencedProfileToOperator(t *testing.T) {
 	}
 }
 
-func TestAssignProfileOwnerRejectsNonAdminInvalidTargetAndReferencedProfile(t *testing.T) {
+func TestAssignProfileOwnerRejectsUnboundOrMismatchedTarget(t *testing.T) {
 	teamID := identityservice.TeamID(10)
 	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 	operator := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID}
 	senior := identityservice.PublicUser{ID: 4, Role: identityservice.RoleSeniorOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID}
 
 	store := newMemoryStore()
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, LocalStatus: ProfileActive}
+	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-a", LocalStatus: ProfileActive}
 	service := newTestService(store)
 	if _, err := service.AssignProfileOwner(operator, "profile", operator); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("AssignProfileOwner(non-admin) error=%v, want ErrForbidden", err)
@@ -223,8 +409,18 @@ func TestAssignProfileOwnerRejectsNonAdminInvalidTargetAndReferencedProfile(t *t
 	if _, err := service.AssignProfileOwner(admin, "profile", senior); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("AssignProfileOwner(senior target) error=%v, want ErrInvalidInput", err)
 	}
-	store.profileAccountRefs["profile"] = true
-	if _, err := service.AssignProfileOwner(admin, "profile", operator); !errors.Is(err, ErrProfileReferenced) {
+	if _, err := service.AssignProfileOwner(admin, "profile", operator); !errors.Is(err, ErrBitNotBound) {
+		t.Fatalf("AssignProfileOwner(unbound target) error=%v, want ErrBitNotBound", err)
+	}
+
+	bindMain(store, 3, "main-user-b")
+	if _, err := service.AssignProfileOwner(admin, "profile", operator); !errors.Is(err, ErrBitMainUserMismatch) {
+		t.Fatalf("AssignProfileOwner(cross-main) error=%v, want ErrBitMainUserMismatch", err)
+	}
+
+	store.profiles["profile-same-main"] = BrowserProfile{ID: "profile-same-main", UserID: 2, TeamID: &teamID, MainUserID: "main-user-b", LocalStatus: ProfileActive}
+	store.profileAccountRefs["profile-same-main"] = true
+	if _, err := service.AssignProfileOwner(admin, "profile-same-main", operator); !errors.Is(err, ErrProfileReferenced) {
 		t.Fatalf("AssignProfileOwner(referenced) error=%v, want ErrProfileReferenced", err)
 	}
 }
@@ -232,7 +428,7 @@ func TestAssignProfileOwnerRejectsNonAdminInvalidTargetAndReferencedProfile(t *t
 func TestSeniorCanReviewSameTeamScanButCannotConfirmIt(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identityservice.TeamID(10)
-	store.scans["scan-same-team"] = ProfileScan{ID: "scan-same-team", UserID: 2, TeamID: &teamID, Status: ScanReady, ExpiresAt: time.Now().Add(time.Hour)}
+	store.scans["scan-same-team"] = ProfileScan{ID: "scan-same-team", UserID: 2, TeamID: &teamID, Status: ScanReady, ExpiresAt: testNow.Add(time.Hour)}
 	service := newTestService(store)
 	actor := identityservice.PublicUser{ID: 1, Role: identityservice.RoleSeniorOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID}
 
@@ -244,17 +440,25 @@ func TestSeniorCanReviewSameTeamScanButCannotConfirmIt(t *testing.T) {
 	}
 }
 
-func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
+func TestConfirmScanAppliesProfilesWithoutChangingBinding(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := profileActor("user-1")
-	scan, _ := service.SubmitScan(actor, SnapshotInput{
+	bound, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan, err := service.SubmitScan(actor, SnapshotInput{
 		MainUserID: "main-user-1",
+		ObservedAt: testNow,
 		Profiles: []ProfileInput{
 			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一", GroupID: "g1", GroupName: "运营组"},
 			{BitProfileID: "p2", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "窗口二"},
 		},
 	})
+	if err != nil {
+		t.Fatalf("SubmitScan() error = %v", err)
+	}
 
 	confirmed, err := service.ConfirmScan(actor, scan.ID)
 	if err != nil {
@@ -264,69 +468,57 @@ func TestConfirmScanBindsUserAndAppliesProfiles(t *testing.T) {
 		t.Fatalf("confirmed scan = %#v", confirmed)
 	}
 	binding := store.bindings[actor.ID]
-	if binding.MainUserID != "main-user-1" || binding.Status != BitAccountBound || binding.BoundAt == nil {
-		t.Fatalf("binding = %#v", binding)
+	if binding.MainUserID != bound.MainUserID || !binding.LastVerifiedAt.Equal(*bound.LastVerifiedAt) {
+		t.Fatalf("confirm rewrote the binding: %#v", binding)
 	}
-	if len(store.audits) != 2 || store.audits[1].Action != auditMainAccountBind {
-		t.Fatalf("binding audits = %#v", store.audits)
+	if len(store.audits) != 2 || store.audits[0].Action != model.AuditMainAccountBind || store.audits[1].Action != "bitbrowser.profile_scan.confirm" {
+		t.Fatalf("audits = %#v", store.audits)
 	}
 	profiles := store.profileList(actor.ID)
 	if len(profiles) != 2 || profiles[0].BitProfileID != "p1" || profiles[0].ProfileUserID != "bit-user-1" || profiles[1].ProfileUserID != "bit-user-2" {
 		t.Fatalf("profiles = %#v", profiles)
 	}
-
-	rescan, err := service.SubmitScan(actor, SnapshotInput{
-		MainUserID: "main-user-1",
-		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ConfirmScan(actor, rescan.ID); err != nil {
-		t.Fatal(err)
-	}
-	if store.audits[len(store.audits)-1].Action != auditMainAccountRebind {
-		t.Fatalf("rescan binding audit = %#v", store.audits[len(store.audits)-1])
-	}
 }
 
-func TestConfirmMainIdentityBindsUserWithoutApplyingProfiles(t *testing.T) {
+func TestConfirmScanRejectsScanFromPreviousMainAccount(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := profileActor("user-1")
-	scan, _ := service.SubmitScan(actor, SnapshotInput{
-		MainUserID: "main-user-1",
-		Profiles: []ProfileInput{
-			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "窗口一"},
-			{BitProfileID: "p2", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "窗口二"},
-		},
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-a", ObservedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	scan, err := service.SubmitScan(actor, SnapshotInput{
+		MainUserID: "main-user-a",
+		ObservedAt: testNow,
+		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-a"}},
 	})
-
-	confirmed, err := service.ConfirmMainIdentity(actor, scan.ID)
 	if err != nil {
-		t.Fatalf("ConfirmMainIdentity() error = %v", err)
+		t.Fatal(err)
 	}
-	if confirmed.Status != ScanConfirmed || confirmed.ConfirmedAt == nil {
-		t.Fatalf("confirmed scan = %#v", confirmed)
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-b", ObservedAt: testNow, Rebind: true}); err != nil {
+		t.Fatal(err)
 	}
-	binding := store.bindings[actor.ID]
-	if binding.MainUserID != "main-user-1" || binding.Status != BitAccountBound || binding.BoundAt == nil || binding.LastVerifiedAt == nil {
-		t.Fatalf("binding = %#v", binding)
+	if _, err := service.ConfirmScan(actor, scan.ID); !errors.Is(err, ErrBitMainUserMismatch) {
+		t.Fatalf("ConfirmScan(previous main) error = %v, want ErrBitMainUserMismatch", err)
 	}
 	if len(store.profiles) != 0 {
-		t.Fatalf("identity-only confirmation applied profiles: %#v", store.profiles)
-	}
-	if len(store.audits) != 1 || store.audits[0].Action != auditMainAccountBind {
-		t.Fatalf("audits = %#v", store.audits)
+		t.Fatalf("stale scan wrote profiles: %#v", store.profiles)
 	}
 }
 
-func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
+func TestConfirmScanRejectsUnboundExpiredAndRepeated(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := profileActor("user-1")
+	if _, err := service.ConfirmScan(actor, "missing"); !errors.Is(err, ErrScanNotFound) {
+		t.Fatalf("ConfirmScan(missing) error = %v", err)
+	}
+	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
 	scan, _ := service.SubmitScan(actor, SnapshotInput{
 		MainUserID: "main-user-1",
+		ObservedAt: testNow,
 		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}},
 	})
 
@@ -352,13 +544,15 @@ func TestConfirmScanRejectsOtherUserExpiredAndRepeated(t *testing.T) {
 
 func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	store := newMemoryStore()
-	store.bindings[1] = BitAccountBinding{UserID: 1, MainUserID: "main-user-1", Status: BitAccountBound}
+	bindMain(store, 1, "main-user-1")
 	store.profiles["profile-old-1"] = BrowserProfile{ID: "profile-old-1", UserID: 1, BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "旧名称", BitStatus: "0", ProxyType: "http", ProxyHost: "1.1.1.1", ProxyPort: 8080, Remark: "旧备注", LocalStatus: ProfileActive}
 	store.profiles["profile-old-2"] = BrowserProfile{ID: "profile-old-2", UserID: 1, BitProfileID: "p2", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "即将缺失", LocalStatus: ProfileActive}
+	store.profiles["profile-old-main"] = BrowserProfile{ID: "profile-old-main", UserID: 1, BitProfileID: "p9", ProfileUserID: "bit-user-1", MainUserID: "main-user-old", Name: "旧主账号窗口", LocalStatus: ProfileActive}
 	service := newTestService(store)
 
 	scan, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
 		MainUserID: "main-user-1",
+		ObservedAt: testNow,
 		Profiles: []ProfileInput{
 			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1", Name: "新名称", BitStatus: "1", ProxyType: "socks5", ProxyHost: "2.2.2.2", ProxyPort: 1080, Remark: "新备注"},
 			{BitProfileID: "p3", ProfileUserID: "bit-user-2", MainUserID: "main-user-1", Name: "新增"},
@@ -396,6 +590,13 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	if byBitID["p1"].Name != "新名称" || byBitID["p1"].ProxyHost != "2.2.2.2" || byBitID["p1"].Remark != "旧备注" || byBitID["p2"].LocalStatus != ProfileLocalMissing || byBitID["p3"].LocalStatus != ProfileActive {
 		t.Fatalf("profiles after apply = %#v", byBitID)
 	}
+	// 缺失窗口只标记，不删除；其他主账号下的行不受本次扫描影响。
+	if byBitID["p2"].ID == "" {
+		t.Fatal("missing window was deleted instead of marked")
+	}
+	if byBitID["p9"].LocalStatus != ProfileActive {
+		t.Fatalf("scan touched a profile from another main account: %#v", byBitID["p9"])
+	}
 }
 
 func profileActor(userID string) identityservice.PublicUser {
@@ -405,7 +606,10 @@ func profileActor(userID string) identityservice.PublicUser {
 }
 
 func newTestService(store Store) *Service {
-	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	return newTestServiceAt(store, testNow)
+}
+
+func newTestServiceAt(store Store, now time.Time) *Service {
 	sequence := 0
 	return NewService(store,
 		WithClock(func() time.Time { return now }),
@@ -414,6 +618,11 @@ func newTestService(store Store) *Service {
 			return prefix + "-test-" + string(rune('0'+sequence))
 		}),
 	)
+}
+
+func bindMain(store *memoryStore, userID identityservice.UserID, mainUserID string) {
+	boundAt := testNow
+	store.bindings[userID] = BitAccountBinding{UserID: userID, MainUserID: mainUserID, Status: BitAccountBound, BoundAt: &boundAt, LastVerifiedAt: &boundAt}
 }
 
 type memoryStore struct {
@@ -433,13 +642,44 @@ func (s *memoryStore) FindBinding(userID identityservice.UserID) (BitAccountBind
 	return binding, ok, nil
 }
 
-func (s *memoryStore) ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]BrowserProfile, error) {
-	if userID > 0 {
-		return s.profileList(userID), nil
+func (s *memoryStore) BindBitAccount(userID identityservice.UserID, mainUserID string, rebind bool, at time.Time) (BitAccountBinding, error) {
+	current, exists := s.bindings[userID]
+	action, result := model.AuditMainAccountBind, "bound"
+	firstBoundAt := at
+	previous := ""
+	switch {
+	case !exists || current.MainUserID == "":
+	case current.MainUserID == mainUserID:
+		action, result = model.AuditMainAccountVerify, "verified"
+		if current.BoundAt != nil {
+			firstBoundAt = *current.BoundAt
+		}
+	case !rebind:
+		return BitAccountBinding{}, ErrBitMainUserMismatch
+	default:
+		action, result, previous = model.AuditMainAccountRebind, "rebound", current.MainUserID
 	}
-	profiles := make([]BrowserProfile, 0, len(s.profiles))
-	for _, profile := range s.profiles {
-		profiles = append(profiles, profile)
+	verifiedAt := at
+	binding := BitAccountBinding{UserID: userID, MainUserID: mainUserID, Status: BitAccountBound, BoundAt: &firstBoundAt, LastVerifiedAt: &verifiedAt}
+	s.bindings[userID] = binding
+	summary := map[string]string{"main_user_id": mainUserID, "result": result}
+	if previous != "" {
+		summary["previous_main_user_id"] = previous
+	}
+	s.audits = append(s.audits, identityservice.AuditEvent{Action: action, TargetType: "user", TargetID: strconv.FormatInt(int64(userID), 10), Summary: summary, CreatedAt: at})
+	return binding, nil
+}
+
+func (s *memoryStore) ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]BrowserProfile, error) {
+	profiles := s.visibleProfiles()
+	if userID > 0 {
+		filtered := profiles[:0]
+		for _, profile := range profiles {
+			if profile.UserID == userID {
+				filtered = append(filtered, profile)
+			}
+		}
+		profiles = filtered
 	}
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].BitProfileID < profiles[j].BitProfileID })
 	return profiles, nil
@@ -448,6 +688,14 @@ func (s *memoryStore) ListProfiles(userID identityservice.UserID, filter Profile
 func (s *memoryStore) GetProfile(profileID string) (BrowserProfile, bool, error) {
 	profile, found := s.profiles[profileID]
 	return profile, found, nil
+}
+
+func (s *memoryStore) GetProfileInScope(profileID string) (BrowserProfile, bool, error) {
+	profile, found := s.profiles[profileID]
+	if !found || !s.inScope(profile) {
+		return BrowserProfile{}, false, nil
+	}
+	return profile, true, nil
 }
 
 func (s *memoryStore) CreateScan(scan ProfileScan) error {
@@ -460,21 +708,30 @@ func (s *memoryStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	return cloneScan(scan), ok, nil
 }
 
-func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	s.bindings[binding.UserID] = binding
+func (s *memoryStore) ApplyScan(scan ProfileScan, at time.Time) error {
+	binding, bound := s.bindings[scan.UserID]
+	if !bound {
+		return ErrBitNotBound
+	}
+	if binding.MainUserID != scan.MainUserID {
+		return ErrBitMainUserMismatch
+	}
 	seen := map[string]struct{}{}
 	for _, candidate := range scan.Profiles {
 		seen[candidate.BitProfileID] = struct{}{}
-		if existing, ok := s.profiles[candidate.ID]; ok {
-			candidate.Remark = existing.Remark
+		if existing, ok := s.findByScope(candidate.UserID, candidate.MainUserID, candidate.BitProfileID); ok {
+			candidate.ID = existing.ID
 			candidate.CreatedAt = existing.CreatedAt
+			candidate.Remark = existing.Remark
+			candidate.CloudRemark = existing.CloudRemark
+			candidate.BusinessStatus = existing.BusinessStatus
 		}
 		candidate.LocalStatus = ProfileActive
 		candidate.LastSyncedAt = at
 		s.profiles[candidate.ID] = candidate
 	}
 	for id, profile := range s.profiles {
-		if profile.UserID != scan.UserID {
+		if profile.UserID != scan.UserID || profile.MainUserID != scan.MainUserID {
 			continue
 		}
 		if _, ok := seen[profile.BitProfileID]; !ok && profile.LocalStatus != ProfileArchived {
@@ -488,26 +745,6 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, binding BitAccountBinding, at 
 	s.scans[scan.ID] = cloneScan(scan)
 	s.audits = append(s.audits,
 		identityservice.AuditEvent{Action: "bitbrowser.profile_scan.confirm", TargetType: "profile_sync_scan", TargetID: scan.ID, Summary: map[string]string{"main_user_id": scan.MainUserID}},
-		identityservice.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(scan.UserID), 10), Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "verified"}},
-	)
-	return nil
-}
-
-func (s *memoryStore) ConfirmMainIdentity(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error {
-	s.bindings[binding.UserID] = binding
-	scan.Status = ScanConfirmed
-	scan.ConfirmedAt = &at
-	s.scans[scan.ID] = cloneScan(scan)
-	s.audits = append(s.audits,
-		identityservice.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(scan.UserID), 10), Summary: map[string]string{"main_user_id": scan.MainUserID, "result": "identity_verified", "identity_only": "true"}},
-	)
-	return nil
-}
-
-func (s *memoryStore) ConfirmMainIdentityDirect(binding BitAccountBinding, _ time.Time, bindingAuditAction string) error {
-	s.bindings[binding.UserID] = binding
-	s.audits = append(s.audits,
-		identityservice.AuditEvent{Action: bindingAuditAction, TargetType: "user", TargetID: strconv.FormatInt(int64(binding.UserID), 10), Summary: map[string]string{"main_user_id": binding.MainUserID, "result": "identity_verified", "identity_only": "true"}},
 	)
 	return nil
 }
@@ -557,6 +794,30 @@ func (s *memoryStore) AssignProfileOwner(profileID string, userID identityservic
 		identityservice.AuditEvent{ActorUserID: actorID, Action: "bitbrowser.profile.assign_owner", TargetType: "browser_profile", TargetID: profileID, Summary: map[string]string{"user_id": strconv.FormatInt(int64(userID), 10)}, CreatedAt: at},
 	)
 	return nil
+}
+
+func (s *memoryStore) visibleProfiles() []BrowserProfile {
+	result := make([]BrowserProfile, 0, len(s.profiles))
+	for _, profile := range s.profiles {
+		if s.inScope(profile) {
+			result = append(result, profile)
+		}
+	}
+	return result
+}
+
+func (s *memoryStore) inScope(profile BrowserProfile) bool {
+	binding, bound := s.bindings[profile.UserID]
+	return bound && binding.MainUserID == profile.MainUserID
+}
+
+func (s *memoryStore) findByScope(userID identityservice.UserID, mainUserID, bitProfileID string) (BrowserProfile, bool) {
+	for _, profile := range s.profiles {
+		if profile.UserID == userID && profile.MainUserID == mainUserID && profile.BitProfileID == bitProfileID {
+			return profile, true
+		}
+	}
+	return BrowserProfile{}, false
 }
 
 func (s *memoryStore) profileList(userID identityservice.UserID) []BrowserProfile {

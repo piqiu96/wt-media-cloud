@@ -38,6 +38,12 @@ secret = true
 allow_empty = true
 
 [[variables]]
+name = "WT_MEDIA_AGENT_TOKEN_SECRET"
+type = "string"
+required = true
+secret = true
+
+[[variables]]
 name = "WT_DOUYIN_API_KEY"
 type = "string"
 required = true

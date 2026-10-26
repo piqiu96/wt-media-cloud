@@ -7,6 +7,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -16,9 +17,9 @@ func CreateAuthorizedTask(task model.SensitiveTask) error {
 
 func createAuthorizedTask(db *gorm.DB, task model.SensitiveTask) error {
 	return db.Exec(`INSERT INTO sensitive_browser_tasks
-		(id, user_id, profile_id, bit_profile_id, node_id, operation, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.UserID, task.ProfileID, task.BitProfileID, task.NodeID, task.Operation, task.Status, task.CreatedAt, task.UpdatedAt,
+		(id, user_id, profile_id, bit_profile_id, operation, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		task.ID, task.UserID, task.ProfileID, task.BitProfileID, task.Operation, task.Status, task.CreatedAt, task.UpdatedAt,
 	).Error
 }
 
@@ -28,9 +29,9 @@ func FindAuthorizedTask(taskID string) (model.SensitiveTask, bool, error) {
 
 func findAuthorizedTask(db *gorm.DB, taskID string) (model.SensitiveTask, bool, error) {
 	var task model.SensitiveTask
-	err := db.Raw(`SELECT id, user_id, profile_id, bit_profile_id, node_id, operation, status, created_at, updated_at
+	err := db.Raw(`SELECT id, user_id, profile_id, bit_profile_id, operation, status, created_at, updated_at
 		FROM sensitive_browser_tasks WHERE id = ?`, taskID).Row().
-		Scan(&task.ID, &task.UserID, &task.ProfileID, &task.BitProfileID, &task.NodeID, &task.Operation, &task.Status, &task.CreatedAt, &task.UpdatedAt)
+		Scan(&task.ID, &task.UserID, &task.ProfileID, &task.BitProfileID, &task.Operation, &task.Status, &task.CreatedAt, &task.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.SensitiveTask{}, false, nil
 	}
@@ -40,38 +41,22 @@ func findAuthorizedTask(db *gorm.DB, taskID string) (model.SensitiveTask, bool, 
 	return task, true, nil
 }
 
-func AcquirePermit(task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error) {
-	return acquirePermit(database.DB(), task, nodeID, permit, at, freshness)
+func AcquirePermit(task model.SensitiveTask, permit model.Permit, at time.Time) (PreflightOutcome, error) {
+	return acquirePermit(database.DB(), task, permit, at)
 }
 
-func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit model.Permit, at time.Time, freshness time.Duration) (PreflightOutcome, error) {
+// acquirePermit 只负责 Profile 上的互斥：环境与账号检查已由统一准入完成，
+// 这里不再重复，也不再发放独立凭证。
+func acquirePermit(db *gorm.DB, task model.SensitiveTask, permit model.Permit, at time.Time) (PreflightOutcome, error) {
 	outcome := PreflightOutcome{}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		// 行锁串行化同一 Profile 的敏感操作；查不到说明 Profile 已被删除。
 		var profileID string
 		if err := tx.Raw(`SELECT id FROM browser_profiles WHERE id = ? FOR UPDATE`, task.ProfileID).Row().Scan(&profileID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return model.ErrRuntimeUnavailable
 			}
 			return err
-		}
-		var validCount int
-		if err := tx.Raw(`SELECT COUNT(*) FROM sensitive_browser_tasks t
-			JOIN browser_profiles bp ON bp.id = t.profile_id
-			JOIN users u ON u.id = t.user_id
-			JOIN local_agent_nodes n ON n.id = t.node_id
-			JOIN browser_profile_runtime_presence rp ON rp.profile_id = bp.id AND rp.node_id = n.id
-			WHERE t.id = ? AND t.user_id = ? AND t.profile_id = ? AND t.node_id = ? AND t.operation = ?
-			AND t.bit_profile_id = ? AND t.status = 'authorized' AND bp.local_status = 'active'
-			AND bp.bit_profile_id = t.bit_profile_id AND bp.main_user_id = u.bit_main_user_id
-			AND u.status = 'enabled' AND n.status = 'online'
-			AND n.bitbrowser_status = 'normal' AND n.reported_main_user_id = u.bit_main_user_id
-			AND rp.status = 'visible' AND rp.main_user_id = u.bit_main_user_id AND rp.last_seen_at >= ?`,
-			task.ID, task.UserID, task.ProfileID, nodeID, task.Operation, task.BitProfileID, at.Add(-freshness),
-		).Row().Scan(&validCount); err != nil {
-			return err
-		}
-		if validCount != 1 {
-			return model.ErrRuntimeUnavailable
 		}
 
 		var priorID string
@@ -106,10 +91,10 @@ func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit 
 			}
 		}
 		if err := tx.Exec(`INSERT INTO sensitive_profile_permits
-			(id, task_id, user_id, profile_id, node_id, operation, status, credential_hash, acquired_at, expires_at, finished_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			permit.ID, permit.TaskID, permit.UserID, permit.ProfileID, permit.NodeID, permit.Operation, permit.Status,
-			permit.CredentialHash, permit.AcquiredAt, permit.ExpiresAt, permit.FinishedAt,
+			(id, task_id, user_id, profile_id, operation, status, acquired_at, expires_at, finished_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			permit.ID, permit.TaskID, permit.UserID, permit.ProfileID, permit.Operation, permit.Status,
+			permit.AcquiredAt, permit.ExpiresAt, permit.FinishedAt,
 		).Error; err != nil {
 			return err
 		}
@@ -130,42 +115,42 @@ func acquirePermit(db *gorm.DB, task model.SensitiveTask, nodeID string, permit 
 	return outcome, nil
 }
 
-func RenewPermit(permitID, nodeID, credentialHash string, at, expiresAt time.Time) (time.Time, error) {
-	return renewPermit(database.DB(), permitID, nodeID, credentialHash, at, expiresAt)
+func RenewPermit(permitID string, userID identity.UserID, at, expiresAt time.Time) (time.Time, error) {
+	return renewPermit(database.DB(), permitID, userID, at, expiresAt)
 }
 
-func renewPermit(db *gorm.DB, permitID, nodeID, credentialHash string, at, expiresAt time.Time) (time.Time, error) {
+func renewPermit(db *gorm.DB, permitID string, userID identity.UserID, at, expiresAt time.Time) (time.Time, error) {
 	result := db.Exec(`UPDATE sensitive_profile_permits SET expires_at = ?
-		WHERE id = ? AND node_id = ? AND credential_hash = ? AND status = ? AND expires_at > ?`,
-		expiresAt, permitID, nodeID, credentialHash, model.PermitActive, at)
+		WHERE id = ? AND user_id = ? AND status = ? AND expires_at > ?`,
+		expiresAt, permitID, userID, model.PermitActive, at)
 	if result.Error != nil {
 		return time.Time{}, result.Error
 	}
 	if result.RowsAffected != 1 {
-		return time.Time{}, model.ErrPermitCredentialInvalid
+		return time.Time{}, model.ErrPermitInvalid
 	}
 	return expiresAt, nil
 }
 
-func FinishPermit(permitID, nodeID, credentialHash string, outcome model.FinishOutcome, at time.Time) error {
-	return finishPermit(database.DB(), permitID, nodeID, credentialHash, outcome, at)
+func FinishPermit(permitID string, userID identity.UserID, outcome model.FinishOutcome, at time.Time) error {
+	return finishPermit(database.DB(), permitID, userID, outcome, at)
 }
 
-func finishPermit(db *gorm.DB, permitID, nodeID, credentialHash string, outcome model.FinishOutcome, at time.Time) error {
+func finishPermit(db *gorm.DB, permitID string, userID identity.UserID, outcome model.FinishOutcome, at time.Time) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		var taskID string
 		var status model.PermitStatus
 		err := tx.Raw(`SELECT task_id, status FROM sensitive_profile_permits
-			WHERE id = ? AND node_id = ? AND credential_hash = ? FOR UPDATE`, permitID, nodeID, credentialHash).
+			WHERE id = ? AND user_id = ? FOR UPDATE`, permitID, userID).
 			Row().Scan(&taskID, &status)
 		if errors.Is(err, sql.ErrNoRows) {
-			return model.ErrPermitCredentialInvalid
+			return model.ErrPermitInvalid
 		}
 		if err != nil {
 			return err
 		}
 		if status != model.PermitActive {
-			return model.ErrPermitCredentialInvalid
+			return model.ErrPermitInvalid
 		}
 		permitStatus, taskStatus := model.PermitReleased, model.TaskCompleted
 		if outcome == model.FinishResultUncertain {

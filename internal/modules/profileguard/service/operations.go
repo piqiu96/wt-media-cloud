@@ -3,21 +3,22 @@ package service
 import (
 	"time"
 
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard/repository"
 )
 
-func Preflight(nodeID, nodeCredential, taskID string) (dto.PreflightOutcome, error) {
-	return newService(mysqlStore{}, runtimeNodeAuth{}).Preflight(nodeID, nodeCredential, taskID)
+func Preflight(userID identityservice.UserID, taskID string, input PreflightInput) (dto.PreflightOutcome, error) {
+	return newService(mysqlStore{}).Preflight(userID, taskID, input)
 }
 
-func Renew(nodeID, nodeCredential, permitID, permitCredential string, extension time.Duration) (time.Time, error) {
-	return newService(mysqlStore{}, runtimeNodeAuth{}).Renew(nodeID, nodeCredential, permitID, permitCredential, extension)
+func Renew(userID identityservice.UserID, permitID string, extension time.Duration) (time.Time, error) {
+	return newService(mysqlStore{}).Renew(userID, permitID, extension)
 }
 
-func Finish(nodeID, nodeCredential, permitID, permitCredential string, outcome model.FinishOutcome) error {
-	return newService(mysqlStore{}, runtimeNodeAuth{}).Finish(nodeID, nodeCredential, permitID, permitCredential, outcome)
+func Finish(userID identityservice.UserID, permitID string, outcome model.FinishOutcome) error {
+	return newService(mysqlStore{}).Finish(userID, permitID, outcome)
 }
 
 func CreateAuthorizedTask(task model.SensitiveTask) error {

@@ -10,7 +10,6 @@ import (
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 // CHG-20261013-084 (M4-C6 T-02): the my-outputs service — the scope gate the
@@ -93,15 +92,14 @@ func outputFixture(id int64) model.CompositeOutput {
 }
 
 func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks *outputTaskFake, linker *outputLinkerFake) *ComposeOutputService {
-	return NewComposeOutputService(store, traces, traces, traces, tasks, linker, &stubNodes{}, &stubTransfers{})
+	return NewComposeOutputService(store, traces, traces, traces, tasks, linker, &stubTransfers{})
 }
 
 // newOutputDownloadService builds the service for the download path alone. The
-// node stub refuses by default and the transfer stub records what it is handed,
-// so a test that expects a task has to say which machine it goes to, and one
-// that expects facts on the task can read them back.
-func newOutputDownloadService(store *outputMemoryStore, nodes *stubNodes, transfers *stubTransfers) *ComposeOutputService {
-	svc := NewComposeOutputService(store, &outputTraceFakes{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{}, nodes, transfers)
+// transfer stub records what it is handed, so a test that expects facts on the
+// task can read them back.
+func newOutputDownloadService(store *outputMemoryStore, transfers *stubTransfers) *ComposeOutputService {
+	svc := NewComposeOutputService(store, &outputTraceFakes{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{}, transfers)
 	svc.resolveGame = func(gameID string) (string, bool, error) {
 		if gameID == "delta" {
 			return "三角洲行动", true, nil
@@ -254,9 +252,8 @@ func TestCreateOutputDownloadQueuesTheOutputForTheActor(t *testing.T) {
 	team := identity.TeamID(7)
 	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
-	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-1", DeviceID: "device-1"}}
 	transfers := &stubTransfers{}
-	svc := newOutputDownloadService(store, nodes, transfers)
+	svc := newOutputDownloadService(store, transfers)
 
 	task, err := svc.CreateOutputDownload(operator, 5)
 	if err != nil {
@@ -287,8 +284,8 @@ func TestCreateOutputDownloadQueuesTheOutputForTheActor(t *testing.T) {
 	if input.SourceObjectKey != "compose-outputs/55/output.mp4" || input.TotalBytes != 1024 || input.ExpectedSHA256 != "abc" {
 		t.Fatalf("object facts = %+v, want the row's verified object", input)
 	}
-	if input.AssignedNodeID != "node-1" || input.AssignedDeviceID != "device-1" {
-		t.Fatalf("destination = %+v", input)
+	if input.RequestedBy != 9 {
+		t.Fatalf("destination = %+v, want the actor's own queue", input)
 	}
 	// An output has no publish time and no preparation, and both absences are
 	// part of the shape: a published_at on the lease would name a segment of
@@ -304,29 +301,12 @@ func TestCreateOutputDownloadRefusesAnOutputOutsideTheActorsScope(t *testing.T) 
 	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
 	transfers := &stubTransfers{}
-	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: "node-1", DeviceID: "device-1"}}
-	svc := newOutputDownloadService(store, nodes, transfers)
+	svc := newOutputDownloadService(store, transfers)
 
 	if _, err := svc.CreateOutputDownload(operator, 5); !errors.Is(err, ErrComposeOutputNotFound) {
 		t.Fatalf("error = %v, want the same not-found the detail drawer answers with", err)
 	}
 	if transfers.count != 0 {
 		t.Fatal("a refused download still reached the transfer module")
-	}
-}
-
-func TestCreateOutputDownloadRefusesToQueueWithoutAFreshNode(t *testing.T) {
-	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
-	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
-	transfers := &stubTransfers{}
-	nodes := &stubNodes{err: errors.New("no fresh node")}
-	svc := newOutputDownloadService(store, nodes, transfers)
-
-	if _, err := svc.CreateOutputDownload(operator, 5); !errors.Is(err, ErrLocalNodeUnavailable) {
-		t.Fatalf("error = %v, want the node-unavailable conflict", err)
-	}
-	if transfers.count != 0 {
-		t.Fatal("a download with no destination still reached the transfer module")
 	}
 }

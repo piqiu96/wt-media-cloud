@@ -4,9 +4,6 @@ package model
 import "errors"
 
 var (
-	ErrAgentNotFound       = errors.New("agent not found")
-	ErrInvalidAgent        = errors.New("invalid agent")
-	ErrIncompatibleAgent   = errors.New("incompatible agent contract")
 	ErrTaskNotFound        = errors.New("task not found")
 	ErrNoPendingTask       = errors.New("no pending task")
 	ErrTaskLeaseTaken      = errors.New("task lease taken")
@@ -15,7 +12,10 @@ var (
 	ErrTaskAlreadyTerminal = errors.New("task already in terminal state")
 	ErrInvalidStatus       = errors.New("invalid task status")
 	ErrInvalidTaskType     = errors.New("invalid task type")
+	ErrUnsupportedTaskType = errors.New("unsupported task type")
 	ErrTaskNotRetryable    = errors.New("task is not retryable")
+	ErrStaleAttempt        = errors.New("task attempt is stale")
+	ErrResultUnknownRetry  = errors.New("retrying an unknown result needs confirmation")
 )
 
 type Compatibility struct {
@@ -25,18 +25,6 @@ type Compatibility struct {
 	MinimumAgentContractRevision string   `json:"minimum_agent_contract_revision"`
 	CompatibleAgentMajorVersions []string `json:"compatible_agent_major_versions"`
 	Status                       string   `json:"status"`
-}
-
-type AgentNode struct {
-	AgentID              string   `json:"agent_id"`
-	Mode                 string   `json:"mode"`
-	Version              string   `json:"version"`
-	ContractMajorVersion string   `json:"contract_major_version"`
-	ContractRevision     string   `json:"contract_revision"`
-	Status               string   `json:"status"`
-	RegisteredAt         string   `json:"registered_at"`
-	LastHeartbeatAt      string   `json:"last_heartbeat_at"`
-	Capabilities         []string `json:"capabilities"`
 }
 
 type TaskStatus int
@@ -84,6 +72,51 @@ const (
 	TaskTypeProxyMutation                 // 9: assign proxy to BitBrowser Profile
 )
 
+// TaskTypeSpec 是任务类型的静默超时与外部副作用；副作用决定中断后能否重试。
+type TaskTypeSpec struct {
+	TimeoutSeconds     int
+	ExternalSideEffect bool
+}
+
+func (t TaskType) Spec() TaskTypeSpec {
+	switch t {
+	case TaskTypeProfileOpen, TaskTypeProfileClose:
+		return TaskTypeSpec{TimeoutSeconds: 120, ExternalSideEffect: false}
+	case TaskTypeCookieWrite, TaskTypeProfileCreate, TaskTypeProfileUpdate, TaskTypeProxyMutation:
+		return TaskTypeSpec{TimeoutSeconds: 300, ExternalSideEffect: true}
+	default:
+		return TaskTypeSpec{TimeoutSeconds: 300, ExternalSideEffect: false}
+	}
+}
+
+// ParseTaskTypeValue 只接受 `*_task` 拼写；空值或未知类型返回 false，不降级为 noop。
+func ParseTaskTypeValue(value string) (TaskType, bool) {
+	switch value {
+	case TaskTypeNoop.String():
+		return TaskTypeNoop, true
+	case TaskTypeCookieRead.String():
+		return TaskTypeCookieRead, true
+	case TaskTypeCookieWrite.String():
+		return TaskTypeCookieWrite, true
+	case TaskTypeAccountCheck.String():
+		return TaskTypeAccountCheck, true
+	case TaskTypeProfileCreate.String():
+		return TaskTypeProfileCreate, true
+	case TaskTypeProfileOpen.String():
+		return TaskTypeProfileOpen, true
+	case TaskTypeProfileClose.String():
+		return TaskTypeProfileClose, true
+	case TaskTypeProfileUpdate.String():
+		return TaskTypeProfileUpdate, true
+	case TaskTypeProxyCheck.String():
+		return TaskTypeProxyCheck, true
+	case TaskTypeProxyMutation.String():
+		return TaskTypeProxyMutation, true
+	default:
+		return TaskTypeNoop, false
+	}
+}
+
 func (t TaskType) String() string {
 	switch t {
 	case TaskTypeNoop:
@@ -112,17 +145,29 @@ func (t TaskType) String() string {
 }
 
 type Task struct {
-	TaskID         string         `json:"task_id"`
-	TaskType       string         `json:"task_type"`
-	Status         string         `json:"status"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	AgentID        string         `json:"agent_id,omitempty"`
-	CreatedAt      string         `json:"created_at"`
-	LeaseExpiresAt string         `json:"lease_expires_at,omitempty"`
-	Progress       int            `json:"progress,omitempty"`
-	Message        string         `json:"message,omitempty"`
-	UpdatedAt      string         `json:"updated_at,omitempty"`
-	ErrorCode      string         `json:"error_code,omitempty"`
-	Payload        map[string]any `json:"payload,omitempty"`
-	Result         map[string]any `json:"result,omitempty"`
+	TaskID                  string         `json:"task_id"`
+	TaskType                string         `json:"task_type"`
+	Status                  string         `json:"status"`
+	UserID                  int64          `json:"user_id,omitempty"`
+	Attempt                 int            `json:"attempt"`
+	AttemptID               string         `json:"attempt_id,omitempty"`
+	IdempotencyKey          string         `json:"idempotency_key,omitempty"`
+	AgentID                 string         `json:"agent_id,omitempty"`
+	CreatedAt               string         `json:"created_at"`
+	StartedAt               string         `json:"started_at,omitempty"`
+	LastReportAt            string         `json:"last_report_at,omitempty"`
+	FinishedAt              string         `json:"finished_at,omitempty"`
+	LeaseExpiresAt          string         `json:"lease_expires_at,omitempty"`
+	Progress                int            `json:"progress,omitempty"`
+	Message                 string         `json:"message,omitempty"`
+	UpdatedAt               string         `json:"updated_at,omitempty"`
+	ErrorCode               string         `json:"error_code,omitempty"`
+	ErrorMessage            string         `json:"error_message,omitempty"`
+	ExecutionTimeoutSeconds int            `json:"execution_timeout_seconds,omitempty"`
+	ExternalSideEffect      bool           `json:"external_side_effect"`
+	Retryable               bool           `json:"retryable"`
+	RecoveryAction          string         `json:"recovery_action,omitempty"`
+	SettledBy               string         `json:"settled_by,omitempty"`
+	Payload                 map[string]any `json:"payload,omitempty"`
+	Result                  map[string]any `json:"result,omitempty"`
 }

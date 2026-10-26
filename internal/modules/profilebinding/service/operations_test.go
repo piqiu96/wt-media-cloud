@@ -13,7 +13,7 @@ func TestProfileBindingServiceExposesPackageLevelOperations(t *testing.T) {
 		{name: "SubmitScan", got: SubmitScan},
 		{name: "GetScan", got: GetScan},
 		{name: "ConfirmScan", got: ConfirmScan},
-		{name: "ConfirmMainIdentity", got: ConfirmMainIdentity},
+		{name: "BindBitAccount", got: BindBitAccount},
 		{name: "ListProfiles", got: ListProfiles},
 		{name: "AssignProfileOwner", got: AssignProfileOwner},
 	} {

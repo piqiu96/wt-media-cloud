@@ -9,12 +9,14 @@ import (
 )
 
 var (
-	ErrForbidden            = errors.New("media account operation is forbidden")
-	ErrInvalidInput         = errors.New("media account input is invalid")
-	ErrNotFound             = errors.New("media account was not found")
-	ErrDuplicateAccount     = errors.New("media account already exists for this user and platform")
-	ErrProfileUnavailable   = errors.New("browser profile is unavailable")
-	ErrProfilePlatformTaken = errors.New("browser profile already has an account for this platform")
+	ErrForbidden                  = errors.New("media account operation is forbidden")
+	ErrInvalidInput               = errors.New("media account input is invalid")
+	ErrNotFound                   = errors.New("media account was not found")
+	ErrDuplicateAccount           = errors.New("media account already exists for this user and platform")
+	ErrProfileUnavailable         = errors.New("browser profile is unavailable")
+	ErrProfileNotFound            = errors.New("browser profile was not found")
+	ErrProfileAssignedToOtherUser = errors.New("browser profile belongs to another user")
+	ErrProfilePlatformTaken       = errors.New("browser profile already has an account for this platform")
 )
 
 type Platform string

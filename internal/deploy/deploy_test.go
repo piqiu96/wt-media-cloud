@@ -16,6 +16,7 @@ WT_PRIMARY_DB_NAME = "wt_media_online"
 WT_PRIMARY_DB_USERNAME = "wt_media_cloud"
 WT_PRIMARY_DB_PASSWORD = "db-pass"
 WT_AGENT_AUTH_TOKEN = ""
+WT_MEDIA_AGENT_TOKEN_SECRET = "test-agent-token-secret-with-at-least-32-characters"
 WT_DOUYIN_API_KEY = "douyin-key"
 WT_DOUYIN_COOKIE = "douyin-cookie"
 WT_OBJECT_STORAGE_PREFIX = "wt_media/online/"
@@ -111,7 +112,7 @@ func TestPullVariablesWithHTTPS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(digest) != 64 || count != 14 {
+	if len(digest) != 64 || count != 15 {
 		t.Fatalf("digest=%q count=%d", digest, count)
 	}
 	mode, err := os.Stat(target)

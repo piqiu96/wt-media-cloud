@@ -12,6 +12,10 @@ WT_PRIMARY_DB_PASSWORD = "<REPLACE_WITH_DATABASE_PASSWORD>"
 # The current test environment has no Agent auth token.
 WT_AGENT_AUTH_TOKEN = ""
 
+# HMAC key for Local Agent tokens. At least 32 characters; rotating it
+# invalidates every issued Agent Token.
+WT_MEDIA_AGENT_TOKEN_SECRET = "<REPLACE_WITH_AGENT_TOKEN_SECRET>"
+
 WT_DOUYIN_API_KEY = "<REPLACE_WITH_DOUYIN_API_KEY>"
 WT_DOUYIN_COOKIE = "<REPLACE_WITH_DOUYIN_COOKIE>"
 

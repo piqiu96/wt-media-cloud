@@ -4,16 +4,17 @@ import { feedback } from '../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { createSessionClient } from '../../../shared/api/session.js'
-import { createDeviceBindingClient } from '../../../shared/api/deviceBinding.js'
-import { createProfileBindingClient } from '../../../shared/api/profileBindings.js'
+import { createBitAccountClient } from '../../../shared/api/bitAccount.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
-import { bitAccountDiffers as computeBitAccountDiffers, maskBitAccountId } from '../../../apps/desktop/features/local-agent/work-env-status.js'
+import { bitAccountDiffers as computeBitAccountDiffers } from '../../../apps/desktop/features/local-agent/work-env-status.js'
+import { createLocalAgentStatusPage } from '../../../apps/desktop/features/local-agent/local-agent-status.js'
+import { localAgentStateFromStatus } from '../../../apps/desktop/features/local-agent/service.js'
 import { avatarOptions } from '../../../shared/ui/systemAvatars.js'
 import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
 const session = createSessionClient()
-const devices = createDeviceBindingClient()
-// 分组/游戏范围只做展示，取与素材库页同一个 games 端点把游戏 ID 映射成名称；
+const bitAccounts = createBitAccountClient()
+// 团队/游戏范围只做展示，取与素材库页同一个 games 端点把游戏 ID 映射成名称；
 // 拉不到时退化为显示 ID，不阻塞整页加载。
 const usersClient = createUsersClient()
 const games = ref([])
@@ -21,56 +22,66 @@ const user = ref(null)
 const nickname = ref('')
 const avatarId = ref('sky')
 const binding = ref(null)
-const localDevice = ref(null)
 const localAgent = ref(null)
+const deviceId = ref('')
 const loading = ref(true)
 const saving = ref(false)
 const bindingBusy = ref(false)
-const unbinding = ref(false)
-const confirmUnbind = ref(false)
-const understood = ref(false)
-// 本机比特账号变化后，用户必须主动确认新的绑定账号。
-const confirmTakeEnv = ref(false)
-const bitAccountBusy = ref(false)
+// 本机比特账号变化后，用户必须主动确认换用当前账号。
+const confirmRebind = ref(false)
 const error = ref('')
 const inDesktop = typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
-const deviceMatches = computed(() => !!binding.value?.bound && !!localDevice.value?.device_id && binding.value.device_id === localDevice.value.device_id)
-const deviceConflicts = computed(() => !!binding.value?.bound && !!localDevice.value?.device_id && !deviceMatches.value)
-// 管理员不受分组/游戏限制；运营展示自己被授权的游戏名称（找不到名称时退化为 ID）。
+// 管理员不受团队/游戏限制；运营展示自己被授权的游戏名称（找不到名称时退化为 ID）。
 const gameScopeLabel = computed(() => {
   if (user.value?.role === 'admin') return '全部游戏'
   const ids = user.value?.game_ids || []
   if (!ids.length) return '—'
   return ids.map((id) => games.value.find((game) => game.id === id)?.name || id).join('、')
 })
-// 本机 Agent 就绪 = 空闲或运行中（Agent 无事可做时报 idle，不是不可用）。
-const localAgentReady = computed(() => ['idle', 'running'].includes(localAgent.value?.status))
 // 本机账号与绑定账号一致时没有可绑定的东西，入口不出现；不一致才是
 // 「客户端换过账号、系统待确认」。判定与顶栏胶囊同源（work-env-status），
 // 两处只会同时变绿或同时变橙。
-const bitAccountDiffers = computed(() => computeBitAccountDiffers(binding.value, localAgent.value?.main_user_id))
-const bitAccountDisplay = computed(() => maskBitAccountId(localAgent.value?.main_user_id))
-const deviceLabel = computed(() => binding.value?.bound ? binding.value.device_name || '已绑定的运营电脑' : '尚未绑定运营电脑')
-const maskedDeviceId = computed(() => {
-  const value = binding.value?.device_id || ''
-  return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : '—'
+const bitAccountDiffers = computed(() => computeBitAccountDiffers(binding.value, localAgent.value?.main_user_id_masked))
+// 本机读到的账号已由 Tauri 按 Cloud 同一规则掩掉，页面拿不到完整主账号。
+const localAccountMasked = computed(() => localAgent.value?.main_user_id_masked || '')
+const currentAccountText = computed(() => {
+  if (!localAccountMasked.value) return '未读取到（请确认已登录比特浏览器）'
+  return bitAccountDiffers.value ? `${localAccountMasked.value}（与绑定账号不一致）` : localAccountMasked.value
+})
+const bindingTitle = computed(() => (binding.value?.bound ? '已绑定比特浏览器账号' : '尚未绑定比特浏览器账号'))
+const bindingSummary = computed(() => {
+  if (!binding.value?.bound) return inDesktop ? '由本机比特浏览器读取后绑定' : '绑定需在 Desktop 应用中操作'
+  if (bitAccountDiffers.value) return '当前比特浏览器登录的是另一个账号'
+  if (localAccountMasked.value) return '当前比特浏览器已登录绑定账号'
+  return '尚未读取到本机比特浏览器账号'
+})
+const agentStatusText = computed(() => localAgent.value
+  ? createLocalAgentStatusPage(localAgentStateFromStatus(localAgent.value)).primaryStatus
+  : '无法连接')
+const OPERATING_SYSTEM_LABELS = { macos: 'macOS', windows: 'Windows', linux: 'Linux' }
+const systemLabel = computed(() => {
+  const os = localAgent.value?.operating_system || ''
+  const parts = [OPERATING_SYSTEM_LABELS[os] || os, localAgent.value?.cpu_architecture || ''].filter(Boolean)
+  return parts.length ? parts.join(' · ') : '未读取到'
 })
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [currentUser, currentBinding, gameRows] = await Promise.all([session.me(), devices.get(), usersClient.listGames({ status: 'enabled' }).catch(() => [])])
+    const [currentUser, currentBinding, gameRows] = await Promise.all([session.me(), bitAccounts.get(), usersClient.listGames({ status: 'enabled' }).catch(() => [])])
     user.value = currentUser
     nickname.value = currentUser.nickname || currentUser.username
     avatarId.value = currentUser.avatar_id || 'sky'
     games.value = Array.isArray(gameRows) ? gameRows : []
     binding.value = currentBinding
     if (inDesktop) {
-      try { localDevice.value = await invoke('local_device_identity') }
-      catch (e) { error.value = String(e) }
-      try { localAgent.value = await invoke('local_agent_status') }
-      catch { localAgent.value = null }
+      const [agentResult, deviceResult] = await Promise.allSettled([
+        invoke('local_agent_status'),
+        invoke('local_device_id'),
+      ])
+      localAgent.value = agentResult.status === 'fulfilled' ? agentResult.value : null
+      deviceId.value = deviceResult.status === 'fulfilled' ? deviceResult.value : ''
     }
   } catch (e) { error.value = e?.message || '无法加载个人信息' }
   finally { loading.value = false }
@@ -91,66 +102,46 @@ async function saveProfile() {
   finally { saving.value = false }
 }
 
-async function bindThisDevice() {
+// 绑定与换绑是同一个入口：主账号由本机 Agent 实读，页面只决定 `rebind`。
+// 失败按 `code` 分支，尤其「账号不一致」要给出去换绑的下一步，而不是让用户
+// 以为重试就能过。
+const REFUSAL_TEXT = {
+  BIT_MAIN_USER_MISMATCH: '当前比特浏览器登录账号与系统绑定账号不一致；如确需更换，请点击「换绑为当前账号」。',
+  bit_browser_offline: '比特浏览器未运行或不可达，请先启动比特浏览器后重试。',
+  BIT_BROWSER_OFFLINE: '比特浏览器未运行或不可达，请先启动比特浏览器后重试。',
+  agent_unreachable: '本机服务不可达，请重启应用后重试。',
+  cloud_request_failed: '请求未能完成，请稍后重试。',
+  DESKTOP_LOGIN_REQUIRED: '登录状态已失效，请重新登录后再绑定。',
+  AUTH_DESKTOP_REPLACED: '你的账号已在另一台电脑登录，请重新登录。',
+  AUTH_AGENT_TOKEN_INVALID: '本机执行凭证无效，请重新登录后再绑定。',
+  AUTH_AGENT_TOKEN_EXPIRED: '本机执行凭证已过期，请重新登录后再绑定。',
+}
+
+async function bindAccount({ rebind = false } = {}) {
   if (!inDesktop || bindingBusy.value) return
   bindingBusy.value = true
   error.value = ''
   try {
-    const { bindTrustedLocalAgent } = await import('../../../apps/desktop/features/local-agent/init.js')
-    await bindTrustedLocalAgent({ bindDevice: true })
-    const verified = await devices.get()
-    if (!verified.bound || verified.device_id !== localDevice.value?.device_id) throw new Error('云端设备绑定尚未确认，请重新检测')
+    const { bindBitBrowser } = await import('../../../apps/desktop/features/local-agent/init.js')
+    await bindBitBrowser({ rebind })
+    confirmRebind.value = false
     await load()
-    feedback.toast.success('这台电脑已绑定，浏览器身份与本机环境已同步')
-  } catch (e) { feedback.toast.error(e?.message || String(e)) }
-  finally { bindingBusy.value = false }
-}
-
-async function unbindDevice() {
-  if (!understood.value || unbinding.value) return
-  unbinding.value = true
-  error.value = ''
-  try {
-    await devices.unbind()
-    const verified = await devices.get()
-    if (verified.bound) throw new Error('云端仍显示设备已绑定，请重新检测')
-    confirmUnbind.value = false
-    understood.value = false
-    await load()
-    feedback.toast.success('设备已解绑。旧电脑本地文件仍保留；新电脑现在可以手动绑定。')
-  } catch (e) { feedback.toast.error(e?.message || '解绑失败') }
-  finally { unbinding.value = false }
-}
-
-// 覆盖绑定后，原账号窗口需重新扫描确认；确认框必须说明这一影响。
-async function takeCurrentEnvironmentAsAuthoritative() {
-  if (!inDesktop || bitAccountBusy.value) return
-  const mainUserId = localAgent.value?.main_user_id
-  if (!mainUserId) {
-    feedback.toast.error('未读取到当前比特浏览器账号，请确认比特浏览器已登录后重试')
-    return
-  }
-  bitAccountBusy.value = true
-  error.value = ''
-  try {
-    await createProfileBindingClient().confirmMainIdentityDirect(mainUserId, { overwrite: true })
-    confirmTakeEnv.value = false
-    await load()
-    feedback.toast.success('已把当前比特浏览器账号设为绑定账号；原账号的窗口需重新扫描确认后才能使用。')
-  } catch (e) { feedback.toast.error(e?.message || String(e)) }
-  finally { bitAccountBusy.value = false }
+    feedback.toast.success(rebind ? '已换用当前比特浏览器账号；原有窗口记录保留，切回原账号即可恢复。' : '比特浏览器账号已绑定')
+  } catch (e) {
+    feedback.toast.error(REFUSAL_TEXT[e?.code] || e?.message || String(e))
+  } finally { bindingBusy.value = false }
 }
 </script>
 
 <template>
   <main class="personal-page">
-    <header class="page-heading"><div><p class="eyebrow">ACCOUNT &amp; DEVICE</p><h1>个人信息</h1><p>管理你的展示资料与运营电脑绑定。</p></div></header>
+    <header class="page-heading"><div><p class="eyebrow">ACCOUNT &amp; BITBROWSER</p><h1>个人信息</h1><p>管理你的展示资料与比特浏览器账号绑定。</p></div></header>
     <t-loading :loading="loading" size="large">
       <div class="personal-grid">
         <section class="profile-card">
           <h2>基本信息</h2>
           <div class="identity-summary"><SystemAvatar :avatar-id="avatarId" :size="64" /><div><strong>{{ user?.nickname || user?.username }}</strong><span>用户 UID {{ user?.id || '—' }}</span></div></div>
-          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong><span>所属分组</span><strong>{{ user?.team_name || '—' }}</strong><span>游戏范围</span><strong>{{ gameScopeLabel }}</strong></div>
+          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong><span>所属团队</span><strong>{{ user?.team_name || '—' }}</strong><span>游戏范围</span><strong>{{ gameScopeLabel }}</strong></div>
           <label class="form-label" for="profile-nickname">昵称</label>
           <t-input id="profile-nickname" v-model="nickname" maxlength="64" placeholder="请输入昵称" />
           <p class="field-help">默认与用户名一致，可随时修改。</p>
@@ -164,45 +155,44 @@ async function takeCurrentEnvironmentAsAuthoritative() {
         </section>
 
         <section class="device-card">
-          <div class="section-title"><div><h2>设备与本机环境</h2><p>每个账号只能绑定一台运营电脑。</p></div><span class="status-pill" :class="binding?.bound ? 'is-bound' : 'is-unbound'">{{ binding?.bound ? '已绑定' : '未绑定' }}</span></div>
-          <div class="device-hero"><span class="device-icon"><t-icon name="desktop" /></span><div><strong>{{ deviceLabel }}</strong><span>{{ deviceMatches ? '当前正在使用这台电脑' : deviceConflicts ? '当前电脑与绑定设备不一致' : inDesktop && !binding?.bound ? '可以在这台电脑上手动绑定' : '设备信息由云端保存' }}</span></div></div>
+          <div class="section-title"><div><h2>比特浏览器</h2><p>每个账号绑定一个比特浏览器主账号，只有该账号下的窗口能执行任务。</p></div><span class="status-pill" :class="binding?.bound ? 'is-bound' : 'is-unbound'">{{ binding?.bound ? '已绑定' : '未绑定' }}</span></div>
+          <div class="device-hero"><span class="device-icon"><t-icon name="user-circle" /></span><div><strong>{{ bindingTitle }}</strong><span>{{ bindingSummary }}</span></div></div>
           <dl class="device-details">
-            <div><dt>设备标识</dt><dd>{{ maskedDeviceId }}</dd></div>
+            <div><dt>绑定比特账号</dt><dd>{{ binding?.main_user_id_masked || '—' }}</dd></div>
             <div><dt>绑定时间</dt><dd>{{ binding?.bound_at ? new Date(binding.bound_at).toLocaleString() : '—' }}</dd></div>
             <div><dt>最近验证</dt><dd>{{ binding?.last_verified_at ? new Date(binding.last_verified_at).toLocaleString() : '—' }}</dd></div>
-            <div><dt>比特浏览器账号</dt><dd>{{ binding?.bit_account_bound ? binding.bit_main_user_id_masked || '已绑定' : '尚未确认' }}</dd></div>
-            <div v-if="inDesktop"><dt>Local Agent</dt><dd>{{ localAgentReady ? '可用' : '当前不可用' }}</dd></div>
-            <div v-if="inDesktop"><dt>当前比特浏览器</dt><dd>{{ localAgent?.bitbrowser_status === 'normal' ? '已连接' : '待检查' }}</dd></div>
+            <div v-if="inDesktop && bitAccountDiffers"><dt>当前比特账号</dt><dd>{{ currentAccountText }}</dd></div>
           </dl>
-          <FeedbackAlert v-if="deviceConflicts" theme="warning" class="device-alert" message="当前电脑与已绑定设备不同。请先确认旧电脑上的本地文件位置，再手动解除旧设备绑定。" />
-          <FeedbackAlert v-else-if="binding?.bound && inDesktop && !deviceMatches" theme="warning" class="device-alert" message="无法确认当前设备身份，请检查本机应用数据。" />
-          <p v-if="!binding?.bound" class="device-note">首次绑定会读取当前比特浏览器主账号并同步本机环境；后续在同一台电脑重新登录无需重复绑定。</p>
+          <FeedbackAlert v-if="bitAccountDiffers" theme="warning" class="device-alert" message="当前比特浏览器登录账号与系统绑定账号不一致，任务会被拦下。如确需更换，请点击「换绑为当前账号」。" />
+          <p v-if="!binding?.bound" class="device-note">首次绑定由本机 Agent 直接读取比特浏览器当前登录的主账号，不需要手工输入；其他账号下的窗口不会出现在可用列表中。</p>
           <div class="device-actions">
-            <t-button v-if="!binding?.bound && inDesktop" theme="primary" :loading="bindingBusy" @click="bindThisDevice">绑定这台电脑</t-button>
-            <t-button v-if="binding?.bound" theme="danger" variant="outline" @click="confirmUnbind = true">解除设备绑定</t-button>
-            <t-button v-if="inDesktop && bitAccountDiffers" variant="outline" @click="confirmTakeEnv = true">比特账号绑定</t-button>
+            <t-button v-if="!binding?.bound && inDesktop" theme="primary" :loading="bindingBusy" @click="bindAccount()">绑定比特浏览器账号</t-button>
+            <t-button v-if="binding?.bound && inDesktop && bitAccountDiffers" variant="outline" :loading="bindingBusy" @click="confirmRebind = true">换绑为当前账号</t-button>
           </div>
-          <p v-if="!inDesktop" class="device-note">Cloud 网页可查看及解除绑定；绑定新设备需在 Desktop 应用中操作。</p>
+          <p v-if="!inDesktop" class="device-note">Cloud 网页可查看绑定状态；绑定与换绑需在 Desktop 应用中操作。</p>
+          <section v-if="inDesktop" class="machine-section">
+            <h3>本机</h3>
+            <dl class="device-details">
+              <div><dt>设备 ID</dt><dd>{{ deviceId || '无法读取' }}</dd></div>
+              <div><dt>系统</dt><dd>{{ systemLabel }}</dd></div>
+              <div><dt>Agent 状态</dt><dd>{{ agentStatusText }}</dd></div>
+              <div><dt>Agent 版本</dt><dd>{{ localAgent?.agent_version || '未读取到' }}</dd></div>
+            </dl>
+          </section>
         </section>
       </div>
       <FeedbackAlert v-if="error" class="feedback" :message="error" theme="error" />
     </t-loading>
 
-    <t-dialog v-model:visible="confirmUnbind" header="确认解除设备绑定" :footer="false" :close-on-overlay-click="false">
-      <div class="unbind-warning"><strong>换设备前请确认本地文件</strong><p>解除绑定后，旧电脑上的本地文件和本地索引仍保留在旧电脑；新电脑无法直接访问，也不会自动迁移。云端素材、任务和历史记录不会删除。旧设备将不能领取新任务。</p></div>
-      <label class="acknowledge"><input v-model="understood" type="checkbox" />我已了解旧文件保留在旧电脑，新设备无法直接访问</label>
-      <div class="dialog-actions"><t-button variant="outline" @click="confirmUnbind = false">取消</t-button><t-button theme="danger" :disabled="!understood" :loading="unbinding" @click="unbindDevice">确认解除绑定</t-button></div>
-    </t-dialog>
-
-    <t-dialog v-model:visible="confirmTakeEnv" header="比特账号绑定" :footer="false" :close-on-overlay-click="false">
-      <p class="dialog-note">把当前比特浏览器登录的账号（{{ bitAccountDisplay }}）设为绑定账号后：</p>
+    <t-dialog v-model:visible="confirmRebind" header="换绑为当前比特浏览器账号" :footer="false" :close-on-overlay-click="false">
+      <p class="dialog-note">把当前比特浏览器登录的账号（{{ localAccountMasked || '未读取到' }}）设为绑定账号后：</p>
       <ul class="dialog-list">
         <li>这台电脑的比特浏览器窗口按新账号归属，只有新账号下的窗口能执行任务；</li>
-        <li>原账号下的窗口需要在新账号下重新扫描确认后才能继续使用；</li>
-        <li>原账号的窗口记录不会删除，切回原账号即可恢复。</li>
+        <li>原账号下的窗口记录不会删除，切回原账号即可恢复；</li>
+        <li>正在执行的任务不受影响。</li>
       </ul>
-      <p class="dialog-note">请确认这是你当前使用的机器与账号。</p>
-      <div class="dialog-actions"><t-button variant="outline" @click="confirmTakeEnv = false">取消</t-button><t-button theme="primary" :loading="bitAccountBusy" @click="takeCurrentEnvironmentAsAuthoritative">确认绑定当前账号</t-button></div>
+      <p class="dialog-note">请确认比特浏览器已登录你要使用的账号。</p>
+      <div class="dialog-actions"><t-button variant="outline" @click="confirmRebind = false">取消</t-button><t-button theme="primary" :loading="bindingBusy" @click="bindAccount({ rebind: true })">确认换绑</t-button></div>
     </t-dialog>
   </main>
 </template>
@@ -211,6 +201,7 @@ async function takeCurrentEnvironmentAsAuthoritative() {
 .personal-page { max-width: 1140px; margin: 0 auto; color: #193250; }.page-heading { margin-bottom: 25px; }.eyebrow { margin: 0 0 7px; color: #3b86e9; font-size: 11px; font-weight: 700; letter-spacing: .16em; }.page-heading h1 { margin: 0 0 6px; font-size: 28px; }.page-heading p { margin: 0; color: #7b8ba2; }
 .personal-grid { display: grid; grid-template-columns: minmax(330px, 1fr) minmax(340px, 1.1fr); gap: 20px; }.profile-card,.device-card { padding: 28px; border: 1px solid #e7edf5; border-radius: 14px; background: #fff; box-shadow: 0 8px 24px #1733570a; }.profile-card h2,.device-card h2 { margin: 0; font-size: 20px; }.identity-summary { display: flex; align-items: center; gap: 14px; margin: 24px 0; }.identity-summary div { display: flex; flex-direction: column; gap: 5px; }.identity-summary strong { font-size: 19px; }.identity-summary span { color: #8294ab; font-size: 13px; }.static-details { display: grid; grid-template-columns: 75px 1fr; gap: 10px; padding: 16px 0; border-top: 1px solid #eef2f6; border-bottom: 1px solid #eef2f6; }.static-details span { color: #8a9aaf; }.static-details strong { font-weight: 500; }.form-label { display: block; margin: 22px 0 9px; font-weight: 600; }.field-help { margin: 6px 0 0; color: #94a3b8; font-size: 12px; }.avatar-options { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 20px; }.avatar-choice { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 66px; padding: 8px 5px; border: 2px solid transparent; border-radius: 10px; background: #f7f9fc; cursor: pointer; color: #637995; font-size: 12px; }.avatar-choice.selected { border-color: #2984fa; background: #eef6ff; color: #1465d2; }
 .section-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }.section-title p { margin: 7px 0 0; color: #8d9db0; font-size: 13px; }.status-pill { padding: 5px 10px; border-radius: 20px; font-size: 12px; }.is-bound { color: #167e5c; background: #e7f7f0; }.is-unbound { color: #8f6f1c; background: #fff5da; }.device-hero { display: flex; gap: 14px; align-items: center; margin: 24px 0; padding: 18px; border-radius: 10px; background: #f3f8ff; }.device-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 10px; background: #deedff; color: #2075e8; font-size: 24px; }.device-hero div { display: flex; flex-direction: column; gap: 5px; }.device-hero span:not(.device-icon) { color: #7890ae; font-size: 13px; }.device-details { margin: 0; }.device-details div { display: flex; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid #eef2f6; }.device-details dt { color: #8a9bb0; }.device-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }.device-alert { margin-top: 19px; }.device-note { margin: 18px 0 0; color: #8294a9; font-size: 13px; line-height: 1.6; }.device-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }.feedback { margin-top: 18px; }.unbind-warning { padding: 15px; border-radius: 9px; color: #81421a; background: #fff3e8; line-height: 1.7; }.unbind-warning p { margin: 7px 0 0; }.dialog-note { margin: 0; color: #7b8ba2; line-height: 1.7; }.dialog-list { margin: 10px 0; padding-left: 20px; color: #5b6d85; line-height: 1.9; }.dialog-list li + li { margin-top: 2px; }.acknowledge { display: flex; align-items: flex-start; gap: 8px; margin: 19px 0; cursor: pointer; line-height: 1.5; }.acknowledge input { margin-top: 4px; }.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.machine-section { margin-top: 26px; padding-top: 20px; border-top: 1px solid #eef2f6; }.machine-section h3 { margin: 0 0 4px; color: #193250; font-size: 15px; font-weight: 600; }
 @media (max-width: 830px) { .personal-grid { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .profile-card,.device-card { padding: 20px; } }
 </style>

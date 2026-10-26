@@ -14,7 +14,7 @@ import (
 // cannot lease a task it has no way to serve. Only this path, the one the
 // handlers use and Bootstrap has therefore prepared, mints real grants.
 func newWiredService() *Service {
-	return NewService(mysqlStore{}, runtimeNodeAuth{}, WithGrantIssuer(objectStorageGrants{}))
+	return NewService(mysqlStore{}, WithGrantIssuer(objectStorageGrants{}))
 }
 
 func CreateTask(input CreateTaskInput) (dto.Task, error) {
@@ -49,18 +49,18 @@ func CancelTask(actor identityservice.PublicUser, taskID string) (dto.Task, erro
 	return newWiredService().CancelTask(actor, taskID)
 }
 
-func ClaimTask(ctx context.Context, credential string) (dto.ClaimResult, error) {
-	return newWiredService().ClaimTask(ctx, credential)
+func ClaimTask(ctx context.Context, userID int64) (dto.ClaimResult, error) {
+	return newWiredService().ClaimTask(ctx, userID)
 }
 
-func HeartbeatTask(credential, taskID string, completedBytes int64) error {
-	return newWiredService().HeartbeatTask(credential, taskID, completedBytes)
+func HeartbeatTask(userID int64, taskID, attemptID string, completedBytes int64) error {
+	return newWiredService().HeartbeatTask(userID, taskID, attemptID, completedBytes)
 }
 
-func ReportProgress(credential, taskID string, completedBytes, bytesPerSecond int64) error {
-	return newWiredService().ReportProgress(credential, taskID, completedBytes, bytesPerSecond)
+func ReportProgress(userID int64, taskID, attemptID string, completedBytes, bytesPerSecond int64) error {
+	return newWiredService().ReportProgress(userID, taskID, attemptID, completedBytes, bytesPerSecond)
 }
 
-func CompleteTask(credential, taskID string, body dto.CompletionRequest) (dto.TransferTerminal, error) {
-	return newWiredService().CompleteTask(credential, taskID, body)
+func CompleteTask(userID int64, taskID, attemptID string, body dto.CompletionRequest) (dto.TransferTerminal, error) {
+	return newWiredService().CompleteTask(userID, taskID, attemptID, body)
 }

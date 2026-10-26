@@ -1,102 +1,109 @@
-// Package profileguard composes the sensitive Profile guard module.
+// Package profileguard 暴露敏感 Profile 守卫的 HTTP 接口。
 package profileguard
 
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	guardservice "github.com/wt-media/wt-media-cloud/internal/modules/profileguard/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
-type nodeRequest struct {
-	NodeID string `json:"node_id"`
+type preflightRequest struct {
+	Facts executionpreflight.FactsInput `json:"facts"`
 }
+
 type renewRequest struct {
-	NodeID       string `json:"node_id"`
-	LeaseSeconds int    `json:"lease_seconds"`
+	LeaseSeconds int `json:"lease_seconds"`
 }
+
 type finishRequest struct {
-	NodeID  string                     `json:"node_id"`
 	Outcome guardservice.FinishOutcome `json:"outcome"`
 }
 
+// Preflight 是新操作：严格档证明 Desktop 会话仍是当前会话，许可归 Token 用户。
 func Preflight(ctx context.Context, c *hertzapp.RequestContext) {
-	var req nodeRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	credential, ok := bearerCredential(string(c.Request.Header.Peek("Authorization")))
+	auth, ok := localagent.AgentAuthFrom(c)
 	if !ok {
-		writeGuardError(c, runtimeservice.ErrNodeCredentialInvalid)
+		api.InternalError(c, "Profile 守卫服务内部错误")
 		return
 	}
-	outcome, err := guardservice.Preflight(req.NodeID, credential, c.Param("task_id"))
+	var req preflightRequest
+	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {
+		return
+	}
+	outcome, err := guardservice.Preflight(authUserID(auth), c.Param("task_id"), guardservice.PreflightInput{
+		AgentFacts:          req.Facts.AgentFacts(),
+		DesktopSessionValid: true,
+	})
 	if err != nil {
 		writeGuardError(c, err)
 		return
 	}
 	api.Success(c, outcome)
 }
-func Renew(ctx context.Context, c *hertzapp.RequestContext) {
+
+// Renew 与 Finish 走上报档：许可已经持有，即使账号在别处登录，也要能收尾。
+// permit id 不是凭证，Token 用户必须与许可行一致。
+func Renew(_ context.Context, c *hertzapp.RequestContext) {
+	auth, ok := localagent.AgentAuthFrom(c)
+	if !ok {
+		api.InternalError(c, "Profile 守卫服务内部错误")
+		return
+	}
 	var req renewRequest
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	nodeCredential, ok := bearerCredential(string(c.Request.Header.Peek("Authorization")))
-	permitCredential := strings.TrimSpace(string(c.Request.Header.Peek("X-Profile-Permit")))
-	if !ok || permitCredential == "" {
-		writeGuardError(c, guardservice.ErrPermitCredentialInvalid)
-		return
-	}
-	expiresAt, err := guardservice.Renew(req.NodeID, nodeCredential, c.Param("permit_id"), permitCredential, time.Duration(req.LeaseSeconds)*time.Second)
+	expiresAt, err := guardservice.Renew(authUserID(auth), c.Param("permit_id"), time.Duration(req.LeaseSeconds)*time.Second)
 	if err != nil {
 		writeGuardError(c, err)
 		return
 	}
 	api.Success(c, map[string]any{"status": "renewed", "expires_at": expiresAt})
 }
-func Finish(ctx context.Context, c *hertzapp.RequestContext) {
+
+func Finish(_ context.Context, c *hertzapp.RequestContext) {
+	auth, ok := localagent.AgentAuthFrom(c)
+	if !ok {
+		api.InternalError(c, "Profile 守卫服务内部错误")
+		return
+	}
 	var req finishRequest
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	nodeCredential, ok := bearerCredential(string(c.Request.Header.Peek("Authorization")))
-	permitCredential := strings.TrimSpace(string(c.Request.Header.Peek("X-Profile-Permit")))
-	if !ok || permitCredential == "" {
-		writeGuardError(c, guardservice.ErrPermitCredentialInvalid)
-		return
-	}
-	if err := guardservice.Finish(req.NodeID, nodeCredential, c.Param("permit_id"), permitCredential, req.Outcome); err != nil {
+	if err := guardservice.Finish(authUserID(auth), c.Param("permit_id"), req.Outcome); err != nil {
 		writeGuardError(c, err)
 		return
 	}
 	api.NoContent(c)
 }
 
-func bearerCredential(header string) (string, bool) {
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		return "", false
-	}
-	value := strings.TrimSpace(strings.TrimPrefix(header, prefix))
-	return value, value != ""
+func authUserID(auth localagent.AgentAuth) identityservice.UserID {
+	return identityservice.UserID(auth.Claims.UserID)
 }
 
 func writeGuardError(c *hertzapp.RequestContext, err error) {
+	var failure *executionpreflight.Failure
+	if errors.As(err, &failure) {
+		executionpreflight.WriteFailure(c, failure)
+		return
+	}
 	switch {
-	case errors.Is(err, runtimeservice.ErrNodeCredentialInvalid), errors.Is(err, runtimeservice.ErrBoundSessionInvalid), errors.Is(err, guardservice.ErrPermitCredentialInvalid):
-		api.Unauthorized(c, 11001, "凭证无效，请重新登录")
+	case errors.Is(err, guardservice.ErrPermitInvalid):
+		api.ConflictNamed(c, 23003, "Profile 操作许可已失效", "profile_permit_invalid")
 	case errors.Is(err, guardservice.ErrInvalidInput):
 		api.BadRequest(c, 10001, "敏感任务预检请求格式错误")
 	case errors.Is(err, guardservice.ErrTaskNotFound):
 		api.NotFound(c, 20004, "敏感任务不存在")
 	case errors.Is(err, guardservice.ErrTaskAssignmentMismatch):
-		api.Forbidden(c, 11003, "敏感任务未分配给此节点")
+		api.Forbidden(c, 11003, "敏感任务与当前用户或 Profile 不匹配")
 	case errors.Is(err, guardservice.ErrRuntimeUnavailable):
 		api.Conflict(c, 23003, "Profile 运行环境不可用")
 	default:

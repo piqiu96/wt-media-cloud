@@ -140,10 +140,12 @@ func TestInitializeWorkerInitializesOnlyDouyinHTTPClient(t *testing.T) {
 // synthetic steps, so the real plan could lose a step and nothing would say so.
 // `storage` is the one that matters most — a claim mints the lease's download
 // grant, so a server without the store answers every claim with an internal
-// error, and the failure would look like the executor's.
-func TestInitializeServerPlanCarriesStorage(t *testing.T) {
+// error, and the failure would look like the executor's. `agent_token` publishes
+// the signer every Agent route verifies against; without it those routes answer
+// 500 instead of checking a credential.
+func TestInitializeServerPlanCarriesStorageAndTheAgentTokenSigner(t *testing.T) {
 	names := resourceStepNames(serverResourcePlan())
-	want := []string{"config", "logger", "metrics", "tracing", "database", "storage", "clients"}
+	want := []string{"config", "agent_token", "bit_browser", "logger", "metrics", "tracing", "database", "storage", "clients"}
 	assertOrder(t, names, want)
 }
 

@@ -7,3 +7,6 @@ username = ''
 [server]
 http_addr = '127.0.0.1:8188'
 session_cookie_secure = false
+
+[bitbrowser]
+observation_fresh_for = '2m'

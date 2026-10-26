@@ -1,0 +1,53 @@
+openapi: 3.1.0
+info:
+  title: WT Media Agent Token API
+  version: 2026.10.23.1
+  description: >
+    A Desktop session exchanges itself for a short-lived signed Agent Token that lets the
+    Local Agent on that machine act for the signed-in user. The token is stateless: Cloud
+    stores no row for it, and it is never written to disk. It is limited to the Agent API
+    listed in the cloud-agent contracts; a user business API refuses it, and an Agent route
+    refuses a user session.
+
+    `exp` is exactly the desktop session's `expires_at`, so a token cannot expire while
+    its login is still valid, and no refresh timer exists: a token is fetched on login,
+    on a session renewal, and on app or sidecar restart. Replacing the desktop session
+    invalidates the old token for new operations (strict mode) while leaving it able to
+    finish work already claimed (report-safe mode) until its `exp`.
+paths:
+  /api/v1/local-agent/agent-token:
+    post:
+      operationId: issueAgentToken
+      security: [{sessionCookie: []}]
+      summary: Exchange a Desktop session for an Agent Token.
+      description: >
+        Desktop sessions only; a web session is refused with DESKTOP_LOGIN_REQUIRED
+        because a token exists to let this machine's Agent act for a Desktop login. The
+        token is HMAC-SHA256 signed, shaped `v1.<base64url(payload)>.<base64url(sig)>`,
+        and carries `{ver, sub, sid, scope:"agent", iat, exp, jti}`. Signing with any other
+        version, scope, signature or expiry is refused.
+      responses:
+        '200':
+          description: The token and the moment it expires.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentTokenResponse'}
+        '401': {description: 'No valid session, or a web session (DESKTOP_LOGIN_REQUIRED).'}
+        '500': {description: The signer is not configured, or the audit write failed — no token is issued.}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  schemas:
+    AgentTokenResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [token, expires_at]
+          properties:
+            token: {type: string, description: Secret. Never persisted, never logged, never echoed back by any other endpoint.}
+            expires_at:
+              type: integer
+              format: int64
+              description: Unix seconds, equal to the desktop session's `expires_at`.

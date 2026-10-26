@@ -2,7 +2,7 @@
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from "vue"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
-import { cloudBaseUrl } from "../../../apps/desktop/features/local-agent/init.js"
+import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createProxyClient } from "../../../shared/api/proxy.js"
@@ -94,8 +94,6 @@ const batchProxyId = ref("")
 const batchProxyCandidates = ref([])
 const batchProxyBindingHint = ref("")
 const localProxyScan = ref(null)
-let lastRuntimeRefreshAt = 0
-let lastRuntimeStatus = null
 
 const currentUser = ref(null)
 const isDesktopClient = computed(() => isDesktop())
@@ -176,30 +174,15 @@ async function desktopLocalAgentService() {
   return createLocalAgentService({ invoke })
 }
 
-async function currentLocalNodeId() {
-  const service = await desktopLocalAgentService()
-  const status = await refreshRuntimeWithCooldown(service)
-  return status.node_id || ""
-}
-
-async function refreshRuntimeWithCooldown(service, { force = false } = {}) {
-  const now = Date.now()
-  if (!force && lastRuntimeStatus?.node_id && now - lastRuntimeRefreshAt < 60_000) {
-    return lastRuntimeStatus
-  }
-  const localStatus = await service.status()
-  try {
-    const refreshed = await service.refreshRuntime({ cloudBaseUrl: await cloudBaseUrl() })
-    lastRuntimeStatus = refreshed
-    lastRuntimeRefreshAt = now
-    return refreshed
-  } catch {
-    // 返回本地状态，由调用方根据 node_id 判断可信与友好提示，而不是抛原始错误。
-    taskNotice.value = "Cloud可信状态刷新暂时失败；将由本地状态与本机预检判断是否可执行。"
-    lastRuntimeStatus = localStatus
-    lastRuntimeRefreshAt = now
-    return localStatus
-  }
+// Agent 返回的扫描快照本身就是提交给 Cloud 的形状：主账号、观测时刻、窗口列表
+// 都来自同一次实读。页面只做搬运，不补字段——用 Cloud 缓存的主账号兜底会把
+// 「本机现在登录的是谁」换成一个更旧的答案。
+function submitSnapshot(snapshot) {
+  return bindingClient.submit({
+    main_user_id: snapshot?.main_user_id,
+    observed_at: snapshot?.observed_at,
+    profiles: snapshot?.profiles || [],
+  })
 }
 
 function diffCount(scan) {
@@ -213,17 +196,6 @@ function hasDiff(scan) {
 
 // 扫描抽屉页脚那两颗按钮的前提，同时决定页脚本身在不在（见模板上的 :footer）。
 const scanAcceptsChanges = computed(() => currentScan.value?.status === 'ready' && hasDiff(currentScan.value))
-
-function localTrustMessage(e) {
-  const message = String(e?.message || e || "")
-  if (e.errcode === 10001 || e.errcode === 23003 || e.errcode === 11001) {
-    return "当前电脑尚未完成本地环境确认，暂时不能扫描或操作浏览器窗口。请到 Desktop「环境检测」页刷新本机状态后重试。"
-  }
-  if (message.includes("timed out") || message.includes("timeout")) {
-    return "BitBrowser窗口操作超时：Local Agent 已请求 BitBrowser，但 BitBrowser 未在限定时间内返回。请查看 Agent 日志确认是否已延迟打开，或稍后重试。"
-  }
-  return message || "本机操作失败，请查看 Agent 日志。"
-}
 
 onMounted(async () => {
   try {
@@ -288,27 +260,20 @@ async function createProfile() {
   error.value = ""
   try {
     const localAgent = await desktopLocalAgentService()
-    const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
-    if (!status.node_id) {
-      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境检测」页绑定当前比特浏览器账号。")
-    }
     const created = await localAgent.profileCreate(newProfile.value)
-    const readback = created.snapshot || {}
-    const scan = await bindingClient.submit({
-      main_user_id: readback.main_user_id || currentUser.value?.bit_main_user_id || currentUser.value?.id,
-      profiles: readback.profiles || [],
-    }, { nodeId: status.node_id })
-    await bindingClient.confirm(scan.id || scan.scan_id, { nodeId: status.node_id })
+    if (!created.snapshot) throw new Error("BitBrowser 未返回创建后的窗口扫描结果，请重新扫描同步。")
+    const scan = await submitSnapshot(created.snapshot)
+    await bindingClient.confirm(scan.id || scan.scan_id)
     taskNotice.value = `已在BitBrowser创建窗口并读回同步到Cloud：${created.bit_profile_id}`
     showCreate.value = false
     newProfile.value = { name: "", group_id: "", group_name: "", remark: "" }
     identityError.value = ""
     await loadProfiles()
   } catch (e) {
-    if (e.errcode === 23002 || e.errcode === 23003) {
+    if (e?.code === 'BIT_MAIN_USER_MISMATCH') {
       identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
     }
-    createError.value = localTrustMessage(e)
+    createError.value = executionErrorMessage(e)
     error.value = createError.value
   } finally {
     creating.value = false
@@ -349,7 +314,7 @@ async function openProfile(profile) {
     taskNotice.value = `已打开BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     taskNotice.value = ""
-    error.value = localTrustMessage(e)
+    error.value = executionErrorMessage(e)
   } finally {
     operatingProfileId.value = ""
   }
@@ -379,7 +344,7 @@ async function closeProfile(profile) {
     taskNotice.value = `已关闭BitBrowser窗口：${profile.name || result.bit_profile_id}`
   } catch (e) {
     taskNotice.value = ""
-    error.value = localTrustMessage(e)
+    error.value = executionErrorMessage(e)
   } finally {
     operatingProfileId.value = ""
   }
@@ -408,6 +373,7 @@ async function runBatchWindow(targets, action) {
   error.value = ""
   let ok = 0
   let failed = 0
+  let firstFailure = ""
   try {
     const localAgent = await desktopLocalAgentService()
     for (const profile of targets) {
@@ -422,13 +388,15 @@ async function runBatchWindow(targets, action) {
           openStates.value[profile.id] = false
         }
         ok += 1
-      } catch {
+      } catch (e) {
         failed += 1
+        firstFailure ||= executionErrorMessage(e)
       }
     }
     taskNotice.value = `批量${action === "open" ? "打开" : "关闭"}完成：成功 ${ok} 个，失败 ${failed} 个。`
+    if (firstFailure) error.value = firstFailure
   } catch (e) {
-    error.value = localTrustMessage(e)
+    error.value = executionErrorMessage(e)
   } finally {
     batchOperating.value = ""
     selectedRowKeys.value = []
@@ -608,7 +576,7 @@ async function openCreateDialog() {
       createError.value = "未读取到BitBrowser分组，请确认BitBrowser已登录并至少存在一个分组。"
     }
   } catch (e) {
-    createError.value = localTrustMessage(e)
+    createError.value = executionErrorMessage(e)
     error.value = createError.value
   } finally {
     loadingGroups.value = false
@@ -624,15 +592,8 @@ async function triggerScan() {
   error.value = ""
   try {
     const localAgent = await desktopLocalAgentService()
-    const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
-    if (!status.node_id) {
-      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境检测」页绑定当前比特浏览器账号。")
-    }
     const snapshot = await localAgent.profileScan()
-    const scan = await bindingClient.submit({
-      main_user_id: snapshot.main_user_id || currentUser.value?.id,
-      profiles: snapshot.profiles || [],
-    }, { nodeId: status.node_id })
+    const scan = await submitSnapshot(snapshot)
     currentScan.value = scan
     localProxyScan.value = await proxyClient.previewLocalScan(scan.id || scan.scan_id)
     scanDetailVisible.value = true
@@ -640,10 +601,10 @@ async function triggerScan() {
     identityError.value = ""
     await loadProfiles()
   } catch (e) {
-    if (e.errcode === 23002 || e.errcode === 23003) {
+    if (e?.code === 'BIT_MAIN_USER_MISMATCH') {
       identityError.value = "当前比特浏览器登录账号与本系统用户绑定账号不一致。为避免数据错乱，请切换回正确的比特浏览器账号后重试。"
     }
-    error.value = e.message
+    error.value = executionErrorMessage(e)
   } finally {
     scanning.value = false
   }
@@ -682,16 +643,15 @@ async function confirmAcceptLocalChanges() {
   acceptingScan.value = true
   error.value = ""
   try {
-    const nodeId = await currentLocalNodeId()
-    currentScan.value = await bindingClient.confirm(currentScan.value.id || currentScan.value.scan_id, { nodeId })
+    currentScan.value = await bindingClient.confirm(currentScan.value.id || currentScan.value.scan_id)
     if (localProxyScan.value?.scan_id) {
-      await proxyClient.confirmLocalScan(localProxyScan.value.scan_id, nodeId)
+      await proxyClient.confirmLocalScan(localProxyScan.value.scan_id)
     }
     taskNotice.value = "已接受本地变化，Cloud浏览器窗口镜像已按允许字段更新。"
     acceptConfirmVisible.value = false
     await loadProfiles()
   } catch (e) {
-    error.value = localTrustMessage(e)
+    error.value = executionErrorMessage(e)
   } finally {
     acceptingScan.value = false
   }
@@ -742,23 +702,16 @@ async function confirmRestoreCloudConfig() {
   error.value = ""
   try {
     const localAgent = await desktopLocalAgentService()
-    const status = await refreshRuntimeWithCooldown(localAgent, { force: true })
-    if (!status.node_id) {
-      throw new Error("当前电脑尚未完成本地环境确认，请先到 Desktop「环境检测」页绑定当前比特浏览器账号。")
-    }
     const result = await localAgent.profileRestore(restoreTargets.value)
-    const readback = result.snapshot || {}
-    currentScan.value = await bindingClient.submit({
-      main_user_id: readback.main_user_id || currentUser.value?.id,
-      profiles: readback.profiles || [],
-    }, { nodeId: status.node_id })
+    if (!result.snapshot) throw new Error("BitBrowser 未返回写回后的窗口扫描结果，请重新扫描同步。")
+    currentScan.value = await submitSnapshot(result.snapshot)
     taskNotice.value = `已恢复 ${result.restored_count || restoreTargets.value.length} 个窗口的Cloud配置，并已读回验证。`
     restoreConfirmVisible.value = false
     restoreTargets.value = []
     selectedTab.value = "changed"
     await loadProfiles()
   } catch (e) {
-    error.value = localTrustMessage(e)
+    error.value = executionErrorMessage(e)
   } finally {
     restoringCloud.value = false
   }
@@ -798,11 +751,13 @@ function operatorLabel(userID) {
   return user ? user.username : (userID ? `UID ${userID}` : "-")
 }
 
+// 与 Cloud 的 maskMainUserID 同一条规则：留前 4 后 4，8 位以内整体隐去。
+// 主账号全文只在 Agent 与 Cloud 之间流转，页面上任何位置都只显示掩码。
 function maskMainUserId(value) {
   if (!value) return "-"
   const text = String(value)
-  if (text.length <= 8) return text
-  return `${text.slice(0, 4)}…${text.slice(-4)}`
+  if (text.length <= 8) return "****"
+  return `${text.slice(0, 4)}****${text.slice(-4)}`
 }
 
 function getDiff(scan) {
@@ -912,7 +867,11 @@ function changedFieldDetails(scan, bitProfileId) {
   const scanP = scan?.profiles?.find((p) => p.bit_profile_id === bitProfileId) || {}
   return fields.map((f) => {
     const label = CHANGED_FIELD_LABELS[f] || f
-    const format = (src) => (f === 'proxy_host' ? `${src.proxy_type || 'http'}://${src.proxy_host}:${src.proxy_port || 0}` : src[f]) || '-'
+    const format = (src) => {
+      // 主账号在差异里也只露掩码，页面不展示全文。
+      if (f === 'main_user_id') return maskMainUserId(src[f])
+      return (f === 'proxy_host' ? `${src.proxy_type || 'http'}://${src.proxy_host}:${src.proxy_port || 0}` : src[f]) || '-'
+    }
     return `${label}: ${format(cloud)} → ${format(scanP)}`
   }).join('\n')
 }

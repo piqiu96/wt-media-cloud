@@ -1,12 +1,8 @@
 // Desktop 本地 Agent 服务初始化
 // 分离自 main.ts，避免模块间循环引用
 
-import { createLocalAgentService, createMockLocalAgentService } from "./service.js"
-import { createLocalAgentStore } from "./store.js"
-import { createLocalAgentStatusPage } from "./local-agent-status.js"
-import { createSessionClient } from "../../../../shared/api/session.js"
-import { createProfileBindingClient } from "../../../../shared/api/profileBindings.js"
-import { createRuntimeBindingClient } from "../../../../shared/api/runtimeBinding.js"
+import { createLocalAgentService } from "./service.js"
+import { getSessionToken } from "../../../../shared/api/http.js"
 // Static import: a dynamic import() of a node_modules chunk does not resolve in
 // the packaged Tauri WebView ("Module name ... does not resolve to a valid file").
 import { invoke } from "@tauri-apps/api/core"
@@ -18,10 +14,10 @@ function isTauri() {
 export async function startDesktopLocalAgent({ tauri = isTauri(), invokeImpl = invoke } = {}) {
   if (!tauri) return false
   await createLocalAgentService({ invoke: invokeImpl }).start()
-  // A restart clears the Agent's in-memory node credential. The same bound
-  // installation may renew it using the current login, without manual binding.
-  void ensureTrustedLocalAgent().catch((error) => {
-    console.info('本机执行授权将在登录或下一次执行前恢复', error?.message || error)
+  // Agent 重启后内存里没有执行凭证，领不到任务。登录态还在就补一次；
+  // 没登录会在里面报「请先登录」，不该影响启动结果。
+  void ensureAgentToken({ tauri, invokeImpl }).catch((error) => {
+    console.info('本机执行凭证将在登录或下一次执行前获取', error?.message || error)
   })
   return true
 }
@@ -32,9 +28,9 @@ export const PUBLIC_CONFIG_COMMAND = "get_public_config"
 
 // The last answer `get_public_config` managed to give.
 //
-// At module scope because the answer outlives one call: binding and runtime
-// refresh are pressed at different moments, and the second press must not lose
-// the address the first one learned.
+// At module scope because the answer outlives one call: the token exchange and
+// every later press happen at different moments, and the second press must not
+// lose the address the first one learned.
 //
 // It starts empty, and stays empty if the native side never answers. Empty is
 // the honest failure value — the callers already report "Cloud地址为空" — and it
@@ -59,84 +55,48 @@ export async function cloudBaseUrl({ invokeImpl = invoke } = {}) {
   return lastKnownCloudBaseUrl
 }
 
-async function createDesktopStatusContext() {
-  const tauri = isTauri()
-  let service
-
-  if (tauri) {
-    service = createLocalAgentService({ invoke })
-  } else {
-    // Browser previews never contact a local Agent port. Only the Tauri Rust
-    // bridge can reach the Local Agent; non-Desktop contexts use mock facts.
-    service = createMockLocalAgentService()
+/**
+ * 用当前 Desktop 会话换一张 Agent Token，交给本机 Agent。
+ *
+ * 只在登录成功、应用启动、Agent 重启时调用；本进程已经持有就不再换。
+ * `force` 用于登录：新的 Desktop 会话对应新的 Token，旧 Token 的会话已被替换。
+ * 返回的是事实（有没有、何时过期），Token 本身不进页面。
+ */
+let pendingToken = null
+export function ensureAgentToken({ force = false, tauri = isTauri(), invokeImpl = invoke } = {}) {
+  if (!tauri) return Promise.resolve(null)
+  if (force) return configureAgentToken({ invokeImpl })
+  if (!pendingToken) {
+    pendingToken = configureAgentToken({ invokeImpl }).finally(() => { pendingToken = null })
   }
-
-  const store = createLocalAgentStore({ service })
-  await store.refresh()
-  const snapshot = store.snapshot()
-  let cloudUser = null
-  try {
-    cloudUser = await createSessionClient().me()
-  } catch {
-    cloudUser = null
-  }
-  return { service, store, snapshot, cloudUser, tauri }
+  return pendingToken
 }
 
-export async function createDesktopStatusPreview() {
-  const { snapshot, cloudUser, tauri } = await createDesktopStatusContext()
-  console.info(`wt-media-desktop local agent: ${snapshot.status}`)
-  return createLocalAgentStatusPage(snapshot, { cloudUser, canBindTrustedNode: tauri })
+async function configureAgentToken({ invokeImpl }) {
+  const service = createLocalAgentService({ invoke: invokeImpl })
+  const held = await service.tokenFacts().catch(() => null)
+  if (held?.configured) return held
+  const sessionToken = getSessionToken()
+  if (!sessionToken) {
+    throw new Error("请先登录运营平台，才能获取本机执行凭证")
+  }
+  const address = await cloudBaseUrl({ invokeImpl })
+  if (!address) {
+    throw new Error("Cloud地址为空，无法获取本机执行凭证")
+  }
+  return service.configureToken({ cloudBaseUrl: address, sessionToken })
 }
 
-export async function bindTrustedLocalAgent({ bindDevice = false } = {}) {
-  const { service, cloudUser, tauri } = await createDesktopStatusContext()
-  if (!tauri) {
-    throw new Error("请在Desktop应用内刷新本机可信状态")
-  }
-  if (!cloudUser) {
-    throw new Error("请先登录运营平台")
-  }
-  const localSnapshot = await service.profileScan()
-  const mainUserId = localSnapshot?.main_user_id || ""
-  if (!mainUserId) {
-    throw new Error("未读取到比特浏览器账号，请确认比特浏览器已登录后重新检测本机环境。")
-  }
-  try {
-    await createProfileBindingClient().confirmMainIdentityDirect(mainUserId)
-  } catch (error) {
-    if (error?.errcode === 23002) {
-      throw new Error("当前比特浏览器登录账号与系统绑定账号不一致，已阻止本机浏览器相关操作。请切换回已绑定的比特浏览器账号后重新检测；如果确实要改用当前账号，可在「个人信息 → 设备与本机环境」点「比特账号绑定」自助确认。")
-    }
-    throw error
-  }
-  // Asked once, here, rather than at each call site: both paths below need it,
-  // and reading it twice would let the two disagree if the config changed
-  // between them.
-  const address = await cloudBaseUrl()
-  const status = await service.status()
-  if (status.node_id) {
-    try {
-      await service.refreshRuntime({ cloudBaseUrl: address })
-      return createDesktopStatusPreview()
-    } catch (error) {
-      console.warn("刷新本机可信状态失败，将重新确认并绑定当前Desktop执行凭证", error)
-    }
-  }
-  const ticket = await createRuntimeBindingClient().createBindingTicket()
-  await service.bindSession({
-    bindingTicket: ticket.binding_token,
-    cloudBaseUrl: address,
-    bindDevice,
-  })
-  return createDesktopStatusPreview()
-}
-
-let pendingRenewal = null
-export function ensureTrustedLocalAgent() {
-  if (!isTauri()) return Promise.resolve(null)
-  if (!pendingRenewal) {
-    pendingRenewal = bindTrustedLocalAgent().finally(() => { pendingRenewal = null })
-  }
-  return pendingRenewal
+/**
+ * 让本机 Agent 实读 BitBrowser 主账号并请 Cloud 绑定。
+ *
+ * `rebind` 只在用户明确确认「换用当前账号」时为真；不一致会被 Cloud 以
+ * `BIT_MAIN_USER_MISMATCH` 拒绝，不自动重绑。失败时 reject 的是 Rust 的
+ * `GuardRefusal`，页面按 `code` 分支。
+ */
+export async function bindBitBrowser({ rebind = false, tauri = isTauri(), invokeImpl = invoke } = {}) {
+  if (!tauri) throw new Error("请在Desktop应用内绑定比特浏览器账号")
+  // 绑定走严格档，sidecar 手里得先有凭证；没有时会给出可读的登录提示。
+  await ensureAgentToken({ invokeImpl })
+  return createLocalAgentService({ invoke: invokeImpl }).bitAccountBind({ rebind })
 }

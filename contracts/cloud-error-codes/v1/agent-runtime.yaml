@@ -1,16 +1,16 @@
 schema_version: 1
-revision: "2026.10.02.1"
+revision: "2026.10.23.1"
+# A Local Agent authenticates with the Agent Token its Desktop session exchanged for.
+# There is no node credential, registration, or heartbeat: an Agent that cannot present
+# a live token simply fails closed.
 errors:
   authentication_required: {http_status: 401}
-  invalid_runtime_report: {http_status: 400}
-  runtime_binding_forbidden: {http_status: 403}
-  binding_ticket_invalid: {http_status: 401}
-  bound_session_invalid: {http_status: 401}
-  node_credential_invalid: {http_status: 401}
-  # 23003: the Profile a report or a scan names belongs to a bound user other
-  # than the one standing at this machine. Same environment confirmation
-  # (环境确认) gate as profile_runtime_unavailable: the user must confirm the
-  # environment (or switch back to the bound account) before local operations.
-  profile_runtime_ownership_mismatch: {http_status: 409, code: 23003}
+  auth_agent_token_invalid: {http_status: 401, code: 11001, retryable: false, recovery_action: reissue_agent_token}
+  auth_agent_token_expired: {http_status: 401, code: 11001, retryable: false, recovery_action: reissue_agent_token}
+  # The token is valid but bound to a desktop session that has since been replaced.
+  auth_desktop_replaced: {http_status: 401, code: 11001, retryable: false, recovery_action: login_again}
+  # No valid Desktop session remains, so no new local operation can be admitted.
+  desktop_login_required: {http_status: 401, code: 11001, retryable: false, recovery_action: login_desktop}
+  # An Agent Token was presented on a user-facing API; it is scoped to agent routes only.
+  agent_scope_forbidden: {http_status: 403, code: 11003, retryable: false, recovery_action: none}
   incompatible_agent_contract: {http_status: 409}
-  runtime_binding_store_error: {http_status: 500}

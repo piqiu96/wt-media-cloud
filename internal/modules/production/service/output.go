@@ -108,12 +108,10 @@ type ComposeOutputService struct {
 	strategies composeOutputTraceStrategySource
 	tasks      composeOutputTraceTaskSource
 	links      composeOutputLinker
-	// nodes and transfers are the download path's two dependencies. They are
-	// consumer-side interfaces in the same shapes the material download uses
-	// (LocalNodeResolver, TransferCreator), narrowed to the one call each — an
-	// output is never prepared in the cloud, so this service has no reason to
-	// name the preparation half of TransferCreator.
-	nodes     LocalNodeResolver
+	// transfers is the download path's only dependency: a consumer-side
+	// interface narrowed to the one call a download of an already-verified object
+	// needs — an output is never prepared in the cloud, so this service has no
+	// reason to name the preparation half of TransferCreator.
 	transfers outputTransferCreator
 	// resolveGame names the game a download is filed under, stubbed by the
 	// unit tests the same way the material download's is.
@@ -127,10 +125,10 @@ type outputTransferCreator interface {
 	CreateUserDownload(transferservice.CreateUserDownloadInput) (transferdto.Task, error)
 }
 
-func NewComposeOutputService(outputs ComposeOutputRepository, materials composeOutputTraceMaterialSource, usages composeOutputTraceUsageSource, strategies composeOutputTraceStrategySource, tasks composeOutputTraceTaskSource, links composeOutputLinker, nodes LocalNodeResolver, transfers outputTransferCreator) *ComposeOutputService {
+func NewComposeOutputService(outputs ComposeOutputRepository, materials composeOutputTraceMaterialSource, usages composeOutputTraceUsageSource, strategies composeOutputTraceStrategySource, tasks composeOutputTraceTaskSource, links composeOutputLinker, transfers outputTransferCreator) *ComposeOutputService {
 	return &ComposeOutputService{
 		outputs: outputs, materials: materials, usages: usages, strategies: strategies, tasks: tasks, links: links,
-		nodes: nodes, transfers: transfers, now: time.Now,
+		transfers: transfers, now: time.Now,
 		resolveGame: func(gameID string) (string, bool, error) {
 			game, ok, err := identity.ResolveGame(gameID)
 			return game.Name, ok, err
@@ -139,7 +137,7 @@ func NewComposeOutputService(outputs ComposeOutputRepository, materials composeO
 }
 
 func wiredComposeOutputService() *ComposeOutputService {
-	return NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{}, runtimeNodeResolver{}, productionTransferCreator{})
+	return NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{}, productionTransferCreator{})
 }
 
 func ListComposeOutputs(actor identity.PublicUser, input ListComposeOutputsInput) ([]model.CompositeOutput, error) {
@@ -294,21 +292,13 @@ func (s *ComposeOutputService) VideoURL(ctx context.Context, actor identity.Publ
 // has no title of its own, and the executor names its file from what the task
 // carries.
 //
-// The refusals mirror the material download's: the scope gate answers not-found
-// for an output the actor cannot see, and the download is never queued without
-// a node, because an executor claims on its own credential and a task with no
-// assignee would land on whichever machine polled first.
+// The refusal mirrors the material download's: the scope gate answers not-found
+// for an output the actor cannot see. The task carries no machine: any machine
+// the user is logged in on can claim it.
 func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task, error) {
 	output, err := s.readable(actor, id)
 	if err != nil {
 		return transferdto.Task{}, err
-	}
-	node, err := s.nodes.ResolveTrustedLocalNode(actor.ID)
-	if err != nil {
-		// Everything the resolver refuses means the same thing here, including a
-		// store failure: from this route's side there is no node to download to.
-		// The distinction is kept in the log, not in the response.
-		return transferdto.Task{}, ErrLocalNodeUnavailable
 	}
 	gameName := ""
 	if output.GameID != "" {
@@ -319,17 +309,15 @@ func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, i
 		}
 	}
 	task, err := s.transfers.CreateUserDownload(transferservice.CreateUserDownloadInput{
-		TeamID:           identity.TeamID(output.TeamID),
-		AssetType:        transfermodel.AssetCompositeOutput,
-		AssetID:          output.ID,
-		AssetTitle:       fmt.Sprintf("成片-%d", output.ID),
-		GameName:         gameName,
-		SourceObjectKey:  output.ObjectKey,
-		RequestedBy:      actor.ID,
-		AssignedNodeID:   node.ID,
-		AssignedDeviceID: node.DeviceID,
-		TotalBytes:       output.FileSizeBytes,
-		ExpectedSHA256:   output.SHA256,
+		TeamID:          identity.TeamID(output.TeamID),
+		AssetType:       transfermodel.AssetCompositeOutput,
+		AssetID:         output.ID,
+		AssetTitle:      fmt.Sprintf("成片-%d", output.ID),
+		GameName:        gameName,
+		SourceObjectKey: output.ObjectKey,
+		RequestedBy:     actor.ID,
+		TotalBytes:      output.FileSizeBytes,
+		ExpectedSHA256:  output.SHA256,
 	})
 	if err != nil {
 		if errors.Is(err, transferservice.ErrInvalidInput) {

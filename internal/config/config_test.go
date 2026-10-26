@@ -477,11 +477,56 @@ func TestClientAndCredentialConfigsAreIndependent(t *testing.T) {
 func TestSchedulerDurationsAndBatchSizeAreValidated(t *testing.T) {
 	dir := t.TempDir()
 	writeValidConfig(t, dir)
-	writeConfigFile(t, dir, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\ncompose_interval = \"30s\"\nworker_interval = \"5s\"\nworker_batch_size = 0\n")
+	writeConfigFile(t, dir, "scheduler/scheduler.toml", strings.Replace(validSchedulerTOML(), "worker_batch_size = 10", "worker_batch_size = 0", 1))
 
 	_, err := LoadFromDir(dir)
 	if err == nil || !strings.Contains(err.Error(), "worker_batch_size") {
 		t.Fatalf("LoadFromDir() error = %v, want worker_batch_size validation error", err)
+	}
+}
+
+func TestLoadFromDirReadsSessionCleanupSettings(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+
+	cfg, err := LoadFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadFromDir() error = %v", err)
+	}
+	if got, want := cfg.Scheduler.SessionCleanupInterval.Duration, time.Hour; got != want {
+		t.Fatalf("Session cleanup interval = %s, want %s", got, want)
+	}
+	if got, want := cfg.Scheduler.SessionCleanupRetention.Duration, 168*time.Hour; got != want {
+		t.Fatalf("Session cleanup retention = %s, want %s", got, want)
+	}
+	if got, want := cfg.Scheduler.SessionCleanupBatchSize, 500; got != want {
+		t.Fatalf("Session cleanup batch size = %d, want %d", got, want)
+	}
+}
+
+func TestSchedulerSessionCleanupSettingsAreValidated(t *testing.T) {
+	testCases := []struct {
+		name    string
+		old     string
+		new     string
+		wantKey string
+	}{
+		{name: "interval", old: "session_cleanup_interval = \"1h\"", new: "session_cleanup_interval = \"0s\"", wantKey: "session_cleanup_interval"},
+		{name: "retention", old: "session_cleanup_retention = \"168h\"", new: "session_cleanup_retention = \"-1h\"", wantKey: "session_cleanup_retention"},
+		{name: "batch size", old: "session_cleanup_batch_size = 500", new: "session_cleanup_batch_size = 0", wantKey: "session_cleanup_batch_size"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeValidConfig(t, dir)
+			toml := strings.Replace(validSchedulerTOML(), testCase.old, testCase.new, 1)
+			writeConfigFile(t, dir, "scheduler/scheduler.toml", toml)
+
+			_, err := LoadFromDir(dir)
+			if err == nil || !strings.Contains(err.Error(), testCase.wantKey) {
+				t.Fatalf("LoadFromDir() error = %v, want %s validation error", err, testCase.wantKey)
+			}
+		})
 	}
 }
 
@@ -602,11 +647,27 @@ func writeValidConfig(t *testing.T, root string) {
 	writeHTTPClient(t, root, "agent", "http", "127.0.0.1", 8765, "7s")
 	writeHTTPClient(t, root, "douyin", "https", "api.itfaba.com", 443, "30s")
 	writeConfigFile(t, root, "credentials/agent.toml", "auth_token = \"agent-token\"\n")
+	writeConfigFile(t, root, "credentials/agent_token.toml", validAgentTokenCredentialTOML())
 	writeConfigFile(t, root, "credentials/douyin.toml", "api_key = \"douyin-key\"\ncookie = \"douyin-cookie\"\n\n[headers]\n\"User-Agent\" = \"WT-Media-Cloud/1\"\n")
-	writeConfigFile(t, root, "scheduler/scheduler.toml", "proxy_expiry_interval = \"6h\"\ndiscovery_interval = \"1m\"\ncompose_interval = \"30s\"\nworker_interval = \"5s\"\nworker_batch_size = 10\n")
+	writeConfigFile(t, root, "scheduler/scheduler.toml", validSchedulerTOML())
 	writeConfigFile(t, root, "scheduler/compose.toml", validComposeWorkerTOML())
 	writeConfigFile(t, root, "media/ffmpeg.toml", "ffmpeg_path = \"/opt/homebrew/bin/ffmpeg\"\nffprobe_path = \"/opt/homebrew/bin/ffprobe\"\nversion = \"8.1.2\"\nrequired_encoders = [\"libx264\", \"aac\"]\n")
 	writeConfigFile(t, root, "storage/object_storage.toml", validObjectStorageTOML())
+}
+
+// validSchedulerTOML gives every scheduler knob a value: a missing key is a
+// zero value and fails startup, so the shared fixture must not omit any.
+func validSchedulerTOML() string {
+	return "proxy_expiry_interval = \"6h\"\n" +
+		"discovery_interval = \"1m\"\n" +
+		"compose_interval = \"30s\"\n" +
+		"worker_interval = \"5s\"\n" +
+		"worker_batch_size = 10\n" +
+		"task_recovery_interval = \"30s\"\n" +
+		"task_recovery_batch_size = 100\n" +
+		"session_cleanup_interval = \"1h\"\n" +
+		"session_cleanup_retention = \"168h\"\n" +
+		"session_cleanup_batch_size = 500\n"
 }
 
 // validComposeWorkerTOML gives every §5.2 knob a value: a config tree missing
@@ -650,6 +711,10 @@ func validAppTOML(name string) string {
 
 func validAppYAMLIgnored(name string) string {
 	return "name: " + name + "\nserver:\n  http_addr: 127.0.0.1:1\n  session_cookie_secure: true\ninitial_admin:\n  username: \"\"\n  password: \"\"\n"
+}
+
+func validAgentTokenCredentialTOML() string {
+	return "secret = \"test-agent-token-secret-with-at-least-32-characters\"\n"
 }
 
 func writeDatabaseConfig(t *testing.T, root, fileName, name string) {

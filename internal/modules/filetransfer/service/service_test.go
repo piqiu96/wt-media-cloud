@@ -15,7 +15,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/repository"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 // Task is the row the fixtures build. It is aliased here rather than exported
@@ -81,9 +80,10 @@ type memoryStore struct {
 		message   string
 	}
 	lastClaim struct {
-		taskID string
-		nodeID string
-		lease  time.Duration
+		taskID    string
+		userID    identityservice.UserID
+		claimedBy string
+		lease     time.Duration
 	}
 	counts map[string]int
 }
@@ -110,7 +110,7 @@ func TestHideDownloadHistoryRequiresOwnTerminalUserDownload(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newMemoryStore(tc.task)
-			svc := NewService(store, nil)
+			svc := NewService(store)
 			err := svc.HideDownloadHistory(actor, "t")
 			if !errors.Is(err, tc.want) || store.count("hide") != tc.writes {
 				t.Fatalf("err=%v writes=%d", err, store.count("hide"))
@@ -145,7 +145,7 @@ func (s *memoryStore) CreateTask(input repository.CreateTaskInput, now time.Time
 		ID: input.ID, TeamID: input.TeamID, AssetType: input.AssetType, AssetID: input.AssetID,
 		AssetTitle: input.AssetTitle, SourceObjectKey: input.SourceObjectKey, Purpose: input.Purpose,
 		ExecutionScope: input.ExecutionScope, Status: model.StatusPending, RequestedBy: input.RequestedBy,
-		AssignedNodeID: input.AssignedNodeID, TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
+		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -164,9 +164,8 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 		AssetTitle: input.AssetTitle, GameName: input.GameName, PublishedAt: input.PublishedAt,
 		SourceObjectKey: input.SourceObjectKey,
 		Purpose:         model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
-		Status: model.StatusPending, RequestedBy: input.RequestedBy, AssignedNodeID: input.AssignedNodeID,
-		AssignedDeviceID: input.AssignedDeviceID,
-		TotalBytes:       input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
+		Status: model.StatusPending, RequestedBy: input.RequestedBy,
+		TotalBytes: input.TotalBytes, ExpectedSHA256: input.ExpectedSHA256,
 		MaxAttempts: input.MaxAttempts, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
@@ -213,25 +212,27 @@ func (s *memoryStore) LatestUserDownloadStatuses(userID identityservice.UserID, 
 	return s.statusResult, nil
 }
 
-func (s *memoryStore) NextLocalTask(_ string, _ time.Time) (Task, bool, error) {
+func (s *memoryStore) NextLocalTask(userID identityservice.UserID, _ time.Time) (Task, bool, error) {
 	s.counts["next"]++
+	s.lastClaim.userID = userID
 	return s.candidate, s.candidateFound, s.nextErr
 }
 
-func (s *memoryStore) ClaimLocalTask(taskID, nodeID string, _ time.Time, lease time.Duration) (Task, bool, error) {
+func (s *memoryStore) ClaimLocalTask(taskID string, userID identityservice.UserID, claimedBy string, _ time.Time, lease time.Duration) (Task, bool, error) {
 	s.counts["claim"]++
-	s.lastClaim.taskID, s.lastClaim.nodeID, s.lastClaim.lease = taskID, nodeID, lease
+	s.lastClaim.taskID, s.lastClaim.userID, s.lastClaim.claimedBy, s.lastClaim.lease = taskID, userID, claimedBy, lease
 	if !s.claimOK {
 		return Task{}, false, nil
 	}
 	task := s.tasks[taskID]
 	task.Status = model.StatusRunning
-	task.ClaimedByNodeID = nodeID
+	task.ClaimedBy = claimedBy
+	task.AttemptID = attemptID
 	task.AttemptCount++
 	return task, true, nil
 }
 
-func (s *memoryStore) HeartbeatTask(string, string, time.Time, time.Duration) (bool, error) {
+func (s *memoryStore) HeartbeatTask(string, string, string, time.Time, time.Duration) (bool, error) {
 	s.counts["heartbeat"]++
 	return s.heartbeatOK, nil
 }
@@ -304,19 +305,6 @@ func (s *memoryStore) AttachCompletedDependency(taskID string, _ time.Time) (boo
 	return s.attachOK, nil
 }
 
-type stubNodes struct {
-	node           runtimeservice.AgentNode
-	err            error
-	calls          int
-	lastCredential string
-}
-
-func (s *stubNodes) AuthenticateNodeCredential(credential string) (runtimeservice.AgentNode, error) {
-	s.calls++
-	s.lastCredential = credential
-	return s.node, s.err
-}
-
 type stubGrants struct {
 	grant DownloadGrant
 	err   error
@@ -330,14 +318,12 @@ func (s *stubGrants) PresignGet(_ context.Context, objectKey string) (DownloadGr
 	return s.grant, s.err
 }
 
-const nodeID = "node-1"
+// The attempt a running fixture was claimed under. Every continuation call has
+// to present it; a report for a different attempt belongs to a previous executor.
+const attemptID = "attempt-1"
 
-func workingNode() NodeAuthenticator {
-	return &stubNodes{node: runtimeservice.AgentNode{ID: nodeID, UserID: identityservice.UserID(9)}}
-}
-
-func testService(store *memoryStore, nodes NodeAuthenticator, options ...Option) *Service {
-	return NewService(store, nodes, options...)
+func testService(store *memoryStore, options ...Option) *Service {
+	return NewService(store, options...)
 }
 
 func fixedClock(at time.Time) Option { return WithClock(func() time.Time { return at }) }
@@ -358,11 +344,12 @@ func testSHA(seed string) string { return strings.Repeat(seed, 64/len(seed)+1)[:
 
 func taskFixture(id string, status model.Status, user identityservice.UserID, team identityservice.TeamID) Task {
 	now := testNow()
-	// Only a running task is held by a node: a pending one has no claimant, and a
-	// fixture that claimed one for it would make the wrong-node refusal untestable.
+	// Only a running task is held by an executor: a pending one has no claimant,
+	// and a fixture that claimed one for it would make the wrong-executor refusal
+	// untestable.
 	claimedBy := ""
 	if status == model.StatusRunning {
-		claimedBy = nodeID
+		claimedBy = "user-9"
 	}
 	published := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
 	return Task{
@@ -370,20 +357,19 @@ func taskFixture(id string, status model.Status, user identityservice.UserID, te
 		GameName: "三角洲行动", PublishedAt: &published,
 		SourceObjectKey: "materials/42/deadbeef.mp4", Purpose: model.PurposeUserDownload,
 		ExecutionScope: model.ExecutionLocalAgent, Status: status, RequestedBy: user,
-		AssignedNodeID: nodeID, ClaimedByNodeID: claimedBy, TotalBytes: 1000, ExpectedSHA256: strings.Repeat("a", 64),
+		ClaimedBy: claimedBy, AttemptID: attemptID, TotalBytes: 1000, ExpectedSHA256: strings.Repeat("a", 64),
 		MaxAttempts: 3, CreatedAt: now, UpdatedAt: now,
 	}
 }
 
 // prepareFixture is a material's source preparation rather than a download: the
-// same row shape with the purpose and scope the worker claims it under, and no
-// assignee, because a Cloud task is leased by any worker rather than bound to the
-// node a download was queued for.
+// same row shape with the purpose and scope the worker claims it under; neither
+// executor is bound to a machine.
 func prepareFixture(id string, status model.Status, user identityservice.UserID, team identityservice.TeamID) Task {
 	task := taskFixture(id, status, user, team)
 	task.Purpose = model.PurposeComposeInputPrepare
 	task.ExecutionScope = model.ExecutionCloud
-	task.AssignedNodeID = ""
+	task.ClaimedBy = ""
 	return task
 }
 
@@ -391,7 +377,7 @@ func prepareFixture(id string, status model.Status, user identityservice.UserID,
 
 func TestListTasksAsksTheRepositoryForTheActingUser(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
@@ -414,7 +400,7 @@ func TestListTasksAsksTheRepositoryForTheActingUser(t *testing.T) {
 // operator was told they were downloading.
 func TestListTasksCarriesTheAssetTitleTheTaskWasCreatedWith(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
@@ -430,7 +416,7 @@ func TestListTasksCarriesTheAssetTitleTheTaskWasCreatedWith(t *testing.T) {
 // produced a file whose name is empty.
 func TestListTasksNullsTheOptionalFieldsThatHaveNoValueYet(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
@@ -450,7 +436,7 @@ func TestListTasksNullsTheOptionalFieldsThatHaveNoValueYet(t *testing.T) {
 
 func TestListTasksRefusesAnActorWithNoIdentity(t *testing.T) {
 	store := newMemoryStore()
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.ListTasks(identityservice.PublicUser{}, TaskListOptions{}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("ListTasks() error = %v", err)
@@ -465,7 +451,7 @@ func TestListTasksRefusesAnActorWithNoIdentity(t *testing.T) {
 // caller owns, not one the module re-derives.
 func TestListTasksPassesFinishedAfterToTheRepository(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusSuccess, 9, teamOf(7)))
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 	cutoff := testNow().Add(-90 * 24 * time.Hour)
 
 	_, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{FinishedAfter: &cutoff})
@@ -482,7 +468,7 @@ func TestListTasksPassesFinishedAfterToTheRepository(t *testing.T) {
 // would otherwise silently widen the window past what the caller meant.
 func TestListTasksMapsStatusesOntoTheEnumAndRejectsUnknownOnes(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Statuses: []string{"pending", "running"}}); err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
@@ -504,7 +490,7 @@ func TestListTasksMapsStatusesOntoTheEnumAndRejectsUnknownOnes(t *testing.T) {
 // caller does not ask.
 func TestListTasksUsesTheCallersLimitOrTheModuleDefault(t *testing.T) {
 	store := newMemoryStore()
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{Limit: 50}); err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
@@ -528,7 +514,7 @@ func TestListTasksCarriesFinishedAtForTerminalRows(t *testing.T) {
 	done := taskFixture("transfer-1", model.StatusSuccess, 9, teamOf(7))
 	done.FinishedAt = &finished
 	store := newMemoryStore(done)
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	items, err := service.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
@@ -540,7 +526,7 @@ func TestListTasksCarriesFinishedAtForTerminalRows(t *testing.T) {
 
 	running := taskFixture("transfer-2", model.StatusRunning, 9, teamOf(7))
 	store2 := newMemoryStore(running)
-	service2 := testService(store2, workingNode(), fixedClock(testNow()))
+	service2 := testService(store2, fixedClock(testNow()))
 	items2, err := service2.ListTasks(actorWith(9, teamOf(7)), TaskListOptions{})
 	if err != nil {
 		t.Fatalf("ListTasks() error = %v", err)
@@ -556,7 +542,7 @@ func TestListTasksCarriesFinishedAtForTerminalRows(t *testing.T) {
 func TestLatestUserDownloadStatusesPassesTheUserThroughAndRefusesNobody(t *testing.T) {
 	store := newMemoryStore()
 	store.statusResult = map[int64]string{42: "success"}
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	got, err := service.LatestUserDownloadStatuses(identityservice.UserID(9), []int64{42})
 	if err != nil {
@@ -582,7 +568,7 @@ func TestCancelTaskKeepsAnotherUsersTaskApartFromAnotherTeams(t *testing.T) {
 		taskFixture("other-team", model.StatusPending, 12, teamOf(8)),
 	)
 	store.cancelOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "colleague"); !errors.Is(err, ErrTaskForbidden) {
 		t.Fatalf("colleague error = %v, want forbidden", err)
@@ -604,7 +590,7 @@ func TestCancelTaskKeepsAnotherUsersTaskApartFromAnotherTeams(t *testing.T) {
 func TestCancelTaskAnswersWithTheRefreshedTaskNotTheRequest(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.cancelOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	body, err := service.CancelTask(actorWith(9, teamOf(7)), "transfer-1")
 	if err != nil {
@@ -628,7 +614,7 @@ func TestCancelTaskRefusesATaskThatIsAlreadyTerminal(t *testing.T) {
 	for _, status := range []model.Status{model.StatusSuccess, model.StatusFailed, model.StatusCancelled} {
 		store := newMemoryStore(taskFixture("transfer-1", status, 9, teamOf(7)))
 		store.cancelOK = true
-		service := testService(store, workingNode(), fixedClock(testNow()))
+		service := testService(store, fixedClock(testNow()))
 
 		if _, err := service.CancelTask(actorWith(9, teamOf(7)), "transfer-1"); !errors.Is(err, ErrTaskConflict) {
 			t.Fatalf("%s: error = %v, want conflict", status, err)
@@ -654,7 +640,7 @@ func TestCancelTaskRefusesATaskThatIsAlreadyTerminal(t *testing.T) {
 func TestCancellingAPreparationReleasesTheDownloadsWaitingOnIt(t *testing.T) {
 	store := newMemoryStore(prepareFixture("prepare-1", model.StatusPending, 9, teamOf(7)))
 	store.cancelOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "prepare-1"); err != nil {
 		t.Fatalf("CancelTask() error = %v", err)
@@ -682,7 +668,7 @@ func TestCancellingAPreparationReleasesTheDownloadsWaitingOnIt(t *testing.T) {
 func TestCancellingADownloadLeavesDependentsAlone(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusPending, 9, teamOf(7)))
 	store.cancelOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "transfer-1"); err != nil {
 		t.Fatalf("CancelTask() error = %v", err)
@@ -700,7 +686,7 @@ func TestCancellingAPreparationReportsAFailedWaiterRelease(t *testing.T) {
 	store := newMemoryStore(prepareFixture("prepare-1", model.StatusPending, 9, teamOf(7)))
 	store.cancelOK = true
 	store.failDependentsErr = errors.New("the dependent release did not land")
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	if _, err := service.CancelTask(actorWith(9, teamOf(7)), "prepare-1"); !errors.Is(err, store.failDependentsErr) {
 		t.Fatalf("CancelTask() error = %v, want the release failure", err)
@@ -719,9 +705,9 @@ func TestClaimTaskLeasesNothingWhenTheGrantCannotBeMinted(t *testing.T) {
 	store.candidateFound = true
 	store.claimOK = true
 	grants := &stubGrants{err: ErrGrantUnavailable}
-	service := testService(store, workingNode(), fixedClock(testNow()), WithGrantIssuer(grants))
+	service := testService(store, fixedClock(testNow()), WithGrantIssuer(grants))
 
-	if _, err := service.ClaimTask(context.Background(), "secret"); !errors.Is(err, ErrGrantUnavailable) {
+	if _, err := service.ClaimTask(context.Background(), 9); !errors.Is(err, ErrGrantUnavailable) {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
 	if store.count("claim") != 0 {
@@ -739,9 +725,9 @@ func TestClaimTaskRefusesAGrantWithoutAURL(t *testing.T) {
 	store.candidate = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
 	store.candidateFound = true
 	store.claimOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()), WithGrantIssuer(&stubGrants{}))
+	service := testService(store, fixedClock(testNow()), WithGrantIssuer(&stubGrants{}))
 
-	if _, err := service.ClaimTask(context.Background(), "secret"); !errors.Is(err, ErrGrantUnavailable) {
+	if _, err := service.ClaimTask(context.Background(), 9); !errors.Is(err, ErrGrantUnavailable) {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
 	if store.count("claim") != 0 {
@@ -753,9 +739,9 @@ func TestClaimTaskAnswersAnExplicitNullWhenThereIsNothingToDo(t *testing.T) {
 	store := newMemoryStore()
 	store.candidateFound = false
 	grants := &stubGrants{grant: DownloadGrant{URL: "https://example.invalid/x", ExpiresAt: testNow().Add(time.Minute)}}
-	service := testService(store, workingNode(), fixedClock(testNow()), WithGrantIssuer(grants))
+	service := testService(store, fixedClock(testNow()), WithGrantIssuer(grants))
 
-	result, err := service.ClaimTask(context.Background(), "secret")
+	result, err := service.ClaimTask(context.Background(), 9)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -775,9 +761,9 @@ func TestClaimTaskAnswersNullWhenTheClaimLosesItsRace(t *testing.T) {
 	store.candidateFound = true
 	store.claimOK = false
 	grants := &stubGrants{grant: DownloadGrant{URL: "https://example.invalid/x", ExpiresAt: testNow().Add(time.Minute)}}
-	service := testService(store, workingNode(), fixedClock(testNow()), WithGrantIssuer(grants))
+	service := testService(store, fixedClock(testNow()), WithGrantIssuer(grants))
 
-	result, err := service.ClaimTask(context.Background(), "secret")
+	result, err := service.ClaimTask(context.Background(), 9)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -797,9 +783,9 @@ func TestClaimTaskCarriesTheFactsTheExecutorNeeds(t *testing.T) {
 	store.claimOK = true
 	expires := testNow().Add(15 * time.Minute)
 	grants := &stubGrants{grant: DownloadGrant{URL: "https://example.invalid/get?sig=x", ExpiresAt: expires}}
-	service := testService(store, workingNode(), fixedClock(testNow()), WithGrantIssuer(grants), WithLease(90*time.Second))
+	service := testService(store, fixedClock(testNow()), WithGrantIssuer(grants), WithLease(90*time.Second))
 
-	result, err := service.ClaimTask(context.Background(), "secret")
+	result, err := service.ClaimTask(context.Background(), 9)
 	if err != nil {
 		t.Fatalf("ClaimTask() error = %v", err)
 	}
@@ -830,38 +816,60 @@ func TestClaimTaskCarriesTheFactsTheExecutorNeeds(t *testing.T) {
 	if lease.DownloadURL != "https://example.invalid/get?sig=x" || !lease.DownloadURLExpiresAt.Equal(expires) {
 		t.Fatalf("lease grant = %+v", lease)
 	}
-	if store.lastClaim.nodeID != nodeID || store.lastClaim.lease != 90*time.Second {
-		t.Fatalf("claim = %+v, want the node's own id and the configured lease", store.lastClaim)
+	if store.lastClaim.userID != 9 || store.lastClaim.claimedBy != "user-9" || store.lastClaim.lease != 90*time.Second {
+		t.Fatalf("claim = %+v, want the token's user and the configured lease", store.lastClaim)
 	}
 }
 
-// Only the two credential sentinels become "this node may not act". A fault of
-// ours must stay a fault of ours, or a database outage would answer every
-// executor with 401 and send the fleet to re-register for nothing.
-func TestClaimTaskKeepsAFailureOfOursApartFromARejectedCaller(t *testing.T) {
-	broken := errors.New("node table is unreachable")
-	for _, testCase := range []struct {
-		name string
-		err  error
-		want error
-	}{
-		{name: "unknown credential", err: runtimeservice.ErrNodeCredentialInvalid, want: ErrNodeUnauthenticated},
-		{name: "dead session", err: runtimeservice.ErrBoundSessionInvalid, want: ErrNodeUnauthenticated},
-		{name: "our own fault", err: broken, want: broken},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			store := newMemoryStore()
-			store.candidateFound = true
-			service := testService(store, &stubNodes{err: testCase.err}, fixedClock(testNow()))
+// A blank subject is not a user. The refusal happens before the candidate read,
+// because there is nothing to scope the query by and no task could be handed out
+// safely.
+func TestClaimTaskRefusesABlankUserWithoutTouchingTheStore(t *testing.T) {
+	store := newMemoryStore()
+	store.candidateFound = true
+	service := testService(store, fixedClock(testNow()))
 
-			_, err := service.ClaimTask(context.Background(), "secret")
-			if !errors.Is(err, testCase.want) {
-				t.Fatalf("error = %v, want %v", err, testCase.want)
-			}
-			if store.count("next") != 0 {
-				t.Fatalf("candidate read %d times, want none before the caller is identified", store.count("next"))
-			}
-		})
+	if _, err := service.ClaimTask(context.Background(), 0); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if len(store.counts) != 0 {
+		t.Fatalf("store was touched %v, want nothing without a subject", store.counts)
+	}
+}
+
+// A report belongs to the attempt that claimed the task. A token for the same
+// user but an earlier claim must not settle the work a newer attempt is doing.
+func TestCompleteTaskRefusesAReportForAnotherAttempt(t *testing.T) {
+	task := taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7))
+	store := newMemoryStore(task)
+	store.completeOK = true
+	service := testService(store, fixedClock(testNow()))
+
+	_, err := service.CompleteTask(9, task.ID, "attempt-0", CompletionRequest{
+		Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64),
+	})
+	if !errors.Is(err, ErrTaskConflict) {
+		t.Fatalf("error = %v, want conflict", err)
+	}
+	if store.count("complete") != 0 {
+		t.Fatalf("complete called %d times, want none for a stale attempt", store.count("complete"))
+	}
+}
+
+// Progress from a user who does not own the task answers not-found: knowing a
+// task id is not permission to read or write it.
+func TestReportProgressRefusesAnotherUsersTask(t *testing.T) {
+	task := taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7))
+	store := newMemoryStore(task)
+	store.progressOK = true
+	service := testService(store, fixedClock(testNow()))
+
+	err := service.ReportProgress(8, task.ID, attemptID, 250, 50)
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("error = %v, want not found", err)
+	}
+	if store.count("progress") != 0 {
+		t.Fatalf("progress called %d times, want none for another user", store.count("progress"))
 	}
 }
 
@@ -887,9 +895,9 @@ func TestHeartbeatDistinguishesAFinishedTaskFromALapsedLease(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			store := newMemoryStore(testCase.task)
 			store.heartbeatOK = false
-			service := testService(store, workingNode(), fixedClock(testNow()))
+			service := testService(store, fixedClock(testNow()))
 
-			err := service.HeartbeatTask("secret", testCase.task.ID, 100)
+			err := service.HeartbeatTask(9, testCase.task.ID, attemptID, 100)
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("error = %v, want %v", err, testCase.want)
 			}
@@ -900,12 +908,12 @@ func TestHeartbeatDistinguishesAFinishedTaskFromALapsedLease(t *testing.T) {
 func TestHeartbeatTaskRequiresANode(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.heartbeatOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	if err := service.HeartbeatTask("secret", "transfer-1", 100); err != nil {
+	if err := service.HeartbeatTask(9, "transfer-1", attemptID, 100); err != nil {
 		t.Fatalf("HeartbeatTask() error = %v", err)
 	}
-	if err := service.HeartbeatTask("secret", "transfer-1", -1); !errors.Is(err, ErrInvalidInput) {
+	if err := service.HeartbeatTask(9, "transfer-1", attemptID, -1); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("negative progress error = %v", err)
 	}
 	if store.count("heartbeat") != 1 {
@@ -919,9 +927,9 @@ func TestHeartbeatTaskRequiresANode(t *testing.T) {
 func TestReportProgressDerivesTheEstimateTheBodyCannotCarry(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.progressOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	if err := service.ReportProgress("secret", "transfer-1", 250, 50); err != nil {
+	if err := service.ReportProgress(9, "transfer-1", attemptID, 250, 50); err != nil {
 		t.Fatalf("ReportProgress() error = %v", err)
 	}
 	if store.lastProg.TotalBytes != 1000 {
@@ -930,7 +938,7 @@ func TestReportProgressDerivesTheEstimateTheBodyCannotCarry(t *testing.T) {
 	if store.lastProg.ETASeconds != 15 {
 		t.Fatalf("eta = %d, want (1000-250)/50", store.lastProg.ETASeconds)
 	}
-	if store.lastProg.TransferredBytes != 250 || store.lastProg.SpeedBytesPerSec != 50 || store.lastProg.NodeID != nodeID {
+	if store.lastProg.TransferredBytes != 250 || store.lastProg.SpeedBytesPerSec != 50 || store.lastProg.ClaimedBy != "user-9" || store.lastProg.AttemptID != attemptID {
 		t.Fatalf("progress = %+v", store.lastProg)
 	}
 }
@@ -954,9 +962,9 @@ func TestReportProgressLeavesTheEstimateEmptyWhenItCannotBeKnown(t *testing.T) {
 			task.TotalBytes = testCase.total
 			store := newMemoryStore(task)
 			store.progressOK = true
-			service := testService(store, workingNode(), fixedClock(testNow()))
+			service := testService(store, fixedClock(testNow()))
 
-			if err := service.ReportProgress("secret", "transfer-1", testCase.completed, testCase.speed); err != nil {
+			if err := service.ReportProgress(9, "transfer-1", attemptID, testCase.completed, testCase.speed); err != nil {
 				t.Fatalf("ReportProgress() error = %v", err)
 			}
 			if store.lastProg.ETASeconds != 0 {
@@ -969,12 +977,12 @@ func TestReportProgressLeavesTheEstimateEmptyWhenItCannotBeKnown(t *testing.T) {
 func TestReportProgressRefusesANegativeReading(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.progressOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	if err := service.ReportProgress("secret", "transfer-1", -1, 10); !errors.Is(err, ErrInvalidInput) {
+	if err := service.ReportProgress(9, "transfer-1", attemptID, -1, 10); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("error = %v", err)
 	}
-	if err := service.ReportProgress("secret", "transfer-1", 10, -1); !errors.Is(err, ErrInvalidInput) {
+	if err := service.ReportProgress(9, "transfer-1", attemptID, 10, -1); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("negative rate error = %v", err)
 	}
 	if store.count("progress") != 0 {
@@ -999,9 +1007,9 @@ func TestCompleteTaskRefusesASuccessThatDisagreesWithTheTask(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 			store.completeOK = true
-			service := testService(store, workingNode(), fixedClock(testNow()))
+			service := testService(store, fixedClock(testNow()))
 
-			_, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+			_, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{
 				Status: string(model.StatusSuccess), CompletedBytes: testCase.completed, SHA256: testCase.sha,
 			})
 			if !errors.Is(err, testCase.want) {
@@ -1020,10 +1028,10 @@ func TestCompleteTaskRefusesASuccessThatDisagreesWithTheTask(t *testing.T) {
 func TestCompleteTaskNormalisesTheChecksumItStores(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.completeOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	upper := strings.ToUpper(strings.Repeat("a", 64))
-	if _, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+	if _, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{
 		Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: upper, FileName: "演示素材-42.mp4",
 	}); err != nil {
 		t.Fatalf("CompleteTask() error = %v", err)
@@ -1045,9 +1053,9 @@ func TestCompleteTaskEnforcesTheFrozenOneSubdirectoryNamePattern(t *testing.T) {
 	for _, name := range []string{`a\b.mp4`, "a/b/c.mp4", "/abs.mp4", "a/b.mp4/", "a//b.mp4", strings.Repeat("x", 256)} {
 		store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 		store.completeOK = true
-		service := testService(store, workingNode(), fixedClock(testNow()))
+		service := testService(store, fixedClock(testNow()))
 
-		_, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+		_, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{
 			Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64), FileName: name,
 		})
 		if !errors.Is(err, ErrInvalidInput) {
@@ -1058,9 +1066,9 @@ func TestCompleteTaskEnforcesTheFrozenOneSubdirectoryNamePattern(t *testing.T) {
 	for _, name := range []string{"20261001/三角洲-31.mp4", "a/b.mp4"} {
 		store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 		store.completeOK = true
-		service := testService(store, workingNode(), fixedClock(testNow()))
+		service := testService(store, fixedClock(testNow()))
 
-		if _, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+		if _, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{
 			Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64), FileName: name,
 		}); err != nil {
 			t.Fatalf("name %q error = %v, want accepted", name, err)
@@ -1073,8 +1081,8 @@ func TestCompleteTaskEnforcesTheFrozenOneSubdirectoryNamePattern(t *testing.T) {
 	// frozen contract, and a task whose file name was already recorded keeps it.
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.completeOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
-	if _, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+	service := testService(store, fixedClock(testNow()))
+	if _, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{
 		Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64),
 	}); err != nil {
 		t.Fatalf("unnamed file error = %v", err)
@@ -1088,9 +1096,9 @@ func TestCompleteTaskWritesFailureThroughTheFailurePath(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.failOK = true
 	store.completeOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	terminal, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{
+	terminal, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{
 		Status: string(model.StatusCancelled), ErrorCode: "cancelled_by_user", ErrorMessage: "cancelled by user",
 	})
 	if err != nil {
@@ -1110,9 +1118,9 @@ func TestCompleteTaskWritesFailureThroughTheFailurePath(t *testing.T) {
 func TestCompleteTaskRequiresAnErrorCodeForAFailure(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
 	store.failOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	_, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{Status: string(model.StatusFailed)})
+	_, err := service.CompleteTask(9, "transfer-1", attemptID, CompletionRequest{Status: string(model.StatusFailed)})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("error = %v, want invalid input", err)
 	}
@@ -1121,18 +1129,18 @@ func TestCompleteTaskRequiresAnErrorCodeForAFailure(t *testing.T) {
 	}
 }
 
-func TestCompleteTaskRefusesATaskAnotherNodeHolds(t *testing.T) {
+func TestCompleteTaskRefusesATaskAnotherExecutorHolds(t *testing.T) {
 	held := taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7))
-	held.ClaimedByNodeID = "node-2"
+	held.ClaimedBy = "user-8"
 	released := taskFixture("released", model.StatusPending, 9, teamOf(7))
 
 	for _, task := range []Task{held, released} {
 		store := newMemoryStore(task)
 		store.completeOK = true
 		store.failOK = true
-		service := testService(store, workingNode(), fixedClock(testNow()))
+		service := testService(store, fixedClock(testNow()))
 
-		_, err := service.CompleteTask("secret", task.ID, CompletionRequest{
+		_, err := service.CompleteTask(9, task.ID, attemptID, CompletionRequest{
 			Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64),
 		})
 		if !errors.Is(err, ErrTaskConflict) {
@@ -1148,12 +1156,12 @@ func TestCompleteTaskRefusesATaskAnotherNodeHolds(t *testing.T) {
 
 func TestCreateTaskOwnsTheIdTheAssetTypeAndTheAttemptBound(t *testing.T) {
 	store := newMemoryStore()
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	body, err := service.CreateTask(CreateTaskInput{
 		TeamID: teamOf(7), AssetID: 42, AssetTitle: " 演示素材 ", SourceObjectKey: "materials/42/deadbeef.mp4",
 		Purpose: model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent, RequestedBy: 9,
-		AssignedNodeID: nodeID, TotalBytes: 1000, ExpectedSHA256: strings.ToUpper(strings.Repeat("a", 64)),
+		TotalBytes: 1000, ExpectedSHA256: strings.ToUpper(strings.Repeat("a", 64)),
 		DedupeKey: strings.Repeat("c", 64),
 	})
 	if err != nil {
@@ -1199,7 +1207,7 @@ func TestTheAttemptBoundMatchesTheSchemaDefault(t *testing.T) {
 
 func TestCreateTaskRefusesInputWithoutItsOwnScope(t *testing.T) {
 	store := newMemoryStore()
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
 	// The four facts that make a task addressable are this module's to check. The
 	// purpose-dependent ones — the object to download, its size and its hash — are
@@ -1229,9 +1237,9 @@ func TestTheDefaultGrantIssuerRefusesToMint(t *testing.T) {
 	store.candidate = taskFixture("transfer-1", model.StatusPending, 9, teamOf(7))
 	store.candidateFound = true
 	store.claimOK = true
-	service := testService(store, workingNode(), fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	if _, err := service.ClaimTask(context.Background(), "secret"); !errors.Is(err, ErrGrantUnavailable) {
+	if _, err := service.ClaimTask(context.Background(), 9); !errors.Is(err, ErrGrantUnavailable) {
 		t.Fatalf("ClaimTask() error = %v, want the unconfigured issuer's refusal", err)
 	}
 	if store.count("claim") != 0 {
@@ -1239,47 +1247,23 @@ func TestTheDefaultGrantIssuerRefusesToMint(t *testing.T) {
 	}
 }
 
-// A service built without an authenticator must not read "I could not check" as
-// "the caller is a node".
-func TestAServiceWithoutANodeAuthenticatorRefusesEveryExecutorCall(t *testing.T) {
+// Every continuation call requires both a subject and an attempt. The pair is
+// what identifies the caller's executor; neither half alone is enough.
+func TestContinuationCallsRefuseAMissingAttemptWithoutTouchingTheStore(t *testing.T) {
 	store := newMemoryStore(taskFixture("transfer-1", model.StatusRunning, 9, teamOf(7)))
-	store.candidateFound = true
-	store.claimOK = true
-	store.heartbeatOK = true
-	store.progressOK = true
-	store.completeOK = true
-	store.failOK = true
-	service := NewService(store, nil, fixedClock(testNow()))
+	service := testService(store, fixedClock(testNow()))
 
-	if _, err := service.ClaimTask(context.Background(), "secret"); !errors.Is(err, ErrNodeUnauthenticated) {
-		t.Fatalf("ClaimTask() error = %v", err)
-	}
-	if err := service.HeartbeatTask("secret", "transfer-1", 1); !errors.Is(err, ErrNodeUnauthenticated) {
+	if err := service.HeartbeatTask(9, "transfer-1", "", 1); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("HeartbeatTask() error = %v", err)
 	}
-	if err := service.ReportProgress("secret", "transfer-1", 1, 1); !errors.Is(err, ErrNodeUnauthenticated) {
+	if err := service.ReportProgress(9, "transfer-1", "", 1, 1); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("ReportProgress() error = %v", err)
 	}
-	if _, err := service.CompleteTask("secret", "transfer-1", CompletionRequest{Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64)}); !errors.Is(err, ErrNodeUnauthenticated) {
+	if _, err := service.CompleteTask(9, "transfer-1", "", CompletionRequest{Status: string(model.StatusSuccess), CompletedBytes: 1000, SHA256: strings.Repeat("a", 64)}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("CompleteTask() error = %v", err)
 	}
 	if len(store.counts) != 0 {
-		t.Fatalf("store was touched %v, want nothing before the caller is identified", store.counts)
-	}
-}
-
-// An empty credential never reaches the authenticator: there is nothing to look
-// up, and the answer is not in doubt.
-func TestAnEmptyCredentialIsRefusedWithoutAsking(t *testing.T) {
-	store := newMemoryStore()
-	nodes := &stubNodes{node: runtimeservice.AgentNode{ID: nodeID}}
-	service := testService(store, nodes, fixedClock(testNow()))
-
-	if _, err := service.ClaimTask(context.Background(), "   "); !errors.Is(err, ErrNodeUnauthenticated) {
-		t.Fatalf("ClaimTask() error = %v", err)
-	}
-	if nodes.calls != 0 {
-		t.Fatalf("authenticator asked %d times, want none for a blank credential", nodes.calls)
+		t.Fatalf("store was touched %v, want nothing without an attempt", store.counts)
 	}
 }
 
@@ -1290,18 +1274,16 @@ func TestAnEmptyCredentialIsRefusedWithoutAsking(t *testing.T) {
 // decision to whatever called it.
 func TestCreateUserDownloadFixesThePurposeTheScopeAndTheAttemptBound(t *testing.T) {
 	store := newMemoryStore()
-	svc := testService(store, workingNode())
+	svc := testService(store)
 
 	task, err := svc.CreateUserDownload(CreateUserDownloadInput{
-		TeamID:           7,
-		AssetID:          42,
-		AssetTitle:       "示例视频",
-		SourceObjectKey:  "materials/42/abc.mp4",
-		RequestedBy:      9,
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
-		TotalBytes:       1024,
-		ExpectedSHA256:   strings.Repeat("a", 64),
+		TeamID:          7,
+		AssetID:         42,
+		AssetTitle:      "示例视频",
+		SourceObjectKey: "materials/42/abc.mp4",
+		RequestedBy:     9,
+		TotalBytes:      1024,
+		ExpectedSHA256:  strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatalf("CreateUserDownload() error = %v", err)
@@ -1310,7 +1292,7 @@ func TestCreateUserDownloadFixesThePurposeTheScopeAndTheAttemptBound(t *testing.
 		t.Fatalf("the download path must not go through the generic create: %v", store.counts)
 	}
 	input := store.lastDownload
-	if input.TeamID != 7 || input.AssetID != 42 || input.RequestedBy != 9 || input.AssignedNodeID != "node-1" || input.AssignedDeviceID != "device-1" {
+	if input.TeamID != 7 || input.AssetID != 42 || input.RequestedBy != 9 {
 		t.Fatalf("download input = %+v", input)
 	}
 	if input.TotalBytes != 1024 || input.ExpectedSHA256 != strings.Repeat("a", 64) {
@@ -1335,12 +1317,12 @@ func TestCreateUserDownloadRefusesAnIncompleteIdentity(t *testing.T) {
 		name  string
 		input CreateUserDownloadInput
 	}{
-		{"no team", CreateUserDownloadInput{AssetID: 42, RequestedBy: 9, AssignedNodeID: "node-1"}},
-		{"no material", CreateUserDownloadInput{TeamID: 7, RequestedBy: 9, AssignedNodeID: "node-1"}},
-		{"no user", CreateUserDownloadInput{TeamID: 7, AssetID: 42, AssignedNodeID: "node-1"}},
+		{"no team", CreateUserDownloadInput{AssetID: 42, RequestedBy: 9}},
+		{"no material", CreateUserDownloadInput{TeamID: 7, RequestedBy: 9}},
+		{"no user", CreateUserDownloadInput{TeamID: 7, AssetID: 42}},
 	} {
 		store := newMemoryStore()
-		if _, err := testService(store, workingNode()).CreateUserDownload(testCase.input); !errors.Is(err, ErrInvalidInput) {
+		if _, err := testService(store).CreateUserDownload(testCase.input); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("%s: error = %v, want ErrInvalidInput", testCase.name, err)
 		}
 		if store.counts["createDownload"] != 0 {
@@ -1357,15 +1339,13 @@ func TestCreateUserDownloadRefusesAnIncompleteIdentity(t *testing.T) {
 // of the call.
 func TestCreateUserDownloadCarriesThePreparationItWaitsFor(t *testing.T) {
 	store := newMemoryStore()
-	svc := testService(store, workingNode())
+	svc := testService(store)
 
 	task, err := svc.CreateUserDownload(CreateUserDownloadInput{
 		TeamID:           7,
 		AssetID:          42,
 		AssetTitle:       "示例视频",
 		RequestedBy:      9,
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
 		DependencyTaskID: "transfer-prepare-1",
 	})
 	if err != nil {
@@ -1388,19 +1368,17 @@ func TestCreateUserDownloadCarriesThePreparationItWaitsFor(t *testing.T) {
 // applied at the far end would silently re-key nothing but surprises.
 func TestCreateUserDownloadCarriesTheAssetType(t *testing.T) {
 	store := newMemoryStore()
-	svc := testService(store, workingNode())
+	svc := testService(store)
 
 	_, err := svc.CreateUserDownload(CreateUserDownloadInput{
-		TeamID:           7,
-		AssetType:        model.AssetCompositeOutput,
-		AssetID:          5,
-		AssetTitle:       "成片-5",
-		SourceObjectKey:  "compose-outputs/55/output.mp4",
-		RequestedBy:      9,
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
-		TotalBytes:       1024,
-		ExpectedSHA256:   strings.Repeat("b", 64),
+		TeamID:          7,
+		AssetType:       model.AssetCompositeOutput,
+		AssetID:         5,
+		AssetTitle:      "成片-5",
+		SourceObjectKey: "compose-outputs/55/output.mp4",
+		RequestedBy:     9,
+		TotalBytes:      1024,
+		ExpectedSHA256:  strings.Repeat("b", 64),
 	})
 	if err != nil {
 		t.Fatalf("CreateUserDownload() error = %v", err)
@@ -1416,16 +1394,14 @@ func TestCreateUserDownloadCarriesTheAssetType(t *testing.T) {
 // claims, so the refusal has to happen while the caller can still be told.
 func TestCreateUserDownloadDefaultsAndRefusesTheAssetType(t *testing.T) {
 	store := newMemoryStore()
-	_, err := testService(store, workingNode()).CreateUserDownload(CreateUserDownloadInput{
-		TeamID:           7,
-		AssetID:          42,
-		AssetTitle:       "示例视频",
-		SourceObjectKey:  "materials/42/abc.mp4",
-		RequestedBy:      9,
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
-		TotalBytes:       1024,
-		ExpectedSHA256:   strings.Repeat("a", 64),
+	_, err := testService(store).CreateUserDownload(CreateUserDownloadInput{
+		TeamID:          7,
+		AssetID:         42,
+		AssetTitle:      "示例视频",
+		SourceObjectKey: "materials/42/abc.mp4",
+		RequestedBy:     9,
+		TotalBytes:      1024,
+		ExpectedSHA256:  strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatalf("CreateUserDownload() error = %v", err)
@@ -1435,14 +1411,12 @@ func TestCreateUserDownloadDefaultsAndRefusesTheAssetType(t *testing.T) {
 	}
 
 	refused := newMemoryStore()
-	_, err = testService(refused, workingNode()).CreateUserDownload(CreateUserDownloadInput{
-		TeamID:           7,
-		AssetType:        model.AssetType("recipe"),
-		AssetID:          42,
-		AssetTitle:       "示例视频",
-		RequestedBy:      9,
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
+	_, err = testService(refused).CreateUserDownload(CreateUserDownloadInput{
+		TeamID:      7,
+		AssetType:   model.AssetType("recipe"),
+		AssetID:     42,
+		AssetTitle:  "示例视频",
+		RequestedBy: 9,
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("unknown asset type: error = %v, want ErrInvalidInput", err)
@@ -1457,7 +1431,7 @@ func TestCreateUserDownloadDefaultsAndRefusesTheAssetType(t *testing.T) {
 // of them wrong at once is a task no worker would ever claim.
 func TestEnsureMaterialSourcePrepareQueuesACloudPreparation(t *testing.T) {
 	store := newMemoryStore()
-	svc := testService(store, workingNode())
+	svc := testService(store)
 
 	task, err := svc.EnsureMaterialSourcePrepare(EnsureMaterialSourcePrepareInput{
 		TeamID:      7,
@@ -1500,7 +1474,7 @@ func TestEnsureMaterialSourcePrepareRefusesAnIncompleteIdentity(t *testing.T) {
 		{"no user", EnsureMaterialSourcePrepareInput{TeamID: 7, AssetID: 42}},
 	} {
 		store := newMemoryStore()
-		if _, err := testService(store, workingNode()).EnsureMaterialSourcePrepare(testCase.input); !errors.Is(err, ErrInvalidInput) {
+		if _, err := testService(store).EnsureMaterialSourcePrepare(testCase.input); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("%s: error = %v, want ErrInvalidInput", testCase.name, err)
 		}
 		if store.counts["createPrepare"] != 0 {
@@ -1517,7 +1491,7 @@ func TestAttachCompletedDependencyReturnsTheRepairedRow(t *testing.T) {
 	sha := "8f14e45fceea167a5a36dedd4bea2543a1b2c3d4e5f60718293a4b5c6d7e8f90"
 	store := newMemoryStore(model.Task{ID: "transfer-1", Status: model.StatusPending, TotalBytes: 2048, IntegritySHA256: sha})
 	store.attachOK = true
-	svc := testService(store, nil)
+	svc := testService(store)
 
 	task, attached, err := svc.AttachCompletedDependency("transfer-1")
 	if err != nil {
@@ -1539,7 +1513,7 @@ func TestAttachCompletedDependencyReturnsTheRepairedRow(t *testing.T) {
 // the pending body it already has and the scheduled sweep retries later.
 func TestAttachCompletedDependencyReportsAnUnfinishedPreparation(t *testing.T) {
 	store := newMemoryStore(model.Task{ID: "transfer-1", Status: model.StatusPending})
-	svc := testService(store, nil)
+	svc := testService(store)
 
 	task, attached, err := svc.AttachCompletedDependency("transfer-1")
 	if err != nil {
@@ -1555,7 +1529,7 @@ func TestAttachCompletedDependencyReportsAnUnfinishedPreparation(t *testing.T) {
 
 func TestAttachCompletedDependencyRefusesAnEmptyTaskID(t *testing.T) {
 	store := newMemoryStore()
-	svc := testService(store, nil)
+	svc := testService(store)
 
 	_, _, err := svc.AttachCompletedDependency("   ")
 	if !errors.Is(err, ErrInvalidInput) {

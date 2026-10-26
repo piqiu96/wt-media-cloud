@@ -3,15 +3,16 @@ package identity
 import (
 	"context"
 	"errors"
-	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"strconv"
 	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
@@ -44,9 +45,10 @@ func sessionCookieMode(origin string, defaultSecure bool) (protocol.CookieSameSi
 }
 
 type loginRequest struct {
-	Username        string `json:"username"`
-	Password        string `json:"password"`
-	ReplaceExisting bool   `json:"replace_existing"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	ReplaceExisting  bool   `json:"replace_existing"`
+	ReplaceSessionID string `json:"replace_session_id"`
 }
 
 type createUserRequest struct {
@@ -101,11 +103,6 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	username := strings.TrimSpace(req.Username)
-	if context, err := identityservice.AuthenticateContext(sessionToken(c)); err == nil && context.User.Username == username {
-		hlog.CtxInfof(ctx, "module=identity action=login result=already_authenticated username=%q user_id=%d ip=%s", username, context.User.ID, c.ClientIP())
-		api.Success(c, context.User)
-		return
-	}
 	// Session client_type is inferred from the Origin (Tauri WebView -> desktop,
 	// anything else -> web), the same signal already used below to decide between
 	// the token and cookie paths. It is not a client-declared field.
@@ -113,7 +110,11 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 	if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
 		clientType = identityservice.ClientTypeDesktop
 	}
-	result, err := identityservice.LoginWithOptions(username, req.Password, identityservice.LoginOptions{ReplaceExisting: req.ReplaceExisting, ClientType: clientType})
+	result, err := identityservice.LoginWithOptions(username, req.Password, identityservice.LoginOptions{
+		ReplaceExisting:  req.ReplaceExisting,
+		ReplaceSessionID: req.ReplaceSessionID,
+		ClientType:       clientType,
+	})
 	if err != nil {
 		hlog.CtxWarnf(
 			ctx,
@@ -125,16 +126,24 @@ func Login(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	hlog.CtxInfof(
 		ctx,
-		"module=identity action=login result=ok username=%q user_id=%d client_type=%s origin=%q ip=%s",
-		username, result.User.ID, clientType, string(c.GetHeader("Origin")), c.ClientIP(),
+		"module=identity action=login result=ok username=%q user_id=%d client_type=%s session_id=%s origin=%q ip=%s",
+		username, result.User.ID, clientType, result.SessionID, string(c.GetHeader("Origin")), c.ClientIP(),
 	)
 	sameSite, secure := sessionCookieMode(string(c.GetHeader("Origin")), config.Get().App.Server.SessionCookieSecure)
-	c.SetCookie(middleware.SessionCookieName, result.Token, 0, "/", "", sameSite, secure, true)
+	maxAge := int(time.Until(result.ExpiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	c.SetCookie(middleware.SessionCookieName, result.Token, maxAge, "/", "", sameSite, secure, true)
 	if isLocalDesktopOrigin(string(c.GetHeader("Origin"))) {
 		// Packaged Desktop cannot round-trip the cross-site cookie, so it
 		// receives the session token in the body and sends it back as the
 		// X-Session-Token header. Cloud Web keeps the HttpOnly cookie path.
-		api.Success(c, map[string]any{"user": result.User, "token": result.Token})
+		api.Success(c, map[string]any{
+			"user":       result.User,
+			"token":      result.Token,
+			"expires_at": result.ExpiresAt,
+		})
 		return
 	}
 	api.Success(c, result.User)
@@ -172,6 +181,23 @@ func Logout(ctx context.Context, c *hertzapp.RequestContext) {
 	c.SetCookie(middleware.SessionCookieName, "", -1, "/", "", sameSite, secure, true)
 	api.NoContent(c)
 }
+func ForceLogout(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	userID, valid := parseUserID(c.Param("user_id"))
+	if !valid {
+		writeIdentityError(c, identityservice.ErrInvalidInput)
+		return
+	}
+	if err := identityservice.ForceLogout(actor.ID, userID); err != nil {
+		writeIdentityError(c, err)
+		return
+	}
+	api.NoContent(c)
+}
+
 func CreateUser(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -544,8 +570,8 @@ func loginFailureReason(err error) string {
 		return "invalid_login_input"
 	case errors.Is(err, identityservice.ErrAuthenticationFailed):
 		return "invalid_credentials"
-	case errors.Is(err, identityservice.ErrSessionReplaceNeeded):
-		return "session_replace_needed"
+	case errors.Is(err, identityservice.ErrDesktopLoginConflict):
+		return "desktop_login_conflict"
 	case errors.Is(err, identityservice.ErrForbidden):
 		return "forbidden"
 	default:
@@ -561,16 +587,22 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 		api.BadRequest(c, 10006, "账号最长 64 位，密码需为 6-72 位")
 	case errors.Is(err, identityservice.ErrAuthenticationFailed):
 		api.Unauthorized(c, 11004, "账号或密码不正确")
-	case errors.Is(err, identityservice.ErrSessionInvalid):
-		api.Unauthorized(c, 11001, "请先登录或凭证已过期")
+	case errors.Is(err, identityservice.ErrDesktopLoginConflict):
+		activeSessionID := ""
+		var conflict *identityservice.DesktopLoginConflictError
+		if errors.As(err, &conflict) {
+			activeSessionID = conflict.ActiveSessionID
+		}
+		api.FailureCode(c, 409, 20010, "该账号已在另一台电脑登录 Desktop，是否继续？", "DESKTOP_LOGIN_CONFLICT",
+			map[string]any{"active_session_id": activeSessionID}, false, "confirm_desktop_takeover")
 	case errors.Is(err, identityservice.ErrForbidden):
 		api.Forbidden(c, 11003, "没有权限执行此操作")
 	case errors.Is(err, identityservice.ErrUsernameTaken):
 		api.Conflict(c, 20001, "用户名已被使用")
 	case errors.Is(err, identityservice.ErrTeamNameTaken):
-		api.Conflict(c, 20002, "分组名称已被使用")
+		api.Conflict(c, 20002, "团队名称已被使用")
 	case errors.Is(err, identityservice.ErrTeamInUse):
-		api.Conflict(c, 20003, "该分组下还有用户或业务引用，不能删除，请先转移用户")
+		api.Conflict(c, 20003, "该团队下还有用户或业务引用，不能删除，请先转移用户")
 	case errors.Is(err, identityservice.ErrGameIDTaken):
 		api.Conflict(c, 20006, "游戏ID已被使用")
 	case errors.Is(err, identityservice.ErrInvalidGameID):
@@ -583,11 +615,13 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 		api.BadRequest(c, 10002, "请选择已启用的游戏")
 	case errors.Is(err, identityservice.ErrPasswordTooShort):
 		api.BadRequest(c, 10003, "密码至少需要6位")
-	case errors.Is(err, identityservice.ErrSessionReplaceNeeded):
-		api.Conflict(c, 20010, "当前账号已在其他位置登录，请确认是否替换旧会话")
 	case errors.Is(err, identityservice.ErrInvalidInput), errors.Is(err, identityservice.ErrBootstrapUnavailable):
-		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、分组、游戏ID或状态")
+		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、团队、游戏ID或状态")
 	default:
+		if failure, ok := identityservice.DescribeAuthFailure(err); ok {
+			api.FailureCode(c, 401, 11001, failure.Message, failure.Code, nil, false, failure.RecoveryAction)
+			return
+		}
 		hlog.Errorf(
 			"module=identity result=error path=%s method=%s ip=%s reason=internal error=%v",
 			string(c.Path()), string(c.Method()), c.ClientIP(), err,

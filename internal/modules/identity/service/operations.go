@@ -27,8 +27,24 @@ func AuthenticateContext(token string) (AuthContext, error) {
 	return newService(mysqlStore{}).AuthenticateContext(token)
 }
 
+func AuthenticateAgentSession(sessionID string) (AuthContext, error) {
+	return newService(mysqlStore{}).AuthenticateAgentSession(sessionID)
+}
+
+// AuditAgentTokenIssued records the issuance event only. The token itself is
+// never persisted, so the audit summary must never contain it.
+func AuditAgentTokenIssued(userID UserID, sessionID string) error {
+	return newService(mysqlStore{}).audit(userID, "local_agent.agent_token.issue", "user", userID, map[string]string{
+		"session_id": sessionID,
+	})
+}
+
 func Logout(token string) error {
 	return newService(mysqlStore{}).Logout(token)
+}
+
+func ForceLogout(actorID, userID UserID) error {
+	return newService(mysqlStore{}).ForceLogout(actorID, userID)
 }
 
 func SetUserStatus(actorID, userID UserID, status UserStatus) error {

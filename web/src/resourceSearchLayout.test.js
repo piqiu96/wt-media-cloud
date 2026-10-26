@@ -22,7 +22,7 @@ const pages = [
   ['浏览器窗口', ProfilesPage, './modules/profiles/pages/ProfilesPage.vue'],
   ['代理管理', ProxyPage, './modules/proxy/pages/ProxyPage.vue'],
   ['用户管理', UsersPage, './apps/cloud/pages/users/UsersPage.vue'],
-  ['运营分组', TeamsPage, './apps/cloud/pages/users/TeamsPage.vue'],
+  ['运营团队', TeamsPage, './apps/cloud/pages/users/TeamsPage.vue'],
   ['游戏管理', GamesPage, './apps/cloud/pages/users/GamesPage.vue'],
 ]
 

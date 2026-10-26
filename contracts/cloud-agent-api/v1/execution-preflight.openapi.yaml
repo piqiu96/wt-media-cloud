@@ -1,0 +1,91 @@
+openapi: 3.1.0
+info:
+  title: WT Media Execution Preflight API
+  version: 2026.10.23.1
+  description: >
+    One admission decision for every local operation, ordinary or sensitive. The checks
+    run once, at admission: user enabled; desktop session valid; desktop login not
+    replaced; BitBrowser main account bound; BitBrowser running; observed main account
+    matches the bound one; profile owned by the user; profile of the bound main account;
+    profile present locally; platform login satisfied when the action needs it; required
+    local files ready. A failure is final for that attempt and carries a stable `code`.
+paths:
+  /api/v1/local-agent/execution-preflight:
+    post:
+      operationId: evaluateExecutionPreflight
+      security: [{agentBearer: []}]
+      summary: Decide whether one local action may run now.
+      description: >
+        Two modes, chosen by the body. Without `attempt_id` this is a new operation: the
+        Agent Token must still be the one bound to the current desktop session, so a
+        replaced desktop is refused (AUTH_DESKTOP_REPLACED). With `attempt_id` the caller
+        is continuing a task it already claimed; the strict check made at claim time is
+        the admission evidence, so a session replaced afterwards does not interrupt the
+        running task — only the attempt must still be the current one (STALE_ATTEMPT).
+
+        An action the evaluator does not know is refused (UNSUPPORTED_TASK_TYPE), never
+        treated as a no-op. The Agent supplies the runtime facts; Cloud reads the rest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PreflightRequest'}
+      responses:
+        '200': {description: Admitted.}
+        '400': {description: Malformed request, or an unknown action (UNSUPPORTED_TASK_TYPE).}
+        '401': {description: 'Agent Token invalid/expired; new-operation mode refused with AUTH_DESKTOP_REPLACED or DESKTOP_LOGIN_REQUIRED.'}
+        '403': {description: 'PROFILE_ASSIGNED_TO_OTHER_USER.'}
+        '404': {description: 'PROFILE_NOT_FOUND.'}
+        '409': {description: 'STALE_ATTEMPT, BIT_NOT_BOUND, BIT_MAIN_USER_MISMATCH, BIT_BROWSER_OFFLINE or PROFILE_LOGIN_INVALID.'}
+        '422': {description: 'FILE_PREPARE_FAILED.'}
+components:
+  securitySchemes:
+    agentBearer: {type: http, scheme: bearer}
+  schemas:
+    PreflightRequest:
+      type: object
+      required: [action, facts]
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum:
+            - account_check
+            - cookie_read
+            - cookie_write
+            - profile_create
+            - profile_open
+            - profile_close
+            - profile_update
+            - proxy_check
+            - proxy_mutation
+            - assisted_publication
+            - interaction
+        task_id: {type: string}
+        attempt_id:
+          type: string
+          description: Present only when continuing an already claimed task; selects the report-safe mode.
+        profile_id: {type: string}
+        media_account_id: {type: string}
+        facts:
+          type: object
+          required: [bitbrowser_status, main_user_id, observed_at]
+          additionalProperties: false
+          properties:
+            bitbrowser_status: {type: string, enum: [running, stopped, unreachable]}
+            main_user_id: {type: string, description: Read from the running BitBrowser by the Agent; never typed by a user.}
+            observed_at:
+              type: string
+              format: date-time
+              description: When the Agent read the facts. Older than the observation window (120 seconds by default) is BIT_BROWSER_OFFLINE.
+            profile_visible: {type: boolean}
+            files_ready: {type: boolean}
+    FailureEnvelope:
+      type: object
+      description: >
+        The shared error envelope. `error.code` is one of AUTH_DESKTOP_REPLACED,
+        DESKTOP_LOGIN_REQUIRED, AUTH_SESSION_INVALIDATED, BIT_NOT_BOUND,
+        BIT_MAIN_USER_MISMATCH, BIT_BROWSER_OFFLINE, PROFILE_NOT_FOUND,
+        PROFILE_ASSIGNED_TO_OTHER_USER, PROFILE_LOGIN_INVALID, FILE_PREPARE_FAILED,
+        STALE_ATTEMPT or UNSUPPORTED_TASK_TYPE; each carries `retryable` and a
+        `recovery_action` the client can branch on without parsing messages.

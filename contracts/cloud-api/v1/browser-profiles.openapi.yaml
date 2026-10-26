@@ -1,6 +1,41 @@
 openapi: 3.0.3
-info: {title: WT Media Cloud Browser Profile API, version: 2026.10.21.1}
+info:
+  title: WT Media Cloud Browser Profile API
+  version: 2026.10.23.1
 paths:
+  /api/v1/local-agent/bit-account:
+    get:
+      operationId: getBitAccountBinding
+      security: [{sessionCookie: []}]
+      summary: The BitBrowser account this user is bound to, masked.
+      description: >
+        Full `main_user_id` stays between the Agent and the Cloud; the page only receives
+        enough to say which account it is. An account of eight characters or fewer is
+        masked in full, otherwise the first and last four are kept.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BitAccountView'}
+  /api/v1/local-agent/bit-account/bind:
+    post:
+      operationId: bindBitAccount
+      security: [{agentBearer: []}]
+      summary: Bind the main account the Local Agent actually read.
+      description: >
+        Strict Agent Token only, so the `main_user_id` in the body is an observation made
+        by the Agent rather than an assertion typed by a user. Bind rules: no bound account
+        → write it; same account → refresh `last_verified_at`; different account with
+        `rebind: false` → `BIT_MAIN_USER_MISMATCH` and no write; different account with
+        `rebind: true` (the user confirmed in the UI) → rebind. Rebinding never migrates,
+        deletes or invalidates the Profiles of the previous account.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BitAccountBindInput'}}}
+      responses:
+        '200': {description: The binding after the call, with the account masked.}
+        '409': {description: 'BIT_MAIN_USER_MISMATCH, or stale observation (BIT_BROWSER_OFFLINE).'}
+        '401': {description: Missing or replaced Agent Token.}
   /api/v1/bit-browser/profile-scans:
     post:
       operationId: submitProfileScan
@@ -10,7 +45,7 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/SnapshotInput'}}}
       responses:
         '201': {description: Secret-free scan staged; formal Profile data is unchanged.}
-        '409': {description: Empty, mixed, missing, or mismatched BitBrowser main identity.}
+        '409': {description: Empty, mixed, missing, or mismatched BitBrowser main identity, or a stale observation.}
   /api/v1/bit-browser/profile-scans/{scan_id}:
     get:
       operationId: getProfileScan
@@ -24,36 +59,18 @@ paths:
       operationId: confirmProfileScan
       security: [{sessionCookie: []}]
       parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
-      requestBody:
-        required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/ConfirmProfileScanInput'}}}
       responses:
-        '200': {description: Trusted Desktop accepted local changes and formal Profile mirror was applied transactionally.}
+        '200': {description: Formal Profile mirror of the currently bound main account applied transactionally.}
         '409': {description: Scan not ready or identity mismatch.}
         '410': {description: Scan expired.}
-  /api/v1/bit-browser/main-identity:
-    post:
-      operationId: confirmBitBrowserMainIdentity
-      summary: Confirm the current user's BitBrowser main account without applying Profile Diff.
-      description: >
-        The user's environment confirmation (环境确认) self-service entry, replacing the
-        admin-only main-identity unbind. The caller submits the main account the local
-        environment reports. If it matches the bound account the binding is re-verified; if
-        the environment reports a different account, the call is refused with errcode 23002
-        unless `overwrite` is true — the deliberate "以当前环境为准" confirmation from the user
-        standing at this machine, which rebinds to the reported account. Never set overwrite
-        from the scan-confirm path: only the explicit self-service entry does.
-      security: [{sessionCookie: []}]
-      requestBody:
-        required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/MainIdentityInput'}}}
-      responses:
-        '200': {description: User main account identity confirmed; formal Profile mirror is unchanged.}
-        '409': {description: 'Empty identity, or mismatch without overwrite (errcode 23002; see `bitbrowser_identity_unverifiable` / `bitbrowser_identity_mismatch`).'}
   /api/v1/browser-profiles:
     get:
       operationId: listBrowserProfiles
       security: [{sessionCookie: []}]
+      description: >
+        Every read is scoped by `user_id = current user AND main_user_id = the bound
+        account`. Rows of a previously bound account stay in the database and reappear if
+        the user switches back; they are never returned while another account is bound.
       parameters:
         - {in: query, name: user_id, schema: {type: integer, format: int64}, description: Admin-only explicit owner filter.}
         - {in: query, name: id, schema: {type: string}, description: Profile ID substring.}
@@ -78,27 +95,32 @@ paths:
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+    agentBearer: {type: http, scheme: bearer}
   schemas:
+    BitAccountView:
+      type: object
+      required: [bound]
+      properties:
+        bound: {type: boolean}
+        main_user_id_masked: {type: string, description: 'First four + **** + last four; the whole value as **** when eight characters or fewer. Absent when not bound.'}
+        bound_at: {type: string, format: date-time}
+        last_verified_at: {type: string, format: date-time}
+    BitAccountBindInput:
+      type: object
+      required: [main_user_id, observed_at]
+      additionalProperties: false
+      properties:
+        main_user_id: {type: string, description: Read from the running BitBrowser by the Local Agent; never typed by a user.}
+        observed_at: {type: string, format: date-time, description: When the Agent read it. Stale observations are refused.}
+        rebind: {type: boolean, default: false, description: The user confirmed switching to the observed account.}
     SnapshotInput:
       type: object
-      required: [main_user_id, profiles]
+      required: [main_user_id, observed_at, profiles]
+      additionalProperties: false
       properties:
-        main_user_id: {type: string, description: Normalized from BitBrowser mainUserId.}
-        node_id: {type: string, description: Trusted Desktop node id.}
+        main_user_id: {type: string, description: Must equal the currently bound account.}
+        observed_at: {type: string, format: date-time, description: When the Agent scanned; a stale scan is refused.}
         profiles: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ProfileInput'}}
-    ConfirmProfileScanInput:
-      type: object
-      required: [node_id]
-      additionalProperties: false
-      properties:
-        node_id: {type: string, description: Trusted Desktop node id required before applying local scan changes.}
-    MainIdentityInput:
-      type: object
-      required: [main_user_id]
-      additionalProperties: false
-      properties:
-        main_user_id: {type: string, description: Normalized from BitBrowser mainUserId read by Desktop through Local Agent.}
-        overwrite: {type: boolean, default: false, description: 'The "以当前环境为准" (take the current environment as authoritative) flag. When the reported account differs from the bound one, only overwrite=true accepts and rebinds; false (the default) is refused as a mismatch.'}
     ProfileInput:
       type: object
       required: [bit_profile_id, main_user_id, profile_user_id]
@@ -115,10 +137,11 @@ components:
         bit_updated_at: {type: string}
     BrowserProfile:
       type: object
-      required: [id, bit_profile_id, local_status]
+      required: [id, bit_profile_id, main_user_id, local_status]
       properties:
         id: {type: string}
         bit_profile_id: {type: string}
+        main_user_id: {type: string, description: The bound account this row belongs to.}
         name: {type: string}
         local_status: {type: string, enum: [active, local_missing, archived]}
         proxy_id: {type: string, nullable: true, description: Cloud formal relation, updated only after Agent write/read-back verification.}

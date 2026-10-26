@@ -111,11 +111,11 @@ func TestUnprocessableEntityCarriesTheFrozenErrorName(t *testing.T) {
 
 // A 409 whose type is absent is not the same answer as one whose type is set:
 // the frontend branches on the type to tell "the source is not ready yet" from
-// "there is no Local Agent to send this to", and those need different copy.
+// "another executor holds the lease", and those need different copy.
 func TestConflictNamedDistinguishesTheTwoConflicts(t *testing.T) {
 	engine := server.New()
 	engine.POST("/conflict", func(_ context.Context, c *hertzapp.RequestContext) {
-		ConflictNamed(c, 15105, "没有可用的本机下载节点", "local_transfer_node_unavailable")
+		ConflictNamed(c, 15105, "任务已被其他执行器领取", "transfer_task_conflict")
 	})
 	result := ut.PerformRequest(engine.Engine, "POST", "/conflict", nil)
 
@@ -131,7 +131,7 @@ func TestConflictNamedDistinguishesTheTwoConflicts(t *testing.T) {
 	if err := json.Unmarshal(result.Result().Body(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.ErrCode != 15105 || body.Error == nil || body.Error.Type != "local_transfer_node_unavailable" {
+	if body.ErrCode != 15105 || body.Error == nil || body.Error.Type != "transfer_task_conflict" {
 		t.Fatalf("response = %+v", body)
 	}
 }

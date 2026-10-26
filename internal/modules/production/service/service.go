@@ -15,7 +15,6 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 )
 
 var (
@@ -40,13 +39,6 @@ var (
 	// prepared video yet", which is a 409 and not a 404: the material exists and
 	// the answer will change on its own once preparation finishes.
 	ErrMaterialUnavailable = errors.New("material has no prepared video")
-
-	// ErrLocalNodeUnavailable is "there is no fresh Local Agent on this account to
-	// download to". It is a separate sentinel from the runtime-binding module's
-	// `ErrLocalTrustUnavailable` so that the handler maps a production decision
-	// rather than a foreign error, and so the two modules stay free to disagree
-	// about what that condition is called.
-	ErrLocalNodeUnavailable = errors.New("no fresh local agent node is available")
 )
 
 type Store interface {
@@ -88,17 +80,6 @@ type Store interface {
 	// that is not `downloading`, which here is the ordinary outcome rather than a
 	// refusal: there is nothing to take back.
 	MarkVideoNotPrepared(identityservice.TeamID, int64, time.Time) (bool, error)
-}
-
-// LocalNodeResolver answers which of the actor's machines should receive a file.
-//
-// A consumer-side interface, one method wide, implemented in store_adapter.go —
-// the shape profileguard and filetransfer already use. `production` is allowed to
-// depend on the runtime-binding domain in this direction; declaring the question
-// here rather than calling the module directly keeps the dependency to one call
-// site and lets a test answer it without a node table.
-type LocalNodeResolver interface {
-	ResolveTrustedLocalNode(identityservice.UserID) (runtimeservice.AgentNode, error)
 }
 
 // TransferCreator queues the task a Local Agent will later claim.
@@ -152,7 +133,6 @@ type ObjectLinker interface {
 
 type Service struct {
 	store     Store
-	nodes     LocalNodeResolver
 	transfers TransferCreator
 	links     ObjectLinker
 	now       func() time.Time
@@ -161,9 +141,9 @@ type Service struct {
 	resolveGame func(gameID string) (string, bool, error)
 }
 
-func NewService(store Store, nodes LocalNodeResolver, transfers TransferCreator, links ObjectLinker) *Service {
+func NewService(store Store, transfers TransferCreator, links ObjectLinker) *Service {
 	return &Service{
-		store: store, nodes: nodes, transfers: transfers, links: links, now: time.Now,
+		store: store, transfers: transfers, links: links, now: time.Now,
 		resolveGame: func(gameID string) (string, bool, error) {
 			game, ok, err := identityservice.ResolveGame(gameID)
 			return game.Name, ok, err
@@ -387,10 +367,11 @@ func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) 
 // video is ready yet.
 //
 // The user clicks once, and what that click means depends on the material — but it
-// is one task either way. A prepared material gets a `user_download` the actor's
-// own machine can claim immediately. A material whose video is not ready gets the
-// same kind of task, held back by `dependency_task_id` until the Cloud
-// preparation it names writes the object key, the size and the hash it waits for.
+// is one task either way. A prepared material gets a `user_download` any machine
+// the actor is logged in on can claim immediately. A material whose video is not
+// ready gets the same kind of task, held back by `dependency_task_id` until the
+// Cloud preparation it names writes the object key, the size and the hash it
+// waits for.
 //
 // That is why nothing here is called a "cloud task": the two statuses the user is
 // looking at are two rows, and the coupling between them is that one column. The
@@ -400,15 +381,13 @@ func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) 
 // the user clicking again.
 //
 // The refusals are ordered by what the user can do about them: a material outside
-// the actor's scope is not theirs to see (the 404/403 from `GetMaterial`), a
+// the actor's scope is not theirs to see (the 404/403 from `GetMaterial`), and a
 // visible material with no prepared video and no source to prepare from is one
-// nothing can be done about, and no fresh node is one they can fix by opening the
-// app on a machine. Answering 409 for the last two rather than 500 is the whole
+// nothing can be done about. Answering 409 for that rather than 500 is the whole
 // point of asking here.
 //
-// The download is **never** queued without a node. An executor claims on its own
-// credential, so a task with no assignee would be claimed by whichever device
-// polled first — a file the user asked for on one machine landing on another.
+// The download belongs to the user, not to a machine: any Desktop the actor logs
+// in on can claim it, and nothing is assigned here.
 func (s *Service) CreateDownload(ctx context.Context, actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
 	material, err := s.GetMaterial(actor, materialID)
 	if err != nil {
@@ -445,25 +424,16 @@ func (s *Service) CreateDownload(ctx context.Context, actor identityservice.Publ
 		// condition is this narrow rather than `!ready`.
 		return transferdto.Task{}, ErrMaterialUnavailable
 	}
-	node, err := s.nodes.ResolveTrustedLocalNode(actor.ID)
-	if err != nil {
-		// Everything the resolver refuses means the same thing here, including a
-		// store failure: from this route's side there is no node to download to.
-		// The distinction is kept in the log, not in the response.
-		return transferdto.Task{}, ErrLocalNodeUnavailable
-	}
 	input := transferservice.CreateUserDownloadInput{
-		TeamID:           material.TeamID,
-		AssetID:          material.ID,
-		AssetTitle:       material.Title,
-		GameName:         s.gameNameOf(material),
-		PublishedAt:      material.PublishedAt,
-		SourceObjectKey:  objectKey,
-		RequestedBy:      actor.ID,
-		AssignedNodeID:   node.ID,
-		AssignedDeviceID: node.DeviceID,
-		TotalBytes:       size,
-		ExpectedSHA256:   sha256,
+		TeamID:          material.TeamID,
+		AssetID:         material.ID,
+		AssetTitle:      material.Title,
+		GameName:        s.gameNameOf(material),
+		PublishedAt:     material.PublishedAt,
+		SourceObjectKey: objectKey,
+		RequestedBy:     actor.ID,
+		TotalBytes:      size,
+		ExpectedSHA256:  sha256,
 	}
 	if needsPreparation {
 		// The preparation is a Cloud task keyed on the material rather than on this

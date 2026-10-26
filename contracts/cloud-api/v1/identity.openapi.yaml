@@ -1,20 +1,32 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Identity API
-  version: 2026.10.21.1
+  version: 2026.10.23.1
 paths:
   /api/v1/auth/login:
     post:
       operationId: login
       description: >
-        Authenticates and creates a session. The session's client_type (desktop/web) is
-        inferred server-side from the Origin header: requests whose Origin is
-        http://tauri.localhost, https://tauri.localhost or tauri://localhost (the packaged
-        Desktop WebView) become desktop sessions; anything else becomes web. It is NOT a
-        client-declared field and cannot be spoofed from a browser, where Origin is a
-        forbidden header. Replacement is per client_type: a new login only invalidates the
-        same type's previous active session (errcode 20010 when one exists and
-        replace_existing is false), so desktop and web sessions coexist.
+        Authenticates and creates a `user_sessions` row, which is the only login fact.
+        The session's client_type (desktop/web) is inferred server-side from the Origin
+        header: requests whose Origin is http://tauri.localhost, https://tauri.localhost
+        or tauri://localhost (the packaged Desktop WebView) become desktop sessions;
+        anything else becomes web. It is NOT a client-declared field and cannot be
+        spoofed from a browser, where Origin is a forbidden header.
+
+        Web: every successful login creates a session and invalidates nothing — one user
+        may hold several web sessions at once, so `replace_existing` is ignored.
+
+        Desktop: one user may hold at most one valid desktop session. When one already
+        exists and `replace_existing` is false, the login returns
+        `DESKTOP_LOGIN_CONFLICT` (errcode 20010, HTTP 409) with
+        `error.details.active_session_id`, and writes nothing. Confirming means
+        resending the same credentials with `replace_existing: true` and
+        `replace_session_id` equal to that id; the old row is invalidated with reason
+        `desktop_replaced` and a new session is inserted. A stale `replace_session_id`
+        (another Desktop confirmed in between) returns the conflict again with the
+        current id. Concurrent confirmations are serialized on the user row, so exactly
+        one succeeds. Password verification happens before any conflict decision.
       requestBody:
         required: true
         content:
@@ -30,6 +42,14 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserResponse'}
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '409':
+          description: >
+            DESKTOP_LOGIN_CONFLICT (errcode 20010). `error.details.active_session_id` is
+            the valid desktop session the confirmation would replace. No authentication
+            state is written when this is returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionError'}
   /api/v1/auth/me:
     get:
       operationId: getCurrentUser
@@ -62,7 +82,10 @@ paths:
       operationId: logout
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: Session invalidated.}
+        '200':
+          description: >
+            The current session row is invalidated with reason `logout`. Other sessions of
+            the same user, web or desktop, are untouched.
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
   /api/v1/auth/change-password:
     post:
@@ -74,7 +97,10 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/ChangePasswordRequest'}
       responses:
-        '200': {description: Password changed and existing session invalidated.}
+        '200':
+          description: >
+            Password changed. Every session of this user is invalidated in the same
+            transaction with reason `password_changed`; the caller must log in again.
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
   /api/v1/users:
     get:
@@ -126,7 +152,9 @@ paths:
             schema: {$ref: '#/components/schemas/UpdateUserRequest'}
       responses:
         '200':
-          description: User access updated.
+          description: >
+            User access updated. Setting `status: disabled` invalidates every session of
+            the user with reason `user_disabled` in the same transaction.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserResponse'}
@@ -159,10 +187,26 @@ paths:
             schema: {$ref: '#/components/schemas/ResetPasswordRequest'}
       responses:
         '200':
-          description: Password reset and sessions invalidated; plaintext returned only in this response.
+          description: Password reset and all of the user's sessions invalidated (reason `admin_reset`); plaintext returned only in this response.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PasswordResetResponse'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/users/{user_id}/force-logout:
+    post:
+      operationId: forceLogoutUser
+      security: [{sessionCookie: []}]
+      description: >
+        Administrator action. Invalidates every session of the user in one transaction with
+        reason `force_logout` and records an audit entry. It does not disable the user, and
+        re-enabling a disabled user never revives an invalidated session.
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '200': {description: All sessions of the user invalidated.}
         '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/operation-teams:
     get:
@@ -229,16 +273,50 @@ components:
       name: wt_media_session
   responses:
     AuthenticationRequired:
-      description: Missing, invalid, or superseded session.
+      description: >
+        Missing, invalid, expired, or invalidated session. `error.code` distinguishes the
+        cases: `AUTH_SESSION_INVALID`, `AUTH_SESSION_INVALIDATED`, `AUTH_SESSION_EXPIRED`
+        and — for a desktop session replaced by another computer — `AUTH_DESKTOP_REPLACED`.
+        Each carries `retryable: false` and a `recovery_action`.
     Forbidden:
       description: Current role cannot perform the operation.
   schemas:
+    SessionError:
+      type: object
+      required: [errcode, message, error]
+      properties:
+        errcode: {type: integer, description: 20010 for DESKTOP_LOGIN_CONFLICT.}
+        message: {type: string}
+        logid: {type: string}
+        error:
+          type: object
+          required: [type, code, retryable, recovery_action]
+          properties:
+            type: {type: string}
+            code: {type: string, enum: [DESKTOP_LOGIN_CONFLICT]}
+            retryable: {type: boolean, const: false}
+            recovery_action: {type: string, const: confirm_desktop_takeover}
+            details:
+              type: object
+              properties:
+                active_session_id: {type: string}
     LoginRequest:
       type: object
       required: [username, password]
       properties:
         username: {type: string, maxLength: 64}
         password: {type: string, format: password, minLength: 12}
+        replace_existing:
+          type: boolean
+          default: false
+          description: >
+            Desktop only. True confirms replacing the currently valid desktop session;
+            web logins ignore it.
+        replace_session_id:
+          type: string
+          description: >
+            Required when `replace_existing` is true: the `active_session_id` the conflict
+            response named. A value that no longer matches returns the conflict again.
     CreateUserRequest:
       type: object
       required: [username, password, role, game_ids]

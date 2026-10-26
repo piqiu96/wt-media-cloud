@@ -42,11 +42,19 @@ type AppConfig struct {
 	Name         string             `toml:"name"`
 	Server       ServerConfig       `toml:"server"`
 	InitialAdmin InitialAdminConfig `toml:"initial_admin"`
+	BitBrowser   BitBrowserConfig   `toml:"bitbrowser"`
 }
 
 type ServerConfig struct {
 	HTTPAddr            string `toml:"http_addr"`
 	SessionCookieSecure bool   `toml:"session_cookie_secure"`
+}
+
+// BitBrowserConfig 保存 BitBrowser 观测的时效设置。
+type BitBrowserConfig struct {
+	// ObservationFreshFor 是 Agent 的 observed_at 仍可用于判断本机状态的最大年龄。
+	// 零值表示使用包内默认值。
+	ObservationFreshFor Duration `toml:"observation_fresh_for"`
 }
 
 type InitialAdminConfig struct {
@@ -103,6 +111,7 @@ type ClientsConfig struct {
 
 type CredentialsConfig struct {
 	Agent         AgentCredentialConfig
+	AgentToken    AgentTokenCredentialConfig
 	Douyin        DouyinCredentialConfig
 	ObjectStorage ObjectStorageCredentialConfig
 }
@@ -165,9 +174,9 @@ type ComposeWorkerConfig struct {
 	// NodeID names this worker in compose_tasks.claimed_node_id — the value
 	// every conditional lifecycle write is keyed by. A deployment runs one
 	// compose worker, so a stable configured number is the identity.
-	NodeID            int64    `toml:"node_id"`
-	Concurrency       int      `toml:"concurrency"`
-	GlobalConcurrency int      `toml:"global_concurrency"`
+	NodeID            int64 `toml:"node_id"`
+	Concurrency       int   `toml:"concurrency"`
+	GlobalConcurrency int   `toml:"global_concurrency"`
 	// MinFreeBytes is the free-space floor on the workspace volume: below it
 	// the worker stops claiming until space recovers.
 	MinFreeBytes      int64    `toml:"min_free_bytes"`
@@ -182,6 +191,14 @@ type AgentCredentialConfig struct {
 	AuthToken string `toml:"auth_token"`
 }
 
+// AgentTokenCredentialConfig holds the HMAC key that signs stateless Local
+// Agent tokens. Unlike the outgoing Agent auth token, this secret is required:
+// without it the server cannot verify any Agent request, so startup fails
+// rather than silently serving an unauthenticated executor surface.
+type AgentTokenCredentialConfig struct {
+	Secret string `toml:"secret"`
+}
+
 type DouyinCredentialConfig struct {
 	APIKey  string            `toml:"api_key"`
 	Cookie  string            `toml:"cookie"`
@@ -189,11 +206,17 @@ type DouyinCredentialConfig struct {
 }
 
 type SchedulerConfig struct {
-	ProxyExpiryInterval Duration `toml:"proxy_expiry_interval"`
-	DiscoveryInterval   Duration `toml:"discovery_interval"`
-	ComposeInterval     Duration `toml:"compose_interval"`
-	WorkerInterval      Duration `toml:"worker_interval"`
-	WorkerBatchSize     int      `toml:"worker_batch_size"`
+	ProxyExpiryInterval   Duration `toml:"proxy_expiry_interval"`
+	DiscoveryInterval     Duration `toml:"discovery_interval"`
+	ComposeInterval       Duration `toml:"compose_interval"`
+	WorkerInterval        Duration `toml:"worker_interval"`
+	WorkerBatchSize       int      `toml:"worker_batch_size"`
+	TaskRecoveryInterval  Duration `toml:"task_recovery_interval"`
+	TaskRecoveryBatchSize int      `toml:"task_recovery_batch_size"`
+
+	SessionCleanupInterval  Duration `toml:"session_cleanup_interval"`
+	SessionCleanupRetention Duration `toml:"session_cleanup_retention"`
+	SessionCleanupBatchSize int      `toml:"session_cleanup_batch_size"`
 }
 
 // Duration is a strict YAML duration parsed with time.ParseDuration.
@@ -323,6 +346,9 @@ func LoadFromDir(root string) (Config, error) {
 	if err := optionalTOML(filepath.Join(root, "credentials", "agent.toml"), &cfg.Credentials.Agent); err != nil {
 		return Config{}, err
 	}
+	if err := optionalTOML(filepath.Join(root, "credentials", "agent_token.toml"), &cfg.Credentials.AgentToken); err != nil {
+		return Config{}, err
+	}
 	if err := optionalTOML(filepath.Join(root, "credentials", "douyin.toml"), &cfg.Credentials.Douyin); err != nil {
 		return Config{}, err
 	}
@@ -362,6 +388,12 @@ func (c Config) Validate() error {
 	if (c.App.InitialAdmin.Username == "") != (c.App.InitialAdmin.Password == "") {
 		return errors.New("app.initial_admin username and password must be configured together")
 	}
+	if len(strings.TrimSpace(c.Credentials.AgentToken.Secret)) < 32 {
+		return errors.New("credentials.agent_token.secret must be at least 32 characters")
+	}
+	if c.App.BitBrowser.ObservationFreshFor.Duration < 0 {
+		return errors.New("app.bitbrowser.observation_fresh_for must not be negative")
+	}
 	if err := validateDatabases(c.Databases); err != nil {
 		return err
 	}
@@ -399,6 +431,21 @@ func (c Config) Validate() error {
 	}
 	if c.Scheduler.WorkerBatchSize <= 0 {
 		return errors.New("scheduler.worker_batch_size must be greater than zero")
+	}
+	if c.Scheduler.TaskRecoveryInterval.Duration <= 0 {
+		return errors.New("scheduler.task_recovery_interval must be greater than zero")
+	}
+	if c.Scheduler.TaskRecoveryBatchSize <= 0 {
+		return errors.New("scheduler.task_recovery_batch_size must be greater than zero")
+	}
+	if c.Scheduler.SessionCleanupInterval.Duration <= 0 {
+		return errors.New("scheduler.session_cleanup_interval must be greater than zero")
+	}
+	if c.Scheduler.SessionCleanupRetention.Duration <= 0 {
+		return errors.New("scheduler.session_cleanup_retention must be greater than zero")
+	}
+	if c.Scheduler.SessionCleanupBatchSize <= 0 {
+		return errors.New("scheduler.session_cleanup_batch_size must be greater than zero")
 	}
 	if err := validateObjectStorage(c.Storage.ObjectStorage, c.Credentials.ObjectStorage); err != nil {
 		return err

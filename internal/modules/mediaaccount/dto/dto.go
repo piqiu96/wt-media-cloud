@@ -24,7 +24,7 @@ type IdentifyAccountInput struct {
 	LoginStatus       model.LoginStatus
 }
 
-type AccountCheckStartInput struct{ NodeID string }
+type AccountCheckStartInput struct{}
 
 type AccountCheckStart struct {
 	TaskID                    string            `json:"task_id"`
@@ -46,7 +46,7 @@ type AccountCheckResultInput struct {
 	CheckItems        []model.AccountCheckItem
 }
 
-type CookieReadStartInput struct{ NodeID string }
+type CookieReadStartInput struct{}
 
 type CookieReadStart struct {
 	TaskID           string         `json:"task_id"`

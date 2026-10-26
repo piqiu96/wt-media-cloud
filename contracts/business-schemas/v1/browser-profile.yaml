@@ -1,15 +1,23 @@
 schema_version: 1
-revision: "2026.07.22.1"
+revision: "2026.10.23.1"
 schemas:
   BrowserProfile:
     type: object
+    description: >
+      One BitBrowser Profile as the Cloud knows it. Reads, updates, assignments and
+      preflight all scope on `user_id + main_user_id`; a row under another main account
+      is simply not found. Switching the Bit main account back makes those rows visible
+      again — they are never migrated or deleted.
     required: [id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, local_status, last_synced_at]
     properties:
       id: {type: string}
       user_id: {type: integer, format: int64}
       team_id: {type: integer, format: int64, nullable: true}
       bit_profile_id: {type: string}
-      main_user_id: {type: string, source: BitBrowser.mainUserId}
+      main_user_id:
+        type: string
+        source: BitBrowser.mainUserId
+        description: BitBrowser main account this row belongs to; half of the data scope.
       profile_user_id: {type: string, source: BitBrowser.userId}
       name: {type: string}
       seq: {type: integer}
@@ -29,7 +37,23 @@ schemas:
       status: {type: string, enum: [bound]}
       bound_at: {type: string, format: date-time}
       last_verified_at: {type: string, format: date-time}
+  BitAccountView:
+    type: object
+    description: >
+      What the Web front-end may see. The full `main_user_id` never leaves the Cloud:
+      eight characters or fewer are shown as `****`, longer ones keep the first four and
+      the last four.
+    required: [bound]
+    properties:
+      bound: {type: boolean}
+      main_user_id_masked: {type: string}
+      bound_at: {type: string, format: date-time}
+      last_verified_at: {type: string, format: date-time}
+    forbidden_properties: [main_user_id]
 sync_policy:
   scan_is_staged: true
   confirmation_required: true
   automatic_rebind: false
+  scan_carries_main_user_id: true
+  scan_carries_observed_at: true
+  scan_never_deletes_unseen_profiles: true

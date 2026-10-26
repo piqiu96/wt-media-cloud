@@ -48,7 +48,7 @@ const menuItems = [
   ] },
   { value: 'system', title: '系统管理', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
-    { title: '运营分组', path: '/operation-teams', icon: 'view-organization' },
+    { title: '运营团队', path: '/operation-teams', icon: 'view-organization' },
     { title: '游戏管理', path: '/games', icon: 'gamepad' },
   ] },
 ]

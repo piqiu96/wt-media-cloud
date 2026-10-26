@@ -61,12 +61,14 @@ const (
 )
 
 var (
-	ErrForbidden            = model.ErrForbidden
-	ErrInvalidInput         = model.ErrInvalidInput
-	ErrNotFound             = model.ErrNotFound
-	ErrDuplicateAccount     = model.ErrDuplicateAccount
-	ErrProfileUnavailable   = model.ErrProfileUnavailable
-	ErrProfilePlatformTaken = model.ErrProfilePlatformTaken
+	ErrForbidden                  = model.ErrForbidden
+	ErrInvalidInput               = model.ErrInvalidInput
+	ErrNotFound                   = model.ErrNotFound
+	ErrDuplicateAccount           = model.ErrDuplicateAccount
+	ErrProfileUnavailable         = model.ErrProfileUnavailable
+	ErrProfileNotFound            = model.ErrProfileNotFound
+	ErrProfileAssignedToOtherUser = model.ErrProfileAssignedToOtherUser
+	ErrProfilePlatformTaken       = model.ErrProfilePlatformTaken
 )
 
 type Store interface {
@@ -99,11 +101,11 @@ type accountService struct {
 }
 
 type profileResolver interface {
-	ResolveProfile(profileID string) (userID identityservice.UserID, active bool, found bool, err error)
+	ResolveProfile(profileID string) (userID identityservice.UserID, active bool, inScope bool, found bool, err error)
 }
 
 type profileFactResolver interface {
-	ResolveProfileForAccountCheck(profileID string) (id string, userID identityservice.UserID, bitProfileID string, active bool, found bool, err error)
+	ResolveProfileForAccountCheck(profileID string) (id string, userID identityservice.UserID, bitProfileID string, inScope bool, active bool, found bool, err error)
 	ResolveProxyForAccountCheck(profileID string) (proxyID string, businessStatus string, lastCheckResult string, expiresAt *time.Time, bound bool, err error)
 }
 
@@ -480,21 +482,23 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
 		return AccountCheckStart{}, ErrProfileUnavailable
 	}
-	nodeID := strings.TrimSpace(input.NodeID)
-	if nodeID == "" {
-		return AccountCheckStart{}, ErrInvalidInput
-	}
-	profileID, profileUserID, bitProfileID, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
+	profileID, profileUserID, bitProfileID, profileInScope, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
 	if err != nil {
 		return AccountCheckStart{}, err
 	}
-	if !found || !profileActive || profileUserID != actor.ID || bitProfileID == "" {
+	if !found || !profileInScope {
+		return AccountCheckStart{}, ErrProfileNotFound
+	}
+	if profileUserID != actor.ID {
+		return AccountCheckStart{}, ErrProfileAssignedToOtherUser
+	}
+	if !profileActive || bitProfileID == "" {
 		return AccountCheckStart{}, ErrProfileUnavailable
 	}
 	now := s.now()
 	taskID := s.newID("sensitive-account-check")
 	task := profileguardservice.SensitiveTask{
-		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
+		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID,
 		Operation: profileguardservice.OperationAuthenticatedAccountCheck, Status: profileguardservice.TaskAuthorized,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -529,21 +533,23 @@ func (s *accountService) StartCookieRead(actor identityservice.PublicUser, accou
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
 		return CookieReadStart{}, ErrProfileUnavailable
 	}
-	nodeID := strings.TrimSpace(input.NodeID)
-	if nodeID == "" {
-		return CookieReadStart{}, ErrInvalidInput
-	}
-	profileID, profileUserID, bitProfileID, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
+	profileID, profileUserID, bitProfileID, profileInScope, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
 	if err != nil {
 		return CookieReadStart{}, err
 	}
-	if !found || !profileActive || profileUserID != actor.ID || bitProfileID == "" {
+	if !found || !profileInScope {
+		return CookieReadStart{}, ErrProfileNotFound
+	}
+	if profileUserID != actor.ID {
+		return CookieReadStart{}, ErrProfileAssignedToOtherUser
+	}
+	if !profileActive || bitProfileID == "" {
 		return CookieReadStart{}, ErrProfileUnavailable
 	}
 	now := s.now()
 	taskID := s.newID("sensitive-cookie-read")
 	task := profileguardservice.SensitiveTask{
-		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID, NodeID: nodeID,
+		ID: taskID, UserID: actor.ID, ProfileID: profileID, BitProfileID: bitProfileID,
 		Operation: profileguardservice.OperationCookieRead, Status: profileguardservice.TaskAuthorized,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -681,15 +687,18 @@ func (s *accountService) BindProfile(actor identityservice.PublicUser, accountID
 	if record.BrowserProfileID == profileID {
 		return record.Account, nil
 	}
-	userID, active, found, err := s.profiles.ResolveProfile(profileID)
+	userID, active, inScope, found, err := s.profiles.ResolveProfile(profileID)
 	if err != nil {
 		return Account{}, err
 	}
-	if !found || !active {
-		return Account{}, ErrProfileUnavailable
+	if !found || !inScope {
+		return Account{}, ErrProfileNotFound
 	}
 	if userID != record.UserID {
-		return Account{}, ErrForbidden
+		return Account{}, ErrProfileAssignedToOtherUser
+	}
+	if !active {
+		return Account{}, ErrProfileUnavailable
 	}
 	existing, found, err := s.store.FindByProfilePlatform(profileID, record.Platform)
 	if err != nil {

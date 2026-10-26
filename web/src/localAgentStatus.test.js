@@ -2,42 +2,49 @@ import { describe, expect, it } from 'vitest'
 
 import { createLocalAgentStatusPage } from './apps/desktop/features/local-agent/local-agent-status.js'
 
+const snapshot = {
+  agentId: 'local-agent-dev',
+  status: 'idle',
+  bitbrowserStatus: 'normal',
+  mainUserIdMasked: 'main****1234',
+  operatingSystem: 'macos',
+  cpuArchitecture: 'arm64',
+  agentVersion: '0.3.0',
+}
+
 describe('local agent status page', () => {
-  it('does not claim cloud trust from a local node id alone', () => {
-    const page = createLocalAgentStatusPage({
-      nodeId: 'agent-node-1',
-      agentId: 'local-agent-dev',
-      status: 'idle',
-      bitbrowserStatus: 'normal',
-      mainUserId: 'main-user-1',
-      operatingSystem: 'macos',
-      cpuArchitecture: 'arm64',
-      agentVersion: '0.2.2',
-    }, {
+  it('is ready only when a credential is held as well as the local environment', () => {
+    const page = createLocalAgentStatusPage(snapshot, {
       cloudUser: { username: 'operator01' },
-      canBindTrustedNode: true,
+      tokenConfigured: true,
     })
 
+    expect(page.ready).toBe(true)
     expect(page.trustText).toBe('可执行本机浏览器操作')
     expect(page.trustReason).toContain('扫描窗口、配置代理和检查账号')
-    expect(page.canBindTrustedNode).toBe(true)
-    expect(page.bindActionText).toBe('刷新本机执行状态')
+    expect(page.credentialText).toBe('已配置')
   })
 
-  it('keeps device binding and session connection distinct before a local node exists', () => {
-    const page = createLocalAgentStatusPage({
-      agentId: 'local-agent-dev',
-      status: 'idle',
-      bitbrowserStatus: 'normal',
-      mainUserId: 'main-user-1',
-    }, {
+  it('names the missing credential instead of claiming the machine can work', () => {
+    const page = createLocalAgentStatusPage(snapshot, {
       cloudUser: { username: 'operator01' },
-      canBindTrustedNode: true,
+      tokenConfigured: false,
     })
 
-    expect(page.trustText).toBe('当前会话待连接')
-    expect(page.trustReason).toContain('本机服务尚未连接云端')
-    expect(page.trustReason).toContain('个人信息')
-    expect(page.bindActionText).toBe('连接当前会话')
+    expect(page.ready).toBe(false)
+    expect(page.trustText).toBe('本机执行凭证未配置')
+    expect(page.trustReason).toContain('执行凭证')
+    expect(page.credentialText).toBe('未配置')
+  })
+
+  it('asks for a BitBrowser login when no masked account was read', () => {
+    const page = createLocalAgentStatusPage({ ...snapshot, mainUserIdMasked: '' }, {
+      cloudUser: { username: 'operator01' },
+      tokenConfigured: true,
+    })
+
+    expect(page.ready).toBe(false)
+    expect(page.trustReason).toContain('比特浏览器')
+    expect(page.bitbrowserText).toBe('可用')
   })
 })

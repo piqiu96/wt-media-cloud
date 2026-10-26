@@ -12,7 +12,6 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	proxyservice "github.com/wt-media/wt-media-cloud/internal/modules/proxy/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
@@ -381,17 +380,8 @@ func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	var req struct {
 		ScanID string `json:"scan_id"`
-		NodeID string `json:"node_id"`
 	}
 	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	if strings.TrimSpace(req.NodeID) == "" {
-		api.Failure(c, 400, 10001, "本机节点不能为空", nil)
-		return
-	}
-	if err := runtimeservice.CheckLocalTrust(actor.ID, req.NodeID); err != nil {
-		api.Forbidden(c, 11003, "当前本机环境未获可信授权")
 		return
 	}
 	scan, err := profilebindingservice.ConfirmScan(actor, req.ScanID)
@@ -474,11 +464,15 @@ func CheckProxyInBackground(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
-	task := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{
+	task, err := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{
 		TaskType:       cloudagentservice.TaskTypeProxyCheck.String(),
 		IdempotencyKey: "proxy-check:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + proxy.ID + ":" + id.NewID("attempt"),
 		Payload:        map[string]any{"proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password},
-	})
+	}, int64(actor.ID))
+	if err != nil {
+		api.InternalError(c, "任务创建失败")
+		return
+	}
 	api.Created(c, task)
 }
 func AssignProxy(ctx context.Context, c *hertzapp.RequestContext) {

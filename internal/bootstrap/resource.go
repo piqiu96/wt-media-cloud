@@ -19,6 +19,9 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
+	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
+	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
+	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
@@ -37,6 +40,8 @@ type resourceStep struct {
 func serverResourcePlan() []resourceStep {
 	return []resourceStep{
 		configResource(),
+		agentTokenResource(),
+		bitBrowserResource(),
 		loggerResource(),
 		metricsResource(),
 		tracingResource(),
@@ -132,6 +137,35 @@ func configResource() resourceStep {
 				return nil, err
 			}
 			return func() error { return nil }, nil
+		},
+	}
+}
+
+// agentTokenResource 发布 Agent Token 签名器。只有 HTTP 进程签发和验签，
+// 所以 scheduler 与 worker 计划不加载它。
+func agentTokenResource() resourceStep {
+	return resourceStep{
+		name: "agent_token",
+		open: func() (func() error, error) {
+			signer, err := agenttoken.NewSigner([]byte(config.Get().Credentials.AgentToken.Secret))
+			if err != nil {
+				return nil, err
+			}
+			agenttoken.Configure(signer)
+			return func() error { return nil }, nil
+		},
+	}
+}
+
+// bitBrowserResource 安装 BitBrowser 观察的有效窗口。零值保留包内默认值。
+func bitBrowserResource() resourceStep {
+	return resourceStep{
+		name: "bit_browser",
+		open: func() (func() error, error) {
+			freshFor := config.Get().App.BitBrowser.ObservationFreshFor.Duration
+			profileservice.ConfigureObservedFreshFor(freshFor)
+			executionpreflight.ConfigureObservedFreshFor(freshFor)
+			return nil, nil
 		},
 	}
 }

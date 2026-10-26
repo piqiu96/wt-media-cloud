@@ -12,6 +12,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/repository"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	runtimeservice "github.com/wt-media/wt-media-cloud/internal/modules/runtimebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
@@ -65,12 +65,6 @@ var (
 	// happens to be in the wrong state.
 	ErrInvalidInput = errors.New("file transfer input is invalid")
 
-	// ErrNodeUnauthenticated is an unknown or superseded credential, a missing
-	// one, or a node whose bound session has died. Those are one answer to the
-	// caller — this node may not act — and one remedy, re-registering, so they
-	// share a sentinel instead of leaking the distinction into the handler.
-	ErrNodeUnauthenticated = errors.New("local node credential is not usable")
-
 	// ErrTaskNotFound is no such task *or* a task outside the caller's team. The
 	// tenant boundary is deliberately not something a caller can probe by
 	// comparing 403 against 404.
@@ -113,9 +107,9 @@ type Store interface {
 	ListTasks(repository.TaskFilter) ([]model.Task, error)
 	HideUserDownloadHistory(identityservice.UserID, model.AssetType, int64, time.Time) error
 	LatestUserDownloadStatuses(identityservice.UserID, []int64) (map[int64]string, error)
-	NextLocalTask(string, time.Time) (model.Task, bool, error)
-	ClaimLocalTask(string, string, time.Time, time.Duration) (model.Task, bool, error)
-	HeartbeatTask(string, string, time.Time, time.Duration) (bool, error)
+	NextLocalTask(identityservice.UserID, time.Time) (model.Task, bool, error)
+	ClaimLocalTask(string, identityservice.UserID, string, time.Time, time.Duration) (model.Task, bool, error)
+	HeartbeatTask(string, string, string, time.Time, time.Duration) (bool, error)
 	ReportProgress(repository.ProgressInput, time.Time) (bool, error)
 	CompleteTask(repository.CompletionInput, time.Time) (bool, error)
 	FailTask(repository.FailureInput, time.Time) (bool, error)
@@ -125,18 +119,6 @@ type Store interface {
 	// already succeeded the facts the live hand-over could not have given it (see
 	// the repository).
 	AttachCompletedDependency(string, time.Time) (bool, error)
-}
-
-// NodeAuthenticator is the one question this module asks the runtime-binding
-// domain: which node does this credential belong to?
-//
-// A consumer-side interface, one method wide, implemented in store_adapter.go —
-// the shape profileguard already uses. Declaring it here rather than calling
-// `runtimeservice.AuthenticateNodeCredential` directly keeps the dependency on
-// that module to a single call site, and lets a test answer the question without
-// a node table.
-type NodeAuthenticator interface {
-	AuthenticateNodeCredential(credential string) (runtimeservice.AgentNode, error)
 }
 
 // DownloadGrant is a short-lived, single-object GET grant: the only place a
@@ -181,7 +163,6 @@ const (
 
 type Service struct {
 	store    Store
-	nodes    NodeAuthenticator
 	grants   GrantIssuer
 	now      func() time.Time
 	lease    time.Duration
@@ -200,10 +181,9 @@ func WithLease(lease time.Duration) Option { return func(s *Service) { s.lease =
 // WithGrantIssuer replaces the grant issuer.
 func WithGrantIssuer(issuer GrantIssuer) Option { return func(s *Service) { s.grants = issuer } }
 
-func NewService(store Store, nodes NodeAuthenticator, opts ...Option) *Service {
+func NewService(store Store, opts ...Option) *Service {
 	service := &Service{
 		store:    store,
-		nodes:    nodes,
 		grants:   unavailableGrants{},
 		now:      time.Now,
 		lease:    DefaultLease,
@@ -213,18 +193,7 @@ func NewService(store Store, nodes NodeAuthenticator, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(service)
 	}
-	if service.nodes == nil {
-		service.nodes = unavailableNodes{}
-	}
 	return service
-}
-
-// unavailableNodes fails closed: a service built without an authenticator must
-// not read "I could not check" as "the caller is a node".
-type unavailableNodes struct{}
-
-func (unavailableNodes) AuthenticateNodeCredential(string) (runtimeservice.AgentNode, error) {
-	return runtimeservice.AgentNode{}, ErrNodeUnauthenticated
 }
 
 // unavailableGrants is the default issuer until the object store is wired.
@@ -250,7 +219,6 @@ type CreateTaskInput struct {
 	Purpose         model.Purpose
 	ExecutionScope  model.ExecutionScope
 	RequestedBy     identityservice.UserID
-	AssignedNodeID  string
 	TotalBytes      int64
 	ExpectedSHA256  string
 	DedupeKey       string
@@ -277,7 +245,6 @@ func (s *Service) CreateTask(input CreateTaskInput) (dto.Task, error) {
 		Purpose:         input.Purpose,
 		ExecutionScope:  input.ExecutionScope,
 		RequestedBy:     input.RequestedBy,
-		AssignedNodeID:  strings.TrimSpace(input.AssignedNodeID),
 		DedupeKey:       input.DedupeKey,
 		TotalBytes:      input.TotalBytes,
 		ExpectedSHA256:  strings.ToLower(strings.TrimSpace(input.ExpectedSHA256)),
@@ -320,8 +287,6 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		PublishedAt:      input.PublishedAt,
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
-		AssignedNodeID:   input.AssignedNodeID,
-		AssignedDeviceID: input.AssignedDeviceID,
 		TotalBytes:       input.TotalBytes,
 		ExpectedSHA256:   input.ExpectedSHA256,
 		DependencyTaskID: input.DependencyTaskID,
@@ -361,8 +326,8 @@ func (s *Service) AttachCompletedDependency(taskID string) (dto.Task, bool, erro
 }
 
 // CreateUserDownloadInput carries the material facts a download needs and no
-// identity of its own: who is downloading and which machine it goes to are
-// fields, so a caller cannot omit them and have a task created for somebody.
+// identity of its own: who is downloading is a field, so a caller cannot omit
+// it and have a task created for somebody.
 type CreateUserDownloadInput struct {
 	TeamID  identityservice.TeamID
 	AssetID int64
@@ -378,13 +343,11 @@ type CreateUserDownloadInput struct {
 	GameName string
 	// PublishedAt is when the material was published, carried to the executor for
 	// naming. Nil is a legal value: the executor omits that segment.
-	PublishedAt      *time.Time
-	SourceObjectKey  string
-	RequestedBy      identityservice.UserID
-	AssignedNodeID   string
-	AssignedDeviceID string
-	TotalBytes       int64
-	ExpectedSHA256   string
+	PublishedAt     *time.Time
+	SourceObjectKey string
+	RequestedBy     identityservice.UserID
+	TotalBytes      int64
+	ExpectedSHA256  string
 	// DependencyTaskID is the Cloud preparation this download waits for, when the
 	// video was not ready at the moment the user asked for it. With it set, the
 	// object key, size and hash above are empty — the preparation produces them —
@@ -589,8 +552,8 @@ const (
 	cancelledPreparationMessage = "the preparation this download waited for was cancelled"
 )
 
-// ClaimTask leases one task for the node a credential identifies, or answers
-// with no task at all.
+// ClaimTask leases one task belonging to the calling user, or answers with no
+// task at all.
 //
 // The order is candidate, grant, claim — not claim, grant. A lease is a promise
 // that a download is available, so the grant has to exist before the row says
@@ -598,13 +561,17 @@ const (
 // recorded as running with nobody holding anything, and with an attempt already
 // spent. Reading the candidate first costs one extra query and, when a competing
 // poll wins the claim below, one wasted local signature. See `NextLocalTask`.
-func (s *Service) ClaimTask(ctx context.Context, credential string) (dto.ClaimResult, error) {
-	node, err := s.authenticate(credential)
-	if err != nil {
-		return dto.ClaimResult{}, err
+//
+// The user is the Agent Token's subject. The candidate query and the claim
+// statement both filter by `requested_by`, so one user's agent cannot lease
+// another's download; the row records `claimed_by` as an audit label and the
+// claim's `attempt_id` as the identity every later report must present.
+func (s *Service) ClaimTask(ctx context.Context, userID int64) (dto.ClaimResult, error) {
+	if userID <= 0 {
+		return dto.ClaimResult{}, ErrInvalidInput
 	}
 	now := s.now().UTC()
-	candidate, found, err := s.store.NextLocalTask(node.ID, now)
+	candidate, found, err := s.store.NextLocalTask(identityservice.UserID(userID), now)
 	if err != nil {
 		return dto.ClaimResult{}, err
 	}
@@ -621,7 +588,7 @@ func (s *Service) ClaimTask(ctx context.Context, credential string) (dto.ClaimRe
 		// failure on the side that can fix it, and leases nothing.
 		return dto.ClaimResult{}, ErrGrantUnavailable
 	}
-	leased, claimed, err := s.store.ClaimLocalTask(candidate.ID, node.ID, now, s.lease)
+	leased, claimed, err := s.store.ClaimLocalTask(candidate.ID, identityservice.UserID(userID), claimedByFor(userID), now, s.lease)
 	if err != nil {
 		return dto.ClaimResult{}, err
 	}
@@ -633,16 +600,15 @@ func (s *Service) ClaimTask(ctx context.Context, credential string) (dto.ClaimRe
 	return dto.ClaimResult{Task: leaseBody(leased, grant, s.lease)}, nil
 }
 
-// HeartbeatTask renews the lease a node holds and carries how far it has got.
-func (s *Service) HeartbeatTask(credential, taskID string, completedBytes int64) error {
-	node, err := s.authenticate(credential)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(taskID) == "" || completedBytes < 0 {
+// HeartbeatTask renews the lease a user's executor holds and carries how far it
+// has got. The attempt is what the renewal is bound to: a re-claimed task has a
+// new one, and the old executor's heartbeat must not keep a lease it no longer
+// owns alive.
+func (s *Service) HeartbeatTask(userID int64, taskID, attemptID string, completedBytes int64) error {
+	if userID <= 0 || strings.TrimSpace(taskID) == "" || strings.TrimSpace(attemptID) == "" || completedBytes < 0 {
 		return ErrInvalidInput
 	}
-	renewed, err := s.store.HeartbeatTask(taskID, node.ID, s.now().UTC(), s.lease)
+	renewed, err := s.store.HeartbeatTask(taskID, claimedByFor(userID), attemptID, s.now().UTC(), s.lease)
 	if err != nil {
 		return err
 	}
@@ -665,21 +631,18 @@ func (s *Service) HeartbeatTask(credential, taskID string, completedBytes int64)
 // The read and the write are two statements, so the total could in principle
 // move between them. It cannot in practice: `total_bytes` is fixed when the task
 // is created and is only ever filled in from zero.
-func (s *Service) ReportProgress(credential, taskID string, completedBytes, bytesPerSecond int64) error {
-	node, err := s.authenticate(credential)
+func (s *Service) ReportProgress(userID int64, taskID, attemptID string, completedBytes, bytesPerSecond int64) error {
+	if userID <= 0 || strings.TrimSpace(taskID) == "" || strings.TrimSpace(attemptID) == "" || completedBytes < 0 || bytesPerSecond < 0 {
+		return ErrInvalidInput
+	}
+	task, err := s.ownedTask(userID, taskID)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(taskID) == "" || completedBytes < 0 || bytesPerSecond < 0 {
-		return ErrInvalidInput
-	}
-	task, err := s.store.GetTask(taskID)
-	if err != nil {
-		return missingOr(err)
-	}
 	recorded, err := s.store.ReportProgress(repository.ProgressInput{
 		TaskID:           task.ID,
-		NodeID:           node.ID,
+		ClaimedBy:        claimedByFor(userID),
+		AttemptID:        attemptID,
 		TransferredBytes: completedBytes,
 		TotalBytes:       task.TotalBytes,
 		SpeedBytesPerSec: bytesPerSecond,
@@ -708,25 +671,21 @@ func (s *Service) ReportProgress(credential, taskID string, completedBytes, byte
 // completion statement: that one sets `status = 'success'`, and the two terminal
 // paths also differ in what they require of the caller (`sha256` against
 // `error_code`).
-func (s *Service) CompleteTask(credential, taskID string, body dto.CompletionRequest) (dto.TransferTerminal, error) {
-	node, err := s.authenticate(credential)
+func (s *Service) CompleteTask(userID int64, taskID, attemptID string, body dto.CompletionRequest) (dto.TransferTerminal, error) {
+	if userID <= 0 || strings.TrimSpace(taskID) == "" || strings.TrimSpace(attemptID) == "" {
+		return dto.TransferTerminal{}, ErrInvalidInput
+	}
+	task, err := s.ownedTask(userID, taskID)
 	if err != nil {
 		return dto.TransferTerminal{}, err
 	}
-	if strings.TrimSpace(taskID) == "" {
-		return dto.TransferTerminal{}, ErrInvalidInput
-	}
-	task, err := s.store.GetTask(taskID)
-	if err != nil {
-		return dto.TransferTerminal{}, missingOr(err)
-	}
-	if task.Status != model.StatusRunning || task.ClaimedByNodeID != node.ID {
+	if task.Status != model.StatusRunning || task.ClaimedBy != claimedByFor(userID) || task.AttemptID != attemptID {
 		return dto.TransferTerminal{}, ErrTaskConflict
 	}
 	now := s.now().UTC()
 	switch model.Status(body.Status) {
 	case model.StatusSuccess:
-		if err := s.recordSuccess(task, node.ID, body, now); err != nil {
+		if err := s.recordSuccess(task, claimedByFor(userID), attemptID, body, now); err != nil {
 			return dto.TransferTerminal{}, err
 		}
 	case model.StatusFailed, model.StatusCancelled:
@@ -736,7 +695,8 @@ func (s *Service) CompleteTask(credential, taskID string, body dto.CompletionReq
 		}
 		failed, err := s.store.FailTask(repository.FailureInput{
 			TaskID:       task.ID,
-			NodeID:       node.ID,
+			ClaimedBy:    claimedByFor(userID),
+			AttemptID:    attemptID,
 			Status:       model.Status(body.Status),
 			ErrorCode:    errorCode,
 			ErrorMessage: body.ErrorMessage,
@@ -762,7 +722,7 @@ func (s *Service) CompleteTask(credential, taskID string, body dto.CompletionReq
 	}, nil
 }
 
-func (s *Service) recordSuccess(task model.Task, nodeID string, body dto.CompletionRequest, now time.Time) error {
+func (s *Service) recordSuccess(task model.Task, claimedBy, attemptID string, body dto.CompletionRequest, now time.Time) error {
 	// The stored hash is lowercased so the comparison is one rule rather than one
 	// per collation: the frozen pattern accepts either case, and MySQL's default
 	// comparison would have accepted them, but the repository's predicate and this
@@ -786,11 +746,12 @@ func (s *Service) recordSuccess(task model.Task, nodeID string, body dto.Complet
 		return ErrIntegrityFailed
 	}
 	completed, err := s.store.CompleteTask(repository.CompletionInput{
-		TaskID:   task.ID,
-		NodeID:   nodeID,
-		Bytes:    body.CompletedBytes,
-		SHA256:   checksum,
-		FileName: fileName,
+		TaskID:    task.ID,
+		ClaimedBy: claimedBy,
+		AttemptID: attemptID,
+		Bytes:     body.CompletedBytes,
+		SHA256:    checksum,
+		FileName:  fileName,
 	}, now)
 	if err != nil {
 		return err
@@ -801,28 +762,26 @@ func (s *Service) recordSuccess(task model.Task, nodeID string, body dto.Complet
 	return nil
 }
 
-// authenticate answers "which node is calling", and folds the several ways that
-// can fail into one refusal.
-//
-// Only the two credential sentinels are folded. Anything else the runtime-binding
-// domain reports — a database that is down, for instance — is passed through, so
-// it stays what it is: a fault of ours, not a rejected caller.
-func (s *Service) authenticate(credential string) (runtimeservice.AgentNode, error) {
-	credential = strings.TrimSpace(credential)
-	if credential == "" {
-		// There is nothing to look up, and the answer is not in doubt. Saying so
-		// here keeps an unauthenticated request from costing a hash and a query
-		// apiece.
-		return runtimeservice.AgentNode{}, ErrNodeUnauthenticated
-	}
-	node, err := s.nodes.AuthenticateNodeCredential(credential)
+// ownedTask reads a task and refuses one queued by another user. The
+// distinction between "no such task" and "someone else's task" is not published:
+// both answer `ErrTaskNotFound` so the endpoint cannot be used to probe which
+// task ids exist.
+func (s *Service) ownedTask(userID int64, taskID string) (model.Task, error) {
+	task, err := s.store.GetTask(taskID)
 	if err != nil {
-		if errors.Is(err, runtimeservice.ErrNodeCredentialInvalid) || errors.Is(err, runtimeservice.ErrBoundSessionInvalid) {
-			return runtimeservice.AgentNode{}, ErrNodeUnauthenticated
-		}
-		return runtimeservice.AgentNode{}, err
+		return model.Task{}, missingOr(err)
 	}
-	return node, nil
+	if int64(task.RequestedBy) != userID {
+		return model.Task{}, ErrTaskNotFound
+	}
+	return task, nil
+}
+
+// claimedByFor is the audit label written when this user's executor claims a
+// task. It is derived from the authenticated subject rather than sent by the
+// caller, and it is not an identity: every report is bound by `attempt_id`.
+func claimedByFor(userID int64) string {
+	return fmt.Sprintf("user-%d", userID)
 }
 
 // scopedTask reads a task and decides whether this actor may act on it, also
@@ -897,7 +856,7 @@ func taskBody(task model.Task) dto.Task {
 		AssetType:                 string(task.AssetType),
 		AssetID:                   task.AssetID,
 		AssetTitle:                task.AssetTitle,
-		AssignedDeviceID:          task.AssignedDeviceID,
+		AttemptID:                 task.AttemptID,
 		Purpose:                   string(task.Purpose),
 		ExecutionScope:            string(task.ExecutionScope),
 		Status:                    string(task.Status),
@@ -920,6 +879,7 @@ func taskBody(task model.Task) dto.Task {
 func leaseBody(task model.Task, grant DownloadGrant, lease time.Duration) *dto.LocalLease {
 	return &dto.LocalLease{
 		TaskID:               task.ID,
+		AttemptID:            task.AttemptID,
 		AssetType:            string(task.AssetType),
 		AssetID:              task.AssetID,
 		Title:                task.AssetTitle,

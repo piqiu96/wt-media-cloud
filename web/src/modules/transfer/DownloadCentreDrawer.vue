@@ -15,8 +15,7 @@ import { createComposeClient } from '../../shared/api/compose.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import MaterialDetailDrawer from '../materials/MaterialDetailDrawer.vue'
 import { isDesktop } from '../../utils.js'
-import { invoke } from '@tauri-apps/api/core'
-import { isDesktopRuntime, openSavedFile, savedFileStates } from './desktopBridge.js'
+import { openSavedFile, savedFileStates } from './desktopBridge.js'
 import { createDownloadFailureMessage } from './downloadErrors.js'
 import { assetFallbackTitle, downloadAssetKey, hasLiveTask, isFailed, isHistory, isTerminal, withinDays } from './downloadFacts.js'
 import { useDownloadCentre } from './downloadCentre.js'
@@ -39,9 +38,6 @@ const cancelRequested = ref([])
 // 空表 ＝ 没查过：浏览器读不到本机、Desktop 还没扫完 —— 界面此时一个字都不说，
 // 不能把「我读不到」写成「文件不在」。
 const presence = ref({})
-// 本机的持久化设备 id。悬置行（pending 且 assigned_device_id 是这台）要靠它认出来；
-// 浏览器读不到本机，读不到就留着 null —— `canRetake` 那一支恒 false，不认就不重取。
-const localDeviceId = ref(null)
 
 const POLL_INTERVAL_MS = 2000
 let timer = null
@@ -69,7 +65,6 @@ const rows = computed(() => {
   return transferRows(tasks.value, {
     cancelRequested: cancelRequested.value,
     presence: presence.value,
-    localDeviceId: localDeviceId.value,
   }).filter((row) => row.task.purpose === 'user_download')
     .filter((row) => {
       const key = downloadAssetKey(row.task)
@@ -155,19 +150,6 @@ function ensurePresence() {
 // 事实，拉一次就够；进行中 Tab 每一次 tick 都是一次真实的 GET，屏幕上的每个数字都来自
 // 服务端，定时器只决定「多久问一次」。没有非终态任务时它立刻停下 —— 一个永远跑着的
 // 2 秒轮询会浪费本机 Agent 与云端之间的带宽。
-// 本机的持久化设备 id，用来认出悬置在这台设备上的任务（见 `canRetake`）。Desktop 运行时
-// 才问（浏览器里 invoke 会炸，见 desktopBridge 的守卫说明），问不到就留着 null —— 认不
-// 出就不重取，比「猜一个设备去重取」诚实。
-async function loadLocalDevice() {
-  if (!isDesktopRuntime()) return
-  try {
-    const identity = await invoke('local_device_identity')
-    localDeviceId.value = identity?.device_id || null
-  } catch {
-    localDeviceId.value = null
-  }
-}
-
 function stopPolling() {
   if (timer) {
     clearInterval(timer)
@@ -209,9 +191,6 @@ watch(visible, async (open) => {
   // 重新打开要重扫一次：面板关着的这段时间里文件可能被搬走、被删，也可能换了保存位置。
   // 清掉指纹就够了 —— `load()` 结尾的 `ensurePresence()` 会补上这一次。
   measuredKey = null
-  // 先问本机 device_id 再拉列表：悬置行的「重取」要拿它认出「发给这台设备」，首帧就得有，
-  // 免得画面上先出现一帧没有重取按钮的样子。
-  await loadLocalDevice()
   // 切回「进行中」**不代替**这一次拉取：`activeTab` 的 watcher 只重估轮询闸门，不取数，
   // 而闸门又依赖已缓存的列表。所以从「历史」再打开时必须自己 `load()`，否则列表停在关闭
   // 前那一帧，中途新发起的下载在面板里根本不存在。
@@ -245,7 +224,7 @@ async function cancel(task) {
 /**
  * 发起下载的**唯一入口**：按行的 asset_type 分派到对应的创建端点（CHG-20261013-085）。
  * 成片与素材共用一张传输表与同一套行投影，差别的只有创建 URL —— 所以分支只在这里出现
- * 一次，重新下载与重取都汇到它，谁也不发明第二种发起方式。
+ * 一次，重新下载也汇到它，谁也不发明第二种发起方式。
  */
 function createDownloadFor(task) {
   if (task.asset_type === 'composite_output') return compose.createOutputDownload(task.asset_id)
@@ -263,29 +242,6 @@ async function redownload(task) {
   try {
     await createDownloadFor(task)
     // 新任务要出现在这张列表里 —— 不刷新的话画面停在旧行上，看起来像没反应。
-    await load()
-  } catch (e) {
-    feedback.toast.error(createDownloadFailureMessage(e))
-  }
-}
-
-/**
- * 重取：把一条悬置（发给本机、没人领的 pending）或可重取（解绑遗留）的任务重新驱动起来。
- *
- * 悬置行先取消 —— pending 没有执行器，取消是立即终态（契约「cancelled when it had no
- * executor」）；再重新发起下载，去重键的 generation 把刚取消的那条算作已结束，新任务于是
- * 落在**当前**可信节点上，而不是仍指着已被替换的旧节点。可重取行已是终态，直接发起。
- * 两条都走与第一次点击**完全相同**的入口（`createDownloadFor`），设备维度的去重
- * 保证不会重复造任务。
- */
-async function retake(task) {
-  try {
-    if (task.status === 'pending') {
-      // 取消失败也照发：挡不住「重新发起」这一步；若确实没取消成，去重键会把新请求折叠回
-      // 原行，不会造出重复任务。
-      try { await client.cancelTask(task.id) } catch { /* 继续重取 */ }
-    }
-    await createDownloadFor(task)
     await load()
   } catch (e) {
     feedback.toast.error(createDownloadFailureMessage(e))
@@ -401,9 +357,7 @@ async function openDetail(row) {
             <div class="transfer-item__footer">
               <p class="transfer-item__time">发起于 {{ row.createdText }}</p>
               <div class="transfer-item__actions">
-                <!-- 进行中的行：取消；悬置在这台设备上、没人领的 pending 行多一个「重取」。
-                     终态的「重新下载」「打开文件」在这一栏恒不成立（它们要求终态）。 -->
-                <t-button v-if="row.canRetake" size="small" theme="primary" @click="retake(row.task)">重取</t-button>
+                <!-- 进行中的行只有「取消」；终态的「重新下载」「打开文件」在这一栏恒不成立。 -->
                 <t-button v-if="row.canCancel" size="small" class="wt-secondary-button" variant="outline" @click="cancel(row.task)">取消</t-button>
               </div>
             </div>
@@ -429,9 +383,8 @@ async function openDetail(row) {
           </li>
         </ul>
 
-        <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件。已取消的行里，
-             解绑遗留（device_unbound）的给「重取」—— 换机重投递的入口，为当前设备建新任务；
-             其余已取消/失败给「重新下载」。已成功的素材不重下（走查裁定）。 -->
+        <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件；
+             已取消/失败给「重新下载」，已成功的素材不重下（走查裁定）。 -->
         <t-table v-else class="transfer-table" :data="visibleRows" :columns="historyColumns" :row-key="(row) => row.task.id" size="small" :scroll="{ x: 640 }">
           <template #title="{ row }">
             <span class="transfer-table__title" :title="row.task.asset_title">{{ row.task.asset_title || assetFallbackTitle(row.task) }}</span>
@@ -442,10 +395,7 @@ async function openDetail(row) {
           <template #op="{ row }">
             <t-space class="wt-resource-actions">
               <t-button v-if="row.canOpen && isDesktop()" size="small" class="wt-secondary-button" variant="outline" @click="open(row.task)">打开文件</t-button>
-              <!-- 解绑遗留（device_unbound）的行叫「重取」而不是「重新下载」：它是换机重投递
-                   的入口，重取会为当前设备建一条新任务。其余已取消/失败的行照旧「重新下载」。 -->
-              <t-button v-if="row.canRetake" size="small" theme="primary" @click="retake(row.task)">重取</t-button>
-              <t-button v-else-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
+              <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
               <t-button size="small" class="wt-secondary-button" variant="outline" :loading="clearingID === row.task.id" @click="clearRecord(row.task)">清理记录</t-button>
             </t-space>
           </template>

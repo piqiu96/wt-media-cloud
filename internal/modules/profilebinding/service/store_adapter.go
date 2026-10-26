@@ -25,21 +25,21 @@ func (mysqlStore) ListProfiles(userID identityservice.UserID, filter ProfileList
 		BusinessStatus: filter.BusinessStatus,
 	})
 }
+func (mysqlStore) BindBitAccount(userID identityservice.UserID, mainUserID string, rebind bool, at time.Time) (model.BitAccountBinding, error) {
+	return repository.BindBitAccount(userID, mainUserID, rebind, at)
+}
 func (mysqlStore) GetProfile(profileID string) (model.BrowserProfile, bool, error) {
 	return repository.GetProfile(profileID)
+}
+func (mysqlStore) GetProfileInScope(profileID string) (model.BrowserProfile, bool, error) {
+	return repository.GetProfileInScope(profileID)
 }
 func (mysqlStore) CreateScan(scan model.ProfileScan) error { return repository.CreateScan(scan) }
 func (mysqlStore) FindScan(scanID string) (model.ProfileScan, bool, error) {
 	return repository.FindScan(scanID)
 }
-func (mysqlStore) ConfirmMainIdentity(scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, action string) error {
-	return repository.ConfirmMainIdentity(scan, binding, at, action)
-}
-func (mysqlStore) ConfirmMainIdentityDirect(binding model.BitAccountBinding, at time.Time, action string) error {
-	return repository.ConfirmMainIdentityDirect(binding, at, action)
-}
-func (mysqlStore) ApplyScan(scan model.ProfileScan, binding model.BitAccountBinding, at time.Time, action string) error {
-	return repository.ApplyScan(scan, binding, at, action)
+func (mysqlStore) ApplyScan(scan model.ProfileScan, at time.Time) error {
+	return repository.ApplyScan(scan, at)
 }
 func (mysqlStore) DeleteProfile(id string) error { return repository.DeleteProfile(id) }
 func (mysqlStore) UpdateProfile(profileID string, cloudRemark *string, businessStatus *model.ProfileBusinessStatus, at time.Time) error {

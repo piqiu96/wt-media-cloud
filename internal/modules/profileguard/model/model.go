@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	ErrInvalidInput            = errors.New("sensitive task guard input is invalid")
-	ErrTaskNotFound            = errors.New("sensitive task authorization was not found")
-	ErrTaskAssignmentMismatch  = errors.New("sensitive task is not assigned to this node and user")
-	ErrRuntimeUnavailable      = errors.New("fresh matching Profile runtime is unavailable")
-	ErrPermitCredentialInvalid = errors.New("sensitive permit credential is invalid")
+	ErrInvalidInput           = errors.New("sensitive task guard input is invalid")
+	ErrTaskNotFound           = errors.New("sensitive task authorization was not found")
+	ErrTaskAssignmentMismatch = errors.New("sensitive task does not belong to this user and Profile")
+	ErrRuntimeUnavailable     = errors.New("matching Profile is unavailable")
+	ErrPermitInvalid          = errors.New("sensitive permit is not active for this user")
 )
 
 type SensitiveOperation string
@@ -65,7 +65,6 @@ type SensitiveTask struct {
 	UserID       sharedidentity.UserID `json:"user_id"`
 	ProfileID    string                `json:"profile_id"`
 	BitProfileID string                `json:"bit_profile_id"`
-	NodeID       string                `json:"node_id"`
 	Operation    SensitiveOperation    `json:"operation"`
 	Status       TaskStatus            `json:"status"`
 	CreatedAt    time.Time             `json:"created_at"`
@@ -73,15 +72,13 @@ type SensitiveTask struct {
 }
 
 type Permit struct {
-	ID             string
-	TaskID         string
-	UserID         sharedidentity.UserID
-	ProfileID      string
-	NodeID         string
-	Operation      SensitiveOperation
-	Status         PermitStatus
-	CredentialHash string
-	AcquiredAt     time.Time
-	ExpiresAt      time.Time
-	FinishedAt     *time.Time
+	ID         string
+	TaskID     string
+	UserID     sharedidentity.UserID
+	ProfileID  string
+	Operation  SensitiveOperation
+	Status     PermitStatus
+	AcquiredAt time.Time
+	ExpiresAt  time.Time
+	FinishedAt *time.Time
 }

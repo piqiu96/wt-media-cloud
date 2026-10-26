@@ -1,5 +1,4 @@
-// Package profilebinding owns staged BitBrowser identity scans and confirmed
-// Cloud Browser Profile mirrors.
+// Package service 负责 BitBrowser 扫描暂存，以及确认后写入 Cloud 的 Profile 镜像。
 package service
 
 import (
@@ -13,8 +12,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
-// ProfileListFilter carries the list page's filters. The running state stays
-// on the page: it is a Desktop runtime fact, not a cloud row field.
+// ProfileListFilter 只包含列表页筛选条件。窗口运行状态由 Desktop 实时提供，不属于
+// Cloud 行字段。
 type ProfileListFilter struct {
 	ID             string
 	Name           string
@@ -36,29 +35,29 @@ type (
 	ProfileDiff           = model.ProfileDiff
 	ProfileScan           = model.ProfileScan
 
-	ProfileInput      = dto.ProfileInput
-	SnapshotInput     = dto.SnapshotInput
-	MainIdentityInput = dto.MainIdentityInput
+	ProfileInput        = dto.ProfileInput
+	SnapshotInput       = dto.SnapshotInput
+	BitAccountBindInput = dto.BitAccountBindInput
 )
 
 var (
-	ErrForbidden            = model.ErrForbidden
-	ErrInvalidInput         = model.ErrInvalidInput
-	ErrIdentityUnverifiable = model.ErrIdentityUnverifiable
-	ErrIdentityMismatch     = model.ErrIdentityMismatch
-	ErrScanNotFound         = model.ErrScanNotFound
-	ErrScanNotReady         = model.ErrScanNotReady
-	ErrScanExpired          = model.ErrScanExpired
-	ErrProfileNotFound      = model.ErrProfileNotFound
-	ErrProfileInactive      = model.ErrProfileInactive
-	ErrProfileReferenced    = model.ErrProfileReferenced
-	ErrProfileNotDisabled   = model.ErrProfileNotDisabled
+	ErrForbidden                  = model.ErrForbidden
+	ErrInvalidInput               = model.ErrInvalidInput
+	ErrIdentityUnverifiable       = model.ErrIdentityUnverifiable
+	ErrBitNotBound                = model.ErrBitNotBound
+	ErrBitBrowserOffline          = model.ErrBitBrowserOffline
+	ErrBitMainUserMismatch        = model.ErrBitMainUserMismatch
+	ErrScanNotFound               = model.ErrScanNotFound
+	ErrScanNotReady               = model.ErrScanNotReady
+	ErrScanExpired                = model.ErrScanExpired
+	ErrProfileNotFound            = model.ErrProfileNotFound
+	ErrProfileAssignedToOtherUser = model.ErrProfileAssignedToOtherUser
+	ErrProfileInactive            = model.ErrProfileInactive
+	ErrProfileReferenced          = model.ErrProfileReferenced
+	ErrProfileNotDisabled         = model.ErrProfileNotDisabled
 )
 
 const (
-	auditMainAccountBind   = "bitbrowser.main_account.bind"
-	auditMainAccountRebind = "bitbrowser.main_account.rebind"
-
 	BitAccountBound         = model.BitAccountBound
 	ProfileActive           = model.ProfileActive
 	ProfileLocalMissing     = model.ProfileLocalMissing
@@ -74,13 +73,15 @@ const (
 
 type Store interface {
 	FindBinding(userID identityservice.UserID) (BitAccountBinding, bool, error)
+	BindBitAccount(userID identityservice.UserID, mainUserID string, rebind bool, at time.Time) (BitAccountBinding, error)
 	ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]BrowserProfile, error)
 	GetProfile(profileID string) (BrowserProfile, bool, error)
+	// GetProfileInScope 只在 Profile 仍属于其所有者当前绑定的 BitBrowser 主账号时
+	// 返回。旧主账号下的 Profile 保留在表中，但正常读取不可见。
+	GetProfileInScope(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
-	ConfirmMainIdentity(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
-	ConfirmMainIdentityDirect(binding BitAccountBinding, at time.Time, bindingAuditAction string) error
-	ApplyScan(scan ProfileScan, binding BitAccountBinding, at time.Time, bindingAuditAction string) error
+	ApplyScan(scan ProfileScan, at time.Time) error
 	DeleteProfile(id string) error
 	UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
@@ -89,10 +90,11 @@ type Store interface {
 }
 
 type Service struct {
-	store   Store
-	now     func() time.Time
-	newID   func(string) string
-	scanTTL time.Duration
+	store            Store
+	now              func() time.Time
+	newID            func(string) string
+	scanTTL          time.Duration
+	observedFreshFor time.Duration
 }
 
 type Option func(*Service)
@@ -109,12 +111,20 @@ func WithScanTTL(ttl time.Duration) Option {
 	return func(service *Service) { service.scanTTL = ttl }
 }
 
+// WithObservedFreshFor 设置 Agent 的 BitBrowser 观察可用于判断的最大年龄。
+func WithObservedFreshFor(freshFor time.Duration) Option {
+	return func(service *Service) { service.observedFreshFor = freshFor }
+}
+
+const defaultObservedFreshFor = 120 * time.Second
+
 func newService(store Store, options ...Option) *Service {
 	service := &Service{
-		store:   store,
-		now:     func() time.Time { return time.Now().UTC() },
-		newID:   id.NewID,
-		scanTTL: 15 * time.Minute,
+		store:            store,
+		now:              func() time.Time { return time.Now().UTC() },
+		newID:            id.NewID,
+		scanTTL:          15 * time.Minute,
+		observedFreshFor: defaultObservedFreshFor,
 	}
 	for _, option := range options {
 		option(service)
@@ -130,12 +140,18 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	if mainUserID == "" || len(input.Profiles) == 0 {
 		return ProfileScan{}, ErrIdentityUnverifiable
 	}
+	if !s.observationFresh(input.ObservedAt) {
+		return ProfileScan{}, ErrBitBrowserOffline
+	}
 	binding, hasBinding, err := s.store.FindBinding(actor.ID)
 	if err != nil {
 		return ProfileScan{}, err
 	}
-	if hasBinding && binding.MainUserID != mainUserID {
-		return ProfileScan{}, ErrIdentityMismatch
+	if !hasBinding {
+		return ProfileScan{}, ErrBitNotBound
+	}
+	if binding.MainUserID != mainUserID {
+		return ProfileScan{}, ErrBitMainUserMismatch
 	}
 	existing, err := s.store.ListProfiles(actor.ID, ProfileListFilter{})
 	if err != nil {
@@ -230,56 +246,33 @@ func (s *Service) GetScan(actor identityservice.PublicUser, scanID string) (Prof
 	return scan, nil
 }
 
-func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (ProfileScan, error) {
-	return s.confirmScan(actor, scanID, true)
+// BindBitAccount 记录 Local Agent 从正在运行的 BitBrowser 读到的主账号，是唯一
+// 写入路径：首次观察建立绑定，相同账号只刷新验证时间，不同账号必须由用户明确确认
+// 重绑。重绑不修改 browser_profiles，旧主账号的 Profile 原样保留，切回后自然恢复
+// 可见。
+// GetBitAccount 返回用户当前绑定的主账号；未绑定不是错误。
+func (s *Service) GetBitAccount(userID identityservice.UserID) (BitAccountBinding, bool, error) {
+	if userID <= 0 {
+		return BitAccountBinding{}, false, ErrForbidden
+	}
+	return s.store.FindBinding(userID)
 }
 
-func (s *Service) ConfirmMainIdentity(actor identityservice.PublicUser, scanID string) (ProfileScan, error) {
-	return s.confirmScan(actor, scanID, false)
-}
-
-func (s *Service) ConfirmMainIdentityDirect(actor identityservice.PublicUser, input MainIdentityInput) (BitAccountBinding, error) {
-	if !validActor(actor) {
+func (s *Service) BindBitAccount(userID identityservice.UserID, input BitAccountBindInput) (BitAccountBinding, error) {
+	if userID <= 0 {
 		return BitAccountBinding{}, ErrForbidden
 	}
 	mainUserID := strings.TrimSpace(input.MainUserID)
 	if mainUserID == "" {
 		return BitAccountBinding{}, ErrIdentityUnverifiable
 	}
-	now := s.now()
-	binding, found, err := s.store.FindBinding(actor.ID)
-	if err != nil {
-		return BitAccountBinding{}, err
+	if !s.observationFresh(input.ObservedAt) {
+		return BitAccountBinding{}, ErrBitBrowserOffline
 	}
-	if found && binding.MainUserID != mainUserID {
-		// The mismatch is the safety guard: one account must not silently take
-		// over another's binding. "以当前环境为准" is the deliberate exception —
-		// the user standing at this machine states that the account the
-		// environment reports is the one to bind — and only that explicit flag
-		// clears the guard. Everything else, including the scan-confirm path,
-		// is refused so a wrong-environment report cannot rebind the account.
-		if !input.Overwrite {
-			return BitAccountBinding{}, ErrIdentityMismatch
-		}
-		binding.MainUserID = mainUserID
-	}
-	if !found {
-		boundAt := now
-		binding = BitAccountBinding{UserID: actor.ID, MainUserID: mainUserID, Status: BitAccountBound, BoundAt: &boundAt}
-	}
-	verifiedAt := now
-	binding.LastVerifiedAt = &verifiedAt
-	bindingAuditAction := auditMainAccountBind
-	if found {
-		bindingAuditAction = auditMainAccountRebind
-	}
-	if err := s.store.ConfirmMainIdentityDirect(binding, now, bindingAuditAction); err != nil {
-		return BitAccountBinding{}, err
-	}
-	return binding, nil
+	return s.store.BindBitAccount(userID, mainUserID, input.Rebind, s.now())
 }
 
-func (s *Service) confirmScan(actor identityservice.PublicUser, scanID string, applyProfiles bool) (ProfileScan, error) {
+func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (ProfileScan, error) {
 	scan, err := s.GetScan(actor, scanID)
 	if err != nil {
 		return ProfileScan{}, err
@@ -298,33 +291,47 @@ func (s *Service) confirmScan(actor identityservice.PublicUser, scanID string, a
 	if err != nil {
 		return ProfileScan{}, err
 	}
-	if found && binding.MainUserID != scan.MainUserID {
-		return ProfileScan{}, ErrIdentityMismatch
-	}
 	if !found {
-		boundAt := now
-		binding = BitAccountBinding{UserID: actor.ID, MainUserID: scan.MainUserID, Status: BitAccountBound, BoundAt: &boundAt}
+		return ProfileScan{}, ErrBitNotBound
 	}
-	verifiedAt := now
-	binding.LastVerifiedAt = &verifiedAt
+	if binding.MainUserID != scan.MainUserID {
+		return ProfileScan{}, ErrBitMainUserMismatch
+	}
 	scan.Status = ScanConfirmed
 	scan.ConfirmedAt = &now
-	bindingAuditAction := auditMainAccountBind
-	if found {
-		bindingAuditAction = auditMainAccountRebind
-	}
-	if applyProfiles {
-		err = s.store.ApplyScan(scan, binding, now, bindingAuditAction)
-	} else {
-		err = s.store.ConfirmMainIdentity(scan, binding, now, bindingAuditAction)
-	}
-	if err != nil {
+	// 确认扫描只应用 Profile。绑定由 Local Agent 通过 /local-agent/bit-account/bind
+	// 观察写入，扫描不能顺带建立或更换主账号。
+	if err := s.store.ApplyScan(scan, now); err != nil {
 		return ProfileScan{}, err
 	}
 	return scan, nil
 }
 
-// RejectScan marks a scan as rejected without applying changes.
+// observationFresh 判断观察是否仍可用于决策。零值表示 Agent 没有说明观察时间，
+// 按过期处理而不是默认可信。
+func (s *Service) observationFresh(at time.Time) bool {
+	if at.IsZero() {
+		return false
+	}
+	now := s.now()
+	if at.After(now) {
+		return true
+	}
+	return now.Sub(at) <= s.observedFreshFor
+}
+
+// processObservedFreshFor 是 HTTP 入口使用的观察窗口。进程启动时由 bootstrap
+// 从配置安装一次。
+var processObservedFreshFor = defaultObservedFreshFor
+
+// ConfigureObservedFreshFor 为 HTTP 处理函数使用的包级操作安装观察新鲜窗口。
+func ConfigureObservedFreshFor(freshFor time.Duration) {
+	if freshFor > 0 {
+		processObservedFreshFor = freshFor
+	}
+}
+
+// RejectScan 只校验扫描可以被拒绝，不写入任何状态。
 func (s *Service) RejectScan(actor identityservice.PublicUser, scanID string) error {
 	if !validActor(actor) {
 		return ErrForbidden
@@ -352,6 +359,16 @@ func (s *Service) ListProfiles(actor identityservice.PublicUser, userID identity
 	if userID <= 0 && actor.Role != identityservice.RoleAdmin && actor.Role != identityservice.RoleSeniorOperator {
 		userID = actor.ID
 	}
+	// 查看自己、以及管理员指定某个用户时，没有绑定就没有作用域。页面需要区分
+	// “未绑定”（引导绑定）与“没有 Profile”（空结果）。Senior 查看同团队用户时
+	// 交给行可见性过滤，避免借此探测他人是否已绑定。
+	if userID > 0 && (actor.Role == identityservice.RoleAdmin || userID == actor.ID) {
+		if _, bound, err := s.store.FindBinding(userID); err != nil {
+			return nil, err
+		} else if !bound {
+			return nil, ErrBitNotBound
+		}
+	}
 	profiles, err := s.store.ListProfiles(userID, filter)
 	if err != nil {
 		return nil, err
@@ -369,7 +386,7 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	if !validActor(actor) {
 		return ErrForbidden
 	}
-	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
+	profile, found, err := s.store.GetProfileInScope(strings.TrimSpace(profileID))
 	if err != nil {
 		return err
 	}
@@ -379,9 +396,8 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	if actor.Role != identityservice.RoleAdmin && profile.UserID != actor.ID {
 		return ErrForbidden
 	}
-	// Sync-delete is only allowed for disabled windows: the window is already
-	// gone from BitBrowser (scan reports it missing) and is disabled, so the
-	// Cloud mirror has no value left. Active windows must not be deleted.
+	// 同步删除只允许已停用的窗口：BitBrowser 中已不存在（扫描报告缺失）且业务已
+	// 停用，Cloud 镜像不再有价值。启用的窗口不允许删除。
 	if profile.BusinessStatus != ProfileBusinessDisabled {
 		return ErrProfileNotDisabled
 	}
@@ -399,7 +415,7 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 	if !validActor(actor) {
 		return BrowserProfile{}, ErrForbidden
 	}
-	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
+	profile, found, err := s.store.GetProfileInScope(strings.TrimSpace(profileID))
 	if err != nil {
 		return BrowserProfile{}, err
 	}
@@ -415,7 +431,7 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 	if err := s.store.UpdateProfile(profileID, cloudRemark, businessStatus, s.now()); err != nil {
 		return BrowserProfile{}, err
 	}
-	updated, found, err := s.store.GetProfile(profileID)
+	updated, found, err := s.store.GetProfileInScope(profileID)
 	if err != nil {
 		return BrowserProfile{}, err
 	}
@@ -439,6 +455,18 @@ func (s *Service) AssignProfileOwner(actor identityservice.PublicUser, profileID
 	if target.ID <= 0 || target.Status != identityservice.UserStatusEnabled || target.Role != identityservice.RoleOperator || target.TeamID == nil {
 		return BrowserProfile{}, ErrInvalidInput
 	}
+	// 归属只在同一主账号内成立：目标用户必须已绑定，且 Profile 属于该主账号。
+	// 跨主账号分配会把目标用户根本看不到的行悄悄转过去。
+	binding, bound, err := s.store.FindBinding(target.ID)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if !bound {
+		return BrowserProfile{}, ErrBitNotBound
+	}
+	if profile.MainUserID != binding.MainUserID {
+		return BrowserProfile{}, ErrBitMainUserMismatch
+	}
 	referenced, err := s.store.ProfileHasAccountReferences(profile.ID)
 	if err != nil {
 		return BrowserProfile{}, err
@@ -460,7 +488,7 @@ func (s *Service) GetActiveProfile(actor identityservice.PublicUser, profileID s
 	if !validActor(actor) {
 		return BrowserProfile{}, ErrForbidden
 	}
-	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
+	profile, found, err := s.store.GetProfileInScope(strings.TrimSpace(profileID))
 	if err != nil {
 		return BrowserProfile{}, err
 	}
@@ -512,9 +540,8 @@ func changedFields(current, candidate BrowserProfile) []string {
 	if current.Remark != candidate.Remark {
 		fields = append(fields, "remark")
 	}
-	// bit_status (open/close running state) and bit_updated_at (BitBrowser
-	// timestamp) are operational state that changes on open/close; they are NOT
-	// window configuration and must not trigger a "changed" diff.
+	// bit_status 是开关窗口的运行状态，bit_updated_at 是 BitBrowser 时间戳，二者
+	// 都会随开关变化，不属于窗口配置，不触发 changed 差异。
 	if current.ProxyType != candidate.ProxyType {
 		fields = append(fields, "proxy_type")
 	}

@@ -1,8 +1,23 @@
 schema_version: 1
-revision: "2026.07.14.1"
+revision: "2026.10.23.1"
+# `users` holds business identity only; every authentication failure below is decided
+# from the `user_sessions` row the caller presented.
 errors:
   authentication_required: {http_status: 401}
   forbidden: {http_status: 403}
   username_taken: {http_status: 409}
   invalid_identity_request: {http_status: 400}
   identity_store_error: {http_status: 500}
+  # 20010: a second Desktop login while this user already has a valid Desktop session.
+  # Carries `error.details.active_session_id`; confirming means resending the same login
+  # with `replace_existing=true` and that id. Cancelling writes nothing.
+  desktop_login_conflict: {http_status: 409, code: 20010, retryable: false, recovery_action: confirm_desktop_takeover}
+  # The presented session was replaced by a login on another Desktop.
+  auth_desktop_replaced: {http_status: 401, code: 11001, retryable: false, recovery_action: login_again}
+  # No such session (bad or missing credential).
+  auth_session_invalid: {http_status: 401, code: 11001, retryable: false, recovery_action: login_again}
+  # Invalidated: logout, password change/reset, user disabled, forced logout.
+  auth_session_invalidated: {http_status: 401, code: 11001, retryable: false, recovery_action: login_again}
+  auth_session_expired: {http_status: 401, code: 11001, retryable: false, recovery_action: login_again}
+  # An operation that only a Desktop session may perform was attempted from a web session.
+  desktop_login_required: {http_status: 401, code: 11001, retryable: false, recovery_action: login_desktop}

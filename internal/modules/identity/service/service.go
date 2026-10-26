@@ -4,6 +4,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,25 +61,70 @@ const (
 )
 
 var (
-	ErrAuthenticationFailed = model.ErrAuthenticationFailed
-	ErrSessionInvalid       = model.ErrSessionInvalid
-	ErrMissingCredentials   = model.ErrMissingCredentials
-	ErrLoginInputInvalid    = model.ErrLoginInputInvalid
-	ErrForbidden            = model.ErrForbidden
-	ErrInvalidInput         = model.ErrInvalidInput
-	ErrUsernameTaken        = model.ErrUsernameTaken
-	ErrTeamNameTaken        = model.ErrTeamNameTaken
-	ErrTeamInUse            = model.ErrTeamInUse
-	ErrGameIDTaken          = model.ErrGameIDTaken
-	ErrInvalidGameID        = model.ErrInvalidGameID
-	ErrGameNameTaken        = model.ErrGameNameTaken
-	ErrGameInUse            = model.ErrGameInUse
-	ErrUserGameScopeInUse   = model.ErrUserGameScopeInUse
-	ErrGameUnavailable      = model.ErrGameUnavailable
-	ErrPasswordTooShort     = model.ErrPasswordTooShort
-	ErrBootstrapUnavailable = model.ErrBootstrapUnavailable
-	ErrSessionReplaceNeeded = model.ErrSessionReplaceNeeded
+	ErrAuthenticationFailed             = model.ErrAuthenticationFailed
+	ErrSessionInvalid                   = model.ErrSessionInvalid
+	ErrSessionInvalidated               = model.ErrSessionInvalidated
+	ErrSessionExpired                   = model.ErrSessionExpired
+	ErrDesktopReplaced                  = model.ErrDesktopReplaced
+	ErrDesktopLoginRequired             = model.ErrDesktopLoginRequired
+	ErrDesktopLoginConflict             = model.ErrDesktopLoginConflict
+	ErrSessionReplaceNeeded             = model.ErrSessionReplaceNeeded
+	ErrSessionStateInvalid              = model.ErrSessionStateInvalid
+	ErrMissingCredentials               = model.ErrMissingCredentials
+	ErrLoginInputInvalid                = model.ErrLoginInputInvalid
+	ErrForbidden                        = model.ErrForbidden
+	ErrInvalidInput                     = model.ErrInvalidInput
+	ErrUsernameTaken                    = model.ErrUsernameTaken
+	ErrTeamNameTaken                    = model.ErrTeamNameTaken
+	ErrTeamInUse                        = model.ErrTeamInUse
+	ErrGameIDTaken                      = model.ErrGameIDTaken
+	ErrInvalidGameID                    = model.ErrInvalidGameID
+	ErrGameNameTaken                    = model.ErrGameNameTaken
+	ErrGameInUse                        = model.ErrGameInUse
+	ErrUserGameScopeInUse               = model.ErrUserGameScopeInUse
+	ErrGameUnavailable                  = model.ErrGameUnavailable
+	ErrPasswordTooShort                 = model.ErrPasswordTooShort
+	ErrBootstrapUnavailable             = model.ErrBootstrapUnavailable
+	SessionInvalidReasonLogout          = model.SessionInvalidReasonLogout
+	SessionInvalidReasonPasswordChanged = model.SessionInvalidReasonPasswordChanged
+	SessionInvalidReasonAdminReset      = model.SessionInvalidReasonAdminReset
+	SessionInvalidReasonUserDisabled    = model.SessionInvalidReasonUserDisabled
+	SessionInvalidReasonForceLogout     = model.SessionInvalidReasonForceLogout
+	SessionInvalidReasonDesktopReplaced = model.SessionInvalidReasonDesktopReplaced
+	SessionInvalidReasonSuperseded      = model.SessionInvalidReasonSuperseded
 )
+
+// SessionTTL is the absolute lifetime of a user session. Agent Tokens derive
+// their expiry from the owning session, so there is no second lifetime here.
+const SessionTTL = 30 * 24 * time.Hour
+
+// AuthFailure is the machine-readable part of a rejected credential. The API
+// layer emits it as error.code/recovery_action so clients never parse the
+// human message to tell "replaced" from "expired".
+type AuthFailure struct {
+	Code           string
+	Message        string
+	RecoveryAction string
+}
+
+func DescribeAuthFailure(err error) (AuthFailure, bool) {
+	switch {
+	case errors.Is(err, ErrDesktopReplaced):
+		return AuthFailure{Code: "AUTH_DESKTOP_REPLACED", Message: "你的账号已在另一台电脑登录", RecoveryAction: "login_again"}, true
+	case errors.Is(err, ErrSessionInvalidated):
+		return AuthFailure{Code: "AUTH_SESSION_INVALIDATED", Message: "登录状态已失效，请重新登录", RecoveryAction: "login_again"}, true
+	case errors.Is(err, ErrSessionExpired):
+		return AuthFailure{Code: "AUTH_SESSION_EXPIRED", Message: "登录已过期，请重新登录", RecoveryAction: "login_again"}, true
+	case errors.Is(err, ErrDesktopLoginRequired):
+		return AuthFailure{Code: "DESKTOP_LOGIN_REQUIRED", Message: "请先在 Desktop 登录", RecoveryAction: "login_desktop"}, true
+	case errors.Is(err, ErrSessionInvalid):
+		return AuthFailure{Code: "AUTH_SESSION_INVALID", Message: "请先登录或凭证已过期", RecoveryAction: "login_again"}, true
+	}
+	return AuthFailure{}, false
+}
+
+type DesktopLoginConflictError = model.DesktopLoginConflictError
+type SessionCreateResult = model.SessionCreateResult
 
 type Store interface {
 	CountUsers() (int, error)
@@ -89,7 +135,7 @@ type Store interface {
 	ListUsers() ([]User, error)
 	UpdateUser(User) error
 	UpdateOwnProfile(UserID, string, string, time.Time, AuditEvent) error
-	UpdateUserAndInvalidateSessions(User, AuditEvent) error
+	UpdateUserAndInvalidateSessions(User, AuditEvent, string) error
 	DeleteUser(UserID) error
 	DeleteUserWithAudit(UserID, AuditEvent) error
 	CreateTeam(OperationTeam) (TeamID, error)
@@ -101,11 +147,13 @@ type Store interface {
 	DeleteTeam(TeamID) error
 	DeleteTeamWithAudit(TeamID, AuditEvent) error
 	TeamHasReferences(TeamID) (bool, error)
-	CreateSession(Session) error
+	CreateSession(Session, string) (SessionCreateResult, error)
 	FindSessionByTokenHash(tokenHash string) (Session, bool, error)
-	HasActiveSessionForClientType(userID UserID, clientType ClientType) (bool, error)
-	InvalidateUserSessionsForClientType(userID UserID, clientType ClientType, at time.Time) error
-	InvalidateSessionByID(sessionID string, at time.Time) error
+	FindSessionByID(sessionID string) (Session, bool, error)
+	FindActiveDesktopSession(userID UserID, at time.Time) (Session, bool, error)
+	InvalidateUserSessions(userID UserID, at time.Time, reason string) error
+	InvalidateUserSessionsWithAudit(userID UserID, at time.Time, reason string, event AuditEvent) error
+	InvalidateSessionByID(sessionID string, at time.Time, reason string) error
 	AppendAudit(AuditEvent) error
 	ListAuditLogs(limit int) ([]AuditEvent, error)
 }
@@ -272,7 +320,7 @@ func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 }
 
 func (s *Service) Login(username, password string) (LoginResult, error) {
-	return s.LoginWithOptions(username, password, LoginOptions{ReplaceExisting: true})
+	return s.LoginWithOptions(username, password, LoginOptions{})
 }
 
 func (s *Service) LoginWithOptions(username, password string, options LoginOptions) (LoginResult, error) {
@@ -297,33 +345,46 @@ func (s *Service) LoginWithOptions(username, password string, options LoginOptio
 	if clientType == "" {
 		clientType = ClientTypeWeb
 	}
-	now := s.now()
-	// Replacement is per client type: desktop and web sessions coexist, and a
-	// new login only kicks the same type's previous active session.
-	hasActive, err := s.store.HasActiveSessionForClientType(user.ID, clientType)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	if hasActive && !options.ReplaceExisting {
-		return LoginResult{}, ErrSessionReplaceNeeded
-	}
-	if err := s.store.InvalidateUserSessionsForClientType(user.ID, clientType, now); err != nil {
-		return LoginResult{}, err
-	}
+	// Agent Tokens derive their exp from this timestamp at one-second
+	// granularity. Truncating here keeps session and token expiring at the same
+	// instant instead of letting the token lapse up to a second earlier.
+	now := s.now().Truncate(time.Second)
 	token := s.newToken()
-	if err := s.store.CreateSession(Session{
+	session := Session{
 		ID:         s.newID("session"),
 		UserID:     user.ID,
 		TokenHash:  tokenHash(token),
 		ClientType: clientType,
 		CreatedAt:  now,
+		ExpiresAt:  now.Add(SessionTTL),
+	}
+	// The store owns the Desktop conflict transaction (user row lock) so the
+	// password check above cannot race with the "one active Desktop row" rule.
+	// A replace_session_id only has meaning for an explicit Desktop takeover;
+	// passing it through without ReplaceExisting would let a plain login
+	// silently evict the active session.
+	replaceSessionID := ""
+	if clientType == ClientTypeDesktop && options.ReplaceExisting {
+		replaceSessionID = options.ReplaceSessionID
+	}
+	created, err := s.store.CreateSession(session, replaceSessionID)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	if err := s.audit(user.ID, "user.login", "user", user.ID, map[string]string{
+		"username":            user.Username,
+		"client_type":         string(clientType),
+		"replaced_session_id": created.ReplacedSessionID,
 	}); err != nil {
 		return LoginResult{}, err
 	}
-	if err := s.audit(user.ID, "user.login", "user", user.ID, map[string]string{"username": user.Username, "replace_existing": strconv.FormatBool(hasActive)}); err != nil {
-		return LoginResult{}, err
-	}
-	return LoginResult{Token: token, User: publicUser(user)}, nil
+	return LoginResult{
+		Token:      token,
+		SessionID:  session.ID,
+		ExpiresAt:  session.ExpiresAt,
+		ClientType: clientType,
+		User:       publicUser(user),
+	}, nil
 }
 
 func (s *Service) Authenticate(token string) (PublicUser, error) {
@@ -342,15 +403,75 @@ func (s *Service) AuthenticateContext(token string) (AuthContext, error) {
 	if err != nil {
 		return AuthContext{}, err
 	}
-	if !ok || session.InvalidAt != nil {
+	if !ok {
 		return AuthContext{}, ErrSessionInvalid
+	}
+	// The order is part of the wire contract: a Desktop row that was replaced
+	// stays "replaced" even after its expiry, so the old client shows the
+	// takeover message rather than a generic expiry.
+	if session.ClientType == ClientTypeDesktop && session.InvalidatedReason == SessionInvalidReasonDesktopReplaced {
+		return AuthContext{}, ErrDesktopReplaced
+	}
+	if session.InvalidAt != nil {
+		return AuthContext{}, ErrSessionInvalidated
+	}
+	if !s.now().Before(session.ExpiresAt) {
+		return AuthContext{}, ErrSessionExpired
 	}
 	user, ok, err := s.store.FindUser(session.UserID)
 	if err != nil {
 		return AuthContext{}, err
 	}
 	if !ok || user.Status != UserStatusEnabled {
-		return AuthContext{}, ErrSessionInvalid
+		return AuthContext{}, ErrSessionInvalidated
+	}
+	return AuthContext{User: publicUser(user), Session: session}, nil
+}
+
+// AuthenticateAgentSession is the strict mode for Agent Token operations: the
+// token's sid must still be the one active Desktop session, and the user must
+// still be enabled. It deliberately returns only agent-facing outcomes so the
+// caller can map takeover and re-login requirements without guessing.
+func (s *Service) AuthenticateAgentSession(sessionID string) (AuthContext, error) {
+	if sessionID == "" {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	session, ok, err := s.store.FindSessionByID(sessionID)
+	if err != nil {
+		return AuthContext{}, err
+	}
+	if !ok || session.ClientType != ClientTypeDesktop {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	if session.InvalidatedReason == SessionInvalidReasonDesktopReplaced {
+		return AuthContext{}, ErrDesktopReplaced
+	}
+	if session.InvalidAt != nil || !s.now().Before(session.ExpiresAt) {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	user, ok, err := s.store.FindUser(session.UserID)
+	if err != nil {
+		return AuthContext{}, err
+	}
+	if !ok || user.Status != UserStatusEnabled {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	active, ok, err := s.store.FindActiveDesktopSession(session.UserID, s.now())
+	if err != nil {
+		if errors.Is(err, ErrSessionStateInvalid) {
+			// Several valid Desktop rows cannot come from a login; it is a
+			// takeover that raced a stale row. Fail closed the same way, so the
+			// old Desktop is told it was replaced instead of silently retrying
+			// a login that would be refused again.
+			return AuthContext{}, ErrDesktopReplaced
+		}
+		return AuthContext{}, err
+	}
+	if !ok {
+		return AuthContext{}, ErrDesktopLoginRequired
+	}
+	if active.ID != session.ID {
+		return AuthContext{}, ErrDesktopReplaced
 	}
 	return AuthContext{User: publicUser(user), Session: session}, nil
 }
@@ -363,12 +484,42 @@ func (s *Service) Logout(token string) error {
 	if err != nil {
 		return err
 	}
-	if !ok || session.InvalidAt != nil {
+	if !ok {
 		return ErrSessionInvalid
 	}
-	// Invalidate only the current session: with desktop and web sessions
+	if session.ClientType == ClientTypeDesktop && session.InvalidatedReason == SessionInvalidReasonDesktopReplaced {
+		return ErrDesktopReplaced
+	}
+	if session.InvalidAt != nil {
+		return ErrSessionInvalidated
+	}
+	if !s.now().Before(session.ExpiresAt) {
+		return ErrSessionExpired
+	}
+	// Invalidate only the current session: with Desktop and Web sessions
 	// coexisting, logging out of one must not kill the other.
-	return s.store.InvalidateSessionByID(session.ID, s.now())
+	return s.store.InvalidateSessionByID(session.ID, s.now(), SessionInvalidReasonLogout)
+}
+
+// ForceLogout invalidates every session of the target user without touching
+// the user row. Re-enabling or resetting a password never revives an old row.
+func (s *Service) ForceLogout(actorID, userID UserID) error {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return err
+	}
+	if !ok || !isAdmin(actor) {
+		return ErrForbidden
+	}
+	target, ok, err := s.store.FindUser(userID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrInvalidInput
+	}
+	event := s.newAuditEvent(actor.ID, "user.session.force_logout", "user", target.ID, map[string]string{"result": "invalidated"})
+	return s.store.InvalidateUserSessionsWithAudit(userID, s.now(), SessionInvalidReasonForceLogout, event)
 }
 
 func (s *Service) SetUserStatus(actorID, userID UserID, status UserStatus) error {
@@ -395,7 +546,7 @@ func (s *Service) ChangeOwnPassword(userID UserID, currentPassword, newPassword 
 	if err != nil {
 		return err
 	}
-	return s.store.UpdateUserAndInvalidateSessions(updated, s.newAuditEvent(user.ID, "user.password.change", "user", user.ID, map[string]string{"result": "changed"}))
+	return s.store.UpdateUserAndInvalidateSessions(updated, s.newAuditEvent(user.ID, "user.password.change", "user", user.ID, map[string]string{"result": "changed"}), SessionInvalidReasonPasswordChanged)
 }
 
 func (s *Service) ResetPassword(actorID, userID UserID, newPassword string) error {
@@ -417,7 +568,7 @@ func (s *Service) ResetPassword(actorID, userID UserID, newPassword string) erro
 	if err != nil {
 		return err
 	}
-	return s.store.UpdateUserAndInvalidateSessions(updated, s.newAuditEvent(actor.ID, "user.password.reset", "user", user.ID, map[string]string{"result": "reset"}))
+	return s.store.UpdateUserAndInvalidateSessions(updated, s.newAuditEvent(actor.ID, "user.password.reset", "user", user.ID, map[string]string{"result": "reset"}), SessionInvalidReasonAdminReset)
 }
 
 func (s *Service) passwordUpdatedUser(user User, newPassword string) (User, error) {
@@ -820,7 +971,11 @@ func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, 
 	event := s.newAuditEvent(actor.ID, action, "user", user.ID, map[string]string{
 		"role": string(role), "status": string(status), "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
 	})
-	if err := s.store.UpdateUserAndInvalidateSessions(user, event); err != nil {
+	reason := SessionInvalidReasonSuperseded
+	if user.Status == UserStatusDisabled {
+		reason = SessionInvalidReasonUserDisabled
+	}
+	if err := s.store.UpdateUserAndInvalidateSessions(user, event, reason); err != nil {
 		return PublicUser{}, err
 	}
 	if user.TeamID != nil {
@@ -1114,7 +1269,7 @@ func (s *memoryStore) UpdateOwnProfile(userID UserID, nickname, avatarID string,
 	return nil
 }
 
-func (s *memoryStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent) error {
+func (s *memoryStore) UpdateUserAndInvalidateSessions(user User, event AuditEvent, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.users[user.ID]
@@ -1134,6 +1289,7 @@ func (s *memoryStore) UpdateUserAndInvalidateSessions(user User, event AuditEven
 		if session.UserID == user.ID && session.InvalidAt == nil {
 			at := user.UpdatedAt
 			session.InvalidAt = &at
+			session.InvalidatedReason = reason
 			s.sessions[hash] = session
 		}
 	}
@@ -1307,11 +1463,40 @@ func (s *memoryStore) TeamHasReferences(teamID TeamID) (bool, error) {
 	return false, nil
 }
 
-func (s *memoryStore) CreateSession(session Session) error {
+func (s *memoryStore) CreateSession(session Session, replaceSessionID string) (SessionCreateResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	result := SessionCreateResult{}
+	if session.ClientType == ClientTypeDesktop {
+		active := make([]Session, 0, 1)
+		for _, existing := range s.sessions {
+			if existing.UserID == session.UserID && existing.ClientType == ClientTypeDesktop &&
+				existing.InvalidAt == nil && existing.ExpiresAt.After(session.CreatedAt) {
+				active = append(active, existing)
+			}
+		}
+		if len(active) > 1 {
+			return SessionCreateResult{}, ErrSessionStateInvalid
+		}
+		if len(active) == 1 {
+			if replaceSessionID != active[0].ID {
+				return SessionCreateResult{}, &DesktopLoginConflictError{ActiveSessionID: active[0].ID}
+			}
+			for hash, existing := range s.sessions {
+				if existing.ID == active[0].ID {
+					invalidAt := session.CreatedAt
+					existing.InvalidAt = &invalidAt
+					existing.InvalidatedReason = SessionInvalidReasonDesktopReplaced
+					s.sessions[hash] = existing
+					result.ReplacedSessionID = existing.ID
+					break
+				}
+			}
+		}
+	}
 	s.sessions[session.TokenHash] = session
-	return nil
+	return result, nil
 }
 
 func (s *memoryStore) FindSessionByTokenHash(tokenHash string) (Session, bool, error) {
@@ -1321,37 +1506,72 @@ func (s *memoryStore) FindSessionByTokenHash(tokenHash string) (Session, bool, e
 	return session, ok, nil
 }
 
-func (s *memoryStore) HasActiveSessionForClientType(userID UserID, clientType ClientType) (bool, error) {
+func (s *memoryStore) FindSessionByID(sessionID string) (Session, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, session := range s.sessions {
-		if session.UserID == userID && session.ClientType == clientType && session.InvalidAt == nil {
-			return true, nil
+		if session.ID == sessionID {
+			return session, true, nil
 		}
 	}
-	return false, nil
+	return Session{}, false, nil
 }
 
-func (s *memoryStore) InvalidateUserSessionsForClientType(userID UserID, clientType ClientType, at time.Time) error {
+func (s *memoryStore) FindActiveDesktopSession(userID UserID, at time.Time) (Session, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found Session
+	count := 0
+	for _, session := range s.sessions {
+		if session.UserID == userID && session.ClientType == ClientTypeDesktop &&
+			session.InvalidAt == nil && session.ExpiresAt.After(at) {
+			found = session
+			count++
+		}
+	}
+	if count > 1 {
+		return Session{}, false, ErrSessionStateInvalid
+	}
+	return found, count == 1, nil
+}
+
+func (s *memoryStore) InvalidateUserSessions(userID UserID, at time.Time, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for hash, session := range s.sessions {
-		if session.UserID == userID && session.ClientType == clientType && session.InvalidAt == nil {
+		if session.UserID == userID && session.InvalidAt == nil {
 			invalidAt := at
 			session.InvalidAt = &invalidAt
+			session.InvalidatedReason = reason
 			s.sessions[hash] = session
 		}
 	}
 	return nil
 }
 
-func (s *memoryStore) InvalidateSessionByID(sessionID string, at time.Time) error {
+func (s *memoryStore) InvalidateUserSessionsWithAudit(userID UserID, at time.Time, reason string, event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for hash, session := range s.sessions {
+		if session.UserID == userID && session.InvalidAt == nil {
+			invalidAt := at
+			session.InvalidAt = &invalidAt
+			session.InvalidatedReason = reason
+			s.sessions[hash] = session
+		}
+	}
+	s.auditLogs = append(s.auditLogs, cloneAuditEvent(event))
+	return nil
+}
+
+func (s *memoryStore) InvalidateSessionByID(sessionID string, at time.Time, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for hash, session := range s.sessions {
 		if session.ID == sessionID && session.InvalidAt == nil {
 			invalidAt := at
 			session.InvalidAt = &invalidAt
+			session.InvalidatedReason = reason
 			s.sessions[hash] = session
 			return nil
 		}

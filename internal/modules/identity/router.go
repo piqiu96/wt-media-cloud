@@ -14,6 +14,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/users", CreateUser)
 	h.PATCH("/api/v1/users/:user_id", UpdateUser)
 	h.POST("/api/v1/users/:user_id/reset-password", ResetPassword)
+	h.POST("/api/v1/users/:user_id/force-logout", ForceLogout)
 	h.POST("/api/v1/auth/change-password", ChangePassword)
 	h.GET("/api/v1/users", ListUsers)
 	h.DELETE("/api/v1/users/:user_id", DeleteUser)

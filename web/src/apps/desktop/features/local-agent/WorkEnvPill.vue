@@ -3,12 +3,12 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 // 顶栏常驻的工作环境状态胶囊。设计原则：用户只关心正常/不正常——
 // 正常时安静（绿点 + 短文案），异常才变色并展开面板看「哪一项坏了、为什么、怎么修」。
 //
-// 取数全部走 Tauri invoke 与 Cloud API（Local Agent 服务/设备绑定），不直连本机端口、
-// 不接触执行凭据。定时自检只做只读的本地状态 + 云端绑定。
+// 取数全部走 Tauri invoke 与 Cloud API（Local Agent 服务/比特账号），不直连本机端口、
+// 不接触执行凭据。定时自检只做只读的本地状态、凭证事实与云端绑定。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { createLocalAgentService } from './service.js'
-import { createDeviceBindingClient } from '../../../../shared/api/deviceBinding.js'
+import { createBitAccountClient } from '../../../../shared/api/bitAccount.js'
 import { createSessionClient } from '../../../../shared/api/session.js'
 import { aggregateWorkEnv, loadWorkEnvInputs } from './work-env-status.js'
 
@@ -19,13 +19,13 @@ const POLL_MS = 30_000
 const BOOT_RETRY_DELAYS = [2_000, 5_000, 10_000]
 
 const service = createLocalAgentService({ invoke })
-const devices = createDeviceBindingClient()
+const bitAccounts = createBitAccountClient()
 const session = createSessionClient()
 
 const snapshot = ref(null)
 const cloudUser = ref(null)
 const binding = ref(null)
-const localDevice = ref(null)
+const tokenFacts = ref(null)
 const checkedAt = ref(null)
 const busy = ref(false)
 const error = ref('')
@@ -34,7 +34,7 @@ const env = computed(() => aggregateWorkEnv({
   snapshot: snapshot.value,
   cloudUser: cloudUser.value,
   binding: binding.value,
-  localDevice: localDevice.value,
+  tokenFacts: tokenFacts.value,
 }))
 
 const checkedTime = computed(() => {
@@ -42,27 +42,23 @@ const checkedTime = computed(() => {
   return new Date(checkedAt.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 })
 
-const deviceRowText = computed(() => {
-  if (!env.value.bound) return '尚未绑定'
-  return env.value.mismatched ? '已绑定其他电脑，当前不一致' : '正在这台电脑工作'
-})
 // 账号不一致时比特浏览器本身可能是好的，但「已登录指定账号」会撒谎——
 // 指向该做的事（去个人信息页确认）而不是事实的另一半。
 const bitRowText = computed(() => env.value.bitAccountDiffers ? '账号待确认' : env.value.page.bitbrowserText)
 
 // 唯一的取数路径：挂载、手动「重新检查」、30s 轮询、窗口重新可见都走它。
-// 四项输入一次读齐——此前轮询只刷 snapshot/binding，cloudUser 与 localDevice
-// 挂载后再不重读，于是个人中心改完绑定，胶囊仍停在旧结论上。
+// 四项输入一次读齐——此前轮询只刷部分输入，cloudUser 挂载后再不重读，
+// 于是个人中心改完绑定，胶囊仍停在旧结论上。
 // `reuseScan` 只由**自动**刷新传：比特浏览器扫描每次都要问一次本机 54345，
 // 30 秒一 tick 约 120 次/小时。后台常驻的这盏灯只需要「结论」，可以让 Agent 复用
 // 五分钟内的扫描；用户主动点「重新检查」、挂载首取、冷启动重试一律实时，
 // 因为它们读的 main_user_id 正是绑定流程与执行门比对的那个值。
 async function refreshAll({ reuseScan = false } = {}) {
-  const inputs = await loadWorkEnvInputs({ session, devices, service, invoke, reuseScan })
+  const inputs = await loadWorkEnvInputs({ session, bitAccounts, service, reuseScan })
   cloudUser.value = inputs.cloudUser
-  localDevice.value = inputs.localDevice
   snapshot.value = inputs.snapshot
   binding.value = inputs.binding
+  tokenFacts.value = inputs.tokenFacts
   checkedAt.value = new Date()
   return inputs.errors
 }
@@ -147,9 +143,9 @@ onBeforeUnmount(() => {
           <t-button size="small" variant="outline" :loading="busy" @click="manualCheck">重新检查</t-button>
         </header>
         <ul class="env-rows">
-          <li><span class="row-label">工作设备</span><span class="row-value">{{ deviceRowText }}</span></li>
           <li><span class="row-label">本机服务</span><span class="row-value">{{ env.page.serviceText }}</span></li>
           <li><span class="row-label">比特浏览器</span><span class="row-value">{{ bitRowText }}</span></li>
+          <li><span class="row-label">执行凭证</span><span class="row-value">{{ env.page.credentialText }}</span></li>
         </ul>
         <template v-if="!env.workable">
           <ul class="env-blockers">

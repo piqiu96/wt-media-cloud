@@ -43,7 +43,7 @@ const testSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 	db, mock := newMockGORM(t)
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
+		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, nil)
 
@@ -51,7 +51,7 @@ func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createTask() error = %v", err)
 	}
-	if task.ID != "transfer-1" || task.Status != model.StatusPending || task.AssignedNodeID != "node-1" {
+	if task.ID != "transfer-1" || task.Status != model.StatusPending {
 		t.Fatalf("task = %+v", task)
 	}
 	if task.ExpectedSHA256 != testSHA256 || task.AssetTitle != "示例视频" {
@@ -68,7 +68,7 @@ func TestCreateTaskDeduplicatesTheBusinessCommand(t *testing.T) {
 func TestCreateTaskReadsBackTheExistingRowWhenTheDedupeKeyIsTaken(t *testing.T) {
 	db, mock := newMockGORM(t)
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), nil, "dedupe-1", int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"id": "transfer-1", "status": "running"})
 
@@ -104,8 +104,6 @@ func TestCreateTaskRefusesATaskWithoutTheFactsAnExecutorNeeds(t *testing.T) {
 		"no expected hash":               {func(in *CreateTaskInput) { in.ExpectedSHA256 = "" }, "expected sha256"},
 		"a truncated hash":               {func(in *CreateTaskInput) { in.ExpectedSHA256 = testSHA256[:63] }, "expected sha256"},
 		"a hash that is not hex":         {func(in *CreateTaskInput) { in.ExpectedSHA256 = "z" + testSHA256[1:] }, "expected sha256"},
-		"a local transfer with no node":  {func(in *CreateTaskInput) { in.AssignedNodeID = "" }, "assigned node"},
-		"a user download with no device": {func(in *CreateTaskInput) { in.AssignedDeviceID = "" }, "assigned device"},
 		"a negative total size":          {func(in *CreateTaskInput) { in.TotalBytes = -1 }, "invalid transfer total size"},
 	} {
 		input := validCreateInput()
@@ -124,7 +122,7 @@ func TestCreateTaskRefusesATaskWithoutTheFactsAnExecutorNeeds(t *testing.T) {
 }
 
 // The claim is the place a cancellation is honoured. Without this predicate a
-// cancelled running task whose node died becomes claimable again, and the new
+// cancelled running task whose executor died becomes claimable again, and the new
 // owner is then refused by every continuation predicate — progress, heartbeat
 // and completion all require `cancel_requested_at IS NULL` — so the task stays
 // `running` with no reachable terminal state.
@@ -134,11 +132,11 @@ func TestCreateTaskRefusesATaskWithoutTheFactsAnExecutorNeeds(t *testing.T) {
 // keeps expiring is retried forever.
 func TestClaimLocalTaskRefusesATaskThatWasAskedToStopOrHasNoAttemptsLeft(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
-		WithArgs("node-1", testNow.Add(2*time.Minute), testNow, testNow, testNow, "transfer-1", "node-1", testNow).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by = ?, attempt_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND requested_by = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
+		WithArgs("user-9", sqlmock.AnyArg(), testNow.Add(2*time.Minute), testNow, testNow, testNow, "transfer-1", int64(9), testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	_, claimed, err := claimLocalTask(db, "transfer-1", "node-1", testNow, 2*time.Minute)
+	_, claimed, err := claimLocalTask(db, "transfer-1", identity.UserID(9), "user-9", testNow, 2*time.Minute)
 	if err != nil {
 		t.Fatalf("claimLocalTask() error = %v", err)
 	}
@@ -151,16 +149,16 @@ func TestClaimLocalTaskRefusesATaskThatWasAskedToStopOrHasNoAttemptsLeft(t *test
 func TestClaimLocalTaskUsesAConditionalUpdate(t *testing.T) {
 	db, mock := newMockGORM(t)
 	leaseUntil := testNow.Add(2 * time.Minute)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
-		WithArgs("node-1", leaseUntil, testNow, testNow, testNow, "transfer-1", "node-1", testNow).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by = ?, attempt_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'local_agent' AND requested_by = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
+		WithArgs("user-9", sqlmock.AnyArg(), leaseUntil, testNow, testNow, testNow, "transfer-1", int64(9), testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "running", "claimed_by_node_id": "node-1", "attempt_count": 1, "lease_expires_at": leaseUntil, "heartbeat_at": testNow, "started_at": testNow})
+	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "running", "claimed_by": "user-9", "attempt_id": "attempt-1", "attempt_count": 1, "lease_expires_at": leaseUntil, "heartbeat_at": testNow, "started_at": testNow})
 
-	task, claimed, err := claimLocalTask(db, "transfer-1", "node-1", testNow, 2*time.Minute)
+	task, claimed, err := claimLocalTask(db, "transfer-1", identity.UserID(9), "user-9", testNow, 2*time.Minute)
 	if err != nil {
 		t.Fatalf("claimLocalTask() error = %v", err)
 	}
-	if !claimed || task.Status != model.StatusRunning || task.ClaimedByNodeID != "node-1" || task.AttemptCount != 1 {
+	if !claimed || task.Status != model.StatusRunning || task.ClaimedBy != "user-9" || task.AttemptID != "attempt-1" || task.AttemptCount != 1 {
 		t.Fatalf("claimed=%v task=%+v", claimed, task)
 	}
 	assertExpectations(t, mock)
@@ -175,10 +173,10 @@ func TestClaimCloudTaskPicksTheQueueHeadThenReassertsThePredicate(t *testing.T) 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs(testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-1"))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
-		WithArgs("cloud-worker:host:1:uuid", leaseUntil, testNow, testNow, testNow, "transfer-1", testNow).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by = ?, attempt_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
+		WithArgs("cloud-worker:host:1:uuid", sqlmock.AnyArg(), leaseUntil, testNow, testNow, testNow, "transfer-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "running", "purpose": "compose_input_prepare", "execution_scope": "cloud", "claimed_by_node_id": "cloud-worker:host:1:uuid", "attempt_count": 1})
+	expectTaskByID(mock, "transfer-1", testNow, map[string]any{"status": "running", "purpose": "compose_input_prepare", "execution_scope": "cloud", "claimed_by": "cloud-worker:host:1:uuid", "attempt_count": 1})
 
 	task, claimed, err := claimCloudTask(db, "cloud-worker:host:1:uuid", testNow, 2*time.Minute)
 	if err != nil {
@@ -198,8 +196,8 @@ func TestClaimCloudTaskReportsNoTaskWhenItLosesTheRace(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
 		WithArgs(testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-1"))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by_node_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
-		WithArgs("cloud-worker:host:1:uuid", testNow.Add(2*time.Minute), testNow, testNow, testNow, "transfer-1", testNow).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'running', claimed_by = ?, attempt_id = ?, lease_expires_at = ?, heartbeat_at = ?, started_at = COALESCE(started_at, ?), attempt_count = attempt_count + 1, updated_at = ? WHERE id = ? AND execution_scope = 'cloud' AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL)")).
+		WithArgs("cloud-worker:host:1:uuid", sqlmock.AnyArg(), testNow.Add(2*time.Minute), testNow, testNow, testNow, "transfer-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	task, claimed, err := claimCloudTask(db, "cloud-worker:host:1:uuid", testNow, 2*time.Minute)
@@ -236,12 +234,12 @@ func TestClaimCloudTaskReportsNoTaskForAnEmptyQueue(t *testing.T) {
 // incremented `attempt_count` whenever minting failed.
 func TestNextLocalTaskReportsTheCandidateWithoutLeasingIt(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
-		WithArgs("node-1", testNow).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND requested_by = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
+		WithArgs(int64(9), testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("transfer-9"))
-	expectTaskByID(mock, "transfer-9", testNow, map[string]any{"id": "transfer-9", "status": "pending", "execution_scope": "local_agent", "purpose": "user_download", "assigned_node_id": "node-1", "attempt_count": 0})
+	expectTaskByID(mock, "transfer-9", testNow, map[string]any{"id": "transfer-9", "status": "pending", "execution_scope": "local_agent", "purpose": "user_download", "attempt_count": 0})
 
-	task, found, err := nextLocalTask(db, "node-1", testNow)
+	task, found, err := nextLocalTask(db, identity.UserID(9), testNow)
 	if err != nil {
 		t.Fatalf("nextLocalTask() error = %v", err)
 	}
@@ -251,15 +249,15 @@ func TestNextLocalTaskReportsTheCandidateWithoutLeasingIt(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
-// A node with nothing waiting is the ordinary case for a polling executor, so it
+// A user with nothing waiting is the ordinary case for a polling executor, so it
 // reports absence rather than an error.
-func TestNextLocalTaskReportsNothingForANodeWithNoWork(t *testing.T) {
+func TestNextLocalTaskReportsNothingForAUserWithNoWork(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND assigned_node_id = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
-		WithArgs("node-1", testNow).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM file_transfer_tasks WHERE execution_scope = 'local_agent' AND requested_by = ? AND cancel_requested_at IS NULL AND attempt_count < max_attempts AND (status = 'pending' OR (status = 'running' AND lease_expires_at <= ?)) AND (execution_scope = 'cloud' OR dependency_task_id IS NULL) ORDER BY created_at ASC, id ASC LIMIT 1")).
+		WithArgs(int64(9), testNow).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	task, found, err := nextLocalTask(db, "node-1", testNow)
+	task, found, err := nextLocalTask(db, identity.UserID(9), testNow)
 	if err != nil {
 		t.Fatalf("nextLocalTask() error = %v", err)
 	}
@@ -271,11 +269,11 @@ func TestNextLocalTaskReportsNothingForANodeWithNoWork(t *testing.T) {
 
 func TestReportProgressRejectsCancelledOrUnclaimedTask(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, speed_bytes_per_sec = ?, eta_seconds = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?) AND transferred_bytes <= ?")).
-		WithArgs(int64(50), int64(100), int64(20), int64(3), testNow, testNow, "transfer-1", "node-1", testNow, int64(50)).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, speed_bytes_per_sec = ?, eta_seconds = ?, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?) AND transferred_bytes <= ?")).
+		WithArgs(int64(50), int64(100), int64(20), int64(3), testNow, testNow, "transfer-1", "user-9", "attempt-1", testNow, int64(50)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	updated, err := reportProgress(db, ProgressInput{TaskID: "transfer-1", NodeID: "node-1", TransferredBytes: 50, TotalBytes: 100, SpeedBytesPerSec: 20, ETASeconds: 3}, testNow)
+	updated, err := reportProgress(db, ProgressInput{TaskID: "transfer-1", ClaimedBy: "user-9", AttemptID: "attempt-1", TransferredBytes: 50, TotalBytes: 100, SpeedBytesPerSec: 20, ETASeconds: 3}, testNow)
 	if err != nil {
 		t.Fatalf("reportProgress() error = %v", err)
 	}
@@ -290,11 +288,11 @@ func TestReportProgressRejectsCancelledOrUnclaimedTask(t *testing.T) {
 // recorded as a success even if the service's own check is bypassed.
 func TestCompleteTaskRequiresRunningClaimAndIntegrity(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, source_object_key = COALESCE(NULLIF(?, ''), source_object_key), file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)")).
-		WithArgs(int64(100), int64(100), testSHA256, int64(100), "", "示例视频-42.mp4", testNow, testNow, testNow, "transfer-1", "node-1", int64(100), testSHA256).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = 'success', transferred_bytes = ?, total_bytes = CASE WHEN total_bytes = 0 THEN ? ELSE total_bytes END, integrity_sha256 = ?, integrity_bytes = ?, source_object_key = COALESCE(NULLIF(?, ''), source_object_key), file_name = COALESCE(?, file_name), finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ? AND cancel_requested_at IS NULL AND (total_bytes = 0 OR total_bytes = ?) AND (expected_sha256 IS NULL OR expected_sha256 = ?)")).
+		WithArgs(int64(100), int64(100), testSHA256, int64(100), "", "示例视频-42.mp4", testNow, testNow, testNow, "transfer-1", "user-9", "attempt-1", int64(100), testSHA256).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	completed, err := completeTask(db, CompletionInput{TaskID: "transfer-1", NodeID: "node-1", Bytes: 100, SHA256: testSHA256, FileName: "示例视频-42.mp4"}, testNow)
+	completed, err := completeTask(db, CompletionInput{TaskID: "transfer-1", ClaimedBy: "user-9", AttemptID: "attempt-1", Bytes: 100, SHA256: testSHA256, FileName: "示例视频-42.mp4"}, testNow)
 	if err != nil {
 		t.Fatalf("completeTask() error = %v", err)
 	}
@@ -304,14 +302,14 @@ func TestCompleteTaskRequiresRunningClaimAndIntegrity(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
-func TestHeartbeatOnlyExtendsTheCurrentNodeLease(t *testing.T) {
+func TestHeartbeatOnlyExtendsTheCurrentExecutorLease(t *testing.T) {
 	db, mock := newMockGORM(t)
 	leaseUntil := testNow.Add(2 * time.Minute)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?)")).
-		WithArgs(testNow, leaseUntil, testNow, "transfer-1", "node-1", testNow).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ? AND cancel_requested_at IS NULL AND (lease_expires_at IS NULL OR lease_expires_at > ?)")).
+		WithArgs(testNow, leaseUntil, testNow, "transfer-1", "user-9", "attempt-1", testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	updated, err := heartbeatTask(db, "transfer-1", "node-1", testNow, 2*time.Minute)
+	updated, err := heartbeatTask(db, "transfer-1", "user-9", "attempt-1", testNow, 2*time.Minute)
 	if err != nil {
 		t.Fatalf("heartbeatTask() error = %v", err)
 	}
@@ -323,11 +321,11 @@ func TestHeartbeatOnlyExtendsTheCurrentNodeLease(t *testing.T) {
 
 func TestFailTaskOnlyAllowsTheClaimedExecutorToWriteTerminalFailure(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = ?, error_code = ?, error_message = ?, finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by_node_id = ?")).
-		WithArgs("failed", "source_unavailable", "source returned 404", testNow, testNow, testNow, "transfer-1", "node-1").
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE file_transfer_tasks SET status = ?, error_code = ?, error_message = ?, finished_at = ?, lease_expires_at = NULL, heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running' AND claimed_by = ? AND attempt_id = ?")).
+		WithArgs("failed", "source_unavailable", "source returned 404", testNow, testNow, testNow, "transfer-1", "user-9", "attempt-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	finished, err := failTask(db, FailureInput{TaskID: "transfer-1", NodeID: "node-1", Status: model.StatusFailed, ErrorCode: "source_unavailable", ErrorMessage: "source returned 404"}, testNow)
+	finished, err := failTask(db, FailureInput{TaskID: "transfer-1", ClaimedBy: "user-9", AttemptID: "attempt-1", Status: model.StatusFailed, ErrorCode: "source_unavailable", ErrorMessage: "source returned 404"}, testNow)
 	if err != nil {
 		t.Fatalf("failTask() error = %v", err)
 	}
@@ -601,7 +599,7 @@ func TestCreateTaskAllowsAWaitingDownloadButNeverALeasableFactlessOne(t *testing
 	input.TotalBytes = 0
 	input.ExpectedSHA256 = ""
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, nil, "user_download", "local_agent", int64(9), "node-1", "device-1", "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
+		WithArgs("transfer-2", int64(7), "material", int64(42), "示例视频", nil, nil, nil, "user_download", "local_agent", int64(9), "prepare-1", "dedupe-1", int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, "dedupe-1", testNow, map[string]any{"dependency_task_id": "prepare-1", "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
 
@@ -639,7 +637,6 @@ func TestCreateTaskRefusesAPreparationThatWaitsOnAnotherTask(t *testing.T) {
 	input.ID = "prepare-1"
 	input.Purpose = model.PurposeComposeInputPrepare
 	input.ExecutionScope = model.ExecutionCloud
-	input.AssignedNodeID = ""
 	input.DependencyTaskID = "prepare-0"
 	input.SourceObjectKey = ""
 	input.TotalBytes = 0
@@ -675,7 +672,7 @@ func TestCreateMaterialSourcePrepareTaskIsKeyedOnTheMaterial(t *testing.T) {
 			mock.ExpectBegin()
 			expectMaterialPrepareCount(mock, testCase.finished)
 			expectMaterialPrepareInsert(mock, "prepare-1", testCase.wantKey, nil)
-			expectTaskByDedupeKey(mock, testCase.wantKey, testNow, map[string]any{"id": "prepare-1", "purpose": "compose_input_prepare", "execution_scope": "cloud", "assigned_node_id": nil, "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
+			expectTaskByDedupeKey(mock, testCase.wantKey, testNow, map[string]any{"id": "prepare-1", "purpose": "compose_input_prepare", "execution_scope": "cloud", "source_object_key": nil, "total_bytes": int64(0), "expected_sha256": nil})
 			mock.ExpectCommit()
 
 			task, err := createMaterialSourcePrepareTask(db, input, testNow)
@@ -703,7 +700,7 @@ func TestMaterialSourcePrepareKeyIgnoresTheUser(t *testing.T) {
 	if materialSourcePrepareDedupeKey(42, 1) == materialSourcePrepareDedupeKey(42, 2) {
 		t.Fatal("a retry after a failed preparation reuses the finished generation's key")
 	}
-	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 1)} {
+	for _, key := range []string{materialSourcePrepareDedupeKey(42, 1), userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), 1)} {
 		if len(key) != 64 {
 			t.Fatalf("dedupe key %q is %d characters, but the column is CHAR(64) and a longer key is truncated into a collision", key, len(key))
 		}
@@ -772,21 +769,19 @@ func TestFailDependentsEndsTheWaitersOfAFailedPreparation(t *testing.T) {
 
 func validCreateInput() CreateTaskInput {
 	return CreateTaskInput{
-		ID:               "transfer-1",
-		TeamID:           identity.TeamID(7),
-		AssetType:        model.AssetMaterial,
-		AssetID:          42,
-		AssetTitle:       "示例视频",
-		SourceObjectKey:  "materials/42/aaaaaaaa.mp4",
-		Purpose:          model.PurposeUserDownload,
-		ExecutionScope:   model.ExecutionLocalAgent,
-		RequestedBy:      identity.UserID(9),
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
-		DedupeKey:        "dedupe-1",
-		TotalBytes:       100,
-		ExpectedSHA256:   testSHA256,
-		MaxAttempts:      3,
+		ID:              "transfer-1",
+		TeamID:          identity.TeamID(7),
+		AssetType:       model.AssetMaterial,
+		AssetID:         42,
+		AssetTitle:      "示例视频",
+		SourceObjectKey: "materials/42/aaaaaaaa.mp4",
+		Purpose:         model.PurposeUserDownload,
+		ExecutionScope:  model.ExecutionLocalAgent,
+		RequestedBy:     identity.UserID(9),
+		DedupeKey:       "dedupe-1",
+		TotalBytes:      100,
+		ExpectedSHA256:  testSHA256,
+		MaxAttempts:     3,
 	}
 }
 
@@ -812,7 +807,7 @@ func expectTaskByDedupeKey(mock sqlmock.Sqlmock, dedupeKey string, now time.Time
 }
 
 func taskColumns() []string {
-	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "assigned_node_id", "assigned_device_id", "claimed_by_node_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
+	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "claimed_by", "attempt_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
 }
 
 // taskDefaults is the value each column reads as in a row builder call that did
@@ -843,10 +838,6 @@ func taskDefaults(column string, now time.Time) (driver.Value, bool) {
 		return "pending", true
 	case "requested_by":
 		return int64(9), true
-	case "assigned_node_id":
-		return "node-1", true
-	case "assigned_device_id":
-		return "device-1", true
 	case "total_bytes":
 		return int64(100), true
 	case "transferred_bytes", "speed_bytes_per_sec", "attempt_count":
@@ -857,7 +848,7 @@ func taskDefaults(column string, now time.Time) (driver.Value, bool) {
 		return testSHA256, true
 	case "created_at", "updated_at":
 		return now, true
-	case "claimed_by_node_id", "dependency_task_id", "eta_seconds",
+	case "claimed_by", "attempt_id", "dependency_task_id", "eta_seconds",
 		"lease_expires_at", "heartbeat_at", "started_at", "finished_at",
 		"cancel_requested_at", "file_name", "error_code", "error_message",
 		"integrity_sha256", "integrity_bytes":
@@ -895,31 +886,27 @@ func taskRow(now time.Time, overrides map[string]any) *sqlmock.Rows {
 
 func validUserDownloadInput() CreateUserDownloadInput {
 	return CreateUserDownloadInput{
-		ID:               "transfer-1",
-		TeamID:           identity.TeamID(7),
-		AssetID:          42,
-		AssetTitle:       "示例视频",
-		SourceObjectKey:  "materials/42/aaaaaaaa.mp4",
-		RequestedBy:      identity.UserID(9),
-		AssignedNodeID:   "node-1",
-		AssignedDeviceID: "device-1",
-		TotalBytes:       100,
-		ExpectedSHA256:   testSHA256,
-		MaxAttempts:      3,
+		ID:              "transfer-1",
+		TeamID:          identity.TeamID(7),
+		AssetID:         42,
+		AssetTitle:      "示例视频",
+		SourceObjectKey: "materials/42/aaaaaaaa.mp4",
+		RequestedBy:     identity.UserID(9),
+		TotalBytes:      100,
+		ExpectedSHA256:  testSHA256,
+		MaxAttempts:     3,
 	}
 }
 
 const (
-	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? AND status IN ('success', 'failed', 'cancelled')"
+	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')"
 	// The latest-task read that decides whether this click is a repeat of a
-	// download that already succeeded. Scoped to the device like the count and
-	// the key: the write-gate answers "does *this device* already have it?", not
-	// "does the user have it somewhere" — a device switch is a new destination
-	// and must not be swallowed by another device's success row. `latestUserDownloadStatuses`
-	// stays user-level on purpose (the badge is asset state); the divergence is
-	// intended and documented on `createUserDownloadTask`.
-	latestUserDownloadSQL = "SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND assigned_device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
-	insertTaskSQL         = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, assigned_node_id, assigned_device_id, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
+	// download that already succeeded. Scoped to the user like the count and the
+	// key: a download belongs to a person, not to the machine it happened to run
+	// on, so the same row is reachable from any machine that user logs in on.
+	// `latestUserDownloadStatuses` uses the same scope for the same reason.
+	latestUserDownloadSQL = "SELECT " + taskColumnList + " FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+	insertTaskSQL         = "INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE id = id"
 	// The preparation count is the same shape as the download count minus the user:
 	// a preparation belongs to the material, so scoping it to a user would let one
 	// user's click start a second download of a video another user is already
@@ -931,31 +918,28 @@ const (
 // scope it must be asked for. The filter is part of the expectation, not a
 // detail: a count that forgot `purpose` would include the Cloud preparation
 // tasks for the same material, and one that forgot the user would let another
-// user's downloads advance this one's generation. The device is in the scope
-// too — a generation counts finishes on *this destination*, because a device
-// switch is a new destination with its own generation.
+// user's downloads advance this one's generation.
 func expectUserDownloadCount(mock sqlmock.Sqlmock, finished int64) {
 	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
-		WithArgs("material", int64(42), "user_download", int64(9), "device-1").
+		WithArgs("material", int64(42), "user_download", int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(finished))
 }
 
 func expectUserDownloadInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), nil, dedupeKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 // expectNoLatestUserDownload arms the "has this user already got it?" read with
 // the row it returns when there is nothing: an empty result, which `selectTask`
 // turns into `ErrNotFound`. The scope is part of the expectation for the same
-// reason the count's is — a lookup that forgot the user, the purpose or the
-// device would answer with somebody else's download, or with a Cloud
-// preparation, or with another device's row, and refuse a download that never
-// happened.
+// reason the count's is — a lookup that forgot the user or the purpose would
+// answer with somebody else's download, or with a Cloud preparation, and refuse
+// a download that never happened.
 func expectNoLatestUserDownload(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-		WithArgs("material", int64(42), "user_download", int64(9), "device-1").
+		WithArgs("material", int64(42), "user_download", int64(9)).
 		WillReturnRows(sqlmock.NewRows(taskColumns()))
 }
 
@@ -975,7 +959,7 @@ func expectMaterialPrepareCount(mock sqlmock.Sqlmock, finished int64) {
 // insert, so that the guard is what refuses rather than the mock.
 func expectMaterialPrepareInsert(mock sqlmock.Sqlmock, taskID string, dedupeKey string, dependency any) {
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, nil, "compose_input_prepare", "cloud", int64(9), nil, nil, dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
+		WithArgs(taskID, int64(7), "material", int64(42), "示例视频", nil, nil, nil, "compose_input_prepare", "cloud", int64(9), dependency, dedupeKey, int64(0), nil, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -994,8 +978,9 @@ func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing
 	// itself no matter which generation the code picked. They also freeze the
 	// digest's input format, so changing the tuple or its separator is a visible
 	// edit rather than a silent re-key of every future download. CHG-20261013-085
-	// is that visible edit: `asset_type` joined the digest, so every material
-	// literal below was recomputed from `user_download|material|42|9|device-1|<gen>`.
+	// is one visible edit (`asset_type` joined the digest); this CHG is another
+	// (`v2` schema, device dimension removed), so every material literal below
+	// was recomputed from `v2|user_download|material|42|9|<gen>`.
 	for _, testCase := range []struct {
 		name     string
 		finished int64
@@ -1004,12 +989,12 @@ func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing
 		{
 			name:     "nothing finished yet",
 			finished: 0,
-			wantKey:  "d1ac526d8bf1a50361a212679e801ae9da2758279c8ac85e8c5e275d87861353",
+			wantKey:  "95474a3c3dc420f8171644a914fe55b3a4b0544563b22cd61acd059a8bcfe2ef",
 		},
 		{
 			name:     "one download already finished",
 			finished: 1,
-			wantKey:  "29bcc7e76963da5edc9b2d0ae4717988dc6c24a9b105c43e0668dabe9187f640",
+			wantKey:  "8dbd2512aea9a1183f2c29256601cce2609c3143ba63fda4d101ccf0446a07e8",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1043,7 +1028,7 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 		db, mock := newMockGORM(t)
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-			WithArgs("material", int64(42), "user_download", int64(9), "device-1").
+			WithArgs("material", int64(42), "user_download", int64(9)).
 			WillReturnRows(taskRow(testNow, map[string]any{"status": "success"}))
 		mock.ExpectCommit()
 
@@ -1064,14 +1049,14 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 		db, mock := newMockGORM(t)
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-			WithArgs("material", int64(42), "user_download", int64(9), "device-1").
+			WithArgs("material", int64(42), "user_download", int64(9)).
 			WillReturnRows(taskRow(testNow, map[string]any{"status": "failed"}))
 		// Two terminal rows by now — the success and the failure after it — so the
 		// new task is the third generation. The literal is the same kind of frozen
 		// value the table above uses.
 		expectUserDownloadCount(mock, 2)
-		expectUserDownloadInsert(mock, "transfer-1", "c6efed4c109719bb7db98a03992113104b317b5e4043c936c1c62951d7ea6ad2")
-		expectTaskByDedupeKey(mock, "c6efed4c109719bb7db98a03992113104b317b5e4043c936c1c62951d7ea6ad2", testNow, nil)
+		expectUserDownloadInsert(mock, "transfer-1", "f89097a6a33ff14bdce8f05a244c916b93648350a06f6cd74f063082877f75e9")
+		expectTaskByDedupeKey(mock, "f89097a6a33ff14bdce8f05a244c916b93648350a06f6cd74f063082877f75e9", testNow, nil)
 		mock.ExpectCommit()
 
 		if _, err := createUserDownloadTask(db, validUserDownloadInput(), testNow); err != nil {
@@ -1081,73 +1066,25 @@ func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) 
 	})
 }
 
-// The stage-3 redelivery (CHG-20261002-074): a download that succeeded on device
-// A must not answer a click on device B. The two devices are two destinations —
-// the file A has is not on B — so the device-scoped latest-success read must
-// come back empty for B and a fresh task must be queued, at B's own generation,
-// even though a user-level read would have found A's success row. Without the
-// device scope this is the bug the dimension change exists to fix: the write-gate
-// swallows the redelivery before the key is even reached.
-//
-// The key and count are literals, not calls to the helper under test (same rule
-// as the generation table): B's first click is generation 1 on B, not generation
-// 2 inherited from A, which is exactly what the count scoped to device-2 asserts.
-func TestCreateUserDownloadTaskADeviceSwitchIsANewDestination(t *testing.T) {
-	db, mock := newMockGORM(t)
-	mock.ExpectBegin()
-	// Device A succeeded; the click names device B. The latest read is scoped to
-	// B, so it is empty. A version that dropped the device filter would query
-	// with four args against a five-arg expectation and fail the run — the scope
-	// is asserted, not assumed.
-	mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-		WithArgs("material", int64(42), "user_download", int64(9), "device-2").
-		WillReturnRows(sqlmock.NewRows(taskColumns()))
-	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
-		WithArgs("material", int64(42), "user_download", int64(9), "device-2").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	const deviceSwitchKey = "83989f26b734dab93f7aaa8587457fb5a59705508a043a1b319f4e2713b3d90a"
-	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs("transfer-1", int64(7), "material", int64(42), "示例视频", nil, nil, "materials/42/aaaaaaaa.mp4", "user_download", "local_agent", int64(9), "node-2", "device-2", nil, deviceSwitchKey, int64(100), testSHA256, 3, testNow, testNow).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	expectTaskByDedupeKey(mock, deviceSwitchKey, testNow, nil)
-	mock.ExpectCommit()
-
-	input := validUserDownloadInput()
-	input.AssignedNodeID = "node-2"
-	input.AssignedDeviceID = "device-2"
-	task, err := createUserDownloadTask(db, input, testNow)
-	if err != nil {
-		t.Fatalf("createUserDownloadTask() error = %v, want a fresh task on the new device", err)
-	}
-	if task.ID == "" {
-		t.Fatal("a device switch must queue a new task, not be answered with the old device's row")
-	}
-	assertExpectations(t, mock)
-}
-
 // The key has to be a function of the tuple and nothing else. A clock or a random
 // value in it would make two clicks that should collapse into one produce two
 // tasks — the failure the unique index exists to prevent — and it would do so
 // only under timing, so no other test here would see it.
 func TestUserDownloadDedupeKeyIsAFunctionOfTheTupleAlone(t *testing.T) {
-	base := userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 1)
-	if base != userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 1) {
+	base := userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), 1)
+	if base != userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), 1) {
 		t.Fatal("the same tuple must produce the same key, or a repeat click creates a second task")
 	}
 	if len(base) != 64 {
 		t.Fatalf("key length = %d, want 64 for the CHAR(64) column", len(base))
 	}
 	for _, other := range []string{
-		userDownloadDedupeKey(model.AssetMaterial, 43, identity.UserID(9), "device-1", 1),
-		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(10), "device-1", 1),
-		// A device switch is the whole point of the dimension change: the new
-		// device's click must be a different key even at the same generation,
-		// or unbind→rebind would be swallowed by the old device's task.
-		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-2", 1),
-		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), "device-1", 2),
+		userDownloadDedupeKey(model.AssetMaterial, 43, identity.UserID(9), 1),
+		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(10), 1),
+		userDownloadDedupeKey(model.AssetMaterial, 42, identity.UserID(9), 2),
 		// And the asset type is a tuple member too (CHG-20261013-085): output 5
 		// and material 5 must never share a key.
-		userDownloadDedupeKey(model.AssetCompositeOutput, 42, identity.UserID(9), "device-1", 1),
+		userDownloadDedupeKey(model.AssetCompositeOutput, 42, identity.UserID(9), 1),
 	} {
 		if other == base {
 			t.Fatalf("the tuple is not discriminating: %s collides with %s", other, base)
@@ -1158,29 +1095,29 @@ func TestUserDownloadDedupeKeyIsAFunctionOfTheTupleAlone(t *testing.T) {
 // CHG-20261013-085 T-02: a composite output rides the same table, the same
 // lifecycle and the same dedupe as a material. The type has to travel into
 // every scope these statements name and into the digest itself — without it,
-// output 5 and material 5 for one user on one device would collapse onto a
+// output 5 and material 5 for one user would collapse onto a
 // single key, and the second asset's click would be answered with the first
 // asset's row. The scope args are asserted on every statement for the same
-// reason the device/user/purpose args are: a filter that dropped the type
+// reason the user/purpose args are: a filter that dropped the type
 // would answer a click with the other asset kind's row and refuse a download
 // that never happened.
 func TestCreateUserDownloadTaskCarriesTheAssetType(t *testing.T) {
 	db, mock := newMockGORM(t)
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-		WithArgs("composite_output", int64(42), "user_download", int64(9), "device-1").
+		WithArgs("composite_output", int64(42), "user_download", int64(9)).
 		WillReturnRows(sqlmock.NewRows(taskColumns()))
 	mock.ExpectQuery(regexp.QuoteMeta(countFinishedDownloadsSQL)).
-		WithArgs("composite_output", int64(42), "user_download", int64(9), "device-1").
+		WithArgs("composite_output", int64(42), "user_download", int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	// The key is a literal computed from the frozen digest input
-	// `user_download|composite_output|42|9|device-1|1` — the same rule as the
+	// `v2|user_download|composite_output|42|9|1` — the same rule as the
 	// generation table above, so putting the type into the digest is a visible
 	// edit, and the material key at this generation (frozen in the test above)
 	// is a different value by construction.
-	const outputKey = "d5046b7b7f23b2e6b7124ae853141b77dee6afc0aea830eb82bb3075195966c1"
+	const outputKey = "9eed0c10fa5fb05c789aca482398f69d543c2ab5c7605b5368150436e9710ac6"
 	mock.ExpectExec(regexp.QuoteMeta(insertTaskSQL)).
-		WithArgs("transfer-1", int64(7), "composite_output", int64(42), "成片-42", nil, nil, "compose-outputs/55/output.mp4", "user_download", "local_agent", int64(9), "node-1", "device-1", nil, outputKey, int64(100), testSHA256, 3, testNow, testNow).
+		WithArgs("transfer-1", int64(7), "composite_output", int64(42), "成片-42", nil, nil, "compose-outputs/55/output.mp4", "user_download", "local_agent", int64(9), nil, outputKey, int64(100), testSHA256, 3, testNow, testNow).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectTaskByDedupeKey(mock, outputKey, testNow, nil)
 	mock.ExpectCommit()
@@ -1199,18 +1136,15 @@ func TestCreateUserDownloadTaskCarriesTheAssetType(t *testing.T) {
 	assertExpectations(t, mock)
 }
 
-// A download without a node has nowhere to go, and a task row with an empty
-// assignee would be claimed by the first node that asked. The refusal is
-// asserted rather than assumed because the check lives in `validateCreateInput`,
-// which this path reaches only through `createTask`.
+// A download is queued for a user, and without one there is no scope to dedupe
+// or claim by. The refusal is asserted rather than assumed because the check
+// lives in `createUserDownloadTask`, and an un-mocked statement would also
+// return an error — the message is what tells the two apart.
 func TestCreateUserDownloadTaskRefusesAnIncompleteIdentity(t *testing.T) {
 	for name, mutate := range map[string]func(*CreateUserDownloadInput){
 		"no team":     func(input *CreateUserDownloadInput) { input.TeamID = 0 },
 		"no material": func(input *CreateUserDownloadInput) { input.AssetID = 0 },
 		"no user":     func(input *CreateUserDownloadInput) { input.RequestedBy = 0 },
-		// No device: the download has no destination, the dedupe key would have
-		// nothing to bind to, and every device-less click would share one key.
-		"no device": func(input *CreateUserDownloadInput) { input.AssignedDeviceID = "" },
 	} {
 		input := validUserDownloadInput()
 		mutate(&input)

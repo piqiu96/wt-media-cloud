@@ -76,8 +76,8 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     unbindProfile(accountId) {
       return api.delete(`/media-accounts/${accountId}/profile`).then(sanitize)
     },
-    check(accountId, { nodeId } = {}) {
-      return api.post(`/media-accounts/${accountId}/check`, { node_id: nodeId })
+    check(accountId) {
+      return api.post(`/media-accounts/${accountId}/check`, {})
     },
     submitCheckResult(accountId, { taskId, platformAccountId, name, avatarUrl, loginStatus, message, checkItems = [] }) {
       return api.post(`/media-accounts/${accountId}/check/result`, {
@@ -99,8 +99,8 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     fetchCookies(accountId) {
       return api.get(`/media-accounts/${accountId}/cookies`)
     },
-    startCookieReadSync(accountId, { nodeId } = {}) {
-      return api.post(`/media-accounts/${accountId}/cookies/read-sync`, { node_id: nodeId })
+    startCookieReadSync(accountId) {
+      return api.post(`/media-accounts/${accountId}/cookies/read-sync`, {})
     },
     submitCookieReadResult(accountId, { taskId, cookies }) {
       return api.post(`/media-accounts/${accountId}/cookies/read-sync/result`, {

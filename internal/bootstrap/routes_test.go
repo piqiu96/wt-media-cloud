@@ -31,18 +31,13 @@ func TestBootstrapCORSAllowsPackagedDesktopPreflight(t *testing.T) {
 	}
 }
 
-// Every module's surface has to be reachable once `registerModuleRoutes` has run.
+// 运行过 registerModuleRoutes 后，每个模块的入口都必须可达。
 //
-// The assertion is deliberately "not 404" and not a status: this test exists to
-// catch a module dropped from the list, and what each module answers to a
-// credential-less caller is that module's own business — three different answers
-// are already visible above (401 for a session route, 400 where the handler
-// decodes before it authenticates, 200 for a route that is public on purpose).
-// Pinning those here would make this file a second, silently-drifting copy of
-// each module's routing contract.
+// 断言故意只要求“不是 404”：这个用例负责发现被漏掉的模块，而各模块对无凭证调用方
+// 的回答各不相同（401、400、200 都有），那是各模块自己的路由契约。把它们钉在这里，
+// 这个文件就会变成契约的第二份、会悄悄漂移的副本。
 //
-// The control keeps the assertion from being vacuous: an engine that answered
-// anything but 404 would pass this test with the list emptied.
+// 末尾的对照防止断言空转：如果引擎对任意路径都不返回 404，清空列表也能通过。
 func TestRegisterModuleRoutesReachesEveryModule(t *testing.T) {
 	engine := server.New()
 	registerModuleRoutes(engine)
@@ -54,7 +49,8 @@ func TestRegisterModuleRoutesReachesEveryModule(t *testing.T) {
 	}{
 		{"cloudagent", consts.MethodGet, "/api/v1/cloud-agent/compatibility"},
 		{"identity", consts.MethodGet, "/api/v1/auth/me"},
-		{"runtimebinding", consts.MethodPost, "/api/v1/local-agent/binding-tickets"},
+		{"localagent", consts.MethodPost, "/api/v1/local-agent/agent-token"},
+		{"executionpreflight", consts.MethodPost, "/api/v1/local-agent/execution-preflight"},
 		{"profileguard", consts.MethodPost, "/api/v1/local-agent/sensitive-tasks/task-1/preflight"},
 		{"profilebinding", consts.MethodGet, "/api/v1/bit-browser/profile-scans/7"},
 		{"mediaaccount", consts.MethodGet, "/api/v1/media-accounts"},

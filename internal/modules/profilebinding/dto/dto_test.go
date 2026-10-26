@@ -12,7 +12,7 @@ func TestProfileBindingDTOTypesAreDeclaredInDTOPackage(t *testing.T) {
 	}{
 		{name: "ProfileInput", got: reflect.TypeFor[ProfileInput]()},
 		{name: "SnapshotInput", got: reflect.TypeFor[SnapshotInput]()},
-		{name: "MainIdentityInput", got: reflect.TypeFor[MainIdentityInput]()},
+		{name: "BitAccountBindInput", got: reflect.TypeFor[BitAccountBindInput]()},
 	} {
 		if got, want := item.got.PkgPath(), "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/dto"; got != want {
 			t.Fatalf("%s PkgPath = %q, want %q", item.name, got, want)

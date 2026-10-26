@@ -50,10 +50,6 @@ type bindProfileRequest struct {
 	BrowserProfileID string `json:"browser_profile_id"`
 }
 
-type startAccountCheckRequest struct {
-	NodeID string `json:"node_id"`
-}
-
 type accountCheckResultRequest struct {
 	TaskID            string                            `json:"task_id"`
 	PlatformAccountID string                            `json:"platform_account_id"`
@@ -62,10 +58,6 @@ type accountCheckResultRequest struct {
 	LoginStatus       accountservice.LoginStatus        `json:"login_status"`
 	Message           string                            `json:"message"`
 	CheckItems        []accountservice.AccountCheckItem `json:"check_items"`
-}
-
-type startCookieReadRequest struct {
-	NodeID string `json:"node_id"`
 }
 
 type cookieReadResultRequest struct {
@@ -194,11 +186,7 @@ func StartMediaAccountCheck(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	var req startAccountCheckRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	start, err := accountservice.StartLocalAccountCheck(actor, c.Param("account_id"), accountservice.AccountCheckStartInput(req))
+	start, err := accountservice.StartLocalAccountCheck(actor, c.Param("account_id"), accountservice.AccountCheckStartInput{})
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
@@ -235,7 +223,11 @@ func ReadMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 		writeMediaAccountError(c, accountservice.ErrProfileUnavailable)
 		return
 	}
-	task := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{TaskType: cloudagentservice.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + id.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}})
+	task, err := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{TaskType: cloudagentservice.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + id.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}}, int64(actor.ID))
+	if err != nil {
+		api.InternalError(c, "任务创建失败")
+		return
+	}
 	api.Created(c, task)
 }
 func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext) {
@@ -243,11 +235,7 @@ func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext
 	if !ok {
 		return
 	}
-	var req startCookieReadRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	start, err := accountservice.StartCookieRead(actor, c.Param("account_id"), accountservice.CookieReadStartInput{NodeID: req.NodeID})
+	start, err := accountservice.StartCookieRead(actor, c.Param("account_id"), accountservice.CookieReadStartInput{})
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
@@ -422,6 +410,10 @@ func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 		api.Conflict(c, 23001, "此浏览器环境已绑定其他平台账号")
 	case errors.Is(err, accountservice.ErrProfileUnavailable):
 		api.Conflict(c, 23001, "浏览器环境不可用")
+	case errors.Is(err, accountservice.ErrProfileNotFound):
+		api.FailureCode(c, 404, 20004, "未找到对应的浏览器环境", "PROFILE_NOT_FOUND", nil, false, "choose_profile")
+	case errors.Is(err, accountservice.ErrProfileAssignedToOtherUser):
+		api.FailureCode(c, 403, 11003, "浏览器环境属于其他用户", "PROFILE_ASSIGNED_TO_OTHER_USER", nil, false, "choose_own_profile")
 	case errors.Is(err, accountservice.ErrInvalidInput):
 		api.BadRequest(c, 10001, "媒体账号信息格式错误")
 	default:

@@ -7,10 +7,12 @@ import (
 )
 
 const (
-	APIName                      = "cloud-agent"
-	MajorVersion                 = "v1"
-	ContractRevision             = "2026.10.01.1"
-	MinimumAgentContractRevision = "2026.07.14.7"
+	APIName          = "cloud-agent"
+	MajorVersion     = "v1"
+	ContractRevision = "2026.10.23.1"
+	// 本轮之后旧 Agent 没有 Agent Token，也没有 attempt 上报：低于它的版本无法工作，
+	// 由兼容性端点直接判为不兼容，不保留无认证旁路。
+	MinimumAgentContractRevision = "2026.10.23.1"
 )
 
 type Compatibility = model.Compatibility
