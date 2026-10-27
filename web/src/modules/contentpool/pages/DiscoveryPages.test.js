@@ -15,7 +15,8 @@ describe('discovery strategy and task pages', () => {
     expect(source).not.toContain('启用策略')
     expect(source).toContain('今日执行')
     expect(source).toContain('自动素材')
-    expect(source).toContain('搜索策略名称')
+    expect(source).toContain('<span class="wt-filter-field__label">综合搜索</span>')
+    expect(source).toContain('placeholder="搜索策略 ID / 策略名称"')
     expect(source).toContain("colKey: 'id'")
     expect(source).toContain('required-mark')
     expect(source).toContain('执行方式')
@@ -78,6 +79,8 @@ describe('discovery strategy and task pages', () => {
   it('renders tasks with business naming, results, and a tabbed detail drawer', () => {
     const source = read('CrawlTasksPage.vue')
     expect(source).toContain('任务名称')
+    expect(source).toContain('<span class="wt-filter-field__label">综合搜索</span>')
+    expect(source).toContain('placeholder="搜索任务 ID / 任务名称 / 来源策略"')
     expect(source).toContain('任务来源')
     expect(source).toContain('触发方式')
     expect(source).toContain("colKey: 'game'")

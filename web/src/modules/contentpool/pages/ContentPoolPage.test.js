@@ -199,7 +199,9 @@ describe('content pool page', () => {
     expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>`)
     expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>`)
     expect(source).toContain(`v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>`)
-    expect(source).toContain(`v-if="!isLibrary && row.status === 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="viewMaterial(row)">素材详情</t-button>`)
+    // 用户 2026-10-27 裁定：操作列只留统一「详情」；转入素材的入口在详情抽屉的
+    // 「关联素材」里，不在行上再放第二个详情按钮。
+    expect(source).not.toContain('>素材详情</t-button>')
     expect(source).not.toContain('>查看</t-button>')
     expect(source).not.toContain('查看素材')
   })
@@ -232,9 +234,16 @@ describe('content pool page', () => {
     expect(source).toContain('class="detail-cover"')
     expect(source).toContain('row.strategy_name')
     expect(source).toContain('row.crawl_task_name')
-    expect(source).toContain('素材详情')
+    // 行上唯一的「详情」之外，素材跳转只在详情抽屉的「关联素材」里。
+    expect(source).toContain('@click="viewMaterial(detail)">素材详情</t-link>')
     expect(source).toContain("router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)")
     expect(source).toContain("router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)")
+  })
+
+  it('labels the ingest time as 入库时间 and never as 发现时间', () => {
+    expect(source).toContain("{ colKey: 'created_at', title: '入库时间', width: 150, sorter: true }")
+    expect(source).toContain('<span>入库时间</span>')
+    expect(source).not.toContain('发现时间')
   })
 
   it('opens platform pages and displays complete interaction and author data', () => {

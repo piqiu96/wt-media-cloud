@@ -109,7 +109,7 @@ const columns = [
   // 状态排在关联实体与时间之后（§4.1：主体 → 属性 → 关联实体 → 状态/结果 → 时间）。
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
-  { colKey: 'created_at', title: '发现时间', width: 150, sorter: true },
+  { colKey: 'created_at', title: '入库时间', width: 150, sorter: true },
   { colKey: 'updated_at', title: '修改时间', width: 150, sorter: true },
   { colKey: 'updated_by_name', title: '修改人', width: 120 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
@@ -578,7 +578,6 @@ function openImageViewer(url) {
                 <t-button v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>
                 <t-button v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>
                 <t-button v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>
-                <t-button v-if="!isLibrary && row.status === 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="viewMaterial(row)">素材详情</t-button>
               </t-space>
             </template>
           </t-table>
@@ -614,7 +613,7 @@ function openImageViewer(url) {
                 </div>
                 <div><span>平台</span><strong>{{ platformLabel(detail.platform) }}</strong></div>
                 <div><span>发布时间</span><strong>{{ formatDateTime(detail.published_at) }}</strong></div>
-                <div><span>发现时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
+                <div><span>入库时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
                 <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
                 <div><span>操作人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
                 <div><span>审核时间</span><strong>{{ formatDateTime(detail.audited_at) }}</strong></div>
