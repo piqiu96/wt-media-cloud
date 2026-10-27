@@ -6,6 +6,7 @@ import { schemaFields } from '../schemaFields.js'
 import { CANDIDATE_SORTS, addAction, cappedRows, candidateRows, materialStatesById, usageCounts } from '../materialStates.js'
 import { buildOverridePayload, prefillOverrides, validateOverrides } from '../taskOverrides.js'
 import { feedback } from '../../../shared/ui/feedback/index.js'
+import { enabledGames } from '../../../shared/utils/games.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import FormError from '../../../shared/ui/feedback/FormError.vue'
 import MaterialCover from '../../materials/components/MaterialCover.vue'
@@ -62,10 +63,14 @@ const prefilledFor = ref(null)
 const selected = computed(() => candidates.value.filter((item) => selectedIds.value.includes(item.id)))
 
 // 只列候选里真的出现过的游戏：列一个点下去没有任何素材的选项，与「筛了但服务端没筛」
-// 是同一种误导（素材库的游戏筛选同此口径）。名字从游戏表来，查不到就退回编号。
+// 是同一种误导（素材库的游戏筛选同此口径）。停用游戏同样不列 —— 它已经不能再建策略。
+// 名字从游戏表来，查不到就退回编号。候选本身不缩小，这里只决定筛选项。
 const gameOptions = computed(() => {
+  const enabledIds = new Set(enabledGames(games.value).map((game) => game.id))
   const used = [...new Set(candidates.value.map((item) => item.game_id).filter(Boolean))]
-  return used.map((id) => ({ value: id, label: games.value.find((game) => game.id === id)?.name || id }))
+  return used
+    .filter((id) => enabledIds.has(id))
+    .map((id) => ({ value: id, label: games.value.find((game) => game.id === id)?.name || id }))
 })
 
 // 游戏筛选只缩候选、不动已选：selected 直接取自全量候选，切游戏不会把选好的素材弄丢。

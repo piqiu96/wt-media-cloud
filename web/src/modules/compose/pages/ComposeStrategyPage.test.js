@@ -61,6 +61,16 @@ describe('compose strategy page', () => {
     expect(source).not.toMatch(/<t-option v-for="operator in conditionOperators/)
   })
 
+  // 停用游戏不能再建策略（服务端也拒），列表筛选与新建表单都不该出现它；
+  // 名称解析仍读全量目录，历史策略不会退化成裸 ID。
+  it('offers only enabled games in the list filter and the create form', () => {
+    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
+    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
+    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="game in games"')
+    expect(source).toContain('return games.value.find((game) => game.id === id)?.name || id')
+  })
+
   // 负责人是策略的必填归属（M4-I）：候选由团队＋游戏决定，创建和更新都必须提交；
   // 历史行没有可靠来源，列表与详情都显示“未记录”，不拿创建人冒充。
   it('binds a required operator and renders unrecorded history honestly', () => {

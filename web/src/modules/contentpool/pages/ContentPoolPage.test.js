@@ -91,19 +91,33 @@ describe('content pool page', () => {
     expect(source).toContain('team.name')
   })
 
-  it('defaults the game filter to the user game scope and offers the full catalog', () => {
+  // 目录仍按 scope=all 取（名称解析与人工导入要看全团队），但选项只列启用游戏：
+  // 停用游戏已不能新建策略，勾进筛选就成了一个看不见的裸条件。默认负责游戏与启用集合
+  // 取交集；交集为空时不传 game_ids（按既有裁定，负责游戏只是默认筛选，不是可见边界）。
+  it('offers only enabled games as options while still mapping names from the full catalog', () => {
     expect(source).toContain('const gameFilter = ref([])')
     expect(source).toContain('const isAdmin = computed')
     expect(source).toContain('function defaultGameIDs()')
     expect(source).toContain('gameFilter.value = defaultGameIDs()')
     expect(source).toContain("users.listGames({ scope: 'all' })")
+    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
+    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
+    expect(source).toContain('const enabledIds = new Set(enabledGameOptions.value.map((game) => game.id))')
+    expect(source).toContain('return ids.filter((id) => enabledIds.has(id))')
+    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="game in games"')
+    expect(source).toContain('const enabled = enabledGameOptions.value')
+    expect(source).toContain("enabled.find((g) => g.id === 'other') || enabled[0]")
     expect(source).toContain('game_ids: gameFilter.value.length ? gameFilter.value : undefined')
     expect(source).toContain('team_id: teamFilter.value || undefined')
     expect(source).toContain('function changeTeamFilter()')
     expect(source).toContain('gameFilter.value = []')
     expect(source).toContain('v-model="gameFilter"')
+    expect(source).toContain('v-model="manualGameId"')
     expect(source).toContain('v-model="teamFilter"')
     expect(source).toContain('v-if="isAdmin"')
+    // 名称解析仍读全量目录，停用游戏的历史行不会显示成裸 ID。
+    expect(source).toContain('const game = games.value.find((item) => item.id === id)')
   })
 
   it('imports only the results selected by the user', () => {

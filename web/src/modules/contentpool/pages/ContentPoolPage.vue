@@ -13,6 +13,7 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { enabledGames } from '../../../shared/utils/games.js'
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
@@ -140,9 +141,16 @@ function reset() {
   load()
 }
 
+// 选择与筛选用启用游戏；名称解析仍读全量目录，停用游戏的历史行不会显示成裸 ID。
+const enabledGameOptions = computed(() => enabledGames(games.value))
+
 // 游戏范围是“负责游戏”，不是可见边界：默认只勾本人负责的游戏，清空即看全团队。
+// 与启用集合取交集：停用游戏已不在筛选项里，勾上等于挂一个删不掉的条件。
 function defaultGameIDs() {
-  return currentUser.value?.role === 'admin' ? [] : [...(currentUser.value?.game_ids || [])]
+  const ids = currentUser.value?.role === 'admin' ? [] : [...(currentUser.value?.game_ids || [])]
+  if (!games.value.length) return ids
+  const enabledIds = new Set(enabledGameOptions.value.map((game) => game.id))
+  return ids.filter((id) => enabledIds.has(id))
 }
 
 function changeTeamFilter() {
@@ -177,13 +185,15 @@ async function loadManualContext() {
     currentUser.value = user
     manualTeamLocked.value = user?.role !== 'admin'
     manualTeamId.value = user?.role === 'admin' ? '' : (user?.team_id || '')
-    if (!gameFilter.value.length) gameFilter.value = defaultGameIDs()
     const data = await users.listTeams()
     teams.value = Array.isArray(data) ? data : []
     // 游戏名称映射与人工导入需要完整目录，非管理员也要看到本团队其他游戏。
     const gameData = await users.listGames({ scope: 'all' })
     games.value = Array.isArray(gameData) ? gameData : []
-    if (!manualGameId.value && games.value.length) manualGameId.value = (games.value.find((g) => g.id === 'other') || games.value[0]).id
+    // 默认负责游戏要在目录到位后再取，否则与启用集合的交集算不出来。
+    if (!gameFilter.value.length) gameFilter.value = defaultGameIDs()
+    const enabled = enabledGameOptions.value
+    if (!manualGameId.value && enabled.length) manualGameId.value = (enabled.find((g) => g.id === 'other') || enabled[0]).id
   } catch {
     teams.value = []
     games.value = []
@@ -509,7 +519,7 @@ function openImageViewer(url) {
             <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
             <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
-            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" multiple clearable placeholder="全部"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
+            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" multiple clearable placeholder="全部"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
@@ -671,7 +681,7 @@ function openImageViewer(url) {
             <div class="discover-section__title"><span class="discover-no">①</span>基础信息<small>选择平台和归属游戏，用于内容分类和数据统计</small></div>
             <t-form label-width="80px">
               <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-              <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
+              <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
               <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
             </t-form>
           </div>

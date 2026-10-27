@@ -6,6 +6,7 @@ import { createUsersClient } from './usersApi.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
+import { enabledGames } from '../../../../shared/utils/games.js'
 
 const client = createUsersClient()
 const users = ref([])
@@ -27,7 +28,7 @@ const passwordTarget = ref(null)
 const newPassword = ref('')
 
 const roleLabels = { admin: '管理员', senior_operator: '高级运营', operator: '普通运营' }
-const enabledGames = computed(() => games.value.filter((game) => game.status === 'enabled'))
+const enabledGameOptions = computed(() => enabledGames(games.value))
 const gameNameMap = computed(() => new Map(games.value.map((game) => [game.id, game.name])))
 const requiresScope = computed(() => userForm.value.role !== 'admin')
 const pagedUsers = computed(() => {
@@ -237,7 +238,7 @@ function gameScopeText(gameIds) {
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.gameId" placeholder="全部" clearable>
-          <t-option v-for="game in games" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
+          <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" placeholder="全部" clearable>
           <t-option value="enabled" label="启用" />
@@ -281,7 +282,7 @@ function gameScopeText(gameIds) {
         </t-form-item>
         <t-form-item v-if="requiresScope" label="游戏范围">
           <t-select v-model="userForm.gameIds" multiple filterable placeholder="请选择已启用游戏">
-            <t-option v-for="game in enabledGames" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
+            <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
           </t-select>
         </t-form-item>
       </t-form>

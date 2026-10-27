@@ -84,6 +84,22 @@ func TestStrategyCreateRejectsUnknownConfigAndInactiveTemplate(t *testing.T) {
 	}
 }
 
+// 前端只列启用游戏，服务端仍要自己把关：停用游戏必须在写库前拒掉，
+// 否则绕开页面直接调接口就能建出一条挂在已停用游戏上的策略。
+func TestStrategyCreateRejectsDisabledGame(t *testing.T) {
+	svc, store, actor := strategyFixture()
+	svc.resolveGame = func(string) (identity.OperationGame, bool, error) {
+		return identity.OperationGame{ID: "delta", Status: identity.GameStatusDisabled}, true, nil
+	}
+	input := CreateStrategyInput{GameID: "delta", OperatorID: 9, Name: "切段", TemplateID: 3, TemplateVersion: 1, Config: json.RawMessage(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}
+	if _, err := svc.Create(actor, input); !errors.Is(err, ErrStrategyInvalid) {
+		t.Fatalf("disabled game error = %v", err)
+	}
+	if store.writes != 0 {
+		t.Fatalf("writes = %d", store.writes)
+	}
+}
+
 func TestStrategyOperatorReadsAvailableTeamStrategyButCannotWrite(t *testing.T) {
 	svc, store, actor := strategyFixture()
 	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 99}}

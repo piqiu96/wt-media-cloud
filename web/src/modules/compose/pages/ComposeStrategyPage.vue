@@ -10,6 +10,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { enabledGames } from '../../../shared/utils/games.js'
 import { schemaFields } from '../schemaFields.js'
 import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
 import { scheduleLabel } from '../scheduleForm.js'
@@ -25,6 +26,8 @@ const sessionClient = createSessionClient()
 const rows = ref([])
 const templates = ref([])
 const games = ref([])
+// 选择与筛选只列启用游戏；名称解析仍读全量目录，停用游戏的历史策略不显示裸 ID。
+const enabledGameOptions = computed(() => enabledGames(games.value))
 const teams = ref([])
 const operatorOptions = ref([])
 const operatorsLoading = ref(false)
@@ -679,7 +682,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="load" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
-            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+            <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" />
           </t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
             <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
@@ -746,7 +749,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                   </t-form-item>
                   <t-form-item label="所属游戏" required-mark>
                     <t-select v-model="form.game_id" clearable placeholder="选择游戏">
-                      <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+                      <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" />
                     </t-select>
                   </t-form-item>
                 </template>
