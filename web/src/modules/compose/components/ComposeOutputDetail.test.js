@@ -67,7 +67,7 @@ describe('compose output detail', () => {
       downloadState: { key: 'unverified', label: '下载记录完成 · 本机未核验', tone: 'neutral' },
       linkable: true,
     })
-    for (const label of ['核心信息', '标题', '素材标题 · 策略名', '人工', '生成来源', '文件信息', '查看素材详情', '查看策略详情', '查看任务详情']) {
+    for (const label of ['核心信息', '标题', '素材标题 · 策略名', '人工创建', '生成来源', '文件信息', '查看素材详情', '查看策略详情', '查看任务详情']) {
       expect(html).toContain(label)
     }
     expect(html.indexOf('核心信息')).toBeLessThan(html.indexOf('生成来源'))

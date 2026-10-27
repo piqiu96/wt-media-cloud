@@ -13,7 +13,7 @@ const FILES = ['ComposeStrategyPage.vue', 'ComposeTasksPage.vue', 'MyOutputsPage
 
 const TABLES = [
   { file: 'ComposeStrategyPage.vue', name: 'columns', count: 9 },
-  { file: 'ComposeTasksPage.vue', name: 'columns', count: 10 },
+  { file: 'ComposeTasksPage.vue', name: 'columns', count: 11 },
   { file: 'MyOutputsPage.vue', name: 'columns', count: 11 },
 ]
 

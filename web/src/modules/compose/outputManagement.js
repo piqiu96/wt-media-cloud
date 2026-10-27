@@ -6,12 +6,6 @@ export function outputTitle(output, materialTitle, strategyName) {
   return `${material} · ${strategy}`
 }
 
-export function generationLabel(triggerType) {
-  if (triggerType === 'manual') return '人工'
-  if (triggerType === 'scheduled') return '定时'
-  return '—'
-}
-
 export function canQueueOutputDownload(state) {
   return ['not_downloaded', 'failed', 'missing'].includes(state?.key)
 }

@@ -22,6 +22,16 @@ describe('compose strategy page', () => {
     expect(source).toContain('client.runStrategyNow(row.id, crypto.randomUUID())')
     expect(source).toContain('不改变')
   })
+  // 运行记录的触发方式与任务页、成片管理共用一组文案；策略自身的
+  // 「手动执行 / 定时执行」是另一个字段（执行方式），不能一起换掉。
+  it('uses the shared task trigger labels for run history', () => {
+    expect(source).toContain("import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'")
+    expect(source).toContain('v-model="runFilters.trigger_type" :options="TRIGGER_TYPE_OPTIONS"')
+    expect(source).toContain('triggerLabel(row.trigger_type)')
+    expect(source).not.toContain('人工执行')
+    expect(source).toContain('手动执行')
+    expect(source).toContain('定时执行')
+  })
   // 普通运营只有详情；管理角色可详情、编辑、执行、复制。列宽跟着这份清单走。
   it('derives the op column width from the buttons the current role can see', () => {
     expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '执行', '复制'] : ['详情'])")
@@ -49,6 +59,16 @@ describe('compose strategy page', () => {
   it('feeds the operator options as a prop so they follow the field', () => {
     expect(source).toContain(':options="conditionOperators(condition.field)"')
     expect(source).not.toMatch(/<t-option v-for="operator in conditionOperators/)
+  })
+
+  // 停用游戏不能再建策略（服务端也拒），列表筛选与新建表单都不该出现它；
+  // 名称解析仍读全量目录，历史策略不会退化成裸 ID。
+  it('offers only enabled games in the list filter and the create form', () => {
+    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
+    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
+    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="game in games"')
+    expect(source).toContain('return games.value.find((game) => game.id === id)?.name || id')
   })
 
   // 负责人是策略的必填归属（M4-I）：候选由团队＋游戏决定，创建和更新都必须提交；

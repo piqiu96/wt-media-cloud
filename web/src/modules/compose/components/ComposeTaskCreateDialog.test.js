@@ -29,6 +29,15 @@ describe('compose task create drawer', () => {
     expect(source).toContain('只列出「我的素材」里使用中的素材')
   })
 
+  // 停用游戏不能再建策略，也不该出现在素材的游戏筛选里。候选本身不缩小：
+  // 这里只决定「能筛哪些游戏」，已经选中的素材与全量候选都不受影响。
+  it('offers only enabled games in the candidate filter', () => {
+    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
+    expect(source).toContain('const enabledIds = new Set(enabledGames(games.value).map((game) => game.id))')
+    expect(source).toContain('.filter((id) => enabledIds.has(id))')
+    expect(source).toContain('games.value.find((game) => game.id === id)?.name || id')
+  })
+
   // 负责人必须来自策略（M4-I）：提交时把它一起发出去，策略随后被改负责人时服务端
   // 会拒掉这次创建而不是悄悄换人；未指派负责人的策略在这里就拦下并说明去哪里补。
   it('carries the strategy operator into the task and refuses an unassigned strategy', () => {

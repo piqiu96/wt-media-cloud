@@ -52,7 +52,6 @@ describe('material library page', () => {
       'joined: joinedFilter.value',
       'my_usage: myUsageFilter.value',
       'team_usage: teamUsageFilter.value',
-      'video_status: statusFilter.value',
       'sort_by: sortBy.value',
       'sort_order: sortOrder.value',
     ]) {
@@ -60,7 +59,6 @@ describe('material library page', () => {
     }
     expect(source.match(/client\.list\(/g)).toHaveLength(1)
     expect(source).not.toContain('filteredRows')
-    expect(source).not.toContain('row.video_status === statusFilter.value')
     expect(source).not.toContain('row.game_id === gameFilters.value')
   })
 
@@ -111,9 +109,15 @@ describe('material library page', () => {
     expect(source).not.toContain('created ===')
   })
 
-  it('renders the four video states through the shared formatters', () => {
-    expect(source).toContain('videoStatusLabel(row.video_status)')
-    expect(source).toContain('videoStatusTone(row.video_status)')
+  // 用户 2026-10-27 裁定：素材库列表不展示文件状态，也不提供它的筛选。
+  // 文件状态本身没删：详情抽屉仍按四态渲染（MaterialDetailDrawer.test.js 是正向对照），
+  // 「我的素材」的下载文件状态是另一个事实，也不动。
+  it('keeps the file status and its filter out of the list', () => {
+    for (const gone of ["colKey: 'video_status'", 'videoStatusLabel', 'videoStatusTone', 'VIDEO_STATUSES', 'statusFilter']) {
+      expect(source, `列表不该再有 ${gone}`).not.toContain(gone)
+    }
+    expect(source).not.toContain('文件状态</span>')
+    expect(source).not.toContain('video_status:')
   })
 
   // 走查四轮（2026-09-30 用户带设计图 + 裁定）：封面、标题、来源平台合成一个「素材」
@@ -138,15 +142,6 @@ describe('material library page', () => {
     // 副行只带来源平台；游戏有自己的一列，同一格里再说一遍就是重复。
     expect(source).not.toContain('· {{ row.author_name')
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
-  })
-
-  // 列名换成了「文件状态」，因为它描述的是源视频文件的准备进度，不是这条素材的业务状态。
-  // 取值没换，仍是 video_status 四态。
-  it('names the video status column 文件状态 and keeps the four-state labels', () => {
-    expect(source).toContain("{ colKey: 'video_status', title: '文件状态'")
-    expect(source).not.toContain("title: '视频状态'")
-    expect(source).toContain('videoStatusLabel(row.video_status)')
-    expect(source).toContain('videoStatusTone(row.video_status)')
   })
 
   /**
@@ -211,39 +206,42 @@ describe('material library page', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
     expect(source).toContain('mode="library"')
-    expect(source).toContain(':show-usage="canViewUsage"')
+    // 使用情况段由 mode 决定，不再由角色开关决定。
+    expect(source).not.toContain('show-usage')
     expect(source).toContain('@add="addToMine"')
     expect(source).toContain('@go-mine="goToMyMaterials"')
     expect(source).toContain(':mine="detail?.usage_status === \'active\'"')
     expect(source).not.toContain('material-detail-drawer')
   })
 
-  // 走查五轮（2026-09-30 用户走查 + 设计图）：列表要同时给出两个状态维度。
-  // 「文件状态」说的是源视频准备好了没有，「素材状态」说的是这条素材还提供给运营选用吗，
-  // 规范 §7.2 明令两者不得合并——同一个素材可以同时是「已暂停 + 可下载」。
-  it('puts the material status column next to the file status column', () => {
+  // 走查五轮（2026-09-30 用户走查 + 设计图）：列表要给出「素材状态」——这条素材还提供给
+  // 运营选用吗。文件状态已从列表撤掉（2026-10-27 用户裁定），业务状态仍在列表上。
+  it('keeps the material status column right after the game column', () => {
+    const gameAt = source.indexOf("{ colKey: 'game'")
+    const statusAt = source.indexOf("{ colKey: 'material_status'")
     expect(source).toContain("{ colKey: 'material_status', title: '素材状态'")
-    expect(source.indexOf("{ colKey: 'material_status'")).toBeLessThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(statusAt).toBeGreaterThan(gameAt)
+    expect(statusAt).toBeLessThan(source.indexOf("{ colKey: 'joined'"))
     expect(source).toContain('materialStatusLabel(row.status)')
     expect(source).toContain('materialStatusTone(row.status)')
   })
 
   /**
-   * CHG-104：三个使用维度各自成列，依次排在文件状态之后、入库时间之前。
+   * CHG-104：三个使用维度各自成列，依次排在素材状态之后、入库时间之前。
    *
    * 加入状态回答「当前这个人有没有把这条素材放进自己的工作集」；我的使用回答
    * 「当前这个人有没有用它做出过成功成片」；使用情况回答「本团队有没有人用它做出过
    * 成功成片、都是谁」。三个问题各有自己的真值来源（关系表 / 成片表按本人 / 成片表按
    * 团队），合成一列就是把三个答案压成一个数，规范 §7.2 明令不得合并。
    */
-  it('puts 加入状态, 我的使用 and 使用情况 between the file status and 入库时间', () => {
+  it('puts 加入状态, 我的使用 and 使用情况 between 素材状态 and 入库时间', () => {
     const joinedAt = source.indexOf("{ colKey: 'joined'")
     const myUsageAt = source.indexOf("{ colKey: 'my_usage'")
     const usageAt = source.indexOf("{ colKey: 'usage'")
     expect(source).toContain("{ colKey: 'joined', title: '加入状态'")
     expect(source).toContain("{ colKey: 'my_usage', title: '我的使用'")
     expect(source).toContain("{ colKey: 'usage', title: '使用情况'")
-    expect(joinedAt).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
+    expect(joinedAt).toBeGreaterThan(source.indexOf("{ colKey: 'material_status'"))
     expect(joinedAt).toBeLessThan(myUsageAt)
     expect(myUsageAt).toBeLessThan(usageAt)
     expect(usageAt).toBeLessThan(source.indexOf("{ colKey: 'created_at'"))
@@ -251,17 +249,20 @@ describe('material library page', () => {
     expect(source).toContain('myUsageLabel(row.my_usage)')
   })
 
-  // 使用情况对普通运营完全不存在：列、筛选、详情段都不渲染；高级运营/管理员只有
-  // 一行可点摘要，明细进弹窗。没有已知使用人时也不写占位文案。
-  it('shows usage to seniors and admins only, behind a one-line summary and a dialog', () => {
-    expect(source).toContain("const isSenior = computed(() => currentUser.value?.role === 'senior_operator')")
-    expect(source).toContain('const canViewUsage = computed(() => isAdmin.value || isSenior.value)')
-    expect(source).toContain("canViewUsage.value ? columns : columns.filter((col) => col.colKey !== 'usage')")
-    expect(source).toContain('<label v-if="canViewUsage"')
+  // 2026-10-27 用户裁定：普通运营也看得到使用情况 —— 列、筛选、弹窗、详情段按同一套
+  // 渲染，服务端只把姓名置空。页面因此不再有角色开关；弹窗用 operator_count 给出
+  // 「使用人数」，不拿姓名数组长度反推，也不写占位文案假装知道是谁。
+  it('shows the team usage to every role, counting but never naming for operators', () => {
+    expect(source).not.toContain('canViewUsage')
+    expect(source).not.toContain("role === 'senior_operator'")
+    expect(source).not.toContain('tableColumns')
+    expect(source).toContain('<label class="wt-filter-field"><span class="wt-filter-field__label">使用情况')
+    expect(source).toContain('v-model="teamUsageFilter"')
     expect(source).toContain('<template #usage="{ row }">')
     expect(source).toContain('usageSummary(row)')
     expect(source).toContain('@click="openUsage(row)"')
     expect(source).toContain('成功成片 {{ usageOutputCount(usageMaterial) }}')
+    expect(source).toContain('使用人数 {{ usageOperatorCount(usageMaterial) }}')
     expect(source).toContain('v-for="operator in usageOperators(usageMaterial)"')
     expect(source).toContain("{{ operator.name }}")
     expect(source).toContain("成片 {{ operator.output_count }}")
@@ -272,7 +273,6 @@ describe('material library page', () => {
     for (const gone of ['暂无成功成片', '负责人未记录', '姓名不可见', 'usageSummaryLines']) {
       expect(source, `不该再有 ${gone}`).not.toContain(gone)
     }
-    expect(source).toContain(':show-usage="canViewUsage"')
   })
 
   /**

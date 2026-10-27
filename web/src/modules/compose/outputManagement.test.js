@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canQueueOutputDownload, generationLabel, outputDownloadState, outputTitle } from './outputManagement.js'
+import { canQueueOutputDownload, outputDownloadState, outputTitle } from './outputManagement.js'
 
 const task = (status, extra = {}) => ({
   asset_type: 'composite_output', asset_id: 59, execution_scope: 'local_agent',
@@ -10,9 +10,6 @@ describe('output management facts', () => {
   it('uses material and strategy facts for a stable output title', () => {
     expect(outputTitle({ material_id: 161, compose_strategy_id: 34 }, '来源标题', '测试')).toBe('来源标题 · 测试')
     expect(outputTitle({ material_id: 161, compose_strategy_id: 34 }, '', '')).toBe('素材 161 · 策略 34')
-    expect(generationLabel('manual')).toBe('人工')
-    expect(generationLabel('scheduled')).toBe('定时')
-    expect(generationLabel('')).toBe('—')
   })
 
   it('only reports downloaded after the desktop confirms the file exists', () => {

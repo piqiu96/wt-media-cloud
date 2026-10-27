@@ -14,7 +14,9 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
+import { scheduleLabel } from '../labels.js'
 
 const client = createDiscoveryClient()
 const session = createSessionClient()
@@ -384,6 +386,17 @@ function gameName(id) {
   return game?.name || '-'
 }
 
+// 只列启用游戏。编辑一条挂在停用游戏上的历史策略时，把当前游戏补成不可选选项：
+// 不补，原值显示不出来，保存一次就把游戏悄悄换掉了。
+const formGameOptions = computed(() => {
+  const options = enabledGames(games.value).map((game) => ({ id: game.id, label: game.name, disabled: false }))
+  const current = games.value.find((game) => game.id === form.value.game_id)
+  if (current && current.status !== GAME_STATUS_ENABLED) {
+    options.unshift({ id: current.id, label: `${current.name}（已停用）`, disabled: true })
+  }
+  return options
+})
+
 function teamName(id) {
   if (currentUser.value?.team_id != null && String(currentUser.value.team_id) === String(id)) return currentUser.value.team_name || '-'
   const team = teams.value.find((item) => String(item.id) === String(id))
@@ -431,13 +444,6 @@ function openAuthors(row) {
 
 function materialLabel(row) {
   return materialRulesSummary(row.config || {})
-}
-
-function scheduleLabel(schedule) {
-  if (!schedule || schedule === 'manual') return '手动执行'
-  if (String(schedule).startsWith('daily ')) return `每天 ${String(schedule).slice(6)}`
-  if (String(schedule).startsWith('interval:')) return `每 ${String(schedule).slice(9)} 分钟`
-  return schedule
 }
 
 // 竖排一行一项，返回数组而不是拼好的字符串（渲染交给 MetricList）。
@@ -526,7 +532,7 @@ function latestStats(row) {
               <t-form label-width="88px">
                 <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
                 <t-form-item v-if="isAdmin && !editingID" label="目标团队" required-mark><t-select v-model="form.team_id" placeholder="选择运营团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-                <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
+                <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in formGameOptions" :key="game.id" :value="game.id" :label="game.label" :disabled="game.disabled" /></t-select></t-form-item>
                 <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
                 <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>
               </t-form>

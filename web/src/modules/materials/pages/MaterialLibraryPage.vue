@@ -15,18 +15,16 @@ import {
   JOIN_FILTERS,
   MY_USAGE_FILTERS,
   TEAM_USAGE_FILTERS,
-  VIDEO_STATUSES,
   gameName,
   joinStatus,
   materialStatusLabel,
   materialStatusTone,
   myUsageLabel,
   myUsageTone,
+  usageOperatorCount,
   usageOperators,
   usageOutputCount,
   usageSummary,
-  videoStatusLabel,
-  videoStatusTone,
 } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
@@ -41,7 +39,6 @@ const rows = ref([])
 const loading = ref(false)
 const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
-const statusFilter = ref('')
 const joinedFilter = ref('')
 const myUsageFilter = ref('')
 const teamUsageFilter = ref('')
@@ -60,9 +57,8 @@ const usageMaterial = ref(null)
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
-const isSenior = computed(() => currentUser.value?.role === 'senior_operator')
-// 使用情况是团队汇总事实：普通运营不渲染列、筛选和详情段，只有高级运营/管理员能看。
-const canViewUsage = computed(() => isAdmin.value || isSenior.value)
+// 使用情况对全部角色可见：服务端对所有角色都返回成片数与使用人数，只对普通运营
+// 把姓名置空。所以这一列、筛选和详情段按同一套渲染，不需要角色开关。
 
 // 普通运营与高级运营进入页面时，游戏多选默认本人负责的游戏；管理员默认不筛，
 // 读的是所选团队（未选则跨团队）的库。清空筛选即可看到本团队全部游戏。
@@ -86,13 +82,14 @@ function defaultGameFilters() {
 // 成片）、使用情况（本团队成功成片汇总）。它们不是同一个问题的不同画法，规范 §7.2
 // 明令不得合并。缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到
 // 状态的素材画成「可用」。
-// 使用情况是团队汇总：普通运营既没有姓名也没有这一列的入口，连表头都不出现。
+// 使用情况是团队汇总，对全部角色成列：普通运营只少姓名，不少计数（2026-10-27 用户裁定）。
+// 文件状态不进列表（同一次裁定）：它是下载链路的中间态，不是运营挑素材
+// 要看的东西，需要时在详情抽屉里看。
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 360 },
   { colKey: 'game', title: '游戏', width: 100 },
   { colKey: 'material_status', title: '素材状态', width: 100 },
-  { colKey: 'video_status', title: '文件状态', width: 100 },
   { colKey: 'joined', title: '加入状态', width: 100 },
   { colKey: 'my_usage', title: '我的使用', width: 100 },
   { colKey: 'usage', title: '使用情况', width: 200 },
@@ -101,12 +98,8 @@ const columns = [
   { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
 
-const tableColumns = computed(() => (
-  canViewUsage.value ? columns : columns.filter((col) => col.colKey !== 'usage')
-))
-
 const tableScroll = computed(() => ({
-  x: `${tableColumns.value.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
+  x: `${columns.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
 }))
 
 const pagedRows = computed(() => {
@@ -129,7 +122,6 @@ async function load() {
       joined: joinedFilter.value,
       my_usage: myUsageFilter.value,
       team_usage: teamUsageFilter.value,
-      video_status: statusFilter.value,
       sort_by: sortBy.value,
       sort_order: sortOrder.value,
     })
@@ -250,7 +242,6 @@ async function addToMine(row) {
 
 function reset() {
   search.value = ''
-  statusFilter.value = ''
   joinedFilter.value = ''
   myUsageFilter.value = ''
   teamUsageFilter.value = ''
@@ -296,12 +287,11 @@ onMounted(async () => {
           <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilters" multiple clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label v-if="canViewUsage" class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="tableColumns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面 + 标题 + 来源平台合成一格；标题跳来源平台落地页，没有则退回普通文本。 -->
             <template #material="{ row }">
@@ -320,7 +310,6 @@ onMounted(async () => {
               <ResourceStatusBadge v-if="row.status" :tone="materialStatusTone(row.status)" :label="materialStatusLabel(row.status)" />
               <template v-else>—</template>
             </template>
-            <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
             <!-- 加入状态读服务端投影：active=已加入，removed=已移出，无关系=未加入。 -->
             <template #joined="{ row }"><ResourceStatusBadge :tone="joinStatus(row).tone" :label="joinStatus(row).label" /></template>
             <template #my_usage="{ row }"><ResourceStatusBadge :tone="myUsageTone(row.my_usage)" :label="myUsageLabel(row.my_usage)" /></template>
@@ -353,7 +342,6 @@ onMounted(async () => {
         :loading="detailLoading"
         :games="games"
         :mine="detail?.usage_status === 'active'"
-        :show-usage="canViewUsage"
         mode="library"
         @add="addToMine"
         @go-mine="goToMyMaterials"
@@ -362,6 +350,9 @@ onMounted(async () => {
       <t-dialog v-model:visible="usageVisible" header="使用情况" width="420px" :footer="false">
         <div v-if="usageMaterial" class="usage-detail">
           <p class="usage-detail__total">成功成片 {{ usageOutputCount(usageMaterial) }}</p>
+          <!-- 普通运营的读模型只有计数没有姓名（服务端置空 operators），这一行就是
+               他们能看到的「被引用情况」；缺字段不渲染，不把未知画成 0 人。 -->
+          <p v-if="usageOperatorCount(usageMaterial) > 0" class="usage-detail__total">使用人数 {{ usageOperatorCount(usageMaterial) }}</p>
           <ul v-if="usageOperators(usageMaterial).length" class="usage-detail__list">
             <li v-for="operator in usageOperators(usageMaterial)" :key="operator.id" class="usage-detail__row">
               <span class="usage-detail__name">{{ operator.name }}</span>

@@ -26,6 +26,14 @@ describe('compose tasks page', () => {
     expect(source).toContain('v-model="filters.created_range"')
   })
 
+  it('uses the shared trigger labels for the filter, list and detail', () => {
+    expect(source).toContain("import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'")
+    expect(source).toContain(':options="TRIGGER_TYPE_OPTIONS"')
+    expect(source).toContain('triggerLabel(row.trigger_type)')
+    expect(source).toContain('triggerLabel(detail.trigger_type)')
+    expect(source).not.toContain('triggerText')
+  })
+
   // 负责人筛选（CHG-104 T-08）：团队成员本身就是候选项，未选择即本团队全部；
   // 不再有「我的／团队全部」伪选项，页面也不再发送 operator_scope。
   it('lists team members as the only operator options and narrows by operator_id', () => {
@@ -71,10 +79,10 @@ describe('compose tasks page', () => {
     expect(source).toContain(':label="statusText(detail)"')
   })
 
-  // 列序固定：识别 → 来源（含负责人）→ 结果 → 状态 → 时间 → 操作。
-  it('declares the ten columns in the fixed order', () => {
+  // 列序固定：识别 → 来源（含负责人）→ 结果 → 状态 → 时间（创建、完成）→ 操作。
+  it('declares the eleven columns in the fixed order', () => {
     const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))
-    const order = ['id', 'name', 'trigger_type', 'material_id', 'strategy', 'operator', 'output', 'status', 'created_at', 'op']
+    const order = ['id', 'name', 'trigger_type', 'material_id', 'strategy', 'operator', 'output', 'status', 'created_at', 'finished_at', 'op']
     // 分母可见：列数对不上说明列结构被改过，立刻失败而不是让后面的顺序断言空转。
     expect((columns.match(/colKey:/g) || [])).toHaveLength(order.length)
     for (let index = 1; index < order.length; index += 1) {
@@ -82,6 +90,13 @@ describe('compose tasks page', () => {
       expect(previous, order[index - 1]).toBeGreaterThanOrEqual(0)
       expect(previous).toBeLessThan(columns.indexOf(`colKey: '${order[index]}'`))
     }
+  })
+
+  it('shows the task finish time in the list and names the detail field the same', () => {
+    expect(source).toContain("{ colKey: 'finished_at', title: '完成时间', width: 150 }")
+    expect(source).toContain('<template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>')
+    expect(source).toContain('<span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span>')
+    expect(source).not.toContain('结束时间')
   })
 
   // 任务 ID 一律裸数字：`#252` 这类内码前缀在本页与创建抽屉里都不出现。

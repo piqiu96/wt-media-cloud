@@ -250,6 +250,16 @@ export function usageOperators(material) {
 }
 
 /**
+ * 使用人数字；缺字段返回 null，真实 0 返回 0。普通运营看不到姓名，弹窗里的
+ * 「使用人数 M」就是这一项 —— 不能拿姓名数组的长度反推（服务端根本不发姓名）。
+ */
+export function usageOperatorCount(material) {
+  const value = material?.usage?.operator_count
+  if (value === undefined || value === null) return null
+  return Number(value) || 0
+}
+
+/**
  * 列表「使用情况」一格只写一行：没有成功成片就是 —，有数没人只写「成片 N」，
  * 有已知使用人才补人数。点击展开的明细在弹窗里，列表不再用第二行塞姓名。
  */

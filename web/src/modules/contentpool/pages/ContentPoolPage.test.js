@@ -27,8 +27,9 @@ describe('content pool page', () => {
     expect(source).toContain('discover-mode')
     expect(source).not.toContain('筛选条件')
     expect(source).toContain('interaction')
-    expect(source).toContain("colKey: 'source_strategy'")
-    expect(source).toContain("colKey: 'source_task'")
+    expect(source).toContain("colKey: 'source'")
+    expect(source).not.toContain("colKey: 'source_strategy'")
+    expect(source).not.toContain("colKey: 'source_task'")
     expect(source).toContain('updated_by_name')
     expect(source).toContain('interactionLabel')
     expect(source).toContain('result?.items')
@@ -91,19 +92,33 @@ describe('content pool page', () => {
     expect(source).toContain('team.name')
   })
 
-  it('defaults the game filter to the user game scope and offers the full catalog', () => {
+  // 目录仍按 scope=all 取（名称解析与人工导入要看全团队），但选项只列启用游戏：
+  // 停用游戏已不能新建策略，勾进筛选就成了一个看不见的裸条件。默认负责游戏与启用集合
+  // 取交集；交集为空时不传 game_ids（按既有裁定，负责游戏只是默认筛选，不是可见边界）。
+  it('offers only enabled games as options while still mapping names from the full catalog', () => {
     expect(source).toContain('const gameFilter = ref([])')
     expect(source).toContain('const isAdmin = computed')
     expect(source).toContain('function defaultGameIDs()')
     expect(source).toContain('gameFilter.value = defaultGameIDs()')
     expect(source).toContain("users.listGames({ scope: 'all' })")
+    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
+    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
+    expect(source).toContain('const enabledIds = new Set(enabledGameOptions.value.map((game) => game.id))')
+    expect(source).toContain('return ids.filter((id) => enabledIds.has(id))')
+    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="game in games"')
+    expect(source).toContain('const enabled = enabledGameOptions.value')
+    expect(source).toContain("enabled.find((g) => g.id === 'other') || enabled[0]")
     expect(source).toContain('game_ids: gameFilter.value.length ? gameFilter.value : undefined')
     expect(source).toContain('team_id: teamFilter.value || undefined')
     expect(source).toContain('function changeTeamFilter()')
     expect(source).toContain('gameFilter.value = []')
     expect(source).toContain('v-model="gameFilter"')
+    expect(source).toContain('v-model="manualGameId"')
     expect(source).toContain('v-model="teamFilter"')
     expect(source).toContain('v-if="isAdmin"')
+    // 名称解析仍读全量目录，停用游戏的历史行不会显示成裸 ID。
+    expect(source).toContain('const game = games.value.find((item) => item.id === id)')
   })
 
   it('imports only the results selected by the user', () => {
@@ -195,6 +210,20 @@ describe('content pool page', () => {
     const filters = source.slice(source.indexOf('<div class="filter-bar">'), source.indexOf('<div class="table-scroll-wrap">'))
     expect(filters.indexOf('class="wt-selection-toolbar"')).toBeGreaterThan(filters.indexOf('</div>\n        <div v-if="!isLibrary'))
     expect(filters).not.toContain('<t-space wrap>')
+  })
+
+  // 用户 2026-10-27 裁定：来源策略与来源任务合成一列。策略来源显示可点的策略名，
+  // 点开合并的来源弹窗（策略 + 任务关键信息）；人工来源（含只有任务 id 的历史行）
+  // 显示固定文案且不可点。列表本身不再跳转，跳转只在弹窗页脚。
+  it('merges the source columns behind a strategy-only drill-down', () => {
+    expect(source).toContain("import ContentPoolSourceDrawer from '../components/ContentPoolSourceDrawer.vue'")
+    expect(source).toContain('<ContentPoolSourceDrawer v-model:visible="sourceVisible" :source="sourceRow" />')
+    expect(source).toContain('function openSource(row)')
+    expect(source).toContain('if (!row?.strategy_id) return')
+    expect(source).toContain('<template #source="{ row }">')
+    expect(source).toContain('@click="openSource(row)"')
+    expect(source).toContain('<span v-else>人工</span>')
+    expect(source).not.toContain('?strategy_id=${row.strategy_id}')
   })
 
   it('renders a large content decision workspace instead of a CRUD field table', () => {

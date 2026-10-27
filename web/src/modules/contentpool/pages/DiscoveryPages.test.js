@@ -146,6 +146,18 @@ describe('discovery strategy and task pages', () => {
     expect(tasks).toContain('team_id: teamFilter.value || undefined')
   })
 
+  // 「所属游戏」只列启用游戏。编辑一条挂在停用游戏上的历史策略时，原游戏以不可选项补回：
+  // 不补，表单显示不出原值，保存一次就把游戏悄悄换掉了。
+  it('offers only enabled games in the strategy form and keeps a disabled current game visible', () => {
+    const strategies = read('DiscoveryStrategiesPage.vue')
+    expect(strategies).toContain("import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'")
+    expect(strategies).toContain('const formGameOptions = computed')
+    expect(strategies).toContain("options.unshift({ id: current.id, label: `${current.name}（已停用）`, disabled: true })")
+    expect(strategies).toContain('v-for="game in formGameOptions"')
+    expect(strategies).toContain(':disabled="game.disabled"')
+    expect(strategies).not.toContain('v-for="game in games"')
+  })
+
   it('sends both discovery list filters to the backend instead of filtering locally', () => {
     const strategies = read('DiscoveryStrategiesPage.vue')
     expect(strategies).toContain('client.listStrategies(query)')

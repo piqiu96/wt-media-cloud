@@ -15,6 +15,7 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { formatDurationMs } from '../../../shared/utils/units.js'
 import { attemptSteps, stepMetricsText } from '../attemptSteps.js'
 import { createdRangeParams } from '../createdRange.js'
+import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
 import { missingOperatorOption, operatorIdFromOption } from '../operatorFilter.js'
 import { UNCERTAIN_CODE, isRetryableTask, retryHint } from '../retryPolicy.js'
 import { reviewReady, safeComposeError } from '../uncertainReview.js'
@@ -68,6 +69,7 @@ const columns = computed(() => [
   { colKey: 'output', title: '生成成片', width: 120 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'created_at', title: '创建时间', width: 150 },
+  { colKey: 'finished_at', title: '完成时间', width: 150 },
   { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消', '重试']), fixed: 'right' },
 ])
 
@@ -109,7 +111,6 @@ function stageText(row) {
 // 任务名称是创建那一刻形成的事实：素材标题摘要 · 策略名称。历史行没有它，
 // 退回「合成任务 252」——不显示内码，也不为了好看编一个名字。
 function taskName(row) { return row.display_name?.trim() || `合成任务 ${row.id}` }
-function triggerText(row) { return row.trigger_type === 'scheduled' ? '策略自动' : '人工创建' }
 function outputID(row) { return row.status === 'success' ? row.composite_output_id : null }
 function canRetryTask(row) { return canRetry.value && isRetryableTask(row) }
 function canCancelTask(row) { return row.status === 'pending' || (row.status === 'running' && !row.cancel_requested) }
@@ -515,7 +516,7 @@ onMounted(() => {
           </t-select></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
           <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="人工创建" /><t-option value="scheduled" label="策略自动" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           <div class="wt-filter-actions">
@@ -527,13 +528,14 @@ onMounted(() => {
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="还没有合成任务">
             <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
             <template #name="{ row }"><span class="compose-task-name" :title="taskName(row)">{{ taskName(row) }}</span></template>
-            <template #trigger_type="{ row }">{{ triggerText(row) }}</template>
+            <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link></template>
             <template #strategy="{ row }"><t-link class="compose-strategy-link" theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link></template>
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
@@ -557,7 +559,7 @@ onMounted(() => {
                   <div class="compose-detail__grid">
                     <div><span class="compose-detail__label">任务名称</span><span>{{ taskName(detail) }}</span></div>
                     <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
-                    <div><span class="compose-detail__label">触发方式</span><span>{{ triggerText(detail) }}</span></div>
+                    <div><span class="compose-detail__label">触发方式</span><span>{{ triggerLabel(detail.trigger_type) }}</span></div>
                     <div><span class="compose-detail__label">创建人 ID</span><span>{{ detail.created_by }}</span></div>
                     <div><span class="compose-detail__label">负责人</span><span>{{ detail.operator_name || '未记录' }}</span></div>
                     <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
@@ -583,7 +585,7 @@ onMounted(() => {
                     <div><span class="compose-detail__label">当前阶段</span><span>{{ stageText(detail) }}</span></div>
                     <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
                     <div><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
-                    <div><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
+                    <div><span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
                     <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
                   </div>
                 </div>
