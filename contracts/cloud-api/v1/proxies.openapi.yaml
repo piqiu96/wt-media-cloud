@@ -1,8 +1,228 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Proxy API
-  version: 2026.09.06.1
+  version: 2026.10.28.1
+  description: >
+    Proxy resources belong to a team. Operators and senior operators read and write
+    their own team only; admins may read every team and must name the target team
+    when creating or importing. Health checks run inside Cloud against the saved
+    connection, so they do not depend on a local Agent or a running workstation.
 paths:
+  /api/v1/proxies:
+    get:
+      operationId: listProxies
+      summary: List proxies visible to the caller.
+      description: >
+        Operators and senior operators always read their own team; passing another
+        team_id is refused. Admins without team_id read every team.
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: team_id, schema: {type: integer, format: int64}, description: Admin-only team filter.}
+        - {in: query, name: business_status, schema: {type: string, enum: [active, paused]}}
+        - {in: query, name: supplier, schema: {type: string}}
+        - {in: query, name: region, schema: {type: string}}
+        - {in: query, name: search, schema: {type: string}, description: Substring over name, host and supplier.}
+      responses:
+        '200':
+          description: Secret-free proxy views. Username and password never appear in list responses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ProxyConfigView'}}
+        '400': {description: The requested team does not exist.}
+        '403': {description: The caller may not read the requested team.}
+    post:
+      operationId: createProxy
+      summary: Create one proxy resource in the caller's team.
+      description: >
+        Admins must supply team_id; other roles are forced onto their own team and
+        an explicit team_id is ignored. A new static proxy stays unassignable until
+        a successful check.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyWriteInput'}
+      responses:
+        '201':
+          description: Created proxy view without credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
+        '400': {description: Invalid fields, missing target team, or an unknown team.}
+        '403': {description: The caller may not write the target team.}
+  /api/v1/proxies/recommendations:
+    get:
+      operationId: listProxyRecommendations
+      summary: List assignable proxies for a set of browser windows.
+      description: >
+        Candidates come from the caller's team scope and exclude resources that are
+        paused, expired, unchecked, failed, or short on remaining capacity after
+        accounting for the selected windows.
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: profile_ids, required: true, schema: {type: string}, description: Comma-separated Cloud Profile ids owned by the caller.}
+      responses:
+        '200':
+          description: Secret-free assignable proxy views.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ProxyConfigView'}}
+        '400': {description: No window was selected.}
+        '403': {description: A selected window is not owned by the caller, or the caller has no team.}
+  /api/v1/proxies/{proxy_id}:
+    get:
+      operationId: getProxy
+      summary: Read one proxy, including credentials.
+      description: Username and password are returned only by this detail operation.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      responses:
+        '200':
+          description: Proxy detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
+        '403': {description: The proxy belongs to another team.}
+        '404': {description: Proxy does not exist.}
+    delete:
+      operationId: deleteProxy
+      summary: Physically delete a proxy that no window formally references.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      responses:
+        '204': {description: Deleted.}
+        '403': {description: Only a senior operator or admin may delete this proxy.}
+        '404': {description: Proxy does not exist.}
+        '409': {description: A browser window still formally references this proxy; pause it instead.}
+    patch:
+      operationId: updateProxy
+      summary: Update a proxy under the caller's field scope.
+      description: >
+        Operators may change name, region, supplier, tags and remark. Senior
+        operators and admins may additionally change source type, connection,
+        credentials, extraction URL, expiry and quota. Omitting credentials or the
+        extraction URL keeps the stored value. A changed connection clears the last
+        check result, so the proxy needs a new successful check before assignment.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyWriteInput'}
+      responses:
+        '200':
+          description: Updated proxy view without credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
+        '400': {description: Invalid fields or a quota below current usage.}
+        '403': {description: The proxy belongs to another team or the field needs a governor.}
+        '404': {description: Proxy does not exist.}
+  /api/v1/proxies/{proxy_id}/status:
+    patch:
+      operationId: updateProxyStatus
+      summary: Enable or pause a proxy.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_status]
+              additionalProperties: false
+              properties:
+                business_status: {type: string, enum: [active, paused]}
+      responses:
+        '200':
+          description: Updated proxy view without credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
+        '400': {description: Invalid status.}
+        '403': {description: Only a senior operator or admin may govern this proxy.}
+        '404': {description: Proxy does not exist.}
+  /api/v1/proxies/{proxy_id}/quota:
+    post:
+      operationId: setProxyQuota
+      summary: Change the maximum number of windows this proxy may serve.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max_profiles]
+              additionalProperties: false
+              properties:
+                max_profiles: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Updated proxy view without credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
+        '400': {description: Non-positive quota, or a quota below current formal occupancy.}
+        '403': {description: Only a senior operator or admin may govern this proxy.}
+        '404': {description: Proxy does not exist.}
+  /api/v1/proxies/{proxy_id}/check:
+    post:
+      operationId: checkProxy
+      summary: Probe the saved proxy connection from Cloud.
+      description: >
+        Cloud connects to the stored protocol, host and port directly and records
+        ok, conn_failed, auth_failed, timeout or invalid_params. The result is
+        written only if the connection has not changed since the probe started; a
+        late result for an edited connection is discarded and reported as
+        invalid_params with a retry reason. The response carries the refreshed view,
+        whose assignment_blocker includes the check reason.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      responses:
+        '200':
+          description: Proxy view after the check, without credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
+        '403': {description: The proxy belongs to another team.}
+        '404': {description: Proxy does not exist.}
   /api/v1/proxies/parse:
     post:
       operationId: parseProxyAddress
@@ -46,16 +266,64 @@ paths:
                   data: {$ref: '#/components/schemas/ProxyAddress'}
         '400': {description: Source URL or extracted proxy format is invalid.}
         '503': {description: The current local Agent could not extract the proxy.}
+  /api/v1/proxies/import/preview:
+    post:
+      operationId: previewProxyImport
+      summary: Parse bulk proxy lines and mark duplicates without persisting them.
+      description: >
+        Line numbers count the submitted non-empty lines from 1. A row is a
+        duplicate when its normalized connection (protocol, host, port) matches an
+        existing proxy of the target team or an earlier submitted row.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyImportPreviewInput'}
+      responses:
+        '200':
+          description: Per-line parse results and duplicate markers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyImportPreviewResult'}
+        '400': {description: Missing or unknown target team.}
+        '403': {description: The caller may not write the target team.}
+  /api/v1/proxies/import:
+    post:
+      operationId: importProxies
+      summary: Import the selected rows of a previewed bulk input.
+      description: >
+        Every previewed row is submitted with its selected flag so the result can
+        be reconciled line by line. Unselected, duplicate and invalid rows are
+        reported as skipped or failed and never silently dropped.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyImportInput'}
+      responses:
+        '201':
+          description: Import result with total, imported, failed and skipped counts and per-row outcomes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyImportResult'}
+        '400': {description: No row was selected, or the target team is missing or unknown.}
+        '403': {description: The caller may not write the target team.}
   /api/v1/proxies/{proxy_id}/bindings:
     get:
       operationId: listProxyBindings
       summary: List browser windows formally bound to one proxy under the caller's existing Profile visibility.
       security: [{sessionCookie: []}]
-      parameters:
-        - in: path
-          name: proxy_id
-          required: true
-          schema: {type: string}
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
       responses:
         '200':
           description: Secret-free bound browser-window summaries.
@@ -68,32 +336,38 @@ paths:
                   data:
                     type: array
                     items: {$ref: '#/components/schemas/ProxyBindingSummary'}
+        '403': {description: The proxy belongs to another team.}
         '404': {description: Proxy does not exist.}
   /api/v1/proxies/{proxy_id}/refresh:
     post:
       operationId: refreshDynamicProxy
       summary: Manually extract and check a dynamic API proxy, update the ledger connection fields, and never write BitBrowser Profiles.
+      description: >
+        Extraction stays on the operator's workstation because the provider URL
+        needs the operator's network; the extracted connection replaces the saved
+        one and is then checked by Cloud. A changed connection clears the previous
+        check fact.
       security: [{sessionCookie: []}]
-      parameters:
-        - in: path
-          name: proxy_id
-          required: true
-          schema: {type: string}
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
       responses:
         '200':
           description: Current dynamic address was extracted and checked. Bound windows may require later resynchronization.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyConfigView'}
         '400': {description: Proxy is not an API source or the extracted response is invalid.}
-        '503': {description: Local extraction or check did not succeed; no BitBrowser Profile was modified.}
+        '403': {description: Only a senior operator or admin may govern this proxy.}
+        '503': {description: Local extraction did not succeed; no BitBrowser Profile was modified.}
   /api/v1/proxies/{proxy_id}/assign:
     post:
       operationId: assignProxyToProfile
       summary: Synchronously write or replace one verified Profile proxy and persist the formal relation only after read-back matches.
       security: [{sessionCookie: []}]
-      parameters:
-        - in: path
-          name: proxy_id
-          required: true
-          schema: {type: string}
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
       requestBody:
         required: true
         content:
@@ -110,18 +384,41 @@ paths:
                 properties:
                   data: {$ref: '#/components/schemas/ProxyAssignmentResult'}
         '403': {description: Profile does not belong to the current user or is inactive.}
-        '409': {description: Proxy unavailable or unified proxy capacity is exhausted.}
+        '409': {description: Proxy unavailable, unified proxy capacity is exhausted, or the proxy is busy.}
         '503': {description: Agent write/read-back did not succeed; no formal relation was updated.}
+  /api/v1/proxies/{proxy_id}/assign-batch:
+    post:
+      operationId: assignProxyToProfiles
+      summary: Assign one proxy to several Profiles and report per-Profile outcomes.
+      description: >
+        Each Profile is attempted independently; a failed Profile does not roll back
+        the others. The result lists succeeded Profiles and failed Profile ids with
+        their reasons.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyBatchAssignmentRequest'}
+      responses:
+        '200':
+          description: Per-Profile outcomes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyBatchAssignmentResult'}
+        '400': {description: No Profile was selected.}
+        '403': {description: The proxy belongs to another team, or a Profile is not owned by the caller.}
   /api/v1/proxies/{proxy_id}/unbind:
     post:
       operationId: unbindProxyFromProfile
       summary: Synchronously remove one verified Profile proxy and clear the formal relation only after BitBrowser reads back noproxy.
       security: [{sessionCookie: []}]
-      parameters:
-        - in: path
-          name: proxy_id
-          required: true
-          schema: {type: string}
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
       requestBody:
         required: true
         content:
@@ -140,10 +437,68 @@ paths:
         '403': {description: Profile does not belong to the current user or is inactive.}
         '409': {description: Profile is not formally bound to the requested proxy.}
         '503': {description: Agent write/read-back did not succeed; no formal relation was cleared.}
+  /api/v1/proxies/{proxy_id}/release:
+    post:
+      operationId: releaseProxyFromProfile
+      summary: Drop the formal relation without touching the address BitBrowser is already using.
+      description: >
+        The window keeps its actual proxy and stops consuming the unified quota.
+        Only the Cloud formal relation is cleared.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyAssignmentRequest'}
+      responses:
+        '200':
+          description: Formal relation cleared; the BitBrowser Profile is unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyUnbindResult'}
+        '403': {description: Profile does not belong to the current user or is inactive.}
+        '409': {description: Profile is not formally bound to the requested proxy.}
+  /api/v1/proxies/profile-unbind:
+    post:
+      operationId: clearObservedProfileProxy
+      summary: Clear the observed proxy of a BitBrowser-managed window and turn it direct-connect.
+      description: >
+        Only for an active, caller-owned window with no formal proxy relation. The
+        Agent writes noproxy and reads it back first; the observed address is cleared
+        only when no concurrent assignment has established a formal relation.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyAssignmentRequest'}
+      responses:
+        '200':
+          description: BitBrowser read back noproxy; the observed proxy fields are cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyUnbindResult'}
+        '403': {description: Profile does not belong to the current user or is inactive.}
+        '409': {description: The window still has a formal system proxy relation; switch it to BitBrowser-managed first.}
+        '503': {description: Agent write/read-back did not succeed; the observed fields were left unchanged.}
   /api/v1/proxies/local-scan/preview:
     post:
       operationId: previewLocalProxyScan
       summary: Compare a trusted BitBrowser Profile scan with formal proxy relations without writing Cloud data.
+      description: >
+        Only the scanning operator's own windows are compared. A window registered
+        to another operator of the same team is reported as ownership_conflict and is
+        never modified. Windows with the same address as exactly one team proxy are
+        reported as changed; zero matches are unknown, several matches are conflict.
       security: [{sessionCookie: []}]
       requestBody:
         required: true
@@ -165,6 +520,12 @@ paths:
     post:
       operationId: confirmLocalProxyScan
       summary: Accept a trusted local Profile scan and reconcile only unambiguous formal proxy relations.
+      description: >
+        The source Profile scan must already be accepted by the operator. changed and
+        unbound entries are applied; unknown entries listed in selected_profile_ids
+        are created in the caller's team as paused, unchecked records and bound;
+        unselected unknown entries are returned as unregistered; conflict and
+        ownership_conflict entries are never guessed or written.
       security: [{sessionCookie: []}]
       requestBody:
         required: true
@@ -173,7 +534,7 @@ paths:
             schema: {$ref: '#/components/schemas/LocalProxyScanConfirmRequest'}
       responses:
         '200':
-          description: Known changes are reconciled; unknown proxies are created as paused records pending supplement and check.
+          description: Reconciled changes; every entry carries the kind after confirmation.
           content:
             application/json:
               schema:
@@ -181,11 +542,67 @@ paths:
                 required: [data]
                 properties:
                   data: {$ref: '#/components/schemas/LocalProxyScanResult'}
-        '409': {description: The source Profile scan is no longer confirmable.}
+        '409': {description: The source Profile scan is not accepted, belongs to another user, or is no longer confirmable.}
 components:
+  parameters:
+    ProxyID:
+      in: path
+      name: proxy_id
+      required: true
+      schema: {type: string}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
+    ProxyWriteInput:
+      type: object
+      additionalProperties: false
+      properties:
+        team_id: {type: integer, format: int64, description: Create only. Required for admins; other roles are forced onto their own team. Ignored on update.}
+        name: {type: string, maxLength: 64}
+        source_type: {type: string, enum: [static, api], default: static}
+        proxy_protocol: {type: string, enum: [http, https, socks5]}
+        host: {type: string}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        username: {type: string}
+        password: {type: string, writeOnly: true}
+        region: {type: string}
+        supplier: {type: string}
+        tags: {type: array, items: {type: string}}
+        extract_url: {type: string, format: uri, writeOnly: true, description: Required when creating an api source; never returned.}
+        expires_at: {type: string, format: date-time}
+        remark: {type: string}
+        max_profile_count: {type: integer, minimum: 1, description: Required on create; omitted on update keeps the stored quota.}
+    ProxyConfigView:
+      type: object
+      required: [id, team_id, name, source_type, proxy_protocol, business_status, max_profile_count, tags, expired, created_at, updated_at]
+      properties:
+        id: {type: string}
+        team_id: {type: integer, format: int64}
+        team_name: {type: string}
+        name: {type: string}
+        source_type: {type: string, enum: [static, api]}
+        proxy_protocol: {type: string, enum: [http, https, socks5]}
+        host: {type: string}
+        port: {type: integer}
+        username: {type: string, description: Only the detail operation returns it.}
+        password: {type: string, description: Only the detail operation returns it.}
+        region: {type: string}
+        supplier: {type: string}
+        tags: {type: array, items: {type: string}}
+        extract_url_configured: {type: boolean, description: Whether an API source has a stored extraction URL.}
+        expires_at: {type: string, format: date-time, nullable: true}
+        business_status: {type: string, enum: [active, paused]}
+        max_profile_count: {type: integer}
+        last_check_at: {type: string, format: date-time, nullable: true}
+        last_check_result: {type: string, enum: [ok, conn_failed, auth_failed, timeout, invalid_params]}
+        observed_exit_ip: {type: string}
+        assigned_profile_count: {type: integer, description: Windows currently holding a formal relation.}
+        remaining_profile_count: {type: integer, description: max_profile_count minus assigned_profile_count, never negative.}
+        remark: {type: string}
+        expired: {type: boolean, description: Derived at read time from expires_at; not a stored status.}
+        assignment_blocker: {type: string, description: Why the proxy cannot be assigned right now; absent when assignable.}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     ProxyAddressRequest:
       type: object
       required: [proxy_address]
@@ -223,6 +640,25 @@ components:
       additionalProperties: false
       properties:
         profile_id: {type: string, description: Cloud Browser Profile id.}
+    ProxyBatchAssignmentRequest:
+      type: object
+      required: [profile_ids]
+      additionalProperties: false
+      properties:
+        profile_ids: {type: array, minItems: 1, items: {type: string}}
+    ProxyBatchAssignmentResult:
+      type: object
+      required: [succeeded, failed]
+      properties:
+        succeeded: {type: array, items: {$ref: '#/components/schemas/ProxyAssignmentResult'}}
+        failed:
+          type: array
+          items:
+            type: object
+            required: [profile_id, message]
+            properties:
+              profile_id: {type: string}
+              message: {type: string}
     ProxyAssignmentResult:
       type: object
       required: [id, bit_profile_id, proxy_id, proxy_type, proxy_host, proxy_port]
@@ -243,6 +679,64 @@ components:
         proxy_type: {type: string, nullable: true}
         proxy_host: {type: string, nullable: true}
         proxy_port: {type: integer}
+    ProxyImportPreviewInput:
+      type: object
+      required: [lines]
+      additionalProperties: false
+      properties:
+        team_id: {type: integer, format: int64, description: Required for admins; ignored for other roles.}
+        lines: {type: array, items: {type: string}}
+    ProxyImportPreviewResult:
+      type: object
+      required: [rows, total]
+      properties:
+        total: {type: integer}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [line, raw, duplicate]
+            properties:
+              line: {type: integer}
+              raw: {type: string}
+              parsed: {$ref: '#/components/schemas/ProxyWriteInput'}
+              error: {type: string}
+              duplicate: {type: boolean}
+              duplicate_reason: {type: string, description: The existing resource or earlier line occupying the same connection.}
+    ProxyImportInput:
+      type: object
+      required: [rows]
+      additionalProperties: false
+      properties:
+        team_id: {type: integer, format: int64, description: Required for admins; ignored for other roles.}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [line, raw, selected]
+            properties:
+              line: {type: integer}
+              raw: {type: string}
+              selected: {type: boolean}
+    ProxyImportResult:
+      type: object
+      required: [total, imported, failed, skipped, rows]
+      properties:
+        total: {type: integer}
+        imported: {type: integer}
+        failed: {type: integer}
+        skipped: {type: integer}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [line, raw, status]
+            properties:
+              line: {type: integer}
+              raw: {type: string}
+              status: {type: string, enum: [imported, failed, skipped]}
+              reason: {type: string}
+              proxy_id: {type: string}
     LocalProxyScanRequest:
       type: object
       required: [scan_id]
@@ -251,11 +745,11 @@ components:
         scan_id: {type: string, description: Trusted Profile scan id created from the local Desktop snapshot.}
     LocalProxyScanConfirmRequest:
       type: object
-      required: [scan_id, node_id]
+      required: [scan_id, selected_profile_ids]
       additionalProperties: false
       properties:
         scan_id: {type: string, description: Trusted Profile scan id created from the local Desktop snapshot.}
-        node_id: {type: string, description: Current trusted Desktop node id.}
+        selected_profile_ids: {type: array, items: {type: string}, description: Unknown-address windows the operator accepted for registration.}
     LocalProxyScanResult:
       type: object
       required: [scan_id, changes]
@@ -268,11 +762,22 @@ components:
       type: object
       required: [kind, profile_id, bit_profile_id]
       properties:
-        kind: {type: string, enum: [changed, unbound, unknown, conflict]}
+        kind:
+          type: string
+          enum: [changed, unbound, unknown, unregistered, conflict, ownership_conflict]
+          description: >
+            changed: address matches one team proxy and differs from the formal
+            relation. unbound: BitBrowser holds no proxy while a formal relation
+            exists. unknown: address matches no team proxy; preview proposes
+            registration, confirm registers only when selected. unregistered:
+            confirm-time result for an unselected unknown entry. conflict: the
+            address matches several team proxies. ownership_conflict: the window
+            belongs to another operator and is never modified by this scan.
         profile_id: {type: string}
         bit_profile_id: {type: string}
         current_proxy_id: {type: string}
-        target_proxy_id: {type: string}
+        target_proxy_id: {type: string, description: The matched or newly created proxy after confirmation.}
         proxy_protocol: {type: string, enum: [http, https, socks5]}
         host: {type: string}
         port: {type: integer}
+        ownership_notice: {type: string, description: Set on ownership_conflict to explain why the window is untouched.}
