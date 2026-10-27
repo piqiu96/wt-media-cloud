@@ -16,6 +16,7 @@ import ContentPoolSourceDrawer from '../components/ContentPoolSourceDrawer.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { enabledGames } from '../../../shared/utils/games.js'
 import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
@@ -126,19 +127,26 @@ onMounted(async () => {
   await load()
 })
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 是定时刷新用的：不翻页码、不闪 loading、失败保留上一次读数。用户自己改筛选
+// 或翻页仍走非 quiet，读不到就显式报错。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const result = await client.list({ search: search.value.trim(), content_id: contentID.value.trim() || undefined, platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, team_id: teamFilter.value || undefined, game_ids: gameFilter.value.length ? gameFilter.value : undefined, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined, material_id: materialFilter.value || undefined, published_from: publishedRange.value?.[0] || undefined, published_to: publishedRange.value?.[1] || undefined, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = Array.isArray(result) ? result : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e.message || '内容池加载失败'
+    if (!quiet) error.value = e.message || '内容池加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+// 定时刷新让开用户正在做的事：详情/来源/人工导入打开、审核模式、已选行或批量操作中。
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => detailVisible.value || sourceVisible.value || manualVisible.value || imageViewerVisible.value || reviewMode.value || selectedRowKeys.value.length > 0 || batchLoading.value || manualLoading.value || reviewProcessing.value,
+})
 
 function reset() {
   search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []; teamFilter.value = ''; gameFilter.value = defaultGameIDs()
@@ -556,7 +564,6 @@ function openImageViewer(url) {
             :disabled="!reviewMode && !pendingCount"
             @click="reviewMode ? exitReviewMode() : enterReviewMode()"
           >审核模式</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
       <ResourceCard class="content-pool-card" :class="{ 'is-reviewing': reviewMode }">

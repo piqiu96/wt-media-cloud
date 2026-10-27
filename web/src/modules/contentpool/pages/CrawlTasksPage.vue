@@ -12,6 +12,7 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 
 const client = createDiscoveryClient()
 const session = createSessionClient()
@@ -108,24 +109,29 @@ async function loadContext() {
   }
 }
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const strategyID = Number(route.query.strategy_id || 0)
     // 从策略详情跳进来时锁定来源策略，其余筛选交给后端。
     const params = { strategy_id: strategyID > 0 ? strategyID : undefined, search: filters.value.search.trim(), status: filters.value.status, team_id: teamFilter.value || undefined }
     const data = await client.listTasks(params)
     rows.value = Array.isArray(data) ? data : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
     const gameRows = await client.listGames({ scope: 'all' })
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
-    error.value = e.message || '任务加载失败'
+    if (!quiet) error.value = e.message || '任务加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => visible.value || strategyDrawerVisible.value || retrying.value,
+})
 
 function resetFilters() {
   filters.value = { search: '', status: '' }
@@ -340,11 +346,7 @@ function hasFailed(task) {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题">
-        <template #actions>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
-        </template>
-      </ResourcePageHeader>
+      <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题" />
 
       <ResourceCard class="task-card">
         <div class="filter-bar">

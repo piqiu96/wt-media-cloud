@@ -12,6 +12,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import {
   JOIN_FILTERS,
   MY_USAGE_FILTERS,
@@ -113,9 +114,10 @@ const pagedRows = computed(() => {
 // 哪些行：默认勾选只决定第一次看到什么，能筛到哪些游戏由游戏管理决定。
 const gameOptions = computed(() => games.value.map((game) => ({ id: game.id, name: game.name })))
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const data = await client.list({
       search: search.value,
@@ -128,13 +130,17 @@ async function load() {
       sort_order: sortOrder.value,
     })
     rows.value = Array.isArray(data) ? data : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e?.message || '读取素材失败'
+    if (!quiet) error.value = e?.message || '读取素材失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => detailVisible.value || detailLoading.value || usageVisible.value,
+})
 
 async function loadGames() {
   try {
@@ -277,11 +283,7 @@ onMounted(async () => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page material-library-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="素材库" description="团队公共素材池：加入「我的素材」后可下载到本机并用于合成">
-        <template #actions>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
-        </template>
-      </ResourcePageHeader>
+      <ResourcePageHeader title="素材库" description="团队公共素材池：加入「我的素材」后可下载到本机并用于合成" />
       <ResourceCard class="material-table-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>

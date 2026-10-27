@@ -16,6 +16,7 @@ import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'
 import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
 import { scheduleLabel } from '../labels.js'
 
@@ -185,22 +186,27 @@ function defaultForm() {
   }
 }
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留当前页码与筛选，失败沿用上一次读数。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const query = { search: String(filters.value.search || '').trim(), type: filters.value.type, status: filters.value.status, teamId: teamFilter.value || undefined }
     const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(query), client.listTasks({ team_id: teamFilter.value || undefined }), client.listGames({ scope: 'all' })])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
     tasks.value = Array.isArray(taskRows) ? taskRows : []
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
-    error.value = e.message || '策略加载失败'
+    if (!quiet) error.value = e.message || '策略加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => visible.value || detailVisible.value || keywordVisible.value || authorVisible.value || saving.value,
+})
 
 function resetFilters() {
   filters.value = { search: '', type: '', status: '' }
@@ -469,7 +475,6 @@ function latestStats(row) {
       <ResourcePageHeader title="挖掘策略" description="配置内容发现规则，让系统自动帮你找到优质内容">
         <template #actions>
           <t-button v-if="canManage" theme="primary" @click="openCreate">新增策略</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
 

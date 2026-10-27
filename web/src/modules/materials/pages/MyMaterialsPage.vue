@@ -9,6 +9,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import {
   VIDEO_STATUSES,
   downloadActionLabel,
@@ -183,21 +184,26 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const data = await client.listMyMaterials({ search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = toRows(Array.isArray(data) ? data : [])
     selectedRowKeys.value = selectedRowKeys.value.filter((key) => rows.value.some((row) => String(row.usage_id) === String(key) && canSelectForDownload(row)))
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e?.message || '读取我的素材失败'
+    if (!quiet) error.value = e?.message || '读取我的素材失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
   await loadPresence()
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => detailVisible.value || detailLoading.value || selectedRowKeys.value.length > 0 || batchLoading.value,
+})
 
 function changeSort(sort) {
   sortBy.value = sort?.sortBy || 'published_at'
@@ -309,11 +315,7 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page my-materials-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、查看使用状态与详情">
-        <template #actions>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
-        </template>
-      </ResourcePageHeader>
+      <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、查看使用状态与详情" />
       <ResourceCard class="material-table-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、作者" @enter="load" /></label>

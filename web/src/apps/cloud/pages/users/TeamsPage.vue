@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
 import { createSessionClient } from '../../../../shared/api/session.js'
 import { isAdminRole } from '../../../../shared/utils/roles.js'
+import { useAutoRefresh } from '../../../../shared/utils/useAutoRefresh.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 
@@ -56,20 +57,25 @@ async function loadSession() {
   }
 }
 
-async function loadAll() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与关键字，失败沿用上一次读数。
+async function loadAll({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     // 关键字（团队 ID 精确 / 名称片段）由服务端过滤，页面只做分页切片。
     const teamRows = await client.listTeams({ keyword: keyword.value.trim() })
     teams.value = (teamRows || []).map((team) => ({ ...team, user_count: team.user_count ?? 0 }))
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e.message || '加载运营团队失败'
+    if (!quiet) error.value = e.message || '加载运营团队失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => loadAll({ quiet: true }), {
+  shouldSkip: () => dialogVisible.value || saving.value,
+})
 
 function search() {
   loadAll()
@@ -128,7 +134,6 @@ async function deleteTeam(team) {
     <ResourcePageHeader title="运营团队" description="管理运营人员的团队归属">
       <template #actions>
         <t-button v-if="canManage" theme="primary" @click="openCreate">新增团队</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />

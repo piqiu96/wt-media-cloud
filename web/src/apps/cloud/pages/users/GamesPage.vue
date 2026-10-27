@@ -6,6 +6,7 @@ import { createUsersClient } from './usersApi.js'
 import { createSessionClient } from '../../../../shared/api/session.js'
 import { isAdminRole } from '../../../../shared/utils/roles.js'
 import { platformLabel } from '../../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../../shared/utils/useAutoRefresh.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -72,20 +73,25 @@ function resetFilters() {
   loadGames()
 }
 
-async function loadGames() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
+async function loadGames({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     // management：全部状态、不含关联摘要；all：管理员口径，带摘要。
     const scope = canManage.value ? 'all' : 'management'
     games.value = await client.listGames({ ...filters.value, scope }) || []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e.message || '加载游戏失败'
+    if (!quiet) error.value = e.message || '加载游戏失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => loadGames({ quiet: true }), {
+  shouldSkip: () => dialogVisible.value || saving.value || referencesVisible.value || referencesLoading.value,
+})
 
 function referenceSummary(game) {
   return game.reference_summary || { user_scope_count: 0, media_account_count: 0, total_count: 0 }
@@ -179,7 +185,6 @@ async function deleteGame(game) {
     <ResourcePageHeader title="游戏管理" description="维护游戏分类与关联范围">
       <template #actions>
         <t-button v-if="canManage" theme="primary" @click="openCreate">新增游戏</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="loadGames">刷新</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />

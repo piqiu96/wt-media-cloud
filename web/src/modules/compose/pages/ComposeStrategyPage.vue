@@ -11,6 +11,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { enabledGames } from '../../../shared/utils/games.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import { schemaFields } from '../schemaFields.js'
 import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
 import { scheduleLabel } from '../scheduleForm.js'
@@ -242,13 +243,14 @@ onMounted(() => {
   if (/^\d+$/.test(id)) client.getStrategy(Number(id)).then(openDetail).catch((e) => feedback.toast.error(e?.message || '打开策略失败'))
 })
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数；会话只读一次。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     // 团队列表所有角色都可读（服务端仅要求登录），编辑/详情要把 team_id 映射成团队名；
     // 管理员的创建表单另用它选目标团队。
-    currentUser.value = await sessionClient.me()
+    if (!quiet || !currentUser.value) currentUser.value = await sessionClient.me()
     const [strategyRows, templateRows, gameRows, teamRows] = await Promise.all([
       client.listStrategies({ search: filters.value.search.trim(), game_id: filters.value.game_id, template_id: filters.value.template_id, status: filters.value.status }),
       client.listTemplates(), client.listGames(), client.listTeams().catch(() => []),
@@ -257,13 +259,17 @@ async function load() {
     templates.value = Array.isArray(templateRows) ? templateRows : []
     games.value = Array.isArray(gameRows) ? gameRows : []
     teams.value = Array.isArray(teamRows) ? teamRows : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e.message || '合成策略加载失败'
+    if (!quiet) error.value = e.message || '合成策略加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => visible.value || saving.value || copyVisible.value || copySaving.value || detailVisible.value || Boolean(runPendingID.value) || Boolean(statusPendingID.value),
+})
 
 function defaultForm() {
   return {
@@ -673,7 +679,6 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <ResourcePageHeader title="合成策略" :description="canManage ? '维护合成模板的业务参数，普通运营据此创建合成任务' : '选择可用策略，在创建合成任务时使用'">
         <template #actions>
           <t-button v-if="canManage" theme="primary" @click="openCreate">新增策略</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
 

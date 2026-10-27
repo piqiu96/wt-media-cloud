@@ -386,20 +386,22 @@ describe('compose tasks page', () => {
   })
 
   // 活动任务自动刷新：只复用模块内的最小轮询，页面自己不起 timer。
-  it('polls the list and the open detail only while a task is active', () => {
+  it('auto-refreshes the list every ten seconds and polls an open detail only while a task is active', () => {
+    // 列表：页面开着就定时重读（T-25 用户裁定），不再靠刷新按钮或「有活任务才轮询」。
+    expect(source).toContain("import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'")
+    expect(source).toContain('useAutoRefresh(() => load({ quiet: true }),')
+    expect(source).not.toContain('hasActiveTask(rows.value)')
+    expect(source).not.toContain('function syncListPolling()')
+    // 详情：抽屉开着且任务还在跑时才 5 秒轮询，这一份保留。
     expect(source).toContain('useTaskPolling(')
-    expect(source).toContain('hasActiveTask(rows.value)')
-    expect(source).toContain('function syncListPolling()')
     expect(source).toContain('function syncDetailPolling()')
-    expect(source).toContain('listPolling.start()')
-    expect(source).toContain('listPolling.stop()')
     expect(source).toContain('detailPolling.start()')
     expect(source).toContain('detailPolling.stop()')
-    // 轮询那一遍不掀整页 Loading、不把用户正在看的页码拨回去。
+    // 定时那一遍不掀整页 Loading、不把用户正在看的页码拨回去。
     expect(source).toContain('load({ quiet: true })')
     expect(source).toContain('if (!quiet) pagination.value.current = 1')
-    // 手动刷新还在。
-    expect(source).toContain('@click="load()"')
+    // 刷新按钮已移除；页面自己不建 timer（交给 useAutoRefresh）。
+    expect(source).not.toContain('@click="load()">刷新')
     expect(source).not.toContain('setInterval')
   })
 
