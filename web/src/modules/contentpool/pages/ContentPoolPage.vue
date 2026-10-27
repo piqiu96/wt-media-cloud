@@ -12,6 +12,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
+import ContentPoolSourceDrawer from '../components/ContentPoolSourceDrawer.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { enabledGames } from '../../../shared/utils/games.js'
 
@@ -45,6 +46,8 @@ const reviewError = ref('')
 const reviewProcessing = ref(false)
 const detailVisible = ref(false)
 const detail = ref(null)
+const sourceVisible = ref(false)
+const sourceRow = ref(null)
 const pagination = ref({ current: 1, pageSize: 20 })
 const selectedRowKeys = ref([])
 const batchLoading = ref(false)
@@ -99,9 +102,9 @@ const columns = [
   // 互动列为较长的带千分位数值留出宽度。
   { colKey: 'interaction', title: '互动', width: 120 },
   { colKey: 'source_type', title: '来源方式', width: 110 },
-  // 来源策略与来源任务是两种关联实体，各占一列（AdminUI 规范 §4.1 一种实体一列）。
-  { colKey: 'source_strategy', title: '来源策略', width: 140 },
-  { colKey: 'source_task', title: '来源任务', width: 180 },
+  // 用户 2026-10-27 显式裁定：来源策略与来源任务合成一列（§4.1「一种实体一列」的例外）。
+  // 来源链以策略为可见锚点，任务细节进关联弹窗；人工来源没有实体，显示固定文案。
+  { colKey: 'source', title: '来源', width: 180 },
   // 状态排在关联实体与时间之后（§4.1：主体 → 属性 → 关联实体 → 状态/结果 → 时间）。
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
@@ -303,6 +306,13 @@ async function openDetail(row) {
     feedback.toast.error(e.message || '内容详情加载失败')
     return false
   }
+}
+
+// 来源弹窗只对策略来源开：人工来源（含只有任务 id 的历史行）没有可追溯的实体。
+function openSource(row) {
+  if (!row?.strategy_id) return
+  sourceRow.value = row
+  sourceVisible.value = true
 }
 
 async function materialize(row, reload = true) {
@@ -553,13 +563,9 @@ function openImageViewer(url) {
             </template>
             <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
             <template #interaction="{ row }"><MetricList :items="interactionLabel(row)" /></template>
-            <template #source_strategy="{ row }">
-              <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${row.strategy_id}`)">{{ strategyLabel(row) }}</t-link>
-              <span v-else>—</span>
-            </template>
-            <template #source_task="{ row }">
-              <span v-if="row.crawl_task_id">{{ taskLabel(row) }}</span>
-              <span v-else>—</span>
+            <template #source="{ row }">
+              <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="openSource(row)">{{ strategyLabel(row) }}</t-link>
+              <span v-else>人工</span>
             </template>
             <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
@@ -730,6 +736,7 @@ function openImageViewer(url) {
           </div>
         </div>
       </t-dialog>
+      <ContentPoolSourceDrawer v-model:visible="sourceVisible" :source="sourceRow" />
       <t-image-viewer
         v-model:visible="imageViewerVisible"
         :images="imageViewerImages"
