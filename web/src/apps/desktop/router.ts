@@ -27,12 +27,13 @@ export const desktopRoutes = [
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
-      // 社媒账号三角色可见（本地操作按账号归属在页面内判定）；开户 / 浏览器窗口 /
-      // 代理仍是本机执行面，只有普通运营可以进入，其余角色由 main.ts 拦回内容池。
+      // 社媒账号三角色可见（本地操作按账号归属在页面内判定）；浏览器窗口与代理对
+      // 运营和高级运营开放（D08），开户仍是普通运营的本机执行面；其余角色由
+      // main.ts 拦回内容池。
       { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue") },
-      { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue"), meta: { localOnly: true } },
+      { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue"), meta: { operatorOnly: true } },
       { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue"), meta: { localOnly: true } },
-      { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue"), meta: { localOnly: true } },
+      { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue") },
       // 系统管理复用 Cloud 的同一批组件文件，而不是在 Desktop 再写一套。
       { path: "users", name: "Users", component: () => import("../cloud/pages/users/UsersPage.vue") },
       { path: "operation-teams", name: "OperationTeams", component: () => import("../cloud/pages/users/TeamsPage.vue") },

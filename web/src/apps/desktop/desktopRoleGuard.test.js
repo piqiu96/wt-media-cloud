@@ -10,12 +10,12 @@ const layout = readFileSync(new URL('../../layout/AppLayout.vue', import.meta.ur
 const personalInfo = readFileSync(new URL('../../modules/auth/pages/PersonalInfoPage.vue', import.meta.url), 'utf8')
 const routerSource = readFileSync(new URL('./router.ts', import.meta.url), 'utf8')
 
-// 2026-10-27：社媒账号对三种角色都开放（本地操作按账号归属在页面内判定），
-// 只剩开户 / 浏览器窗口 / 代理这三条本机执行面归普通运营。
-const LOCAL_ONLY_PATHS = ['account-opening', 'browser-windows', 'proxies']
+// 2026-10-28（V3 D08）：浏览器窗口对运营与高级运营开放本机能力；查看其他运营的
+// 窗口只读。开户仍是普通运营专属，代理管理不再受本机页面可见性限制。
+const LOCAL_ONLY_PATHS = ['browser-windows']
 
 describe('desktop role guard', () => {
-  it('lets all three roles into Desktop; local pages stay operator-only, the sidecar serves operators and seniors', () => {
+  it('lets all three roles into Desktop; windows follow the operator/senior local capability', () => {
     expect(canUseDesktop({ role: 'operator' })).toBe(true)
     expect(canUseDesktop({ role: 'senior_operator' })).toBe(true)
     expect(canUseDesktop({ role: 'admin' })).toBe(true)
@@ -23,7 +23,7 @@ describe('desktop role guard', () => {
     expect(canUseDesktop(null)).toBe(false)
 
     expect(canUseLocalAgent({ role: 'operator' })).toBe(true)
-    expect(canUseLocalAgent({ role: 'senior_operator' })).toBe(false)
+    expect(canUseLocalAgent({ role: 'senior_operator' })).toBe(true)
     expect(canUseLocalAgent({ role: 'admin' })).toBe(false)
     expect(canUseLocalAgent(null)).toBe(false)
 
@@ -35,15 +35,17 @@ describe('desktop role guard', () => {
     expect(canRunLocalAgent(null)).toBe(false)
   })
 
-  it('marks the three M2 local-resource routes and redirects non-operators away from them', () => {
+  it('marks the local window route and redirects roles without the capability away from it', () => {
     const children = desktopRoutes.flatMap((route) => route.children ?? [])
     for (const path of LOCAL_ONLY_PATHS) {
       const route = children.find((child) => child.path === path)
       expect(route, `missing desktop route ${path}`).toBeDefined()
       expect(route.meta?.localOnly, `${path} must be localOnly`).toBe(true)
     }
-    // 分母：三条都得在路由表里真的被标到，而不是只检查了一个循环变量。
-    expect(children.filter((child) => child.meta?.localOnly)).toHaveLength(3)
+    // 分母：本地专属路由只有窗口这一条，代理与账号页面不再标 localOnly。
+    expect(children.filter((child) => child.meta?.localOnly)).toHaveLength(1)
+    expect(children.find((child) => child.path === 'proxies')?.meta?.localOnly).toBeUndefined()
+    expect(children.find((child) => child.path === 'account-opening')?.meta?.operatorOnly).toBe(true)
 
     expect(desktopMain).toContain('to.meta?.localOnly')
     expect(desktopMain).toContain('next("/content-pool")')

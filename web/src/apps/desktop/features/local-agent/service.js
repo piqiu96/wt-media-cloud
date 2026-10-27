@@ -16,6 +16,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   profileOpen: "local_agent_profile_open",
   profileClose: "local_agent_profile_close",
   profileCreate: "local_agent_profile_create",
+  profileUpdate: "local_agent_profile_update",
   profileRestore: "local_agent_profile_restore",
 });
 
@@ -160,6 +161,17 @@ export function createLocalAgentService({ invoke }) {
         },
       });
     },
+    async profileUpdate(profile) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileUpdate, {
+        args: {
+          bit_profile_id: profile.bit_profile_id,
+          name: profile.name,
+          group_id: profile.group_id,
+          group_name: profile.group_name || "",
+          remark: profile.remark || "",
+        },
+      });
+    },
     async profileRestore(profiles) {
       return invoke(LOCAL_AGENT_COMMANDS.profileRestore, { profiles });
     },
@@ -234,6 +246,19 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
             group_name: profile.group_name || "模拟分组",
           }],
         },
+      };
+    },
+    async profileUpdate(profile) {
+      const updated = {
+        bit_profile_id: profile.bit_profile_id,
+        main_user_id: "main-user-mock",
+        profile_user_id: "bit-user-mock",
+        ...profile,
+      };
+      return {
+        bit_profile_id: profile.bit_profile_id,
+        fields: ["name", "group_id", "group_name", "remark"].map((field) => ({ field, status: "verified" })),
+        snapshot: { main_user_id: "main-user-mock", profiles: [updated] },
       };
     },
     async profileRestore(profiles) {

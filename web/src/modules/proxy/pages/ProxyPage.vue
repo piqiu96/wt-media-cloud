@@ -1,83 +1,154 @@
 <script setup>
-import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { feedback } from '../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from "vue"
 import { createProxyClient } from "../../../shared/api/proxy.js"
-import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
+import { createSessionClient } from "../../../shared/api/session.js"
+import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
+import { isDesktop } from "../../../utils.js"
+import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
+import { feedback } from "../../../shared/ui/feedback/index.js"
+import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
-import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
+import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
 
 const proxyClient = createProxyClient()
+const sessionClient = createSessionClient()
+const usersClient = createUsersClient()
+
 const proxies = ref([])
 const loading = ref(true)
 const error = ref("")
-const failedCheckProxy = ref(null)
+const currentUser = ref(null)
+const teams = ref([])
 const selectedRowKeys = ref([])
-const batchChecking = ref(false)
-const pagination = ref({ current: 1, pageSize: 50, total: 0 })
+const checkingIds = ref([])
+const pagination = ref({ current: 1, pageSize: 20, total: 0 })
 
-// Search
-const searchSupplier = ref("")
-const searchBizStatus = ref("")
-const searchRegion = ref("")
-const searchText = ref("")
+const filterTeam = ref("")
+const filterStatus = ref("")
+const filterRegion = ref("")
+const filterSupplier = ref("")
+const filterCheck = ref("")
+const filterExpiry = ref("")
+const filterText = ref("")
 
-// Import
-const importText = ref("")
-const showImport = ref(false)
-const importPreview = ref([])
-const importing = ref(false)
-const showCreate = ref(false)
-const creating = ref(false)
-const createForm = ref(emptyProxyForm())
-const editVisible = ref(false)
-const editing = ref(false)
-const editProxy = ref(null)
-const editForm = ref(emptyProxyForm())
+const isAdmin = computed(() => currentUser.value?.role === "admin")
+const isGovernor = computed(() => ["admin", "senior_operator"].includes(currentUser.value?.role))
+const canExtract = computed(() => isDesktop() && ["operator", "senior_operator"].includes(currentUser.value?.role))
 
-// Detail drawer
-const detailVisible = ref(false)
-const detailProxy = ref(null)
-const boundProfiles = ref([])
-const loadingBindings = ref(false)
+const teamOptions = computed(() => teams.value.map((team) => ({ label: team.name, value: String(team.id) })))
+const ownTeamLabel = computed(() => currentUser.value?.team_name || "本人团队")
 
-// Quota dialog
-const quotaVisible = ref(false)
-const quotaProxyId = ref("")
-const quotaMax = ref(1)
-const savingQuota = ref(false)
-
-const proxyStatItems = computed(() => [
-  { key: "total", label: "代理总数", value: proxies.value.length, tone: "info" },
-  { key: "available", label: "可用代理", value: proxies.value.filter((proxy) => proxy.business_status === "active" && proxy.last_check_result === "ok").length, tone: "success" },
-  { key: "attention", label: "异常代理", value: proxies.value.filter((proxy) => proxy.last_check_result && proxy.last_check_result !== "ok").length, tone: "danger" },
-  { key: "bound", label: "已绑定窗口", value: proxies.value.reduce((total, proxy) => total + Number(proxy.assigned_profile_count || 0), 0), tone: "warning" },
-])
+const visibleProxies = computed(() => proxies.value.filter((proxy) => {
+  if (filterCheck.value === "unchecked" && proxy.last_check_result) return false
+  if (filterCheck.value === "ok" && proxy.last_check_result !== "ok") return false
+  if (filterCheck.value === "failed" && (!proxy.last_check_result || proxy.last_check_result === "ok")) return false
+  if (filterExpiry.value === "expired" && !isExpired(proxy)) return false
+  if (filterExpiry.value === "valid" && isExpired(proxy)) return false
+  return true
+}))
 
 const pagedProxies = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return proxies.value.slice(start, start + pagination.value.pageSize)
+  return visibleProxies.value.slice(start, start + pagination.value.pageSize)
 })
 
+const proxyActionLabels = computed(() => isGovernor.value
+  ? ["详情", "编辑", "检测", "设置配额", "删除"]
+  : ["详情", "编辑", "检测"])
+const columns = computed(() => [
+  { colKey: "row-select", type: "multiple", width: 48 },
+  { colKey: "id", title: "ID", width: 90 },
+  { colKey: "name", title: "名称 / 地址", width: 220 },
+  { colKey: "region_supplier", title: "地区 / 供应商", width: 130 },
+  { colKey: "source_type", title: "来源", width: 80 },
+  { colKey: "usage", title: "已用 / 额度", width: 130 },
+  { colKey: "business_status", title: "资源启停", width: 100 },
+  { colKey: "last_check_result", title: "检测结果", width: 110 },
+  { colKey: "expires_at", title: "到期时间", width: 120 },
+  { colKey: "remark", title: "备注", width: 170 },
+  { colKey: "op", title: "操作", width: opColumnWidth(proxyActionLabels.value), fixed: "right" },
+])
 
-onMounted(() => { loadProxies() })
+// 新增 / 编辑抽屉
+const formVisible = ref(false)
+const formMode = ref("create")
+const formError = ref("")
+const savingForm = ref(false)
+const parsingAddress = ref(false)
+const extracting = ref(false)
+const form = ref(emptyForm())
+const editingProxy = ref(null)
+
+// Detail drawer
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detailProxy = ref(null)
+const detailBindings = ref([])
+
+// 配额
+const quotaVisible = ref(false)
+const quotaProxy = ref(null)
+const quotaValue = ref(1)
+const savingQuota = ref(false)
+const quotaError = ref("")
+
+// 导入
+const importVisible = ref(false)
+const importTeam = ref("")
+const importText = ref("")
+const importRows = ref([])
+const importSelected = ref([])
+const importError = ref("")
+const importPreviewing = ref(false)
+const importing = ref(false)
+const importStep = ref("input")
+
+// 启停
+const statusConfirmVisible = ref(false)
+const statusTarget = ref(null)
+const statusNext = ref(false)
+
+// 批量检测与导入共用的进度弹窗
+const progressVisible = ref(false)
+const progressTitle = ref("处理进度")
+const progressPhase = ref("running")
+const progressItems = ref([])
+const progressMode = ref("")
+const progressLabels = ref({})
+const retryPayload = ref(null)
+
+onMounted(async () => {
+  try {
+    currentUser.value = await sessionClient.me()
+  } catch {}
+  if (isAdmin.value) {
+    try {
+      const result = await usersClient.listTeams()
+      teams.value = Array.isArray(result) ? result : []
+    } catch (e) {
+      error.value = e.message
+    }
+  }
+  await loadProxies()
+})
 
 async function loadProxies() {
   error.value = ""
   loading.value = true
   try {
     const params = {}
-    if (searchBizStatus.value) params.business_status = searchBizStatus.value
-    if (searchSupplier.value) params.supplier = searchSupplier.value
-    if (searchRegion.value) params.region = searchRegion.value
-    if (searchText.value) params.search = searchText.value
+    if (isAdmin.value && filterTeam.value) params.team_id = filterTeam.value
+    if (filterStatus.value) params.business_status = filterStatus.value
+    if (filterRegion.value.trim()) params.region = filterRegion.value.trim()
+    if (filterSupplier.value.trim()) params.supplier = filterSupplier.value.trim()
+    if (filterText.value.trim()) params.search = filterText.value.trim()
     const result = await proxyClient.list(params)
-    // Be defensive while older Cloud instances may still return data: null.
     proxies.value = Array.isArray(result) ? result : (Array.isArray(result?.list) ? result.list : [])
-    pagination.value.total = proxies.value.length
     pagination.value.current = 1
+    pagination.value.total = visibleProxies.value.length
+    selectedRowKeys.value = selectedRowKeys.value.filter((id) => proxies.value.some((proxy) => proxy.id === id))
   } catch (e) {
     error.value = e.message
   } finally {
@@ -85,449 +156,976 @@ async function loadProxies() {
   }
 }
 
-async function deleteProxy(proxy) {
-	if ((proxy.assigned_profile_count || 0) > 0) {
-		error.value = `该代理仍关联 ${proxy.assigned_profile_count} 个浏览器窗口，请先到浏览器窗口页解绑或更换。`
-		return
-	}
-  if (!await feedback.confirmWarning({ title: '删除代理', message: `确定删除代理 ${proxy.host}:${proxy.port}？`, confirmText: '删除', danger: true })) return
-  try {
-    await proxyClient.delete(proxy.id)
-    await loadProxies()
-  } catch (e) {
-    error.value = e.message
-  }
+function applyFilters() {
+  pagination.value.current = 1
+  pagination.value.total = visibleProxies.value.length
 }
 
-function onFileSelected(e) {
-  const file = e.target?.files?.[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    importText.value = reader.result
-    e.target.value = ''
-  }
-  reader.readAsText(file)
+function applyClientFilters() {
+  applyFilters()
 }
 
-async function previewImport() {
-  const lines = importText.value.split("\n").map(l => l.trim()).filter(Boolean)
-  if (!lines.length) return
-  try {
-    const result = await proxyClient.previewImport(lines)
-    importPreview.value = result.parsed || []
-  } catch (e) {
-    error.value = e.message
-  }
+async function submitSearch() {
+  applyFilters()
+  await loadProxies()
 }
 
-async function confirmImport() {
-	importing.value = true
-	try {
-		const lines = importText.value.split("\n").map(l => l.trim()).filter(Boolean)
-		await proxyClient.bulkImport(lines)
-		await loadProxies()
-    showImport.value = false
-    importText.value = ""
-    importPreview.value = []
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    importing.value = false
-  }
+function resetFilters() {
+  filterTeam.value = ""
+  filterStatus.value = ""
+  filterRegion.value = ""
+  filterSupplier.value = ""
+  filterCheck.value = ""
+  filterExpiry.value = ""
+  filterText.value = ""
+  loadProxies()
 }
 
-function emptyProxyForm() {
-  return { source_type: "static", proxy_address: "", extract_url: "", proxy_protocol: "http", host: "", port: 0, username: "", password: "", region: "", supplier: "", remark: "" }
+function onTeamChanged() {
+  selectedRowKeys.value = []
+  loadProxies()
 }
 
-function applyParsedAddress(form, parsed) {
-  form.proxy_protocol = parsed.proxy_protocol || form.proxy_protocol
-  form.host = parsed.host || ""
-  form.port = Number(parsed.port) || 0
-  form.username = parsed.username || ""
-  form.password = parsed.password || ""
-}
-
-async function parseAddress(form) {
-  if (!form.proxy_address?.trim()) return
-  try {
-    applyParsedAddress(form, await proxyClient.parseAddress(form.proxy_address.trim()))
-  } catch (e) {
-    error.value = e.message || "代理地址无法解析"
-  }
-}
-
-async function previewExtract(form) {
-  if (!form.extract_url?.trim()) {
-    error.value = "请填写提取 URL"
-    return
-  }
-  try {
-    applyParsedAddress(form, await proxyClient.previewExtract({ extract_url: form.extract_url.trim(), proxy_protocol: form.proxy_protocol }))
-    feedback.toast.info("已提取一条代理地址；确认创建后才会写入台账。")
-  } catch (e) {
-    error.value = e.message || "动态代理提取失败"
+function emptyForm() {
+  return {
+    name: "", team_id: "", region: "", supplier: "", source_type: "static",
+    proxy_protocol: "http", proxy_address: "", extract_url: "", host: "", port: 0,
+    username: "", password: "", tags: [], expires_at: null, max_profile_count: 3, remark: "",
   }
 }
 
 function openCreate() {
-  createForm.value = emptyProxyForm()
-  showCreate.value = true
+  formMode.value = "create"
+  form.value = emptyForm()
+  form.value.team_id = isAdmin.value ? String(filterTeam.value || "") : String(currentUser.value?.team_id || "")
+  formError.value = ""
+  formVisible.value = true
 }
 
 function openEdit(proxy) {
-	editProxy.value = proxy
-	editForm.value = {
-		source_type: proxy.source_type || "static", proxy_address: "", extract_url: "",
-		proxy_protocol: proxy.proxy_protocol || "http", host: proxy.host || "", port: Number(proxy.port) || 0,
-		username: proxy.username || "", password: "", region: proxy.region || "", supplier: proxy.supplier || "", remark: proxy.remark || "",
-	}
-	editVisible.value = true
+  formMode.value = "edit"
+  editingProxy.value = proxy
+  form.value = {
+    name: proxy.name || "",
+    team_id: String(proxy.team_id || ""),
+    region: proxy.region || "",
+    supplier: proxy.supplier || "",
+    source_type: proxy.source_type || "static",
+    proxy_protocol: proxy.proxy_protocol || "http",
+    proxy_address: "",
+    extract_url: "",
+    host: proxy.host || "",
+    port: Number(proxy.port) || 0,
+    username: proxy.username || "",
+    password: "",
+    tags: Array.isArray(proxy.tags) ? [...proxy.tags] : [],
+    expires_at: proxy.expires_at ? new Date(proxy.expires_at).getTime() : null,
+    max_profile_count: Number(proxy.max_profile_count) || 3,
+    remark: proxy.remark || "",
+  }
+  formError.value = ""
+  formVisible.value = true
 }
 
-async function saveEdit() {
-	if (!editProxy.value || !editForm.value.host.trim() || !Number(editForm.value.port)) {
-		error.value = "请填写代理地址和端口"
-		return
-	}
-	editing.value = true
-	try {
-		await proxyClient.update(editProxy.value.id, { ...editForm.value, host: editForm.value.host.trim(), port: Number(editForm.value.port) })
-		const bound = editProxy.value.assigned_profile_count || 0
-		feedback.toast.info(bound > 0
-			? `代理已更新；${bound} 个关联窗口的代理配置待同步，请到浏览器窗口页重新写入并读回验证。`
-			: "代理已更新，检测结果已清空，请重新检测后再绑定窗口。")
-		editVisible.value = false
-		await loadProxies()
-	} catch (e) {
-		error.value = e.message || "更新代理失败"
-	} finally {
-		editing.value = false
-	}
+const connectionChanged = computed(() => {
+  if (formMode.value !== "edit" || !editingProxy.value) return false
+  const proxy = editingProxy.value
+  return form.value.proxy_protocol !== proxy.proxy_protocol
+    || form.value.host.trim() !== (proxy.host || "")
+    || Number(form.value.port) !== Number(proxy.port)
+    || (form.value.username.trim() !== "" && form.value.username.trim() !== (proxy.username || ""))
+    || form.value.password !== ""
+    || form.value.source_type !== proxy.source_type
+})
+
+const editAffectedWindows = computed(() => Number(editingProxy.value?.assigned_profile_count || 0))
+
+function applyParsedAddress(parsed) {
+  if (!parsed) return
+  form.value.proxy_protocol = parsed.proxy_protocol || form.value.proxy_protocol
+  form.value.host = parsed.host || ""
+  form.value.port = Number(parsed.port) || 0
+  form.value.username = parsed.username || ""
+  form.value.password = parsed.password || ""
 }
 
-async function createProxy() {
-  if (!createForm.value.host.trim() || !Number(createForm.value.port)) {
-    error.value = "请填写代理地址和端口"
+async function parseAddress() {
+  if (!form.value.proxy_address.trim()) return
+  parsingAddress.value = true
+  formError.value = ""
+  try {
+    applyParsedAddress(await proxyClient.parseAddress(form.value.proxy_address.trim()))
+  } catch (e) {
+    formError.value = e.message || "代理地址无法解析"
+  } finally {
+    parsingAddress.value = false
+  }
+}
+
+async function extractAddress() {
+  if (!canExtract.value) {
+    formError.value = "动态提取需要本人桌面端在线；网页版和管理员只能维护提取来源或手动录入地址。"
     return
   }
-  creating.value = true
+  if (!form.value.extract_url.trim()) {
+    formError.value = "请填写提取地址。"
+    return
+  }
+  extracting.value = true
+  formError.value = ""
   try {
-    await proxyClient.create({ ...createForm.value, host: createForm.value.host.trim(), port: Number(createForm.value.port) })
-    feedback.toast.info("代理台账已创建；请到浏览器窗口页绑定并同步到 BitBrowser。")
-    showCreate.value = false
+    applyParsedAddress(await proxyClient.previewExtract({
+      extract_url: form.value.extract_url.trim(),
+      proxy_protocol: form.value.proxy_protocol,
+    }))
+    feedback.toast.info("已提取一条地址；保存后才会写入资源，检测成功前不能分配。")
+  } catch (e) {
+    formError.value = e.message || "动态代理提取失败"
+  } finally {
+    extracting.value = false
+  }
+}
+
+async function refreshDynamic() {
+  if (!editingProxy.value) return
+  const confirmed = await feedback.confirmWarning({
+    title: "提取新地址并检测",
+    message: `将按已保存的提取地址重新获取并检测，检测结果会替换当前记录。已有 ${editAffectedWindows.value} 个关联窗口不会自动改写，需在窗口页重新同步。`,
+    confirmText: "提取并检测",
+  })
+  if (!confirmed) return
+  savingForm.value = true
+  formError.value = ""
+  try {
+    const updated = await proxyClient.refreshDynamic(editingProxy.value.id)
+    feedback.toast.info(updated.assignment_blocker
+      ? `已提取新地址，但检测未通过：${updated.assignment_blocker}`
+      : "已提取新地址并检测通过。")
+    formVisible.value = false
     await loadProxies()
   } catch (e) {
-    error.value = e.message || "创建代理失败"
+    formError.value = e.message || "动态代理提取失败"
   } finally {
-    creating.value = false
+    savingForm.value = false
+  }
+}
+
+async function saveForm() {
+  formError.value = ""
+  const target = form.value
+  if (!target.name.trim()) {
+    formError.value = "请填写代理名称。"
+    return
+  }
+  if (isAdmin.value && formMode.value === "create" && !target.team_id) {
+    formError.value = "请选择目标团队。"
+    return
+  }
+  if (target.source_type === "static" && (!target.host.trim() || !Number(target.port))) {
+    formError.value = "静态代理需要地址和端口。"
+    return
+  }
+  if (target.source_type === "api") {
+    const hasStoredExtractURL = formMode.value === "edit" && Boolean(editingProxy.value?.extract_url_configured)
+    if (!target.extract_url.trim() && !hasStoredExtractURL && !target.host.trim()) {
+      formError.value = "动态代理需要提取地址，或先手动填写地址。"
+      return
+    }
+  }
+  if (target.host.trim() && (!Number(target.port) || Number(target.port) < 1 || Number(target.port) > 65535)) {
+    formError.value = "端口必须是 1-65535。"
+    return
+  }
+  savingForm.value = true
+  try {
+    const payload = {
+      name: target.name.trim(),
+      source_type: target.source_type,
+      proxy_protocol: target.proxy_protocol,
+      host: target.host.trim(),
+      port: Number(target.port) || 0,
+      username: target.username.trim(),
+      password: target.password,
+      region: target.region.trim(),
+      supplier: target.supplier.trim(),
+      tags: target.tags,
+      extract_url: target.extract_url.trim(),
+      remark: target.remark.trim(),
+    }
+    if (target.expires_at) payload.expires_at = new Date(target.expires_at).toISOString()
+    if (formMode.value === "create") {
+      payload.team_id = isAdmin.value ? Number(target.team_id) : undefined
+      payload.max_profile_count = Number(target.max_profile_count) || 3
+      await proxyClient.create(payload)
+      feedback.toast.success(`代理「${payload.name}」已创建；检测通过后才能分配窗口。`)
+    } else {
+      await proxyClient.update(editingProxy.value.id, payload)
+      if (connectionChanged.value) {
+        feedback.toast.info(editAffectedWindows.value
+          ? `代理已更新；${editAffectedWindows.value} 个关联窗口的代理配置待同步，请到浏览器窗口页重新同步。`
+          : "代理已更新，旧检测结果已失效，请重新检测后再分配窗口。")
+      } else {
+        feedback.toast.success("代理资料已更新。")
+      }
+    }
+    formVisible.value = false
+    await loadProxies()
+  } catch (e) {
+    formError.value = e.message || "保存代理失败"
+  } finally {
+    savingForm.value = false
   }
 }
 
 async function openDetail(proxy) {
-  detailProxy.value = proxy
-  boundProfiles.value = []
   detailVisible.value = true
-  loadingBindings.value = true
+  detailLoading.value = true
+  detailProxy.value = proxy
+  detailBindings.value = []
   try {
-    const result = await proxyClient.listBindings(proxy.id)
-    boundProfiles.value = Array.isArray(result) ? result : []
+    const [detail, bindings] = await Promise.all([
+      proxyClient.get(proxy.id),
+      proxyClient.listBindings(proxy.id),
+    ])
+    detailProxy.value = detail
+    detailBindings.value = Array.isArray(bindings) ? bindings : []
   } catch (e) {
-    error.value = e.message || "关联窗口查询失败"
+    error.value = e.message || "代理详情读取失败"
   } finally {
-    loadingBindings.value = false
+    detailLoading.value = false
   }
 }
 
-async function triggerCheck(proxy) {
+async function copyText(text, label) {
+  if (!text) return
   try {
-    const result = await proxyClient.check(proxy.id)
-    failedCheckProxy.value = null
-    feedback.toast.info(`代理检测完成：${result.last_check_result || "未知"}`)
+    await navigator.clipboard.writeText(text)
+    feedback.toast.success(`${label}已复制。`)
+  } catch {
+    feedback.toast.error(`${label}复制失败，请手动选择复制。`)
+  }
+}
+
+function requestStatusChange(proxy, next) {
+  statusTarget.value = proxy
+  statusNext.value = next
+  statusConfirmVisible.value = true
+}
+
+async function confirmStatusChange() {
+  const proxy = statusTarget.value
+  if (!proxy) return
+  statusConfirmVisible.value = false
+  try {
+    await proxyClient.updateStatus(proxy.id, statusNext.value ? "active" : "paused")
+    feedback.toast.success(statusNext.value
+      ? "代理已启用；仍需有效期内且检测正常才可分配。"
+      : "代理已停用；现有窗口配置和已占名额保持不变，仅阻止新分配。")
     await loadProxies()
   } catch (e) {
     error.value = e.message
-    failedCheckProxy.value = proxy
-  }
-}
-
-async function refreshDynamicProxy(proxy) {
-  try {
-    await proxyClient.refreshDynamic(proxy.id)
-    feedback.toast.info((proxy.assigned_profile_count || 0) > 0 ? "动态代理已提取并检测；关联窗口待到浏览器窗口页重新同步。" : "动态代理已提取并检测。")
     await loadProxies()
-    await openDetail(proxy)
-  } catch (e) {
-    error.value = e.message || "动态代理刷新失败"
   }
 }
 
-async function batchCheck() {
-	const targets = proxies.value.filter((proxy) => selectedRowKeys.value.includes(proxy.id))
-	if (!targets.length) return
-	batchChecking.value = true
-	let passed = 0
-	let failed = 0
-	for (const proxy of targets) {
-		try {
-			const result = await proxyClient.check(proxy.id)
-			if (result.last_check_result === "ok") passed += 1
-			else failed += 1
-		} catch {
-			failed += 1
-		}
-	}
-	selectedRowKeys.value = []
-	batchChecking.value = false
-	feedback.toast.info(`批量检测完成：${passed} 条正常，${failed} 条失败。`)
-	await loadProxies()
-}
-
-async function queueBackgroundCheck() {
-  if (!failedCheckProxy.value) return
+async function deleteProxy(proxy) {
+  const assigned = Number(proxy.assigned_profile_count || 0)
+  if (assigned > 0) {
+    error.value = `该代理仍关联 ${assigned} 个浏览器窗口，请先由窗口本人在浏览器窗口页解绑或更换代理后再删除。`
+    return
+  }
+  if (!await feedback.confirmWarning({
+    title: "删除代理",
+    message: `确定删除代理「${proxy.name || `${proxy.host}:${proxy.port}`}」？删除后不可恢复。`,
+    confirmText: "删除",
+    danger: true,
+  })) return
   try {
-    const task = await proxyClient.backgroundCheck(failedCheckProxy.value.id)
-    feedback.toast.info(`已创建后台检测任务（${task.task_id || "待执行"}），可稍后刷新代理列表查看结果。`)
-    failedCheckProxy.value = null
+    await proxyClient.delete(proxy.id)
+    feedback.toast.success("代理已删除。")
+    await loadProxies()
   } catch (e) {
     error.value = e.message
   }
 }
 
 function openQuota(proxy) {
-	quotaProxyId.value = proxy.id
-	quotaMax.value = proxy.max_profile_count || 3
+  quotaProxy.value = proxy
+  quotaValue.value = Number(proxy.max_profile_count) || 3
+  quotaError.value = ""
   quotaVisible.value = true
 }
 
 async function saveQuota() {
+  quotaError.value = ""
+  if (!Number.isInteger(Number(quotaValue.value)) || Number(quotaValue.value) < 1) {
+    quotaError.value = "最大窗口数必须是正整数。"
+    return
+  }
+  const assigned = Number(quotaProxy.value?.assigned_profile_count || 0)
+  if (Number(quotaValue.value) < assigned) {
+    quotaError.value = `最大窗口数不能低于当前已占用数（${assigned}）。`
+    return
+  }
   savingQuota.value = true
   try {
-		await proxyClient.setMaxProfileCount(quotaProxyId.value, quotaMax.value)
+    await proxyClient.setMaxProfileCount(quotaProxy.value.id, Number(quotaValue.value))
+    feedback.toast.success("窗口额度已更新。")
     quotaVisible.value = false
+    await loadProxies()
   } catch (e) {
-    error.value = e.message
+    quotaError.value = e.message
   } finally {
     savingQuota.value = false
   }
 }
 
+async function checkOne(proxy) {
+  if (!proxy.host || !proxy.port) {
+    error.value = "该资源还没有地址，无法检测；请先编辑补充地址或提取。"
+    return
+  }
+  checkingIds.value = [...checkingIds.value, proxy.id]
+  try {
+    const result = await proxyClient.check(proxy.id)
+    if (result.last_check_result === "ok") {
+      feedback.toast.success("系统检测通过，线路正常。")
+    } else {
+      feedback.toast.error(`系统检测未通过：${checkResultLabel(result.last_check_result)}${result.assignment_blocker ? `（${result.assignment_blocker}）` : ""}`)
+    }
+    await loadProxies()
+  } catch (e) {
+    error.value = e.message || "系统检测失败"
+  } finally {
+    checkingIds.value = checkingIds.value.filter((id) => id !== proxy.id)
+  }
+}
 
-const columns = [
-  { colKey: "row-select", type: "multiple", width: 48 },
-  { colKey: "host", title: "地址", width: 200 },
-  { colKey: "proxy_protocol", title: "协议", width: 80 },
-  { colKey: "region", title: "地区", width: 100 },
-  { colKey: "supplier", title: "供应商", width: 100 },
-	{ colKey: "max_profile_count", title: "窗口容量", width: 170 },
-	{ colKey: "bindings", title: "绑定窗口", width: 120 },
-  // 状态排在属性与关联实体之后（AdminUI 规范 §4.1）。
-  { colKey: "business_status", title: "状态", width: 90 },
-	{ colKey: "last_check_result", title: "检测结果", width: 100 },
-  { colKey: "expires_at", title: "到期时间", width: 140 },
-	{ colKey: "op", title: "操作", width: 340, fixed: "right" },
-]
+async function runBatchCheck(targets) {
+  progressMode.value = "check"
+  progressTitle.value = "批量检测代理"
+  progressLabels.value = { success: "正常", failed: "检测失败" }
+  progressItems.value = targets.map((proxy) => ({
+    key: proxy.id,
+    label: `${proxy.name || `${proxy.host}:${proxy.port}`}（${proxy.host}:${proxy.port}）`,
+    status: "pending",
+  }))
+  progressPhase.value = "running"
+  progressVisible.value = true
+  for (const item of progressItems.value) {
+    item.status = "processing"
+    const proxy = targets.find((candidate) => candidate.id === item.key)
+    try {
+      const result = await proxyClient.check(proxy.id)
+      item.status = result.last_check_result === "ok" ? "success" : "failed"
+      item.reason = result.last_check_result === "ok" ? "" : (result.assignment_blocker || checkResultLabel(result.last_check_result))
+    } catch (e) {
+      item.status = "failed"
+      item.reason = e.message || "检测执行失败"
+    }
+  }
+  progressPhase.value = "done"
+  retryPayload.value = { kind: "check", ids: progressItems.value.filter((item) => item.status === "failed").map((item) => item.key) }
+  await loadProxies()
+}
 
-function formatTime(t) {
-  if (!t) return "-"
-  return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+function startBatchCheck() {
+  const targets = proxies.value.filter((proxy) => selectedRowKeys.value.includes(proxy.id))
+  if (!targets.length) return
+  runBatchCheck(targets)
+}
+
+async function retryFailed() {
+  if (progressMode.value === "check") {
+    const targets = proxies.value.filter((proxy) => retryPayload.value?.ids?.includes(proxy.id))
+    if (!targets.length) {
+      progressVisible.value = false
+      return
+    }
+    await runBatchCheck(targets)
+    return
+  }
+  if (progressMode.value === "import") {
+    const failedLines = new Set(retryPayload.value?.rows?.map((row) => row.line) || [])
+    const rows = importRows.value
+      .filter((row) => failedLines.has(row.line))
+      .map((row) => ({ line: row.line, raw: row.raw, selected: true }))
+    if (!rows.length) {
+      progressVisible.value = false
+      return
+    }
+    await submitImport(rows)
+  }
+}
+
+function closeProgress() {
+  progressVisible.value = false
+  progressMode.value = ""
+  retryPayload.value = null
+  if (importStep.value === "done") {
+    importVisible.value = false
+    importText.value = ""
+    importRows.value = []
+    importSelected.value = []
+    importStep.value = "input"
+  }
+}
+
+function sourceLabel(source) {
+  return source === "api" ? "动态" : "静态"
+}
+
+function checkResultLabel(result) {
+  return {
+    ok: "正常",
+    conn_failed: "连接失败",
+    auth_failed: "认证失败",
+    timeout: "超时",
+    invalid_params: "参数无效",
+  }[result] || (result || "未检测")
+}
+
+function checkTone(result) {
+  if (result === "ok") return "success"
+  if (!result) return "neutral"
+  return "danger"
+}
+
+function isExpired(proxy) {
+  return Boolean(proxy.expired) || (proxy.expires_at && new Date(proxy.expires_at).getTime() <= Date.now())
+}
+
+function formatTime(value) {
+  if (!value) return "-"
+  return new Date(value).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+
+function formatDate(value) {
+  if (!value) return "-"
+  return new Date(value).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })
+}
+
+// --- 导入 ---
+
+function openImport() {
+  importTeam.value = isAdmin.value ? filterTeam.value : String(currentUser.value?.team_id || "")
+  importText.value = ""
+  importRows.value = []
+  importSelected.value = []
+  importError.value = ""
+  importStep.value = "input"
+  importVisible.value = true
+}
+
+function onFileSelected(event) {
+  const file = event.target?.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    importText.value = String(reader.result || "")
+    event.target.value = ""
+    importRows.value = []
+    importSelected.value = []
+  }
+  reader.readAsText(file)
+}
+
+function importLines() {
+  return importText.value.split("\n").map((line) => line.trim()).filter(Boolean)
+}
+
+async function previewImport() {
+  importError.value = ""
+  const lines = importLines()
+  if (!lines.length) {
+    importError.value = "请粘贴或选择要导入的代理内容。"
+    return
+  }
+  if (isAdmin.value && !importTeam.value) {
+    importError.value = "请选择目标团队。"
+    return
+  }
+  importPreviewing.value = true
+  try {
+    const result = await proxyClient.previewImport(isAdmin.value ? Number(importTeam.value) : null, lines)
+    importRows.value = Array.isArray(result?.rows) ? result.rows : []
+    importSelected.value = importRows.value
+      .filter((row) => isImportable(row))
+      .map((row) => row.line)
+    importStep.value = "preview"
+  } catch (e) {
+    importError.value = e.message || "导入预览失败"
+  } finally {
+    importPreviewing.value = false
+  }
+}
+
+function isImportable(row) {
+  return Boolean(row.parsed) && !row.error && !row.duplicate
+}
+
+function toggleImportRow(line, checked) {
+  const row = importRows.value.find((item) => item.line === line)
+  if (!row || !isImportable(row)) return
+  importSelected.value = checked
+    ? [...new Set([...importSelected.value, line])]
+    : importSelected.value.filter((value) => value !== line)
+}
+
+const importSelectedCount = computed(() => importSelected.value.length)
+
+async function submitImport(rows) {
+  importStep.value = "submitting"
+  importing.value = true
+  importError.value = ""
+  const payload = (rows || importRows.value.map((row) => ({
+    line: row.line,
+    raw: row.raw,
+    selected: importSelected.value.includes(row.line),
+  })))
+  progressMode.value = "import"
+  progressTitle.value = "批量导入代理"
+  progressPhase.value = "running"
+  progressItems.value = payload.map((row) => ({
+    key: String(row.line),
+    label: `第 ${row.line} 行：${row.raw}`,
+    status: "pending",
+  }))
+  progressVisible.value = true
+  try {
+    const result = await proxyClient.bulkImport(isAdmin.value ? Number(importTeam.value) : null, payload)
+    const byLine = new Map((result?.rows || []).map((row) => [row.line, row]))
+    const remaining = []
+    for (const item of progressItems.value) {
+      const row = byLine.get(Number(item.key))
+      if (!row) {
+        item.status = "skipped"
+        item.reason = "本轮未返回结果"
+        continue
+      }
+      item.status = { imported: "success", failed: "failed", skipped: "skipped" }[row.status] || "unconfirmed"
+      item.reason = row.reason || ""
+      if (row.status === "failed") remaining.push(row)
+    }
+    retryPayload.value = { kind: "import", rows: remaining }
+    importStep.value = "done"
+    feedback.toast.success(`导入处理完成：成功 ${result?.imported ?? 0} 条，跳过 ${result?.skipped ?? 0} 条，失败 ${result?.failed ?? 0} 条。`)
+    await loadProxies()
+  } catch (e) {
+    importError.value = e.message || "批量导入失败"
+    progressVisible.value = false
+    importStep.value = "preview"
+  } finally {
+    importing.value = false
+    progressPhase.value = "done"
+  }
+}
+
+function confirmImport() {
+  if (!importSelectedCount.value) return
+  const rows = importRows.value.map((row) => ({
+    line: row.line,
+    raw: row.raw,
+    selected: importSelected.value.includes(row.line),
+  }))
+  submitImport(rows)
+}
+
+function closeImport() {
+  if (importing.value) return
+  importVisible.value = false
+  importRows.value = []
+  importSelected.value = []
+  importText.value = ""
+  importStep.value = "input"
 }
 </script>
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-  <div class="wt-resource-page">
-    <ResourcePageHeader title="代理管理" description="管理代理资源池、连通性和窗口绑定">
-      <template #actions>
-        <t-button theme="primary" @click="openCreate">新增代理</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="loadProxies">刷新</t-button>
-      </template>
-    </ResourcePageHeader>
-    <ResourceStatGrid :items="proxyStatItems" />
-    <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <FeedbackAlert v-if="failedCheckProxy" theme="warning" style="margin-bottom:16px">
-      同步检测失败时才需要后台任务：
-      <t-button size="small" variant="text" @click="queueBackgroundCheck">后台重试</t-button>
-    </FeedbackAlert>
+    <div class="wt-resource-page">
+      <ResourcePageHeader title="代理管理" description="团队代理资源、连接检测与窗口额度">
+        <template #actions>
+          <t-button theme="primary" @click="openCreate">新增代理</t-button>
+          <t-button class="wt-secondary-button" variant="outline" @click="openImport">批量导入</t-button>
+        </template>
+      </ResourcePageHeader>
 
-    <ResourceCard class="proxy-resource-card">
-    <!-- 搜索/过滤栏 -->
-    <div class="filter-bar">
-        <label class="wt-filter-field"><span class="wt-filter-field__label">代理状态</span><t-select v-model="searchBizStatus" placeholder="全部" clearable>
-          <t-option value="active" label="正常" />
-          <t-option value="paused" label="停用" />
-          <t-option value="expired" label="过期" />
-        </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="searchSupplier" placeholder="供应商" clearable /></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="searchRegion" placeholder="地区" clearable /></label>
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="searchText" placeholder="IP / 备注" clearable /></label>
-        <div class="wt-filter-actions">
-          <t-button theme="primary" @click="loadProxies">查询</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="() => { searchBizStatus=''; searchSupplier=''; searchRegion=''; searchText=''; loadProxies() }">重置</t-button>
+      <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
+
+      <ResourceCard class="proxy-resource-card">
+        <div class="filter-bar">
+          <label v-if="isAdmin" class="wt-filter-field">
+            <span class="wt-filter-field__label">团队</span>
+            <t-select v-model="filterTeam" clearable placeholder="全部" :options="teamOptions" filterable @change="onTeamChanged" />
+          </label>
+          <label v-else class="wt-filter-field">
+            <span class="wt-filter-field__label">团队</span>
+            <span class="proxy-fixed-team">{{ ownTeamLabel }}</span>
+          </label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">资源启停</span>
+            <t-select v-model="filterStatus" clearable placeholder="全部" @change="submitSearch">
+              <t-option value="active" label="启用" />
+              <t-option value="paused" label="停用" />
+            </t-select>
+          </label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">检测结果</span>
+            <t-select v-model="filterCheck" clearable placeholder="全部" @change="applyClientFilters">
+              <t-option value="ok" label="正常" />
+              <t-option value="failed" label="检测失败" />
+              <t-option value="unchecked" label="未检测" />
+            </t-select>
+          </label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">到期</span>
+            <t-select v-model="filterExpiry" clearable placeholder="全部" @change="applyClientFilters">
+              <t-option value="valid" label="有效" />
+              <t-option value="expired" label="已到期" />
+            </t-select>
+          </label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="filterSupplier" clearable placeholder="供应商" @enter="submitSearch" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
+          <div class="wt-filter-actions">
+            <t-button theme="primary" @click="submitSearch">查询</t-button>
+            <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+          </div>
         </div>
-    </div>
 
-    <!-- 操作栏 -->
-    <div class="action-bar wt-resource-actions">
-      <t-space>
-        <t-button class="wt-secondary-button" variant="outline" @click="showImport = true">批量导入</t-button>
-			<t-button class="wt-secondary-button" variant="outline" :loading="batchChecking" :disabled="!selectedRowKeys.length" @click="batchCheck">批量检测</t-button>
-      </t-space>
-    </div>
-
-    <!-- 表格 -->
-    <div class="table-scroll-wrap">
-    <t-table class="wt-resource-table"
-      :data="pagedProxies"
-      :columns="columns"
-      row-key="id"
-      size="small"
-      hover
-			v-model:selected-row-keys="selectedRowKeys"
-      :scroll="{ x: 'max-content' }"
-      empty="暂无代理"
-    >
-      <template #host="{ row }">
-        <div>
-          <div class="proxy-addr">{{ row.host }}:{{ row.port }}</div>
-          <div v-if="row.username" class="proxy-user">{{ row.username }}</div>
+        <div v-if="selectedRowKeys.length" class="action-bar wt-resource-actions">
+          <t-space>
+            <t-button class="wt-secondary-button" variant="outline" @click="startBatchCheck">批量检测（{{ selectedRowKeys.length }}）</t-button>
+            <t-button variant="text" @click="selectedRowKeys = []">取消选择</t-button>
+          </t-space>
         </div>
-      </template>
-      <template #business_status="{ row }">
-        <ResourceStatusBadge :tone="row.business_status === 'active' ? 'success' : 'warning'" :label="row.business_status === 'active' ? '可用' : row.business_status === 'paused' ? '停用' : '过期'" />
-      </template>
-      <template #last_check_result="{ row }">
-        <ResourceStatusBadge v-if="row.last_check_result === 'ok'" tone="success" label="正常" />
-        <ResourceStatusBadge v-else-if="row.last_check_result" tone="danger" :label="row.last_check_result" />
-        <ResourceStatusBadge v-else tone="neutral" label="未检测" />
-      </template>
-      <template #max_profile_count="{ row }">{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }} 已用，{{ row.remaining_profile_count ?? (row.max_profile_count || 3) }} 剩余</template>
-      <template #bindings="{ row }"><t-button variant="text" size="small" @click="openDetail(row)">已绑定 {{ row.assigned_profile_count || 0 }} 个</t-button></template>
-      <template #expires_at="{ row }">
-        <span :style="row.expires_at && new Date(row.expires_at) < new Date() ? 'color:var(--td-error-color)' : ''">
-          {{ formatTime(row.expires_at) }}
-        </span>
-      </template>
-      <template #op="{ row }">
-        <t-space size="small" class="op-cell">
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-          <t-button size="small" theme="primary" @click="triggerCheck(row)">检测</t-button>
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openEdit(row)">编辑</t-button>
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openQuota(row)">设置配额</t-button>
-          <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="deleteProxy(row)">删除</t-button>
-        </t-space>
-      </template>
-    </t-table>
-    </div>
-    <div class="pagination-bar">
-      <t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" :page-size-options="[10, 20, 50, 100]" show-jumper />
-    </div>
-    </ResourceCard>
 
-    <t-dialog v-model:visible="showCreate" header="新增代理" :confirm-btn="{ loading: creating, content: '创建' }" @confirm="createProxy">
-      <t-form label-width="84px">
-        <t-form-item label="代理方式"><t-radio-group v-model="createForm.source_type"><t-radio value="static">静态地址</t-radio><t-radio value="api">动态 API 提取</t-radio></t-radio-group></t-form-item>
-        <template v-if="createForm.source_type === 'static'">
-          <t-form-item label="代理地址"><t-input v-model="createForm.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" @blur="parseAddress(createForm)" /></t-form-item>
+        <div class="table-scroll-wrap">
+          <t-table
+            class="wt-resource-table"
+            :data="pagedProxies"
+            :columns="columns"
+            row-key="id"
+            size="small"
+            hover
+            v-model:selected-row-keys="selectedRowKeys"
+            :scroll="{ x: 'max-content' }"
+            empty="暂无符合条件的数据"
+          >
+            <template #id="{ row }"><span class="proxy-id">{{ row.id }}</span></template>
+            <template #name="{ row }">
+              <div class="proxy-name">{{ row.name || "-" }}</div>
+              <div class="proxy-addr">{{ row.host ? `${row.host}:${row.port}` : "尚未提取地址" }}</div>
+            </template>
+            <template #region_supplier="{ row }">
+              <div>{{ row.region || "-" }}</div>
+              <div class="proxy-sub">{{ row.supplier || "-" }}</div>
+            </template>
+            <template #source_type="{ row }"><span>{{ sourceLabel(row.source_type) }}</span></template>
+            <template #usage="{ row }">
+              <span>{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }}</span>
+              <div class="proxy-sub">剩余 {{ row.remaining_profile_count ?? ((row.max_profile_count || 3) - (row.assigned_profile_count || 0)) }}</div>
+            </template>
+            <template #business_status="{ row }">
+              <t-switch
+                v-if="isGovernor"
+                :value="row.business_status === 'active'"
+                size="small"
+                @change="(value) => requestStatusChange(row, value)"
+              />
+              <ResourceStatusBadge v-else :tone="row.business_status === 'active' ? 'success' : 'neutral'" :label="row.business_status === 'active' ? '启用' : '停用'" />
+            </template>
+            <template #last_check_result="{ row }">
+              <ResourceStatusBadge :tone="checkTone(row.last_check_result)" :label="checkResultLabel(row.last_check_result)" />
+            </template>
+            <template #expires_at="{ row }">
+              <span :class="{ 'proxy-expired': isExpired(row) }">{{ formatDate(row.expires_at) }}</span>
+              <div v-if="isExpired(row)" class="proxy-sub proxy-expired">已到期</div>
+            </template>
+            <template #remark="{ row }"><span class="proxy-remark">{{ row.remark || "-" }}</span></template>
+            <template #op="{ row }">
+              <t-space size="small" class="op-cell">
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openEdit(row)">编辑</t-button>
+                <t-button size="small" theme="primary" :loading="checkingIds.includes(row.id)" :disabled="!row.host || !row.port" @click="checkOne(row)">检测</t-button>
+                <t-button v-if="isGovernor" size="small" class="wt-secondary-button" variant="outline" @click="openQuota(row)">设置配额</t-button>
+                <t-button v-if="isGovernor" size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="deleteProxy(row)">删除</t-button>
+              </t-space>
+            </template>
+          </t-table>
+        </div>
+        <div class="pagination-bar">
+          <t-pagination
+            v-model:current="pagination.current"
+            v-model:pageSize="pagination.pageSize"
+            :total="visibleProxies.length"
+            :page-size-options="[10, 20, 50, 100]"
+            show-jumper
+          />
+        </div>
+      </ResourceCard>
+
+      <t-drawer
+        v-model:visible="formVisible"
+        :header="formMode === 'create' ? '新增代理' : '编辑代理'"
+        size="min(94vw, 640px)"
+        :close-btn="true"
+        :footer="true"
+        destroy-on-close
+      >
+        <FeedbackAlert
+          v-if="formMode === 'edit' && connectionChanged && editAffectedWindows > 0"
+          theme="warning"
+          style="margin-bottom:12px"
+          :message="`连接信息变更后，旧检测结果会失效，${editAffectedWindows} 个关联窗口会标记为代理配置待同步；保存不会自动改写 BitBrowser，也不会自动解除正式关系。`"
+        />
+        <FeedbackAlert
+          v-if="formMode === 'edit' && !isGovernor"
+          theme="info"
+          style="margin-bottom:12px"
+          message="普通运营只能维护名称、地区、供应商、业务标签和备注；连接、到期、额度、启停与删除由高级运营或管理员处理。"
+        />
+        <FeedbackAlert v-if="formError" :message="formError" theme="error" style="margin-bottom:12px" />
+
+        <t-form label-width="96px">
+          <t-form-item label="名称"><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
+          <t-form-item v-if="isAdmin && formMode === 'create'" label="所属团队">
+            <t-select v-model="form.team_id" :options="teamOptions" placeholder="请选择目标团队" filterable />
+          </t-form-item>
+          <t-form-item v-else label="所属团队">
+            <span>{{ formMode === 'create' ? ownTeamLabel : (editingProxy?.team_name || ownTeamLabel) }}</span>
+          </t-form-item>
+          <t-form-item label="资源来源">
+            <t-radio-group v-model="form.source_type" :disabled="formMode === 'edit' && !isGovernor">
+              <t-radio value="static">静态地址</t-radio>
+              <t-radio value="api">动态提取</t-radio>
+            </t-radio-group>
+          </t-form-item>
+          <template v-if="form.source_type === 'static'">
+            <t-form-item label="粘贴地址">
+              <t-input v-model="form.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" :disabled="formMode === 'edit' && !isGovernor" @blur="parseAddress" />
+            </t-form-item>
+          </template>
+          <template v-else>
+            <t-form-item label="提取地址">
+              <t-input v-model="form.extract_url" placeholder="供应商提取链接" :disabled="formMode === 'edit' && !isGovernor" />
+            </t-form-item>
+            <t-form-item label="">
+              <t-space>
+                <t-button size="small" variant="outline" :loading="extracting" :disabled="!canExtract" @click="extractAddress">测试提取</t-button>
+                <t-button v-if="formMode === 'edit' && isGovernor" size="small" variant="outline" :loading="savingForm" @click="refreshDynamic">提取新地址并检测</t-button>
+              </t-space>
+              <div v-if="!canExtract" class="form-hint">动态提取需要本人桌面端在线；网页版和管理员可维护提取来源或手动录入地址。</div>
+            </t-form-item>
+          </template>
+          <t-form-item label="协议">
+            <t-select v-model="form.proxy_protocol" :disabled="formMode === 'edit' && !isGovernor">
+              <t-option value="http" label="HTTP" />
+              <t-option value="https" label="HTTPS" />
+              <t-option value="socks5" label="SOCKS5" />
+            </t-select>
+          </t-form-item>
+          <t-form-item label="地址">
+            <t-input v-model="form.host" placeholder="例如 10.0.0.1" :disabled="formMode === 'edit' && !isGovernor" />
+          </t-form-item>
+          <t-form-item label="端口">
+            <t-input-number v-model="form.port" :min="1" :max="65535" :disabled="formMode === 'edit' && !isGovernor" />
+          </t-form-item>
+          <t-form-item label="认证用户名">
+            <t-input v-model="form.username" :placeholder="formMode === 'edit' ? '留空表示保留原认证信息' : ''" :disabled="formMode === 'edit' && !isGovernor" />
+          </t-form-item>
+          <t-form-item label="认证密码">
+            <t-input v-model="form.password" type="password" :placeholder="formMode === 'edit' ? '留空表示保留原密码' : ''" :disabled="formMode === 'edit' && !isGovernor" />
+          </t-form-item>
+          <t-form-item label="地区"><t-input v-model="form.region" /></t-form-item>
+          <t-form-item label="供应商"><t-input v-model="form.supplier" /></t-form-item>
+          <t-form-item v-if="isGovernor && formMode === 'create'" label="初始额度">
+            <t-input-number v-model="form.max_profile_count" :min="1" :max="1000" />
+            <div class="form-hint">一个窗口只占一个名额；比特自管的窗口不占名额。</div>
+          </t-form-item>
+          <t-form-item v-if="isGovernor" label="到期时间">
+            <t-date-picker v-model="form.expires_at" value-type="time-stamp" clearable :placeholder="formMode === 'create' ? '不填表示长期有效' : '留空保持当前到期时间'" />
+            <div v-if="formMode === 'edit'" class="form-hint">当前接口只支持改期，留空不会清除原到期时间。</div>
+          </t-form-item>
+          <t-form-item label="业务标签"><t-tag-input v-model="form.tags" clearable placeholder="回车添加标签" /></t-form-item>
+          <t-form-item label="备注"><t-textarea v-model="form.remark" /></t-form-item>
+        </t-form>
+        <template #footer>
+          <t-space>
+            <t-button class="wt-secondary-button" variant="outline" :disabled="savingForm" @click="formVisible = false">取消</t-button>
+            <t-button theme="primary" :loading="savingForm" @click="saveForm">{{ formMode === 'create' ? '创建' : '保存' }}</t-button>
+          </t-space>
+        </template>
+      </t-drawer>
+
+      <t-drawer v-model:visible="detailVisible" :header="'代理详情'" size="min(94vw, 720px)" :close-btn="true" destroy-on-close :footer="false">
+        <t-loading :loading="detailLoading">
+          <template v-if="detailProxy">
+            <t-descriptions :column="1" bordered size="small">
+              <t-descriptions-item label="代理ID">{{ detailProxy.id }}</t-descriptions-item>
+              <t-descriptions-item label="名称">{{ detailProxy.name || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="所属团队">{{ detailProxy.team_name || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="来源">{{ sourceLabel(detailProxy.source_type) }}<span v-if="detailProxy.extract_url_configured" class="proxy-sub">（已配置提取地址）</span></t-descriptions-item>
+              <t-descriptions-item label="协议 / 地址">{{ detailProxy.proxy_protocol }}://{{ detailProxy.host || "-" }}:{{ detailProxy.port || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="认证用户名">
+                <span>{{ detailProxy.username || "-" }}</span>
+                <t-button v-if="detailProxy.username" size="small" variant="text" @click="copyText(detailProxy.username, '认证用户名')">复制</t-button>
+              </t-descriptions-item>
+              <t-descriptions-item label="认证密码">
+                <span>{{ detailProxy.password || "-" }}</span>
+                <t-button v-if="detailProxy.password" size="small" variant="text" @click="copyText(detailProxy.password, '认证密码')">复制</t-button>
+              </t-descriptions-item>
+              <t-descriptions-item label="地区 / 供应商">{{ detailProxy.region || "-" }} / {{ detailProxy.supplier || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="业务标签">{{ (detailProxy.tags || []).join("、") || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="资源启停">{{ detailProxy.business_status === "active" ? "启用" : "停用" }}</t-descriptions-item>
+              <t-descriptions-item label="到期时间">
+                <span :class="{ 'proxy-expired': isExpired(detailProxy) }">{{ formatDate(detailProxy.expires_at) }}</span>
+                <span v-if="isExpired(detailProxy)" class="proxy-expired">（已到期）</span>
+              </t-descriptions-item>
+              <t-descriptions-item label="检测结果">{{ checkResultLabel(detailProxy.last_check_result) }}（{{ formatTime(detailProxy.last_check_at) }}）</t-descriptions-item>
+              <t-descriptions-item label="出口IP">{{ detailProxy.observed_exit_ip || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="窗口额度">{{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profile_count || 3 }} 已用</t-descriptions-item>
+              <t-descriptions-item label="备注"><span class="proxy-remark">{{ detailProxy.remark || "-" }}</span></t-descriptions-item>
+            </t-descriptions>
+            <t-divider>关联窗口（{{ detailBindings.length }}）</t-divider>
+            <t-table
+              :data="detailBindings"
+              row-key="id"
+              size="small"
+              :columns="[
+                { colKey: 'name', title: '窗口名称' },
+                { colKey: 'id', title: '系统ID', width: 150 },
+                { colKey: 'bit_profile_id', title: '比特窗口ID', width: 150 },
+                { colKey: 'user_id', title: '运营UID', width: 90 },
+                { colKey: 'local_status', title: '状态', width: 90 },
+              ]"
+              empty="暂无关联窗口"
+            />
+          </template>
+        </t-loading>
+      </t-drawer>
+
+      <t-dialog v-model:visible="quotaVisible" header="设置窗口额度" :confirm-btn="{ loading: savingQuota, content: '保存' }" @confirm="saveQuota">
+        <FeedbackAlert v-if="quotaError" :message="quotaError" theme="error" style="margin-bottom:12px" />
+        <t-form label-width="96px">
+          <t-form-item label="代理">{{ quotaProxy?.name || quotaProxy?.host }}</t-form-item>
+          <t-form-item label="当前已用">{{ quotaProxy?.assigned_profile_count || 0 }} 个窗口</t-form-item>
+          <t-form-item label="最大窗口数"><t-input-number v-model="quotaValue" :min="1" :max="1000" /></t-form-item>
+        </t-form>
+        <p class="form-hint">调整额度不会自动解绑窗口，也不会改写 BitBrowser 配置。</p>
+      </t-dialog>
+
+      <t-dialog
+        v-model:visible="statusConfirmVisible"
+        :header="statusNext ? '启用代理' : '停用代理'"
+        :confirm-btn="{ content: statusNext ? '启用' : '停用', theme: statusNext ? 'primary' : 'warning' }"
+        @confirm="confirmStatusChange"
+      >
+        <p>资源：{{ statusTarget?.name || `${statusTarget?.host}:${statusTarget?.port}` }}（团队：{{ statusTarget?.team_name || ownTeamLabel }}）</p>
+        <p>受影响窗口：{{ statusTarget?.assigned_profile_count || 0 }} 个</p>
+        <p class="form-hint">
+          {{ statusNext
+            ? "启用后仍需在有效期内且检测正常才可分配窗口。"
+            : "停用只阻止新分配，不会清除现有窗口配置，也不会释放已占额度。" }}
+        </p>
+      </t-dialog>
+
+      <t-dialog
+        v-model:visible="importVisible"
+        header="批量导入代理"
+        width="min(94vw, 760px)"
+        :close-btn="true"
+        :close-on-esc-keydown="!importing"
+        :close-on-overlay-click="!importing"
+        :footer="importStep === 'input' || importStep === 'preview'"
+        @close="closeImport"
+      >
+        <template v-if="importStep === 'input' || importStep === 'preview'">
+          <FeedbackAlert v-if="importError" :message="importError" theme="error" style="margin-bottom:12px" />
+          <div class="import-team">
+            <span>目标团队：</span>
+            <t-select v-if="isAdmin" v-model="importTeam" :options="teamOptions" placeholder="请选择目标团队" style="width:220px" />
+            <strong v-else>{{ ownTeamLabel }}</strong>
+            <span class="form-hint">导入只新增资源，不会覆盖同团队已有地址。</span>
+          </div>
+          <p class="form-hint">支持 host:port、host:port:user:pass、protocol://user:pass@host:port，每行一个。</p>
+          <div class="import-file">
+            <t-button size="small" variant="outline" @click="$refs.importFile.click()">选择文件</t-button>
+            <span class="form-hint">支持 .txt / .csv / .xlsx 文本内容</span>
+            <input ref="importFile" type="file" accept=".txt,.csv" style="display:none" @change="onFileSelected" />
+          </div>
+          <t-textarea v-model="importText" :rows="7" placeholder="粘贴代理文本，每行一个…" />
+          <div class="import-actions">
+            <t-button theme="primary" :loading="importPreviewing" @click="previewImport">解析预览</t-button>
+          </div>
+
+          <template v-if="importRows.length && importStep === 'preview'">
+            <t-divider>解析结果（已选 {{ importSelectedCount }} 条）</t-divider>
+            <t-table :data="importRows" row-key="line" size="small" :columns="[
+              { colKey: 'selected', title: '选择', width: 70 },
+              { colKey: 'line', title: '行号', width: 80 },
+              { colKey: 'raw', title: '原文', width: 220 },
+              { colKey: 'status', title: '结果' },
+            ]">
+              <template #selected="{ row }">
+                <t-checkbox
+                  :checked="importSelected.includes(row.line)"
+                  :disabled="!isImportable(row)"
+                  @change="(checked) => toggleImportRow(row.line, checked)"
+                />
+              </template>
+              <template #status="{ row }">
+                <t-tag v-if="isImportable(row)" theme="success" size="small">可导入</t-tag>
+                <t-tag v-else-if="row.duplicate" theme="warning" size="small">{{ row.duplicate_reason || "重复" }}</t-tag>
+                <t-tag v-else theme="danger" size="small">{{ row.error || "无效" }}</t-tag>
+              </template>
+            </t-table>
+          </template>
         </template>
         <template v-else>
-          <t-form-item label="提取 URL"><t-input v-model="createForm.extract_url" placeholder="供应商 API 提取链接" /></t-form-item>
-          <t-form-item label=""><t-button size="small" @click="previewExtract(createForm)">测试提取</t-button></t-form-item>
+          <p class="form-hint">导入处理中会在当前弹窗显示结果；完成后请根据真实列表核对已创建资源。</p>
         </template>
-        <t-form-item label="协议"><t-select v-model="createForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
-        <t-form-item label="地址"><t-input v-model="createForm.host" placeholder="例如 127.0.0.1" /></t-form-item>
-        <t-form-item label="端口"><t-input-number v-model="createForm.port" :min="1" :max="65535" /></t-form-item>
-        <t-form-item label="用户名"><t-input v-model="createForm.username" /></t-form-item>
-        <t-form-item label="密码"><t-input v-model="createForm.password" type="password" /></t-form-item>
-        <t-form-item label="地区"><t-input v-model="createForm.region" /></t-form-item>
-        <t-form-item label="供应商"><t-input v-model="createForm.supplier" /></t-form-item>
-        <t-form-item label="备注"><t-textarea v-model="createForm.remark" /></t-form-item>
-      </t-form>
-    </t-dialog>
-
-    <t-dialog v-model:visible="editVisible" header="编辑代理" :confirm-btn="{ loading: editing, content: '保存' }" @confirm="saveEdit">
-      <FeedbackAlert v-if="(editProxy?.assigned_profile_count || 0) > 0" theme="warning" style="margin-bottom:12px">保存不会自动改写 BitBrowser；{{ editProxy.assigned_profile_count }} 个关联窗口将标记为代理配置待同步，请到浏览器窗口页重新写入并读回。</FeedbackAlert>
-      <t-form label-width="84px">
-        <t-form-item label="协议"><t-select v-model="editForm.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
-        <t-form-item label="地址"><t-input v-model="editForm.host" placeholder="例如 127.0.0.1（不含协议、账号和端口）" /></t-form-item>
-        <t-form-item label="端口"><t-input-number v-model="editForm.port" :min="1" :max="65535" /></t-form-item>
-        <t-form-item label="用户名"><t-input v-model="editForm.username" /></t-form-item>
-        <t-form-item label="密码"><t-input v-model="editForm.password" type="password" placeholder="留空表示不修改" /></t-form-item>
-        <t-form-item label="地区"><t-input v-model="editForm.region" /></t-form-item>
-        <t-form-item label="供应商"><t-input v-model="editForm.supplier" /></t-form-item>
-        <t-form-item label="备注"><t-textarea v-model="editForm.remark" /></t-form-item>
-      </t-form>
-    </t-dialog>
-
-    <!-- 批量导入弹窗 -->
-    <t-dialog v-model:visible="showImport" header="批量导入代理" width="640px"
-      @confirm="confirmImport"
-      :confirm-btn="importPreview.length ? { loading: importing, theme: 'primary', content: '确认导入' } : null"
-    >
-      <p style="margin-bottom:8px; color:var(--td-text-color-secondary); font-size:13px">
-        支持格式: host:port、host:port:user:pass、protocol://user:pass@host:port，每行一个
-      </p>
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
-        <t-button size="small" variant="outline" @click="$refs.fileInput.click()">选择文件</t-button>
-        <span style="font-size:12px; color:var(--td-text-color-secondary)">支持 .txt / .csv 格式</span>
-        <input ref="fileInput" type="file" accept=".txt,.csv" style="display:none" @change="onFileSelected" />
-      </div>
-      <t-textarea v-model="importText" :rows="6" placeholder="粘贴代理文本，每行一个，或点击上方选择文件导入..." />
-      <t-button v-if="importText.trim()" size="small" style="margin-top:8px" @click="previewImport">预览解析</t-button>
-
-      <t-table v-if="importPreview.length" :data="importPreview" :columns="[
-        { colKey: 'raw', title: '原文', width: 200 },
-        { colKey: 'error', title: '解析结果' },
-      ]" size="small" style="margin-top:12px">
-        <template #raw="{ row }">{{ row.raw }}</template>
-        <template #error="{ row }">
-          <t-tag v-if="row.parsed" theme="success" size="small">可导入</t-tag>
-          <t-tag v-else theme="danger" size="small">{{ row.error }}</t-tag>
+        <template #footer>
+          <t-space>
+            <t-button class="wt-secondary-button" variant="outline" :disabled="importing" @click="closeImport">取消</t-button>
+            <t-button
+              v-if="importStep === 'preview'"
+              theme="primary"
+              :loading="importing"
+              :disabled="!importSelectedCount"
+              @click="confirmImport"
+            >确认导入已选 {{ importSelectedCount }} 条</t-button>
+          </t-space>
         </template>
-      </t-table>
-    </t-dialog>
+      </t-dialog>
 
-    <!-- 详情抽屉 -->
-    <t-drawer :close-btn="true" v-model:visible="detailVisible" header="代理详情" size="min(92vw, 760px)" destroy-on-close :footer="detailProxy?.source_type === 'api'">
-      <t-descriptions v-if="detailProxy" :column="1" bordered size="small">
-        <t-descriptions-item label="ID">{{ detailProxy.id }}</t-descriptions-item>
-        <t-descriptions-item label="地址">{{ detailProxy.host }}:{{ detailProxy.port }}</t-descriptions-item>
-        <t-descriptions-item label="协议">{{ detailProxy.proxy_protocol }}</t-descriptions-item>
-        <t-descriptions-item label="用户名">{{ detailProxy.username || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="地区">{{ detailProxy.region || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="供应商">{{ detailProxy.supplier || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="业务状态">
-          <BusinessStatus :status="detailProxy.business_status === 'active' ? 'normal' : detailProxy.business_status === 'paused' ? 'paused' : 'expired'" />
-        </t-descriptions-item>
-        <t-descriptions-item label="到期时间">{{ formatTime(detailProxy.expires_at) }}</t-descriptions-item>
-        <t-descriptions-item label="最后检测">{{ formatTime(detailProxy.last_check_at) }}</t-descriptions-item>
-        <t-descriptions-item label="检测结果">{{ detailProxy.last_check_result || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="出口 IP">{{ detailProxy.observed_exit_ip || '-' }}</t-descriptions-item>
-        <t-descriptions-item label="备注">{{ detailProxy.remark || '-' }}</t-descriptions-item>
-      </t-descriptions>
-      <t-divider>绑定窗口</t-divider>
-      <t-loading :loading="loadingBindings"><t-table :data="boundProfiles" size="small" :columns="[{ colKey: 'name', title: '窗口' }, { colKey: 'bit_profile_id', title: 'BitBrowser ID' }, { colKey: 'user_id', title: '用户' }, { colKey: 'local_status', title: '状态' }]" row-key="id" /></t-loading>
-      <template #footer><t-button v-if="detailProxy?.source_type === 'api'" theme="primary" @click="refreshDynamicProxy(detailProxy)">提取新地址并检测</t-button></template>
-    </t-drawer>
-
-    <!-- 配额弹窗 -->
-    <t-dialog v-model:visible="quotaVisible" header="设置最大窗口数" @confirm="saveQuota" :confirm-btn="{ loading: savingQuota, theme: 'primary' }">
-      <t-form>
-        <t-form-item label="最大 Profile 数">
-          <t-input-number v-model="quotaMax" :min="1" :max="100" />
-        </t-form-item>
-      </t-form>
-    </t-dialog>
-
-  </div>
+      <OperationProgressDialog
+        :visible="progressVisible"
+        :title="progressTitle"
+        :phase="progressPhase"
+        :items="progressItems"
+        :running-label="progressMode === 'import' ? '正在导入' : '正在检测'"
+        :status-labels="progressLabels"
+        retry-label="重试失败项"
+        @retry="retryFailed"
+        @done="closeProgress"
+      />
+    </div>
   </t-loading>
 </template>
 
 <style scoped>
 .proxy-resource-card { padding: 18px 20px; }
-.action-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.proxy-fixed-team { display: inline-flex; align-items: center; height: 32px; color: var(--td-text-color-primary); }
+.proxy-id { color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
+.proxy-name { font-weight: 500; }
+.proxy-addr { color: var(--td-text-color-secondary); font-size: 12px; margin-top: 2px; }
+.proxy-sub { color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 2px; }
+.proxy-remark { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy-expired { color: var(--td-error-color); }
 .op-cell { white-space: nowrap; }
-.proxy-addr { font-weight: 500; }
-.proxy-user { color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 2px; }
+.form-hint { color: var(--td-text-color-placeholder); font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.import-team { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.import-team .form-hint { margin-top: 0; }
+.import-file { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.import-actions { margin-top: 8px; }
+.action-bar { display: flex; align-items: center; margin-bottom: 12px; }
 </style>

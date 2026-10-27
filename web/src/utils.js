@@ -10,8 +10,14 @@ export function canUseDesktop(user) {
   return ['operator', 'senior_operator', 'admin'].includes(user?.role)
 }
 
-// 本地专属页面（开户 / 浏览器窗口 / 代理）仍只属于普通运营。
+// 桌面端本机资源页面：浏览器窗口与代理对运营、高级运营开放（D08）。
+// 高级运营对本人窗口有同样本机能力；查看成员时由页面隐藏本机动作。
 export function canUseLocalAgent(user) {
+  return user?.role === 'operator' || user?.role === 'senior_operator'
+}
+
+// 开户不在本轮范围，仍是普通运营的本机执行面。
+export function canUseAccountOpening(user) {
   return user?.role === 'operator'
 }
 

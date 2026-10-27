@@ -7,57 +7,104 @@ describe('browser window resource page', () => {
   it('composes the shared resource presentation primitives', () => {
     expect(source).toContain('ResourcePageHeader')
     expect(source).toContain('ResourceCard')
-    // 概览指标与分页总数/筛选结果重复，已移除（AdminUI 规范 §3.3）。
-    expect(source).not.toContain('ResourceStatGrid')
-    expect(source).not.toContain('profileStatItems')
+    expect(source).toContain('ResourceStatGrid')
     expect(source).toContain('ResourceStatusBadge')
+    expect(source).toContain('OperationProgressDialog')
     expect(source).toContain('wt-resource-table')
   })
 
-  it('shows all five routine window operations directly instead of hiding them in an overflow menu', () => {
-    expect(source).not.toContain('>更多</t-button>')
-    expect(source).toContain('@click="openProfile(row)"')
-    expect(source).toContain('@click="closeProfile(row)"')
-    expect(source).toContain('@click="openProxyBinding(row)"')
-    expect(source).toContain('@click="openEdit(row)"')
-    expect(source).toContain('@click="toggleBusinessStatus(row)"')
+  it('limits local capability to operators on desktop and keeps every other view read-only', () => {
+    expect(source).toContain('const isOwnDesktop = computed(() => isDesktopClient.value && (isOperator.value || (isSenior.value && !viewingMember.value)))')
+    expect(source).toContain('? ["详情", "打开", "编辑", "处理异常", "运营备注"]')
+    expect(source).toContain(': ["详情", "运营备注"]')
+    expect(source).toContain('if (isOwnDesktop.value) list.push({ colKey: "row-select", type: "multiple", width: 48 })')
+    expect(source).toContain('if (isAdmin.value) list.push({ colKey: "team", title: "运营团队", width: 120 })')
+    expect(source).toContain('<ResourceStatusBadge\n                v-else')
+    expect(source).toContain('if (!isOwnDesktop.value) return')
   })
 
-  it('sends window filters to the backend and keeps only the local running overlay', () => {
-    expect(source).toContain('bindingClient.listProfiles(query)')
-    expect(source).toContain('local_status: statusFilter.value')
-    expect(source).toContain('business_status: businessFilter.value')
-    expect(source).toContain('user_id: userFilter.value')
-    expect(source).toContain('if (runningFilter.value === "open" && openStates.value[profile.id] !== true) return false')
-    expect(source).not.toContain('.sort((a, b) => (Number(b.seq)')
+  it('sends scoped filters to the backend and pages the returned set', () => {
+    expect(source).toContain('bindingClient.listProfiles(filters)')
+    expect(source).toContain('if (isSenior.value) filters.user_id = memberFilter.value || selfId.value')
+    expect(source).not.toContain('local_status: statusFilter.value')
+    expect(source).toContain('const pagedProfiles = computed(')
+    expect(source).toContain('<t-pagination')
   })
 
-  it('keeps the browser window operation column pinned during horizontal scrolling', () => {
-    expect(source).toContain('{ colKey: "op", title: "操作", width: 320, fixed: "right" }')
-  })
-
-  it('keeps the filter field labels visible', () => {
-    expect(source).toContain('>窗口 ID</span>')
-    expect(source).toContain('>授权用户</span>')
-    expect(source).toContain('>Cloud 状态</span>')
-  })
-
-  it('provides the same query and reset controls as the other resource pages', () => {
-    expect(source).toContain('@click="applyFilters"')
+  it('keeps filter labels visible and separates draft inputs from applied filters', () => {
+    expect(source).toContain('>搜索</span>')
+    expect(source).toContain('>授权运营</span>')
+    expect(source).toContain('>代理方式</span>')
+    expect(source).toContain('>业务状态</span>')
+    expect(source).toContain('>运行状态</span>')
+    expect(source).toContain('@click="submitSearch"')
     expect(source).toContain('@click="resetFilters"')
-    expect(source).toContain('>查询</t-button>')
-    expect(source).toContain('>重置</t-button>')
+    expect(source).toContain('const filterDraft = ref(emptyFilters())')
+    expect(source).toContain('const appliedFilters = ref(emptyFilters())')
   })
 
-  // 扫描抽屉的页脚只剩业务动作（2026-09-30 裁定：关闭走抽屉右上角的 ×）。没有可接受的
-  // 变化时页脚整条不出现——`:footer` 为 false 时 TDesign 连页脚容器一起不渲染，否则会
-  // 留下一道空条。
-  it('keeps the scan drawer footer on the accept actions and drops it when there is nothing to accept', () => {
-    expect(source).toContain(':footer="scanAcceptsChanges"')
-    expect(source).toContain('const scanAcceptsChanges = computed(')
-    const footer = source.slice(source.indexOf('<template #footer>', source.indexOf('scanDetailVisible')))
-    expect(footer).toContain('接受本地变化')
-    expect(footer).toContain('恢复Cloud配置并读回验证')
-    expect(footer).not.toContain('>关闭</t-button>')
+  it('keeps the operation column pinned and width from the shared measure', () => {
+    expect(source).toContain('{ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value), fixed: "right" }')
+  })
+
+  it('requires a fresh running-state read before disabling a window', () => {
+    const body = source.slice(source.indexOf('async function requestBusinessChange('))
+    const disable = body.slice(0, body.indexOf('businessTarget.value = profile'))
+    expect(disable).toContain('refreshRunningStates({ silent: false })')
+    expect(disable).toContain('state === true')
+    expect(disable).toContain('state === undefined')
+    expect(disable).toContain('profile.local_status !== "active"')
+  })
+
+  it('enables batch actions only for a consistent running state', () => {
+    expect(source).toContain('const batchOpenReady = computed(() => selectedProfiles.value.length > 0 && selectedProfiles.value.every((profile) => rowOperable(profile) && runningState(profile) === false))')
+    expect(source).toContain('const batchCloseReady = computed(() => selectedProfiles.value.length > 0 && selectedProfiles.value.every((profile) => rowOperable(profile) && runningState(profile) === true))')
+    expect(source).toContain('>批量设置代理</t-button>')
+    expect(source).toContain('>批量打开</t-button>')
+    expect(source).toContain('>批量关闭</t-button>')
+  })
+
+  it('defaults every discovered window to unclaimed and disables existing owners', () => {
+    expect(source).toContain('syncSelectedAdded.value = []')
+    expect(source).toContain(':disabled="Boolean(row.ownership_conflict)"')
+    expect(source).toContain('const syncSelectableAdded = computed(() => syncAddedProfiles.value.filter((profile) => !profile.ownership_conflict))')
+    expect(source).toContain('本机发现但 Cloud 尚无关联的窗口。勾选后才会建立关联；不勾选不会认领，其他运营已登记的窗口不可选择。')
+  })
+
+  it('accepts a scan through two explicit stages instead of one combined action', () => {
+    expect(source).toContain('await bindingClient.confirm(syncScan.value.id, syncSelectedAdded.value)')
+    expect(source).toContain('await proxyClient.confirmLocalScan(syncScan.value.id, syncSelectedUnknown.value)')
+    expect(source).toContain('async function retryProxyStage()')
+    expect(source).toContain('窗口变化已接受，但代理关系核对未完成。重新同步会以本机实际状态继续核对。')
+  })
+
+  it('never retries a create that may already have happened', () => {
+    const body = source.slice(source.indexOf('async function submitCreate('))
+    expect(body).toContain('if (!snapshot) {')
+    expect(body).toContain('item.status = "unconfirmed"')
+    expect(body).toContain('请先同步窗口确认，不要重复创建')
+    expect(source).toContain('const createUncertain = ref(false)')
+  })
+
+  it('drives proxy changes through the server-side scan endpoints', () => {
+    expect(source).toContain('proxyClient.previewLocalScan(')
+    expect(source).toContain('proxyClient.clearProfileProxy(')
+    expect(source).toContain('proxyClient.release(')
+    expect(source).toContain('proxyClient.unbind(')
+  })
+
+  it('uses real Agent and Cloud results instead of prototype timers or mock data', () => {
+    expect(source).not.toContain('setTimeout')
+    expect(source).not.toContain('setInterval')
+    expect(source).not.toContain('mockProfiles')
+    expect(source).not.toContain('Math.random')
+  })
+
+  it('keeps the read-only detail drawer footerless and the progress dialog reachable', () => {
+    expect(source).toContain('v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 720px)" :close-btn="true" :footer="false"')
+    expect(source).toContain(':footer="syncDone || syncHasChanges"')
+    expect(source).toContain('@retry="retryFailed"')
+    expect(source).toContain('@verify="verifyPending"')
+    expect(source).toContain('@done="closeProgress"')
   })
 })

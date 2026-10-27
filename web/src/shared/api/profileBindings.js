@@ -25,8 +25,8 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     review(scanId) {
       return api.get(`/bit-browser/profile-scans/${scanId}`)
     },
-    confirm(scanId) {
-      return api.post(`/bit-browser/profile-scans/${scanId}/confirm`, {})
+    confirm(scanId, adoptBitProfileIds = []) {
+      return api.post(`/bit-browser/profile-scans/${scanId}/confirm`, { adopt_bit_profile_ids: adoptBitProfileIds })
     },
     listProfiles(filters = {}) {
       return api.get('/browser-profiles', {
@@ -51,9 +51,6 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     },
     updateProfile(id, config) {
       return api.patch(`/browser-profiles/${id}`, config)
-    },
-    assignProfileOwner(id, userId) {
-      return api.post(`/browser-profiles/${id}/assign-owner`, { user_id: Number(userId) })
     },
     deleteProfile(id) {
       return api.delete(`/browser-profiles/${id}`)

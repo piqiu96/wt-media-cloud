@@ -27,7 +27,7 @@ describe('proxy client', () => {
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/proxies/local-scan/preview', expect.objectContaining({ method: 'POST', credentials: 'include' }))
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ scan_id: 'scan-1' })
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/proxies/local-scan/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ scan_id: 'scan-1' })
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ scan_id: 'scan-1', selected_profile_ids: [] })
   })
 
   it('uses Cloud-only parse, extraction preview, and binding-detail endpoints', async () => {

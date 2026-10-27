@@ -8,6 +8,7 @@ import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
+import { loginStatusText } from "../../../shared/utils/mediaAccountLabels.js"
 import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
@@ -404,19 +405,6 @@ function executableText(account) {
   if (profile && (profile.local_status !== "active" || profile.business_status === "disabled")) return "不可执行：绑定窗口已停用"
   if (account.login_status !== "normal") return "待检查：需要真实账号检查"
   return "可进入后续预检"
-}
-
-function loginStatusText(status) {
-  return {
-    unknown: "待检查",
-    normal: "登录正常",
-    not_logged_in: "未登录",
-    verification_needed: "需要验证码",
-    expired: "已失效",
-    restricted: "受限",
-    account_mismatch: "账号不一致",
-    environment_error: "环境异常",
-  }[status] || status || "-"
 }
 
 function bizStatusText(status) {

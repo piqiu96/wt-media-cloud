@@ -21,16 +21,18 @@ describe('profile binding client', () => {
     expect(fetch.mock.calls[0][1].credentials).toBe('include')
   })
 
-  it('confirms scans without a body and lists profiles with cookie credentials', async () => {
+  it('confirms scans with only the selected windows and lists profiles with cookie credentials', async () => {
     const fetch = vi.fn(async () => response([]))
     const client = createProfileBindingClient({ fetch })
 
     await client.confirm('scan-1')
+    await client.confirm('scan-1', ['bit-1'])
     await client.listProfiles()
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/bit-browser/profile-scans/scan-1/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({})
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ adopt_bit_profile_ids: [] })
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ adopt_bit_profile_ids: ['bit-1'] })
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 
   it('creates and opens windows without naming a device or node', async () => {
@@ -39,11 +41,9 @@ describe('profile binding client', () => {
 
     await client.createProfile({ name: '窗口一' })
     await client.openProfile('profile-1')
-    await client.assignProfileOwner('profile-1', 3)
 
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ name: '窗口一' })
     expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({})
-    expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles/profile-1/assign-owner', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ user_id: 3 })
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/browser-profiles/profile-1/open', expect.objectContaining({ method: 'POST', credentials: 'include' }))
   })
 })
