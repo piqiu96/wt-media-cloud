@@ -98,6 +98,9 @@ type BrowserProfile struct {
 	LastSyncedAt   time.Time              `json:"last_synced_at"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+	// OwnershipConflict 是扫描时的证据，不是存储列：同一比特窗口已登记在其他
+	// 运营名下，不能被最后扫描到的人认领。
+	OwnershipConflict string `json:"ownership_conflict,omitempty"`
 }
 
 type ProfileDiff struct {

@@ -189,7 +189,7 @@ func TestRebindKeepsOtherMainProfilesAndSwitchingBackRestoresThem(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmScan(actor, scan.ID); err != nil {
+	if _, err := service.ConfirmScan(actor, scan.ID, []string{"p1"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-b", ObservedAt: testNow, Rebind: true}); err != nil {
@@ -368,60 +368,45 @@ func TestServiceUpdateProfileCloudRemarkAndBusinessStatus(t *testing.T) {
 	}
 }
 
-func TestAdminCanAssignUnreferencedProfileToOperator(t *testing.T) {
+func TestScanReportsWindowsOwnedByAnotherOperatorAndNeverAdoptsThem(t *testing.T) {
 	store := newMemoryStore()
-	teamID := identityservice.TeamID(10)
-	targetTeamID := identityservice.TeamID(20)
+	bindMain(store, 1, "main-user-shared")
 	bindMain(store, 2, "main-user-shared")
-	bindMain(store, 3, "main-user-shared")
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-shared", BitProfileID: "bit-profile-1", LocalStatus: ProfileActive}
+	teamID := identityservice.TeamID(2)
+	store.profiles["profile-owned-elsewhere"] = BrowserProfile{ID: "profile-owned-elsewhere", UserID: 2, TeamID: &teamID, BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-shared", Name: "同事的窗口", LocalStatus: ProfileActive}
 	service := newTestService(store)
-	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
-	target := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, Status: identityservice.UserStatusEnabled, TeamID: &targetTeamID}
 
-	profile, err := service.AssignProfileOwner(admin, "profile", target)
+	scan, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
+		MainUserID: "main-user-shared",
+		ObservedAt: testNow,
+		Profiles: []ProfileInput{
+			{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-shared", Name: "同事的窗口"},
+			{BitProfileID: "p2", ProfileUserID: "bit-user-2", MainUserID: "main-user-shared", Name: "自己的窗口"},
+		},
+	})
 	if err != nil {
-		t.Fatalf("AssignProfileOwner() error=%v", err)
+		t.Fatalf("SubmitScan() error = %v", err)
 	}
-	if profile.UserID != target.ID || profile.TeamID == nil || *profile.TeamID != targetTeamID {
-		t.Fatalf("assigned profile=%#v", profile)
+	conflicts := map[string]string{}
+	for _, profile := range scan.Profiles {
+		conflicts[profile.BitProfileID] = profile.OwnershipConflict
 	}
-	if stored := store.profiles["profile"]; stored.UserID != target.ID || stored.TeamID == nil || *stored.TeamID != targetTeamID {
-		t.Fatalf("stored profile=%#v", stored)
+	if conflicts["p1"] == "" {
+		t.Fatalf("p1 conflict not reported: %#v", scan.Profiles)
 	}
-	if len(store.audits) != 1 || store.audits[0].Action != "bitbrowser.profile.assign_owner" {
-		t.Fatalf("audits=%#v", store.audits)
-	}
-}
-
-func TestAssignProfileOwnerRejectsUnboundOrMismatchedTarget(t *testing.T) {
-	teamID := identityservice.TeamID(10)
-	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
-	operator := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID}
-	senior := identityservice.PublicUser{ID: 4, Role: identityservice.RoleSeniorOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID}
-
-	store := newMemoryStore()
-	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, MainUserID: "main-user-a", LocalStatus: ProfileActive}
-	service := newTestService(store)
-	if _, err := service.AssignProfileOwner(operator, "profile", operator); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("AssignProfileOwner(non-admin) error=%v, want ErrForbidden", err)
-	}
-	if _, err := service.AssignProfileOwner(admin, "profile", senior); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("AssignProfileOwner(senior target) error=%v, want ErrInvalidInput", err)
-	}
-	if _, err := service.AssignProfileOwner(admin, "profile", operator); !errors.Is(err, ErrBitNotBound) {
-		t.Fatalf("AssignProfileOwner(unbound target) error=%v, want ErrBitNotBound", err)
+	if conflicts["p2"] != "" {
+		t.Fatalf("p2 reported a conflict: %#v", scan.Profiles)
 	}
 
-	bindMain(store, 3, "main-user-b")
-	if _, err := service.AssignProfileOwner(admin, "profile", operator); !errors.Is(err, ErrBitMainUserMismatch) {
-		t.Fatalf("AssignProfileOwner(cross-main) error=%v, want ErrBitMainUserMismatch", err)
+	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID, []string{"p1", "p2"}); err != nil {
+		t.Fatalf("ConfirmScan() error = %v", err)
 	}
-
-	store.profiles["profile-same-main"] = BrowserProfile{ID: "profile-same-main", UserID: 2, TeamID: &teamID, MainUserID: "main-user-b", LocalStatus: ProfileActive}
-	store.profileAccountRefs["profile-same-main"] = true
-	if _, err := service.AssignProfileOwner(admin, "profile-same-main", operator); !errors.Is(err, ErrProfileReferenced) {
-		t.Fatalf("AssignProfileOwner(referenced) error=%v, want ErrProfileReferenced", err)
+	mine := store.profileList(1)
+	if len(mine) != 1 || mine[0].BitProfileID != "p2" {
+		t.Fatalf("scan adopted a window it does not own: %#v", mine)
+	}
+	if stored := store.profiles["profile-owned-elsewhere"]; stored.UserID != 2 || stored.Name != "同事的窗口" {
+		t.Fatalf("existing owner row was changed: %#v", stored)
 	}
 }
 
@@ -435,7 +420,7 @@ func TestSeniorCanReviewSameTeamScanButCannotConfirmIt(t *testing.T) {
 	if _, err := service.GetScan(actor, "scan-same-team"); err != nil {
 		t.Fatalf("GetScan(same team) error=%v", err)
 	}
-	if _, err := service.ConfirmScan(actor, "scan-same-team"); !errors.Is(err, ErrForbidden) {
+	if _, err := service.ConfirmScan(actor, "scan-same-team", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ConfirmScan(other owner) error=%v, want ErrForbidden", err)
 	}
 }
@@ -460,7 +445,7 @@ func TestConfirmScanAppliesProfilesWithoutChangingBinding(t *testing.T) {
 		t.Fatalf("SubmitScan() error = %v", err)
 	}
 
-	confirmed, err := service.ConfirmScan(actor, scan.ID)
+	confirmed, err := service.ConfirmScan(actor, scan.ID, []string{"p1", "p2"})
 	if err != nil {
 		t.Fatalf("ConfirmScan() error = %v", err)
 	}
@@ -498,7 +483,7 @@ func TestConfirmScanRejectsScanFromPreviousMainAccount(t *testing.T) {
 	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-b", ObservedAt: testNow, Rebind: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmScan(actor, scan.ID); !errors.Is(err, ErrBitMainUserMismatch) {
+	if _, err := service.ConfirmScan(actor, scan.ID, nil); !errors.Is(err, ErrBitMainUserMismatch) {
 		t.Fatalf("ConfirmScan(previous main) error = %v, want ErrBitMainUserMismatch", err)
 	}
 	if len(store.profiles) != 0 {
@@ -510,7 +495,7 @@ func TestConfirmScanRejectsUnboundExpiredAndRepeated(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := profileActor("user-1")
-	if _, err := service.ConfirmScan(actor, "missing"); !errors.Is(err, ErrScanNotFound) {
+	if _, err := service.ConfirmScan(actor, "missing", nil); !errors.Is(err, ErrScanNotFound) {
 		t.Fatalf("ConfirmScan(missing) error = %v", err)
 	}
 	if _, err := service.BindBitAccount(actor.ID, BitAccountBindInput{MainUserID: "main-user-1", ObservedAt: testNow}); err != nil {
@@ -522,22 +507,22 @@ func TestConfirmScanRejectsUnboundExpiredAndRepeated(t *testing.T) {
 		Profiles:   []ProfileInput{{BitProfileID: "p1", ProfileUserID: "bit-user-1", MainUserID: "main-user-1"}},
 	})
 
-	if _, err := service.ConfirmScan(profileActor("user-2"), scan.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := service.ConfirmScan(profileActor("user-2"), scan.ID, nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("other-user confirm error = %v", err)
 	}
 	expired := store.scans[scan.ID]
 	expired.ExpiresAt = expired.CreatedAt.Add(-time.Second)
 	store.scans[scan.ID] = expired
-	if _, err := service.ConfirmScan(actor, scan.ID); !errors.Is(err, ErrScanExpired) {
+	if _, err := service.ConfirmScan(actor, scan.ID, nil); !errors.Is(err, ErrScanExpired) {
 		t.Fatalf("expired confirm error = %v", err)
 	}
 
 	expired.ExpiresAt = expired.CreatedAt.Add(time.Hour)
 	store.scans[scan.ID] = expired
-	if _, err := service.ConfirmScan(actor, scan.ID); err != nil {
+	if _, err := service.ConfirmScan(actor, scan.ID, []string{"p1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmScan(actor, scan.ID); !errors.Is(err, ErrScanNotReady) {
+	if _, err := service.ConfirmScan(actor, scan.ID, nil); !errors.Is(err, ErrScanNotReady) {
 		t.Fatalf("repeated confirm error = %v", err)
 	}
 }
@@ -579,7 +564,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	if strings.Join(changed.Fields, ",") != "name,remark,proxy_type,proxy_host,proxy_port" {
 		t.Fatalf("changed fields = %v", changed.Fields)
 	}
-	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID); err != nil {
+	if _, err := service.ConfirmScan(profileActor("user-1"), scan.ID, []string{"p3"}); err != nil {
 		t.Fatal(err)
 	}
 	profiles := store.profileList(1)
@@ -690,6 +675,19 @@ func (s *memoryStore) GetProfile(profileID string) (BrowserProfile, bool, error)
 	return profile, found, nil
 }
 
+func (s *memoryStore) ListProfileOwners(mainUserID string) (map[string]identityservice.UserID, error) {
+	owners := map[string]identityservice.UserID{}
+	for _, profile := range s.profiles {
+		if profile.MainUserID != mainUserID {
+			continue
+		}
+		if _, exists := owners[profile.BitProfileID]; !exists {
+			owners[profile.BitProfileID] = profile.UserID
+		}
+	}
+	return owners, nil
+}
+
 func (s *memoryStore) GetProfileInScope(profileID string) (BrowserProfile, bool, error) {
 	profile, found := s.profiles[profileID]
 	if !found || !s.inScope(profile) {
@@ -708,7 +706,7 @@ func (s *memoryStore) FindScan(scanID string) (ProfileScan, bool, error) {
 	return cloneScan(scan), ok, nil
 }
 
-func (s *memoryStore) ApplyScan(scan ProfileScan, at time.Time) error {
+func (s *memoryStore) ApplyScan(scan ProfileScan, observedBitProfileIDs []string, at time.Time) error {
 	binding, bound := s.bindings[scan.UserID]
 	if !bound {
 		return ErrBitNotBound
@@ -717,8 +715,10 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, at time.Time) error {
 		return ErrBitMainUserMismatch
 	}
 	seen := map[string]struct{}{}
+	for _, bitID := range observedBitProfileIDs {
+		seen[bitID] = struct{}{}
+	}
 	for _, candidate := range scan.Profiles {
-		seen[candidate.BitProfileID] = struct{}{}
 		if existing, ok := s.findByScope(candidate.UserID, candidate.MainUserID, candidate.BitProfileID); ok {
 			candidate.ID = existing.ID
 			candidate.CreatedAt = existing.CreatedAt
@@ -779,21 +779,6 @@ func (s *memoryStore) ProfileHasAccountReferences(profileID string) (bool, error
 
 func (s *memoryStore) ProfileHasDependencies(profileID string) (bool, error) {
 	return s.profileAccountRefs[profileID], nil
-}
-
-func (s *memoryStore) AssignProfileOwner(profileID string, userID identityservice.UserID, teamID *identityservice.TeamID, actorID identityservice.UserID, at time.Time) error {
-	profile, ok := s.profiles[profileID]
-	if !ok {
-		return ErrProfileNotFound
-	}
-	profile.UserID = userID
-	profile.TeamID = cloneTeamID(teamID)
-	profile.UpdatedAt = at
-	s.profiles[profileID] = profile
-	s.audits = append(s.audits,
-		identityservice.AuditEvent{ActorUserID: actorID, Action: "bitbrowser.profile.assign_owner", TargetType: "browser_profile", TargetID: profileID, Summary: map[string]string{"user_id": strconv.FormatInt(int64(userID), 10)}, CreatedAt: at},
-	)
-	return nil
 }
 
 func (s *memoryStore) visibleProfiles() []BrowserProfile {

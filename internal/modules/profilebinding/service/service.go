@@ -81,12 +81,14 @@ type Store interface {
 	GetProfileInScope(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
-	ApplyScan(scan ProfileScan, at time.Time) error
+	ApplyScan(scan ProfileScan, observedBitProfileIDs []string, at time.Time) error
 	DeleteProfile(id string) error
 	UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
 	ProfileHasDependencies(profileID string) (bool, error)
-	AssignProfileOwner(profileID string, userID identityservice.UserID, teamID *identityservice.TeamID, actorID identityservice.UserID, at time.Time) error
+	// ListProfileOwners 把 bit_profile_id 映射到同一比特主账号下已登记的运营，
+	// 让扫描能暴露归属冲突，而不是静默认领或改派他人的记录。
+	ListProfileOwners(mainUserID string) (map[string]identityservice.UserID, error)
 }
 
 type Service struct {
@@ -222,6 +224,11 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		}
 		return diff[i].Kind < diff[j].Kind
 	})
+	owners, err := s.store.ListProfileOwners(mainUserID)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	annotateOwnership(candidates, owners, existingByBitID, actor.ID)
 	scan := ProfileScan{
 		ID: s.newID("profile_scan"), UserID: actor.ID, TeamID: actor.TeamID, MainUserID: mainUserID,
 		Status: ScanReady, Profiles: candidates, Diff: diff, CreatedAt: now, ExpiresAt: now.Add(s.scanTTL),
@@ -243,7 +250,32 @@ func (s *Service) GetScan(actor identityservice.PublicUser, scanID string) (Prof
 	if !validActor(actor) || !actor.CanAccessOwnedResource(scan.UserID, scan.TeamID) {
 		return ProfileScan{}, ErrForbidden
 	}
+	if scan.UserID == actor.ID {
+		if owners, ownerErr := s.store.ListProfileOwners(scan.MainUserID); ownerErr != nil {
+			return ProfileScan{}, ownerErr
+		} else {
+			annotateOwnership(scan.Profiles, owners, nil, actor.ID)
+		}
+	}
 	return scan, nil
+}
+
+// annotateOwnership 标记同一比特主账号下已被其他运营登记的候选窗口。记录仍归
+// 原所有者，后扫描到的人只能看到，不能认领或转移。
+func annotateOwnership(profiles []BrowserProfile, owners map[string]identityservice.UserID, own map[string]BrowserProfile, actorID identityservice.UserID) {
+	for index := range profiles {
+		profile := &profiles[index]
+		if _, isOwn := own[profile.BitProfileID]; isOwn {
+			profile.OwnershipConflict = ""
+			continue
+		}
+		owner, exists := owners[profile.BitProfileID]
+		if !exists || owner == actorID {
+			profile.OwnershipConflict = ""
+			continue
+		}
+		profile.OwnershipConflict = "该窗口已登记在其他运营名下，不会自动登记或转移归属"
+	}
 }
 
 // BindBitAccount 记录 Local Agent 从正在运行的 BitBrowser 读到的主账号，是唯一
@@ -272,7 +304,9 @@ func (s *Service) BindBitAccount(userID identityservice.UserID, input BitAccount
 	return s.store.BindBitAccount(userID, mainUserID, input.Rebind, s.now())
 }
 
-func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (ProfileScan, error) {
+// ConfirmScan 只处理运营自己的窗口：预览中勾选的新窗口才会登记，属于他人的
+// 记录既不认领也不改派。
+func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, adoptBitProfileIDs []string) (ProfileScan, error) {
 	scan, err := s.GetScan(actor, scanID)
 	if err != nil {
 		return ProfileScan{}, err
@@ -297,14 +331,54 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (
 	if binding.MainUserID != scan.MainUserID {
 		return ProfileScan{}, ErrBitMainUserMismatch
 	}
-	scan.Status = ScanConfirmed
-	scan.ConfirmedAt = &now
-	// 确认扫描只应用 Profile。绑定由 Local Agent 通过 /local-agent/bit-account/bind
-	// 观察写入，扫描不能顺带建立或更换主账号。
-	if err := s.store.ApplyScan(scan, now); err != nil {
+	owners, err := s.store.ListProfileOwners(scan.MainUserID)
+	if err != nil {
 		return ProfileScan{}, err
 	}
-	return scan, nil
+	adopted := make(map[string]struct{}, len(adoptBitProfileIDs))
+	for _, bitID := range adoptBitProfileIDs {
+		adopted[strings.TrimSpace(bitID)] = struct{}{}
+	}
+	added := make(map[string]struct{})
+	for _, item := range scan.Diff {
+		if item.Kind == DiffAdded {
+			added[item.BitProfileID] = struct{}{}
+		}
+	}
+	observed := make([]string, 0, len(scan.Profiles))
+	applied := make([]BrowserProfile, 0, len(scan.Profiles))
+	for _, profile := range scan.Profiles {
+		observed = append(observed, profile.BitProfileID)
+		if _, isAdded := added[profile.BitProfileID]; isAdded {
+			if profile.OwnershipConflict != "" {
+				continue
+			}
+			if owner, exists := owners[profile.BitProfileID]; exists && owner != actor.ID {
+				continue
+			}
+			if _, selected := adopted[profile.BitProfileID]; !selected {
+				continue
+			}
+		}
+		applied = append(applied, profile)
+	}
+	scan.Status = ScanConfirmed
+	scan.ConfirmedAt = &now
+	scan.Profiles = applied
+	// 确认扫描只应用 Profile。绑定由 Local Agent 通过 /local-agent/bit-account/bind
+	// 观察写入，扫描不能顺带建立或更换主账号。
+	if err := s.store.ApplyScan(scan, observed, now); err != nil {
+		return ProfileScan{}, err
+	}
+	scan.Profiles = nil
+	stored, found, err := s.store.FindScan(scan.ID)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	if !found {
+		return ProfileScan{}, ErrScanNotFound
+	}
+	return stored, nil
 }
 
 // observationFresh 判断观察是否仍可用于决策。零值表示 Agent 没有说明观察时间，
@@ -422,7 +496,15 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 	if !found {
 		return BrowserProfile{}, ErrProfileNotFound
 	}
-	if actor.Role != identityservice.RoleAdmin && profile.UserID != actor.ID {
+	isOwner := actor.Role == identityservice.RoleAdmin || profile.UserID == actor.ID
+	// 高级运营可以维护可见成员的 Cloud 运营备注；业务启停仍归窗口所有者，
+	// 避免用隐藏或过期的运行状态去停用他人窗口。
+	isTeamSenior := actor.Role == identityservice.RoleSeniorOperator && actor.TeamID != nil &&
+		profile.TeamID != nil && *actor.TeamID == *profile.TeamID
+	if !isOwner && !(isTeamSenior && cloudRemark != nil) {
+		return BrowserProfile{}, ErrForbidden
+	}
+	if !isOwner && businessStatus != nil {
 		return BrowserProfile{}, ErrForbidden
 	}
 	if businessStatus != nil && *businessStatus != ProfileBusinessEnabled && *businessStatus != ProfileBusinessDisabled {
@@ -439,49 +521,6 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 		return BrowserProfile{}, ErrProfileNotFound
 	}
 	return updated, nil
-}
-
-func (s *Service) AssignProfileOwner(actor identityservice.PublicUser, profileID string, target identityservice.PublicUser) (BrowserProfile, error) {
-	if !validActor(actor) || actor.Role != identityservice.RoleAdmin {
-		return BrowserProfile{}, ErrForbidden
-	}
-	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
-	if err != nil {
-		return BrowserProfile{}, err
-	}
-	if !found {
-		return BrowserProfile{}, ErrProfileNotFound
-	}
-	if target.ID <= 0 || target.Status != identityservice.UserStatusEnabled || target.Role != identityservice.RoleOperator || target.TeamID == nil {
-		return BrowserProfile{}, ErrInvalidInput
-	}
-	// 归属只在同一主账号内成立：目标用户必须已绑定，且 Profile 属于该主账号。
-	// 跨主账号分配会把目标用户根本看不到的行悄悄转过去。
-	binding, bound, err := s.store.FindBinding(target.ID)
-	if err != nil {
-		return BrowserProfile{}, err
-	}
-	if !bound {
-		return BrowserProfile{}, ErrBitNotBound
-	}
-	if profile.MainUserID != binding.MainUserID {
-		return BrowserProfile{}, ErrBitMainUserMismatch
-	}
-	referenced, err := s.store.ProfileHasAccountReferences(profile.ID)
-	if err != nil {
-		return BrowserProfile{}, err
-	}
-	if referenced {
-		return BrowserProfile{}, ErrProfileReferenced
-	}
-	now := s.now()
-	if err := s.store.AssignProfileOwner(profile.ID, target.ID, target.TeamID, actor.ID, now); err != nil {
-		return BrowserProfile{}, err
-	}
-	profile.UserID = target.ID
-	profile.TeamID = cloneTeamID(target.TeamID)
-	profile.UpdatedAt = now
-	return profile, nil
 }
 
 func (s *Service) GetActiveProfile(actor identityservice.PublicUser, profileID string) (BrowserProfile, error) {

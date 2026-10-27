@@ -15,7 +15,6 @@ func TestProfileBindingServiceExposesPackageLevelOperations(t *testing.T) {
 		{name: "ConfirmScan", got: ConfirmScan},
 		{name: "BindBitAccount", got: BindBitAccount},
 		{name: "ListProfiles", got: ListProfiles},
-		{name: "AssignProfileOwner", got: AssignProfileOwner},
 	} {
 		if reflect.TypeOf(item.got).Kind() != reflect.Func {
 			t.Fatalf("%s is not a package-level function", item.name)

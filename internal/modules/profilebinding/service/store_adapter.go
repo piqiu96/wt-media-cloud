@@ -38,8 +38,8 @@ func (mysqlStore) CreateScan(scan model.ProfileScan) error { return repository.C
 func (mysqlStore) FindScan(scanID string) (model.ProfileScan, bool, error) {
 	return repository.FindScan(scanID)
 }
-func (mysqlStore) ApplyScan(scan model.ProfileScan, at time.Time) error {
-	return repository.ApplyScan(scan, at)
+func (mysqlStore) ApplyScan(scan model.ProfileScan, observedBitProfileIDs []string, at time.Time) error {
+	return repository.ApplyScan(scan, observedBitProfileIDs, at)
 }
 func (mysqlStore) DeleteProfile(id string) error { return repository.DeleteProfile(id) }
 func (mysqlStore) UpdateProfile(profileID string, cloudRemark *string, businessStatus *model.ProfileBusinessStatus, at time.Time) error {
@@ -51,6 +51,6 @@ func (mysqlStore) ProfileHasAccountReferences(profileID string) (bool, error) {
 func (mysqlStore) ProfileHasDependencies(profileID string) (bool, error) {
 	return repository.ProfileHasDependencies(profileID)
 }
-func (mysqlStore) AssignProfileOwner(profileID string, userID identityservice.UserID, teamID *identityservice.TeamID, actorID identityservice.UserID, at time.Time) error {
-	return repository.AssignProfileOwner(profileID, userID, teamID, actorID, at)
+func (mysqlStore) ListProfileOwners(mainUserID string) (map[string]identityservice.UserID, error) {
+	return repository.ListProfileOwners(mainUserID)
 }

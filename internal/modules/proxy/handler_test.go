@@ -16,3 +16,12 @@ func TestRegisterRoutesBindsProxyEndpoints(t *testing.T) {
 		t.Fatalf("unauthenticated proxy list status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
 	}
 }
+
+func TestRegisterRoutesBindsProfileProxyUnbind(t *testing.T) {
+	engine := server.New()
+	RegisterRoutes(engine)
+	response := ut.PerformRequest(engine.Engine, consts.MethodPost, "/api/v1/proxies/profile-unbind", nil)
+	if response.Result().StatusCode() != consts.StatusUnauthorized {
+		t.Fatalf("unauthenticated profile unbind status = %d, body = %s", response.Result().StatusCode(), response.Result().Body())
+	}
+}

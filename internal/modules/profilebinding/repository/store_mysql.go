@@ -427,11 +427,11 @@ func bindBitAccount(db *gorm.DB, userID sharedidentity.UserID, mainUserID string
 	}, nil
 }
 
-func ApplyScan(scan model.ProfileScan, at time.Time) error {
-	return applyScan(database.DB(), scan, at)
+func ApplyScan(scan model.ProfileScan, observedBitProfileIDs []string, at time.Time) error {
+	return applyScan(database.DB(), scan, observedBitProfileIDs, at)
 }
 
-func applyScan(db *gorm.DB, scan model.ProfileScan, at time.Time) error {
+func applyScan(db *gorm.DB, scan model.ProfileScan, observedBitProfileIDs []string, at time.Time) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	// 提交扫描前再次核对绑定：扫描暂存期间用户可能已重绑，旧扫描不能写入新主账号。
@@ -463,9 +463,11 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, at time.Time) error {
 			return err
 		}
 	}
-	bitIDs := make([]string, 0, len(scan.Profiles))
-	for _, profile := range scan.Profiles {
-		bitIDs = append(bitIDs, profile.BitProfileID)
+	// 缺失判定要用全部观测窗口，包括运营选择不登记的：未勾选不代表窗口消失，
+	// 同一窗口的旧记录因此不能标为缺失。
+	bitIDs := make([]string, 0, len(observedBitProfileIDs))
+	for _, bitID := range observedBitProfileIDs {
+		bitIDs = append(bitIDs, bitID)
 	}
 	notIn := placeholders(len(bitIDs))
 	if len(bitIDs) > 0 {
@@ -653,6 +655,50 @@ func unbindProxy(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserP
 	return profile, nil
 }
 
+// ReleaseProxy 只解除正式托管关系，保留窗口的观测代理配置，也就是「改为比特自管」：
+// 比特继续使用该地址，代理资源不再占用窗口配额。
+func ReleaseProxy(profileID, expectedProxyID string) (model.BrowserProfile, error) {
+	result, err := execSQL(database.DB(),
+		`UPDATE browser_profiles SET proxy_id = NULL, updated_at = ? WHERE id = ? AND proxy_id = ?`,
+		time.Now(), profileID, expectedProxyID,
+	)
+	if err != nil {
+		return model.BrowserProfile{}, err
+	}
+	if result == 0 {
+		return model.BrowserProfile{}, model.ErrProfileNotFound
+	}
+	profile, found, err := getProfile(database.DB(), profileID)
+	if err != nil || !found {
+		return model.BrowserProfile{}, model.ErrProfileNotFound
+	}
+	return profile, nil
+}
+
+// ClearObservedProxy 清掉比特自管窗口的观测地址。proxy_id 条件用于挡住并发分配：
+// 对方已建立托管关系时，这次过期的清除不会把关系覆盖掉。
+func ClearObservedProxy(profileID string) (model.BrowserProfile, error) {
+	return clearObservedProxy(database.DB(), profileID)
+}
+
+func clearObservedProxy(db *gorm.DB, profileID string) (model.BrowserProfile, error) {
+	result, err := execSQL(db,
+		`UPDATE browser_profiles SET proxy_type = NULL, proxy_host = NULL, proxy_port = 0, updated_at = ? WHERE id = ? AND COALESCE(proxy_id, '') = ''`,
+		time.Now(), profileID,
+	)
+	if err != nil {
+		return model.BrowserProfile{}, err
+	}
+	if result == 0 {
+		return model.BrowserProfile{}, model.ErrProfileNotFound
+	}
+	profile, found, err := getProfile(db, profileID)
+	if err != nil || !found {
+		return model.BrowserProfile{}, model.ErrProfileNotFound
+	}
+	return profile, nil
+}
+
 func ProfileHasAccountReferences(profileID string) (bool, error) {
 	return profileHasAccountReferences(database.DB(), profileID)
 }
@@ -665,36 +711,23 @@ func profileHasAccountReferences(db *gorm.DB, profileID string) (bool, error) {
 	return count > 0, nil
 }
 
-func AssignProfileOwner(profileID string, userID sharedidentity.UserID, teamID *sharedidentity.TeamID, actorID sharedidentity.UserID, at time.Time) error {
-	return assignProfileOwner(database.DB(), profileID, userID, teamID, actorID, at)
-}
-
-func assignProfileOwner(db *gorm.DB, profileID string, userID sharedidentity.UserID, teamID *sharedidentity.TeamID, actorID sharedidentity.UserID, at time.Time) error {
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	result, err := execSQL(tx,
-		`UPDATE browser_profiles SET user_id = ?, team_id = ?, updated_at = ? WHERE id = ?`,
-		userID, sqlTeamID(teamID), at, profileID,
-	)
+// ListProfileOwners 返回同一比特主账号下每条 Cloud 记录的当前归属。扫描用它区分
+// 「我的」「已登记」「别人的」，再决定是否提供登记入口。
+func ListProfileOwners(mainUserID string) (map[string]sharedidentity.UserID, error) {
+	rows, err := queryRows(database.DB(),
+		`SELECT bit_profile_id, user_id FROM browser_profiles WHERE main_user_id = ?`, mainUserID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if result == 0 {
-		return model.ErrProfileNotFound
+	defer rows.Close()
+	owners := make(map[string]sharedidentity.UserID)
+	for rows.Next() {
+		var bitProfileID string
+		var userID sharedidentity.UserID
+		if err := rows.Scan(&bitProfileID, &userID); err != nil {
+			return nil, err
+		}
+		owners[bitProfileID] = userID
 	}
-	summary, _ := json.Marshal(map[string]any{"user_id": userID, "team_id": teamID})
-	if _, err := execSQL(tx,
-		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.NewID("audit"), actorID, "bitbrowser.profile.assign_owner", "browser_profile", profileID, summary, at,
-	); err != nil {
-		return err
-	}
-	return tx.Commit().Error
-}
-
-func sqlTeamID(teamID *sharedidentity.TeamID) any {
-	if teamID == nil {
-		return nil
-	}
-	return *teamID
+	return owners, rows.Err()
 }

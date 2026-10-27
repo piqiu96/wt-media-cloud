@@ -20,10 +20,6 @@ type updateProfileRequest struct {
 	BusinessStatus *profileservice.ProfileBusinessStatus `json:"business_status"`
 }
 
-type assignProfileOwnerRequest struct {
-	UserID identityservice.UserID `json:"user_id"`
-}
-
 func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -57,7 +53,13 @@ func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	scan, err := profileservice.ConfirmScan(actor, c.Param("scan_id"))
+	var req struct {
+		AdoptBitProfileIDs []string `json:"adopt_bit_profile_ids"`
+	}
+	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {
+		return
+	}
+	scan, err := profileservice.ConfirmScan(actor, c.Param("scan_id"), req.AdoptBitProfileIDs)
 	if err != nil {
 		writeProfileError(c, err)
 		return
@@ -201,32 +203,6 @@ func UpdateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	profile, err := profileservice.UpdateProfile(actor, c.Param("id"), req.CloudRemark, req.BusinessStatus)
-	if err != nil {
-		writeProfileError(c, err)
-		return
-	}
-	api.Success(c, profile)
-}
-func AssignBrowserProfileOwner(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req assignProfileOwnerRequest
-	if !api.DecodeJSON(c, &req) || req.UserID <= 0 {
-		writeProfileError(c, profileservice.ErrInvalidInput)
-		return
-	}
-	target, found, err := identityservice.ResolveUser(req.UserID)
-	if err != nil {
-		writeProfileError(c, err)
-		return
-	}
-	if !found {
-		writeProfileError(c, profileservice.ErrInvalidInput)
-		return
-	}
-	profile, err := profileservice.AssignProfileOwner(actor, c.Param("id"), target)
 	if err != nil {
 		writeProfileError(c, err)
 		return

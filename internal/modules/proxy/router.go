@@ -22,10 +22,11 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/proxies/import", ImportProxies)
 	h.POST("/api/v1/proxies/local-scan/preview", PreviewLocalProxyScan)
 	h.POST("/api/v1/proxies/local-scan/confirm", ConfirmLocalProxyScan)
+	h.POST("/api/v1/proxies/profile-unbind", UnbindProfileProxy)
 	h.POST("/api/v1/proxies/:id/check", CheckProxy)
-	h.POST("/api/v1/proxies/:id/check/background", CheckProxyInBackground)
 	h.POST("/api/v1/proxies/:id/assign", AssignProxy)
 	h.POST("/api/v1/proxies/:id/assign-batch", AssignProxyBatch)
 	h.POST("/api/v1/proxies/:id/unbind", UnbindProxy)
+	h.POST("/api/v1/proxies/:id/release", ReleaseProxy)
 	h.POST("/api/v1/proxies/:id/quota", SetProxyQuota)
 }

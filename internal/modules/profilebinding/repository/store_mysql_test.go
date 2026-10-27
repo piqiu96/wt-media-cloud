@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -158,7 +159,7 @@ func TestApplyScanMarksMissingOnlyInsideTheCurrentMainScope(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := applyScan(db, scan, now); err != nil {
+	if err := applyScan(db, scan, []string{"bit-1"}, now); err != nil {
 		t.Fatalf("applyScan() error = %v", err)
 	}
 }
@@ -173,7 +174,7 @@ func TestApplyScanRejectsScanFromPreviousMainAccount(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id"}).AddRow("main-user-b"))
 	mock.ExpectRollback()
 
-	err := applyScan(db, model.ProfileScan{ID: "scan-1", UserID: 1, MainUserID: "main-user-a"}, now)
+	err := applyScan(db, model.ProfileScan{ID: "scan-1", UserID: 1, MainUserID: "main-user-a"}, nil, now)
 	if err != model.ErrBitMainUserMismatch {
 		t.Fatalf("applyScan() error = %v, want ErrBitMainUserMismatch", err)
 	}
@@ -187,6 +188,41 @@ func TestGetProfileInScopeJoinsTheOwnerBinding(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(strings.Split(profileColumnsSQL, ", ")))
 	if _, found, err := getProfileInScope(db, "bp-1"); err != nil || found {
 		t.Fatalf("getProfileInScope() found=%v err=%v", found, err)
+	}
+}
+
+func TestClearObservedProxyOnlyClearsUnmanagedWindows(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE browser_profiles SET proxy_type = NULL, proxy_host = NULL, proxy_port = 0, updated_at = ? WHERE id = ? AND COALESCE(proxy_id, '') = ''")).
+		WithArgs(sqlmock.AnyArg(), "bp-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + profileColumnsSQL + " FROM browser_profiles WHERE id = ?")).
+		WithArgs("bp-1").
+		WillReturnRows(sqlmock.NewRows(strings.Split(profileColumnsSQL, ", ")))
+
+	_, err := clearObservedProxy(db, "bp-1")
+	if !errors.Is(err, model.ErrProfileNotFound) {
+		t.Fatalf("clearObservedProxy() error = %v, want ErrProfileNotFound for a vanished row", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClearObservedProxyLeavesAssignmentsAlone(t *testing.T) {
+	db, mock, closeDB := newProfileMockGORM(t)
+	defer closeDB()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE browser_profiles SET proxy_type = NULL, proxy_host = NULL, proxy_port = 0, updated_at = ? WHERE id = ? AND COALESCE(proxy_id, '') = ''")).
+		WithArgs(sqlmock.AnyArg(), "bp-1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	_, err := clearObservedProxy(db, "bp-1")
+	if !errors.Is(err, model.ErrProfileNotFound) {
+		t.Fatalf("clearObservedProxy() error = %v, want ErrProfileNotFound when the managed relation already exists", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

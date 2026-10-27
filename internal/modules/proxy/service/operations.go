@@ -2,21 +2,30 @@ package service
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/repository"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
-func BulkParse(lines []string) []dto.BulkImportRow {
-	return newProxyService(mysqlStore{}).BulkParse(lines)
+func BulkParse(lines []string, existingKeys []StoredConnectionKey) []dto.BulkImportRow {
+	return newProxyService(mysqlStore{}).BulkParse(lines, existingKeys)
 }
 
-func BulkImport(rows []dto.BulkImportRow) ([]model.ProxyConfig, error) {
-	return newProxyService(mysqlStore{}).BulkImport(rows)
+func Import(rows []dto.ImportRowInput, teamID sharedidentity.TeamID) (dto.ImportResult, error) {
+	svc := newProxyService(mysqlStore{})
+	keys, err := svc.store.ListConnectionKeys(teamID)
+	if err != nil {
+		return dto.ImportResult{}, err
+	}
+	return svc.Import(rows, teamID, keys)
+}
+
+func LookupConnectionKeys(teamID sharedidentity.TeamID) ([]StoredConnectionKey, error) {
+	return newProxyService(mysqlStore{}).store.ListConnectionKeys(teamID)
 }
 
 func List(filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
@@ -28,33 +37,47 @@ func ParseAddress(raw string) (dto.CreateProxyInput, error) {
 }
 
 func Get(id string) (model.ProxyConfig, error) { return newProxyService(mysqlStore{}).Get(id) }
-func Create(input dto.CreateProxyInput) (model.ProxyConfig, error) {
-	return newProxyService(mysqlStore{}).Create(input)
+
+func Create(input dto.CreateProxyInput, teamID sharedidentity.TeamID) (model.ProxyConfig, error) {
+	return newProxyService(mysqlStore{}).Create(input, teamID)
 }
-func CreateDiscovered(input dto.CreateProxyInput, observedProfileCount int) (model.ProxyConfig, error) {
-	return newProxyService(mysqlStore{}).CreateDiscovered(input, observedProfileCount)
+
+func CreateDiscovered(input dto.CreateProxyInput, teamID sharedidentity.TeamID, observedProfileCount int) (model.ProxyConfig, error) {
+	return newProxyService(mysqlStore{}).CreateDiscovered(input, teamID, observedProfileCount)
 }
-func Update(id string, input dto.CreateProxyInput) (model.ProxyConfig, error) {
-	return newProxyService(mysqlStore{}).Update(id, input)
+
+func Update(id string, input dto.CreateProxyInput, govern bool) (model.ProxyConfig, error) {
+	return newProxyService(mysqlStore{}).Update(id, input, govern)
 }
+
 func UpdateStatus(id string, status model.BusinessStatus) (model.ProxyConfig, error) {
 	return newProxyService(mysqlStore{}).UpdateStatus(id, status)
 }
+
 func Delete(id string) error { return newProxyService(mysqlStore{}).Delete(id) }
-func TriggerCheck(id string) (model.ProxyConfig, error) {
-	return newProxyService(mysqlStore{}).TriggerCheck(id)
-}
+
 func CheckQuota(proxyID string, currentAssigned int) (bool, error) {
 	return newProxyService(mysqlStore{}).CheckQuota(proxyID, currentAssigned)
 }
+
 func CheckAssignable(proxy model.ProxyConfig) error {
 	return newProxyService(mysqlStore{}).CheckAssignable(proxy)
 }
+
+func AssignmentBlockReason(proxy model.ProxyConfig, remaining int) string {
+	return AssignmentBlocker(proxy, time.Now(), remaining)
+}
+
 func SetMaxProfileCount(proxyID string, maxProfiles int) (model.ProxyConfig, error) {
 	return newProxyService(mysqlStore{}).SetMaxProfileCount(proxyID, maxProfiles)
 }
-func RecordCheckResult(id, result string) (model.ProxyConfig, error) {
-	return newProxyService(mysqlStore{}).RecordCheckResult(id, result)
+
+func RecordCheckResult(id string, checked dto.ProxyCheckInput, result string) (model.ProxyConfig, bool, error) {
+	return newProxyService(mysqlStore{}).RecordCheckResult(id, checked, result)
+}
+
+func WithAssignmentLock(proxyID string, fn func() error) error {
+	return newProxyService(mysqlStore{}).WithAssignmentLock(proxyID, fn)
 }
 
 type (
@@ -66,16 +89,35 @@ type (
 	ProxyMutationResult   = dto.ProxyMutationResult
 )
 
-func CheckProxy(ctx context.Context, input dto.ProxyCheckInput) (dto.ProxyCheckResult, error) {
-	result, err := agentclient.Get().CheckProxy(ctx, agentclient.ProxyCheckRequest{
-		ProxyID: input.ProxyID, ProxyProtocol: string(input.ProxyProtocol), Host: input.Host, Port: input.Port,
-	})
+// CheckProxy 探测已保存的代理。检测在 Cloud 进程内执行，不依赖本机 Agent，
+// 因此与哪台工作站在线无关，也不会触碰浏览器窗口。
+func CheckProxy(id string) (model.ProxyConfig, dto.ProxyCheckResult, error) {
+	svc := newProxyService(mysqlStore{})
+	proxy, err := svc.Get(id)
 	if err != nil {
-		return dto.ProxyCheckResult{}, err
+		return model.ProxyConfig{}, dto.ProxyCheckResult{}, err
 	}
-	return dto.ProxyCheckResult{Connectivity: result.Connectivity}, nil
+	result := svc.Probe(proxy, ProbeOptions{})
+	updated, applied, err := svc.RecordCheckResult(id, dto.ProxyCheckInput{
+		ProxyID:       proxy.ID,
+		ProxyProtocol: proxy.ProxyProtocol,
+		Host:          proxy.Host,
+		Port:          proxy.Port,
+	}, result.Connectivity)
+	if err != nil {
+		return model.ProxyConfig{}, result, err
+	}
+	if !applied {
+		return updated, dto.ProxyCheckResult{
+			Connectivity: CheckInvalid,
+			Reason:       "代理地址在检测期间被修改，本次结果已丢弃，请重新检测",
+		}, nil
+	}
+	return updated, result, nil
 }
 
+// ExtractProxy 仍在运营工作站执行：动态代理商 URL 要用运营可用的网络抓取，
+// 取到的地址再由 Cloud 保存并检测。
 func ExtractProxy(ctx context.Context, input dto.ProxyExtractionInput) (dto.ProxyExtractionResult, error) {
 	result, err := agentclient.Get().ExtractProxy(ctx, agentclient.ProxyExtractionRequest{
 		ExtractURL: input.ExtractURL, ProxyProtocol: string(input.ProxyProtocol),
@@ -103,36 +145,27 @@ func MutateProxy(ctx context.Context, input dto.ProxyMutationInput) (dto.ProxyMu
 	}, nil
 }
 
+// MarkExpiringProxies 保留为调度入口，但到期状态改为读取时由 expires_at 现算。
+// 任务只汇报页面会显示的到期项，不再把「已到期」写进检测结果列，避免健康代理
+// 被所有读取方当成检测失败。
 func MarkExpiringProxies(ctx context.Context) ([]model.ProxyConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
+	deadline := now.Add(7 * 24 * time.Hour)
 	proxies, err := repository.List(repository.ProxyFilter{BusinessStatus: string(model.BizActive), Limit: 1000})
 	if err != nil {
 		return nil, err
 	}
-	updated := make([]model.ProxyConfig, 0)
+	expiring := make([]model.ProxyConfig, 0)
 	for _, proxy := range proxies {
-		if proxy.ExpiresAt == nil || proxy.ExpiresAt.After(now.Add(7*24*time.Hour)) || proxy.ExpiresAt.Before(now) {
+		if proxy.ExpiresAt == nil {
 			continue
 		}
-		if strings.HasPrefix(proxy.LastCheckResult, "expiring_") {
-			continue
+		if proxy.ExpiresAt.Before(deadline) {
+			expiring = append(expiring, proxy)
 		}
-		label := "expiring_7days"
-		switch {
-		case proxy.ExpiresAt.Before(now.Add(24 * time.Hour)):
-			label = "expiring_today"
-		case proxy.ExpiresAt.Before(now.Add(3 * 24 * time.Hour)):
-			label = "expiring_3days"
-		}
-		proxy.LastCheckResult = label
-		proxy.UpdatedAt = now
-		if err := repository.Update(proxy); err != nil {
-			return updated, err
-		}
-		updated = append(updated, proxy)
 	}
-	return updated, nil
+	return expiring, nil
 }

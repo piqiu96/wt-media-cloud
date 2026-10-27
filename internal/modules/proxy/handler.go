@@ -5,26 +5,26 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
-	cloudagentservice "github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	proxyservice "github.com/wt-media/wt-media-cloud/internal/modules/proxy/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
-	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
 type LocalProxyChange struct {
-	Kind           string `json:"kind"`
-	ProfileID      string `json:"profile_id"`
-	BitProfileID   string `json:"bit_profile_id"`
-	CurrentProxyID string `json:"current_proxy_id,omitempty"`
-	TargetProxyID  string `json:"target_proxy_id,omitempty"`
-	ProxyProtocol  string `json:"proxy_protocol,omitempty"`
-	Host           string `json:"host,omitempty"`
-	Port           int    `json:"port,omitempty"`
+	Kind            string `json:"kind"`
+	ProfileID       string `json:"profile_id"`
+	BitProfileID    string `json:"bit_profile_id"`
+	CurrentProxyID  string `json:"current_proxy_id,omitempty"`
+	TargetProxyID   string `json:"target_proxy_id,omitempty"`
+	ProxyProtocol   string `json:"proxy_protocol,omitempty"`
+	Host            string `json:"host,omitempty"`
+	Port            int    `json:"port,omitempty"`
+	OwnershipNotice string `json:"ownership_notice,omitempty"`
 }
 
 type LocalProxyScanPreview struct {
@@ -50,18 +50,40 @@ type ProxyBatchAssignResult struct {
 	Failed    []ProxyBatchAssignFailure              `json:"failed"`
 }
 
+// proxyView 在存储行之外补页面要展示的事实。凭据仍只随详情处理器返回。
+type proxyView struct {
+	proxyservice.ProxyConfig
+	TeamName          string `json:"team_name,omitempty"`
+	Expired           bool   `json:"expired"`
+	AssignmentBlocker string `json:"assignment_blocker,omitempty"`
+}
+
 var (
 	errProfileProxyUnauthorized = errors.New("profile proxy operation is forbidden")
 	errProxyQuotaFull           = errors.New("proxy profile quota is full")
 	errProxyReadback            = errors.New("proxy agent readback failed")
+	errProxyForbidden           = errors.New("proxy operation is forbidden")
+	errProxyTeamRequired        = errors.New("proxy team is required")
+	errProxyTeamUnknown         = errors.New("proxy team does not exist")
 )
 
 func ListProxies(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
+	requestedTeam, err := requestedTeamID(actor, c.Query("team_id"))
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	scope, err := proxyTeamScope(actor, requestedTeam)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
 	proxies, err := proxyservice.List(proxyservice.ProxyFilter{
+		TeamID:         scope,
 		BusinessStatus: c.Query("business_status"),
 		Supplier:       c.Query("supplier"),
 		Region:         c.Query("region"),
@@ -72,20 +94,19 @@ func ListProxies(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
+	teamNames := newTeamNameResolver()
+	views := make([]proxyView, 0, len(proxies))
 	for index := range proxies {
 		assigned, countErr := profilebindingservice.CountProfilesByProxyID(proxies[index].ID)
 		if countErr != nil {
 			api.InternalError(c, "代理关联窗口查询失败")
 			return
 		}
-		proxies[index].AssignedProfileCount = assigned
-		proxies[index].RemainingProfileCount = max(0, proxyservice.NormalizedMaxProfileCount(proxies[index].MaxProfileCount)-assigned)
+		views = append(views, buildProxyView(actor, proxies[index], assigned, teamNames, false))
 	}
-	for index := range proxies {
-		proxies[index] = publicProxy(proxies[index])
-	}
-	api.Success(c, proxies)
+	api.Success(c, views)
 }
+
 func ProxyRecommendations(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -105,15 +126,23 @@ func ProxyRecommendations(ctx context.Context, c *hertzapp.RequestContext) {
 		}
 		targets = append(targets, profile)
 	}
-	candidates, err := proxyservice.List(proxyservice.ProxyFilter{Limit: 200})
+	scope, err := proxyTeamScope(actor, nil)
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	recommended := make([]proxyservice.ProxyConfig, 0, len(candidates))
+	candidates, err := proxyservice.List(proxyservice.ProxyFilter{TeamID: scope, Limit: 200})
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	teamNames := newTeamNameResolver()
+	recommended := make([]proxyView, 0, len(candidates))
 	for _, candidate := range candidates {
-		if proxyservice.CheckAssignable(candidate) != nil {
-			continue
+		assigned, countErr := profilebindingservice.CountProfilesByProxyID(candidate.ID)
+		if countErr != nil {
+			api.InternalError(c, "代理关联窗口查询失败")
+			return
 		}
 		required := 0
 		for _, target := range targets {
@@ -121,27 +150,17 @@ func ProxyRecommendations(ctx context.Context, c *hertzapp.RequestContext) {
 				required++
 			}
 		}
-		if required > 0 {
-			assigned, countErr := profilebindingservice.CountProfilesByProxyID(candidate.ID)
-			if countErr != nil {
-				api.InternalError(c, "代理关联窗口查询失败")
-				return
-			}
-			available, quotaErr := proxyservice.CheckQuota(candidate.ID, assigned+required-1)
-			if quotaErr != nil {
-				writeProxyError(c, quotaErr)
-				return
-			}
-			if !available {
-				continue
-			}
+		remaining := proxyservice.NormalizedMaxProfileCount(candidate.MaxProfileCount) - assigned - required
+		if proxyservice.AssignmentBlockReason(candidate, remaining) != "" {
+			continue
 		}
-		recommended = append(recommended, publicProxy(candidate))
+		recommended = append(recommended, buildProxyView(actor, candidate, assigned, teamNames, false))
 	}
 	api.Success(c, recommended)
 }
+
 func GetProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -150,15 +169,30 @@ func GetProxy(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
-	api.Success(c, publicProxy(proxy))
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
+	assigned, err := profilebindingservice.CountProfilesByProxyID(proxy.ID)
+	if err != nil {
+		api.InternalError(c, "代理关联窗口查询失败")
+		return
+	}
+	api.Success(c, buildProxyView(actor, proxy, assigned, newTeamNameResolver(), true))
 }
+
 func GetProxyBindings(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	if _, err := proxyservice.Get(c.Param("id")); err != nil {
+	proxy, err := proxyservice.Get(c.Param("id"))
+	if err != nil {
 		writeProxyError(c, err)
+		return
+	}
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
 		return
 	}
 	profiles, err := profilebindingservice.ListProfiles(actor, 0, profilebindingservice.ProfileListFilter{})
@@ -168,12 +202,13 @@ func GetProxyBindings(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	result := make([]ProxyBindingSummary, 0)
 	for _, profile := range profiles {
-		if profile.ProxyID == c.Param("id") {
+		if profile.ProxyID == proxy.ID {
 			result = append(result, ProxyBindingSummary{ID: profile.ID, BitProfileID: profile.BitProfileID, Name: profile.Name, UserID: int64(profile.UserID), LocalStatus: string(profile.LocalStatus)})
 		}
 	}
 	api.Success(c, result)
 }
+
 func ParseProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -187,11 +222,12 @@ func ParseProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	parsed, err := proxyservice.ParseAddress(req.ProxyAddress)
 	if err != nil {
-		api.Failure(c, 400, 10001, "代理地址格式无效", nil)
+		api.BadRequest(c, 10001, "代理地址格式无效")
 		return
 	}
 	api.Success(c, parsed)
 }
+
 func PreviewProxyExtraction(ctx context.Context, c *hertzapp.RequestContext) {
 	_, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -203,13 +239,14 @@ func PreviewProxyExtraction(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	result, err := proxyservice.ExtractProxy(ctx, req)
 	if err != nil {
-		api.Failure(c, 503, 30007, "Agent 动态代理提取失败", nil)
+		api.Failure(c, 503, 30007, "动态代理提取失败；提取需要本人桌面环境运行", nil)
 		return
 	}
 	api.Success(c, result)
 }
+
 func RefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -218,34 +255,46 @@ func RefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
+	if !canGovernProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
 	if proxy.SourceType != proxyservice.ProxySourceAPI || proxy.ExtractURL == "" {
-		api.Failure(c, 400, 10001, "该代理未配置动态提取来源", nil)
+		api.BadRequest(c, 10001, "该代理未配置动态提取来源")
 		return
 	}
 	extracted, err := proxyservice.ExtractProxy(ctx, proxyservice.ProxyExtractionInput{ExtractURL: proxy.ExtractURL, ProxyProtocol: proxy.ProxyProtocol})
 	if err != nil {
-		api.Failure(c, 503, 30007, "Agent 动态代理提取失败", nil)
+		api.Failure(c, 503, 30007, "动态代理提取失败；提取需要本人桌面环境运行", nil)
 		return
 	}
-	updated, err := proxyservice.Update(proxy.ID, proxyservice.CreateProxyInput{SourceType: proxyservice.ProxySourceAPI, ExtractURL: proxy.ExtractURL, ProxyProtocol: extracted.ProxyProtocol, Host: extracted.Host, Port: extracted.Port, Username: extracted.Username, Password: extracted.Password, Region: proxy.Region, Supplier: proxy.Supplier, ExpiresAt: proxy.ExpiresAt, Remark: proxy.Remark, MaxProfileCount: proxy.MaxProfileCount})
+	updated, err := proxyservice.Update(proxy.ID, proxyservice.CreateProxyInput{
+		Name: proxy.Name, SourceType: proxyservice.ProxySourceAPI, ExtractURL: proxy.ExtractURL,
+		ProxyProtocol: extracted.ProxyProtocol, Host: extracted.Host, Port: extracted.Port,
+		Username: extracted.Username, Password: extracted.Password, Region: proxy.Region, Supplier: proxy.Supplier,
+		Tags: proxy.Tags, ExpiresAt: proxy.ExpiresAt, Remark: proxy.Remark, MaxProfileCount: proxy.MaxProfileCount,
+	}, true)
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	check, err := proxyservice.CheckProxy(ctx, proxyservice.ProxyCheckInput{ProxyID: updated.ID, ProxyProtocol: updated.ProxyProtocol, Host: updated.Host, Port: updated.Port})
-	if err != nil {
-		api.Failure(c, 503, 30007, "Agent 同步检查失败", nil)
-		return
-	}
-	updated, err = proxyservice.RecordCheckResult(updated.ID, check.Connectivity)
+	updated, result, err := proxyservice.CheckProxy(updated.ID)
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	api.Success(c, publicProxy(updated))
+	assigned, err := profilebindingservice.CountProfilesByProxyID(updated.ID)
+	if err != nil {
+		api.InternalError(c, "代理关联窗口查询失败")
+		return
+	}
+	view := buildProxyView(actor, updated, assigned, newTeamNameResolver(), true)
+	view.AssignmentBlocker = firstMessage(view.AssignmentBlocker, result.Reason)
+	api.Success(c, view)
 }
+
 func CreateProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -253,15 +302,21 @@ func CreateProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	proxy, err := proxyservice.Create(req)
+	teamID, err := resolveProxyWriteTeam(actor, req.TeamID)
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	api.Created(c, publicProxy(proxy))
+	proxy, err := proxyservice.Create(req, teamID)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	api.Created(c, buildProxyView(actor, proxy, 0, newTeamNameResolver(), false))
 }
+
 func UpdateProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -269,15 +324,51 @@ func UpdateProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	proxy, err := proxyservice.Update(c.Param("id"), req)
+	proxy, err := proxyservice.Get(c.Param("id"))
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	api.Success(c, publicProxy(proxy))
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
+	govern := canGovernProxy(actor, proxy)
+	var updated proxyservice.ProxyConfig
+	update := func() error {
+		var updateErr error
+		updated, updateErr = proxyservice.Update(proxy.ID, req, govern)
+		return updateErr
+	}
+	if govern && req.MaxProfileCount > 0 {
+		// 统一编辑里改配额仍然是配额变更：不能低于当前正式占用，并发绑定下也一样。
+		err = proxyservice.WithAssignmentLock(proxy.ID, func() error {
+			assigned, countErr := profilebindingservice.CountProfilesByProxyID(proxy.ID)
+			if countErr != nil {
+				return countErr
+			}
+			if req.MaxProfileCount < assigned {
+				return proxyservice.ErrQuotaBelowUsage
+			}
+			return update()
+		})
+	} else {
+		err = update()
+	}
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	assigned, err := profilebindingservice.CountProfilesByProxyID(updated.ID)
+	if err != nil {
+		api.InternalError(c, "代理关联窗口查询失败")
+		return
+	}
+	api.Success(c, buildProxyView(actor, updated, assigned, newTeamNameResolver(), false))
 }
+
 func UpdateProxyStatus(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -287,69 +378,126 @@ func UpdateProxyStatus(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	proxy, err := proxyservice.UpdateStatus(c.Param("id"), req.BusinessStatus)
+	proxy, err := proxyservice.Get(c.Param("id"))
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	api.Success(c, publicProxy(proxy))
-}
-func DeleteProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
-	if !ok {
+	if !canGovernProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
 		return
 	}
-	count, countErr := profilebindingservice.CountProfilesByProxyID(c.Param("id"))
-	if countErr != nil {
+	updated, err := proxyservice.UpdateStatus(proxy.ID, req.BusinessStatus)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	assigned, err := profilebindingservice.CountProfilesByProxyID(updated.ID)
+	if err != nil {
 		api.InternalError(c, "代理关联窗口查询失败")
 		return
 	}
-	if count > 0 {
-		api.Conflict(c, 23006, "代理仍绑定窗口，请先在浏览器窗口页解绑或更换")
+	api.Success(c, buildProxyView(actor, updated, assigned, newTeamNameResolver(), false))
+}
+
+func DeleteProxy(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
 		return
 	}
-	if err := proxyservice.Delete(c.Param("id")); err != nil {
+	proxy, err := proxyservice.Get(c.Param("id"))
+	if err != nil {
 		writeProxyError(c, err)
+		return
+	}
+	if !canGovernProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
+	var deleteBlocked error
+	err = proxyservice.WithAssignmentLock(proxy.ID, func() error {
+		count, countErr := profilebindingservice.CountProfilesByProxyID(proxy.ID)
+		if countErr != nil {
+			return countErr
+		}
+		if count > 0 {
+			deleteBlocked = errProxyReferenced
+			return nil
+		}
+		return proxyservice.Delete(proxy.ID)
+	})
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	if deleteBlocked != nil {
+		api.Conflict(c, 23006, "代理仍绑定窗口，请在浏览器窗口页解绑或更换后再删除")
 		return
 	}
 	api.NoContent(c)
 }
+
 func PreviewProxyImport(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
 	var req struct {
-		Lines []string `json:"lines"`
+		TeamID *identityservice.TeamID `json:"team_id"`
+		Lines  []string                `json:"lines"`
 	}
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	parsed := proxyservice.BulkParse(req.Lines)
-	api.Success(c, map[string]interface{}{"parsed": parsed})
-}
-func ImportProxies(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req struct {
-		Lines []string `json:"lines"`
-	}
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	parsed := proxyservice.BulkParse(req.Lines)
-	imported, err := proxyservice.BulkImport(parsed)
+	teamID, err := resolveProxyWriteTeam(actor, req.TeamID)
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	api.Created(c, map[string]interface{}{
-		"parsed":   parsed,
-		"imported": imported,
-	})
+	keys, err := proxyservice.LookupConnectionKeys(teamID)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	rows := proxyservice.BulkParse(req.Lines, keys)
+	api.Success(c, map[string]interface{}{"rows": rows, "total": len(rows)})
 }
+
+func ImportProxies(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		TeamID *identityservice.TeamID       `json:"team_id"`
+		Rows   []proxyservice.ImportRowInput `json:"rows"`
+	}
+	if !api.DecodeJSON(c, &req) {
+		return
+	}
+	teamID, err := resolveProxyWriteTeam(actor, req.TeamID)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	selected := 0
+	for _, row := range req.Rows {
+		if row.Selected {
+			selected++
+		}
+	}
+	if len(req.Rows) == 0 || selected == 0 {
+		api.BadRequest(c, 10001, "请至少选择一条有效代理记录")
+		return
+	}
+	result, err := proxyservice.Import(req.Rows, teamID)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	api.Created(c, result)
+}
+
 func PreviewLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -363,37 +511,41 @@ func PreviewLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	scan, err := profilebindingservice.GetScan(actor, req.ScanID)
 	if err != nil {
-		api.Failure(c, 404, 23001, "扫描记录不存在", nil)
+		api.NotFound(c, 23001, "扫描记录不存在")
 		return
 	}
-	preview, err := buildLocalProxyScanPreview(scan)
+	preview, err := buildLocalProxyScanPreview(actor, scan)
 	if err != nil {
 		api.InternalError(c, "本机代理差异计算失败")
 		return
 	}
 	api.Success(c, preview)
 }
+
 func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
 	var req struct {
-		ScanID string `json:"scan_id"`
+		ScanID             string   `json:"scan_id"`
+		SelectedProfileIDs []string `json:"selected_profile_ids"`
 	}
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	scan, err := profilebindingservice.ConfirmScan(actor, req.ScanID)
-	if err != nil {
-		confirmed, getErr := profilebindingservice.GetScan(actor, req.ScanID)
-		if getErr != nil || confirmed.Status != profilebindingservice.ScanConfirmed {
-			api.Failure(c, 409, 23004, "扫描记录无法确认", nil)
-			return
-		}
-		scan = confirmed
+	// 只有运营接受了本机窗口快照后才核对代理关系。接受扫描就是这一决定，
+	// 本接口不会自行认领窗口。
+	scan, err := profilebindingservice.GetScan(actor, req.ScanID)
+	if err != nil || scan.UserID != actor.ID {
+		api.Failure(c, 409, 23004, "扫描记录无法确认", nil)
+		return
 	}
-	preview, err := buildLocalProxyScanPreview(scan)
+	if scan.Status != profilebindingservice.ScanConfirmed {
+		api.Failure(c, 409, 23004, "请先接受本机窗口变化，再处理代理关系", nil)
+		return
+	}
+	preview, err := buildLocalProxyScanPreview(actor, scan)
 	if err != nil {
 		api.InternalError(c, "本机代理差异计算失败")
 		return
@@ -408,7 +560,12 @@ func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 		change := &preview.Changes[index]
 		switch change.Kind {
 		case "changed":
-			if _, err := profilebindingservice.BindProxy(change.ProfileID, change.TargetProxyID, change.ProxyProtocol, change.Host, change.Port); err != nil {
+			// 只核对当前地址仍与扫描观测一致的窗口；扫描是本机事实，不是写权限。
+			err := proxyservice.WithAssignmentLock(change.TargetProxyID, func() error {
+				_, bindErr := profilebindingservice.BindProxy(change.ProfileID, change.TargetProxyID, change.ProxyProtocol, change.Host, change.Port)
+				return bindErr
+			})
+			if err != nil && !errors.Is(err, proxyservice.ErrAssignmentLocked) {
 				api.InternalError(c, "代理正式关系更新失败")
 				return
 			}
@@ -418,7 +575,13 @@ func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 				return
 			}
 		case "unknown":
-			created, err := proxyservice.CreateDiscovered(proxyservice.CreateProxyInput{ProxyProtocol: proxyservice.ProxyProtocol(change.ProxyProtocol), Host: change.Host, Port: change.Port}, unknownCounts[proxyAddressKey(change.ProxyProtocol, change.Host, change.Port)])
+			if !containsProfileID(req.SelectedProfileIDs, change.ProfileID) {
+				change.Kind = "unregistered"
+				continue
+			}
+			created, err := proxyservice.CreateDiscovered(proxyservice.CreateProxyInput{
+				ProxyProtocol: proxyservice.ProxyProtocol(change.ProxyProtocol), Host: change.Host, Port: change.Port,
+			}, actorTeamOf(actor), unknownCounts[proxyAddressKey(change.ProxyProtocol, change.Host, change.Port)])
 			if err != nil {
 				api.InternalError(c, "扫描发现代理记录失败")
 				return
@@ -432,29 +595,8 @@ func ConfirmLocalProxyScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, preview)
 }
+
 func CheckProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	proxy, err := proxyservice.Get(c.Param("id"))
-	if err != nil {
-		writeProxyError(c, err)
-		return
-	}
-	result, err := proxyservice.CheckProxy(ctx, proxyservice.ProxyCheckInput{ProxyID: proxy.ID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port})
-	if err != nil {
-		api.Failure(c, 503, 30007, "Agent 同步检查失败", nil)
-		return
-	}
-	updated, err := proxyservice.RecordCheckResult(proxy.ID, result.Connectivity)
-	if err != nil {
-		writeProxyError(c, err)
-		return
-	}
-	api.Success(c, publicProxy(updated))
-}
-func CheckProxyInBackground(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
@@ -464,17 +606,25 @@ func CheckProxyInBackground(ctx context.Context, c *hertzapp.RequestContext) {
 		writeProxyError(c, err)
 		return
 	}
-	task, err := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{
-		TaskType:       cloudagentservice.TaskTypeProxyCheck.String(),
-		IdempotencyKey: "proxy-check:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + proxy.ID + ":" + id.NewID("attempt"),
-		Payload:        map[string]any{"proxy_id": proxy.ID, "proxy_protocol": proxy.ProxyProtocol, "host": proxy.Host, "port": proxy.Port, "username": proxy.Username, "password": proxy.Password},
-	}, int64(actor.ID))
-	if err != nil {
-		api.InternalError(c, "任务创建失败")
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
 		return
 	}
-	api.Created(c, task)
+	updated, result, err := proxyservice.CheckProxy(proxy.ID)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	assigned, err := profilebindingservice.CountProfilesByProxyID(updated.ID)
+	if err != nil {
+		api.InternalError(c, "代理关联窗口查询失败")
+		return
+	}
+	view := buildProxyView(actor, updated, assigned, newTeamNameResolver(), false)
+	view.AssignmentBlocker = firstMessage(view.AssignmentBlocker, result.Reason)
+	api.Success(c, view)
 }
+
 func AssignProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -486,13 +636,23 @@ func AssignProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	updated, err := assignProxyToProfile(ctx, actor, c.Param("id"), req.ProfileID)
+	proxy, err := proxyservice.Get(c.Param("id"))
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
+	updated, err := assignProxyToProfile(ctx, actor, proxy.ID, req.ProfileID)
 	if err != nil {
 		writeProxyAssignmentError(c, err)
 		return
 	}
 	api.Success(c, updated)
 }
+
 func AssignProxyBatch(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -502,6 +662,15 @@ func AssignProxyBatch(ctx context.Context, c *hertzapp.RequestContext) {
 		ProfileIDs []string `json:"profile_ids"`
 	}
 	if !api.DecodeJSON(c, &req) {
+		return
+	}
+	proxy, err := proxyservice.Get(c.Param("id"))
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
 		return
 	}
 	profileIDs := normalizedProfileIDs(req.ProfileIDs)
@@ -514,15 +683,16 @@ func AssignProxyBatch(ctx context.Context, c *hertzapp.RequestContext) {
 		Failed:    make([]ProxyBatchAssignFailure, 0),
 	}
 	for _, profileID := range profileIDs {
-		updated, err := assignProxyToProfile(ctx, actor, c.Param("id"), profileID)
-		if err != nil {
-			result.Failed = append(result.Failed, ProxyBatchAssignFailure{ProfileID: profileID, Message: proxyAssignmentFailureMessage(err)})
+		updated, assignErr := assignProxyToProfile(ctx, actor, proxy.ID, profileID)
+		if assignErr != nil {
+			result.Failed = append(result.Failed, ProxyBatchAssignFailure{ProfileID: profileID, Message: proxyAssignmentFailureMessage(assignErr)})
 			continue
 		}
 		result.Succeeded = append(result.Succeeded, updated)
 	}
 	api.Success(c, result)
 }
+
 func UnbindProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -534,16 +704,25 @@ func UnbindProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
+	proxy, err := proxyservice.Get(c.Param("id"))
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
 	profile, found, err := profilebindingservice.GetProfile(req.ProfileID)
 	if err != nil {
 		api.InternalError(c, "Profile 查询失败")
 		return
 	}
-	if !found || profile.UserID != actor.ID || profile.LocalStatus != profilebindingservice.ProfileActive {
+	if !found || !actor.CanAccessOwnedResource(profile.UserID, profile.TeamID) || profile.UserID != actor.ID || profile.LocalStatus != profilebindingservice.ProfileActive {
 		api.Forbidden(c, 11003, "没有权限解绑此 Profile")
 		return
 	}
-	if profile.ProxyID != c.Param("id") {
+	if profile.ProxyID != proxy.ID {
 		api.Conflict(c, 23004, "Profile 未绑定此代理")
 		return
 	}
@@ -559,8 +738,99 @@ func UnbindProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, updated)
 }
+
+// UnbindProfileProxy 清除比特自管窗口的实际代理，即「解绑并改为直连」。
+// 托管窗口必须先解除正式关系，避免两步结果互相矛盾。
+func UnbindProfileProxy(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		ProfileID string `json:"profile_id"`
+	}
+	if !api.DecodeJSON(c, &req) {
+		return
+	}
+	profile, err := ownedActiveProfile(actor, req.ProfileID)
+	if err != nil {
+		if errors.Is(err, errProfileProxyUnauthorized) {
+			api.Forbidden(c, 11003, "没有权限操作此 Profile")
+			return
+		}
+		writeProxyAssignmentError(c, err)
+		return
+	}
+	if profile.ProxyID != "" {
+		api.Conflict(c, 23004, "该窗口仍绑定系统代理，请先改为比特自管")
+		return
+	}
+	result, mutateErr := proxyservice.MutateProxy(ctx, proxyservice.ProxyMutationInput{Operation: "unbind", ProfileID: profile.BitProfileID})
+	if mutateErr != nil || !result.Readback || result.Operation != "unbind" || result.ProfileID != profile.BitProfileID {
+		api.Failure(c, 503, 30008, "Agent 写入或读回解绑失败", nil)
+		return
+	}
+	updated, clearErr := profilebindingservice.ClearObservedProxy(profile.ID)
+	if clearErr != nil {
+		api.InternalError(c, "窗口代理状态清除失败")
+		return
+	}
+	api.Success(c, updated)
+}
+
+// ReleaseProxy 只解除系统托管关系，不改比特窗口里的实际地址：窗口继续用原代理，
+// 只是不再占用配额。
+func ReleaseProxy(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		ProfileID string `json:"profile_id"`
+	}
+	if !api.DecodeJSON(c, &req) {
+		return
+	}
+	proxy, err := proxyservice.Get(c.Param("id"))
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	if !canReadProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
+	profile, err := ownedActiveProfile(actor, req.ProfileID)
+	if err != nil {
+		if errors.Is(err, errProfileProxyUnauthorized) {
+			api.Forbidden(c, 11003, "没有权限操作此 Profile")
+			return
+		}
+		writeProxyAssignmentError(c, err)
+		return
+	}
+	if profile.ProxyID != proxy.ID {
+		api.Conflict(c, 23004, "Profile 未绑定此代理")
+		return
+	}
+	var updated profilebindingservice.BrowserProfile
+	lockErr := proxyservice.WithAssignmentLock(proxy.ID, func() error {
+		released, releaseErr := profilebindingservice.ReleaseProxy(profile.ID, proxy.ID)
+		if releaseErr != nil {
+			return releaseErr
+		}
+		updated = released
+		return nil
+	})
+	if lockErr != nil {
+		writeProxyAssignmentError(c, lockErr)
+		return
+	}
+	api.Success(c, updated)
+}
+
 func SetProxyQuota(ctx context.Context, c *hertzapp.RequestContext) {
-	_, ok := middleware.AuthenticateRequest(c)
+	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
@@ -570,12 +840,185 @@ func SetProxyQuota(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	proxy, err := proxyservice.SetMaxProfileCount(c.Param("id"), req.MaxProfiles)
+	proxy, err := proxyservice.Get(c.Param("id"))
 	if err != nil {
 		writeProxyError(c, err)
 		return
 	}
-	api.Success(c, publicProxy(proxy))
+	if !canGovernProxy(actor, proxy) {
+		writeProxyError(c, errProxyForbidden)
+		return
+	}
+	if req.MaxProfiles < 1 {
+		api.BadRequest(c, 10001, "最大窗口数必须是正整数")
+		return
+	}
+	var belowUsage bool
+	err = proxyservice.WithAssignmentLock(proxy.ID, func() error {
+		assigned, countErr := profilebindingservice.CountProfilesByProxyID(proxy.ID)
+		if countErr != nil {
+			return countErr
+		}
+		if req.MaxProfiles < assigned {
+			belowUsage = true
+			return nil
+		}
+		_, updateErr := proxyservice.SetMaxProfileCount(proxy.ID, req.MaxProfiles)
+		return updateErr
+	})
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	if belowUsage {
+		api.BadRequest(c, 10001, "最大窗口数不能低于当前已占用数")
+		return
+	}
+	updated, err := proxyservice.Get(proxy.ID)
+	if err != nil {
+		writeProxyError(c, err)
+		return
+	}
+	assigned, err := profilebindingservice.CountProfilesByProxyID(updated.ID)
+	if err != nil {
+		api.InternalError(c, "代理关联窗口查询失败")
+		return
+	}
+	api.Success(c, buildProxyView(actor, updated, assigned, newTeamNameResolver(), false))
+}
+
+// --- 范围辅助 ---
+
+func requestedTeamID(actor identityservice.PublicUser, raw string) (*identityservice.TeamID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed <= 0 {
+		return nil, errProxyTeamUnknown
+	}
+	if actor.Role != identityservice.RoleAdmin {
+		return nil, errProxyForbidden
+	}
+	teamID := identityservice.TeamID(parsed)
+	return &teamID, nil
+}
+
+// proxyTeamScope 把操作者映射到可读团队。运营和高级运营固定为本人团队；
+// 「全部团队」只是管理员视图，永远不是合法写目标。
+func proxyTeamScope(actor identityservice.PublicUser, requested *identityservice.TeamID) (*identityservice.TeamID, error) {
+	if actor.Role == identityservice.RoleAdmin {
+		return requested, nil
+	}
+	if actor.TeamID == nil {
+		return nil, errProxyForbidden
+	}
+	if requested != nil && *requested != *actor.TeamID {
+		return nil, errProxyForbidden
+	}
+	teamID := *actor.TeamID
+	return &teamID, nil
+}
+
+func resolveProxyWriteTeam(actor identityservice.PublicUser, requested *identityservice.TeamID) (identityservice.TeamID, error) {
+	if actor.Role != identityservice.RoleAdmin {
+		if actor.TeamID == nil {
+			return 0, errProxyTeamRequired
+		}
+		return *actor.TeamID, nil
+	}
+	if requested == nil || *requested <= 0 {
+		return 0, errProxyTeamRequired
+	}
+	teams, err := identityservice.ListTeams(actor.ID, "")
+	if err != nil {
+		return 0, err
+	}
+	for _, team := range teams {
+		if team.ID == *requested {
+			return *requested, nil
+		}
+	}
+	return 0, errProxyTeamUnknown
+}
+
+func canReadProxy(actor identityservice.PublicUser, proxy proxyservice.ProxyConfig) bool {
+	if actor.Role == identityservice.RoleAdmin {
+		return true
+	}
+	return actor.TeamID != nil && proxy.TeamID == *actor.TeamID
+}
+
+func canGovernProxy(actor identityservice.PublicUser, proxy proxyservice.ProxyConfig) bool {
+	return canReadProxy(actor, proxy) &&
+		(actor.Role == identityservice.RoleAdmin || actor.Role == identityservice.RoleSeniorOperator)
+}
+
+func actorTeamOf(actor identityservice.PublicUser) identityservice.TeamID {
+	if actor.TeamID == nil {
+		return 0
+	}
+	return *actor.TeamID
+}
+
+func containsProfileID(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
+func firstMessage(primary, secondary string) string {
+	if primary != "" {
+		return primary
+	}
+	return secondary
+}
+
+func buildProxyView(actor identityservice.PublicUser, proxy proxyservice.ProxyConfig, assigned int, teams *teamNameResolver, withCredentials bool) proxyView {
+	proxy.AssignedProfileCount = assigned
+	proxy.RemainingProfileCount = max(0, proxyservice.NormalizedMaxProfileCount(proxy.MaxProfileCount)-assigned)
+	view := proxyView{
+		ProxyConfig: proxy,
+		Expired:     proxy.Expired(time.Now()),
+	}
+	view.TeamName = teams.name(actor, proxy.TeamID)
+	view.AssignmentBlocker = proxyservice.AssignmentBlockReason(proxy, proxy.RemainingProfileCount)
+	if !withCredentials {
+		view.ProxyConfig.Username = ""
+		view.ProxyConfig.Password = ""
+	}
+	view.ProxyConfig.ExtractURLConfigured = view.ProxyConfig.ExtractURL != ""
+	view.ProxyConfig.ExtractURL = ""
+	return view
+}
+
+// teamNameResolver 按需批量取团队名，避免列表逐行查询，同时保证详情仍能显示团队。
+type teamNameResolver struct {
+	loaded bool
+	names  map[identityservice.TeamID]string
+}
+
+func newTeamNameResolver() *teamNameResolver {
+	return &teamNameResolver{names: make(map[identityservice.TeamID]string)}
+}
+
+func (r *teamNameResolver) name(actor identityservice.PublicUser, teamID identityservice.TeamID) string {
+	if teamID <= 0 {
+		return ""
+	}
+	if !r.loaded {
+		r.loaded = true
+		if teams, err := identityservice.ListTeams(actor.ID, ""); err == nil {
+			for _, team := range teams {
+				r.names[team.ID] = team.Name
+			}
+		}
+	}
+	return r.names[teamID]
 }
 
 func normalizedProfileIDs(raw []string) []string {
@@ -608,46 +1051,63 @@ func assignProxyToProfile(ctx context.Context, actor identityservice.PublicUser,
 	if err != nil {
 		return profilebindingservice.BrowserProfile{}, err
 	}
-	proxy, err := proxyservice.Get(proxyID)
+	var updated profilebindingservice.BrowserProfile
+	var assignmentFailure error
+	err = proxyservice.WithAssignmentLock(proxyID, func() error {
+		proxy, getErr := proxyservice.Get(proxyID)
+		if getErr != nil {
+			return getErr
+		}
+		if !canReadProxy(actor, proxy) {
+			return errProxyForbidden
+		}
+		assigned, countErr := profilebindingservice.CountProfilesByProxyID(proxy.ID)
+		if countErr != nil {
+			return countErr
+		}
+		if profile.ProxyID != proxy.ID {
+			remaining := proxyservice.NormalizedMaxProfileCount(proxy.MaxProfileCount) - assigned
+			if reason := proxyservice.AssignmentBlockReason(proxy, remaining); reason != "" {
+				assignmentFailure = errors.Join(proxyservice.ErrNotAssignable, errors.New(reason))
+				return nil
+			}
+		}
+		result, mutateErr := proxyservice.MutateProxy(ctx, proxyservice.ProxyMutationInput{
+			Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol,
+			Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password,
+		})
+		if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID ||
+			result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
+			assignmentFailure = errProxyReadback
+			return nil
+		}
+		bound, bindErr := profilebindingservice.BindProxy(profile.ID, proxy.ID, string(result.ProxyProtocol), result.Host, result.Port)
+		if bindErr != nil {
+			return bindErr
+		}
+		updated = bound
+		return nil
+	})
 	if err != nil {
 		return profilebindingservice.BrowserProfile{}, err
 	}
-	if err := proxyservice.CheckAssignable(proxy); err != nil {
-		return profilebindingservice.BrowserProfile{}, err
-	}
-	if profile.ProxyID != proxy.ID {
-		assigned, countErr := profilebindingservice.CountProfilesByProxyID(proxy.ID)
-		if countErr != nil {
-			return profilebindingservice.BrowserProfile{}, countErr
-		}
-		available, quotaErr := proxyservice.CheckQuota(proxy.ID, assigned)
-		if quotaErr != nil {
-			return profilebindingservice.BrowserProfile{}, quotaErr
-		}
-		if !available {
-			return profilebindingservice.BrowserProfile{}, errProxyQuotaFull
-		}
-	}
-	result, mutateErr := proxyservice.MutateProxy(ctx, proxyservice.ProxyMutationInput{Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password})
-	if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID || result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
-		return profilebindingservice.BrowserProfile{}, errProxyReadback
-	}
-	updated, bindErr := profilebindingservice.BindProxy(profile.ID, proxy.ID, string(result.ProxyProtocol), result.Host, result.Port)
-	if bindErr != nil {
-		return profilebindingservice.BrowserProfile{}, bindErr
+	if assignmentFailure != nil {
+		return profilebindingservice.BrowserProfile{}, assignmentFailure
 	}
 	return updated, nil
 }
+
+var errProxyReferenced = errors.New("proxy is referenced by browser profiles")
 
 func writeProxyAssignmentError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, errProfileProxyUnauthorized):
 		api.Forbidden(c, 11003, "没有权限分配此 Profile")
-	case errors.Is(err, errProxyQuotaFull):
-		api.Conflict(c, 23005, "代理窗口配额已满")
+	case errors.Is(err, proxyservice.ErrAssignmentLocked):
+		api.Conflict(c, 23009, "代理正在被其他操作占用，请稍后重试")
 	case errors.Is(err, errProxyReadback):
 		api.Failure(c, 503, 30008, "Agent 写入或读回代理失败", nil)
-	case errors.Is(err, proxyservice.ErrNotFound), errors.Is(err, proxyservice.ErrInvalidInput), errors.Is(err, proxyservice.ErrNotAssignable):
+	case errors.Is(err, proxyservice.ErrNotFound), errors.Is(err, proxyservice.ErrInvalidInput), errors.Is(err, proxyservice.ErrNotAssignable), errors.Is(err, errProxyForbidden):
 		writeProxyError(c, err)
 	default:
 		api.InternalError(c, "代理正式关系更新失败")
@@ -655,15 +1115,24 @@ func writeProxyAssignmentError(c *hertzapp.RequestContext, err error) {
 }
 
 func proxyAssignmentFailureMessage(err error) string {
+	reason := err.Error()
+	if strings.Contains(reason, ":") {
+		parts := strings.SplitN(reason, ":", 2)
+		if len(parts) == 2 {
+			reason = strings.TrimSpace(parts[1])
+		}
+	}
 	switch {
 	case errors.Is(err, errProfileProxyUnauthorized):
 		return "没有权限分配此 Profile"
-	case errors.Is(err, errProxyQuotaFull):
-		return "代理窗口配额已满"
+	case errors.Is(err, errProxyForbidden):
+		return "没有权限使用此代理"
 	case errors.Is(err, proxyservice.ErrNotAssignable):
-		return "代理未通过检测、已停用或已过期"
+		return reason
 	case errors.Is(err, proxyservice.ErrNotFound):
 		return "代理不存在"
+	case errors.Is(err, proxyservice.ErrAssignmentLocked):
+		return "代理正在被其他操作占用，请稍后重试"
 	case errors.Is(err, errProxyReadback):
 		return "Agent 写入或读回代理失败"
 	default:
@@ -671,14 +1140,19 @@ func proxyAssignmentFailureMessage(err error) string {
 	}
 }
 
-func buildLocalProxyScanPreview(scan profilebindingservice.ProfileScan) (LocalProxyScanPreview, error) {
-	known, err := proxyservice.List(proxyservice.ProxyFilter{Limit: 200})
+func buildLocalProxyScanPreview(actor identityservice.PublicUser, scan profilebindingservice.ProfileScan) (LocalProxyScanPreview, error) {
+	scope, err := proxyTeamScope(actor, nil)
+	if err != nil {
+		return LocalProxyScanPreview{}, err
+	}
+	known, err := proxyservice.List(proxyservice.ProxyFilter{TeamID: scope, Limit: 200})
 	if err != nil {
 		return LocalProxyScanPreview{}, err
 	}
 	byAddress := make(map[string][]proxyservice.ProxyConfig, len(known))
 	for _, proxy := range known {
-		byAddress[proxyAddressKey(string(proxy.ProxyProtocol), proxy.Host, proxy.Port)] = append(byAddress[proxyAddressKey(string(proxy.ProxyProtocol), proxy.Host, proxy.Port)], proxy)
+		key := proxyAddressKey(string(proxy.ProxyProtocol), proxy.Host, proxy.Port)
+		byAddress[key] = append(byAddress[key], proxy)
 	}
 	changes := make([]LocalProxyChange, 0)
 	for _, observed := range scan.Profiles {
@@ -687,6 +1161,16 @@ func buildLocalProxyScanPreview(scan profilebindingservice.ProfileScan) (LocalPr
 			return LocalProxyScanPreview{}, err
 		}
 		if !found {
+			continue
+		}
+		if current.UserID != actor.ID {
+			// 其他运营的记录可见，但不会被本次本机扫描核对。
+			if current.TeamID != nil && actor.TeamID != nil && *current.TeamID == *actor.TeamID {
+				changes = append(changes, LocalProxyChange{
+					Kind: "ownership_conflict", ProfileID: current.ID, BitProfileID: current.BitProfileID,
+					OwnershipNotice: "窗口已登记在其他运营名下，本机扫描不会改动其归属",
+				})
+			}
 			continue
 		}
 		protocol, host, port := strings.ToLower(strings.TrimSpace(observed.ProxyType)), strings.TrimSpace(observed.ProxyHost), observed.ProxyPort
@@ -714,27 +1198,26 @@ func buildLocalProxyScanPreview(scan profilebindingservice.ProfileScan) (LocalPr
 	return LocalProxyScanPreview{ScanID: scan.ID, Changes: changes}, nil
 }
 
-func publicProxy(proxy proxyservice.ProxyConfig) proxyservice.ProxyConfig {
-	if proxy.SourceType == "" {
-		proxy.SourceType = proxyservice.ProxySourceStatic
-	}
-	proxy.ExtractURLConfigured = proxy.ExtractURL != ""
-	proxy.ExtractURL = ""
-	proxy.Username = ""
-	proxy.Password = ""
-	return proxy
-}
-
 func proxyAddressKey(protocol, host string, port int) string {
 	return strings.ToLower(strings.TrimSpace(protocol)) + "://" + strings.ToLower(strings.TrimSpace(host)) + ":" + strconv.Itoa(port)
 }
 
 func writeProxyError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, errProxyForbidden):
+		api.Forbidden(c, 11003, "没有权限执行此代理操作")
+	case errors.Is(err, errProxyTeamRequired):
+		api.BadRequest(c, 10001, "请选择目标团队")
+	case errors.Is(err, errProxyTeamUnknown):
+		api.BadRequest(c, 10001, "目标团队不存在")
+	case errors.Is(err, proxyservice.ErrAssignmentLocked):
+		api.Conflict(c, 23009, "代理正在被其他操作占用，请稍后重试")
 	case errors.Is(err, proxyservice.ErrNotFound):
 		api.NotFound(c, 20004, "代理不存在")
 	case errors.Is(err, proxyservice.ErrInvalidInput):
 		api.BadRequest(c, 10001, "代理信息格式错误")
+	case errors.Is(err, proxyservice.ErrQuotaBelowUsage):
+		api.BadRequest(c, 10001, "最大窗口数不能低于当前已占用数")
 	case errors.Is(err, proxyservice.ErrNotAssignable):
 		api.Conflict(c, 23007, "代理未通过检测、已停用或已过期，不能绑定窗口")
 	default:

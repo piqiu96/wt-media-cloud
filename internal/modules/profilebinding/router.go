@@ -19,6 +19,5 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/browser-profiles/:id/open", OpenBrowserProfile)
 	h.POST("/api/v1/browser-profiles/:id/close", CloseBrowserProfile)
 	h.PATCH("/api/v1/browser-profiles/:id", UpdateBrowserProfile)
-	h.POST("/api/v1/browser-profiles/:id/assign-owner", AssignBrowserProfileOwner)
 	h.DELETE("/api/v1/browser-profiles/:id", DeleteBrowserProfile)
 }
