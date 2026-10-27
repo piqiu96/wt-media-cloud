@@ -107,6 +107,10 @@ func ListAllGames(actorID UserID) ([]OperationGame, error) {
 	return newService(mysqlStore{}).ListAllGames(actorID)
 }
 
+func ListManagementGames(actorID UserID) ([]OperationGame, error) {
+	return newService(mysqlStore{}).ListManagementGames(actorID)
+}
+
 func GameReferences(actorID UserID, gameID string) (model.GameReferences, error) {
 	return newService(mysqlStore{}).GameReferences(actorID, gameID)
 }

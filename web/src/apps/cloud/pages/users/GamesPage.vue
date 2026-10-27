@@ -3,12 +3,16 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
+import { createSessionClient } from '../../../../shared/api/session.js'
+import { isAdminRole } from '../../../../shared/utils/roles.js'
 import { platformLabel } from '../../../../shared/utils/platforms.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
 
 const client = createUsersClient()
+const sessionClient = createSessionClient()
+const currentUser = ref(null)
 const games = ref([])
 const loading = ref(true)
 const error = ref('')
@@ -28,18 +32,36 @@ const pagedGames = computed(() => {
   return games.value.slice(start, start + pagination.value.pageSize)
 })
 
-const columns = [
-  { colKey: 'id', title: '游戏ID', width: 160 },
-  { colKey: 'name', title: '游戏名称', width: 200 },
-  { colKey: 'references', title: '关联情况', width: 190 },
-  { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'remark', title: '备注', width: 220 },
-  { colKey: 'operations', title: '操作', width: 220, fixed: 'right' },
-]
+// 高级运营能看全部状态，但只读，也不拿关联摘要（关联详情仍归管理员）。
+const canManage = computed(() => isAdminRole(currentUser.value))
 
-const tableScroll = computed(() => ({ x: `${columns.reduce((sum, col) => sum + col.width, 0)}px` }))
+const columns = computed(() => {
+  const base = [
+    { colKey: 'id', title: '游戏ID', width: 160 },
+    { colKey: 'name', title: '游戏名称', width: 200 },
+  ]
+  if (canManage.value) base.push({ colKey: 'references', title: '关联情况', width: 190 })
+  base.push({ colKey: 'status', title: '状态', width: 100 })
+  base.push({ colKey: 'remark', title: '备注', width: 220 })
+  if (canManage.value) base.push({ colKey: 'operations', title: '操作', width: 220, fixed: 'right' })
+  return base
+})
 
-onMounted(loadGames)
+const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, col) => sum + col.width, 0)}px` }))
+
+onMounted(async () => {
+  await loadSession()
+  await loadGames()
+})
+
+async function loadSession() {
+  try {
+    currentUser.value = await sessionClient.me()
+  } catch {
+    // 读不到会话按只读处理：senior 的 management 视图不比管理员视图多给任何写入口。
+    currentUser.value = null
+  }
+}
 
 function emptyGameForm() {
   return { id: '', name: '', status: 'enabled', remark: '' }
@@ -54,7 +76,9 @@ async function loadGames() {
   loading.value = true
   error.value = ''
   try {
-    games.value = await client.listGames(filters.value) || []
+    // management：全部状态、不含关联摘要；all：管理员口径，带摘要。
+    const scope = canManage.value ? 'all' : 'management'
+    games.value = await client.listGames({ ...filters.value, scope }) || []
     pagination.value.current = 1
   } catch (e) {
     error.value = e.message || '加载游戏失败'
@@ -72,6 +96,7 @@ function hasReferences(game) {
 }
 
 async function openReferences(game) {
+  if (!canManage.value) return
   referenceGame.value = game
   references.value = { users: [], media_accounts: [] }
   referencesVisible.value = true
@@ -153,7 +178,7 @@ async function deleteGame(game) {
     <div class="wt-resource-page">
     <ResourcePageHeader title="游戏管理" description="维护游戏分类与关联范围">
       <template #actions>
-        <t-button theme="primary" @click="openCreate">新增游戏</t-button>
+        <t-button v-if="canManage" theme="primary" @click="openCreate">新增游戏</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="loadGames">刷新</t-button>
       </template>
     </ResourcePageHeader>

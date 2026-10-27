@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { canUseLocalAgent, isDesktop } from '../utils.js'
+import { SYSTEM_MANAGEMENT_PATHS, canUseDesktopEnv, canViewSystemPath } from '../shared/utils/roles.js'
 import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
 import DownloadCentreDrawer from '../modules/transfer/DownloadCentreDrawer.vue'
@@ -60,11 +61,11 @@ const desktopItems = [
   ] },
 ]
 
-const adminOnlyPaths = new Set(['/users', '/operation-teams', '/games'])
-const desktopHiddenPaths = new Set(['/users', '/operation-teams', '/games'])
-// M2 本机资源只属于普通运营；其他角色在 Desktop 里看不到这些入口。
-const localOnlyPaths = new Set(['/accounts', '/account-opening', '/browser-windows', '/proxies'])
+// M2 本机资源（开户 / 浏览器窗口 / 代理）只属于普通运营；社媒账号三种角色都能看，
+// 本地操作按账号归属另行判定。
+const localOnlyPaths = new Set(['/account-opening', '/browser-windows', '/proxies'])
 const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))
+const desktopEnvAllowed = computed(() => canUseDesktopEnv(currentUser.value))
 
 async function refreshUser() {
   try {
@@ -82,17 +83,16 @@ onUnmounted(() => window.removeEventListener('wt-media:profile-updated', refresh
 
 const allItems = computed(() => {
   const hiddenPaths = new Set()
-  if (isDesktop()) {
-    for (const path of desktopHiddenPaths) hiddenPaths.add(path)
-    if (!localAgentAllowed.value) {
-      for (const path of localOnlyPaths) hiddenPaths.add(path)
-    }
+  if (isDesktop() && !localAgentAllowed.value) {
+    for (const path of localOnlyPaths) hiddenPaths.add(path)
   }
-  if (currentUser.value?.role !== 'admin') {
-    for (const path of adminOnlyPaths) hiddenPaths.add(path)
+  // 系统管理：用户管理仅管理员；运营团队 / 游戏管理 高级运营 + 管理员。
+  // Cloud Web 与 Desktop 走同一条规则。
+  for (const path of SYSTEM_MANAGEMENT_PATHS) {
+    if (!canViewSystemPath(currentUser.value?.role, path)) hiddenPaths.add(path)
   }
   const sourceItems = isDesktop()
-    ? [...menuItems, ...(localAgentAllowed.value ? desktopItems : [])]
+    ? [...menuItems, ...(desktopEnvAllowed.value ? desktopItems : [])]
     : menuItems
   return sourceItems
     .map((item) => {

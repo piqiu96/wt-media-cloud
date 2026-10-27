@@ -55,16 +55,19 @@ describe('the 本机设置 route', () => {
 
   it('is listed under 桌面环境, after the page that was already there', () => {
     const layout = read('./layout/AppLayout.vue')
-    const desktopItems = layout.slice(layout.indexOf('const desktopItems'))
+    // 切到下一段声明为止：整份文件里还有别的 `path: '/…'`（内容挖掘那一组），
+    // 不切的话断言的是整份菜单，而不是「桌面环境」这一组。
+    const desktopItems = layout.slice(
+      layout.indexOf('const desktopItems'),
+      layout.indexOf('const localOnlyPaths')
+    )
 
     expect(desktopItems.indexOf("path: '/logs'")).toBeGreaterThan(-1)
     expect(desktopItems.indexOf("path: '/settings'")).toBeGreaterThan(
       desktopItems.indexOf("path: '/logs'")
     )
-    // Still inside the one desktop group rather than in a group of its own.
-    expect(desktopItems.indexOf("path: '/settings'")).toBeLessThan(
-      desktopItems.indexOf('adminOnlyPaths')
-    )
+    // 切片的端点还在：端点一旦改名，上面的 slice 会退化成整份文件，下面这句就红。
+    expect(desktopItems).not.toContain('内容挖掘')
   })
 
   /**
@@ -91,7 +94,7 @@ describe('the 本机设置 route', () => {
     // Exact rather than a floor: a floor catches only a table that has been emptied,
     // not one that lost a route, and the walk below would then cover one page fewer
     // without saying so.
-    expect(loaders.length, 'desktop routes carrying a loader (measured 20)').toBe(20)
+    expect(loaders.length, 'desktop routes carrying a loader (measured 23)').toBe(23)
 
     const projectRoot = new URL('../', import.meta.url)
     let checked = 0

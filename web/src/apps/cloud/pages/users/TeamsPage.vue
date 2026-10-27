@@ -3,12 +3,15 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
+import { createSessionClient } from '../../../../shared/api/session.js'
+import { isAdminRole } from '../../../../shared/utils/roles.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 
 const client = createUsersClient()
+const sessionClient = createSessionClient()
 const teams = ref([])
-const users = ref([])
+const currentUser = ref(null)
 const keyword = ref('')
 const loading = ref(true)
 const error = ref('')
@@ -23,28 +26,43 @@ const pagedTeams = computed(() => {
   return teams.value.slice(start, start + pagination.value.pageSize)
 })
 
-const columns = [
-  { colKey: 'id', title: '团队ID', width: 100 },
-  { colKey: 'name', title: '团队名称', width: 240 },
-  { colKey: 'user_count', title: '用户数', width: 100 },
-  { colKey: 'operations', title: '操作', width: 180, fixed: 'right' },
-]
+// 高级运营能进这一页但只读；人数由服务端随团队一起返回，不再读用户列表
+// （那条接口对高级运营是 403，人数会整列变成 0）。
+const canManage = computed(() => isAdminRole(currentUser.value))
 
-const tableScroll = computed(() => ({ x: `${columns.reduce((sum, col) => sum + col.width, 0)}px` }))
+const columns = computed(() => {
+  const base = [
+    { colKey: 'id', title: '团队ID', width: 100 },
+    { colKey: 'name', title: '团队名称', width: 240 },
+    { colKey: 'user_count', title: '用户数', width: 100 },
+  ]
+  if (canManage.value) base.push({ colKey: 'operations', title: '操作', width: 180, fixed: 'right' })
+  return base
+})
 
-onMounted(loadAll)
+const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, col) => sum + col.width, 0)}px` }))
+
+onMounted(async () => {
+  await loadSession()
+  await loadAll()
+})
+
+async function loadSession() {
+  try {
+    currentUser.value = await sessionClient.me()
+  } catch {
+    // 读不到会话就按只读处理：写入口宁可少给，也不给错。
+    currentUser.value = null
+  }
+}
 
 async function loadAll() {
   loading.value = true
   error.value = ''
   try {
     // 关键字（团队 ID 精确 / 名称片段）由服务端过滤，页面只做分页切片。
-    const [teamRows, userRows] = await Promise.all([client.listTeams({ keyword: keyword.value.trim() }), client.listUsers()])
-    users.value = userRows || []
-    teams.value = (teamRows || []).map((team) => ({
-      ...team,
-      user_count: users.value.filter((user) => user.team_id === team.id).length,
-    }))
+    const teamRows = await client.listTeams({ keyword: keyword.value.trim() })
+    teams.value = (teamRows || []).map((team) => ({ ...team, user_count: team.user_count ?? 0 }))
     pagination.value.current = 1
   } catch (e) {
     error.value = e.message || '加载运营团队失败'
@@ -109,7 +127,7 @@ async function deleteTeam(team) {
     <div class="wt-resource-page">
     <ResourcePageHeader title="运营团队" description="管理运营人员的团队归属">
       <template #actions>
-        <t-button theme="primary" @click="openCreate">新增团队</t-button>
+        <t-button v-if="canManage" theme="primary" @click="openCreate">新增团队</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
       </template>
     </ResourcePageHeader>
