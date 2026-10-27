@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import { canUseDesktop, canUseLocalAgent } from '../../utils.js'
+import { canRunLocalAgent, canUseDesktop, canUseLocalAgent } from '../../utils.js'
 import { desktopRoutes } from './router.ts'
 
 const desktopMain = readFileSync(new URL('./main.ts', import.meta.url), 'utf8')
@@ -15,7 +15,7 @@ const routerSource = readFileSync(new URL('./router.ts', import.meta.url), 'utf8
 const LOCAL_ONLY_PATHS = ['account-opening', 'browser-windows', 'proxies']
 
 describe('desktop role guard', () => {
-  it('lets all three roles into Desktop but keeps the local agent operator-only', () => {
+  it('lets all three roles into Desktop; local pages stay operator-only, the sidecar serves operators and seniors', () => {
     expect(canUseDesktop({ role: 'operator' })).toBe(true)
     expect(canUseDesktop({ role: 'senior_operator' })).toBe(true)
     expect(canUseDesktop({ role: 'admin' })).toBe(true)
@@ -26,6 +26,13 @@ describe('desktop role guard', () => {
     expect(canUseLocalAgent({ role: 'senior_operator' })).toBe(false)
     expect(canUseLocalAgent({ role: 'admin' })).toBe(false)
     expect(canUseLocalAgent(null)).toBe(false)
+
+    // 2026-10-27：高级运营要在本机跑自己账号的检查与 Cookie 读取，sidecar 得起来；
+    // 管理员仍不参与本机操作。
+    expect(canRunLocalAgent({ role: 'operator' })).toBe(true)
+    expect(canRunLocalAgent({ role: 'senior_operator' })).toBe(true)
+    expect(canRunLocalAgent({ role: 'admin' })).toBe(false)
+    expect(canRunLocalAgent(null)).toBe(false)
   })
 
   it('marks the three M2 local-resource routes and redirects non-operators away from them', () => {
@@ -44,22 +51,24 @@ describe('desktop role guard', () => {
     expect(routerSource).toContain('localOnly: true')
   })
 
-  it('starts the local agent only for operators and stops it for other roles', () => {
+  it('starts the local agent for operators and seniors and stops it for admins', () => {
     expect(desktopMain).toContain('startDesktopLocalAgent')
     expect(desktopMain).toContain('stopDesktopLocalAgent')
     expect(desktopMain).toContain('syncLocalAgentFor')
+    expect(desktopMain).toContain('if (canRunLocalAgent(user))')
     // 旧行为是应用启动就无条件拉起 sidecar，和登录角色无关。
     expect(desktopMain).not.toContain('void startDesktopLocalAgent({ tauri: true }).catch')
     expect(loginPage).toContain('stopDesktopLocalAgent')
-    expect(loginPage).toContain('if (!canUseLocalAgent(user))')
+    expect(loginPage).toContain('if (!canRunLocalAgent(user))')
     expect(loginPage).not.toContain('管理员和高级运营不能登录 Desktop')
   })
 
-  it('hides local-resource navigation and the agent pill from non-operators', () => {
+  it('keeps local-resource navigation operator-only while the agent pill follows the sidecar roles', () => {
     expect(layout).toContain('const localOnlyPaths = new Set')
-    expect(layout).toContain('localAgentAllowed')
+    expect(layout).toContain('const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))')
     expect(layout).toContain('if (isDesktop() && !localAgentAllowed.value)')
-    expect(layout).toContain('v-if="isDesktop() && localAgentAllowed"')
+    expect(layout).toContain('const localAgentRunnable = computed(() => canRunLocalAgent(currentUser.value))')
+    expect(layout).toContain('v-if="isDesktop() && localAgentRunnable"')
   })
 
   // 2026-10-27：桌面环境（本地日志 / 本机设置）给运营与高级运营，管理员不可见；
@@ -88,8 +97,8 @@ describe('desktop role guard', () => {
     expect(accounts.meta?.localOnly).toBeUndefined()
   })
 
-  it('does not read or render local agent and BitBrowser binding for non-operators', () => {
-    expect(personalInfo).toContain("if (!canUseLocalAgent(currentUser)) return")
+  it('does not read or render local agent and BitBrowser binding for admins', () => {
+    expect(personalInfo).toContain("if (!canRunLocalAgent(currentUser)) return")
     expect(personalInfo).toContain('v-if="localAgentAllowed" class="device-card"')
   })
 

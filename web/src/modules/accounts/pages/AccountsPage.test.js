@@ -35,4 +35,26 @@ describe('media account resource page', () => {
     expect(source).toContain('>账号状态</span>')
     expect(source).toContain('{ colKey: "op", title: "操作", width: 400, fixed: "right" }')
   })
+
+  // 2026-10-27：列表要能看到账号归谁用，高级运营/管理员按使用人收窄，普通运营不显示该筛选。
+  it('shows the account owner and narrows the list by owner for seniors and admins', () => {
+    expect(source).toContain('{ colKey: "user_name", title: "使用人", width: 100 }')
+    expect(source).toContain("row.user_name || '--'")
+    expect(source).toContain('const canFilterByOwner = computed(')
+    expect(source).toContain('function defaultOwnerFilter()')
+    expect(source).toContain('>使用人</span>')
+    expect(source).toContain(':total="ownerFilteredAccounts.length"')
+    expect(source).toContain('ownerFilteredAccounts.value.slice(start, start + pagination.value.pageSize)')
+  })
+
+  // 2026-10-27：本地操作按账号归属：高级运营只能动本人账号，管理员一律只读。
+  it('gates local account work by ownership on desktop', () => {
+    expect(source).toContain('function canOperateLocalAccount(account)')
+    expect(source).toContain('return isOwnAccount(account)')
+    expect(source).toContain('管理员不执行本地操作')
+    expect(source).toContain('仅账号本人可执行本地操作')
+    expect(source).toContain(':disabled="isDesktop && !canOperateLocalAccount(row)"')
+    expect(source).toContain(':disabled="!canOperateLocalAccount(editAccount)"')
+    expect(source).toContain('已跳过 ${nonOwnedCount} 条非本人账号')
+  })
 })

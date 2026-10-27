@@ -29,10 +29,10 @@ func TestFindByIDUsesGORM(t *testing.T) {
 	db, mock, closeDB := newAccountMockGORM(t)
 	defer closeDB()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, user_id, team_id, platform")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.id, ma.user_id, ma.team_id, ma.platform")).
 		WithArgs("account-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "team_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id", "remark", "identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie", "cookie_status", "active_cookie_updated_at", "last_checked_at", "check_items", "created_at", "updated_at"}).
-			AddRow("account-1", 1, nil, "douyin", "platform-1", "account", nil, nil, nil, "identified", nil, "enabled", "normal", nil, nil, nil, nil, nil, nil, now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "team_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id", "remark", "identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie", "cookie_status", "active_cookie_updated_at", "last_checked_at", "check_items", "created_at", "updated_at", "user_name"}).
+			AddRow("account-1", 1, nil, "douyin", "platform-1", "account", nil, nil, nil, "identified", nil, "enabled", "normal", nil, nil, nil, nil, nil, nil, now, now, "运营张三"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT media_account_id, game_id FROM media_account_games")).
 		WithArgs("account-1").
 		WillReturnRows(sqlmock.NewRows([]string{"media_account_id", "game_id"}).AddRow("account-1", "game-a"))
@@ -43,6 +43,10 @@ func TestFindByIDUsesGORM(t *testing.T) {
 	}
 	if record.ID != "account-1" || record.Platform != model.PlatformDouyin || len(record.GameIDs) != 1 {
 		t.Fatalf("record = %#v", record)
+	}
+	// 使用人随账号一起读出；它来自 join，不参与写入。
+	if record.UserName != "运营张三" {
+		t.Fatalf("user_name = %q, want 运营张三", record.UserName)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("SQL expectations: %v", err)

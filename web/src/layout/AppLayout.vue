@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { canUseLocalAgent, isDesktop } from '../utils.js'
+import { canRunLocalAgent, canUseLocalAgent, isDesktop } from '../utils.js'
 import { SYSTEM_MANAGEMENT_PATHS, canUseDesktopEnv, canViewSystemPath } from '../shared/utils/roles.js'
 import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
@@ -65,6 +65,9 @@ const desktopItems = [
 // 本地操作按账号归属另行判定。
 const localOnlyPaths = new Set(['/account-opening', '/browser-windows', '/proxies'])
 const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))
+// 顶栏的本机执行状态给真正会拉起 sidecar 的角色（运营 + 高级运营），与本地专属
+// 页面的可见性不是同一件事：高级运营能跑本机检查，但进不了开户/窗口/代理。
+const localAgentRunnable = computed(() => canRunLocalAgent(currentUser.value))
 const desktopEnvAllowed = computed(() => canUseDesktopEnv(currentUser.value))
 
 async function refreshUser() {
@@ -203,7 +206,7 @@ async function logout() {
             成片导出，它不属于其中任何一页。面板本身只有一份（modules/transfer），
             页面用 `useDownloadCentre().open()` 把它叫出来。
           -->
-          <WorkEnvPill v-if="isDesktop() && localAgentAllowed" />
+          <WorkEnvPill v-if="isDesktop() && localAgentRunnable" />
           <t-button variant="text" @click="downloadCentre.open">
             <t-icon name="download" />
             下载中心

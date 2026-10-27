@@ -22,7 +22,7 @@ export async function startDesktopLocalAgent({ tauri = isTauri(), invokeImpl = i
   return true
 }
 
-// 高级运营和管理员登录 Desktop 时，本机 Agent 不能继续以任何旧会话工作。
+// 角色切换要停掉上一段会话的 sidecar；管理员登录后本机 Agent 不保留任何旧会话。
 export async function stopDesktopLocalAgent({ tauri = isTauri(), invokeImpl = invoke } = {}) {
   if (!tauri) return false
   await createLocalAgentService({ invoke: invokeImpl }).stop()

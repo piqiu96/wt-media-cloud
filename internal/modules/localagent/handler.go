@@ -28,10 +28,11 @@ func IssueAgentToken(_ context.Context, c *hertzapp.RequestContext) {
 		api.FailureCode(c, 401, 11001, "请先在 Desktop 登录", "DESKTOP_LOGIN_REQUIRED", nil, false, "login_desktop")
 		return
 	}
-	// Agent Token 代表这台电脑执行本机浏览器任务，只属于普通运营；
-	// 高级运营和管理员可以登录 Desktop 使用共用页面，但不能取得本机执行凭证。
-	if authContext.User.Role != identityservice.RoleOperator {
-		api.FailureCode(c, 403, 11003, "本机执行仅支持普通运营账号", "DESKTOP_ROLE_FORBIDDEN", nil, false, "use_cloud_web")
+	// Agent Token 代表这台电脑执行本机浏览器任务：运营与高级运营可以取得。
+	// 高级运营能对哪些账号执行本机动作仍由 mediaaccount 的归属门禁决定；管理员
+	// 可以登录 Desktop 使用共用页面，但不取得本机执行凭证。
+	if authContext.User.Role != identityservice.RoleOperator && authContext.User.Role != identityservice.RoleSeniorOperator {
+		api.FailureCode(c, 403, 11003, "本机执行仅支持运营与高级运营账号", "DESKTOP_ROLE_FORBIDDEN", nil, false, "use_cloud_web")
 		return
 	}
 	signer, err := agenttoken.Current()

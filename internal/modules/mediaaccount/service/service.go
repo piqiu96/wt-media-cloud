@@ -462,8 +462,21 @@ func (s *accountService) IdentifyAccount(actor identityservice.PublicUser, accou
 	return record.Account, nil
 }
 
+// canStartLocalOperation is the role half of the local-operation gate. The
+// account half is GetOwnedAccountRecord: operators and senior operators may
+// work only on the accounts they created, and admins never run local work.
+func canStartLocalOperation(role identityservice.Role) bool {
+	return role == identityservice.RoleOperator || role == identityservice.RoleSeniorOperator
+}
+
+// CanStartLocalOperation exposes the role half so HTTP handlers that start a
+// local task without going through StartLocalAccountCheck apply the same gate.
+func CanStartLocalOperation(role identityservice.Role) bool {
+	return canStartLocalOperation(role)
+}
+
 func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser, accountID string, input AccountCheckStartInput) (AccountCheckStart, error) {
-	if actor.Role != identityservice.RoleOperator {
+	if !canStartLocalOperation(actor.Role) {
 		return AccountCheckStart{}, ErrForbidden
 	}
 	if s.profileFacts == nil || s.sensitiveTasks == nil {
@@ -517,7 +530,7 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 }
 
 func (s *accountService) StartCookieRead(actor identityservice.PublicUser, accountID string, input CookieReadStartInput) (CookieReadStart, error) {
-	if actor.Role != identityservice.RoleOperator {
+	if !canStartLocalOperation(actor.Role) {
 		return CookieReadStart{}, ErrForbidden
 	}
 	if s.profileFacts == nil || s.sensitiveTasks == nil {

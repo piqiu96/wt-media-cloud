@@ -3,7 +3,7 @@ import { createPinia } from "pinia"
 import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
 import App from "./App.vue"
-import { canUseDesktop, canUseLocalAgent } from "../../utils.js"
+import { canUseDesktop, canRunLocalAgent, canUseLocalAgent } from "../../utils.js"
 import { canUseDesktopEnv, canViewSystemPath, isSystemManagementPath } from "../../shared/utils/roles.js"
 import { cloudBaseUrl, startDesktopLocalAgent, stopDesktopLocalAgent } from "./features/local-agent/init.js"
 import { setDesktopCloudOrigin } from "../../shared/api/http.js"
@@ -26,14 +26,14 @@ app.use(pinia)
 app.use(TDesign)
 app.use(router)
 
-// 本机 Agent 只在普通运营登录时启动。角色切换（含退出后换号）时重新同步一次，
-// 避免高级运营／管理员继承上一段会话留下的 sidecar。
+// 本机 Agent 在运营与高级运营登录时启动，管理员不启动。角色切换（含退出后换号）
+// 时重新同步一次，避免管理员或另一个角色继承上一段会话留下的 sidecar。
 let syncedAgentUser = ""
 async function syncLocalAgentFor(user: { id?: number; role?: string }) {
   const key = `${user?.id ?? ""}:${user?.role ?? ""}`
   if (key === syncedAgentUser) return
   syncedAgentUser = key
-  if (canUseLocalAgent(user)) {
+  if (canRunLocalAgent(user)) {
     await startDesktopLocalAgent({ tauri: true }).catch((error) => {
       console.warn("Local Agent startup failed; use the environment page to retry.", error)
     })

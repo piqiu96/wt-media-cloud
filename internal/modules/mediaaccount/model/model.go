@@ -63,8 +63,11 @@ type AccountCheckItem struct {
 }
 
 type Account struct {
-	ID                    string                 `json:"id"`
-	UserID                sharedidentity.UserID  `json:"user_id"`
+	ID     string                 `json:"id"`
+	UserID sharedidentity.UserID  `json:"user_id"`
+	// UserName is the account owner's display name (nickname, falling back to
+	// username), resolved by the read query. It is a projection, never written.
+	UserName              string                 `json:"user_name"`
 	TeamID                *sharedidentity.TeamID `json:"team_id"`
 	GameIDs               []string               `json:"game_ids"`
 	Platform              Platform               `json:"platform"`

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.10.27.3
+  version: 2026.10.27.6
 paths:
   /api/v1/media-accounts:
     get:
@@ -100,6 +100,62 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Duplicate identity exists for this user and platform; candidate is marked duplicate.}
+  /api/v1/media-accounts/{account_id}/check:
+    post:
+      operationId: startMediaAccountCheck
+      description: >-
+        Authorizes a local account check and returns the task the Desktop sidecar
+        must run. Operators may check the accounts they own; senior operators only
+        the accounts they created; admins cannot start local work.
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
+      responses:
+        '201':
+          description: Sensitive task authorized for the local agent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountCheckStartResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Binding window is unavailable or belongs to another user.}
+  /api/v1/media-accounts/{account_id}/cookies/read:
+    post:
+      operationId: readMediaAccountCookies
+      description: >-
+        Queues a local cookie read through the cloud agent worker. Uses the same
+        role and ownership gate as the synchronous read: operators own their
+        accounts, senior operators only accounts they created, admins cannot start
+        local work.
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
+      responses:
+        '201': {description: Cookie-read task queued.}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Account has no binding window.}
+  /api/v1/media-accounts/{account_id}/cookies/read-sync:
+    post:
+      operationId: readMediaAccountCookiesSync
+      description: >-
+        Authorizes a synchronous local cookie read. Operators may read cookies
+        from their own accounts; senior operators only the accounts they created;
+        admins cannot start local work.
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
+      responses:
+        '201':
+          description: Sensitive task authorized for the local agent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaAccountCookieReadStartResponse'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Binding window is unavailable or belongs to another user.}
   /api/v1/media-accounts/tags/add:
     post:
       operationId: addMediaAccountTags
@@ -188,10 +244,11 @@ components:
         tags: {type: array, minItems: 1, items: {type: string, maxLength: 64}}
     MediaAccount:
       type: object
-      required: [id, user_id, team_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+      required: [id, user_id, user_name, team_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
       properties:
         id: {type: string}
         user_id: {type: integer, format: int64}
+        user_name: {type: string, description: 'Owner display name (nickname, falling back to username) resolved by the read query; empty when the user row is missing. Read-only projection, never written.'}
         team_id: {type: integer, format: int64, nullable: true}
         game_id: {type: string}
         platform: {$ref: '#/components/schemas/Platform'}
@@ -217,3 +274,31 @@ components:
       type: object
       required: [data]
       properties: {data: {type: array, items: {$ref: '#/components/schemas/MediaAccount'}}}
+    MediaAccountCheckStart:
+      type: object
+      required: [task_id, account_id, browser_profile_id, bit_profile_id, platform, login_status]
+      properties:
+        task_id: {type: string}
+        account_id: {type: string}
+        browser_profile_id: {type: string}
+        bit_profile_id: {type: string}
+        platform: {$ref: '#/components/schemas/Platform'}
+        expected_platform_account_id: {type: string}
+        login_status: {$ref: '#/components/schemas/LoginStatus'}
+    MediaAccountCookieReadStart:
+      type: object
+      required: [task_id, account_id, browser_profile_id, bit_profile_id, platform]
+      properties:
+        task_id: {type: string}
+        account_id: {type: string}
+        browser_profile_id: {type: string}
+        bit_profile_id: {type: string}
+        platform: {$ref: '#/components/schemas/Platform'}
+    MediaAccountCheckStartResponse:
+      type: object
+      required: [data]
+      properties: {data: {$ref: '#/components/schemas/MediaAccountCheckStart'}}
+    MediaAccountCookieReadStartResponse:
+      type: object
+      required: [data]
+      properties: {data: {$ref: '#/components/schemas/MediaAccountCookieReadStart'}}

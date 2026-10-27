@@ -214,6 +214,10 @@ func ReadMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
+	if !accountservice.CanStartLocalOperation(actor.Role) {
+		writeMediaAccountError(c, accountservice.ErrForbidden)
+		return
+	}
 	record, err := accountservice.GetOwnedAccountRecord(actor, c.Param("account_id"))
 	if err != nil {
 		writeMediaAccountError(c, err)
