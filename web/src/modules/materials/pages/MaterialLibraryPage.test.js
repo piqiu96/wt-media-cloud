@@ -103,6 +103,16 @@ describe('material library page', () => {
     expect(source).toContain('@sort-change="changeSort"')
   })
 
+  // 用户 2026-10-27：素材库要能直接看出是谁把素材放进来的。操作人跟在入库时间之后，
+  // 宽度仍由列宽推导（tableScroll 自动计入新增列），缺失时画 —，不伪造姓名。
+  it('shows the material creator right after the ingest time', () => {
+    expect(source).toContain("{ colKey: 'created_by_name', title: '操作人', width: 110 }")
+    const creatorAt = source.indexOf("{ colKey: 'created_by_name'")
+    expect(creatorAt).toBeGreaterThan(source.indexOf("{ colKey: 'created_at'"))
+    expect(creatorAt).toBeLessThan(source.indexOf("{ colKey: 'op'"))
+    expect(source).toContain('<template #created_by_name="{ row }">{{ row.created_by_name || \'—\' }}</template>')
+  })
+
   it('adds to my materials through the one idempotent command', () => {
     expect(source).toContain('await client.addUsage(row.id)')
     // 200 与 201 的响应体相同，客户端分支不了 —— 也就不该假装能分支。

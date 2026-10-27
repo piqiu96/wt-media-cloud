@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.27.2
+  version: 2026.10.27.4
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -495,7 +495,9 @@ paths:
         relation (`usage_status` / `added_at`), whether the viewer has produced a
         successful output from it (`my_usage`), and the team's known use
         (`usage`). Those three dimensions are independent and are also accepted
-        as filters. "My Materials" remains the personal working set and is read
+        as filters. Each material also names who put it into the library
+        (`created_by`, `created_by_name`), a fact about the material that every
+        role reads. "My Materials" remains the personal working set and is read
         from `/api/v1/my-materials`.
       security: [{sessionCookie: []}]
       parameters:

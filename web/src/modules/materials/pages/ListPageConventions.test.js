@@ -19,10 +19,11 @@ const FILES = ['MaterialLibraryPage.vue', 'MyMaterialsPage.vue']
 // 本轮批量下载重新增加选择列；合成任务创建入口仍只在合成任务页。
 // CHG-104：素材库把「使用情况」拆成三个各回答一个问题的维度（加入状态 / 我的使用 /
 // 使用情况），9 列变 11 列；我的素材不变。
-// 2026-10-27 用户裁定撤掉列表的「文件状态」列，素材库回到 10 列。
+// 2026-10-27 用户裁定撤掉列表的「文件状态」列，素材库回到 10 列；
+// 同日第三轮再补「操作人」列（素材创建人），素材库 11 列。
 // 分母留在这里，列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
 const TABLES = [
-  { file: 'MaterialLibraryPage.vue', name: 'columns', count: 10 },
+  { file: 'MaterialLibraryPage.vue', name: 'columns', count: 11 },
   { file: 'MyMaterialsPage.vue', name: 'columns', count: 10 },
 ]
 

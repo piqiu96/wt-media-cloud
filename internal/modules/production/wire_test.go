@@ -112,6 +112,8 @@ func readyMaterial() model.Material {
 			OperatorCount: 1,
 			Operators:     []model.MaterialOperatorUse{{ID: 9, Name: "张三", OutputCount: 2}},
 		},
+		CreatedBy:       9,
+		CreatedByName:   "张三",
 		VideoSizeBytes:  &size,
 		VideoSHA256:     "0f343b0931126a20f133d67c2b018a3b",
 		VideoMedia:      map[string]any{"duration_ms": 15000},
@@ -132,9 +134,10 @@ func TestMaterialBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 		t.Fatal("contract has no Material schema")
 	}
 	want := schemaPropertyNames(schema.Properties)
-	// 29 = 25（素材自身与来源投影）+ 4（查看者关系与团队使用投影，CHG-20261026-104）。
-	if len(want) != 29 {
-		t.Fatalf("Material declares %d properties, want the measured 29: %v", len(want), want)
+	// 31 = 25（素材自身与来源投影）+ 4（查看者关系与团队使用投影，CHG-20261026-104）
+	// + 2（素材操作人 created_by / created_by_name，CHG-20261015-098 T-21）。
+	if len(want) != 31 {
+		t.Fatalf("Material declares %d properties, want the measured 31: %v", len(want), want)
 	}
 
 	if got := marshalledKeys(t, readyMaterial()); !reflect.DeepEqual(got, want) {

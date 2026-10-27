@@ -379,6 +379,8 @@ async function openDirectory() {
             <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
             <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
             <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
+            <!-- 操作人 = 素材创建人；目录里已没有此人时回退 —，不伪造姓名。 -->
+            <div><dt>操作人</dt><dd>{{ material.created_by_name || '-' }}</dd></div>
           </dl>
         </section>
       </div>

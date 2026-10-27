@@ -96,6 +96,7 @@ const columns = [
   { colKey: 'usage', title: '使用情况', width: 200 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
   { colKey: 'created_at', title: '入库时间', width: 105, sorter: true },
+  { colKey: 'created_by_name', title: '操作人', width: 110 },
   { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
 ]
 
@@ -320,6 +321,8 @@ onMounted(async () => {
               <span v-else class="usage-cell usage-cell--empty">—</span>
             </template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            <!-- 操作人 = 素材创建人；目录里已没有此人时留空，画 —，不伪造姓名。 -->
+            <template #created_by_name="{ row }">{{ row.created_by_name || '—' }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <template #op="{ row }">
               <!-- 详情 | 单一主操作；已加入的行换成「去我的素材」，不再给必然空转的「加入」。
