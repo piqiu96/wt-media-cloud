@@ -56,7 +56,10 @@ describe('output management page', () => {
     expect(source).toContain('gameName(row.game_id)')
     expect(source).toContain("row.operator_name || '未记录'")
     expect(source).toContain('titleFor(row)')
-    expect(source).toContain('generationLabel(triggerFor(row))')
+    expect(source).toContain('triggerLabel(triggerFor(row))')
+    expect(source).toContain(':options="TRIGGER_TYPE_OPTIONS"')
+    expect(source).not.toContain('generationLabel')
+    expect(source).not.toContain('const triggerOptions')
     expect(source).toContain('downloadFor(row).label')
     expect(source).toContain('filteredRows.length')
     // 游戏列紧跟来源素材，早于策略；筛选与列说的是同一个字段。

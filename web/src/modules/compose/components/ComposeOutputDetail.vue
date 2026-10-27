@@ -5,7 +5,7 @@ import { formatBytes, formatDurationMs } from '../../../shared/utils/units.js'
 import { usageStatusLabel } from '../../materials/labels.js'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { schemaFields } from '../schemaFields.js'
-import { generationLabel } from '../outputManagement.js'
+import { triggerLabel } from '../labels.js'
 
 // 成片详情正文由成片管理和任务关联抽屉共用。管理视图按资产操作顺序展示，
 // 任务视图保留任务上下文所需的来源面板；标题栏和页脚由各自宿主控制。
@@ -82,7 +82,7 @@ function retryPreview() {
         <div class="output-detail__grid">
           <div class="output-detail__wide"><span class="output-detail__label">标题</span><strong>{{ title }}</strong></div>
           <div><span class="output-detail__label">成片 ID</span><strong>{{ detail.output.id }}</strong></div>
-          <div><span class="output-detail__label">生成方式</span><strong>{{ generationLabel(triggerType) }}</strong></div>
+          <div><span class="output-detail__label">生成方式</span><strong>{{ triggerLabel(triggerType) }}</strong></div>
           <div><span class="output-detail__label">负责人</span><strong>{{ detail.output.operator_name || '未记录' }}</strong></div>
           <div><span class="output-detail__label">生成时间</span><strong>{{ formatDateTime(detail.output.created_at) }}</strong></div>
           <div><span class="output-detail__label">视频时长</span><strong>{{ formatDurationMs(detail.output.media?.duration_ms) }}</strong></div>

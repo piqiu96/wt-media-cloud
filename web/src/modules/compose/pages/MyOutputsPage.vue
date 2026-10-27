@@ -22,7 +22,8 @@ import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
 import { downloadedFileName } from '../../transfer/downloadFacts.js'
 import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../../transfer/desktopBridge.js'
-import { canQueueOutputDownload, generationLabel, outputDownloadState, outputTitle } from '../outputManagement.js'
+import { canQueueOutputDownload, outputDownloadState, outputTitle } from '../outputManagement.js'
+import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
 import { publicObjectReadUrl } from '../../../shared/utils/objectReadUrl.js'
 
 const client = createComposeClient()
@@ -59,7 +60,6 @@ const selectedRowKeys = ref([])
 const batchDownloading = ref(false)
 const batchResult = ref('')
 
-const triggerOptions = [{ label: '人工', value: 'manual' }, { label: '定时', value: 'scheduled' }]
 const downloadOptions = [
   { label: '未下载', value: 'not_downloaded' },
   { label: '下载中', value: 'downloading' },
@@ -430,7 +430,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
           </t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" :options="gameFilterOptions" clearable placeholder="全部" /></label>
           <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">生成方式</span><t-select v-model="filters.trigger" :options="triggerOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">生成方式</span><t-select v-model="filters.trigger" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">下载状态</span><t-select v-model="filters.download" :options="downloadOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           <div class="wt-filter-actions">
@@ -463,7 +463,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
               </div>
             </template>
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
-            <template #trigger="{ row }">{{ generationLabel(triggerFor(row)) }}</template>
+            <template #trigger="{ row }">{{ triggerLabel(triggerFor(row)) }}</template>
             <template #download_status="{ row }"><ResourceStatusBadge :tone="downloadFor(row).tone" :label="downloadFor(row).label" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }">
@@ -516,7 +516,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
             <div class="output-task-summary__grid">
               <div><span>任务 ID</span><strong>{{ taskDrawer.row.id }}</strong></div>
               <div><span>任务名称</span><strong>{{ taskDrawer.row.display_name || `合成任务 ${taskDrawer.row.id}` }}</strong></div>
-              <div><span>生成方式</span><strong>{{ generationLabel(taskDrawer.row.trigger_type) }}</strong></div>
+              <div><span>生成方式</span><strong>{{ triggerLabel(taskDrawer.row.trigger_type) }}</strong></div>
               <div><span>任务状态</span><ResourceStatusBadge :tone="taskStatusTones[taskDrawer.row.status] || 'neutral'" :label="taskStatusLabels[taskDrawer.row.status] || '—'" /></div>
               <div><span>来源素材</span><strong>素材 {{ taskDrawer.row.material_id }}</strong></div>
               <div><span>合成策略</span><strong>{{ strategyName(taskDrawer.row) }}</strong></div>

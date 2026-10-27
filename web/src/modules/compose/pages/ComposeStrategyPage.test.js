@@ -22,6 +22,16 @@ describe('compose strategy page', () => {
     expect(source).toContain('client.runStrategyNow(row.id, crypto.randomUUID())')
     expect(source).toContain('不改变')
   })
+  // 运行记录的触发方式与任务页、成片管理共用一组文案；策略自身的
+  // 「手动执行 / 定时执行」是另一个字段（执行方式），不能一起换掉。
+  it('uses the shared task trigger labels for run history', () => {
+    expect(source).toContain("import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'")
+    expect(source).toContain('v-model="runFilters.trigger_type" :options="TRIGGER_TYPE_OPTIONS"')
+    expect(source).toContain('triggerLabel(row.trigger_type)')
+    expect(source).not.toContain('人工执行')
+    expect(source).toContain('手动执行')
+    expect(source).toContain('定时执行')
+  })
   // 普通运营只有详情；管理角色可详情、编辑、执行、复制。列宽跟着这份清单走。
   it('derives the op column width from the buttons the current role can see', () => {
     expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '执行', '复制'] : ['详情'])")

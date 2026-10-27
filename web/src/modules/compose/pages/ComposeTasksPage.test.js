@@ -26,6 +26,14 @@ describe('compose tasks page', () => {
     expect(source).toContain('v-model="filters.created_range"')
   })
 
+  it('uses the shared trigger labels for the filter, list and detail', () => {
+    expect(source).toContain("import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'")
+    expect(source).toContain(':options="TRIGGER_TYPE_OPTIONS"')
+    expect(source).toContain('triggerLabel(row.trigger_type)')
+    expect(source).toContain('triggerLabel(detail.trigger_type)')
+    expect(source).not.toContain('triggerText')
+  })
+
   // 负责人筛选（CHG-104 T-08）：团队成员本身就是候选项，未选择即本团队全部；
   // 不再有「我的／团队全部」伪选项，页面也不再发送 operator_scope。
   it('lists team members as the only operator options and narrows by operator_id', () => {

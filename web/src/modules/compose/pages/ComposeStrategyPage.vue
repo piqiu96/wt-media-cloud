@@ -11,6 +11,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { schemaFields } from '../schemaFields.js'
+import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
 import { scheduleLabel } from '../scheduleForm.js'
 import { defaultCondition, displayRules, saveRules } from '../strategyRules.js'
 import { templateLabel } from '../strategyConfig.js'
@@ -457,7 +458,7 @@ function toggleStatus(row, nextEnabled) {
   const dialog = DialogPlugin.confirm({
     header: next === 'enabled' ? '启用策略' : '停用策略',
     body: next === 'enabled'
-      ? `即将启用「${row.name}」。启用后可人工执行${row.execution_mode === 'scheduled' ? '，也会按计划创建任务' : ''}。`
+      ? `即将启用「${row.name}」。启用后可立即执行${row.execution_mode === 'scheduled' ? '，也会按计划创建任务' : ''}。`
       : `停用「${row.name}」后不再创建新的人工或定时任务；已有任务和历史成片不受影响。`,
     confirmBtn: { content: next === 'enabled' ? '启用' : '停用', theme: next === 'enabled' ? 'primary' : 'danger' },
     onConfirm: async () => {
@@ -934,7 +935,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
           <t-tab-panel value="runs" label="运行记录">
             <div class="strategy-history">
               <div class="strategy-history__filters">
-                <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="runFilters.trigger_type" clearable placeholder="全部"><t-option value="manual" label="人工执行" /><t-option value="scheduled" label="定时执行" /></t-select></label>
+                <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="runFilters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
                 <label class="wt-filter-field"><span class="wt-filter-field__label">执行时间</span><t-date-range-picker v-model="runFilters.created_range" value-type="YYYY-MM-DD" clearable /></label>
                 <div class="strategy-history__actions"><t-button theme="primary" @click="applyRunFilters">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetRunFilters">重置</t-button></div>
               </div>
@@ -943,7 +944,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 <div class="table-scroll-wrap">
                   <t-table class="wt-resource-table" :data="runHistory" :columns="runColumns" row-key="run_key" hover size="small" :scroll="runTableScroll" empty="暂无运行记录">
                     <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
-                    <template #trigger_type="{ row }">{{ row.trigger_type === 'scheduled' ? '定时执行' : '人工执行' }}</template>
+                    <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
                     <template #skipped_count="{ row }">{{ row.skipped?.length ?? 0 }}</template>
                     <template #op="{ row }"><t-link v-if="row.created_count" theme="primary" @click="toggleRunBatch(row)">{{ batchDetail[row.run_key]?.open ? '收起本次任务' : '查看本次任务' }}</t-link><span v-else>—</span></template>
                   </t-table>
