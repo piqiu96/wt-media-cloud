@@ -20,6 +20,7 @@ import {
   nextStepHint,
   shortDigest,
   usageFacts,
+  usageOperatorCount,
   usageOperators,
   usageOutputCount,
   usageStatusLabel,
@@ -187,6 +188,16 @@ describe('library usage dimensions', () => {
     expect(usageOutputCount({ usage: { output_count: 0 } })).toBe(0)
     expect(usageOutputCount({})).toBeNull()
     expect(usageOutputCount(undefined)).toBeNull()
+  })
+
+  // 普通运营的读模型只有 operator_count、没有 operators：弹窗的使用人数只能读这个计数，
+  // 不能拿姓名数组长度反推。缺字段是「还没事实」，与真实的 0 人分开。
+  it('reads the operator count without needing the name list', () => {
+    expect(usageOperatorCount({ usage: { output_count: 12, operator_count: 2 } })).toBe(2)
+    expect(usageOperatorCount({ usage: { operator_count: 0 } })).toBe(0)
+    expect(usageOperatorCount({ usage: { output_count: 12 } })).toBeNull()
+    expect(usageOperatorCount({})).toBeNull()
+    expect(usageOperatorCount(undefined)).toBeNull()
   })
 
   it('lists only the facts that carry a value', () => {

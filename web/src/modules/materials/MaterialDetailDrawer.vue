@@ -45,8 +45,6 @@ const props = defineProps({
   showPageLink: { type: Boolean, default: true },
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
-  // 团队使用汇总只给高级运营/管理员；普通运营在素材库上下文连这一段都不渲染。
-  showUsage: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel'])
 
@@ -270,7 +268,7 @@ async function openDirectory() {
         <!-- 首段回答「我现在处理到哪一步，下一步是什么」（走查七轮用户提示词）：两个状态
              维度 + 加入时间 + 一句下一步，使用情况的五个事实跟在下面（协议见 labels.js）。 -->
         <section class="detail-card">
-          <h4 class="detail-card__title">{{ mode === 'library' && showUsage ? '当前进度 / 使用情况' : '当前进度' }}</h4>
+          <h4 class="detail-card__title">{{ mode === 'library' ? '当前进度 / 使用情况' : '当前进度' }}</h4>
           <dl class="detail-card__grid" :class="mode === 'library' ? 'detail-card__grid--5' : 'detail-card__grid--4'">
             <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></dd></div>
             <div v-if="mode === 'mine'"><dt>使用状态</dt><dd>
@@ -284,9 +282,9 @@ async function openDirectory() {
             <div><dt>加入时间</dt><dd>{{ material.added_at ? formatDateTime(material.added_at) : '—' }}</dd></div>
             <div><dt>下一步</dt><dd>{{ nextStep }}</dd></div>
           </dl>
-          <!-- 使用情况只在素材库上下文且查看者有权看时显示：我的素材读的是关系与
-               下载，普通运营不携带团队成片汇总；没有事实就整段不渲染。 -->
-          <div v-if="mode === 'library' && showUsage && usageRows.length" class="detail-usage">
+          <!-- 使用情况只在素材库上下文显示：我的素材读的是关系与下载。所有角色都能看，
+               普通运营的读模型只少姓名、不少计数；没有事实就整段不渲染。 -->
+          <div v-if="mode === 'library' && usageRows.length" class="detail-usage">
             <div v-for="fact in usageRows" :key="fact.key" class="detail-usage__item">
               <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
               <strong v-else>{{ fact.value }}</strong>

@@ -96,7 +96,7 @@ describe('material detail drawer', () => {
     const titles = [...template.matchAll(/class="detail-card__title"[^>]*>\s*([^<]+)/g)]
       .map((m) => m[1].trim())
     expect(titles).toEqual([
-      "{{ mode === 'library' && showUsage ? '当前进度 / 使用情况' : '当前进度' }}",
+      "{{ mode === 'library' ? '当前进度 / 使用情况' : '当前进度' }}",
       '文件信息', '来源信息', '来源内容池统计', '基本信息',
     ])
   })
@@ -131,11 +131,11 @@ describe('material detail drawer', () => {
     expect(source).toContain('nextStepHint(props.material)')
     expect(body).toContain('usageRows')
     // 量标题标记而不是裸词：裸词会先量到正文注释里的那一次，读数就成了注释的函数。
-    // 第一段标题随权限变化（使用情况只给高级运营/管理员），这里量固定的前半句。
+    // 第一段标题随上下文变化（素材库带使用情况），这里量固定的前半句。
     const cards = [...body.matchAll(/<h4 class="detail-card__title">\s*([^<\n]*)/g)]
       .map((m) => ({ title: m[1].trim(), at: m.index }))
     const at = (title) => cards.find((card) => card.title === title)?.at ?? -1
-    const first = "{{ mode === 'library' && showUsage ? '当前进度 / 使用情况' : '当前进度' }}"
+    const first = "{{ mode === 'library' ? '当前进度 / 使用情况' : '当前进度' }}"
     expect(at(first)).toBeGreaterThan(-1)
     expect(at('基本信息')).toBeGreaterThan(at('来源内容池统计'))
     expect(at(first)).toBeLessThan(at('文件信息'))
@@ -167,8 +167,9 @@ describe('material detail drawer', () => {
     expect(card).toContain('myUsageLabel(material.my_usage)')
     // 加入时间是关系自己的时间，素材库上下文没有它——缺值画 —，不是画入库时间冒充。
     expect(card).toContain("material.added_at ? formatDateTime(material.added_at) : '—'")
-    // 团队成片汇总只在素材库上下文且有权看时出现；我的素材与普通运营都不携带它。
-    expect(card).toContain('v-if="mode === \'library\' && showUsage && usageRows.length" class="detail-usage"')
+    // 团队成片汇总只在素材库上下文出现；我的素材读的是关系与下载。所有角色都看得到，
+    // 普通运营的读模型只少姓名、不少计数。
+    expect(card).toContain('v-if="mode === \'library\' && usageRows.length" class="detail-usage"')
   })
 
   // 使用状态读不到画 —：我的素材里关系读不到不等于「使用中」。

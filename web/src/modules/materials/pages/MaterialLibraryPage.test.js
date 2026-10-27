@@ -206,7 +206,8 @@ describe('material library page', () => {
     expect(source).toContain("import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'")
     expect(source).toContain('<MaterialDetailDrawer')
     expect(source).toContain('mode="library"')
-    expect(source).toContain(':show-usage="canViewUsage"')
+    // 使用情况段由 mode 决定，不再由角色开关决定。
+    expect(source).not.toContain('show-usage')
     expect(source).toContain('@add="addToMine"')
     expect(source).toContain('@go-mine="goToMyMaterials"')
     expect(source).toContain(':mine="detail?.usage_status === \'active\'"')
@@ -248,17 +249,20 @@ describe('material library page', () => {
     expect(source).toContain('myUsageLabel(row.my_usage)')
   })
 
-  // 使用情况对普通运营完全不存在：列、筛选、详情段都不渲染；高级运营/管理员只有
-  // 一行可点摘要，明细进弹窗。没有已知使用人时也不写占位文案。
-  it('shows usage to seniors and admins only, behind a one-line summary and a dialog', () => {
-    expect(source).toContain("const isSenior = computed(() => currentUser.value?.role === 'senior_operator')")
-    expect(source).toContain('const canViewUsage = computed(() => isAdmin.value || isSenior.value)')
-    expect(source).toContain("canViewUsage.value ? columns : columns.filter((col) => col.colKey !== 'usage')")
-    expect(source).toContain('<label v-if="canViewUsage"')
+  // 2026-10-27 用户裁定：普通运营也看得到使用情况 —— 列、筛选、弹窗、详情段按同一套
+  // 渲染，服务端只把姓名置空。页面因此不再有角色开关；弹窗用 operator_count 给出
+  // 「使用人数」，不拿姓名数组长度反推，也不写占位文案假装知道是谁。
+  it('shows the team usage to every role, counting but never naming for operators', () => {
+    expect(source).not.toContain('canViewUsage')
+    expect(source).not.toContain("role === 'senior_operator'")
+    expect(source).not.toContain('tableColumns')
+    expect(source).toContain('<label class="wt-filter-field"><span class="wt-filter-field__label">使用情况')
+    expect(source).toContain('v-model="teamUsageFilter"')
     expect(source).toContain('<template #usage="{ row }">')
     expect(source).toContain('usageSummary(row)')
     expect(source).toContain('@click="openUsage(row)"')
     expect(source).toContain('成功成片 {{ usageOutputCount(usageMaterial) }}')
+    expect(source).toContain('使用人数 {{ usageOperatorCount(usageMaterial) }}')
     expect(source).toContain('v-for="operator in usageOperators(usageMaterial)"')
     expect(source).toContain("{{ operator.name }}")
     expect(source).toContain("成片 {{ operator.output_count }}")
@@ -269,7 +273,6 @@ describe('material library page', () => {
     for (const gone of ['暂无成功成片', '负责人未记录', '姓名不可见', 'usageSummaryLines']) {
       expect(source, `不该再有 ${gone}`).not.toContain(gone)
     }
-    expect(source).toContain(':show-usage="canViewUsage"')
   })
 
   /**
