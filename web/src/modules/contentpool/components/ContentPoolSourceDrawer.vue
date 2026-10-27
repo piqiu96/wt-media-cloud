@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { scheduleLabel } from '../labels.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 
@@ -130,7 +131,7 @@ function goTask() {
           <div><dt>策略名称</dt><dd>{{ strategyName() }}</dd></div>
           <div><dt>类型</dt><dd>{{ strategyTypeLabel() }}</dd></div>
           <div><dt>关键词 / 作者</dt><dd>{{ strategyFocus() }}</dd></div>
-          <div><dt>执行周期</dt><dd>{{ snapshot().schedule || '-' }}</dd></div>
+          <div><dt>执行周期</dt><dd>{{ scheduleLabel(snapshot().schedule) }}</dd></div>
         </dl>
       </section>
       <section class="source-drawer__card">

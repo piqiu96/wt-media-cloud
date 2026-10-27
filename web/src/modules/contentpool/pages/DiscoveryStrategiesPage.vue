@@ -16,6 +16,7 @@ import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
+import { scheduleLabel } from '../labels.js'
 
 const client = createDiscoveryClient()
 const session = createSessionClient()
@@ -443,13 +444,6 @@ function openAuthors(row) {
 
 function materialLabel(row) {
   return materialRulesSummary(row.config || {})
-}
-
-function scheduleLabel(schedule) {
-  if (!schedule || schedule === 'manual') return '手动执行'
-  if (String(schedule).startsWith('daily ')) return `每天 ${String(schedule).slice(6)}`
-  if (String(schedule).startsWith('interval:')) return `每 ${String(schedule).slice(9)} 分钟`
-  return schedule
 }
 
 // 竖排一行一项，返回数组而不是拼好的字符串（渲染交给 MetricList）。

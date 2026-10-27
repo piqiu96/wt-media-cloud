@@ -60,7 +60,8 @@ describe('content pool source drawer', () => {
     expect(source).toContain("if (snapshot().strategy_type === 'author') return '作者'")
     expect(source).toContain("if (snapshot().strategy_type === 'keyword') return '关键词'")
     expect(source).toContain("keywords.join('、') || snap.author || '-'")
-    expect(source).toContain("snapshot().schedule || '-'")
+    // 快照里存的是 `manual` 这类原始值，与列表、详情用同一个映射。
+    expect(source).toContain('scheduleLabel(snapshot().schedule)')
     for (const label of ['策略名称', '类型', '关键词 / 作者', '执行周期']) {
       expect(source, label).toContain(`<dt>${label}</dt>`)
     }
