@@ -69,6 +69,7 @@ const columns = computed(() => [
   { colKey: 'output', title: '生成成片', width: 120 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'created_at', title: '创建时间', width: 150 },
+  { colKey: 'finished_at', title: '完成时间', width: 150 },
   { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消', '重试']), fixed: 'right' },
 ])
 
@@ -534,6 +535,7 @@ onMounted(() => {
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
@@ -583,7 +585,7 @@ onMounted(() => {
                     <div><span class="compose-detail__label">当前阶段</span><span>{{ stageText(detail) }}</span></div>
                     <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
                     <div><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
-                    <div><span class="compose-detail__label">结束时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
+                    <div><span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
                     <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
                   </div>
                 </div>
