@@ -8,6 +8,7 @@ import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
+import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
@@ -442,10 +443,6 @@ function relativeTime(ts) {
   return `${day}天前 · 建议检查`
 }
 
-function platformLabel(platform) {
-  return { bilibili: "哔哩", baijiahao: "百度" }[platform] || platform || "-"
-}
-
 function profileOptionLabel(profile) {
   if (!profile) return ""
   const name = profile.name || "未命名窗口"
@@ -770,8 +767,7 @@ const columns = [
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
-            <t-option value="bilibili" label="哔哩" />
-            <t-option value="baijiahao" label="百度" />
+            <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchBizStatus" placeholder="全部" clearable>
             <t-option value="enabled" label="启用" />
@@ -942,8 +938,7 @@ const columns = [
         </t-form-item>
         <t-form-item label="平台">
           <t-select v-model="createForm.platform">
-            <t-option value="bilibili" label="哔哩" />
-            <t-option value="baijiahao" label="百度" />
+            <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
           </t-select>
         </t-form-item>
         <t-form-item label="账号名称">
@@ -1038,7 +1033,7 @@ const columns = [
     <t-drawer :close-btn="true" v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
-        <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>
+        <t-descriptions-item label="平台">{{ platformLabel(detailAccount.platform) }}</t-descriptions-item>
         <t-descriptions-item label="游戏">{{ gameNames(detailAccount.game_ids) }}</t-descriptions-item>
         <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
         <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>

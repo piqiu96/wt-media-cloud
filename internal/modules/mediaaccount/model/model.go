@@ -22,9 +22,9 @@ var (
 type Platform string
 
 const (
-	PlatformDouyin    Platform = "douyin"
-	PlatformBilibili  Platform = "bilibili"
-	PlatformBaijiahao Platform = "baijiahao"
+	PlatformDouyin   Platform = "douyin"
+	PlatformBilibili Platform = "bilibili"
+	PlatformBaidu    Platform = "baidu"
 )
 
 type IdentificationStatus string

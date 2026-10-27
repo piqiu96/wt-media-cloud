@@ -11,6 +11,7 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { platformLabel } from '../../../shared/utils/platforms.js'
 
 const client = createDiscoveryClient()
 const session = createSessionClient()
@@ -467,7 +468,7 @@ function hasFailed(task) {
         <div v-if="strategyDrawer" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(strategyDrawer.game_id) }}</strong></div>
-          <div class="strategy-drawer__field"><span>平台</span><strong>{{ strategyDrawer.platform || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(strategyDrawer.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ strategyDrawer.schedule || '-' }}</strong></div>

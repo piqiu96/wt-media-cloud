@@ -44,7 +44,7 @@ type (
 const (
 	PlatformDouyin           = model.PlatformDouyin
 	PlatformBilibili         = model.PlatformBilibili
-	PlatformBaijiahao        = model.PlatformBaijiahao
+	PlatformBaidu            = model.PlatformBaidu
 	IdentificationPending    = model.IdentificationPending
 	IdentificationIdentified = model.IdentificationIdentified
 	IdentificationDuplicate  = model.IdentificationDuplicate
@@ -1127,7 +1127,7 @@ func validActor(actor identityservice.PublicUser) bool {
 }
 
 func validPlatform(platform Platform) bool {
-	return platform == PlatformDouyin || platform == PlatformBilibili || platform == PlatformBaijiahao
+	return platform == PlatformDouyin || platform == PlatformBilibili || platform == PlatformBaidu
 }
 
 func validBusinessStatus(status BusinessStatus) bool {

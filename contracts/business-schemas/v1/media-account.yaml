@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.23.1"
+revision: "2026.10.27.2"
 schemas:
   MediaAccount:
     type: object
@@ -9,7 +9,7 @@ schemas:
       user_id: {type: integer, format: int64}
       team_id: {type: integer, format: int64, nullable: true}
       game_id: {type: string}
-      platform: {type: string, enum: [douyin, bilibili, baijiahao]}
+      platform: {type: string, enum: [douyin, bilibili, baidu]}
       platform_account_id: {type: string, nullable: true}
       name: {type: string, nullable: true}
       avatar_url: {type: string, nullable: true}

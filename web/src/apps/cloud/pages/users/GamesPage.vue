@@ -3,6 +3,7 @@ import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
 import { createUsersClient } from './usersApi.js'
+import { platformLabel } from '../../../../shared/utils/platforms.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -206,7 +207,9 @@ async function deleteGame(game) {
         <div class="reference-section">媒体账号</div>
         <t-table :data="references.media_accounts || []" size="small" row-key="account_id" :columns="[
           { colKey: 'account_id', title: '账号ID', width: 90 }, { colKey: 'name', title: '账号名称' }, { colKey: 'platform', title: '平台' }, { colKey: 'username', title: '归属用户' }
-        ]" />
+        ]">
+          <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
+        </t-table>
       </t-loading>
     </t-drawer>
     </div>

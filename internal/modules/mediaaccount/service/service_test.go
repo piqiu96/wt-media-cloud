@@ -133,7 +133,7 @@ func TestServiceAdminCanAssignGlobalAccount(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := identityservice.PublicUser{ID: identityservice.UserID(99), Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 
-	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-z"}, Platform: PlatformBaijiahao})
+	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-z"}, Platform: PlatformBaidu})
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
@@ -595,7 +595,7 @@ func TestServiceFiltersByStatusAndSearch(t *testing.T) {
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili, Remark: "重点账号"})
-	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaijiahao, Remark: "普通账号"})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaidu, Remark: "普通账号"})
 	firstRecord, _, _ := store.Find(first.ID)
 	firstRecord.BusinessStatus = BusinessDisabled
 	firstRecord.LoginStatus = LoginExpired
@@ -673,8 +673,8 @@ func TestServiceAccountGroupApplyFilters(t *testing.T) {
 	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili}); err != nil {
 		t.Fatalf("create bilibili: %v", err)
 	}
-	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaijiahao}); err != nil {
-		t.Fatalf("create baijiahao: %v", err)
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaidu}); err != nil {
+		t.Fatalf("create baidu: %v", err)
 	}
 	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{Name: "仅B站", Filters: AccountGroupFilters{Platform: PlatformBilibili}})
 	if err != nil {

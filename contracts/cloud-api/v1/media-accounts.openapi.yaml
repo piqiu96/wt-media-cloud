@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.07.14.3
+  version: 2026.10.27.3
 paths:
   /api/v1/media-accounts:
     get:
@@ -154,7 +154,7 @@ components:
     InvalidRequest: {description: Invalid media account request.}
     NotFound: {description: Media account not found.}
   schemas:
-    Platform: {type: string, enum: [douyin, bilibili, baijiahao]}
+    Platform: {type: string, enum: [douyin, bilibili, baidu]}
     BusinessStatus: {type: string, enum: [enabled, disabled, retired]}
     LoginStatus: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
     IdentificationStatus: {type: string, enum: [pending_identification, identified, duplicate]}

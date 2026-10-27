@@ -11,6 +11,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { platformLabel } from '../../../shared/utils/platforms.js'
 import {
   JOIN_FILTERS,
   MY_USAGE_FILTERS,
@@ -300,7 +301,7 @@ onMounted(async () => {
                 <div class="material-cell__text">
                   <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
                   <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
-                  <span class="material-cell__source">{{ row.platform || '-' }}</span>
+                  <span class="material-cell__source">{{ platformLabel(row.platform) }}</span>
                 </div>
               </div>
             </template>

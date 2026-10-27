@@ -15,6 +15,7 @@ import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import ContentPoolSourceDrawer from '../components/ContentPoolSourceDrawer.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { enabledGames } from '../../../shared/utils/games.js'
+import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
@@ -454,7 +455,6 @@ async function advanceReview() {
 
 function strategyLabel(row) { return row.strategy_name || (row.strategy_id ? `策略 ${row.strategy_id}` : '-') }
 function taskLabel(row) { return row.crawl_task_name || (row.crawl_task_id ? `任务 ${row.crawl_task_id}` : '-') }
-function platformLabel(value) { return ({ douyin: '抖音', bilibili: 'B站' })[value] || value || '-' }
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
 function statusTone(value) { return ({ pending: 'warning', material_created: 'success', ignored: 'neutral' })[value] || 'info' }
 function sourceTypeLabel(value) { return ({ link: 'ID/链接发现', search: '关键词发现', author: '博主发现', strategy: '挖掘策略' })[value] || value || '-' }
@@ -527,7 +527,7 @@ function openImageViewer(url) {
         <div class="filter-bar">
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></label>
             <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" multiple clearable placeholder="全部"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
@@ -556,6 +556,7 @@ function openImageViewer(url) {
                 </div>
               </div>
             </template>
+            <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #author_name="{ row }">
               <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
@@ -688,7 +689,7 @@ function openImageViewer(url) {
             <t-form label-width="80px">
               <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
               <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
-              <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+              <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
             </t-form>
           </div>
 

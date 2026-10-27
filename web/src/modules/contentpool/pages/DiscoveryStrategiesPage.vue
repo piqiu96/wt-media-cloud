@@ -15,6 +15,7 @@ import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'
+import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
 import { scheduleLabel } from '../labels.js'
 
@@ -533,7 +534,7 @@ function latestStats(row) {
                 <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
                 <t-form-item v-if="isAdmin && !editingID" label="目标团队" required-mark><t-select v-model="form.team_id" placeholder="选择运营团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
                 <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in formGameOptions" :key="game.id" :value="game.id" :label="game.label" :disabled="game.disabled" /></t-select></t-form-item>
-                <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+                <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
                 <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>
               </t-form>
             </div>
@@ -644,7 +645,7 @@ function latestStats(row) {
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
-          <div class="strategy-drawer__field"><span>平台</span><strong>{{ detailRow.platform || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(detailRow.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ typeLabel(detailRow.strategy_type) }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (detailRow.config?.keywords || []).join('、') || detailRow.config?.author || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>

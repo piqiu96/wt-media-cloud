@@ -135,7 +135,7 @@ describe('material library page', () => {
     expect(source).toContain('<template #material="{ row }">')
     expect(source).toContain('MaterialCover')
     expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
-    expect(source).toContain('{{ row.platform')
+    expect(source).toContain('{{ platformLabel(row.platform) }}')
     // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
