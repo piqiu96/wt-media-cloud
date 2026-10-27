@@ -15,7 +15,6 @@ import {
   JOIN_FILTERS,
   MY_USAGE_FILTERS,
   TEAM_USAGE_FILTERS,
-  VIDEO_STATUSES,
   gameName,
   joinStatus,
   materialStatusLabel,
@@ -25,8 +24,6 @@ import {
   usageOperators,
   usageOutputCount,
   usageSummary,
-  videoStatusLabel,
-  videoStatusTone,
 } from '../labels.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
@@ -41,7 +38,6 @@ const rows = ref([])
 const loading = ref(false)
 const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
-const statusFilter = ref('')
 const joinedFilter = ref('')
 const myUsageFilter = ref('')
 const teamUsageFilter = ref('')
@@ -87,12 +83,13 @@ function defaultGameFilters() {
 // 明令不得合并。缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到
 // 状态的素材画成「可用」。
 // 使用情况是团队汇总：普通运营既没有姓名也没有这一列的入口，连表头都不出现。
+// 文件状态不进列表（用户 2026-10-27 裁定）：它是下载链路的中间态，不是运营挑素材
+// 要看的东西，需要时在详情抽屉里看。
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 360 },
   { colKey: 'game', title: '游戏', width: 100 },
   { colKey: 'material_status', title: '素材状态', width: 100 },
-  { colKey: 'video_status', title: '文件状态', width: 100 },
   { colKey: 'joined', title: '加入状态', width: 100 },
   { colKey: 'my_usage', title: '我的使用', width: 100 },
   { colKey: 'usage', title: '使用情况', width: 200 },
@@ -129,7 +126,6 @@ async function load() {
       joined: joinedFilter.value,
       my_usage: myUsageFilter.value,
       team_usage: teamUsageFilter.value,
-      video_status: statusFilter.value,
       sort_by: sortBy.value,
       sort_order: sortOrder.value,
     })
@@ -250,7 +246,6 @@ async function addToMine(row) {
 
 function reset() {
   search.value = ''
-  statusFilter.value = ''
   joinedFilter.value = ''
   myUsageFilter.value = ''
   teamUsageFilter.value = ''
@@ -297,7 +292,6 @@ onMounted(async () => {
           <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <label v-if="canViewUsage" class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </div>
         <div class="table-scroll-wrap">
@@ -320,7 +314,6 @@ onMounted(async () => {
               <ResourceStatusBadge v-if="row.status" :tone="materialStatusTone(row.status)" :label="materialStatusLabel(row.status)" />
               <template v-else>—</template>
             </template>
-            <template #video_status="{ row }"><ResourceStatusBadge :tone="videoStatusTone(row.video_status)" :label="videoStatusLabel(row.video_status)" /></template>
             <!-- 加入状态读服务端投影：active=已加入，removed=已移出，无关系=未加入。 -->
             <template #joined="{ row }"><ResourceStatusBadge :tone="joinStatus(row).tone" :label="joinStatus(row).label" /></template>
             <template #my_usage="{ row }"><ResourceStatusBadge :tone="myUsageTone(row.my_usage)" :label="myUsageLabel(row.my_usage)" /></template>

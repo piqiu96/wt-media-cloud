@@ -492,8 +492,8 @@ describe('the drawer while a download is in progress', () => {
    * 取消之后要让宿主页面重读。
    *
    * 这里重读的只是抽屉自己的 `downloadTasks` / `downloadStatus` / `activeTransferTask`，
-   * 而列表那一行的「文件状态」由同一批任务另算一份 —— 不通知宿主，取消完回到列表，
-   * 那一行还写着「下载中」。
+   * 而「我的素材」列表那一行的文件状态由同一批任务另算一份（素材库列表自 2026-10-27
+   * 起不再展示文件状态）—— 不通知宿主，取消完回到列表，那一行还写着「下载中」。
    */
   it('tells the host page to re-read after cancelling', () => {
     expect(source).toMatch(/defineEmits\(\[[^\]]*'cancel'/)
