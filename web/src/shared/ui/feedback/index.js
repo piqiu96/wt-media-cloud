@@ -32,8 +32,31 @@ function confirmWarning({ title, message, confirmText = '继续', danger = false
   })
 }
 
+// 单按钮告知，用于「操作已完成，结果是什么」这类必须被看见、但不改变流程的消息。
+// 返回 Promise 只是让调用方能等到用户点掉；业务流程不依赖它的结果。
+function notice({ title, message, confirmText = '知道了' }) {
+  return new Promise((resolve) => {
+    let settled = false
+    function finish() {
+      if (settled) return
+      settled = true
+      dialog.destroy()
+      resolve(true)
+    }
+    const dialog = DialogPlugin.alert({
+      header: title,
+      body: message,
+      confirmBtn: { content: confirmText, theme: 'primary' },
+      closeOnOverlayClick: false,
+      onConfirm: finish,
+      onClose: finish,
+    })
+  })
+}
+
 export const feedback = {
   confirmWarning,
+  notice,
   toast: {
     success(message) { return toast('success', message) },
     error(message) { return toast('error', message) },

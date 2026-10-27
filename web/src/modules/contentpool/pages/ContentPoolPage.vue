@@ -204,6 +204,11 @@ async function loadManualContext() {
   }
 }
 
+function teamName(id) {
+  const team = teams.value.find((item) => item.id === id)
+  return team?.name || '未知团队'
+}
+
 function gameName(id) {
   const game = games.value.find((item) => item.id === id)
   return game?.name || '-'
@@ -316,11 +321,25 @@ function openSource(row) {
   sourceVisible.value = true
 }
 
+// 用户 2026-10-27：管理员转素材后必须知道素材进了哪个团队（目标团队恒为来源内容的
+// 团队，管理员不选团队）。单条用单按钮告知把去向说清楚；运营 / 高级运营的素材恒属于
+// 本团队，保留原来的 toast。审核模式是连续操作，用非阻塞 toast 带出去向，不打断
+// 「转素材并下一条」。
+function announceMaterialized(material, { modal = true } = {}) {
+  if (!isAdmin.value) {
+    feedback.toast.success('已转为素材，来源关系已保留')
+    return
+  }
+  const message = `素材 ${material?.id ?? '-'}「${material?.title || '未命名素材'}」已转入团队「${teamName(material?.team_id)}」的素材库`
+  if (modal) feedback.notice({ title: '已转入素材库', message })
+  else feedback.toast.success(message)
+}
+
 async function materialize(row, reload = true) {
   try {
-    await client.materialize(row.id)
+    const material = await client.materialize(row.id)
     if (reload) await load()
-    feedback.toast.success('已转为素材，来源关系已保留')
+    announceMaterialized(material)
     return true
   } catch (e) {
     feedback.toast.error(e.message || '转素材失败')
@@ -352,7 +371,22 @@ async function batchMaterialize() {
     const result = await client.batchMaterialize(selectedRowKeys.value.map(Number))
     selectedRowKeys.value = []
     await load()
-    feedback.toast.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+    const succeeded = (result.items || []).filter((item) => item.success && item.material)
+    if (isAdmin.value && succeeded.length) {
+      // 管理员跨团队批量转换：按目标团队聚合，逐条列出素材进了哪个团队。
+      const counts = new Map()
+      for (const item of succeeded) {
+        const teamID = item.material.team_id
+        counts.set(teamID, (counts.get(teamID) || 0) + 1)
+      }
+      const lines = [...counts.entries()].map(([teamID, count]) => `团队「${teamName(teamID)}」：${count} 条`)
+      feedback.notice({
+        title: '已转入素材库',
+        message: `转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条。${lines.join('；')}`,
+      })
+    } else {
+      feedback.toast.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+    }
   } catch (e) {
     feedback.toast.error(e.message || '批量转素材失败')
   } finally {
@@ -408,6 +442,8 @@ async function reviewAction(action) {
       const material = await client.materialize(row.id)
       row.status = 'material_created'
       row.material_id = material.id
+      // 审核模式是连续操作：管理员用 toast 带出目标团队，不弹窗打断下一条。
+      if (isAdmin.value) announceMaterialized(material, { modal: false })
     } else if (action === 'ignore') {
       const updated = await client.setStatus(row.id, 'ignored', '人工忽略', reviewNote.value)
       Object.assign(row, updated)

@@ -206,6 +206,23 @@ describe('content pool page', () => {
     expect(source).not.toContain('查看素材')
   })
 
+  // 用户 2026-10-27：管理员转素材后要知道素材落在哪个团队。目标团队恒为来源内容的
+  // 团队，管理员不选团队；单条用单按钮告知，批量按目标团队聚合，审核模式用非阻塞
+  // toast 带出去向，不打断「转素材并下一条」。运营 / 高级运营保留原 toast。
+  it('tells an administrator which team received the material', () => {
+    expect(source).toContain('function teamName(id)')
+    expect(source).toContain('function announceMaterialized(material, { modal = true } = {})')
+    expect(source).toContain('if (modal) feedback.notice({ title: \'已转入素材库\', message })')
+    expect(source).toContain('已转入团队「${teamName(material?.team_id)}」的素材库')
+    expect(source).toContain('announceMaterialized(material)')
+    expect(source).toContain('announceMaterialized(material, { modal: false })')
+    expect(source).toContain('const succeeded = (result.items || []).filter((item) => item.success && item.material)')
+    expect(source).toContain('if (isAdmin.value && succeeded.length) {')
+    expect(source).toContain('团队「${teamName(teamID)}」：${count} 条')
+    // 失败路径仍是错误提示，不弹「已转入素材库」。
+    expect(source).toContain("feedback.toast.error(e.message || '转素材失败')")
+  })
+
   it('keeps batch actions in a separate selection toolbar below the filters', () => {
     expect(source).toContain('已选 {{ selectedRowKeys.length }} 项')
     expect(source).toContain('v-if="!isLibrary && selectedRowKeys.length" class="wt-selection-toolbar"')
