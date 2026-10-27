@@ -15,6 +15,8 @@ import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'
+import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
 import { scheduleLabel } from '../labels.js'
 
@@ -184,22 +186,27 @@ function defaultForm() {
   }
 }
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留当前页码与筛选，失败沿用上一次读数。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const query = { search: String(filters.value.search || '').trim(), type: filters.value.type, status: filters.value.status, teamId: teamFilter.value || undefined }
     const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(query), client.listTasks({ team_id: teamFilter.value || undefined }), client.listGames({ scope: 'all' })])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
     tasks.value = Array.isArray(taskRows) ? taskRows : []
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
-    error.value = e.message || '策略加载失败'
+    if (!quiet) error.value = e.message || '策略加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => visible.value || detailVisible.value || keywordVisible.value || authorVisible.value || saving.value,
+})
 
 function resetFilters() {
   filters.value = { search: '', type: '', status: '' }
@@ -468,7 +475,6 @@ function latestStats(row) {
       <ResourcePageHeader title="挖掘策略" description="配置内容发现规则，让系统自动帮你找到优质内容">
         <template #actions>
           <t-button v-if="canManage" theme="primary" @click="openCreate">新增策略</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
 
@@ -476,7 +482,7 @@ function latestStats(row) {
 
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称或 ID" @enter="load" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索策略 ID / 策略名称" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">策略类型</span><t-select v-model="filters.type" clearable placeholder="全部">
             <t-option value="keyword" label="关键词" />
@@ -533,7 +539,7 @@ function latestStats(row) {
                 <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
                 <t-form-item v-if="isAdmin && !editingID" label="目标团队" required-mark><t-select v-model="form.team_id" placeholder="选择运营团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
                 <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in formGameOptions" :key="game.id" :value="game.id" :label="game.label" :disabled="game.disabled" /></t-select></t-form-item>
-                <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+                <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
                 <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>
               </t-form>
             </div>
@@ -644,7 +650,7 @@ function latestStats(row) {
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
-          <div class="strategy-drawer__field"><span>平台</span><strong>{{ detailRow.platform || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(detailRow.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ typeLabel(detailRow.strategy_type) }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (detailRow.config?.keywords || []).join('、') || detailRow.config?.author || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ scheduleLabel(detailRow.schedule) }}</strong></div>

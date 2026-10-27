@@ -574,6 +574,63 @@ func TestListMaterialsDecoratesTheViewersRelationAndTheTeamsUsage(t *testing.T) 
 	}
 }
 
+// The creator is a fact about the material, so every role reads the name — not
+// only the roles allowed to see who produced from it. It is filled on the
+// library list, the detail read and "my materials", whose rows may have been
+// created by a teammate. A directory that no longer holds the creator leaves the
+// name empty so the page can say 未记录 instead of inventing a person.
+func TestMaterialCreatorNamesAreResolvedForEveryRoleAndBothLists(t *testing.T) {
+	team := service.TeamID(7)
+	store := &memoryStore{
+		found:    true,
+		material: model.Material{ID: 42, TeamID: team, CreatedBy: 11},
+		usages:   []model.MaterialUsage{{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}},
+	}
+	svc := testService(store)
+	svc.operators = func() ([]service.PublicUser, error) {
+		return []service.PublicUser{{ID: 9, Username: "operator-a"}, {ID: 11, Nickname: "运营乙"}}, nil
+	}
+	actor := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team}
+
+	items, err := svc.ListMaterials(actor, "")
+	if err != nil {
+		t.Fatalf("ListMaterials() error = %v", err)
+	}
+	if items[0].CreatedBy != 11 || items[0].CreatedByName != "运营乙" {
+		t.Fatalf("list creator = %d %q, want 11 运营乙 for an ordinary operator", items[0].CreatedBy, items[0].CreatedByName)
+	}
+	if items[0].Usage == nil || items[0].Usage.Operators != nil {
+		t.Fatalf("usage names must stay hidden from ordinary operators: %+v", items[0].Usage)
+	}
+
+	detail, err := svc.GetMaterial(actor, 42)
+	if err != nil {
+		t.Fatalf("GetMaterial() error = %v", err)
+	}
+	if detail.CreatedByName != "运营乙" {
+		t.Fatalf("detail creator name = %q, want 运营乙", detail.CreatedByName)
+	}
+
+	my, err := svc.ListMyMaterials(actor)
+	if err != nil {
+		t.Fatalf("ListMyMaterials() error = %v", err)
+	}
+	if len(my) != 1 || my[0].Material == nil || my[0].Material.CreatedByName != "运营乙" {
+		t.Fatalf("my materials creator = %+v, want 运营乙", my)
+	}
+
+	svc.operators = func() ([]service.PublicUser, error) {
+		return []service.PublicUser{{ID: 9, Username: "operator-a"}}, nil
+	}
+	items, err = svc.ListMaterials(actor, "")
+	if err != nil {
+		t.Fatalf("ListMaterials() without the creator in the directory error = %v", err)
+	}
+	if items[0].CreatedByName != "" {
+		t.Fatalf("creator name = %q, want empty when the directory no longer holds the user", items[0].CreatedByName)
+	}
+}
+
 // A material nobody has produced from yet still carries a summary — zero
 // counts — so the page can render the third column without guessing from an
 // absent field.

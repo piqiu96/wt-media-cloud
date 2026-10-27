@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { canUseLocalAgent, isDesktop } from '../utils.js'
+import { canRunLocalAgent, canUseLocalAgent, isDesktop } from '../utils.js'
+import { SYSTEM_MANAGEMENT_PATHS, canUseDesktopEnv, canViewSystemPath } from '../shared/utils/roles.js'
 import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
 import DownloadCentreDrawer from '../modules/transfer/DownloadCentreDrawer.vue'
@@ -60,11 +61,14 @@ const desktopItems = [
   ] },
 ]
 
-const adminOnlyPaths = new Set(['/users', '/operation-teams', '/games'])
-const desktopHiddenPaths = new Set(['/users', '/operation-teams', '/games'])
-// M2 本机资源只属于普通运营；其他角色在 Desktop 里看不到这些入口。
-const localOnlyPaths = new Set(['/accounts', '/account-opening', '/browser-windows', '/proxies'])
+// M2 本机资源（开户 / 浏览器窗口 / 代理）只属于普通运营；社媒账号三种角色都能看，
+// 本地操作按账号归属另行判定。
+const localOnlyPaths = new Set(['/account-opening', '/browser-windows', '/proxies'])
 const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))
+// 顶栏的本机执行状态给真正会拉起 sidecar 的角色（运营 + 高级运营），与本地专属
+// 页面的可见性不是同一件事：高级运营能跑本机检查，但进不了开户/窗口/代理。
+const localAgentRunnable = computed(() => canRunLocalAgent(currentUser.value))
+const desktopEnvAllowed = computed(() => canUseDesktopEnv(currentUser.value))
 
 async function refreshUser() {
   try {
@@ -82,17 +86,16 @@ onUnmounted(() => window.removeEventListener('wt-media:profile-updated', refresh
 
 const allItems = computed(() => {
   const hiddenPaths = new Set()
-  if (isDesktop()) {
-    for (const path of desktopHiddenPaths) hiddenPaths.add(path)
-    if (!localAgentAllowed.value) {
-      for (const path of localOnlyPaths) hiddenPaths.add(path)
-    }
+  if (isDesktop() && !localAgentAllowed.value) {
+    for (const path of localOnlyPaths) hiddenPaths.add(path)
   }
-  if (currentUser.value?.role !== 'admin') {
-    for (const path of adminOnlyPaths) hiddenPaths.add(path)
+  // 系统管理：用户管理仅管理员；运营团队 / 游戏管理 高级运营 + 管理员。
+  // Cloud Web 与 Desktop 走同一条规则。
+  for (const path of SYSTEM_MANAGEMENT_PATHS) {
+    if (!canViewSystemPath(currentUser.value?.role, path)) hiddenPaths.add(path)
   }
   const sourceItems = isDesktop()
-    ? [...menuItems, ...(localAgentAllowed.value ? desktopItems : [])]
+    ? [...menuItems, ...(desktopEnvAllowed.value ? desktopItems : [])]
     : menuItems
   return sourceItems
     .map((item) => {
@@ -203,7 +206,7 @@ async function logout() {
             成片导出，它不属于其中任何一页。面板本身只有一份（modules/transfer），
             页面用 `useDownloadCentre().open()` 把它叫出来。
           -->
-          <WorkEnvPill v-if="isDesktop() && localAgentAllowed" />
+          <WorkEnvPill v-if="isDesktop() && localAgentRunnable" />
           <t-button variant="text" @click="downloadCentre.open">
             <t-icon name="download" />
             下载中心

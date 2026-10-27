@@ -517,6 +517,85 @@ func TestListAllGamesReturnsEnabledCatalogForOperators(t *testing.T) {
 	}
 }
 
+func TestListManagementGamesShowsEveryStatusWithoutReferenceSummaries(t *testing.T) {
+	store := newGameMemoryStore()
+	service := NewService(store)
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team := mustCreateTeam(t, service, admin.ID, "火影组")
+	naruto, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired, err := service.CreateGame(admin.ID, "retired", "停用游戏", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateGame(admin.ID, retired.ID, retired.Name, GameStatusDisabled, ""); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "operator-mgmt", Password: "a-long-operator-password", Role: RoleOperator,
+		TeamID: &team.ID, GameIDs: []string{naruto.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	senior, err := service.CreateUser(admin.ID, CreateUserInput{
+		Username: "senior-mgmt", Password: "a-long-operator-password", Role: RoleSeniorOperator,
+		TeamID: &team.ID, GameIDs: []string{naruto.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The admin list carries summaries; the management list must not, or a
+	// senior would read counts for a reference drawer they cannot open.
+	games, err := service.ListManagementGames(senior.ID)
+	if err != nil {
+		t.Fatalf("ListManagementGames(senior) error = %v", err)
+	}
+	if len(games) != 2 {
+		t.Fatalf("management games = %#v, want both enabled and disabled", games)
+	}
+	for _, game := range games {
+		if game.ReferenceSummary != nil {
+			t.Fatalf("management games leaked a reference summary: %#v", game)
+		}
+	}
+	if _, err := service.ListManagementGames(operator.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListManagementGames(operator) error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestListTeamsReportsMembershipCount(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	alpha := mustCreateTeam(t, service, admin.ID, "甲组")
+	beta := mustCreateTeam(t, service, admin.ID, "乙组")
+	for _, input := range []CreateUserInput{
+		{Username: "alpha-a", Password: "a-long-operator-password", Role: RoleOperator, TeamID: &alpha.ID, GameIDs: []string{"game-a"}},
+		{Username: "alpha-b", Password: "a-long-operator-password", Role: RoleSeniorOperator, TeamID: &alpha.ID, GameIDs: []string{"game-a"}},
+		{Username: "beta-a", Password: "a-long-operator-password", Role: RoleOperator, TeamID: &beta.ID, GameIDs: []string{"game-a"}},
+	} {
+		if _, err := service.CreateUser(admin.ID, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	teams, err := service.ListTeams(admin.ID, "")
+	if err != nil {
+		t.Fatalf("ListTeams() error = %v", err)
+	}
+	counts := make(map[TeamID]int64, len(teams))
+	for _, team := range teams {
+		counts[team.ID] = team.UserCount
+	}
+	if counts[alpha.ID] != 2 || counts[beta.ID] != 1 {
+		t.Fatalf("team user counts = %#v, want 甲组=2 乙组=1", counts)
+	}
+	if filtered, err := service.ListTeams(admin.ID, "甲"); err != nil || len(filtered) != 1 || filtered[0].UserCount != 2 {
+		t.Fatalf("filtered teams = %#v, err=%v", filtered, err)
+	}
+}
+
 func TestUserGameScopeCannotDropReferencedAccountGame(t *testing.T) {
 	store := newGameMemoryStore()
 	service := NewService(store)

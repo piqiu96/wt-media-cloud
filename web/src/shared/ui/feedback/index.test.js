@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { success, error, confirm, destroy } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), confirm: vi.fn(), destroy: vi.fn() }))
-vi.mock('tdesign-vue-next', () => ({ MessagePlugin: { success, error, info: vi.fn() }, DialogPlugin: { confirm } }))
+const { success, error, confirm, alert, destroy } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), confirm: vi.fn(), alert: vi.fn(), destroy: vi.fn() }))
+vi.mock('tdesign-vue-next', () => ({ MessagePlugin: { success, error, info: vi.fn() }, DialogPlugin: { confirm, alert } }))
+
+beforeEach(() => { vi.clearAllMocks() })
 
 import { feedback } from './index.js'
 
@@ -36,5 +38,30 @@ describe('warning confirmation', () => {
     const canceled = feedback.confirmWarning({ title: '继续执行', message: '存在风险' })
     confirm.mock.lastCall[0].onCancel()
     expect(await canceled).toBe(false)
+  })
+})
+
+describe('notice', () => {
+  // 单按钮告知：没有取消按钮，确认文案默认「知道了」；点确认或右上角关闭都只收口一次。
+  it('acknowledges with one button and closes once', async () => {
+    alert.mockReturnValue({ destroy })
+    const done = feedback.notice({ title: '已转入素材库', message: '素材 12 已转入团队「甲」的素材库' })
+    const dialog = alert.mock.lastCall[0]
+    expect(dialog).toEqual(expect.objectContaining({
+      header: '已转入素材库', body: '素材 12 已转入团队「甲」的素材库', closeOnOverlayClick: false,
+    }))
+    expect(dialog.confirmBtn).toEqual({ content: '知道了', theme: 'primary' })
+    expect(dialog.cancelBtn).toBeUndefined()
+
+    dialog.onConfirm()
+    expect(await done).toBe(true)
+    dialog.onClose()
+    expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it('uses the caller confirm text', () => {
+    alert.mockReturnValue({ destroy })
+    feedback.notice({ title: '提示', message: '完成', confirmText: '好的' })
+    expect(alert.mock.lastCall[0].confirmBtn).toEqual({ content: '好的', theme: 'primary' })
   })
 })

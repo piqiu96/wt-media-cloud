@@ -62,7 +62,7 @@ type MaterialUsageRelation struct {
 	CreatedAt  time.Time
 }
 
-const materialProjectionColumns = `m.id, m.team_id, s.game_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at`
+const materialProjectionColumns = `m.id, m.team_id, s.game_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at, m.created_by`
 
 // FindMaterial returns the material readiness projection only within the
 // caller's team boundary. Game-range filtering is applied by the Service.
@@ -737,9 +737,11 @@ func scanMaterial(row rowScanner, material *model.Material) error {
 	// The library lifecycle's column is NOT NULL, so this is a plain string.
 	var materialStatus string
 	var mediaJSON []byte
-	if err := row.Scan(&material.ID, &teamID, &gameID, &material.SourceContentID, &platformContentID, &material.Title, &sourceURL, &material.Platform, &authorName, &coverURL, &authorHomeURL, &material.ViewCount, &material.LikeCount, &material.FavoriteCount, &material.CommentCount, &material.ShareCount, &publishedAt, &status, &materialStatus, &objectKey, &size, &sha256, &mediaJSON, &videoError, &preparedAt, &material.CreatedAt, &material.UpdatedAt); err != nil {
+	var createdBy int64
+	if err := row.Scan(&material.ID, &teamID, &gameID, &material.SourceContentID, &platformContentID, &material.Title, &sourceURL, &material.Platform, &authorName, &coverURL, &authorHomeURL, &material.ViewCount, &material.LikeCount, &material.FavoriteCount, &material.CommentCount, &material.ShareCount, &publishedAt, &status, &materialStatus, &objectKey, &size, &sha256, &mediaJSON, &videoError, &preparedAt, &material.CreatedAt, &material.UpdatedAt, &createdBy); err != nil {
 		return err
 	}
+	material.CreatedBy = identity.UserID(createdBy)
 	material.PlatformContentID = platformContentID.String
 	material.TeamID = identity.TeamID(teamID)
 	material.SourceURL = sourceURL.String

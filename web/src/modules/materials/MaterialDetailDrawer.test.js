@@ -118,7 +118,8 @@ describe('material detail drawer', () => {
    * 走查七轮（用户提示词第十节「详情信息顺序」）：第一段回答「我现在处理到哪一步，
    * 下一步是什么」，字段往后放。
    *
-   * 「基本信息」剩下的三行（素材 ID / 游戏 / 入库时间）**没有删**，挪到最后一段：
+   * 「基本信息」剩下的三行（素材 ID / 游戏 / 入库时间）与 2026-10-27 新增的操作人
+   * **没有删**，挪到最后一段：
    * 提示词那四段是「建议」，而没有一段提到这两样东西该去哪，直接删掉就是一次用户没
    * 裁定过的信息损失 —— 素材 ID 还是运营要复制去别处查的那串数字。顺序上官方那三段
    * 紧跟第一段，与提示词列出的次序一致。
@@ -141,6 +142,14 @@ describe('material detail drawer', () => {
     expect(at(first)).toBeLessThan(at('文件信息'))
     expect(at('文件信息')).toBeLessThan(at('来源信息'))
     expect(at('来源信息')).toBeLessThan(at('来源内容池统计'))
+  })
+
+  // 用户 2026-10-27：素材库要说清「这条素材是谁放进来、谁操作的」。操作人是素材
+  // 自身的创建人事实，三种角色都读；目录里已没有此人时画 —，不伪造姓名。
+  it('names the material creator in 基本信息', () => {
+    const basic = sliceBetween(template, '<h4 class="detail-card__title">基本信息', '</section>')
+    expect(basic).toContain('<dt>操作人</dt>')
+    expect(basic).toContain("{{ material.created_by_name || '-' }}")
   })
 
   // 第一段的四件事：两个状态各一颗徽章、加入时间、下一步。

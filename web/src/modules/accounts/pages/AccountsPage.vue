@@ -1,13 +1,14 @@
 <script setup>
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
+import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
@@ -75,16 +76,33 @@ const allTagsPopup = ref(null)
 
 const selectedAccountIds = ref([])
 const searchProfile = ref("")
+// 使用人筛选：高级运营默认看自己，管理员默认看全部成员；普通运营由服务端强制
+// 只看自己，因此不展示这个筛选项。
+const searchOwner = ref("")
 
 onMounted(async () => {
   try {
     user.value = await sessionClient.me()
+    searchOwner.value = defaultOwnerFilter()
     await Promise.all([loadAuxiliaryData(), loadAccounts()])
   } catch (e) {
     error.value = e.message || "加载账号数据失败"
   } finally {
     loading.value = false
   }
+})
+
+const isAdmin = computed(() => user.value?.role === "admin")
+const canFilterByOwner = computed(() => user.value?.role === "senior_operator" || user.value?.role === "admin")
+
+function defaultOwnerFilter() {
+  if (user.value?.role === "admin") return "all"
+  if (user.value?.role === "senior_operator") return String(user.value?.id ?? "")
+  return ""
+}
+
+watch(searchOwner, () => {
+  pagination.value.current = 1
 })
 
 function defaultCreateForm() {
@@ -120,7 +138,6 @@ async function loadAccounts() {
   if (searchProfile.value) params.profile = searchProfile.value
   try {
     accounts.value = await accountClient.list(params)
-    pagination.value.total = accounts.value.length
     pagination.value.current = 1
   } catch (e) {
     error.value = e.message || "加载媒体账号失败"
@@ -140,6 +157,7 @@ function resetFilters() {
   searchTags.value = ""
   searchGameIds.value = []
   searchProfile.value = ""
+  searchOwner.value = defaultOwnerFilter()
   loadAccounts()
 }
 
@@ -175,7 +193,7 @@ async function createAccount() {
       gameIds: createForm.value.gameIds,
       name: createForm.value.name || undefined,
       platform: createForm.value.platform,
-      browserProfileId: isDesktop ? createForm.value.browserProfileId : "",
+      browserProfileId: isDesktop && !isAdmin.value ? createForm.value.browserProfileId : "",
       remark: createForm.value.remark,
       tags: createForm.value.tags || [],
     })
@@ -231,6 +249,10 @@ function profileIsOpen(account) {
 }
 
 async function toggleWindow(account) {
+  if (!canOperateLocalAccount(account)) {
+    feedback.toast.info(localOperationHint(account))
+    return
+  }
   const profile = profileForAccount(account)
   if (!profile?.bit_profile_id) return
   const isOpen = profileIsOpen(account)
@@ -294,8 +316,8 @@ async function saveEdit() {
       remark: editRemark.value,
       gameIds: editGameIds.value,
     })
-    // 绑定窗口差异
-    if (isDesktop && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
+    // 绑定窗口差异：只有本人账号才允许改绑定，管理员与他人账号保持原绑定。
+    if (isDesktop && canOperateLocalAccount(editAccount.value) && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
       updated = editProfileId.value
         ? await accountClient.bindProfile(editAccount.value.id, editProfileId.value)
         : await accountClient.unbindProfile(editAccount.value.id)
@@ -352,7 +374,29 @@ function profileForAccount(account) {
   return profiles.value.find(item => item.id === account?.browser_profile_id)
 }
 
+function isOwnAccount(account) {
+  return Boolean(account) && String(account.user_id ?? "") === String(user.value?.id ?? "")
+}
+
+// 本地操作按账号归属：普通运营可操作自己的账号，高级运营只能操作本人创建的账号，
+// 管理员一律只读。服务端 StartLocalAccountCheck / StartCookieRead 用同一套归属判定。
+function canOperateLocalAccount(account) {
+  if (!isDesktop || !account) return false
+  if (user.value?.role === "operator") return true
+  if (user.value?.role === "senior_operator") return isOwnAccount(account)
+  return false
+}
+
+function localOperationHint(account) {
+  if (!isDesktop) return "本地操作只能在 Desktop 客户端执行"
+  if (user.value?.role === "admin") return "管理员不执行本地操作"
+  if (!canOperateLocalAccount(account)) return "仅账号本人可执行本地操作"
+  return ""
+}
+
 function executableText(account) {
+  const roleHint = isDesktop ? localOperationHint(account) : ""
+  if (roleHint) return `不可执行：${roleHint}`
   if (account.business_status !== "enabled") return "不可执行：账号已停用"
   if (!(account.game_ids || []).length) return "不可执行：未绑定游戏"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
@@ -442,10 +486,6 @@ function relativeTime(ts) {
   return `${day}天前 · 建议检查`
 }
 
-function platformLabel(platform) {
-  return { bilibili: "哔哩", baijiahao: "百度" }[platform] || platform || "-"
-}
-
 function profileOptionLabel(profile) {
   if (!profile) return ""
   const name = profile.name || "未命名窗口"
@@ -466,12 +506,18 @@ function checkItemStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  return isDesktop && account?.business_status === "enabled" && (account.game_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
+  return isDesktop && canOperateLocalAccount(account) && account?.business_status === "enabled" && (account.game_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
   const profile = profileForAccount(account)
   return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active" && profile.business_status !== "disabled"
+}
+
+// 他人账号也要露出窗口按钮（禁用 + 提示），否则高级运营／管理员看不到「为什么不能操作」。
+function showWindowToggle(account) {
+  if (!isDesktop || !account?.browser_profile_id) return false
+  return canOperateBoundWindow(account) || !canOperateLocalAccount(account)
 }
 
 async function desktopLocalAgentService() {
@@ -503,6 +549,14 @@ async function runSingleAccountCheck(account, service) {
 async function readProfileCookieFor(account) {
   const target = account || cookieDialog.value?.account
   if (!target?.id || !target.browser_profile_id) return
+  if (!canOperateLocalAccount(target)) {
+    feedback.toast.info(localOperationHint(target))
+    return
+  }
+  if (!canOperateBoundWindow(target)) {
+    feedback.toast.info("绑定窗口不可用，无法读取 Cookie")
+    return
+  }
   readingCookie.value = true
   error.value = ""
   try {
@@ -588,6 +642,12 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     return
   }
   batchChecking.value = true
+  const nonOwnedCount = candidates.filter(account => !canOperateLocalAccount(account)).length
+  const skippedOwnershipText = nonOwnedCount
+    ? isAdmin.value
+      ? `，管理员不执行本地操作，已跳过 ${nonOwnedCount} 条`
+      : `，已跳过 ${nonOwnedCount} 条非本人账号`
+    : ""
   const initialResults = candidates.map(account => {
     if (!canCheckAccount(account)) {
       return { account, status: "skipped", message: executableText(account) }
@@ -615,10 +675,11 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
       }
     }
     const stats = batchStats()
-    if (stats.failed > 0) {
-      feedback.toast.info(`批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}`)
+    const summary = `批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}${skippedOwnershipText}`
+    if (stats.failed > 0 || stats.success === 0) {
+      feedback.toast.info(summary)
     } else {
-      feedback.toast.success(`批量检查完成：成功 ${stats.success}，跳过 ${stats.skipped}`)
+      feedback.toast.success(summary)
     }
     await loadAccounts()
   } catch (e) {
@@ -702,13 +763,35 @@ function onTagEnter(list, ctx) {
   if (v && !availableTags.value.includes(v)) commitNewTag(list, v)
 }
 
+// 使用人选项来自已加载的账号目录，不额外请求；高级运营自己即使还没有账号也要能选回自己。
+const ownerOptions = computed(() => {
+  const options = new Map()
+  const selfId = String(user.value?.id ?? "")
+  if (selfId && user.value?.role === "senior_operator") {
+    options.set(selfId, user.value?.nickname || user.value?.username || "本人")
+  }
+  for (const account of accounts.value) {
+    const value = String(account.user_id ?? "")
+    if (!value || options.has(value)) continue
+    options.set(value, account.user_name || `用户 ${value}`)
+  }
+  return [...options].map(([value, label]) => ({ value, label }))
+})
+
+// 服务端已按角色划定可见范围（普通运营强制自己、高级运营/管理员为团队范围），
+// 这里只在已加载数据上再按使用人收窄，不扩大可见边界。
+const ownerFilteredAccounts = computed(() => {
+  if (!canFilterByOwner.value || !searchOwner.value || searchOwner.value === "all") return accounts.value
+  return accounts.value.filter(account => String(account.user_id ?? "") === searchOwner.value)
+})
+
 const stats = computed(() => ({
-  total: accounts.value.length,
-  enabled: accounts.value.filter(a => a.business_status === "enabled").length,
-  disabled: accounts.value.filter(a => a.business_status === "disabled").length,
-  normal: accounts.value.filter(a => accountStatusKey(a) === "normal").length,
-  abnormal: accounts.value.filter(a => ["restricted", "account_mismatch", "check_failed"].includes(accountStatusKey(a))).length,
-  pending: accounts.value.filter(a => ["pending", "not_logged_in", "expired"].includes(accountStatusKey(a))).length,
+  total: ownerFilteredAccounts.value.length,
+  enabled: ownerFilteredAccounts.value.filter(a => a.business_status === "enabled").length,
+  disabled: ownerFilteredAccounts.value.filter(a => a.business_status === "disabled").length,
+  normal: ownerFilteredAccounts.value.filter(a => accountStatusKey(a) === "normal").length,
+  abnormal: ownerFilteredAccounts.value.filter(a => ["restricted", "account_mismatch", "check_failed"].includes(accountStatusKey(a))).length,
+  pending: ownerFilteredAccounts.value.filter(a => ["pending", "not_logged_in", "expired"].includes(accountStatusKey(a))).length,
 }))
 
 // 统计卡片：分两组展示（业务状态 / 账号健康），点击应用对应筛选
@@ -718,14 +801,14 @@ const resourceAccountStats = computed(() => [
   { key: "total", label: "账号总数", value: stats.value.total, tone: "info" },
   { key: "normal", label: "正常账号", value: stats.value.normal, tone: "success" },
   { key: "abnormal", label: "异常账号", value: stats.value.abnormal, tone: "danger" },
-  { key: "unbound", label: "未绑定环境", value: accounts.value.filter((account) => !account.browser_profile_id).length, tone: "warning" },
+  { key: "unbound", label: "未绑定环境", value: ownerFilteredAccounts.value.filter((account) => !account.browser_profile_id).length, tone: "warning" },
 ])
 
 const currentBatchStats = computed(batchStats)
 const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
 const pagedAccounts = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return accounts.value.slice(start, start + pagination.value.pageSize)
+  return ownerFilteredAccounts.value.slice(start, start + pagination.value.pageSize)
 })
 
 const columns = [
@@ -733,6 +816,7 @@ const columns = [
   { colKey: "id", title: "ID", width: 60 },
   { colKey: "platform", title: "平台", width: 70 },
   { colKey: "account_info", title: "账号信息", width: 190 },
+  { colKey: "user_name", title: "使用人", width: 100 },
   { colKey: "game_ids", title: "游戏", width: 160 },
   { colKey: "tags", title: "标签", width: 140 },
   { colKey: "window_info", title: "浏览器窗口", width: 180 },
@@ -766,12 +850,15 @@ const columns = [
     <ResourceCard class="account-resource-card">
     <div class="filter-bar">
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable /></label>
+        <label v-if="canFilterByOwner" class="wt-filter-field"><span class="wt-filter-field__label">使用人</span><t-select v-model="searchOwner" placeholder="全部">
+            <t-option value="all" label="全部成员" />
+            <t-option v-for="option in ownerOptions" :key="option.value" :value="option.value" :label="option.label" />
+          </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="searchGameIds" multiple clearable placeholder="全部">
             <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
-            <t-option value="bilibili" label="哔哩" />
-            <t-option value="baijiahao" label="百度" />
+            <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchBizStatus" placeholder="全部" clearable>
             <t-option value="enabled" label="启用" />
@@ -831,6 +918,7 @@ const columns = [
           <div class="account-sub">UID：{{ row.platform_account_id || '--' }}</div>
         </div>
       </template>
+      <template #user_name="{ row }">{{ row.user_name || '--' }}</template>
       <template #game_ids="{ row }">{{ gameNames(row.game_ids) }}</template>
       <template #tags="{ row }">
         <div class="account-tags">
@@ -857,9 +945,9 @@ const columns = [
       </template>
       <template #op="{ row }">
         <t-space size="small" class="op-cell">
-          <t-button size="small" theme="primary" :loading="currentCheckingId === row.id" @click="checkFromRow(row)">检查</t-button>
+          <t-button size="small" theme="primary" :loading="currentCheckingId === row.id" :disabled="isDesktop && !canOperateLocalAccount(row)" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
           <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
-          <t-button v-if="isDesktop && canOperateBoundWindow(row)" size="small" class="wt-secondary-button" variant="outline" :disabled="Boolean(operatingProfileId)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
+          <t-button v-if="showWindowToggle(row)" size="small" class="wt-secondary-button" variant="outline" :disabled="!canOperateLocalAccount(row) || !canOperateBoundWindow(row) || Boolean(operatingProfileId)" :title="localOperationHint(row)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
           <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCookieDialog(row)">查看 Cookie</t-button>
           <t-button size="small" class="wt-secondary-button" variant="outline" @click="openEdit(row)">编辑</t-button>
           <t-button size="small" class="wt-secondary-button" variant="outline" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
@@ -868,7 +956,7 @@ const columns = [
     </t-table>
     </div>
     <div class="pagination-bar">
-      <t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" :page-size-options="[10, 20, 50, 100]" show-jumper />
+      <t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="ownerFilteredAccounts.length" :page-size-options="[10, 20, 50, 100]" show-jumper />
     </div>
     </ResourceCard>
 
@@ -886,6 +974,7 @@ const columns = [
           <t-descriptions-item label="系统账号ID">{{ accountInfoPopup.id }}</t-descriptions-item>
           <t-descriptions-item label="平台UID">{{ accountInfoPopup.platform_account_id || '--' }}</t-descriptions-item>
           <t-descriptions-item label="平台昵称">{{ accountInfoPopup.name || '--' }}</t-descriptions-item>
+          <t-descriptions-item label="使用人">{{ accountInfoPopup.user_name || '--' }}</t-descriptions-item>
           <t-descriptions-item label="所属游戏">{{ gameNames(accountInfoPopup.game_ids) }}</t-descriptions-item>
           <t-descriptions-item label="标签">{{ (accountInfoPopup.tags || []).join('、') || '--' }}</t-descriptions-item>
           <t-descriptions-item label="业务状态">{{ bizStatusText(accountInfoPopup.business_status) }}</t-descriptions-item>
@@ -913,7 +1002,7 @@ const columns = [
           <t-descriptions-item label="最近同步">{{ windowPopup.last_checked_at ? formatTime(windowPopup.last_checked_at) : '--' }}</t-descriptions-item>
         </t-descriptions>
         <div style="margin-top:12px; text-align:right">
-          <t-button v-if="canOperateBoundWindow(windowPopup)" variant="outline" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
+          <t-button v-if="canOperateBoundWindow(windowPopup)" variant="outline" :disabled="!canOperateLocalAccount(windowPopup)" :title="localOperationHint(windowPopup)" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
         </div>
       </div>
     </t-dialog>
@@ -942,8 +1031,7 @@ const columns = [
         </t-form-item>
         <t-form-item label="平台">
           <t-select v-model="createForm.platform">
-            <t-option value="bilibili" label="哔哩" />
-            <t-option value="baijiahao" label="百度" />
+            <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
           </t-select>
         </t-form-item>
         <t-form-item label="账号名称">
@@ -972,9 +1060,10 @@ const columns = [
         </t-form-item>
         <div class="form-section">关联资源</div>
         <t-form-item v-if="isDesktop" label="绑定窗口">
-          <t-select v-model="createForm.browserProfileId" clearable placeholder="可先不绑定">
+          <t-select v-model="createForm.browserProfileId" clearable :disabled="isAdmin" placeholder="可先不绑定">
             <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
           </t-select>
+          <div v-if="isAdmin" class="form-tip">管理员不执行本地操作，窗口绑定由账号使用人完成。</div>
         </t-form-item>
         <div class="form-section">备注</div>
         <t-form-item label="备注">
@@ -1020,9 +1109,10 @@ const columns = [
         </t-form-item>
         <div class="form-section">关联资源</div>
         <t-form-item v-if="isDesktop" label="绑定窗口">
-          <t-select v-model="editProfileId" clearable placeholder="选择本人授权窗口">
+          <t-select v-model="editProfileId" clearable :disabled="!canOperateLocalAccount(editAccount)" placeholder="选择本人授权窗口">
             <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile)" />
           </t-select>
+          <div v-if="localOperationHint(editAccount)" class="form-tip">{{ localOperationHint(editAccount) }}</div>
         </t-form-item>
         <t-form-item v-else label="操作边界">
           <div class="form-tip">Cloud Web 只查看绑定关系；请在 Desktop 端绑定、解绑或换绑窗口。</div>
@@ -1038,7 +1128,8 @@ const columns = [
     <t-drawer :close-btn="true" v-model:visible="detailVisible" header="账号详情" :size="'560px'" destroy-on-close :footer="false">
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
-        <t-descriptions-item label="平台">{{ detailAccount.platform }}</t-descriptions-item>
+        <t-descriptions-item label="平台">{{ platformLabel(detailAccount.platform) }}</t-descriptions-item>
+        <t-descriptions-item label="使用人">{{ detailAccount.user_name || '--' }}</t-descriptions-item>
         <t-descriptions-item label="游戏">{{ gameNames(detailAccount.game_ids) }}</t-descriptions-item>
         <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
         <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>
@@ -1086,7 +1177,7 @@ const columns = [
       <pre class="cookie-box">{{ cookieDialog?.active_cookie || '（空）' }}</pre>
       <div class="form-tip">Cookie 为敏感数据，请勿泄露。复制后建议及时清理剪贴板；导出仅用于授权用途。</div>
       <t-space style="margin-top:8px">
-        <t-button v-if="isDesktop && canOperateBoundWindow(cookieDialog?.account)" size="small" :loading="readingCookie" @click="readProfileCookieFor(cookieDialog.account)">从 Profile 读真实 Cookie</t-button>
+        <t-button v-if="isDesktop && cookieDialog?.account?.browser_profile_id" size="small" :disabled="!canOperateLocalAccount(cookieDialog?.account) || !canOperateBoundWindow(cookieDialog?.account)" :title="localOperationHint(cookieDialog?.account)" :loading="readingCookie" @click="readProfileCookieFor(cookieDialog.account)">从 Profile 读真实 Cookie</t-button>
         <t-button size="small" @click="copyCookie('active_cookie')">复制 Active Cookie</t-button>
         <t-button size="small" variant="outline" @click="copyCookie('original_cookie')">复制原始 Cookie</t-button>
       </t-space>

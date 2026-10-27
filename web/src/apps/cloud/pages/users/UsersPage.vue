@@ -7,6 +7,7 @@ import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { enabledGames } from '../../../../shared/utils/games.js'
+import { useAutoRefresh } from '../../../../shared/utils/useAutoRefresh.js'
 
 const client = createUsersClient()
 const users = ref([])
@@ -54,9 +55,10 @@ function emptyUserForm() {
   return { username: '', password: '', role: 'operator', teamId: '', status: 'enabled', gameIds: [] }
 }
 
-async function loadAll() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
+async function loadAll({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const [userRows, teamRows, gameRows] = await Promise.all([
       client.listUsers(filters.value),
@@ -66,13 +68,17 @@ async function loadAll() {
     users.value = userRows || []
     teams.value = teamRows || []
     games.value = gameRows || []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = friendlyError(e)
+    if (!quiet) error.value = friendlyError(e)
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => loadAll({ quiet: true }), {
+  shouldSkip: () => userDialogVisible.value || savingUser.value || passwordDialogVisible.value,
+})
 
 async function applyFilters() {
   loading.value = true
@@ -221,7 +227,6 @@ function gameScopeText(gameIds) {
     <ResourcePageHeader title="用户管理" description="管理用户权限、运营团队与游戏范围">
       <template #actions>
         <t-button theme="primary" @click="openCreateUser">新增用户</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="loadAll">刷新</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />

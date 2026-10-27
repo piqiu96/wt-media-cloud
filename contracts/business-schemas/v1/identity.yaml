@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.23.1"
+revision: "2026.10.27.4"
 schemas:
   PublicUser:
     type: object
@@ -36,10 +36,16 @@ schemas:
     forbidden_properties: [token, token_hash]
   OperationTeam:
     type: object
-    required: [id, name, created_at, updated_at]
+    required: [id, name, user_count, created_at, updated_at]
     properties:
       id: {type: integer, format: int64}
       name: {type: string, maxLength: 64}
+      user_count:
+        type: integer
+        format: int64
+        description: >
+          Users currently belonging to this team. Read from the users table on every
+          list, so it cannot drift from the membership it describes.
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
   OneTimePasswordResult:

@@ -16,7 +16,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// accountColumns is the INSERT column list; reads use accountReadColumns, which
+// qualifies every column and adds the owner name.
 const accountColumns = `id, user_id, team_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, check_items, created_at, updated_at`
+
+// accountReadColumns must stay in the same order as scanAccount's destinations.
+// The owner name is resolved by the join rather than stored, so a renamed user
+// shows the new name and an account whose user row is gone shows an empty one.
+const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.name, ma.avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.business_status, ma.login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.active_cookie_updated_at, ma.last_checked_at, ma.check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, '')`
+
+const accountReadFrom = ` FROM media_accounts ma LEFT JOIN users u ON u.id = ma.user_id`
 
 func queryRow(db *gorm.DB, query string, args ...any) *sql.Row {
 	return db.Raw(query, args...).Row()
@@ -85,7 +94,7 @@ func FindByID(id string) (model.AccountRecord, bool, error) {
 }
 
 func findByID(db *gorm.DB, id string) (model.AccountRecord, bool, error) {
-	return findByQuery(db, `SELECT `+accountColumns+` FROM media_accounts WHERE id = ?`, id)
+	return findByQuery(db, `SELECT `+accountReadColumns+accountReadFrom+` WHERE ma.id = ?`, id)
 }
 
 func FindByIdentity(userID sharedidentity.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
@@ -94,7 +103,7 @@ func FindByIdentity(userID sharedidentity.UserID, platform model.Platform, platf
 
 func findByIdentity(db *gorm.DB, userID sharedidentity.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
 	return findByQuery(db,
-		`SELECT `+accountColumns+` FROM media_accounts WHERE user_id = ? AND platform = ? AND platform_account_id = ?`,
+		`SELECT `+accountReadColumns+accountReadFrom+` WHERE ma.user_id = ? AND ma.platform = ? AND ma.platform_account_id = ?`,
 		userID, platform, platformAccountID,
 	)
 }
@@ -105,7 +114,7 @@ func FindByProfilePlatform(profileID string, platform model.Platform) (model.Acc
 
 func findByProfilePlatform(db *gorm.DB, profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
 	return findByQuery(db,
-		`SELECT `+accountColumns+` FROM media_accounts WHERE browser_profile_id = ? AND platform = ? LIMIT 1`,
+		`SELECT `+accountReadColumns+accountReadFrom+` WHERE ma.browser_profile_id = ? AND ma.platform = ? LIMIT 1`,
 		profileID, platform,
 	)
 }
@@ -162,45 +171,45 @@ func List(query AccountFilter) ([]model.AccountRecord, error) {
 }
 
 func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
-	statement := `SELECT ` + accountColumns + ` FROM media_accounts`
+	statement := `SELECT ` + accountReadColumns + accountReadFrom
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 3)
 	if query.UserID > 0 {
-		conditions = append(conditions, "user_id = ?")
+		conditions = append(conditions, "ma.user_id = ?")
 		args = append(args, query.UserID)
 	}
 	if len(query.GameIDs) > 0 {
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_games mag WHERE mag.media_account_id = media_accounts.id AND mag.game_id IN (`+placeholders(len(query.GameIDs))+`))`)
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_games mag WHERE mag.media_account_id = ma.id AND mag.game_id IN (`+placeholders(len(query.GameIDs))+`))`)
 		for _, gameID := range query.GameIDs {
 			args = append(args, gameID)
 		}
 	}
 	if query.Platform != "" {
-		conditions = append(conditions, "platform = ?")
+		conditions = append(conditions, "ma.platform = ?")
 		args = append(args, query.Platform)
 	}
 	if query.BusinessStatus != "" {
-		conditions = append(conditions, "business_status = ?")
+		conditions = append(conditions, "ma.business_status = ?")
 		args = append(args, query.BusinessStatus)
 	}
 	if query.LoginStatus != "" {
-		conditions = append(conditions, "login_status = ?")
+		conditions = append(conditions, "ma.login_status = ?")
 		args = append(args, query.LoginStatus)
 	}
 	if query.Search != "" {
 		like := "%" + query.Search + "%"
-		conditions = append(conditions, "(id LIKE ? OR platform_account_id LIKE ? OR name LIKE ? OR remark LIKE ?)")
+		conditions = append(conditions, "(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.name LIKE ? OR ma.remark LIKE ?)")
 		args = append(args, like, like, like, like)
 	}
 	if query.ProfileSearch != "" {
 		like := "%" + query.ProfileSearch + "%"
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = media_accounts.browser_profile_id AND (bp.name LIKE ? OR bp.seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = ma.browser_profile_id AND (bp.name LIKE ? OR bp.seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
 		args = append(args, like, like, like, like)
 	}
 	if len(conditions) > 0 {
 		statement += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	statement += " ORDER BY created_at, id"
+	statement += " ORDER BY ma.created_at, ma.id"
 
 	rows, err := queryRows(db, statement, args...)
 	if err != nil {
@@ -397,13 +406,13 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
-	var checkItemsJSON sql.NullString
+	var checkItemsJSON, userName sql.NullString
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
 		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
-		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt,
+		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt, &userName,
 	)
 	if err != nil {
 		return model.AccountRecord{}, err
@@ -417,6 +426,7 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	record.OriginalCookie = originalCookie.String
 	record.ActiveCookie = activeCookie.String
 	record.CookieStatus = cookieStatus.String
+	record.UserName = userName.String
 	if checkItemsJSON.Valid && checkItemsJSON.String != "" {
 		_ = json.Unmarshal([]byte(checkItemsJSON.String), &record.CheckItems)
 	}

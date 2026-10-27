@@ -371,11 +371,17 @@ func FindTeam(teamID model.TeamID) (model.OperationTeam, bool, error) {
 	return findTeam(database.DB(), teamID)
 }
 
+// teamColumns reads the membership count in the same statement as the row, so a
+// team's number of users is never a second query that can answer a different
+// question than the row it is shown beside.
+const teamColumns = `SELECT t.id, t.name, t.created_at, t.updated_at,
+	(SELECT COUNT(*) FROM users u WHERE u.team_id = t.id) AS user_count
+	FROM operation_teams t`
+
 func findTeam(db *gorm.DB, teamID model.TeamID) (model.OperationTeam, bool, error) {
 	var team model.OperationTeam
-	err := queryRow(db,
-		`SELECT id, name, created_at, updated_at FROM operation_teams WHERE id = ?`, teamID,
-	).Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt)
+	err := queryRow(db, teamColumns+` WHERE t.id = ?`, teamID,
+	).Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt, &team.UserCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.OperationTeam{}, false, nil
 	}
@@ -387,13 +393,13 @@ func ListTeams(keyword string) ([]model.OperationTeam, error) {
 }
 
 func listTeams(db *gorm.DB, keyword string) ([]model.OperationTeam, error) {
-	query := `SELECT id, name, created_at, updated_at FROM operation_teams WHERE 1=1`
+	query := teamColumns + ` WHERE 1=1`
 	args := make([]any, 0, 2)
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
-		query += ` AND (name LIKE ? ESCAPE '!' OR CAST(id AS CHAR) = ?)`
+		query += ` AND (t.name LIKE ? ESCAPE '!' OR CAST(t.id AS CHAR) = ?)`
 		args = append(args, teamLikeContains(keyword), keyword)
 	}
-	query += ` ORDER BY name, id`
+	query += ` ORDER BY t.name, t.id`
 	rows, err := queryRows(db, query, args...)
 	if err != nil {
 		return nil, err
@@ -402,7 +408,7 @@ func listTeams(db *gorm.DB, keyword string) ([]model.OperationTeam, error) {
 	var teams []model.OperationTeam
 	for rows.Next() {
 		var team model.OperationTeam
-		if err := rows.Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt); err != nil {
+		if err := rows.Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt, &team.UserCount); err != nil {
 			return nil, err
 		}
 		teams = append(teams, team)

@@ -13,6 +13,11 @@ const childrenOf = (routes) => routes.flatMap((route) => route.children ?? [])
 const cloudChildren = childrenOf(cloudRoutes)
 const desktopChildren = childrenOf(desktopRoutes)
 
+// Vite 的根相对 id 是相对 **web/** 这一层解析的（`/src/…`），而本文件在 `web/src/apps/`。
+const projectRoot = new URL('../../', import.meta.url)
+const cloudBase = new URL('./cloud/', import.meta.url)
+const desktopBase = new URL('./desktop/', import.meta.url)
+
 function loaderSource(route) {
   const loader = route.components?.default ?? route.component
   if (typeof loader !== 'function') return null
@@ -20,6 +25,20 @@ function loaderSource(route) {
   // 两种拼法都接受 —— 出现哪一种由打包器决定，不是这条断言的事。取到的是**模块 id**。
   const match = /(?:\bimport|__vite_ssr_dynamic_import__)\(\s*(?:"|')(.+?)(?:"|')\s*\)/.exec(String(loader))
   return match ? match[1] : null
+}
+
+/**
+ * 模块 id → 磁盘文件。
+ *
+ * 相对 id 要按**各自的路由目录**解析：同一份组件在 Cloud 表里写作
+ * `./pages/users/UsersPage.vue`，在 Desktop 表里写作 `../cloud/pages/users/UsersPage.vue`，
+ * 两者是同一个文件。比较原始 id 会把它们报成不同，比较解析后的文件才是那句话的意思。
+ */
+function loaderFile(route, base) {
+  const id = loaderSource(route)
+  if (!id) return null
+  const target = id.startsWith('/') ? new URL(`.${id}`, projectRoot) : new URL(id, base)
+  return fileURLToPath(target)
 }
 
 function byPath(children) {
@@ -35,7 +54,7 @@ const desktopByPath = byPath(desktopChildren)
  * 注释说的是一件事，而它可以是假的：两条路由各改各的，把同一个地址指向两个不同的
  * 组件文件，页面外表照常工作，两端的运营看到的却是两个不同的东西 —— 没有任何构建、
  * 测试或日志会提这件事。这条断言把那句话变成可执行的：**同一个 path，两端解析到
- * 同一个模块 id**。
+ * 同一个文件**（相对 id 按各自的路由目录解析，拼法不同不算不同）。
  */
 describe('cloud and desktop serve the same pages', () => {
   const sharedPaths = [...cloudByPath.keys()].filter((path) => desktopByPath.has(path))
@@ -52,8 +71,8 @@ describe('cloud and desktop serve the same pages', () => {
     const checked = []
     const differing = []
     for (const path of sharedPaths) {
-      const cloud = loaderSource(cloudByPath.get(path))
-      const desktop = loaderSource(desktopByPath.get(path))
+      const cloud = loaderFile(cloudByPath.get(path), cloudBase)
+      const desktop = loaderFile(desktopByPath.get(path), desktopBase)
       if (cloud === null || desktop === null) continue
       checked.push(path)
       if (cloud !== desktop) differing.push(`${path}: cloud ${cloud} / desktop ${desktop}`)
@@ -67,8 +86,8 @@ describe('cloud and desktop serve the same pages', () => {
   // 阳性对照：这套比较**能**看出不同。拿一对已知不同的（都是真实存在的页面，
   // 且不在共享集里）验一次，否则「0 处不同」也可能只是比较器对谁都报相等。
   it('would notice two paths that resolve to different files', () => {
-    const cloudLibrary = loaderSource(cloudByPath.get('material-library'))
-    const desktopContentPool = loaderSource(desktopByPath.get('content-pool'))
+    const cloudLibrary = loaderFile(cloudByPath.get('material-library'), cloudBase)
+    const desktopContentPool = loaderFile(desktopByPath.get('content-pool'), desktopBase)
 
     expect(cloudLibrary).toBeTruthy()
     expect(desktopContentPool).toBeTruthy()
@@ -142,11 +161,10 @@ describe('the my outputs page is a real page on both ends', () => {
 })
 
 /**
- * 两端各自不该有的页面。这两条原先也只是注释（「不包含 /logs, /settings」「不包含 /users」）。
- * 一个地址在错的树上存在，不会报错：它会渲染出一个那个端根本进不到的服务器的页面，
- * 或者一个运营无从管理的管理页。
+ * 两端的路由表边界。原先这两条只是注释（「不包含 /logs, /settings」「不包含 /users」）。
+ * 一个地址在错的树上存在，不会报错：它会渲染出一个那个端根本进不到的服务器的页面。
  */
-describe('the two ends keep their own exclusions', () => {
+describe('the two ends keep their route tables straight', () => {
   it('keeps the desktop-only pages out of the cloud table', () => {
     for (const path of ['logs', 'settings']) {
       expect(cloudByPath.has(path), path).toBe(false)
@@ -154,10 +172,18 @@ describe('the two ends keep their own exclusions', () => {
     }
   })
 
-  it('keeps the cloud admin pages out of the desktop table', () => {
+  // 系统管理页原先钉的是「桌面端不得出现这三个地址」。2026-10-27 起桌面端对管理员与
+  // 高级运营开放系统管理，规则换了个方向：地址两端都有，但必须落在同一个组件文件上，
+  // 不许各写一套。角色可见性由 `shared/utils/roles.js` 与两端 main.ts 的守卫决定，
+  // 不靠路由表缺项来隐藏。
+  it('serves the system management pages from one file on both ends', () => {
     for (const path of ['users', 'operation-teams', 'games']) {
-      expect(desktopByPath.has(path), path).toBe(false)
       expect(cloudByPath.has(path), path).toBe(true)
+      expect(desktopByPath.has(path), path).toBe(true)
+      const cloud = loaderFile(cloudByPath.get(path), cloudBase)
+      const desktop = loaderFile(desktopByPath.get(path), desktopBase)
+      expect(cloud, `cloud ${path}`).toContain(`/cloud/pages/users/`)
+      expect(desktop, `desktop ${path}`).toBe(cloud)
     }
   })
 })

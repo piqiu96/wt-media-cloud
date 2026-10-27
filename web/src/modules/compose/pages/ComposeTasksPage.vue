@@ -20,7 +20,8 @@ import { missingOperatorOption, operatorIdFromOption } from '../operatorFilter.j
 import { UNCERTAIN_CODE, isRetryableTask, retryHint } from '../retryPolicy.js'
 import { reviewReady, safeComposeError } from '../uncertainReview.js'
 import { schemaFields } from '../schemaFields.js'
-import { hasActiveTask, useTaskPolling } from '../useTaskPolling.js'
+import { useTaskPolling } from '../useTaskPolling.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import MaterialDetailDrawer from '../../materials/MaterialDetailDrawer.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
@@ -152,7 +153,6 @@ async function load({ quiet = false } = {}) {
     if (!quiet) error.value = e?.message || '读取合成任务失败'
   } finally {
     if (!quiet) loading.value = false
-    syncListPolling()
   }
 }
 
@@ -222,12 +222,11 @@ function onTeamFilterChange() {
 }
 
 // —— 状态自动刷新 ——
-// 列表这一份：有排队中/处理中的任务就每 5 秒重读一次，跑完最后一单就自己停。
-const listPolling = useTaskPolling(() => load({ quiet: true }))
-function syncListPolling() {
-  if (hasActiveTask(rows.value)) listPolling.start()
-  else listPolling.stop()
-}
+// 列表这一份：页面开着就每 10 秒重读一次（用户 2026-10-27 裁定，去刷新按钮）。
+// 创建/详情打开时让开，避免在脚下换掉正在看的行。
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => createVisible.value || detailVisible.value || reviewBusy.value,
+})
 
 const detailVisible = ref(false)
 const detail = ref(null)
@@ -435,7 +434,7 @@ async function resolveUncertain() {
     feedback.toast.success('核对依据已记录，任务已重新排队')
     reviewInput.value = { oldExecutionStopped: false, noOutputCommitted: false, evidence: '' }
   } catch (e) {
-    feedback.toast.error(e?.message || '核对处置失败，请刷新任务状态')
+    feedback.toast.error(e?.message || '核对处置失败，请稍后查看任务状态')
   } finally {
     await load()
     await reloadDetail(id)
@@ -505,7 +504,6 @@ onMounted(() => {
       <ResourcePageHeader title="合成任务" description="从我的素材创建的合成任务，在这里查看任务状态和生产结果">
         <template #actions>
           <t-button theme="primary" @click="createVisible = true">新建合成任务</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="load()">刷新</t-button>
         </template>
       </ResourcePageHeader>
       <ResourceCard class="compose-tasks-card">

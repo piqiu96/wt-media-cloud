@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Identity API
-  version: 2026.10.23.1
+  version: 2026.10.27.5
 paths:
   /api/v1/auth/login:
     post:
@@ -265,6 +265,39 @@ paths:
         '200': {description: Unreferenced team deleted.}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: Team is referenced by users or historical business objects.}
+  /api/v1/games:
+    get:
+      operationId: listGames
+      security: [{sessionCookie: []}]
+      description: >
+        Games visible to the caller. Omitted `scope`: non-admins get only games that are
+        both enabled and assigned to them; admins get every game. `scope=all` treats the
+        game as a filter rather than an access boundary — non-admins get every enabled
+        game, admins get every game with reference summaries. `scope=management` serves
+        the game-management page: senior operators and admins get every game with its
+        real status; the read-only senior view carries no `reference_summary`, because
+        the reference detail it counts is admin-only. Operators get 403 for
+        `management`.
+      parameters:
+        - in: query
+          name: keyword
+          schema: {type: string}
+          description: Case-insensitive substring of game ID or name, applied to the returned rows.
+        - in: query
+          name: status
+          schema: {type: string, enum: [enabled, disabled]}
+          description: Exact status filter applied to the returned rows.
+        - in: query
+          name: scope
+          schema: {type: string, enum: [all, management]}
+          description: Widened dictionary (`all`) or management listing (`management`).
+      responses:
+        '200':
+          description: Flat game list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GameListResponse'}
+        '403': {$ref: '#/components/responses/Forbidden'}
 components:
   securitySchemes:
     sessionCookie:
@@ -370,12 +403,41 @@ components:
       enum: [admin, senior_operator, operator]
     OperationTeam:
       type: object
-      required: [id, name, created_at, updated_at]
+      required: [id, name, user_count, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         name: {type: string, maxLength: 64}
+        user_count:
+          type: integer
+          format: int64
+          description: >
+            Users currently belonging to this team. Read from the users table on every
+            list, so it cannot drift from the membership it describes.
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    Game:
+      type: object
+      required: [id, name, status, remark, created_at, updated_at]
+      properties:
+        id: {type: string, pattern: '^[A-Za-z0-9]{1,32}$'}
+        name: {type: string, maxLength: 128}
+        status: {type: string, enum: [enabled, disabled]}
+        remark: {type: string, maxLength: 255}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        reference_summary: {$ref: '#/components/schemas/GameReferenceSummary'}
+    GameReferenceSummary:
+      type: object
+      required: [user_scope_count, media_account_count, total_count]
+      properties:
+        user_scope_count: {type: integer}
+        media_account_count: {type: integer}
+        total_count: {type: integer}
+    GameListResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/Game'}}
     TeamRequest:
       type: object
       required: [name]

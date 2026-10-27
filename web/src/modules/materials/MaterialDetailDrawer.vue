@@ -12,6 +12,7 @@ import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/
 import { handOverCloudVideo } from './cloudVideo.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
+import { platformLabel } from '../../shared/utils/platforms.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
 import {
@@ -246,7 +247,7 @@ async function openDirectory() {
             </h3>
             <!-- 副行只留平台 · 作者：游戏在列表里有列、在详情最后一段有行。 -->
             <p class="detail-source-line">
-              <template v-if="material.platform">{{ material.platform }}</template>
+              <template v-if="material.platform">{{ platformLabel(material.platform) }}</template>
               <template v-if="material.platform && (material.author_name || material.author_home_url)"> · </template>
               <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
               <template v-else>{{ material.author_name }}</template>
@@ -346,7 +347,7 @@ async function openDirectory() {
         <section class="detail-card">
           <h4 class="detail-card__title">来源信息</h4>
           <dl class="detail-card__grid detail-card__grid--4">
-            <div><dt>平台</dt><dd>{{ material.platform || '-' }}</dd></div>
+            <div><dt>平台</dt><dd>{{ platformLabel(material.platform) }}</dd></div>
             <div><dt>作者</dt><dd>
               <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
               <template v-else>{{ material.author_name || '-' }}</template>
@@ -378,6 +379,8 @@ async function openDirectory() {
             <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
             <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
             <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
+            <!-- 操作人 = 素材创建人；目录里已没有此人时回退 —，不伪造姓名。 -->
+            <div><dt>操作人</dt><dd>{{ material.created_by_name || '-' }}</dd></div>
           </dl>
         </section>
       </div>

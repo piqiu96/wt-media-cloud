@@ -133,7 +133,7 @@ func TestServiceAdminCanAssignGlobalAccount(t *testing.T) {
 	service := newTestService(newMemoryStore())
 	actor := identityservice.PublicUser{ID: identityservice.UserID(99), Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 
-	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-z"}, Platform: PlatformBaijiahao})
+	account, err := service.CreateAccount(actor, CreateAccountInput{UserID: identityservice.UserID(2), GameIDs: []string{"game-z"}, Platform: PlatformBaidu})
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
@@ -388,6 +388,71 @@ func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testi
 	}
 }
 
+// 2026-10-27：本地敏感操作按账号归属，而不只看角色。高级运营可以操作自己创建的
+// 账号；同团队他人的账号看得见但不能本地执行；管理员即使拥有账号也不执行本地操作。
+func TestLocalOperationsFollowAccountOwnership(t *testing.T) {
+	store := newMemoryStore()
+	teamID := identityservice.TeamID(10)
+	senior := mediaActor(1, teamID, identityservice.RoleSeniorOperator)
+	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
+	store.records["own"] = AccountRecord{Account: Account{
+		ID: "own", UserID: senior.ID, TeamID: &teamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
+		BrowserProfileID: "profile-senior", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+	}}
+	store.records["teammate"] = AccountRecord{Account: Account{
+		ID: "teammate", UserID: 2, TeamID: &teamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
+		BrowserProfileID: "profile-teammate", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+	}}
+	store.records["admin-own"] = AccountRecord{Account: Account{
+		ID: "admin-own", UserID: admin.ID, TeamID: &teamID, GameIDs: []string{"game-a"}, Platform: PlatformBilibili,
+		BrowserProfileID: "profile-admin", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+	}}
+	facts := &fakeProfileFacts{profiles: map[string]fakeProfileFact{
+		"profile-senior":   {id: "profile-senior", userID: senior.ID, bitProfileID: "bit-senior", active: true},
+		"profile-teammate": {id: "profile-teammate", userID: 2, bitProfileID: "bit-teammate", active: true},
+		"profile-admin":    {id: "profile-admin", userID: admin.ID, bitProfileID: "bit-admin", active: true},
+	}}
+	tasks := &fakeSensitiveTasks{}
+	service := newTestServiceForAccountCheck(store, facts, tasks)
+
+	if _, err := service.StartLocalAccountCheck(senior, "own", AccountCheckStartInput{}); err != nil {
+		t.Fatalf("senior own StartLocalAccountCheck error=%v", err)
+	}
+	if _, err := service.StartCookieRead(senior, "own", CookieReadStartInput{}); err != nil {
+		t.Fatalf("senior own StartCookieRead error=%v", err)
+	}
+	if _, err := service.StartLocalAccountCheck(senior, "teammate", AccountCheckStartInput{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("senior teammate StartLocalAccountCheck error=%v, want ErrForbidden", err)
+	}
+	if _, err := service.StartCookieRead(senior, "teammate", CookieReadStartInput{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("senior teammate StartCookieRead error=%v, want ErrForbidden", err)
+	}
+	for _, accountID := range []string{"own", "admin-own"} {
+		if _, err := service.StartLocalAccountCheck(admin, accountID, AccountCheckStartInput{}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("admin %s StartLocalAccountCheck error=%v, want ErrForbidden", accountID, err)
+		}
+		if _, err := service.StartCookieRead(admin, accountID, CookieReadStartInput{}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("admin %s StartCookieRead error=%v, want ErrForbidden", accountID, err)
+		}
+	}
+	if len(tasks.tasks) != 2 {
+		t.Fatalf("created sensitive tasks=%d, want 2 (only the senior's own account)", len(tasks.tasks))
+	}
+}
+
+// ReadMediaAccountCookies (the async cloud-agent path) applies this exported
+// gate in the handler; it must stay the same rule as the two synchronous starts.
+func TestCanStartLocalOperationExcludesAdmins(t *testing.T) {
+	for _, role := range []identityservice.Role{identityservice.RoleOperator, identityservice.RoleSeniorOperator} {
+		if !CanStartLocalOperation(role) {
+			t.Fatalf("CanStartLocalOperation(%s) = false, want true", role)
+		}
+	}
+	if CanStartLocalOperation(identityservice.RoleAdmin) {
+		t.Fatal("CanStartLocalOperation(admin) = true, want false")
+	}
+}
+
 func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
@@ -595,7 +660,7 @@ func TestServiceFiltersByStatusAndSearch(t *testing.T) {
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	first, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili, Remark: "重点账号"})
-	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaijiahao, Remark: "普通账号"})
+	second, _ := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaidu, Remark: "普通账号"})
 	firstRecord, _, _ := store.Find(first.ID)
 	firstRecord.BusinessStatus = BusinessDisabled
 	firstRecord.LoginStatus = LoginExpired
@@ -673,8 +738,8 @@ func TestServiceAccountGroupApplyFilters(t *testing.T) {
 	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBilibili}); err != nil {
 		t.Fatalf("create bilibili: %v", err)
 	}
-	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaijiahao}); err != nil {
-		t.Fatalf("create baijiahao: %v", err)
+	if _, err := service.CreateAccount(actor, CreateAccountInput{GameIDs: []string{"game-a"}, Platform: PlatformBaidu}); err != nil {
+		t.Fatalf("create baidu: %v", err)
 	}
 	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{Name: "仅B站", Filters: AccountGroupFilters{Platform: PlatformBilibili}})
 	if err != nil {

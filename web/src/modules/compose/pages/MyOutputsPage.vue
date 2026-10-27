@@ -25,6 +25,7 @@ import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../../transf
 import { canQueueOutputDownload, outputDownloadState, outputTitle } from '../outputManagement.js'
 import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
 import { publicObjectReadUrl } from '../../../shared/utils/objectReadUrl.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 
 const client = createComposeClient()
 const materialsClient = createMaterialsClient()
@@ -214,9 +215,10 @@ watch(() => `${lookupsReady.value}|${pagedRows.value.map((row) => `${row.materia
 // media 是执行时量到的文件事实（时长等）；解析不动就当没有，不替服务端编数。
 function durationText(row) { return formatDurationMs(row.media?.duration_ms) }
 
-async function load({ resetPage = false } = {}) {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：不掀 Loading、不动页码与已选行，失败沿用上一次读数。
+async function load({ resetPage = false, quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const params = {}
     Object.assign(params, createdRangeParams(filters.value.created_range))
@@ -233,14 +235,18 @@ async function load({ resetPage = false } = {}) {
     const data = await client.listComposeOutputs(params)
     rows.value = Array.isArray(data) ? data : []
     if (resetPage) pagination.value.current = 1
-    selectedRowKeys.value = selectedRowKeys.value.filter((id) => rows.value.some((row) => row.id === id))
+    if (!quiet) selectedRowKeys.value = selectedRowKeys.value.filter((id) => rows.value.some((row) => row.id === id))
     await refreshDownloadFacts()
   } catch (e) {
-    error.value = e?.message || '读取成片列表失败'
+    if (!quiet) error.value = e?.message || '读取成片列表失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => detailVisible.value || selectedRowKeys.value.length > 0 || batchDownloading.value || Boolean(downloadingID.value) || materialDrawer.value.visible || strategyDrawer.value.visible || taskDrawer.value.visible,
+})
 
 function reset() {
   filters.value = { search: '', trigger: '', download: '', created_range: [], team_id: '', game_id: '', operator: '' }
@@ -417,11 +423,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page my-outputs-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="成片管理" description="管理已生成的视频成片，查看来源、预览并下载文件">
-        <template #actions>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
-        </template>
-      </ResourcePageHeader>
+      <ResourcePageHeader title="成片管理" description="管理已生成的视频成片，查看来源、预览并下载文件" />
       <ResourceCard class="my-outputs-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" :maxlength="100" clearable placeholder="成片 ID/标题、素材 ID/名称" /></label>

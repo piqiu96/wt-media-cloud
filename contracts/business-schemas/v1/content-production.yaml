@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.27.1"
+revision: "2026.10.27.3"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -74,7 +74,7 @@ schemas:
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。
-    required: [id, team_id, source_content_id, title, source_url, platform, status, video_status, view_count, like_count, favorite_count, comment_count, share_count, created_at, updated_at]
+    required: [id, team_id, source_content_id, title, source_url, platform, status, video_status, view_count, like_count, favorite_count, comment_count, share_count, created_at, updated_at, created_by]
     properties:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
@@ -90,6 +90,11 @@ schemas:
       status: {type: string, enum: [available, paused, delisted]}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
+      # 素材操作人（= 创建人）：人工转换时是执行转换的人，自动转素材时是任务创建人。
+      # 库列 NOT NULL，键恒在；权限与「谁用过这条素材」的 usage 投影无关，三种角色都读。
+      created_by: {type: integer, format: int64}
+      # 创建人昵称（无昵称回退用户名）；目录里已没有此人时不出现，页面显示「未记录」。
+      created_by_name: {type: string}
       # 以下四个键只出现在素材库列表与详情读取里，是「当前查看者」的投影，不是素材自己的
       # 事实：两个人读同一行可能看到不同的值。没有关系时 usage_status 与 added_at 都不出现；
       # removed 表示关系还在、用户已移出，在素材库口径里等同于未加入。

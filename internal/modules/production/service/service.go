@@ -321,9 +321,17 @@ func (s *Service) decorateMaterials(actor identityservice.PublicUser, items []mo
 		summary.Operators = append(summary.Operators, model.MaterialOperatorUse{ID: *fact.OperatorID, OutputCount: fact.OutputCount})
 		operatorIDs = append(operatorIDs, *fact.OperatorID)
 	}
+	creatorIDs := make([]int64, 0, len(items))
+	for i := range items {
+		if items[i].CreatedBy > 0 {
+			creatorIDs = append(creatorIDs, int64(items[i].CreatedBy))
+		}
+	}
 	names := map[int64]string(nil)
-	if actor.Role == identityservice.RoleSeniorOperator || actor.Role == identityservice.RoleAdmin {
-		names, err = composeOperatorNameLookup(s.operators, operatorIDs)
+	// The creator's name belongs to the material itself and every role reads it,
+	// so the directory is consulted for it even when the usage names stay hidden.
+	if actor.Role == identityservice.RoleSeniorOperator || actor.Role == identityservice.RoleAdmin || len(creatorIDs) > 0 {
+		names, err = composeOperatorNameLookup(s.operators, append(operatorIDs, creatorIDs...))
 		if err != nil {
 			return nil, err
 		}
@@ -336,6 +344,7 @@ func (s *Service) decorateMaterials(actor identityservice.PublicUser, items []mo
 			item.AddedAt = &addedAt
 		}
 		item.MyUsage = model.MaterialMyUsageUnused
+		item.CreatedByName = names[int64(item.CreatedBy)]
 		summary := summaryByMaterial[item.ID]
 		if summary == nil {
 			summary = &model.MaterialUsageSummary{}
@@ -374,6 +383,23 @@ func (s *Service) ListMyMaterials(actor identityservice.PublicUser) ([]model.Mat
 		}
 		usage.Material = &material
 		visible = append(visible, usage)
+	}
+	// "My materials" shows the materials the viewer added, which may have been
+	// created by someone else; the shared detail drawer still names the creator.
+	creatorIDs := make([]int64, 0, len(visible))
+	for i := range visible {
+		if visible[i].Material != nil && visible[i].Material.CreatedBy > 0 {
+			creatorIDs = append(creatorIDs, int64(visible[i].Material.CreatedBy))
+		}
+	}
+	if len(creatorIDs) > 0 {
+		names, err := composeOperatorNameLookup(s.operators, creatorIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range visible {
+			visible[i].Material.CreatedByName = names[int64(visible[i].Material.CreatedBy)]
+		}
 	}
 	// The download lifecycle is per user, not per material: the same row renders
 	// differently for two users who downloaded it at different times. One batch

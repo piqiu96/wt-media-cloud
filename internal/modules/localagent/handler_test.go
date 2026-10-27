@@ -123,27 +123,40 @@ func TestIssueAgentTokenRefusesAWebSession(t *testing.T) {
 	}
 }
 
-// 高级运营和管理员可以登录 Desktop 使用共用页面，但不能取得本机执行凭证。
-func TestIssueAgentTokenRefusesNonOperatorDesktopRoles(t *testing.T) {
-	for _, role := range []identityservice.Role{identityservice.RoleSeniorOperator, identityservice.RoleAdmin} {
-		t.Run(string(role), func(t *testing.T) {
-			configureSigner(t)
-			recorded := stubIssuedAudit(t, nil)
-			desktop := desktopSession(testNow.Add(time.Hour))
-			desktop.User.Role = role
-			stubSession(t, func() (identityservice.AuthContext, bool) { return desktop, true })
+// 高级运营要对本人创建的账号执行本机检查与 Cookie 读取，需要取得本机执行凭证。
+func TestIssueAgentTokenAllowsSeniorOperators(t *testing.T) {
+	configureSigner(t)
+	recorded := stubIssuedAudit(t, nil)
+	desktop := desktopSession(testNow.Add(time.Hour))
+	desktop.User.Role = identityservice.RoleSeniorOperator
+	stubSession(t, func() (identityservice.AuthContext, bool) { return desktop, true })
 
-			result := issueProbe(t)
-			if result.status != consts.StatusForbidden || result.code != "DESKTOP_ROLE_FORBIDDEN" {
-				t.Fatalf("status = %d, code = %q", result.status, result.code)
-			}
-			if result.token != "" {
-				t.Fatalf("%s received an Agent Token", role)
-			}
-			if len(*recorded) != 0 {
-				t.Fatalf("%s refused issuance was audited as issued", role)
-			}
-		})
+	result := issueProbe(t)
+	if result.status != consts.StatusOK || result.token == "" {
+		t.Fatalf("status = %d, code = %q, token empty = %v", result.status, result.code, result.token == "")
+	}
+	if len(*recorded) != 1 {
+		t.Fatalf("issued audit records = %d, want 1", len(*recorded))
+	}
+}
+
+// 管理员可以登录 Desktop 使用共用页面，但不取得本机执行凭证。
+func TestIssueAgentTokenRefusesAdmins(t *testing.T) {
+	configureSigner(t)
+	recorded := stubIssuedAudit(t, nil)
+	desktop := desktopSession(testNow.Add(time.Hour))
+	desktop.User.Role = identityservice.RoleAdmin
+	stubSession(t, func() (identityservice.AuthContext, bool) { return desktop, true })
+
+	result := issueProbe(t)
+	if result.status != consts.StatusForbidden || result.code != "DESKTOP_ROLE_FORBIDDEN" {
+		t.Fatalf("status = %d, code = %q", result.status, result.code)
+	}
+	if result.token != "" {
+		t.Fatal("admin received an Agent Token")
+	}
+	if len(*recorded) != 0 {
+		t.Fatal("refused issuance was audited as issued")
 	}
 }
 

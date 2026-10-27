@@ -4,6 +4,7 @@ import { feedback } from '../../../shared/ui/feedback/index.js'
 import { ref, computed } from "vue"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProxyClient } from "../../../shared/api/proxy.js"
+import { ACCOUNT_OPENING_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
 
 const accountClient = createMediaAccountClient()
 const proxyClient = createProxyClient()
@@ -127,9 +128,7 @@ const stats = computed(() => {
       <t-form layout="inline" style="margin-bottom:16px">
         <t-form-item label="平台">
           <t-select v-model="importPlatform" style="width:120px">
-            <t-option value="douyin" label="抖音" />
-            <t-option value="bilibili" label="B站" />
-            <t-option value="baijiahao" label="百家号" />
+            <t-option v-for="option in ACCOUNT_OPENING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
           </t-select>
         </t-form-item>
         <t-form-item label="游戏">
@@ -149,6 +148,7 @@ const stats = computed(() => {
         { colKey: 'status', title: '状态', width: 100 },
       ]" size="small" hover>
         <template #raw="{ row }"><span>Cookie {{ row.id }}</span></template>
+        <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
         <template #proxy="{ row }">
           <span>{{ row.proxy ? row.proxy.host + ':' + row.proxy.port : '待分配' }}</span>
         </template>
@@ -177,6 +177,7 @@ const stats = computed(() => {
         { colKey: 'error', title: '错误信息' },
       ]" size="small" hover>
         <template #raw="{ row }"><span>Cookie {{ row.id }}</span></template>
+        <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
         <template #status="{ row }">
           <t-tag :theme="row.status === 'created' ? 'success' : 'danger'" size="small">{{ row.status }}</t-tag>
         </template>

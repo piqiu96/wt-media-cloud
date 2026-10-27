@@ -104,16 +104,24 @@ type Material struct {
 	// MyUsage answers whether this viewer is the operator of at least one
 	// successful output. Usage is the team-scoped summary both the counts and
 	// the names come from; names are only filled for seniors and admins.
-	MyUsage         string                `json:"my_usage,omitempty"`
-	Usage           *MaterialUsageSummary `json:"usage,omitempty"`
-	SourceObjectKey string                `json:"-"`
-	VideoSizeBytes  *int64                `json:"video_size_bytes,omitempty"`
-	VideoSHA256     string                `json:"video_sha256,omitempty"`
-	VideoMedia      map[string]any        `json:"media_summary,omitempty"`
-	VideoError      string                `json:"last_error,omitempty"`
-	VideoPreparedAt *time.Time            `json:"video_prepared_at,omitempty"`
-	CreatedAt       time.Time             `json:"created_at"`
-	UpdatedAt       time.Time             `json:"updated_at"`
+	MyUsage string                `json:"my_usage,omitempty"`
+	Usage   *MaterialUsageSummary `json:"usage,omitempty"`
+	// CreatedBy is who put this material into the library — the operator who
+	// converted the source, or the task's creator for an auto-materialized one.
+	// It is a fact about the material, not about the viewer, so every role sees
+	// it; the name is resolved from the user directory at read time and stays
+	// empty when that user is gone, which the page renders as a dash rather than
+	// inventing a person.
+	CreatedBy       identity.UserID `json:"created_by"`
+	CreatedByName   string          `json:"created_by_name,omitempty"`
+	SourceObjectKey string          `json:"-"`
+	VideoSizeBytes  *int64          `json:"video_size_bytes,omitempty"`
+	VideoSHA256     string          `json:"video_sha256,omitempty"`
+	VideoMedia      map[string]any  `json:"media_summary,omitempty"`
+	VideoError      string          `json:"last_error,omitempty"`
+	VideoPreparedAt *time.Time      `json:"video_prepared_at,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // MaterialUsage is the sole durable relationship behind “My Materials”.

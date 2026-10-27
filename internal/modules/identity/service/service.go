@@ -765,6 +765,27 @@ func (s *Service) ListAllGames(actorID UserID) ([]OperationGame, error) {
 	return s.listGames(actorID, false)
 }
 
+// ListManagementGames answers the game-management page for senior operators:
+// every game with its real status, but without reference summaries. The summary
+// counts users and accounts that the caller cannot open — the admin-only
+// reference detail — so leaving it out keeps the read-only page from implying a
+// drill-down it cannot offer. Admins ask for scope=all instead, which carries
+// the summaries.
+func (s *Service) ListManagementGames(actorID UserID) ([]OperationGame, error) {
+	actor, ok, err := s.store.FindUser(actorID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || (actor.Role != RoleSeniorOperator && actor.Role != RoleAdmin) {
+		return nil, ErrForbidden
+	}
+	gameStore, okStore := s.store.(operationGameStore)
+	if !okStore {
+		return nil, ErrForbidden
+	}
+	return gameStore.ListGames()
+}
+
 func (s *Service) listGames(actorID UserID, assignedOnly bool) ([]OperationGame, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
@@ -1387,12 +1408,19 @@ func (s *memoryStore) FindTeam(teamID TeamID) (OperationTeam, bool, error) {
 func (s *memoryStore) ListTeams(keyword string) ([]OperationTeam, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	counts := make(map[TeamID]int64, len(s.teams))
+	for _, user := range s.users {
+		if user.TeamID != nil {
+			counts[*user.TeamID]++
+		}
+	}
 	needle := strings.ToLower(strings.TrimSpace(keyword))
 	result := make([]OperationTeam, 0, len(s.teams))
 	for _, team := range s.teams {
 		if needle != "" && !strings.Contains(strings.ToLower(team.Name), needle) && strconv.FormatInt(int64(team.ID), 10) != needle {
 			continue
 		}
+		team.UserCount = counts[team.ID]
 		result = append(result, team)
 	}
 	sort.Slice(result, func(i, j int) bool {

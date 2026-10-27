@@ -199,9 +199,28 @@ describe('content pool page', () => {
     expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>`)
     expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>`)
     expect(source).toContain(`v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>`)
-    expect(source).toContain(`v-if="!isLibrary && row.status === 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="viewMaterial(row)">素材详情</t-button>`)
+    // 用户 2026-10-27 裁定：操作列只留统一「详情」；转入素材的入口在详情抽屉的
+    // 「关联素材」里，不在行上再放第二个详情按钮。
+    expect(source).not.toContain('>素材详情</t-button>')
     expect(source).not.toContain('>查看</t-button>')
     expect(source).not.toContain('查看素材')
+  })
+
+  // 用户 2026-10-27：管理员转素材后要知道素材落在哪个团队。目标团队恒为来源内容的
+  // 团队，管理员不选团队；单条用单按钮告知，批量按目标团队聚合，审核模式用非阻塞
+  // toast 带出去向，不打断「转素材并下一条」。运营 / 高级运营保留原 toast。
+  it('tells an administrator which team received the material', () => {
+    expect(source).toContain('function teamName(id)')
+    expect(source).toContain('function announceMaterialized(material, { modal = true } = {})')
+    expect(source).toContain('if (modal) feedback.notice({ title: \'已转入素材库\', message })')
+    expect(source).toContain('已转入团队「${teamName(material?.team_id)}」的素材库')
+    expect(source).toContain('announceMaterialized(material)')
+    expect(source).toContain('announceMaterialized(material, { modal: false })')
+    expect(source).toContain('const succeeded = (result.items || []).filter((item) => item.success && item.material)')
+    expect(source).toContain('if (isAdmin.value && succeeded.length) {')
+    expect(source).toContain('团队「${teamName(teamID)}」：${count} 条')
+    // 失败路径仍是错误提示，不弹「已转入素材库」。
+    expect(source).toContain("feedback.toast.error(e.message || '转素材失败')")
   })
 
   it('keeps batch actions in a separate selection toolbar below the filters', () => {
@@ -232,9 +251,16 @@ describe('content pool page', () => {
     expect(source).toContain('class="detail-cover"')
     expect(source).toContain('row.strategy_name')
     expect(source).toContain('row.crawl_task_name')
-    expect(source).toContain('素材详情')
+    // 行上唯一的「详情」之外，素材跳转只在详情抽屉的「关联素材」里。
+    expect(source).toContain('@click="viewMaterial(detail)">素材详情</t-link>')
     expect(source).toContain("router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)")
     expect(source).toContain("router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)")
+  })
+
+  it('labels the ingest time as 入库时间 and never as 发现时间', () => {
+    expect(source).toContain("{ colKey: 'created_at', title: '入库时间', width: 150, sorter: true }")
+    expect(source).toContain('<span>入库时间</span>')
+    expect(source).not.toContain('发现时间')
   })
 
   it('opens platform pages and displays complete interaction and author data', () => {

@@ -15,6 +15,8 @@ import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import ContentPoolSourceDrawer from '../components/ContentPoolSourceDrawer.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { enabledGames } from '../../../shared/utils/games.js'
+import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 
 const client = createContentPoolClient()
 const discovery = createDiscoveryClient()
@@ -108,7 +110,7 @@ const columns = [
   // 状态排在关联实体与时间之后（§4.1：主体 → 属性 → 关联实体 → 状态/结果 → 时间）。
   { colKey: 'status', title: '状态', width: 120 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
-  { colKey: 'created_at', title: '发现时间', width: 150, sorter: true },
+  { colKey: 'created_at', title: '入库时间', width: 150, sorter: true },
   { colKey: 'updated_at', title: '修改时间', width: 150, sorter: true },
   { colKey: 'updated_by_name', title: '修改人', width: 120 },
   { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
@@ -125,19 +127,26 @@ onMounted(async () => {
   await load()
 })
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 是定时刷新用的：不翻页码、不闪 loading、失败保留上一次读数。用户自己改筛选
+// 或翻页仍走非 quiet，读不到就显式报错。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const result = await client.list({ search: search.value.trim(), content_id: contentID.value.trim() || undefined, platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, team_id: teamFilter.value || undefined, game_ids: gameFilter.value.length ? gameFilter.value : undefined, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined, material_id: materialFilter.value || undefined, published_from: publishedRange.value?.[0] || undefined, published_to: publishedRange.value?.[1] || undefined, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = Array.isArray(result) ? result : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    error.value = e.message || '内容池加载失败'
+    if (!quiet) error.value = e.message || '内容池加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+// 定时刷新让开用户正在做的事：详情/来源/人工导入打开、审核模式、已选行或批量操作中。
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => detailVisible.value || sourceVisible.value || manualVisible.value || imageViewerVisible.value || reviewMode.value || selectedRowKeys.value.length > 0 || batchLoading.value || manualLoading.value || reviewProcessing.value,
+})
 
 function reset() {
   search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []; teamFilter.value = ''; gameFilter.value = defaultGameIDs()
@@ -201,6 +210,11 @@ async function loadManualContext() {
     teams.value = []
     games.value = []
   }
+}
+
+function teamName(id) {
+  const team = teams.value.find((item) => item.id === id)
+  return team?.name || '未知团队'
 }
 
 function gameName(id) {
@@ -315,11 +329,25 @@ function openSource(row) {
   sourceVisible.value = true
 }
 
+// 用户 2026-10-27：管理员转素材后必须知道素材进了哪个团队（目标团队恒为来源内容的
+// 团队，管理员不选团队）。单条用单按钮告知把去向说清楚；运营 / 高级运营的素材恒属于
+// 本团队，保留原来的 toast。审核模式是连续操作，用非阻塞 toast 带出去向，不打断
+// 「转素材并下一条」。
+function announceMaterialized(material, { modal = true } = {}) {
+  if (!isAdmin.value) {
+    feedback.toast.success('已转为素材，来源关系已保留')
+    return
+  }
+  const message = `素材 ${material?.id ?? '-'}「${material?.title || '未命名素材'}」已转入团队「${teamName(material?.team_id)}」的素材库`
+  if (modal) feedback.notice({ title: '已转入素材库', message })
+  else feedback.toast.success(message)
+}
+
 async function materialize(row, reload = true) {
   try {
-    await client.materialize(row.id)
+    const material = await client.materialize(row.id)
     if (reload) await load()
-    feedback.toast.success('已转为素材，来源关系已保留')
+    announceMaterialized(material)
     return true
   } catch (e) {
     feedback.toast.error(e.message || '转素材失败')
@@ -351,7 +379,22 @@ async function batchMaterialize() {
     const result = await client.batchMaterialize(selectedRowKeys.value.map(Number))
     selectedRowKeys.value = []
     await load()
-    feedback.toast.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+    const succeeded = (result.items || []).filter((item) => item.success && item.material)
+    if (isAdmin.value && succeeded.length) {
+      // 管理员跨团队批量转换：按目标团队聚合，逐条列出素材进了哪个团队。
+      const counts = new Map()
+      for (const item of succeeded) {
+        const teamID = item.material.team_id
+        counts.set(teamID, (counts.get(teamID) || 0) + 1)
+      }
+      const lines = [...counts.entries()].map(([teamID, count]) => `团队「${teamName(teamID)}」：${count} 条`)
+      feedback.notice({
+        title: '已转入素材库',
+        message: `转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条。${lines.join('；')}`,
+      })
+    } else {
+      feedback.toast.success(`转素材成功 ${result.succeeded || 0} 条，失败 ${result.failed || 0} 条`)
+    }
   } catch (e) {
     feedback.toast.error(e.message || '批量转素材失败')
   } finally {
@@ -407,6 +450,8 @@ async function reviewAction(action) {
       const material = await client.materialize(row.id)
       row.status = 'material_created'
       row.material_id = material.id
+      // 审核模式是连续操作：管理员用 toast 带出目标团队，不弹窗打断下一条。
+      if (isAdmin.value) announceMaterialized(material, { modal: false })
     } else if (action === 'ignore') {
       const updated = await client.setStatus(row.id, 'ignored', '人工忽略', reviewNote.value)
       Object.assign(row, updated)
@@ -454,7 +499,6 @@ async function advanceReview() {
 
 function strategyLabel(row) { return row.strategy_name || (row.strategy_id ? `策略 ${row.strategy_id}` : '-') }
 function taskLabel(row) { return row.crawl_task_name || (row.crawl_task_id ? `任务 ${row.crawl_task_id}` : '-') }
-function platformLabel(value) { return ({ douyin: '抖音', bilibili: 'B站' })[value] || value || '-' }
 function statusLabel(value) { return ({ pending: '待处理', material_created: '已转素材', ignored: '已忽略' })[value] || value || '未知' }
 function statusTone(value) { return ({ pending: 'warning', material_created: 'success', ignored: 'neutral' })[value] || 'info' }
 function sourceTypeLabel(value) { return ({ link: 'ID/链接发现', search: '关键词发现', author: '博主发现', strategy: '挖掘策略' })[value] || value || '-' }
@@ -520,14 +564,13 @@ function openImageViewer(url) {
             :disabled="!reviewMode && !pendingCount"
             @click="reviewMode ? exitReviewMode() : enterReviewMode()"
           >审核模式</t-button>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
         </template>
       </ResourcePageHeader>
       <ResourceCard class="content-pool-card" :class="{ 'is-reviewing': reviewMode }">
         <div class="filter-bar">
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站" /></t-select></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></label>
             <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" multiple clearable placeholder="全部"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
@@ -556,6 +599,7 @@ function openImageViewer(url) {
                 </div>
               </div>
             </template>
+            <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
             <template #game="{ row }">{{ gameName(row.game_id) }}</template>
             <template #author_name="{ row }">
               <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
@@ -577,7 +621,6 @@ function openImageViewer(url) {
                 <t-button v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>
                 <t-button v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>
                 <t-button v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>
-                <t-button v-if="!isLibrary && row.status === 'material_created'" size="small" class="wt-secondary-button" variant="outline" @click="viewMaterial(row)">素材详情</t-button>
               </t-space>
             </template>
           </t-table>
@@ -613,7 +656,7 @@ function openImageViewer(url) {
                 </div>
                 <div><span>平台</span><strong>{{ platformLabel(detail.platform) }}</strong></div>
                 <div><span>发布时间</span><strong>{{ formatDateTime(detail.published_at) }}</strong></div>
-                <div><span>发现时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
+                <div><span>入库时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
                 <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
                 <div><span>操作人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
                 <div><span>审核时间</span><strong>{{ formatDateTime(detail.audited_at) }}</strong></div>
@@ -688,7 +731,7 @@ function openImageViewer(url) {
             <t-form label-width="80px">
               <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
               <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
-              <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option value="douyin" label="抖音" /><t-option value="bilibili" label="B站（待接入）" disabled /></t-select></t-form-item>
+              <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
             </t-form>
           </div>
 

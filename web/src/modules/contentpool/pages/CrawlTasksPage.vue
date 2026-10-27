@@ -11,6 +11,8 @@ import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
+import { platformLabel } from '../../../shared/utils/platforms.js'
+import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 
 const client = createDiscoveryClient()
 const session = createSessionClient()
@@ -107,24 +109,29 @@ async function loadContext() {
   }
 }
 
-async function load() {
-  loading.value = true
-  error.value = ''
+// quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
+  if (!quiet) error.value = ''
   try {
     const strategyID = Number(route.query.strategy_id || 0)
     // 从策略详情跳进来时锁定来源策略，其余筛选交给后端。
     const params = { strategy_id: strategyID > 0 ? strategyID : undefined, search: filters.value.search.trim(), status: filters.value.status, team_id: teamFilter.value || undefined }
     const data = await client.listTasks(params)
     rows.value = Array.isArray(data) ? data : []
-    pagination.value.current = 1
+    if (!quiet) pagination.value.current = 1
     const gameRows = await client.listGames({ scope: 'all' })
     games.value = Array.isArray(gameRows) ? gameRows : []
   } catch (e) {
-    error.value = e.message || '任务加载失败'
+    if (!quiet) error.value = e.message || '任务加载失败'
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
   }
 }
+
+useAutoRefresh(() => load({ quiet: true }), {
+  shouldSkip: () => visible.value || strategyDrawerVisible.value || retrying.value,
+})
 
 function resetFilters() {
   filters.value = { search: '', status: '' }
@@ -339,15 +346,11 @@ function hasFailed(task) {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题">
-        <template #actions>
-          <t-button class="wt-secondary-button" variant="outline" @click="load">刷新</t-button>
-        </template>
-      </ResourcePageHeader>
+      <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题" />
 
       <ResourceCard class="task-card">
         <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">任务名称 / 来源策略</span><t-input v-model="filters.search" clearable placeholder="搜索任务名称 / 来源策略" @enter="load" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索任务 ID / 任务名称 / 来源策略" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="success" label="成功" />
@@ -467,7 +470,7 @@ function hasFailed(task) {
         <div v-if="strategyDrawer" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(strategyDrawer.game_id) }}</strong></div>
-          <div class="strategy-drawer__field"><span>平台</span><strong>{{ strategyDrawer.platform || '-' }}</strong></div>
+          <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(strategyDrawer.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>
           <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ strategyDrawer.schedule || '-' }}</strong></div>

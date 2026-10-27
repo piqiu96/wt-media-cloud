@@ -9,7 +9,7 @@ import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import { bitAccountDiffers as computeBitAccountDiffers } from '../../../apps/desktop/features/local-agent/work-env-status.js'
 import { createLocalAgentStatusPage } from '../../../apps/desktop/features/local-agent/local-agent-status.js'
 import { localAgentStateFromStatus } from '../../../apps/desktop/features/local-agent/service.js'
-import { canUseLocalAgent } from '../../../utils.js'
+import { canRunLocalAgent } from '../../../utils.js'
 import { avatarOptions } from '../../../shared/ui/systemAvatars.js'
 import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
@@ -32,7 +32,7 @@ const bindingBusy = ref(false)
 const confirmRebind = ref(false)
 const error = ref('')
 const inDesktop = typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
-const localAgentAllowed = computed(() => canUseLocalAgent(user.value))
+const localAgentAllowed = computed(() => canRunLocalAgent(user.value))
 // 管理员不受团队/游戏限制；运营展示自己被授权的游戏名称（找不到名称时退化为 ID）。
 const gameScopeLabel = computed(() => {
   if (user.value?.role === 'admin') return '全部游戏'
@@ -76,8 +76,8 @@ async function load() {
     nickname.value = currentUser.nickname || currentUser.username
     avatarId.value = currentUser.avatar_id || 'sky'
     games.value = Array.isArray(gameRows) ? gameRows : []
-    // 本机 Agent 与比特账号绑定只属于普通运营；管理角色不读取这类本机信息。
-    if (!canUseLocalAgent(currentUser)) return
+    // 本机 Agent 与比特账号绑定给运营与高级运营；管理员不读取这类本机信息。
+    if (!canRunLocalAgent(currentUser)) return
     binding.value = await bitAccounts.get()
     if (inDesktop) {
       const [agentResult, deviceResult] = await Promise.allSettled([

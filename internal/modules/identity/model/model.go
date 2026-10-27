@@ -74,8 +74,12 @@ const (
 )
 
 type OperationTeam struct {
-	ID        TeamID    `json:"id"`
-	Name      string    `json:"name"`
+	ID   TeamID `json:"id"`
+	Name string `json:"name"`
+	// UserCount is how many users still belong to this team. It is read from the
+	// users table on every list rather than stored here, so it cannot drift from
+	// the membership it describes.
+	UserCount int64     `json:"user_count"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
