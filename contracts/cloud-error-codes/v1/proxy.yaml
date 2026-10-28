@@ -1,0 +1,6 @@
+schema_version: 1
+revision: "2026.10.29.1"
+errors:
+  proxy_assignment_unconfirmed: {http_status: 503, code: 30008, retryable: false, recovery_action: inspect_actual_state}
+  proxy_assignment_rejected: {http_status: 409, code: 23101, retryable: false, recovery_action: inspect_bitbrowser}
+  proxy_agent_upgrade_required: {http_status: 409, code: 23102, retryable: false, recovery_action: upgrade_agent}

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Proxy API
-  version: 2026.10.28.1
+  version: 2026.10.29.1
   description: >
     Proxy resources belong to a team. Operators and senior operators read and write
     their own team only; admins may read every team and must name the target team
@@ -365,7 +365,11 @@ paths:
   /api/v1/proxies/{proxy_id}/assign:
     post:
       operationId: assignProxyToProfile
-      summary: Synchronously write or replace one verified Profile proxy and persist the formal relation only after read-back matches.
+      summary: Apply a Profile proxy and persist the formal relation after BitBrowser explicitly acknowledges the update.
+      description: >
+        Successful acknowledgement is not a read-back or a connectivity check.
+        An uncertain result must be inspected before another write. Agent versions
+        without the acknowledgement capability require an upgrade.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/ProxyID'}]
       requestBody:
@@ -375,7 +379,7 @@ paths:
             schema: {$ref: '#/components/schemas/ProxyAssignmentRequest'}
       responses:
         '200':
-          description: Agent write and read-back succeeded; Cloud formal Profile proxy relation is updated.
+          description: BitBrowser explicitly acknowledged the update and Cloud formal Profile proxy relation is updated.
           content:
             application/json:
               schema:
@@ -384,8 +388,8 @@ paths:
                 properties:
                   data: {$ref: '#/components/schemas/ProxyAssignmentResult'}
         '403': {description: Profile does not belong to the current user or is inactive.}
-        '409': {description: Proxy unavailable, unified proxy capacity is exhausted, or the proxy is busy.}
-        '503': {description: Agent write/read-back did not succeed; no formal relation was updated.}
+        '409': {description: Proxy unavailable, capacity exhausted, busy, explicit BitBrowser rejection, or Agent upgrade required.}
+        '503': {description: Result is uncertain; the requested relation was not confirmed and must be inspected before retry.}
   /api/v1/proxies/{proxy_id}/assign-batch:
     post:
       operationId: assignProxyToProfiles

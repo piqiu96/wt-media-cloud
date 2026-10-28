@@ -14,6 +14,6 @@ describe('proxy assignment uncertainty', () => {
   expect(isUncertainAssignmentError(new TypeError('Failed to fetch'))).toBe(true)
   expect(isUncertainAssignmentError({errcode:30008})).toBe(true)
   expect(isUncertainAssignmentError({errcode:10001,message:'服务器响应格式错误'})).toBe(true)
-  expect(isUncertainAssignmentError({errcode:23010})).toBe(false)
+  expect(isUncertainAssignmentError({errcode:23101})).toBe(false)
  })
 })

@@ -1128,9 +1128,9 @@ func writeProxyAssignmentError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, errProxyReadback):
 		api.Failure(c, 503, 30008, "代理应用结果待确认，请读取比特配置核对", nil)
 	case errors.Is(err, errProxyRejected):
-		api.Failure(c, 409, 23010, "比特拒绝应用代理，原托管关系未更改", nil)
+		api.Failure(c, 409, 23101, "比特拒绝应用代理，原托管关系未更改", nil)
 	case errors.Is(err, errProxyAgentUpgrade):
-		api.Failure(c, 409, 23011, "本机 Agent 版本过旧，请升级后重试", nil)
+		api.Failure(c, 409, 23102, "本机 Agent 版本过旧，请升级后重试", nil)
 	case errors.Is(err, proxyservice.ErrNotFound), errors.Is(err, proxyservice.ErrInvalidInput), errors.Is(err, proxyservice.ErrNotAssignable), errors.Is(err, errProxyForbidden):
 		writeProxyError(c, err)
 	default:
