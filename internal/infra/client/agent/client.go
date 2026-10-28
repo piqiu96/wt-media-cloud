@@ -14,17 +14,6 @@ import (
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
-type ProxyCheckRequest struct {
-	ProxyID       string `json:"proxy_id,omitempty"`
-	ProxyProtocol string `json:"proxy_protocol"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-}
-
-type ProxyCheckResult struct {
-	Connectivity string `json:"connectivity"`
-}
-
 type ProxyExtractionRequest struct {
 	ExtractURL    string `json:"extract_url"`
 	ProxyProtocol string `json:"proxy_protocol"`
@@ -36,30 +25,6 @@ type ProxyExtractionResult struct {
 	Port          int    `json:"port"`
 	Username      string `json:"username,omitempty"`
 	Password      string `json:"password,omitempty"`
-}
-
-type ProxyMutationRequest struct {
-	Operation     string `json:"operation,omitempty"`
-	ProfileID     string `json:"profile_id"`
-	ProxyProtocol string `json:"proxy_protocol"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Username      string `json:"username,omitempty"`
-	Password      string `json:"password,omitempty"`
-}
-
-type ProxyMutationResult struct {
-	Operation     string `json:"operation,omitempty"`
-	ProfileID     string `json:"profile_id"`
-	ProxyProtocol string `json:"proxy_protocol"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Readback      bool   `json:"readback"`
-}
-
-type ProxyAssignmentResult struct {
-	ProfileID string `json:"profile_id"`
-	Accepted  bool   `json:"accepted"`
 }
 
 type ResponseError struct {
@@ -132,13 +97,6 @@ func NewWithClient(origin string, credential config.AgentCredentialConfig, trans
 	}
 }
 
-// CheckProxy asks the local Agent to test a proxy address.
-func (c *Client) CheckProxy(ctx context.Context, request ProxyCheckRequest) (ProxyCheckResult, error) {
-	var result ProxyCheckResult
-	err := c.post(ctx, "/api/v1/proxy-check", request, &result)
-	return result, err
-}
-
 // ExtractProxy asks the local Agent to extract a proxy address.
 func (c *Client) ExtractProxy(ctx context.Context, request ProxyExtractionRequest) (ProxyExtractionResult, error) {
 	var result ProxyExtractionResult
@@ -146,28 +104,7 @@ func (c *Client) ExtractProxy(ctx context.Context, request ProxyExtractionReques
 	return result, err
 }
 
-// MutateProxy asks the local Agent to bind or unbind a profile proxy.
-func (c *Client) MutateProxy(ctx context.Context, request ProxyMutationRequest) (ProxyMutationResult, error) {
-	var result ProxyMutationResult
-	err := c.post(ctx, "/api/v1/proxy-mutation", request, &result)
-	return result, err
-}
-
-func (c *Client) ApplyProxy(ctx context.Context, request ProxyMutationRequest) (ProxyAssignmentResult, error) {
-	var result ProxyAssignmentResult
-	err := c.postOnce(ctx, "/api/v1/proxy-assignment", request, &result)
-	return result, err
-}
-
 func (c *Client) post(ctx context.Context, path string, input, output any) error {
-	return c.postRequest(ctx, path, input, output, false)
-}
-
-func (c *Client) postOnce(ctx context.Context, path string, input, output any) error {
-	return c.postRequest(ctx, path, input, output, true)
-}
-
-func (c *Client) postRequest(ctx context.Context, path string, input, output any, noRetry bool) error {
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
@@ -181,9 +118,6 @@ func (c *Client) postRequest(ctx context.Context, path string, input, output any
 	request.SetRequestURI(c.origin + path)
 	request.SetBodyRaw(body)
 	request.Header.Set("Content-Type", "application/json")
-	if noRetry {
-		request.Header.Set("X-WT-No-Retry", "1")
-	}
 	if c.token != "" {
 		request.Header.Set("Authorization", "Bearer "+c.token)
 	}

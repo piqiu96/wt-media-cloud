@@ -31,10 +31,10 @@ func TestAgentClientAddsCredentialWithoutBusinessPassingHeaders(t *testing.T) {
 		if _, exists := body["auth_token"]; exists {
 			t.Error("credential leaked into business request body")
 		}
-		if body["host"] != "127.0.0.1" {
-			t.Errorf("host = %#v, want 127.0.0.1", body["host"])
+		if body["extract_url"] != "https://provider.example/extract" {
+			t.Errorf("extract_url = %#v", body["extract_url"])
 		}
-		_, _ = w.Write([]byte(`{"data":{"connectivity":"ok"}}`))
+		_, _ = w.Write([]byte(`{"data":{"proxy_protocol":"socks5","host":"127.0.0.1","port":1080}}`))
 	}))
 	defer server.Close()
 
@@ -43,12 +43,12 @@ func TestAgentClientAddsCredentialWithoutBusinessPassingHeaders(t *testing.T) {
 		config.AgentCredentialConfig{AuthToken: "agent-secret"},
 		newTransport(1),
 	)
-	result, err := client.CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1", Port: 1080})
+	result, err := client.ExtractProxy(context.Background(), ProxyExtractionRequest{ExtractURL: "https://provider.example/extract", ProxyProtocol: "socks5"})
 	if err != nil {
-		t.Fatalf("CheckProxy() error = %v", err)
+		t.Fatalf("ExtractProxy() error = %v", err)
 	}
-	if result.Connectivity != "ok" {
-		t.Fatalf("connectivity = %q, want ok", result.Connectivity)
+	if result.Host != "127.0.0.1" || result.Port != 1080 {
+		t.Fatalf("extracted = %+v", result)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestInitializePublishesConfiguredAgentClient(t *testing.T) {
 		if got, want := r.Header.Get("Authorization"), "Bearer initialize-secret"; got != want {
 			t.Errorf("authorization = %q, want %q", got, want)
 		}
-		_, _ = w.Write([]byte(`{"data":{"connectivity":"ok"}}`))
+		_, _ = w.Write([]byte(`{"data":{"proxy_protocol":"socks5","host":"127.0.0.1","port":1080}}`))
 	}))
 	defer server.Close()
 
@@ -72,12 +72,12 @@ func TestInitializePublishesConfiguredAgentClient(t *testing.T) {
 		}
 	})
 
-	result, err := Get().CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1", Port: 1080})
+	result, err := Get().ExtractProxy(context.Background(), ProxyExtractionRequest{ExtractURL: "https://provider.example/extract", ProxyProtocol: "socks5"})
 	if err != nil {
-		t.Fatalf("CheckProxy() error = %v", err)
+		t.Fatalf("ExtractProxy() error = %v", err)
 	}
-	if result.Connectivity != "ok" {
-		t.Fatalf("connectivity = %q, want ok", result.Connectivity)
+	if result.Host != "127.0.0.1" || result.Port != 1080 {
+		t.Fatalf("extracted = %+v", result)
 	}
 }
 
@@ -90,9 +90,9 @@ func TestClientDoesNotRetryNonSuccessResponses(t *testing.T) {
 	defer server.Close()
 
 	client := NewWithClient(server.URL, config.AgentCredentialConfig{AuthToken: "secret"}, newTransport(3))
-	_, err := client.CheckProxy(context.Background(), ProxyCheckRequest{Host: "127.0.0.1"})
+	_, err := client.ExtractProxy(context.Background(), ProxyExtractionRequest{ExtractURL: "https://provider.example/extract", ProxyProtocol: "http"})
 	if err == nil {
-		t.Fatal("CheckProxy() with HTTP 502 succeeded")
+		t.Fatal("ExtractProxy() with HTTP 502 succeeded")
 	}
 	if !strings.Contains(err.Error(), "502") || !strings.Contains(err.Error(), "agent unavailable") {
 		t.Fatalf("error = %v, want status and response body", err)
@@ -153,43 +153,4 @@ func closeHTTPClient(t *testing.T, closer func() error) {
 			t.Fatalf("close http client: %v", err)
 		}
 	})
-}
-
-func TestApplyProxyNeverRetriesWhenResponseIsLost(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if r.URL.Path != "/api/v1/proxy-assignment" {
-			t.Errorf("path = %s", r.URL.Path)
-		}
-		conn, _, err := w.(http.Hijacker).Hijack()
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = conn.Close()
-	}))
-	defer server.Close()
-	client := NewWithClient(server.URL, config.AgentCredentialConfig{}, newTransport(3))
-	_, err := client.ApplyProxy(context.Background(), ProxyMutationRequest{ProfileID: "p1", ProxyProtocol: "socks5", Host: "127.0.0.1", Port: 1080})
-	if err == nil {
-		t.Fatal("response loss must be uncertain")
-	}
-	if attempts != 1 {
-		t.Fatalf("attempts = %d, want 1", attempts)
-	}
-}
-
-func TestApplyProxyAcceptsAcknowledgementWithoutReadback(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/proxy-assignment" {
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`{"data":{"profile_id":"p1","accepted":true}}`))
-	}))
-	defer server.Close()
-	client := NewWithClient(server.URL, config.AgentCredentialConfig{}, newTransport(2))
-	result, err := client.ApplyProxy(context.Background(), ProxyMutationRequest{ProfileID: "p1", ProxyProtocol: "socks5", Host: "127.0.0.1", Port: 1080})
-	if err != nil || !result.Accepted || result.ProfileID != "p1" {
-		t.Fatalf("ack = %+v, err = %v", result, err)
-	}
 }

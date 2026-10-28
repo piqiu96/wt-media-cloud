@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -41,6 +40,4 @@ func TestProxyCheckRunsInTheCloudInsteadOfTheAgent(t *testing.T) {
 	// 提取和变更仍在运营桌面执行，但连通性检测是 Cloud 能力：签名不能要求
 	// Agent 上下文或本机拼出的 ProxyCheckInput。
 	var _ func(string) (model.Proxy, dto.ProxyCheckResult, error) = CheckProxy
-	var _ func(context.Context, dto.ProxyExtractionInput) (dto.ProxyExtractionResult, error) = ExtractProxy
-	var _ func(context.Context, dto.ProxyMutationInput) (dto.ProxyMutationResult, error) = MutateProxy
 }

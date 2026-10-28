@@ -130,22 +130,3 @@ type ProxyExtractionResult struct {
 	Username string         `json:"username,omitempty"`
 	Password string         `json:"password,omitempty"`
 }
-
-type ProxyMutationInput struct {
-	Operation string         `json:"operation,omitempty"`
-	ProfileID string         `json:"profile_id"`
-	Protocol  model.Protocol `json:"protocol"`
-	Host      string         `json:"host"`
-	Port      int            `json:"port"`
-	Username  string         `json:"username,omitempty"`
-	Password  string         `json:"password,omitempty"`
-}
-
-type ProxyMutationResult struct {
-	Operation string         `json:"operation,omitempty"`
-	ProfileID string         `json:"profile_id"`
-	Protocol  model.Protocol `json:"protocol"`
-	Host      string         `json:"host"`
-	Port      int            `json:"port"`
-	Readback  bool           `json:"readback"`
-}
