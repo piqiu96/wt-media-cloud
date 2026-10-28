@@ -4,8 +4,6 @@ import { createProxyClient } from "../../../shared/api/proxy.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { isDesktop } from "../../../utils.js"
-import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
-import { invoke } from "@tauri-apps/api/core"
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
 import { feedback } from "../../../shared/ui/feedback/index.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
@@ -25,7 +23,6 @@ import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
 const proxyClient = createProxyClient()
 const sessionClient = createSessionClient()
 const usersClient = createUsersClient()
-const localAgent = createLocalAgentService({ invoke })
 
 const proxies = ref([])
 const loading = ref(true)
@@ -288,9 +285,9 @@ async function extractAddress() {
   extracting.value = true
   formError.value = ""
   try {
-    applyParsedAddress(await localAgent.proxyExtract({
-      extractUrl: form.value.extract_url.trim(),
-      proxyProtocol: form.value.protocol,
+    applyParsedAddress(await proxyClient.previewExtract({
+      extract_url: form.value.extract_url.trim(),
+      protocol: form.value.protocol,
     }))
     feedback.toast.info("已提取一条地址；保存后才会写入资源，检测成功前不能分配。")
   } catch (e) {
@@ -311,12 +308,7 @@ async function refreshDynamic() {
   savingForm.value = true
   formError.value = ""
   try {
-    const intent = await proxyClient.refreshDynamic(editingProxy.value.id)
-    const extracted = await localAgent.proxyExtract({
-      extractUrl: intent.extract_url,
-      proxyProtocol: intent.protocol,
-    })
-    const updated = await proxyClient.finishDynamicRefresh(editingProxy.value.id, extracted)
+    const updated = await proxyClient.refreshDynamic(editingProxy.value.id)
     feedback.toast.info(updated.assignment_blocker
       ? `已提取新地址，但检测未通过：${updated.assignment_blocker}`
       : "已提取新地址并检测通过。")

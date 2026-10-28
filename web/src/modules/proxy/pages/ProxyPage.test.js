@@ -52,12 +52,6 @@ describe('proxy resource page', () => {
     }
   })
 
-  it('runs dynamic extraction through Desktop and the Local Agent', () => {
-    expect(source).toContain('localAgent.proxyExtract(')
-    expect(source).toContain('proxyClient.finishDynamicRefresh(')
-    expect(source).not.toContain('proxyClient.previewExtract(')
-  })
-
   it('keeps batch health checks in the selection toolbar', () => {
     expect(source).toContain('>批量检测（{{ selectedRowKeys.length }}）</t-button>')
     expect(source).toContain('async function runBatchCheck(')

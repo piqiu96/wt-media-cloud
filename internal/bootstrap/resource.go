@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/client"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wt-media/wt-media-cloud/internal/config"
+	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
 	"github.com/wt-media/wt-media-cloud/internal/infra/client/observe"
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
@@ -26,6 +27,7 @@ import (
 type clientInitializer func(name string, credentials config.CredentialsConfig) (func() error, error)
 
 var clientInitializers = map[string]clientInitializer{
+	"agent":  agentclient.Initialize,
 	"douyin": douyinclient.Initialize,
 }
 
@@ -44,7 +46,7 @@ func serverResourcePlan() []resourceStep {
 		tracingResource(),
 		databaseResource(),
 		storageResource(),
-		clientsResource("douyin"),
+		clientsResource(),
 	}
 }
 

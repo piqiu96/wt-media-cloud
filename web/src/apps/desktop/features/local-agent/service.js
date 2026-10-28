@@ -19,7 +19,6 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   profileUpdate: "local_agent_profile_update",
   profileRestore: "local_agent_profile_restore",
   profileProxyOperation: "local_agent_profile_proxy_operation",
-  proxyExtract: "local_agent_proxy_extract",
 });
 
 const DEFAULT_STATUS = Object.freeze({
@@ -187,14 +186,6 @@ export function createLocalAgentService({ invoke }) {
           port,
           username,
           password,
-        },
-      });
-    },
-    async proxyExtract({ extractUrl, proxyProtocol = "http" }) {
-      return invoke(LOCAL_AGENT_COMMANDS.proxyExtract, {
-        args: {
-          extract_url: extractUrl,
-          proxy_protocol: proxyProtocol,
         },
       });
     },

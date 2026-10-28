@@ -288,6 +288,23 @@ func ParseProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, parsed)
 }
 
+func PreviewProxyExtraction(ctx context.Context, c *hertzapp.RequestContext) {
+	_, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var req proxyservice.ProxyExtractionInput
+	if !api.DecodeJSON(c, &req) {
+		return
+	}
+	result, err := proxyservice.ExtractProxy(ctx, req)
+	if err != nil {
+		api.Failure(c, 503, 30007, "动态代理提取失败；提取需要本人桌面环境运行", nil)
+		return
+	}
+	api.Success(c, result)
+}
+
 func RefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -306,31 +323,9 @@ func RefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
 		api.BadRequest(c, 10001, "该代理未配置动态提取来源")
 		return
 	}
-	api.Success(c, proxyservice.ProxyRefreshIntent{
-		ProxyID: proxy.ID, ExtractURL: proxy.ExtractURL, Protocol: proxy.Protocol,
-	})
-}
-
-func FinishRefreshProxy(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	proxy, err := proxyservice.Get(c.Param("id"))
+	extracted, err := proxyservice.ExtractProxy(ctx, proxyservice.ProxyExtractionInput{ExtractURL: proxy.ExtractURL, Protocol: proxy.Protocol})
 	if err != nil {
-		writeProxyError(c, err)
-		return
-	}
-	if !canGovernProxy(actor, proxy) {
-		writeProxyError(c, errProxyForbidden)
-		return
-	}
-	if proxy.Source != proxyservice.ProxySourceAPI || proxy.ExtractURL == "" {
-		api.BadRequest(c, 10001, "该代理未配置动态提取来源")
-		return
-	}
-	var extracted proxyservice.ProxyExtractionResult
-	if !api.DecodeJSON(c, &extracted) {
+		api.Failure(c, 503, 30007, "动态代理提取失败；提取需要本人桌面环境运行", nil)
 		return
 	}
 	updated, err := proxyservice.Update(proxy.ID, proxyservice.CreateProxyInput{

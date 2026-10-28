@@ -186,6 +186,28 @@ paths:
                 properties:
                   data: {$ref: '#/components/schemas/ProxyAddress'}
         '400': {description: The address format is invalid.}
+  /api/v1/proxies/extract-preview:
+    post:
+      operationId: extractProxyPreview
+      summary: Ask the current local Agent to fetch and parse the first valid plain-text proxy address without persisting a proxy record.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyExtractionRequest'}
+      responses:
+        '200':
+          description: Authorized caller receives parsed draft fields; the source URL is never returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: {$ref: '#/components/schemas/ProxyAddress'}
+        '400': {description: Source URL or extracted proxy format is invalid.}
+        '503': {description: The current local Agent could not extract the proxy.}
   /api/v1/proxies/import/preview:
     post:
       operationId: previewProxyImport
@@ -260,40 +282,18 @@ paths:
         '404': {description: Proxy does not exist.}
   /api/v1/proxies/{proxy_id}/refresh:
     post:
-      operationId: startDynamicProxyRefresh
-      summary: Return the saved extraction intent for execution by the operator's Desktop.
+      operationId: refreshDynamicProxy
+      summary: Manually extract and check a dynamic API proxy, update the ledger connection fields, and never write BitBrowser Profiles.
       description: >
-        Cloud never fetches the provider URL itself. The authenticated Desktop
-        sends this intent to its Local Agent, then posts the parsed address to
-        the result route. No proxy row is changed by this first call.
+        Extraction stays on the operator's workstation because the provider URL
+        needs the operator's network; the extracted connection replaces the saved
+        one and is then checked by Cloud. A changed connection clears the previous
+        check fact.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/ProxyID'}]
       responses:
         '200':
-          description: Extraction intent for the Desktop/Agent hop.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/ProxyRefreshIntent'}
-        '400': {description: Proxy is not an API source or has no extraction URL.}
-        '403': {description: Only a senior operator or admin may govern this proxy.}
-  /api/v1/proxies/{proxy_id}/refresh/result:
-    post:
-      operationId: finishDynamicProxyRefresh
-      summary: Store the locally extracted address, re-check it in Cloud, and return the refreshed proxy.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/ProxyID'}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/ProxyExtractionResult'}
-      responses:
-        '200':
-          description: Extracted address saved and checked; bound windows may require later resynchronization.
+          description: Current dynamic address was extracted and checked. Bound windows may require later resynchronization.
           content:
             application/json:
               schema:
@@ -301,8 +301,9 @@ paths:
                 required: [data]
                 properties:
                   data: {$ref: '#/components/schemas/ProxyView'}
-        '400': {description: Extracted address is invalid.}
+        '400': {description: Proxy is not an API source or the extracted response is invalid.}
         '403': {description: Only a senior operator or admin may govern this proxy.}
+        '503': {description: Local extraction did not succeed; no BitBrowser Profile was modified.}
 components:
   parameters:
     ProxyID:
@@ -369,24 +370,13 @@ components:
       additionalProperties: false
       properties:
         proxy_address: {type: string, description: 'host:port, host:port:username:password, or protocol://username:password@host:port'}
-    ProxyRefreshIntent:
+    ProxyExtractionRequest:
       type: object
-      required: [proxy_id, extract_url, protocol]
-      properties:
-        proxy_id: {type: string}
-        extract_url: {type: string, format: uri}
-        protocol: {type: string, enum: [http, https, socks5]}
-
-    ProxyExtractionResult:
-      type: object
+      required: [extract_url]
       additionalProperties: false
-      required: [protocol, host, port]
       properties:
-        protocol: {type: string, enum: [http, https, socks5]}
-        host: {type: string}
-        port: {type: integer, minimum: 1, maximum: 65535}
-        username: {type: string}
-        password: {type: string, writeOnly: true}
+        extract_url: {type: string, format: uri, writeOnly: true}
+        protocol: {type: string, enum: [http, https, socks5], default: http}
     ProxyAddress:
       type: object
       required: [protocol, host, port]
