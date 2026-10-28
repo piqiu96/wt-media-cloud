@@ -559,28 +559,29 @@ function proxyRemaining(proxy) {
 
 function proxySelectable(proxy, profile) {
   if (!proxy) return false
-  if (profile && profile.proxy_id === proxy.id) return true
-  if (proxy.assignment_blocker) return false
+  const current = profile && profile.proxy_id === proxy.id
+  if (proxy.assignment_blocker && !(current && proxy.assignment_blocker === "代理窗口配额已满")) return false
   if (proxy.business_status !== "active") return false
   if (proxyExpired(proxy)) return false
   if (proxy.last_check_result !== "ok") return false
-  return proxyRemaining(proxy) > 0
+  return current || proxyRemaining(proxy) > 0
 }
 
 function proxyAvailabilityReason(proxy, profile) {
   if (!proxy) return "代理不存在"
-  if (profile && profile.proxy_id === proxy.id) return "当前托管代理"
-  if (proxy.assignment_blocker) return proxy.assignment_blocker.replace(/^代理/, "")
+  const current = profile && profile.proxy_id === proxy.id
+  if (proxy.assignment_blocker && !(current && proxy.assignment_blocker === "代理窗口配额已满")) return proxy.assignment_blocker.replace(/^代理/, "")
   if (proxy.business_status !== "active") return "已停用"
   if (proxyExpired(proxy)) return "已到期"
   if (proxy.last_check_result !== "ok") return "检测不可用"
+  if (current) return "当前托管代理"
   if (proxyRemaining(proxy) <= 0) return "额度已满"
   return "可用"
 }
 
 // 重新同步不是新分配，但仍要求资源本身可用；同代理的幂等豁免不能盖住过期或停用。
 function proxyResyncable(proxy) {
-  if (!proxy || proxy.assignment_blocker) return false
+  if (!proxy || (proxy.assignment_blocker && proxy.assignment_blocker !== "代理窗口配额已满")) return false
   return proxy.business_status === "active" && !proxyExpired(proxy) && proxy.last_check_result === "ok"
 }
 
@@ -1362,8 +1363,6 @@ function openCandidates(profile) {
   candidateError.value = ""
   candidateSelectedId.value = ""
   candidateVisible.value = true
-  const firstUsable = proxies.value.find((proxy) => proxySelectable(proxy, profile))
-  candidateSelectedId.value = firstUsable?.id || ""
 }
 
 function selectCandidate(proxy) {
@@ -2404,10 +2403,11 @@ function syncIssueAction(profile) {
               <ResourceStatusBadge
                 v-else
                 :tone="proxyConfigMismatch(detailProfile, managedProxy(detailProfile)) ? 'warning' : 'success'"
-                :label="proxyConfigMismatch(detailProfile, managedProxy(detailProfile)) ? '配置不一致' : '已核实'"
+                :label="proxyConfigMismatch(detailProfile, managedProxy(detailProfile)) ? '配置不一致' : '协议与地址记录一致'"
               />
             </t-descriptions-item>
-            <t-descriptions-item label="核实时间">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
+            <t-descriptions-item v-if="isManaged(detailProfile) && managedProxy(detailProfile)" label="认证信息">待核实</t-descriptions-item>
+            <t-descriptions-item label="最近窗口同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
           </ResourceDescriptions>
 
           <template v-if="isManaged(detailProfile) && managedProxy(detailProfile) && proxyConfigMismatch(detailProfile, managedProxy(detailProfile))">
@@ -2763,11 +2763,11 @@ function syncIssueAction(profile) {
           details="代理需属于当前团队、已启用、未到期、检测正常且有剩余额度；具体原因见各行可用性。">当前代理均不可分配</ResourceNotice>
         <ResourceNotice v-if="candidateUsable" :details="accountTitle(candidateProfile)" details-label="查看关联账号">将替换此窗口当前代理。<span v-if="accountsFor(candidateProfile || {}).length">涉及 {{ accountsFor(candidateProfile).length }} 个关联账号。</span></ResourceNotice>
         <template #footer>
-          <t-space>
+          <div class="candidate-footer">
             <t-button class="wt-secondary-button" variant="outline" @click="candidateVisible = false">取消</t-button>
-
+            <span v-if="proxies.length" class="candidate-selection" role="status" :title="candidateSelected ? `已选择：${candidateSelected.name || candidateSelected.host}` : ''">{{ candidateSelected ? `已选择：${candidateSelected.name || candidateSelected.host}` : '尚未选择代理' }}</span>
             <t-button v-if="proxies.length" theme="primary" :disabled="!candidateUsable" @click="confirmCandidate">应用代理</t-button>
-          </t-space>
+          </div>
         </template>
       </ResourceOverlay>
 
@@ -3024,6 +3024,8 @@ function syncIssueAction(profile) {
 .candidate-filters { display: flex; flex-wrap: wrap; gap: 20px 24px; margin: 20px 0; }
 .candidate-filter { display: flex; flex: 0 1 180px; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; font-weight: 500; }
 .candidate-filter--wide { flex: 1 1 280px; }
+.candidate-footer { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; }
+.candidate-selection { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td-text-color-secondary); font-size: 14px; }
 .candidate-filter :deep(.t-input__wrap), .candidate-filter :deep(.t-select__wrap) { min-width: 0; width: 100%; }
 .sync-section { margin-top: 18px; }
 .identity-block { text-align: center; }

@@ -1065,12 +1065,10 @@ func assignProxyToProfile(ctx context.Context, actor identityservice.PublicUser,
 		if countErr != nil {
 			return countErr
 		}
-		if profile.ProxyID != proxy.ID {
-			remaining := proxyservice.NormalizedMaxProfileCount(proxy.MaxProfileCount) - assigned
-			if reason := proxyservice.AssignmentBlockReason(proxy, remaining); reason != "" {
-				assignmentFailure = errors.Join(proxyservice.ErrNotAssignable, errors.New(reason))
-				return nil
-			}
+		remaining := proxyservice.NormalizedMaxProfileCount(proxy.MaxProfileCount) - assigned
+		if reason := proxyservice.AssignmentBlockerForProfile(proxy, time.Now(), remaining, profile.ProxyID == proxy.ID); reason != "" {
+			assignmentFailure = errors.Join(proxyservice.ErrNotAssignable, errors.New(reason))
+			return nil
 		}
 		result, mutateErr := proxyservice.MutateProxy(ctx, proxyservice.ProxyMutationInput{
 			Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol,

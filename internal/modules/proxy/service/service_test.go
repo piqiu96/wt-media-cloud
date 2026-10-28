@@ -337,3 +337,28 @@ func newTestProxyService(store Store) *proxyService {
 	svc.newID = func(prefix string) string { return prefix + "-generated" }
 	return svc
 }
+
+func TestAssignmentBlockerForExistingBindingOnlyWaivesQuota(t *testing.T) {
+	now := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	expired := now.Add(-time.Hour)
+	cases := []struct {
+		name    string
+		proxy   ProxyConfig
+		current bool
+		want    string
+	}{
+		{"existing full", ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckOK}, true, ""},
+		{"new full", ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckOK}, false, "代理窗口配额已满"},
+		{"existing paused", ProxyConfig{BusinessStatus: BizPaused, LastCheckResult: CheckOK}, true, "代理已停用"},
+		{"existing expired", ProxyConfig{BusinessStatus: BizActive, ExpiresAt: &expired, LastCheckResult: CheckOK}, true, "代理已到期"},
+		{"existing unchecked", ProxyConfig{BusinessStatus: BizActive}, true, "代理尚未检测"},
+		{"existing failed", ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckAuthFailed}, true, "代理认证失败"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := AssignmentBlockerForProfile(tc.proxy, now, 0, tc.current); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

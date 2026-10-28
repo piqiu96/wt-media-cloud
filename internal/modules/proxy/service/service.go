@@ -527,6 +527,15 @@ func AssignmentBlocker(p ProxyConfig, now time.Time, remaining int) string {
 	return ""
 }
 
+// An existing binding consumes no additional slot, but must still pass every
+// other availability check before its configuration can be written again.
+func AssignmentBlockerForProfile(p ProxyConfig, now time.Time, remaining int, alreadyAssigned bool) string {
+	if alreadyAssigned && remaining < 1 {
+		remaining = 1
+	}
+	return AssignmentBlocker(p, now, remaining)
+}
+
 func (s *proxyService) CheckAssignable(p ProxyConfig) error {
 	if AssignmentBlocker(p, s.now(), 1) != "" {
 		return ErrNotAssignable
