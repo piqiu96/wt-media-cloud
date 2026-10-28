@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"encoding/json"
 	"errors"
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
 	"testing"
 
@@ -45,6 +47,32 @@ func TestProxyAssignmentAcknowledgementClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := classifyAssignmentAck(tc.result, tc.err, "p1"); !errors.Is(got, tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAssignmentErrorsAreDistinctAndMatchContract(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		err          error
+		status, code int
+	}{
+		{"rejected", errProxyRejected, 409, 23101},
+		{"old agent", errProxyAgentUpgrade, 409, 23102},
+		{"unconfirmed", errProxyReadback, 503, 30008},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := hertzapp.NewContext(0)
+			writeProxyAssignmentError(c, tc.err)
+			var body struct {
+				Errcode int `json:"errcode"`
+			}
+			if err := json.Unmarshal(c.Response.Body(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if c.Response.StatusCode() != tc.status || body.Errcode != tc.code {
+				t.Fatalf("status=%d code=%d", c.Response.StatusCode(), body.Errcode)
 			}
 		})
 	}
