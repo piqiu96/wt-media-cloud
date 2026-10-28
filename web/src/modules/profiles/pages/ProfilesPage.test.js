@@ -44,7 +44,7 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the operation column pinned and width from the shared measure', () => {
-    expect(source).toContain('{ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value), fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true }), fixed: "right" }')
   })
 
   it('requires a fresh running-state read before disabling a window', () => {
@@ -101,7 +101,7 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the read-only detail drawer footerless and the progress dialog reachable', () => {
-    expect(source).toContain('v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 720px)" :close-btn="true" :footer="false"')
+    expect(source).toContain('v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 800px)" :close-btn="true" :footer="false"')
     expect(source).toContain(':footer="syncDone || syncHasChanges"')
     expect(source).toContain('@retry="retryFailed"')
     expect(source).toContain('@verify="verifyPending"')

@@ -20,7 +20,7 @@ describe('proxy resource page', () => {
     expect(source).toContain('const proxyActionLabels = computed(() => isGovernor.value')
     expect(source).toContain('? ["详情", "编辑", "检测", "设置配额", "删除"]')
     expect(source).toContain(': ["详情", "编辑", "检测"]')
-    expect(source).toContain('width: opColumnWidth(proxyActionLabels.value), fixed: "right"')
+    expect(source).toContain('width: opColumnWidth(proxyActionLabels.value, { variant: "text", loading: true }), fixed: "right"')
     expect(source).toContain('@click="openEdit(row)"')
     expect(source).toContain('@click="openQuota(row)"')
   })
@@ -28,7 +28,7 @@ describe('proxy resource page', () => {
   it('uses the browser-window resource table structure', () => {
     expect(source).toContain('class="filter-bar"')
     expect(source).toContain('class="table-scroll-wrap"')
-    expect(source).toContain(":scroll=\"{ x: 'max-content' }\"")
+    expect(source).toContain(':scroll="tableScroll"')
     expect(source).toContain('class="pagination-bar"')
     expect(source).toContain('<t-pagination')
   })

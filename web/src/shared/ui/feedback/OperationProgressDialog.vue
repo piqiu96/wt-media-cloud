@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { CheckCircleIcon, ErrorCircleIcon } from 'tdesign-icons-vue-next'
 import ResourceStatusBadge from '../resource/ResourceStatusBadge.vue'
 
 // 现场处理弹窗：同步、批量开关窗、批量设置代理、导入和检测共用。
@@ -43,7 +44,9 @@ const isRunning = computed(() => props.phase === 'running')
 
 const resultTitle = computed(() => {
   if (counts.value.pending) return '处理已中断'
-  if (failedCount.value || unconfirmedCount.value) return '处理结果'
+  if (unconfirmedCount.value) return '部分结果待确认'
+  if (failedCount.value === total.value && total.value) return '本次处理失败'
+  if (failedCount.value) return '部分项目未完成'
   if (counts.value.skipped && !counts.value.success) return '没有需要处理的项目'
   return '全部完成'
 })
@@ -55,7 +58,8 @@ function statusLabel(status) {
 function badgeTone(status) {
   if (status === 'success') return 'success'
   if (status === 'failed') return 'danger'
-  if (status === 'unconfirmed' || status === 'processing') return 'warning'
+  if (status === 'processing') return 'info'
+  if (status === 'unconfirmed') return 'warning'
   return 'neutral'
 }
 </script>
@@ -63,51 +67,57 @@ function badgeTone(status) {
 <template>
   <t-dialog
     :visible="visible"
-    :header="isRunning ? title : resultTitle"
-    :close-btn="false"
+    :header="title"
+    :close-btn="!isRunning"
     :close-on-esc-keydown="false"
     :close-on-overlay-click="false"
     :footer="!isRunning"
-    width="min(92vw, 640px)"
+    width="min(94vw, 960px)"
+    @close="!isRunning && emit('done')"
   >
-    <template v-if="isRunning">
-      <p class="operation-progress__line">
-        {{ runningLabel }} {{ finished }} / {{ total }}
-        <template v-if="current">：{{ current.label }}</template>
-      </p>
-      <t-progress theme="line" :percentage="percent" :label="false" />
-      <div class="operation-progress__counts">
-        <span>成功 {{ counts.success }}</span>
-        <span>失败 {{ counts.failed }}</span>
-        <span>跳过 {{ counts.skipped }}</span>
-        <span>待确认 {{ counts.unconfirmed }}</span>
-        <span>未处理 {{ counts.pending }}</span>
-      </div>
-    </template>
-    <template v-else>
-      <div class="operation-progress__counts operation-progress__counts--result">
-        <span>总数 {{ total }}</span>
-        <span>成功 {{ counts.success }}</span>
-        <span>失败 {{ counts.failed }}</span>
-        <span>跳过 {{ counts.skipped }}</span>
-        <span>待确认 {{ counts.unconfirmed }}</span>
-        <span>未处理 {{ counts.pending }}</span>
-      </div>
-      <div class="operation-progress__list">
-        <div v-for="item in items" :key="item.key" class="operation-progress__item">
-          <div class="operation-progress__item-head">
-            <span class="operation-progress__item-label">{{ item.label }}</span>
-            <ResourceStatusBadge :tone="badgeTone(item.status)" :label="statusLabel(item.status)" />
-          </div>
-          <div v-if="item.reason" class="operation-progress__reason">{{ item.reason }}</div>
+    <div class="operation-progress" :aria-busy="isRunning">
+      <div class="operation-progress__summary" role="status" aria-live="polite">
+        <div class="operation-progress__symbol" :class="isRunning ? 'is-running' : failedCount === total && total ? 'is-danger' : failedCount || unconfirmedCount || counts.pending ? 'is-warning' : 'is-success'">
+          <span v-if="isRunning" class="operation-progress__spinner" />
+          <ErrorCircleIcon v-else-if="failedCount || unconfirmedCount || counts.pending" />
+          <CheckCircleIcon v-else />
+        </div>
+        <div><h3>{{ isRunning ? runningLabel : resultTitle }}</h3>
+          <p v-if="isRunning">请保持当前窗口打开，处理结束后自动显示结果。</p>
+          <p v-else-if="counts.pending">已完成项目保留，未处理项可重新选择，待确认项请先核实。</p>
+          <p v-else-if="unconfirmedCount">请先核实实际结果，避免重复操作。</p>
+          <p v-else>本次结果仅在当前窗口查看。</p>
         </div>
       </div>
-    </template>
-
+      <dl class="operation-progress__counts">
+        <div><dt>总数</dt><dd>{{ total }}</dd></div>
+        <div v-for="status in ['success', 'failed', 'skipped', 'processing', 'pending', 'unconfirmed']" :key="status" :class="`is-${status}`"><dt>{{ statusLabel(status) }}</dt><dd>{{ counts[status] }}</dd></div>
+      </dl>
+      <div v-if="isRunning" class="operation-progress__running">
+        <t-progress theme="line" :percentage="percent" :label="false" />
+        <p>已处理 {{ finished }} / {{ total }} 项<span v-if="current"> · {{ current.label }}</span></p>
+      </div>
+      <t-table
+        class="operation-progress__table"
+        :data="items"
+        row-key="key"
+        size="small"
+        :max-height="360"
+        :columns="[{ colKey: 'index', title: '序号', width: 60 }, { colKey: 'label', title: '操作对象', width: 240 }, { colKey: 'status', title: '结果', width: 100 }, { colKey: 'reason', title: '原因 / 后续处理', width: 300 }]"
+        :scroll="{ x: '700px' }"
+        empty="暂无处理项目"
+      >
+        <template #index="{ rowIndex }">{{ rowIndex + 1 }}</template>
+        <template #label="{ row }"><span class="operation-progress__item-label">{{ row.label }}</span></template>
+        <template #status="{ row }"><ResourceStatusBadge :tone="badgeTone(row.status)" :label="statusLabel(row.status)" /></template>
+        <template #reason="{ row }"><span class="operation-progress__reason">{{ row.reason || (row.status === 'processing' ? '正在处理' : row.status === 'pending' ? '尚未开始' : '—') }}</span></template>
+      </t-table>
+      <p v-if="isRunning" class="operation-progress__notice">处理中不可关闭；强制离开不会撤销已生效的项目。</p>
+    </div>
     <template v-if="!isRunning" #footer>
       <t-space>
-        <t-button v-if="failedCount" theme="primary" variant="outline" @click="emit('retry')">{{ retryLabel }}（{{ failedCount }}）</t-button>
-        <t-button v-if="unconfirmedCount" theme="warning" variant="outline" @click="emit('verify')">{{ verifyLabel }}（{{ unconfirmedCount }}）</t-button>
+        <t-button v-if="failedCount" theme="default" variant="outline" @click="emit('retry')">{{ retryLabel }}（{{ failedCount }}）</t-button>
+        <t-button v-if="unconfirmedCount" theme="default" variant="outline" @click="emit('verify')">{{ verifyLabel }}（{{ unconfirmedCount }}）</t-button>
         <t-button theme="primary" @click="emit('done')">完成</t-button>
       </t-space>
     </template>
@@ -115,12 +125,27 @@ function badgeTone(status) {
 </template>
 
 <style scoped>
-.operation-progress__line { margin-bottom: 12px; color: var(--td-text-color-primary); }
-.operation-progress__counts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; color: var(--td-text-color-secondary); font-size: 13px; }
-.operation-progress__counts--result { margin-top: 0; margin-bottom: 12px; }
-.operation-progress__list { max-height: 46vh; overflow-y: auto; border-top: 1px solid var(--td-component-stroke); }
-.operation-progress__item { padding: 10px 0; border-bottom: 1px solid var(--td-component-stroke); }
-.operation-progress__item-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.operation-progress__item-label { font-weight: 500; }
-.operation-progress__reason { margin-top: 4px; color: var(--td-text-color-secondary); font-size: 12px; line-height: 1.5; }
+.operation-progress { color: var(--wt-text-secondary); }
+.operation-progress__summary { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.operation-progress__summary h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 600; }
+.operation-progress__summary p { margin: 6px 0 0; color: var(--wt-text-tertiary); font-size: 13px; line-height: 1.6; }
+.operation-progress__symbol { display: flex; align-items: center; justify-content: center; flex: 0 0 48px; height: 48px; border-radius: 50%; font-size: 26px; }
+.operation-progress__symbol.is-success { color: var(--wt-success); background: var(--wt-success-bg); }
+.operation-progress__symbol.is-warning { color: var(--wt-warning); background: var(--wt-warning-bg); }
+.operation-progress__symbol.is-danger { color: var(--wt-danger); background: var(--wt-danger-bg); }
+.operation-progress__symbol.is-running { color: var(--wt-primary); background: var(--wt-info-bg); }
+.operation-progress__spinner { width: 22px; height: 22px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: operation-spin 1s linear infinite; }
+.operation-progress__counts { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin: 0 0 20px; padding: 16px 0; background: var(--wt-bg-page); border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); }
+.operation-progress__counts > div { display: flex; flex-direction: column-reverse; align-items: center; gap: 6px; padding: 0 8px; border-right: 1px solid var(--wt-border); }
+.operation-progress__counts > div:last-child { border: 0; }
+.operation-progress__counts dt { color: var(--wt-text-tertiary); font-size: 12px; }
+.operation-progress__counts dd { margin: 0; color: var(--wt-text-primary); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.operation-progress__running { margin-bottom: 16px; }
+.operation-progress__running p, .operation-progress__notice { margin: 8px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.6; }
+.operation-progress__item-label { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
+.operation-progress__reason { color: var(--wt-text-tertiary); line-height: 1.6; overflow-wrap: anywhere; }
+.operation-progress__notice { margin-top: 14px; }
+@keyframes operation-spin { to { transform: rotate(360deg); } }
+@media (max-width: 600px) { .operation-progress__counts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 0; } .operation-progress__summary { align-items: flex-start; } }
+@media (prefers-reduced-motion: reduce) { .operation-progress__spinner { animation: none; } }
 </style>

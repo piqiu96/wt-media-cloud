@@ -7,6 +7,9 @@ import { isDesktop } from "../../../utils.js"
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
 import { feedback } from "../../../shared/ui/feedback/index.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
+import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
+import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
+import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
@@ -25,6 +28,7 @@ const selectedRowKeys = ref([])
 const checkingIds = ref([])
 const pagination = ref({ current: 1, pageSize: 20, total: 0 })
 
+const advancedFilters = ref(false)
 const filterTeam = ref("")
 const filterStatus = ref("")
 const filterRegion = ref("")
@@ -59,17 +63,19 @@ const proxyActionLabels = computed(() => isGovernor.value
   : ["详情", "编辑", "检测"])
 const columns = computed(() => [
   { colKey: "row-select", type: "multiple", width: 48 },
-  { colKey: "id", title: "ID", width: 90 },
-  { colKey: "name", title: "名称 / 地址", width: 220 },
+  { colKey: "id", title: "ID", width: 70 },
+  { colKey: "name", title: "名称 / 地址", width: 200 },
   { colKey: "region_supplier", title: "地区 / 供应商", width: 130 },
   { colKey: "source_type", title: "来源", width: 80 },
-  { colKey: "usage", title: "已用 / 额度", width: 130 },
+  { colKey: "usage", title: "已用 / 额度", width: 110 },
   { colKey: "business_status", title: "资源启停", width: 100 },
   { colKey: "last_check_result", title: "检测结果", width: 110 },
   { colKey: "expires_at", title: "到期时间", width: 120 },
   { colKey: "remark", title: "备注", width: 170 },
-  { colKey: "op", title: "操作", width: opColumnWidth(proxyActionLabels.value), fixed: "right" },
+  { colKey: "op", title: "操作", width: opColumnWidth(proxyActionLabels.value, { variant: "text", loading: true }), fixed: "right" },
 ])
+
+const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, column) => sum + (column.width || 0), 0)}px` }))
 
 // 新增 / 编辑抽屉
 const formVisible = ref(false)
@@ -189,7 +195,7 @@ function onTeamChanged() {
 function emptyForm() {
   return {
     name: "", team_id: "", region: "", supplier: "", source_type: "static",
-    proxy_protocol: "http", proxy_address: "", extract_url: "", host: "", port: 0,
+    proxy_protocol: "http", proxy_address: "", extract_url: "", host: "", port: undefined,
     username: "", password: "", tags: [], expires_at: null, max_profile_count: 3, remark: "",
   }
 }
@@ -755,6 +761,7 @@ function closeImport() {
 
       <ResourceCard class="proxy-resource-card">
         <div class="filter-bar">
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
           <label v-if="isAdmin" class="wt-filter-field">
             <span class="wt-filter-field__label">团队</span>
             <t-select v-model="filterTeam" clearable placeholder="全部" :options="teamOptions" filterable @change="onTeamChanged" />
@@ -782,21 +789,18 @@ function closeImport() {
               <t-option value="expired" label="已到期" />
             </t-select>
           </label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="filterSupplier" clearable placeholder="供应商" @enter="submitSearch" /></label>
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
+          <label v-show="advancedFilters" class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
+          <label v-show="advancedFilters" class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="filterSupplier" clearable placeholder="供应商" @enter="submitSearch" /></label>
           <div class="wt-filter-actions">
+            <t-button theme="default" variant="text" :aria-expanded="advancedFilters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? "收起筛选" : "更多筛选" }}{{ !advancedFilters && (filterRegion || filterSupplier) ? " · 已设置" : "" }}</t-button>
             <t-button theme="primary" @click="submitSearch">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
           </div>
         </div>
 
-        <div v-if="selectedRowKeys.length" class="action-bar wt-resource-actions">
-          <t-space>
-            <t-button class="wt-secondary-button" variant="outline" @click="startBatchCheck">批量检测（{{ selectedRowKeys.length }}）</t-button>
-            <t-button variant="text" @click="selectedRowKeys = []">取消选择</t-button>
-          </t-space>
-        </div>
+        <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条代理" @clear="selectedRowKeys = []">
+          <t-button theme="default" variant="outline" @click="startBatchCheck">批量检测（{{ selectedRowKeys.length }}）</t-button>
+        </ResourceSelectionToolbar>
 
         <div class="table-scroll-wrap">
           <t-table
@@ -807,13 +811,13 @@ function closeImport() {
             size="small"
             hover
             v-model:selected-row-keys="selectedRowKeys"
-            :scroll="{ x: 'max-content' }"
+            :scroll="tableScroll"
             empty="暂无符合条件的数据"
           >
             <template #id="{ row }"><span class="proxy-id">{{ row.id }}</span></template>
             <template #name="{ row }">
-              <div class="proxy-name">{{ row.name || "-" }}</div>
-              <div class="proxy-addr">{{ row.host ? `${row.host}:${row.port}` : "尚未提取地址" }}</div>
+              <div class="proxy-name" :title="row.name || ''">{{ row.name || "-" }}</div>
+              <div class="proxy-addr" :title="row.host ? `${row.host}:${row.port}` : '尚未提取地址'">{{ row.host ? `${row.host}:${row.port}` : "尚未提取地址" }}</div>
             </template>
             <template #region_supplier="{ row }">
               <div>{{ row.region || "-" }}</div>
@@ -840,15 +844,15 @@ function closeImport() {
               <span :class="{ 'proxy-expired': isExpired(row) }">{{ formatDate(row.expires_at) }}</span>
               <div v-if="isExpired(row)" class="proxy-sub proxy-expired">已到期</div>
             </template>
-            <template #remark="{ row }"><span class="proxy-remark">{{ row.remark || "-" }}</span></template>
+            <template #remark="{ row }"><span class="proxy-remark" :title="row.remark || ''">{{ row.remark || "-" }}</span></template>
             <template #op="{ row }">
-              <t-space size="small" class="op-cell">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openEdit(row)">编辑</t-button>
-                <t-button size="small" theme="primary" :loading="checkingIds.includes(row.id)" :disabled="!row.host || !row.port" @click="checkOne(row)">检测</t-button>
-                <t-button v-if="isGovernor" size="small" class="wt-secondary-button" variant="outline" @click="openQuota(row)">设置配额</t-button>
-                <t-button v-if="isGovernor" size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="deleteProxy(row)">删除</t-button>
-              </t-space>
+              <ResourceRowActions>
+                <t-button size="small" theme="primary" variant="text" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" theme="primary" variant="text" @click="openEdit(row)">编辑</t-button>
+                <t-button size="small" theme="primary" variant="text" :loading="checkingIds.includes(row.id)" :disabled="!row.host || !row.port" @click="checkOne(row)">检测</t-button>
+                <t-button v-if="isGovernor" size="small" theme="primary" variant="text" @click="openQuota(row)">设置配额</t-button>
+                <t-button v-if="isGovernor" size="small" theme="default" class="is-danger" variant="text" @click="deleteProxy(row)">删除</t-button>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
@@ -866,7 +870,7 @@ function closeImport() {
       <t-drawer
         v-model:visible="formVisible"
         :header="formMode === 'create' ? '新增代理' : '编辑代理'"
-        size="min(94vw, 640px)"
+        size="min(94vw, 800px)"
         :close-btn="true"
         :footer="true"
         destroy-on-close
@@ -875,96 +879,72 @@ function closeImport() {
           v-if="formMode === 'edit' && connectionChanged && editAffectedWindows > 0"
           theme="warning"
           style="margin-bottom:12px"
-          :message="`连接信息变更后，旧检测结果会失效，${editAffectedWindows} 个关联窗口会标记为代理配置待同步；保存不会自动改写 BitBrowser，也不会自动解除正式关系。`"
-        />
-        <FeedbackAlert
-          v-if="formMode === 'edit' && !isGovernor"
-          theme="info"
-          style="margin-bottom:12px"
-          message="普通运营只能维护名称、地区、供应商、业务标签和备注；连接、到期、额度、启停与删除由高级运营或管理员处理。"
+          :message="`连接信息变更后，旧检测结果会失效，${editAffectedWindows} 个关联窗口会标记为代理配置待同步；保存不会自动修改窗口或解除关联。`"
         />
         <FeedbackAlert v-if="formError" :message="formError" theme="error" style="margin-bottom:12px" />
 
-        <t-form label-width="96px">
-          <t-form-item label="名称"><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
-          <t-form-item v-if="isAdmin && formMode === 'create'" label="所属团队">
-            <t-select v-model="form.team_id" :options="teamOptions" placeholder="请选择目标团队" filterable />
-          </t-form-item>
-          <t-form-item v-else label="所属团队">
-            <span>{{ formMode === 'create' ? ownTeamLabel : (editingProxy?.team_name || ownTeamLabel) }}</span>
-          </t-form-item>
-          <t-form-item label="资源来源">
-            <t-radio-group v-model="form.source_type" :disabled="formMode === 'edit' && !isGovernor">
-              <t-radio value="static">静态地址</t-radio>
-              <t-radio value="api">动态提取</t-radio>
-            </t-radio-group>
-          </t-form-item>
-          <template v-if="form.source_type === 'static'">
-            <t-form-item label="粘贴地址">
-              <t-input v-model="form.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" :disabled="formMode === 'edit' && !isGovernor" @blur="parseAddress" />
+        <ResourceSection title="基础信息">
+          <t-form label-align="top" class="resource-form-grid">
+            <t-form-item label="代理名称" required-mark><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
+            <t-form-item v-if="isAdmin && formMode === 'create'" label="运营团队" required-mark>
+              <t-select v-model="form.team_id" :options="teamOptions" placeholder="请选择目标团队" filterable />
             </t-form-item>
-          </template>
-          <template v-else>
-            <t-form-item label="提取地址">
-              <t-input v-model="form.extract_url" placeholder="供应商提取链接" :disabled="formMode === 'edit' && !isGovernor" />
+            <t-form-item v-else label="运营团队"><span class="resource-form-value">{{ formMode === 'create' ? ownTeamLabel : (editingProxy?.team_name || ownTeamLabel) }}</span></t-form-item>
+            <t-form-item v-if="formMode === 'create' || isGovernor" label="资源来源" class="resource-form-full">
+              <t-radio-group v-model="form.source_type"><t-radio value="static">静态地址</t-radio><t-radio value="api">动态代理</t-radio></t-radio-group>
             </t-form-item>
-            <t-form-item label="">
-              <t-space>
-                <t-button size="small" variant="outline" :loading="extracting" :disabled="!canExtract" @click="extractAddress">测试提取</t-button>
-                <t-button v-if="formMode === 'edit' && isGovernor" size="small" variant="outline" :loading="savingForm" @click="refreshDynamic">提取新地址并检测</t-button>
-              </t-space>
-              <div v-if="!canExtract" class="form-hint">动态提取需要本人桌面端在线；网页版和管理员可维护提取来源或手动录入地址。</div>
+          </t-form>
+        </ResourceSection>
+        <ResourceSection v-if="formMode === 'create' || isGovernor" title="连接配置">
+          <t-form label-align="top" class="resource-form-grid">
+            <t-form-item v-if="form.source_type === 'static'" label="粘贴代理地址" class="resource-form-full">
+              <t-input v-model="form.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" @blur="parseAddress" />
+              <span class="form-hint">粘贴后自动解析，也可直接填写下方字段。</span>
             </t-form-item>
-          </template>
-          <t-form-item label="协议">
-            <t-select v-model="form.proxy_protocol" :disabled="formMode === 'edit' && !isGovernor">
-              <t-option value="http" label="HTTP" />
-              <t-option value="https" label="HTTPS" />
-              <t-option value="socks5" label="SOCKS5" />
-            </t-select>
-          </t-form-item>
-          <t-form-item label="地址">
-            <t-input v-model="form.host" placeholder="例如 10.0.0.1" :disabled="formMode === 'edit' && !isGovernor" />
-          </t-form-item>
-          <t-form-item label="端口">
-            <t-input-number v-model="form.port" :min="1" :max="65535" :disabled="formMode === 'edit' && !isGovernor" />
-          </t-form-item>
-          <t-form-item label="认证用户名">
-            <t-input v-model="form.username" :placeholder="formMode === 'edit' ? '留空表示保留原认证信息' : ''" :disabled="formMode === 'edit' && !isGovernor" />
-          </t-form-item>
-          <t-form-item label="认证密码">
-            <t-input v-model="form.password" type="password" :placeholder="formMode === 'edit' ? '留空表示保留原密码' : ''" :disabled="formMode === 'edit' && !isGovernor" />
-          </t-form-item>
-          <t-form-item label="地区"><t-input v-model="form.region" /></t-form-item>
-          <t-form-item label="供应商"><t-input v-model="form.supplier" /></t-form-item>
-          <t-form-item v-if="isGovernor && formMode === 'create'" label="初始额度">
-            <t-input-number v-model="form.max_profile_count" :min="1" :max="1000" />
-            <div class="form-hint">一个窗口只占一个名额；比特自管的窗口不占名额。</div>
-          </t-form-item>
-          <t-form-item v-if="isGovernor" label="到期时间">
-            <t-date-picker v-model="form.expires_at" value-type="time-stamp" clearable :placeholder="formMode === 'create' ? '不填表示长期有效' : '留空保持当前到期时间'" />
-            <div v-if="formMode === 'edit'" class="form-hint">当前接口只支持改期，留空不会清除原到期时间。</div>
-          </t-form-item>
-          <t-form-item label="业务标签"><t-tag-input v-model="form.tags" clearable placeholder="回车添加标签" /></t-form-item>
-          <t-form-item label="备注"><t-textarea v-model="form.remark" /></t-form-item>
-        </t-form>
+            <template v-else>
+              <t-form-item label="提取链接" class="resource-form-full"><t-input v-model="form.extract_url" placeholder="供应商提供的代理提取链接" /></t-form-item>
+              <t-form-item label="" class="resource-form-full">
+                <t-space><t-button theme="default" variant="outline" :loading="extracting" :disabled="!canExtract" @click="extractAddress">测试提取</t-button>
+                  <t-button v-if="formMode === 'edit' && isGovernor" theme="default" variant="outline" :disabled="!canExtract" :loading="savingForm" @click="refreshDynamic">提取新地址并检测</t-button></t-space>
+                <span v-if="!canExtract" class="form-hint">请在本人桌面端提取，或手动填写已有地址。</span>
+              </t-form-item>
+            </template>
+            <t-form-item label="协议"><t-select v-model="form.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
+            <t-form-item label="端口" required-mark><t-input-number v-model="form.port" :min="1" :max="65535" /></t-form-item>
+            <t-form-item label="主机地址" required-mark class="resource-form-full"><t-input v-model="form.host" placeholder="主机名或 IP 地址" /></t-form-item>
+            <t-form-item label="认证用户名"><t-input v-model="form.username" :placeholder="formMode === 'edit' ? '留空保留原认证信息' : '无认证可留空'" /></t-form-item>
+            <t-form-item label="认证密码"><t-input v-model="form.password" type="password" :placeholder="formMode === 'edit' ? '留空保留原密码' : '无认证可留空'" /></t-form-item>
+          </t-form>
+        </ResourceSection>
+        <ResourceSection title="资源资料">
+          <t-form label-align="top" class="resource-form-grid">
+            <t-form-item label="地区"><t-input v-model="form.region" placeholder="例如：上海" /></t-form-item>
+            <t-form-item label="供应商"><t-input v-model="form.supplier" placeholder="供应商名称" /></t-form-item>
+            <t-form-item v-if="isGovernor && formMode === 'create'" label="初始窗口额度"><t-input-number v-model="form.max_profile_count" :min="1" :max="1000" /><span class="form-hint">按关联窗口计数，多个平台账号只占一个名额。</span></t-form-item>
+            <t-form-item v-if="isGovernor" label="到期时间"><t-date-picker v-model="form.expires_at" value-type="time-stamp" clearable :placeholder="formMode === 'create' ? '不填表示长期有效' : '留空保持当前到期时间'" /><span v-if="formMode === 'edit'" class="form-hint">留空不会清除已有到期时间。</span></t-form-item>
+            <t-form-item label="业务标签" class="resource-form-full"><t-tag-input v-model="form.tags" clearable placeholder="回车添加标签" /></t-form-item>
+            <t-form-item label="备注" class="resource-form-full"><t-textarea v-model="form.remark" :autosize="{ minRows: 3, maxRows: 6 }" placeholder="补充线路用途或使用注意事项" /></t-form-item>
+          </t-form>
+        </ResourceSection>
         <template #footer>
           <t-space>
             <t-button class="wt-secondary-button" variant="outline" :disabled="savingForm" @click="formVisible = false">取消</t-button>
-            <t-button theme="primary" :loading="savingForm" @click="saveForm">{{ formMode === 'create' ? '创建' : '保存' }}</t-button>
+            <t-button theme="primary" :loading="savingForm" @click="saveForm">保存</t-button>
           </t-space>
         </template>
       </t-drawer>
 
-      <t-drawer v-model:visible="detailVisible" :header="'代理详情'" size="min(94vw, 720px)" :close-btn="true" destroy-on-close :footer="false">
+      <t-drawer v-model:visible="detailVisible" :header="'代理详情'" size="min(94vw, 800px)" :close-btn="true" destroy-on-close :footer="false">
         <t-loading :loading="detailLoading">
           <template v-if="detailProxy">
-            <t-descriptions :column="1" bordered size="small">
+            <ResourceSection title="资源信息"><t-descriptions :column="2" item-layout="vertical" size="small">
               <t-descriptions-item label="代理ID">{{ detailProxy.id }}</t-descriptions-item>
               <t-descriptions-item label="名称">{{ detailProxy.name || "-" }}</t-descriptions-item>
               <t-descriptions-item label="所属团队">{{ detailProxy.team_name || "-" }}</t-descriptions-item>
               <t-descriptions-item label="来源">{{ sourceLabel(detailProxy.source_type) }}<span v-if="detailProxy.extract_url_configured" class="proxy-sub">（已配置提取地址）</span></t-descriptions-item>
               <t-descriptions-item label="协议 / 地址">{{ detailProxy.proxy_protocol }}://{{ detailProxy.host || "-" }}:{{ detailProxy.port || "-" }}</t-descriptions-item>
+              </t-descriptions></ResourceSection>
+            <ResourceSection title="连接信息"><t-descriptions :column="2" item-layout="vertical" size="small">
               <t-descriptions-item label="认证用户名">
                 <span>{{ detailProxy.username || "-" }}</span>
                 <t-button v-if="detailProxy.username" size="small" variant="text" @click="copyText(detailProxy.username, '认证用户名')">复制</t-button>
@@ -973,6 +953,8 @@ function closeImport() {
                 <span>{{ detailProxy.password || "-" }}</span>
                 <t-button v-if="detailProxy.password" size="small" variant="text" @click="copyText(detailProxy.password, '认证密码')">复制</t-button>
               </t-descriptions-item>
+              </t-descriptions></ResourceSection>
+            <ResourceSection title="使用与检测"><t-descriptions :column="2" item-layout="vertical" size="small">
               <t-descriptions-item label="地区 / 供应商">{{ detailProxy.region || "-" }} / {{ detailProxy.supplier || "-" }}</t-descriptions-item>
               <t-descriptions-item label="业务标签">{{ (detailProxy.tags || []).join("、") || "-" }}</t-descriptions-item>
               <t-descriptions-item label="资源启停">{{ detailProxy.business_status === "active" ? "启用" : "停用" }}</t-descriptions-item>
@@ -983,22 +965,25 @@ function closeImport() {
               <t-descriptions-item label="检测结果">{{ checkResultLabel(detailProxy.last_check_result) }}（{{ formatTime(detailProxy.last_check_at) }}）</t-descriptions-item>
               <t-descriptions-item label="出口IP">{{ detailProxy.observed_exit_ip || "-" }}</t-descriptions-item>
               <t-descriptions-item label="窗口额度">{{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profile_count || 3 }} 已用</t-descriptions-item>
-              <t-descriptions-item label="备注"><span class="proxy-remark">{{ detailProxy.remark || "-" }}</span></t-descriptions-item>
-            </t-descriptions>
-            <t-divider>关联窗口（{{ detailBindings.length }}）</t-divider>
+              <t-descriptions-item label="备注"><span class="proxy-detail-remark">{{ detailProxy.remark || "-" }}</span></t-descriptions-item>
+            </t-descriptions></ResourceSection>
+            <ResourceSection :title="`关联窗口 · ${detailBindings.length} 个`">
             <t-table
               :data="detailBindings"
               row-key="id"
               size="small"
               :columns="[
-                { colKey: 'name', title: '窗口名称' },
-                { colKey: 'id', title: '系统ID', width: 150 },
+                { colKey: 'id', title: 'ID', width: 80 },
+                { colKey: 'name', title: '窗口名称', width: 180 },
                 { colKey: 'bit_profile_id', title: '比特窗口ID', width: 150 },
                 { colKey: 'user_id', title: '运营UID', width: 90 },
                 { colKey: 'local_status', title: '状态', width: 90 },
               ]"
               empty="暂无关联窗口"
-            />
+            >
+              <template #local_status="{ row }">{{ row.local_status === 'active' ? '在册' : row.local_status === 'local_missing' ? '窗口缺失' : '尚未确认' }}</template>
+            </t-table>
+            </ResourceSection>
           </template>
         </t-loading>
       </t-drawer>
@@ -1010,7 +995,7 @@ function closeImport() {
           <t-form-item label="当前已用">{{ quotaProxy?.assigned_profile_count || 0 }} 个窗口</t-form-item>
           <t-form-item label="最大窗口数"><t-input-number v-model="quotaValue" :min="1" :max="1000" /></t-form-item>
         </t-form>
-        <p class="form-hint">调整额度不会自动解绑窗口，也不会改写 BitBrowser 配置。</p>
+        <p class="form-hint">调整额度不会自动解绑窗口，也不会改写比特配置。</p>
       </t-dialog>
 
       <t-dialog
@@ -1028,10 +1013,10 @@ function closeImport() {
         </p>
       </t-dialog>
 
-      <t-dialog
+      <t-drawer
         v-model:visible="importVisible"
         header="批量导入代理"
-        width="min(94vw, 760px)"
+        size="min(94vw, 880px)"
         :close-btn="true"
         :close-on-esc-keydown="!importing"
         :close-on-overlay-click="!importing"
@@ -1095,7 +1080,7 @@ function closeImport() {
             >确认导入已选 {{ importSelectedCount }} 条</t-button>
           </t-space>
         </template>
-      </t-dialog>
+      </t-drawer>
 
       <OperationProgressDialog
         :visible="progressVisible"
@@ -1116,16 +1101,15 @@ function closeImport() {
 .proxy-resource-card { padding: 18px 20px; }
 .proxy-fixed-team { display: inline-flex; align-items: center; height: 32px; color: var(--td-text-color-primary); }
 .proxy-id { color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
-.proxy-name { font-weight: 500; }
-.proxy-addr { color: var(--td-text-color-secondary); font-size: 12px; margin-top: 2px; }
+.proxy-name { color: var(--wt-text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy-detail-remark { white-space: pre-wrap; overflow-wrap: anywhere; }
+.proxy-addr { color: var(--td-text-color-secondary); font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proxy-sub { color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 2px; }
 .proxy-remark { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proxy-expired { color: var(--td-error-color); }
-.op-cell { white-space: nowrap; }
 .form-hint { color: var(--td-text-color-placeholder); font-size: 12px; line-height: 1.5; margin-top: 4px; }
 .import-team { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .import-team .form-hint { margin-top: 0; }
 .import-file { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .import-actions { margin-top: 8px; }
-.action-bar { display: flex; align-items: center; margin-bottom: 12px; }
 </style>

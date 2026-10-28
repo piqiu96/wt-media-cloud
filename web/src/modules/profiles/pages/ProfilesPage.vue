@@ -15,6 +15,9 @@ import { isDesktop } from "../../../utils.js"
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
 import { feedback } from "../../../shared/ui/feedback/index.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
+import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
+import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
+import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
@@ -267,20 +270,22 @@ const rowActionLabels = computed(() => isOwnDesktop.value
 const columns = computed(() => {
   const list = []
   if (isOwnDesktop.value) list.push({ colKey: "row-select", type: "multiple", width: 48 })
-  list.push({ colKey: "id", title: "ID", width: 90 })
-  list.push({ colKey: "name", title: "窗口名称", width: 210 })
+  list.push({ colKey: "id", title: "ID", width: 70 })
+  list.push({ colKey: "name", title: "窗口名称", width: 190 })
   list.push({ colKey: "group_owner", title: rowOwnerTitle.value, width: 128 })
   if (isAdmin.value) list.push({ colKey: "team", title: "运营团队", width: 120 })
   list.push({ colKey: "proxy_mode", title: "代理方式", width: 96 })
-  list.push({ colKey: "proxy_info", title: "代理信息", width: 210 })
-  list.push({ colKey: "accounts", title: "关联账号", width: 190 })
+  list.push({ colKey: "proxy_info", title: "代理信息", width: 180 })
+  list.push({ colKey: "accounts", title: "关联账号", width: 170 })
   list.push({ colKey: "cloud_remark", title: "运营备注", width: 170 })
   list.push({ colKey: "business_status", title: "业务启停", width: 96 })
   if (isOwnDesktop.value) list.push({ colKey: "running", title: "运行状态", width: 96 })
   list.push({ colKey: "last_sync", title: "最近同步", width: 118 })
-  list.push({ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value), fixed: "right" })
+  list.push({ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true }), fixed: "right" })
   return list
 })
+
+const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, column) => sum + (column.width || 0), 0)}px` }))
 
 const pageDescription = computed(() => {
   if (isOwnDesktop.value) return "同步比特窗口、管理代理方式与关联账号"
@@ -2246,18 +2251,11 @@ function syncIssueAction(profile) {
           </div>
         </div>
 
-        <div v-if="isOwnDesktop && selectedRowKeys.length" class="action-bar wt-resource-actions">
-          <div class="batch-toolbar">
-            <span class="batch-toolbar__count">已选择 {{ selectedRowKeys.length }} 个窗口</span>
-            <t-space>
-              <t-button class="wt-secondary-button" variant="outline" @click="openBatchProxy">批量设置代理</t-button>
-              <t-button class="wt-secondary-button" variant="outline" :disabled="!batchOpenReady" @click="startBatchWindowFromSelection('open')">批量打开</t-button>
-              <t-button class="wt-secondary-button" variant="outline" :disabled="!batchCloseReady" @click="startBatchWindowFromSelection('close')">批量关闭</t-button>
-              <t-button variant="text" @click="selectedRowKeys = []">取消选择</t-button>
-            </t-space>
-          </div>
-          <div v-if="batchHint" class="batch-hint">{{ batchHint }}</div>
-        </div>
+        <ResourceSelectionToolbar v-if="isOwnDesktop" :count="selectedRowKeys.length" unit="个窗口" :hint="batchHint" @clear="selectedRowKeys = []">
+          <t-button theme="default" variant="outline" @click="openBatchProxy">批量设置代理</t-button>
+          <t-button theme="default" variant="outline" :disabled="!batchOpenReady" @click="startBatchWindowFromSelection('open')">批量打开</t-button>
+          <t-button theme="default" variant="outline" :disabled="!batchCloseReady" @click="startBatchWindowFromSelection('close')">批量关闭</t-button>
+        </ResourceSelectionToolbar>
 
         <div class="table-scroll-wrap">
           <t-table
@@ -2268,13 +2266,12 @@ function syncIssueAction(profile) {
             size="small"
             hover
             v-model:selected-row-keys="selectedRowKeys"
-            :scroll="{ x: 'max-content' }"
+            :scroll="tableScroll"
             empty="暂无符合条件的数据"
           >
             <template #id="{ row }"><span class="window-id">{{ row.id }}</span></template>
             <template #name="{ row }">
-              <div class="window-name">{{ row.name || "-" }}</div>
-              <div class="window-sub">比特窗口 {{ row.bit_profile_id || "-" }}</div>
+              <div class="window-name" :title="row.name || ''">{{ row.name || "-" }}</div>
             </template>
             <template #group_owner="{ row }">
               <span>{{ groupOwnerText(row) }}</span>
@@ -2284,7 +2281,7 @@ function syncIssueAction(profile) {
               <ResourceStatusBadge :tone="isManaged(row) ? 'info' : 'neutral'" :label="proxyModeLabel(row)" />
             </template>
             <template #proxy_info="{ row }">
-              <div>{{ actualProxyText(row) || (isManaged(row) ? "配置未核实" : "—") }}</div>
+              <div class="window-address" :title="actualProxyText(row)">{{ row.proxy_host ? `${row.proxy_host}:${row.proxy_port || '—'}` : (actualProxyText(row) || (isManaged(row) ? "配置未核实" : "—")) }}</div>
               <div class="window-sub">{{ proxySubText(row) }}</div>
               <div v-if="anomalyReasons(row).length" class="window-issues" :title="anomalyReasons(row).join('、')">
                 <span v-for="reason in anomalyReasons(row).slice(0, 2)" :key="reason" class="window-issue">{{ reason }}</span>
@@ -2322,28 +2319,28 @@ function syncIssueAction(profile) {
             </template>
             <template #last_sync="{ row }"><span class="window-time">{{ formatTime(row.last_synced_at) }}</span></template>
             <template #op="{ row }">
-              <t-space size="small" class="op-cell">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+              <ResourceRowActions>
+                <t-button size="small" theme="primary" variant="text" @click="openDetail(row)">详情</t-button>
                 <template v-if="isOwnDesktop">
                   <t-button
                     size="small"
-                    class="wt-secondary-button"
-                    variant="outline"
+                    theme="primary"
+                    variant="text"
                     :loading="operatingIds.includes(row.id)"
                     :disabled="rowOperable(row) === false"
                     @click="toggleRunning(row)"
                   >{{ runningState(row) === undefined ? "刷新状态" : (runningState(row) ? "关闭" : "打开") }}</t-button>
                   <t-button
                     size="small"
-                    class="wt-secondary-button"
-                    variant="outline"
+                    theme="primary"
+                    variant="text"
                     :disabled="!rowOperable(row)"
                     @click="openEdit(row)"
                   >编辑</t-button>
-                  <t-button size="small" class="wt-secondary-button" variant="outline" @click="openRowProxyAction(row)">{{ hasRowIssue(row) ? "处理异常" : "管理代理" }}</t-button>
+                  <t-button size="small" theme="primary" variant="text" @click="openRowProxyAction(row)">{{ hasRowIssue(row) ? "处理异常" : "管理代理" }}</t-button>
                 </template>
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openNote(row)">运营备注</t-button>
-              </t-space>
+                <t-button size="small" theme="primary" variant="text" @click="openNote(row)">运营备注</t-button>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
@@ -2358,7 +2355,7 @@ function syncIssueAction(profile) {
         </div>
       </ResourceCard>
 
-      <t-drawer v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 720px)" :close-btn="true" :footer="false" destroy-on-close>
+      <t-drawer v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 800px)" :close-btn="true" :footer="false" destroy-on-close>
         <template v-if="detailProfile">
           <FeedbackAlert
             v-if="detailProfile.local_status === 'local_missing'"
@@ -2366,8 +2363,8 @@ function syncIssueAction(profile) {
             style="margin-bottom:14px"
             message="该窗口在最近一次同步中未找到。系统记录、关联账号和历史都会保留；请在比特中确认窗口是否仍存在，恢复后重新同步。"
           />
-          <h3 class="window-section">窗口信息</h3>
-          <t-descriptions :column="1" bordered size="small">
+          <ResourceSection title="窗口信息">
+          <t-descriptions :column="2" item-layout="vertical" size="small">
             <t-descriptions-item label="ID">{{ detailProfile.id }}</t-descriptions-item>
             <t-descriptions-item label="窗口名称">{{ detailProfile.name || "-" }}</t-descriptions-item>
             <t-descriptions-item label="比特窗口 ID">{{ detailProfile.bit_profile_id || "-" }}</t-descriptions-item>
@@ -2378,8 +2375,9 @@ function syncIssueAction(profile) {
             <t-descriptions-item label="最近同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
           </t-descriptions>
 
-          <h3 class="window-section">代理</h3>
-          <t-descriptions :column="1" bordered size="small">
+          </ResourceSection>
+          <ResourceSection title="代理">
+          <t-descriptions :column="2" item-layout="vertical" size="small">
             <t-descriptions-item label="代理方式">
               <ResourceStatusBadge :tone="isManaged(detailProfile) ? 'info' : 'neutral'" :label="proxyModeLabel(detailProfile)" />
             </t-descriptions-item>
@@ -2432,7 +2430,8 @@ function syncIssueAction(profile) {
             </div>
           </template>
 
-          <h3 class="window-section">关联账号（{{ accountsFor(detailProfile).length }}）</h3>
+          </ResourceSection>
+          <ResourceSection :title="`关联账号 · ${accountsFor(detailProfile).length} 个`">
           <t-table
             :data="accountsFor(detailProfile)"
             row-key="id"
@@ -2450,13 +2449,15 @@ function syncIssueAction(profile) {
             <template #login_status="{ row }"><ResourceStatusBadge :tone="row.login_status === 'normal' ? 'success' : 'warning'" :label="loginStatusText(row.login_status)" /></template>
           </t-table>
 
-          <h3 class="window-section">运营信息</h3>
-          <t-descriptions :column="1" bordered size="small">
+          </ResourceSection>
+          <ResourceSection title="运营信息">
+          <t-descriptions :column="2" item-layout="vertical" size="small">
             <t-descriptions-item label="运营团队">{{ teamName(detailProfile) }}</t-descriptions-item>
             <t-descriptions-item label="授权运营">{{ ownerLabel(detailProfile.user_id) }}</t-descriptions-item>
             <t-descriptions-item label="业务启停">{{ detailProfile.business_status === "enabled" ? "启用" : "停用" }}</t-descriptions-item>
             <t-descriptions-item label="运营备注">{{ detailProfile.cloud_remark || "-" }}</t-descriptions-item>
           </t-descriptions>
+          </ResourceSection>
         </template>
       </t-drawer>
 
@@ -2499,7 +2500,7 @@ function syncIssueAction(profile) {
         destroy-on-close
       >
         <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
-        <t-form label-width="96px">
+        <ResourceSection title="基础信息"><t-form label-width="96px">
           <t-form-item label="窗口名称" required>
             <t-input v-model="createForm.name" placeholder="例如 B站主号 · 上海05" />
           </t-form-item>
@@ -2515,7 +2516,7 @@ function syncIssueAction(profile) {
             </t-radio-group>
             <div class="form-hint">{{ createForm.proxy_intent === "managed" ? "创建后可立即选择托管代理；未选择前显示「待选择托管代理」。" : "在比特中维护代理，不占系统代理名额。" }}</div>
           </t-form-item>
-        </t-form>
+        </t-form></ResourceSection>
         <template #footer>
           <t-space>
             <t-button class="wt-secondary-button" variant="outline" :disabled="progressVisible" @click="createVisible = false">{{ createCloudRetry ? "稍后处理" : "取消" }}</t-button>
@@ -2556,13 +2557,13 @@ function syncIssueAction(profile) {
         destroy-on-close
       >
         <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
-        <t-form label-width="96px">
+        <ResourceSection title="基础信息"><t-form label-width="96px">
           <t-form-item label="窗口名称" required><t-input v-model="editForm.name" /></t-form-item>
           <t-form-item label="比特分组" required>
             <t-select v-model="editForm.group_id" :options="groupOptions(editGroups, editProfile)" :loading="editGroupLoading" @change="(value) => applyGroup(editForm, editGroups, value)" />
           </t-form-item>
           <t-form-item label="比特备注"><t-textarea v-model="editForm.remark" :autosize="{ minRows: 2, maxRows: 4 }" /></t-form-item>
-        </t-form>
+        </t-form></ResourceSection>
         <p class="form-hint">这些字段会同步修改比特中的窗口信息；运营备注在此不受影响。</p>
         <template #footer>
           <t-space>
@@ -3016,8 +3017,9 @@ function syncIssueAction(profile) {
 
 <style scoped>
 .window-resource-card { padding: 18px 20px; }
+.window-address { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .window-id { color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
-.window-name { font-weight: 500; }
+.window-name { color: var(--wt-text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .window-sub { color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 2px; }
 .window-remark { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .window-time { color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
@@ -3025,13 +3027,9 @@ function syncIssueAction(profile) {
 .window-issues { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px; }
 .window-issue { color: var(--td-warning-color); font-size: 12px; }
 .window-expired { color: var(--td-error-color); }
-.op-cell { white-space: nowrap; }
 .running-state { display: inline-flex; align-items: center; gap: 6px; color: var(--td-text-color-secondary); }
 .running-dot { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--td-text-color-placeholder); background: transparent; }
 .running-dot.is-open { border-color: var(--td-success-color); background: var(--td-success-color); }
-.batch-toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.batch-toolbar__count { color: var(--td-text-color-secondary); }
-.batch-hint { margin-top: 8px; color: var(--td-warning-color); font-size: 12px; }
 .form-hint { color: var(--td-text-color-placeholder); font-size: 12px; line-height: 1.5; margin-top: 4px; }
 .window-section { margin: 18px 0 10px; font-size: 14px; font-weight: 600; color: var(--td-text-color-primary); }
 .window-tips { margin: 0; padding-left: 20px; color: var(--td-text-color-secondary); line-height: 1.8; }
