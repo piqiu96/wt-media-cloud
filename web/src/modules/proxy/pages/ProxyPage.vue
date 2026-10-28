@@ -7,6 +7,9 @@ import { isDesktop } from "../../../utils.js"
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
 import { feedback } from "../../../shared/ui/feedback/index.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
+import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue"
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
 import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
@@ -867,24 +870,17 @@ function closeImport() {
         </div>
       </ResourceCard>
 
-      <t-drawer
+      <ResourceOverlay
         v-model:visible="formVisible"
-        :header="formMode === 'create' ? '新增代理' : '编辑代理'"
-        size="min(94vw, 800px)"
-        :close-btn="true"
+        :title="formMode === 'create' ? '新增代理' : '编辑代理'"
         :footer="true"
-        destroy-on-close
-      >
-        <FeedbackAlert
-          v-if="formMode === 'edit' && connectionChanged && editAffectedWindows > 0"
-          theme="warning"
-          style="margin-bottom:12px"
-          :message="`连接信息变更后，旧检测结果会失效，${editAffectedWindows} 个关联窗口会标记为代理配置待同步；保存不会自动修改窗口或解除关联。`"
-        />
+        :kind="formMode === 'edit' && !isGovernor ? 'dialog' : 'drawer'" :width="formMode === 'edit' && !isGovernor ? 640 : 800" :busy="savingForm">
+        <ResourceNotice v-if="formMode === 'edit' && connectionChanged && editAffectedWindows > 0" tone="warning"
+          details="保存不会解除现有关联；请重新检测后同步窗口配置。">原检测结果将失效；{{ editAffectedWindows }} 个关联窗口需同步，本次保存不修改窗口配置。</ResourceNotice>
         <FeedbackAlert v-if="formError" :message="formError" theme="error" style="margin-bottom:12px" />
 
         <ResourceSection title="基础信息">
-          <t-form label-align="top" class="resource-form-grid">
+          <ResourceForm class="resource-form-grid">
             <t-form-item label="代理名称" required-mark><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
             <t-form-item v-if="isAdmin && formMode === 'create'" label="运营团队" required-mark>
               <t-select v-model="form.team_id" :options="teamOptions" placeholder="请选择目标团队" filterable />
@@ -893,13 +889,12 @@ function closeImport() {
             <t-form-item v-if="formMode === 'create' || isGovernor" label="资源来源" class="resource-form-full">
               <t-radio-group v-model="form.source_type"><t-radio value="static">静态地址</t-radio><t-radio value="api">动态代理</t-radio></t-radio-group>
             </t-form-item>
-          </t-form>
+          </ResourceForm>
         </ResourceSection>
         <ResourceSection v-if="formMode === 'create' || isGovernor" title="连接配置">
-          <t-form label-align="top" class="resource-form-grid">
+          <ResourceForm class="resource-form-grid">
             <t-form-item v-if="form.source_type === 'static'" label="粘贴代理地址" class="resource-form-full">
               <t-input v-model="form.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" @blur="parseAddress" />
-              <span class="form-hint">粘贴后自动解析，也可直接填写下方字段。</span>
             </t-form-item>
             <template v-else>
               <t-form-item label="提取链接" class="resource-form-full"><t-input v-model="form.extract_url" placeholder="供应商提供的代理提取链接" /></t-form-item>
@@ -914,17 +909,17 @@ function closeImport() {
             <t-form-item label="主机地址" required-mark class="resource-form-full"><t-input v-model="form.host" placeholder="主机名或 IP 地址" /></t-form-item>
             <t-form-item label="认证用户名"><t-input v-model="form.username" :placeholder="formMode === 'edit' ? '留空保留原认证信息' : '无认证可留空'" /></t-form-item>
             <t-form-item label="认证密码"><t-input v-model="form.password" type="password" :placeholder="formMode === 'edit' ? '留空保留原密码' : '无认证可留空'" /></t-form-item>
-          </t-form>
+          </ResourceForm>
         </ResourceSection>
         <ResourceSection title="资源资料">
-          <t-form label-align="top" class="resource-form-grid">
+          <ResourceForm class="resource-form-grid">
             <t-form-item label="地区"><t-input v-model="form.region" placeholder="例如：上海" /></t-form-item>
             <t-form-item label="供应商"><t-input v-model="form.supplier" placeholder="供应商名称" /></t-form-item>
-            <t-form-item v-if="isGovernor && formMode === 'create'" label="初始窗口额度"><t-input-number v-model="form.max_profile_count" :min="1" :max="1000" /><span class="form-hint">按关联窗口计数，多个平台账号只占一个名额。</span></t-form-item>
-            <t-form-item v-if="isGovernor" label="到期时间"><t-date-picker v-model="form.expires_at" value-type="time-stamp" clearable :placeholder="formMode === 'create' ? '不填表示长期有效' : '留空保持当前到期时间'" /><span v-if="formMode === 'edit'" class="form-hint">留空不会清除已有到期时间。</span></t-form-item>
+            <t-form-item v-if="isGovernor && formMode === 'create'" label="初始窗口额度"><t-input-number v-model="form.max_profile_count" :min="1" :max="1000" /></t-form-item>
+            <t-form-item v-if="isGovernor" label="到期时间"><t-date-picker v-model="form.expires_at" value-type="time-stamp" clearable :placeholder="formMode === 'create' ? '不填表示长期有效' : '留空保留原日期'" /></t-form-item>
             <t-form-item label="业务标签" class="resource-form-full"><t-tag-input v-model="form.tags" clearable placeholder="回车添加标签" /></t-form-item>
             <t-form-item label="备注" class="resource-form-full"><t-textarea v-model="form.remark" :autosize="{ minRows: 3, maxRows: 6 }" placeholder="补充线路用途或使用注意事项" /></t-form-item>
-          </t-form>
+          </ResourceForm>
         </ResourceSection>
         <template #footer>
           <t-space>
@@ -932,9 +927,9 @@ function closeImport() {
             <t-button theme="primary" :loading="savingForm" @click="saveForm">保存</t-button>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-drawer v-model:visible="detailVisible" :header="'代理详情'" size="min(94vw, 800px)" :close-btn="true" destroy-on-close :footer="false">
+      <ResourceOverlay v-model:visible="detailVisible" :title="'代理详情'" :footer="false" kind="drawer" :width="800">
         <t-loading :loading="detailLoading">
           <template v-if="detailProxy">
             <ResourceSection title="资源信息"><t-descriptions :column="2" item-layout="vertical" size="small">
@@ -986,24 +981,17 @@ function closeImport() {
             </ResourceSection>
           </template>
         </t-loading>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="quotaVisible" header="设置窗口额度" :confirm-btn="{ loading: savingQuota, content: '保存' }" @confirm="saveQuota">
+      <ResourceOverlay v-model:visible="quotaVisible" title="设置窗口额度" :width="520" :busy="savingQuota">
         <FeedbackAlert v-if="quotaError" :message="quotaError" theme="error" style="margin-bottom:12px" />
-        <t-form label-width="96px">
-          <t-form-item label="代理">{{ quotaProxy?.name || quotaProxy?.host }}</t-form-item>
-          <t-form-item label="当前已用">{{ quotaProxy?.assigned_profile_count || 0 }} 个窗口</t-form-item>
-          <t-form-item label="最大窗口数"><t-input-number v-model="quotaValue" :min="1" :max="1000" /></t-form-item>
-        </t-form>
-        <p class="form-hint">调整额度不会自动解绑窗口，也不会改写比特配置。</p>
-      </t-dialog>
+        <ResourceNotice>{{ quotaProxy?.name || "-" }} · 已使用 {{ quotaProxy?.assigned_profile_count || 0 }} 个窗口名额</ResourceNotice>
+        <ResourceForm><t-form-item label="最大窗口数"><t-input-number v-model="quotaValue" :min="1" :max="1000" /></t-form-item></ResourceForm>
+        <ResourceNotice>仅调整窗口名额，已有绑定保持不变。</ResourceNotice>
+        <template #footer><t-button theme="default" variant="outline" :disabled="savingQuota" @click="quotaVisible = false">取消</t-button><t-button theme="primary" :loading="savingQuota" @click="saveQuota">保存</t-button></template>
+      </ResourceOverlay>
 
-      <t-dialog
-        v-model:visible="statusConfirmVisible"
-        :header="statusNext ? '启用代理' : '停用代理'"
-        :confirm-btn="{ content: statusNext ? '启用' : '停用', theme: statusNext ? 'primary' : 'warning' }"
-        @confirm="confirmStatusChange"
-      >
+      <ResourceOverlay v-model:visible="statusConfirmVisible" :title="statusNext ? '启用代理' : '停用代理'" :width="560">
         <p>资源：{{ statusTarget?.name || `${statusTarget?.host}:${statusTarget?.port}` }}（团队：{{ statusTarget?.team_name || ownTeamLabel }}）</p>
         <p>受影响窗口：{{ statusTarget?.assigned_profile_count || 0 }} 个</p>
         <p class="form-hint">
@@ -1011,30 +999,26 @@ function closeImport() {
             ? "启用后仍需在有效期内且检测正常才可分配窗口。"
             : "停用只阻止新分配，不会清除现有窗口配置，也不会释放已占额度。" }}
         </p>
-      </t-dialog>
+              <template #footer><t-button theme="default" variant="outline" @click="statusConfirmVisible = false">取消</t-button><t-button theme="primary" @click="confirmStatusChange">{{ statusNext ? '启用' : '停用' }}</t-button></template>
+      </ResourceOverlay>
 
-      <t-drawer
+      <ResourceOverlay
         v-model:visible="importVisible"
-        header="批量导入代理"
-        size="min(94vw, 880px)"
-        :close-btn="true"
-        :close-on-esc-keydown="!importing"
-        :close-on-overlay-click="!importing"
+        title="批量导入代理"
         :footer="importStep === 'input' || importStep === 'preview'"
         @close="closeImport"
-      >
+        kind="drawer" :width="880" :busy="importing">
         <template v-if="importStep === 'input' || importStep === 'preview'">
           <FeedbackAlert v-if="importError" :message="importError" theme="error" style="margin-bottom:12px" />
           <div class="import-team">
             <span>目标团队：</span>
             <t-select v-if="isAdmin" v-model="importTeam" :options="teamOptions" placeholder="请选择目标团队" style="width:220px" />
             <strong v-else>{{ ownTeamLabel }}</strong>
-            <span class="form-hint">导入只新增资源，不会覆盖同团队已有地址。</span>
           </div>
-          <p class="form-hint">支持 host:port、host:port:user:pass、protocol://user:pass@host:port，每行一个。</p>
+          <ResourceNotice details="支持 host:port、host:port:user:pass、protocol://user:pass@host:port。">每行一个代理，仅新增，不覆盖已有资源。</ResourceNotice>
           <div class="import-file">
             <t-button size="small" variant="outline" @click="$refs.importFile.click()">选择文件</t-button>
-            <span class="form-hint">支持 .txt / .csv / .xlsx 文本内容</span>
+            <span class="form-hint">支持 .txt / .csv</span>
             <input ref="importFile" type="file" accept=".txt,.csv" style="display:none" @change="onFileSelected" />
           </div>
           <t-textarea v-model="importText" :rows="7" placeholder="粘贴代理文本，每行一个…" />
@@ -1065,9 +1049,6 @@ function closeImport() {
             </t-table>
           </template>
         </template>
-        <template v-else>
-          <p class="form-hint">导入处理中会在当前弹窗显示结果；完成后请根据真实列表核对已创建资源。</p>
-        </template>
         <template #footer>
           <t-space>
             <t-button class="wt-secondary-button" variant="outline" :disabled="importing" @click="closeImport">取消</t-button>
@@ -1080,7 +1061,7 @@ function closeImport() {
             >确认导入已选 {{ importSelectedCount }} 条</t-button>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
       <OperationProgressDialog
         :visible="progressVisible"

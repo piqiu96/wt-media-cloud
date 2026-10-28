@@ -15,6 +15,10 @@ import { isDesktop } from "../../../utils.js"
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
 import { feedback } from "../../../shared/ui/feedback/index.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
+import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue"
+import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
 import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
@@ -2355,7 +2359,7 @@ function syncIssueAction(profile) {
         </div>
       </ResourceCard>
 
-      <t-drawer v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 800px)" :close-btn="true" :footer="false" destroy-on-close>
+      <ResourceOverlay v-model:visible="detailVisible" title="窗口详情" :footer="false" kind="drawer" :width="800">
         <template v-if="detailProfile">
           <FeedbackAlert
             v-if="detailProfile.local_status === 'local_missing'"
@@ -2459,24 +2463,16 @@ function syncIssueAction(profile) {
           </t-descriptions>
           </ResourceSection>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="noteVisible" header="运营备注" :confirm-btn="{ loading: noteSaving, content: '保存' }" @confirm="saveNote">
+      <ResourceOverlay v-model:visible="noteVisible" title="运营备注" :width="520" :busy="noteSaving">
         <FeedbackAlert v-if="noteError" :message="noteError" theme="error" style="margin-bottom:12px" />
-        <t-form label-width="80px">
-          <t-form-item label="窗口">{{ noteProfile?.name || "-" }}</t-form-item>
-          <t-form-item label="窗口 ID">{{ noteProfile?.id || "-" }}</t-form-item>
-          <t-form-item label="运营备注"><t-textarea v-model="noteText" :autosize="{ minRows: 4, maxRows: 8 }" /></t-form-item>
-        </t-form>
-        <p class="form-hint">供授权成员协作，不修改比特备注。</p>
-      </t-dialog>
+        <ResourceNotice>{{ noteProfile?.name || "-" }} · ID {{ noteProfile?.id || "-" }}</ResourceNotice>
+        <ResourceForm><t-form-item label="运营备注"><t-textarea v-model="noteText" :autosize="{ minRows: 4, maxRows: 8 }" placeholder="供授权成员协作，不修改比特备注" /></t-form-item></ResourceForm>
+        <template #footer><t-button theme="default" variant="outline" :disabled="noteSaving" @click="noteVisible = false">取消</t-button><t-button theme="primary" :loading="noteSaving" @click="saveNote">保存</t-button></template>
+      </ResourceOverlay>
 
-      <t-dialog
-        v-model:visible="businessConfirmVisible"
-        :header="businessNextEnabled ? '启用窗口' : '停用窗口'"
-        :confirm-btn="{ content: businessNextEnabled ? '确认启用' : '确认停用', theme: 'primary', loading: businessSaving }"
-        @confirm="confirmBusinessChange"
-      >
+      <ResourceOverlay v-model:visible="businessConfirmVisible" :title="businessNextEnabled ? '启用窗口' : '停用窗口'" :width="560" :busy="businessSaving">
         <t-descriptions :column="1" size="small">
           <t-descriptions-item label="窗口">{{ businessTarget?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="窗口 ID">{{ businessTarget?.id || "-" }}</t-descriptions-item>
@@ -2487,26 +2483,22 @@ function syncIssueAction(profile) {
             ? "启用后窗口可用于后续业务操作，不会自动打开窗口，也不会改变代理关系。"
             : "停用不会关闭窗口、删除账号或清除代理关系；请确认窗口已关闭后再停用。" }}
         </p>
-      </t-dialog>
+              <template #footer><t-button theme="default" variant="outline" :disabled="businessSaving" @click="businessConfirmVisible = false">取消</t-button><t-button theme="primary" :loading="businessSaving" @click="confirmBusinessChange">{{ businessNextEnabled ? '确认启用' : '确认停用' }}</t-button></template>
+      </ResourceOverlay>
 
-      <t-drawer
+      <ResourceOverlay
         v-model:visible="createVisible"
-        header="新增窗口"
-        size="min(94vw, 640px)"
-        :close-btn="true"
-        :close-on-esc-keydown="!progressVisible"
-        :close-on-overlay-click="!progressVisible"
+        title="新增窗口"
         :footer="true"
-        destroy-on-close
-      >
+        kind="dialog" :width="560" :busy="progressVisible">
         <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
-        <ResourceSection title="基础信息"><t-form label-width="96px">
+        <ResourceForm>
           <t-form-item label="窗口名称" required>
             <t-input v-model="createForm.name" placeholder="例如 B站主号 · 上海05" />
           </t-form-item>
           <t-form-item label="比特分组" required>
-            <t-select v-model="createForm.group_id" :options="groupOptions(createGroups, createForm)" :loading="createGroupLoading" placeholder="请选择比特中的真实分组" @change="(value) => applyGroup(createForm, createGroups, value)" />
-            <div class="form-hint">分组来自比特浏览器；为空时请先在比特中建立分组。</div>
+            <t-select v-model="createForm.group_id" :options="groupOptions(createGroups, createForm)" :loading="createGroupLoading" placeholder="请选择分组" @change="(value) => applyGroup(createForm, createGroups, value)" />
+            <ResourceNotice v-if="!createGroupLoading && !createGroups.length">请先在比特中创建分组，再重新打开。</ResourceNotice>
           </t-form-item>
           <t-form-item label="比特备注"><t-textarea v-model="createForm.remark" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="仅写入比特窗口备注" /></t-form-item>
           <t-form-item label="代理方式">
@@ -2514,29 +2506,28 @@ function syncIssueAction(profile) {
               <t-radio value="self">比特自管</t-radio>
               <t-radio value="managed">系统托管</t-radio>
             </t-radio-group>
-            <div class="form-hint">{{ createForm.proxy_intent === "managed" ? "创建后可立即选择托管代理；未选择前显示「待选择托管代理」。" : "在比特中维护代理，不占系统代理名额。" }}</div>
+            <ResourceNotice v-if="createForm.proxy_intent === 'managed'">创建后选择托管代理。</ResourceNotice>
           </t-form-item>
-        </t-form></ResourceSection>
+        </ResourceForm>
         <template #footer>
           <t-space>
             <t-button class="wt-secondary-button" variant="outline" :disabled="progressVisible" @click="createVisible = false">{{ createCloudRetry ? "稍后处理" : "取消" }}</t-button>
             <t-button v-if="createUncertain" theme="primary" @click="createVisible = false; runSync()">同步窗口核实</t-button>
-            <t-button v-else-if="createCloudRetry" theme="primary" :loading="progressVisible" @click="retryCreateCloud">重试同步 Cloud</t-button>
+            <t-button v-else-if="createCloudRetry" theme="primary" :loading="progressVisible" @click="retryCreateCloud">重试同步记录</t-button>
             <t-button v-else theme="primary" :loading="progressVisible" @click="submitCreate">保存</t-button>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="createdDialogVisible" header="窗口已创建" :footer="true" width="min(92vw, 560px)">
+      <ResourceOverlay v-model:visible="createdDialogVisible" title="窗口已创建" :footer="true" :width="560">
         <div class="create-success">
           <div class="create-success__icon">✓</div>
-          <h3>窗口已创建</h3>
           <t-descriptions :column="1" size="small">
             <t-descriptions-item label="窗口名称">{{ createdProfile?.name || createForm.name }}</t-descriptions-item>
             <t-descriptions-item label="ID">{{ createdProfile?.id || "-" }}</t-descriptions-item>
             <t-descriptions-item label="代理方式">{{ createdMode === "managed" ? "系统托管（待选择代理）" : "比特自管" }}</t-descriptions-item>
           </t-descriptions>
-          <p v-if="createdMode === 'managed'" class="form-hint">尚未选择托管代理，当前不构成正式托管关系。</p>
+          <ResourceNotice v-if="createdMode === 'managed'">选择代理后开始托管。</ResourceNotice>
         </div>
         <template #footer>
           <t-space>
@@ -2544,36 +2535,31 @@ function syncIssueAction(profile) {
             <t-button theme="primary" @click="openCreatedProxy">{{ createdMode === "managed" ? "选择代理" : "配置代理" }}</t-button>
           </t-space>
         </template>
-      </t-dialog>
+      </ResourceOverlay>
 
-      <t-drawer
+      <ResourceOverlay
         v-model:visible="editVisible"
-        header="编辑窗口"
-        size="min(94vw, 640px)"
-        :close-btn="true"
-        :close-on-esc-keydown="!progressVisible"
-        :close-on-overlay-click="!progressVisible"
+        title="编辑窗口"
         :footer="true"
-        destroy-on-close
-      >
+        kind="dialog" :width="560" :busy="progressVisible">
         <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
-        <ResourceSection title="基础信息"><t-form label-width="96px">
+        <ResourceForm>
           <t-form-item label="窗口名称" required><t-input v-model="editForm.name" /></t-form-item>
           <t-form-item label="比特分组" required>
             <t-select v-model="editForm.group_id" :options="groupOptions(editGroups, editProfile)" :loading="editGroupLoading" @change="(value) => applyGroup(editForm, editGroups, value)" />
           </t-form-item>
           <t-form-item label="比特备注"><t-textarea v-model="editForm.remark" :autosize="{ minRows: 2, maxRows: 4 }" /></t-form-item>
-        </t-form></ResourceSection>
-        <p class="form-hint">这些字段会同步修改比特中的窗口信息；运营备注在此不受影响。</p>
+        </ResourceForm>
+        <ResourceNotice>保存后同步到比特；运营备注保持不变。</ResourceNotice>
         <template #footer>
           <t-space>
             <t-button class="wt-secondary-button" variant="outline" :disabled="progressVisible" @click="editVisible = false">取消</t-button>
             <t-button theme="primary" :loading="progressVisible" @click="submitEdit">保存</t-button>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="editResultVisible" :header="editResultKind === 'cloud_failed' ? 'Cloud 记录同步失败' : '窗口修改结果'" :footer="true" width="min(92vw, 620px)">
+      <ResourceOverlay v-model:visible="editResultVisible" :title="editResultKind === 'cloud_failed' ? '系统记录同步失败' : '窗口修改结果'" :footer="true" :width="800">
         <FeedbackAlert :message="editResultMessage" :theme="editResultKind === 'resolved' ? 'success' : 'warning'" style="margin-bottom:12px" />
         <t-table :data="editResultRows" row-key="field" size="small" :columns="[
           { colKey: 'field', title: '目标字段', width: 120 },
@@ -2591,9 +2577,9 @@ function syncIssueAction(profile) {
             <t-button v-else-if="editResultKind !== 'resolved'" theme="primary" @click="verifyAndRetryEdit">核实并重试</t-button>
           </t-space>
         </template>
-      </t-dialog>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="manageVisible" header="管理代理" :footer="false" width="min(92vw, 620px)">
+      <ResourceOverlay v-model:visible="manageVisible" title="管理代理" :footer="false" :width="640">
         <FeedbackAlert v-if="manageNote" :message="manageNote" theme="warning" style="margin-bottom:12px" />
         <t-descriptions :column="2" size="small">
           <t-descriptions-item label="窗口">{{ manageProfile?.name || "-" }}</t-descriptions-item>
@@ -2601,12 +2587,7 @@ function syncIssueAction(profile) {
           <t-descriptions-item label="管理方式">{{ proxyModeLabel(manageProfile || {}) }}</t-descriptions-item>
           <t-descriptions-item label="当前地址">{{ actualProxyText(manageProfile || {}) || "—" }}</t-descriptions-item>
         </t-descriptions>
-        <FeedbackAlert
-          v-if="manageProfile"
-          theme="info"
-          style="margin:12px 0"
-          :message="`影响此窗口关联的 ${accountsFor(manageProfile).length} 个账号：${accountTitle(manageProfile) || '暂无关联账号'}`"
-        />
+        <ResourceNotice v-if="accountsFor(manageProfile || {}).length" :details="accountTitle(manageProfile)">涉及 {{ accountsFor(manageProfile).length }} 个关联账号</ResourceNotice>
         <div class="manage-section">
           <div>
             <div class="manage-section__title">使用其他托管代理</div>
@@ -2628,10 +2609,10 @@ function syncIssueAction(profile) {
           </div>
           <t-button class="wt-danger-button" theme="danger" variant="text" @click="openUnbindConfirm(manageProfile)">解绑并改为直连</t-button>
         </div>
-      </t-dialog>
+      </ResourceOverlay>
 
-      <t-drawer v-model:visible="missingVisible" header="核实窗口缺失" size="min(94vw, 640px)" :close-btn="true" :footer="true" destroy-on-close>
-        <FeedbackAlert theme="warning" style="margin-bottom:14px" message="本次同步未找到此窗口。请在比特中确认窗口是否仍然存在，再决定是否重新同步。" />
+      <ResourceOverlay v-model:visible="missingVisible" title="核实窗口缺失" :footer="true" kind="drawer" :width="640">
+        <ResourceNotice tone="warning">同步未找到此窗口，请先在比特中确认是否仍然存在。</ResourceNotice>
         <h3 class="window-section">窗口信息</h3>
         <t-descriptions :column="1" bordered size="small">
           <t-descriptions-item label="窗口 ID">{{ missingProfile?.id || "-" }}</t-descriptions-item>
@@ -2658,10 +2639,10 @@ function syncIssueAction(profile) {
         <template #footer>
           <t-button theme="primary" @click="missingVisible = false; runSync()">重新同步</t-button>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-drawer v-model:visible="mismatchVisible" header="处理代理不一致" size="min(94vw, 680px)" :close-btn="true" :footer="true" destroy-on-close>
-        <FeedbackAlert theme="warning" style="margin-bottom:14px" message="比特中的代理已更改。请选择恢复托管配置，或保留当前代理并改为比特自管。" />
+      <ResourceOverlay v-model:visible="mismatchVisible" title="处理代理不一致" :footer="true" kind="drawer" :width="800">
+        <ResourceNotice tone="warning">比特配置与托管配置不同，请选择下方处理方式。</ResourceNotice>
         <t-descriptions :column="2" size="small">
           <t-descriptions-item label="窗口">{{ mismatchProfile?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="窗口 ID">{{ mismatchProfile?.id || "-" }}</t-descriptions-item>
@@ -2680,12 +2661,7 @@ function syncIssueAction(profile) {
             <div class="config-row"><span>端口</span><strong>{{ mismatchProfile?.proxy_port || "-" }}</strong></div>
           </div>
         </div>
-        <FeedbackAlert
-          v-if="mismatchProfile"
-          theme="info"
-          style="margin:12px 0"
-          :message="`影响此窗口关联的 ${accountsFor(mismatchProfile).length} 个账号：${accountTitle(mismatchProfile) || '暂无关联账号'}`"
-        />
+        <ResourceNotice v-if="accountsFor(mismatchProfile || {}).length" :details="accountTitle(mismatchProfile)" details-label="查看关联账号">涉及 {{ accountsFor(mismatchProfile).length }} 个关联账号。</ResourceNotice>
         <p v-if="managedProxy(mismatchProfile || {}) && !proxyResyncable(managedProxy(mismatchProfile || {}))" class="form-hint">
           该托管代理{{ proxyAvailabilityReason(managedProxy(mismatchProfile || {}), mismatchProfile) }}，不能重新同步；可改为比特自管或到代理管理更换代理。
         </p>
@@ -2699,49 +2675,58 @@ function syncIssueAction(profile) {
             >重新同步托管代理</t-button>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="releaseConfirmVisible" header="改为比特自管" :confirm-btn="{ content: '确认改为比特自管', theme: 'primary' }" @confirm="confirmRelease">
-        <FeedbackAlert theme="info" style="margin-bottom:12px" message="保留当前代理，不会改为直连；仅解除系统托管关系，并释放 1 个窗口名额。" />
+      <ResourceOverlay v-model:visible="releaseConfirmVisible" title="改为比特自管" :width="560" >
+        <ResourceNotice>保留当前代理，改由比特维护，并释放 1 个系统名额。</ResourceNotice>
         <t-descriptions :column="1" size="small">
           <t-descriptions-item label="窗口">{{ releaseProfile?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="保留地址">{{ actualProxyText(releaseProfile || {}) || "—" }}</t-descriptions-item>
           <t-descriptions-item label="解除托管代理">{{ managedProxy(releaseProfile || {})?.name || managedProxy(releaseProfile || {})?.host || "—" }}</t-descriptions-item>
         </t-descriptions>
-        <p class="form-hint">影响此窗口关联的 {{ accountsFor(releaseProfile || {}).length }} 个账号；账号与其他配置保持不变。</p>
-      </t-dialog>
+        <ResourceNotice v-if="accountsFor(releaseProfile || {}).length">涉及 {{ accountsFor(releaseProfile).length }} 个关联账号，账号与其他配置保持不变。</ResourceNotice>
+              <template #footer><t-button theme="default" variant="outline"  @click="releaseConfirmVisible = false">取消</t-button><t-button theme="primary"  @click="confirmRelease">确认改为比特自管</t-button></template>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="unbindConfirmVisible" header="解绑并改为直连" :confirm-btn="{ content: '解绑并改为直连', theme: 'danger' }" @confirm="confirmUnbind">
-        <FeedbackAlert theme="warning" style="margin-bottom:12px" message="将清除当前代理，改用本机网络；请确认不会影响正在进行的平台操作。" />
+      <ResourceOverlay v-model:visible="unbindConfirmVisible" title="解绑并改为直连" :width="560" >
+        <ResourceNotice tone="warning">将清除代理并改用本机网络。请先确认平台操作可以切换网络。</ResourceNotice>
         <t-descriptions :column="1" size="small">
           <t-descriptions-item label="窗口">{{ unbindProfile?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="当前代理">{{ actualProxyText(unbindProfile || {}) || "—" }}</t-descriptions-item>
           <t-descriptions-item label="变更后">无代理 · 直连</t-descriptions-item>
         </t-descriptions>
-        <p class="form-hint">影响此窗口关联的 {{ accountsFor(unbindProfile || {}).length }} 个账号。</p>
-      </t-dialog>
+        <ResourceNotice v-if="accountsFor(unbindProfile || {}).length">涉及 {{ accountsFor(unbindProfile).length }} 个关联账号。</ResourceNotice>
+              <template #footer><t-button theme="default" variant="outline"  @click="unbindConfirmVisible = false">取消</t-button><t-button theme="danger"  @click="confirmUnbind">解绑并改为直连</t-button></template>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="resyncConfirmVisible" header="重新同步托管代理" :confirm-btn="{ content: '确认同步', theme: 'primary' }" @confirm="confirmResync">
+      <ResourceOverlay v-model:visible="resyncConfirmVisible" title="重新同步托管代理" :width="560" >
         <t-descriptions :column="1" size="small">
           <t-descriptions-item label="窗口">{{ resyncProfile?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="托管代理">{{ resyncProxy?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="应用地址">{{ resyncProxy?.host }}:{{ resyncProxy?.port }}</t-descriptions-item>
         </t-descriptions>
-        <FeedbackAlert theme="warning" style="margin:12px 0" message="将替换此窗口当前的代理配置；窗口的账号和其他配置保持不变。" />
-        <p class="form-hint">影响此窗口关联的 {{ accountsFor(resyncProfile || {}).length }} 个账号。</p>
-      </t-dialog>
+        <ResourceNotice tone="warning">将替换当前代理；账号与其他配置保持不变。</ResourceNotice>
+        <ResourceNotice v-if="accountsFor(resyncProfile || {}).length">涉及 {{ accountsFor(resyncProfile).length }} 个关联账号。</ResourceNotice>
+              <template #footer><t-button theme="default" variant="outline"  @click="resyncConfirmVisible = false">取消</t-button><t-button theme="primary"  @click="confirmResync">确认同步</t-button></template>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="candidateVisible" header="选择托管代理" :footer="true" width="min(94vw, 820px)">
+      <ResourceOverlay v-model:visible="candidateVisible" title="选择托管代理" :footer="true" :width="proxies.length ? 880 : 560">
         <FeedbackAlert v-if="candidateError" :message="candidateError" theme="error" style="margin-bottom:12px" />
         <t-descriptions :column="2" size="small">
           <t-descriptions-item label="窗口">{{ candidateProfile?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="当前方式">{{ proxyModeLabel(candidateProfile || {}) }}</t-descriptions-item>
         </t-descriptions>
-        <div class="candidate-filters">
+        <div v-if="proxies.length" class="candidate-filters">
           <t-input v-model="candidateSearch" clearable placeholder="名称 / 地址 / 供应商" />
           <t-select v-model="candidateRegion" :options="candidateRegionOptions" clearable placeholder="全部地区" />
         </div>
-        <t-table :data="candidateRows" row-key="id" size="small" :columns="[
+        <ResourceEmptyState v-if="!proxies.length" title="当前团队暂无代理" description="添加代理资源后，即可为窗口选择线路。">
+          <t-button theme="primary" @click="openProxyList">前往代理管理</t-button>
+        </ResourceEmptyState>
+        <ResourceEmptyState v-else-if="!candidateRows.length" title="没有符合条件的代理" description="试试其他名称、地址或地区。">
+          <t-button theme="primary" variant="text" @click="candidateSearch = ''; candidateRegion = ''">清除筛选</t-button>
+        </ResourceEmptyState>
+        <t-table v-else :data="candidateRows" :max-height="320" :scroll="{ x: '800px' }" row-key="id" size="small" :columns="[
           { colKey: 'picked', title: '', width: 46 },
           { colKey: 'id', title: 'ID', width: 70 },
           { colKey: 'name', title: '代理名称 / 地址' },
@@ -2763,42 +2748,25 @@ function syncIssueAction(profile) {
             <ResourceStatusBadge :tone="proxySelectable(row, candidateProfile) ? 'success' : 'neutral'" :label="proxyAvailabilityReason(row, candidateProfile)" />
           </template>
         </t-table>
-        <FeedbackAlert
-          v-if="!proxies.length"
-          theme="warning"
-          style="margin-top:12px"
-          message="当前团队还没有代理资源；请先到代理管理新增资源，或联系管理员补充。"
-        />
-        <FeedbackAlert
-          v-else-if="!candidateRows.some((row) => proxySelectable(row, candidateProfile))"
-          theme="warning"
-          style="margin-top:12px"
-          message="没有可分配的托管代理：需要同团队、启用、未到期、检测正常且剩余额度足够。"
-        />
-        <FeedbackAlert
-          v-if="candidateProfile"
-          theme="info"
-          style="margin-top:12px"
-          :message="`影响此窗口关联的 ${accountsFor(candidateProfile).length} 个账号：${accountTitle(candidateProfile) || '暂无关联账号'}`"
-        />
+        <ResourceNotice v-if="candidateRows.length && !candidateRows.some((row) => proxySelectable(row, candidateProfile))" tone="warning"
+          details="代理需属于当前团队、已启用、未到期、检测正常且有剩余额度；具体原因见各行可用性。">当前代理均不可分配</ResourceNotice>
+        <ResourceNotice v-if="candidateUsable" :details="accountTitle(candidateProfile)" details-label="查看关联账号">将替换此窗口当前代理。<span v-if="accountsFor(candidateProfile || {}).length">涉及 {{ accountsFor(candidateProfile).length }} 个关联账号。</span></ResourceNotice>
         <template #footer>
           <t-space>
             <t-button class="wt-secondary-button" variant="outline" @click="candidateVisible = false">取消</t-button>
-            <t-button v-if="!proxies.length" class="wt-secondary-button" variant="outline" @click="openProxyList">前往代理管理</t-button>
-            <t-button theme="primary" :disabled="!candidateUsable" @click="confirmCandidate">应用代理</t-button>
+
+            <t-button v-if="proxies.length" theme="primary" :disabled="!candidateUsable" @click="confirmCandidate">应用代理</t-button>
           </t-space>
         </template>
-      </t-dialog>
+      </ResourceOverlay>
 
-      <t-drawer
+      <ResourceOverlay
         v-model:visible="syncVisible"
-        header="同步窗口"
-        size="min(96vw, 860px)"
-        :close-btn="true"
+        title="同步窗口"
         :footer="syncDone || syncHasChanges"
-        destroy-on-close
+
         @close="closeSyncDrawer"
-      >
+        kind="drawer" :width="860">
         <FeedbackAlert v-if="syncError" :message="syncError" theme="error" style="margin-bottom:12px" />
         <ResourceStatGrid :items="syncSummaryItems" />
         <template v-if="syncDone">
@@ -2924,9 +2892,9 @@ function syncIssueAction(profile) {
             </template>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="identityVisible" header="当前比特身份不匹配" :footer="true" width="min(92vw, 600px)">
+      <ResourceOverlay v-model:visible="identityVisible" title="当前比特身份不匹配" :footer="true" :width="640">
         <div class="identity-block">
           <div class="identity-icon">!</div>
           <h3>本次同步已停止</h3>
@@ -2950,15 +2918,10 @@ function syncIssueAction(profile) {
             <t-button theme="primary" @click="identityVisible = false; runSync()">重新检测</t-button>
           </t-space>
         </template>
-      </t-dialog>
+      </ResourceOverlay>
 
-      <t-drawer v-model:visible="batchProxyVisible" header="批量设置代理" size="min(96vw, 820px)" :close-btn="true" :footer="true" destroy-on-close>
-        <FeedbackAlert
-          v-if="!batchProxyOptions.length"
-          theme="warning"
-          style="margin-bottom:12px"
-          message="当前团队没有同时满足启用、未到期、检测正常且有余量的托管代理。"
-        />
+      <ResourceOverlay v-model:visible="batchProxyVisible" title="批量设置代理" :footer="true" kind="drawer" :width="820">
+        <ResourceNotice v-if="!batchProxyOptions.length" tone="warning" details="需同团队、已启用、未到期、检测正常且额度足够。">暂无可分配代理，请先到代理管理补充或检测。</ResourceNotice>
         <t-table :data="batchProxyRows" row-key="profile.id" size="small" :columns="[
           { colKey: 'id', title: 'ID', width: 80 },
           { colKey: 'name', title: '窗口' },
@@ -2975,18 +2938,8 @@ function syncIssueAction(profile) {
             <t-select v-model="row.targetId" :options="batchProxyOptions" size="small" placeholder="选择托管代理" />
           </template>
         </t-table>
-        <FeedbackAlert
-          v-if="batchProxyIssue"
-          theme="warning"
-          style="margin:12px 0"
-          :message="batchProxyIssue"
-        />
-        <FeedbackAlert
-          v-else
-          theme="info"
-          style="margin:12px 0"
-          :message="`涉及 ${batchProxyRows.length} 个窗口、${batchProxyAccountCount} 个平台账号；分配额度和正式关系以逐项核实结果为准。`"
-        />
+        <ResourceNotice v-if="batchProxyIssue && batchProxyOptions.length" tone="warning">{{ batchProxyIssue }}</ResourceNotice>
+        <ResourceNotice v-else-if="batchProxyOptions.length">涉及 {{ batchProxyRows.length }} 个窗口<span v-if="batchProxyAccountCount">、{{ batchProxyAccountCount }} 个平台账号</span>；按逐项核实结果生效。</ResourceNotice>
         <div v-if="!batchProxyOptions.length" class="sync-section">
           <t-button class="wt-secondary-button" variant="outline" @click="batchProxyVisible = false; openProxyList()">前往代理管理</t-button>
         </div>
@@ -2996,7 +2949,7 @@ function syncIssueAction(profile) {
             <t-button theme="primary" :disabled="Boolean(batchProxyIssue)" @click="startBatchProxy">开始处理</t-button>
           </t-space>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
       <OperationProgressDialog
         :visible="progressVisible"

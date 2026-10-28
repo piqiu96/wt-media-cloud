@@ -101,7 +101,7 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the read-only detail drawer footerless and the progress dialog reachable', () => {
-    expect(source).toContain('v-model:visible="detailVisible" header="窗口详情" size="min(94vw, 800px)" :close-btn="true" :footer="false"')
+    expect(source).toContain('v-model:visible="detailVisible" title="窗口详情" :footer="false" kind="drawer" :width="800"')
     expect(source).toContain(':footer="syncDone || syncHasChanges"')
     expect(source).toContain('@retry="retryFailed"')
     expect(source).toContain('@verify="verifyPending"')

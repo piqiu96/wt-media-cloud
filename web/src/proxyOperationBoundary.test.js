@@ -37,8 +37,8 @@ describe('proxy operation page boundary', () => {
   })
 
   it('makes unavailable proxy choices and unsynced proxy edits visible', () => {
-    expect(profilesPage).toContain('当前团队还没有代理资源')
-    expect(profilesPage).toContain('没有可分配的托管代理')
-    expect(proxyPage).toContain('个关联窗口会标记为代理配置待同步')
+    expect(profilesPage).toContain('当前团队暂无代理')
+    expect(profilesPage).toContain('当前代理均不可分配')
+    expect(proxyPage).toContain('个关联窗口需同步')
   })
 })

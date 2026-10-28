@@ -137,7 +137,11 @@ describe('drawer footer convention', () => {
   // `.t-drawer__close-btn`，写了 `:close-btn="true"` 才有。
   it('enables the header close button on every drawer, which does not default on', () => {
     const off = drawers
-      .filter((d) => !/:close-btn\s*=\s*"true"/.test(d.tag))
+      .filter((d) => {
+        // 公共容器只在提交时隐藏 X，关闭处理器同时阻断；隔离浏览器覆盖忙碌与恢复状态。
+        const guardedOverlay = d.file === 'shared/ui/resource/ResourceOverlay.vue' && /:close-btn="!busy"/.test(d.tag)
+        return !/:close-btn\s*=\s*"true"/.test(d.tag) && !guardedOverlay
+      })
       .map((d) => `${d.file}:${d.line}`)
     expect(off, '不写 :close-btn="true" 的抽屉没有关闭入口').toEqual([])
   })
