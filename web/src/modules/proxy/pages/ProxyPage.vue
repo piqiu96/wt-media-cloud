@@ -12,6 +12,8 @@ import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
 import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue"
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
+import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue"
+import ResourceChoiceCards from "../../../shared/ui/resource/ResourceChoiceCards.vue"
 import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
@@ -752,7 +754,7 @@ function closeImport() {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-    <div class="wt-resource-page">
+    <div class="wt-resource-page resource-visual-approved">
       <ResourcePageHeader title="代理管理" description="团队代理资源、连接检测与窗口额度">
         <template #actions>
           <t-button theme="primary" @click="openCreate">新增代理</t-button>
@@ -879,19 +881,22 @@ function closeImport() {
           details="保存不会解除现有关联；请重新检测后同步窗口配置。">原检测结果将失效；{{ editAffectedWindows }} 个关联窗口需同步，本次保存不修改窗口配置。</ResourceNotice>
         <FeedbackAlert v-if="formError" :message="formError" theme="error" style="margin-bottom:12px" />
 
-        <ResourceSection title="基础信息">
+        <ResourceSection title="基础信息" variant="form">
           <ResourceForm class="resource-form-grid">
-            <t-form-item label="代理名称" required-mark><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
+            <t-form-item label="代理名称" required-mark class="resource-form-full"><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
             <t-form-item v-if="isAdmin && formMode === 'create'" label="运营团队" required-mark>
               <t-select v-model="form.team_id" :options="teamOptions" placeholder="请选择目标团队" filterable />
             </t-form-item>
             <t-form-item v-else label="运营团队"><span class="resource-form-value">{{ formMode === 'create' ? ownTeamLabel : (editingProxy?.team_name || ownTeamLabel) }}</span></t-form-item>
             <t-form-item v-if="formMode === 'create' || isGovernor" label="资源来源" class="resource-form-full">
-              <t-radio-group v-model="form.source_type"><t-radio value="static">静态地址</t-radio><t-radio value="api">动态代理</t-radio></t-radio-group>
+              <ResourceChoiceCards v-model="form.source_type" :options="[
+                { value: 'static', label: '静态地址', description: '使用固定的连接地址' },
+                { value: 'api', label: '动态代理', description: '从供应商链接提取地址' },
+              ]" />
             </t-form-item>
           </ResourceForm>
         </ResourceSection>
-        <ResourceSection v-if="formMode === 'create' || isGovernor" title="连接配置">
+        <ResourceSection v-if="formMode === 'create' || isGovernor" title="连接配置" variant="form">
           <ResourceForm class="resource-form-grid">
             <t-form-item v-if="form.source_type === 'static'" label="粘贴代理地址" class="resource-form-full">
               <t-input v-model="form.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" @blur="parseAddress" />
@@ -911,7 +916,7 @@ function closeImport() {
             <t-form-item label="认证密码"><t-input v-model="form.password" type="password" :placeholder="formMode === 'edit' ? '留空保留原密码' : '无认证可留空'" /></t-form-item>
           </ResourceForm>
         </ResourceSection>
-        <ResourceSection title="资源资料">
+        <ResourceSection title="资源资料" variant="form">
           <ResourceForm class="resource-form-grid">
             <t-form-item label="地区"><t-input v-model="form.region" placeholder="例如：上海" /></t-form-item>
             <t-form-item label="供应商"><t-input v-model="form.supplier" placeholder="供应商名称" /></t-form-item>
@@ -932,14 +937,14 @@ function closeImport() {
       <ResourceOverlay v-model:visible="detailVisible" :title="'代理详情'" :footer="false" kind="drawer" :width="800">
         <t-loading :loading="detailLoading">
           <template v-if="detailProxy">
-            <ResourceSection title="资源信息"><t-descriptions :column="2" item-layout="vertical" size="small">
+            <ResourceSection title="资源信息"><ResourceDescriptions size="small">
               <t-descriptions-item label="代理ID">{{ detailProxy.id }}</t-descriptions-item>
               <t-descriptions-item label="名称">{{ detailProxy.name || "-" }}</t-descriptions-item>
               <t-descriptions-item label="所属团队">{{ detailProxy.team_name || "-" }}</t-descriptions-item>
               <t-descriptions-item label="来源">{{ sourceLabel(detailProxy.source_type) }}<span v-if="detailProxy.extract_url_configured" class="proxy-sub">（已配置提取地址）</span></t-descriptions-item>
               <t-descriptions-item label="协议 / 地址">{{ detailProxy.proxy_protocol }}://{{ detailProxy.host || "-" }}:{{ detailProxy.port || "-" }}</t-descriptions-item>
-              </t-descriptions></ResourceSection>
-            <ResourceSection title="连接信息"><t-descriptions :column="2" item-layout="vertical" size="small">
+              </ResourceDescriptions></ResourceSection>
+            <ResourceSection title="连接信息"><ResourceDescriptions size="small">
               <t-descriptions-item label="认证用户名">
                 <span>{{ detailProxy.username || "-" }}</span>
                 <t-button v-if="detailProxy.username" size="small" variant="text" @click="copyText(detailProxy.username, '认证用户名')">复制</t-button>
@@ -948,8 +953,8 @@ function closeImport() {
                 <span>{{ detailProxy.password || "-" }}</span>
                 <t-button v-if="detailProxy.password" size="small" variant="text" @click="copyText(detailProxy.password, '认证密码')">复制</t-button>
               </t-descriptions-item>
-              </t-descriptions></ResourceSection>
-            <ResourceSection title="使用与检测"><t-descriptions :column="2" item-layout="vertical" size="small">
+              </ResourceDescriptions></ResourceSection>
+            <ResourceSection title="使用与检测"><ResourceDescriptions size="small">
               <t-descriptions-item label="地区 / 供应商">{{ detailProxy.region || "-" }} / {{ detailProxy.supplier || "-" }}</t-descriptions-item>
               <t-descriptions-item label="业务标签">{{ (detailProxy.tags || []).join("、") || "-" }}</t-descriptions-item>
               <t-descriptions-item label="资源启停">{{ detailProxy.business_status === "active" ? "启用" : "停用" }}</t-descriptions-item>
@@ -961,7 +966,7 @@ function closeImport() {
               <t-descriptions-item label="出口IP">{{ detailProxy.observed_exit_ip || "-" }}</t-descriptions-item>
               <t-descriptions-item label="窗口额度">{{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profile_count || 3 }} 已用</t-descriptions-item>
               <t-descriptions-item label="备注"><span class="proxy-detail-remark">{{ detailProxy.remark || "-" }}</span></t-descriptions-item>
-            </t-descriptions></ResourceSection>
+            </ResourceDescriptions></ResourceSection>
             <ResourceSection :title="`关联窗口 · ${detailBindings.length} 个`">
             <t-table
               :data="detailBindings"
@@ -983,7 +988,7 @@ function closeImport() {
         </t-loading>
       </ResourceOverlay>
 
-      <ResourceOverlay v-model:visible="quotaVisible" title="设置窗口额度" :width="520" :busy="savingQuota">
+      <ResourceOverlay v-model:visible="quotaVisible" title="设置窗口额度" :width="560" :busy="savingQuota">
         <FeedbackAlert v-if="quotaError" :message="quotaError" theme="error" style="margin-bottom:12px" />
         <ResourceNotice>{{ quotaProxy?.name || "-" }} · 已使用 {{ quotaProxy?.assigned_profile_count || 0 }} 个窗口名额</ResourceNotice>
         <ResourceForm><t-form-item label="最大窗口数"><t-input-number v-model="quotaValue" :min="1" :max="1000" /></t-form-item></ResourceForm>
@@ -1007,7 +1012,7 @@ function closeImport() {
         title="批量导入代理"
         :footer="importStep === 'input' || importStep === 'preview'"
         @close="closeImport"
-        kind="drawer" :width="880" :busy="importing">
+        kind="drawer" :width="960" :busy="importing">
         <template v-if="importStep === 'input' || importStep === 'preview'">
           <FeedbackAlert v-if="importError" :message="importError" theme="error" style="margin-bottom:12px" />
           <div class="import-team">
@@ -1042,9 +1047,9 @@ function closeImport() {
                 />
               </template>
               <template #status="{ row }">
-                <t-tag v-if="isImportable(row)" theme="success" size="small">可导入</t-tag>
-                <t-tag v-else-if="row.duplicate" theme="warning" size="small">{{ row.duplicate_reason || "重复" }}</t-tag>
-                <t-tag v-else theme="danger" size="small">{{ row.error || "无效" }}</t-tag>
+                <ResourceStatusBadge v-if="isImportable(row)" tone="success" label="可导入" />
+                <ResourceStatusBadge v-else-if="row.duplicate" tone="warning" :label="row.duplicate_reason || '重复'" />
+                <ResourceStatusBadge v-else tone="danger" :label="row.error || '无效'" />
               </template>
             </t-table>
           </template>

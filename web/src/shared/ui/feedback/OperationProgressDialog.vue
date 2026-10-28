@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { CheckCircleIcon, ErrorCircleIcon } from 'tdesign-icons-vue-next'
 import ResourceStatusBadge from '../resource/ResourceStatusBadge.vue'
+import ResourceOverlay from '../resource/ResourceOverlay.vue'
 
 // 现场处理弹窗：同步、批量开关窗、批量设置代理、导入和检测共用。
 // 处理中不给关闭入口；结束后只在原地提供失败重试与待确认核实，不建任务中心。
@@ -65,16 +66,7 @@ function badgeTone(status) {
 </script>
 
 <template>
-  <t-dialog
-    :visible="visible"
-    :header="title"
-    :close-btn="!isRunning"
-    :close-on-esc-keydown="false"
-    :close-on-overlay-click="false"
-    :footer="!isRunning"
-    width="min(94vw, 960px)"
-    @close="!isRunning && emit('done')"
-  >
+  <ResourceOverlay :visible="visible" :title="title" :busy="isRunning" :esc-closable="false" :footer="!isRunning" :width="960" @close="emit('done')">
     <div class="operation-progress" :aria-busy="isRunning">
       <div class="operation-progress__summary" role="status" aria-live="polite">
         <div class="operation-progress__symbol" :class="isRunning ? 'is-running' : failedCount === total && total ? 'is-danger' : failedCount || unconfirmedCount || counts.pending ? 'is-warning' : 'is-success'">
@@ -121,31 +113,31 @@ function badgeTone(status) {
         <t-button theme="primary" @click="emit('done')">完成</t-button>
       </t-space>
     </template>
-  </t-dialog>
+  </ResourceOverlay>
 </template>
 
 <style scoped>
 .operation-progress { color: var(--wt-text-secondary); }
-.operation-progress__summary { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.operation-progress__summary { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; margin-bottom: 24px; }
 .operation-progress__summary h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 600; }
 .operation-progress__summary p { margin: 6px 0 0; color: var(--wt-text-tertiary); font-size: 13px; line-height: 1.6; }
-.operation-progress__symbol { display: flex; align-items: center; justify-content: center; flex: 0 0 48px; height: 48px; border-radius: 50%; font-size: 26px; }
+.operation-progress__symbol { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; height: 44px; border-radius: 50%; font-size: 26px; }
 .operation-progress__symbol.is-success { color: var(--wt-success); background: var(--wt-success-bg); }
 .operation-progress__symbol.is-warning { color: var(--wt-warning); background: var(--wt-warning-bg); }
 .operation-progress__symbol.is-danger { color: var(--wt-danger); background: var(--wt-danger-bg); }
 .operation-progress__symbol.is-running { color: var(--wt-primary); background: var(--wt-info-bg); }
 .operation-progress__spinner { width: 22px; height: 22px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: operation-spin 1s linear infinite; }
 .operation-progress__counts { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin: 0 0 20px; padding: 16px 0; background: var(--wt-bg-page); border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); }
-.operation-progress__counts > div { display: flex; flex-direction: column-reverse; align-items: center; gap: 6px; padding: 0 8px; border-right: 1px solid var(--wt-border); }
+.operation-progress__counts > div { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 8px; }
 .operation-progress__counts > div:last-child { border: 0; }
 .operation-progress__counts dt { color: var(--wt-text-tertiary); font-size: 12px; }
-.operation-progress__counts dd { margin: 0; color: var(--wt-text-primary); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.operation-progress__counts dd { margin: 0; color: var(--wt-text-primary); font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .operation-progress__running { margin-bottom: 16px; }
 .operation-progress__running p, .operation-progress__notice { margin: 8px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.6; }
 .operation-progress__item-label { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
 .operation-progress__reason { color: var(--wt-text-tertiary); line-height: 1.6; overflow-wrap: anywhere; }
 .operation-progress__notice { margin-top: 14px; }
 @keyframes operation-spin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) { .operation-progress__counts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 0; } .operation-progress__summary { align-items: flex-start; } }
+@media (max-width: 600px) { .operation-progress__counts { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 0; } }
 @media (prefers-reduced-motion: reduce) { .operation-progress__spinner { animation: none; } }
 </style>

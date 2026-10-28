@@ -20,9 +20,13 @@ describe('operation resource design primitives', () => {
   it('serves status colors from the stylesheet both entries import', () => {
     const tokens = read('../../../styles/design-token.css')
 
-    expect(tokens).toContain('--wt-success: #16A34A')
-    expect(tokens).toContain('--wt-warning: #D97706')
-    expect(tokens).toContain('--wt-danger: #DC2626')
+    expect(tokens).toContain('--wt-color-primary: #0052d9')
+    expect(tokens).toContain('--wt-color-success: #00a870')
+    expect(tokens).toContain('--wt-color-warning: #ed7b2f')
+    expect(tokens).toContain('--wt-color-danger: #d54941')
+    expect(tokens).toContain('--wt-success: var(--wt-color-success)')
+    expect(tokens).toContain('--wt-warning: var(--wt-color-warning)')
+    expect(tokens).toContain('--wt-danger: var(--wt-color-danger)')
     expect(existsSync(new URL('../../styles/tokens.css', resourceRoot))).toBe(false)
   })
 
@@ -55,7 +59,7 @@ describe('operation resource design primitives', () => {
     expect(read('ResourceCard.vue')).toContain('<slot />')
     expect(read('ResourceStatGrid.vue')).toContain("items: { type: Array, required: true }")
     expect(read('ResourceStatusBadge.vue')).toContain("tone: { type: String, default: 'neutral' }")
-    expect(read('../../../styles/design-token.css')).toContain('--wt-primary: #2563EB')
+    expect(read('../../../styles/design-token.css')).toContain('--wt-primary: var(--wt-color-primary)')
 
     // MetricList 竖排：容器是 column 方向，每项各占一行。
     const metrics = read('MetricList.vue')

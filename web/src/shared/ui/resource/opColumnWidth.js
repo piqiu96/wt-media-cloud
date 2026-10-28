@@ -1,5 +1,5 @@
 // 操作列宽度按这一页（或这一角色）实际会出现的按钮清单推导，不再逐页写死。
-// 尺寸全部来自 tdesign token：按钮 size=s 的字号 12px、左右 padding 各 7px、边框 2px；
+// 默认outline沿用tdesign size=s：字号12px、左右padding各7px、边框2px；显式text模式见下方规范尺寸。
 // t-space gap 8px；size=s 表格单元格左右 padding 各 8px。中文一个字 ≈ 一个字号宽。
 const BUTTON_TEXT_PX = 12
 const BUTTON_CHROME_PX = 16
