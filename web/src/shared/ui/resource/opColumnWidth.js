@@ -9,10 +9,10 @@ const CELL_CHROME_PX = 16
 const LOADING_CHROME_PX = 18
 const MIN_WIDTH = 80
 
-export function opColumnWidth(labels, { loading = false, variant = 'outline' } = {}) {
-  // ResourceRowActions 的文字按钮无边框和左右留白，间隔为 12px。
+export function opColumnWidth(labels, { loading = false, variant = 'outline', primary = false } = {}) {
+  // 显式文字模式：13px文字、左右各4px热区、8px间隔；主要轻按钮左右各10px。
   const text = variant === 'text'
-  const buttons = [...labels].map((label) => [...String(label)].length * BUTTON_TEXT_PX + (text ? 0 : BUTTON_CHROME_PX))
-  const content = buttons.reduce((sum, width) => sum + width, 0) + Math.max(labels.length - 1, 0) * (text ? 12 : BUTTON_GAP_PX)
-  return Math.max(content + CELL_CHROME_PX + (loading ? LOADING_CHROME_PX : 0), MIN_WIDTH)
+  const buttons = [...labels].map((label) => [...String(label)].length * (text ? 13 : BUTTON_TEXT_PX) + (text ? 8 : BUTTON_CHROME_PX))
+  const content = buttons.reduce((sum, width) => sum + width, 0) + Math.max(labels.length - 1, 0) * BUTTON_GAP_PX
+  return Math.max(content + (text && primary ? 12 : 0) + CELL_CHROME_PX + (loading ? LOADING_CHROME_PX : 0), MIN_WIDTH)
 }

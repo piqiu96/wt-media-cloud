@@ -285,7 +285,7 @@ const columns = computed(() => {
   list.push({ colKey: "business_status", title: "业务启停", width: 96 })
   if (isOwnDesktop.value) list.push({ colKey: "running", title: "运行状态", width: 96 })
   list.push({ colKey: "last_sync", title: "最近同步", width: 118 })
-  list.push({ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true }), fixed: "right" })
+  list.push({ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true, primary: isOwnDesktop.value }), fixed: "right" })
   return list
 })
 
@@ -2324,9 +2324,7 @@ function syncIssueAction(profile) {
             <template #last_sync="{ row }"><span class="window-time">{{ formatTime(row.last_synced_at) }}</span></template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button size="small" theme="primary" variant="text" @click="openDetail(row)">详情</t-button>
-                <template v-if="isOwnDesktop">
-                  <t-button
+                  <t-button v-if="isOwnDesktop" class="is-primary"
                     size="small"
                     theme="primary"
                     variant="text"
@@ -2334,6 +2332,9 @@ function syncIssueAction(profile) {
                     :disabled="rowOperable(row) === false"
                     @click="toggleRunning(row)"
                   >{{ runningState(row) === undefined ? "刷新状态" : (runningState(row) ? "关闭" : "打开") }}</t-button>
+                <t-button size="small" theme="primary" variant="text" @click="openDetail(row)">详情</t-button>
+                <template v-if="isOwnDesktop">
+
                   <t-button
                     size="small"
                     theme="primary"

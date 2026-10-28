@@ -17,8 +17,10 @@ describe('opColumnWidth', () => {
 
   it('fits five text actions without reserving five outlined-button frames', () => {
     const labels = ['详情', '编辑', '检测', '设置配额', '删除']
-    expect(opColumnWidth(labels, { variant: 'text' })).toBe(208)
-    expect(opColumnWidth(labels, { variant: 'text', loading: true })).toBe(226)
+    expect(opColumnWidth(labels, { variant: 'text' })).toBe(244)
+    expect(opColumnWidth(labels, { variant: 'text', primary: true })).toBe(256)
+    expect(opColumnWidth(labels, { variant: 'text', loading: true })).toBe(262)
+    expect(opColumnWidth(labels, { variant: 'text', loading: true, primary: true })).toBe(274)
     expect(opColumnWidth(labels)).toBe(272)
   })
 

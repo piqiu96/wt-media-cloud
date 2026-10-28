@@ -75,7 +75,7 @@ const columns = computed(() => [
   { colKey: "last_check_result", title: "检测结果", width: 110 },
   { colKey: "expires_at", title: "到期时间", width: 120 },
   { colKey: "remark", title: "备注", width: 170 },
-  { colKey: "op", title: "操作", width: opColumnWidth(proxyActionLabels.value, { variant: "text", loading: true }), fixed: "right" },
+  { colKey: "op", title: "操作", width: opColumnWidth(proxyActionLabels.value, { variant: "text", loading: true, primary: true }), fixed: "right" },
 ])
 
 const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, column) => sum + (column.width || 0), 0)}px` }))
@@ -850,9 +850,9 @@ function closeImport() {
             <template #remark="{ row }"><span class="proxy-remark" :title="row.remark || ''">{{ row.remark || "-" }}</span></template>
             <template #op="{ row }">
               <ResourceRowActions>
+                <t-button class="is-primary" size="small" theme="primary" variant="text" :loading="checkingIds.includes(row.id)" :disabled="!row.host || !row.port" @click="checkOne(row)">检测</t-button>
                 <t-button size="small" theme="primary" variant="text" @click="openDetail(row)">详情</t-button>
                 <t-button size="small" theme="primary" variant="text" @click="openEdit(row)">编辑</t-button>
-                <t-button size="small" theme="primary" variant="text" :loading="checkingIds.includes(row.id)" :disabled="!row.host || !row.port" @click="checkOne(row)">检测</t-button>
                 <t-button v-if="isGovernor" size="small" theme="primary" variant="text" @click="openQuota(row)">设置配额</t-button>
                 <t-button v-if="isGovernor" size="small" theme="default" class="is-danger" variant="text" @click="deleteProxy(row)">删除</t-button>
               </ResourceRowActions>

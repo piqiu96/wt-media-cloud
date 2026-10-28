@@ -44,7 +44,7 @@ describe('browser window resource page', () => {
   })
 
   it('keeps the operation column pinned and width from the shared measure', () => {
-    expect(source).toContain('{ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true }), fixed: "right" }')
+    expect(source).toContain('{ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true, primary: isOwnDesktop.value }), fixed: "right" }')
   })
 
   it('requires a fresh running-state read before disabling a window', () => {
