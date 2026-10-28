@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Browser Profile API
-  version: 2026.10.28.1
+  version: 2026.10.29.2
   description: >
     Browser Profile mirrors are read by role and team: operators see their own
     windows, senior operators see their team, admins see every team. BitBrowser

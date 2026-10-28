@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Proxy API
-  version: 2026.10.29.1
+  version: 2026.10.29.2
   description: >
     Proxy resources belong to a team. Operators and senior operators read and write
     their own team only; admins may read every team and must name the target team
