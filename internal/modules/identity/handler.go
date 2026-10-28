@@ -52,18 +52,18 @@ type loginRequest struct {
 }
 
 type createUserRequest struct {
-	Username string                  `json:"username"`
-	Password string                  `json:"password"`
-	Role     identityservice.Role    `json:"role"`
-	TeamID   *identityservice.TeamID `json:"team_id"`
-	GameIDs  []string                `json:"game_ids"`
+	Username    string                       `json:"username"`
+	Password    string                       `json:"password"`
+	Role        identityservice.Role         `json:"role"`
+	TeamID      *identityservice.TeamID      `json:"team_id"`
+	CategoryIDs []identityservice.CategoryID `json:"category_ids"`
 }
 
 type updateUserRequest struct {
-	Role    identityservice.Role       `json:"role"`
-	TeamID  *identityservice.TeamID    `json:"team_id"`
-	Status  identityservice.UserStatus `json:"status"`
-	GameIDs []string                   `json:"game_ids"`
+	Role        identityservice.Role         `json:"role"`
+	TeamID      *identityservice.TeamID      `json:"team_id"`
+	Status      identityservice.UserStatus   `json:"status"`
+	CategoryIDs []identityservice.CategoryID `json:"category_ids"`
 }
 
 type passwordRequest struct {
@@ -80,11 +80,11 @@ type teamRequest struct {
 	Name string `json:"name"`
 }
 
-type gameRequest struct {
-	ID     string                     `json:"id"`
-	Name   string                     `json:"name"`
-	Status identityservice.GameStatus `json:"status"`
-	Remark string                     `json:"remark"`
+type categoryRequest struct {
+	Type    identityservice.CategoryType `json:"type"`
+	Name    string                       `json:"name"`
+	Enabled *bool                        `json:"enabled"`
+	Remark  string                       `json:"remark"`
 }
 
 type oneTimePasswordResult struct {
@@ -228,7 +228,7 @@ func UpdateUser(ctx context.Context, c *hertzapp.RequestContext) {
 		writeIdentityError(c, identityservice.ErrInvalidInput)
 		return
 	}
-	user, err := identityservice.UpdateUser(actor.ID, userID, req.Role, req.TeamID, req.GameIDs, req.Status)
+	user, err := identityservice.UpdateUser(actor.ID, userID, req.Role, req.TeamID, req.CategoryIDs, req.Status)
 	if err != nil {
 		writeIdentityError(c, err)
 		return
@@ -391,77 +391,92 @@ func DeleteTeam(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.NoContent(c)
 }
-func ListGames(ctx context.Context, c *hertzapp.RequestContext) {
+func ListCategories(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	var games []identityservice.OperationGame
+	var categories []identityservice.Category
 	var err error
 	switch strings.TrimSpace(c.Query("scope")) {
 	case "all":
-		games, err = identityservice.ListAllGames(actor.ID)
+		categories, err = identityservice.ListAllCategories(actor.ID)
 	case "management":
-		games, err = identityservice.ListManagementGames(actor.ID)
+		categories, err = identityservice.ListManagementCategories(actor.ID)
 	default:
-		games, err = identityservice.ListGames(actor.ID)
+		categories, err = identityservice.ListCategories(actor.ID)
 	}
 	if err != nil {
 		writeIdentityError(c, err)
 		return
 	}
-	api.Success(c, filterGames(games, c))
+	api.Success(c, filterCategories(categories, c))
 }
-func GameReferences(ctx context.Context, c *hertzapp.RequestContext) {
+func CategoryReferences(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	references, err := identityservice.GameReferences(actor.ID, c.Param("game_id"))
+	categoryID, valid := parseCategoryID(c.Param("category_id"))
+	if !valid {
+		writeIdentityError(c, identityservice.ErrInvalidInput)
+		return
+	}
+	references, err := identityservice.CategoryReferences(actor.ID, categoryID)
 	if err != nil {
 		writeIdentityError(c, err)
 		return
 	}
 	api.Success(c, references)
 }
-func CreateGame(ctx context.Context, c *hertzapp.RequestContext) {
+func CreateCategory(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	var req gameRequest
+	var req categoryRequest
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	game, err := identityservice.CreateGame(actor.ID, req.ID, req.Name, req.Remark)
+	category, err := identityservice.CreateCategory(actor.ID, req.Type, req.Name, req.Remark)
 	if err != nil {
 		writeIdentityError(c, err)
 		return
 	}
-	api.Created(c, game)
+	api.Created(c, category)
 }
-func UpdateGame(ctx context.Context, c *hertzapp.RequestContext) {
+func UpdateCategory(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	var req gameRequest
+	var req categoryRequest
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	game, err := identityservice.UpdateGame(actor.ID, c.Param("game_id"), req.Name, req.Status, req.Remark)
+	categoryID, valid := parseCategoryID(c.Param("category_id"))
+	if !valid || req.Enabled == nil {
+		writeIdentityError(c, identityservice.ErrInvalidInput)
+		return
+	}
+	category, err := identityservice.UpdateCategory(actor.ID, categoryID, req.Name, *req.Enabled, req.Remark)
 	if err != nil {
 		writeIdentityError(c, err)
 		return
 	}
-	api.Success(c, game)
+	api.Success(c, category)
 }
-func DeleteGame(ctx context.Context, c *hertzapp.RequestContext) {
+func DeleteCategory(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	if err := identityservice.DeleteGame(actor.ID, c.Param("game_id")); err != nil {
+	categoryID, valid := parseCategoryID(c.Param("category_id"))
+	if !valid {
+		writeIdentityError(c, identityservice.ErrInvalidInput)
+		return
+	}
+	if err := identityservice.DeleteCategory(actor.ID, categoryID); err != nil {
 		writeIdentityError(c, err)
 		return
 	}
@@ -484,18 +499,29 @@ func ListAuditLogs(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, logs)
 }
 
-func filterGames(games []identityservice.OperationGame, c *hertzapp.RequestContext) []identityservice.OperationGame {
+func filterCategories(categories []identityservice.Category, c *hertzapp.RequestContext) []identityservice.Category {
 	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
-	status := identityservice.GameStatus(strings.TrimSpace(c.Query("status")))
-	result := make([]identityservice.OperationGame, 0, len(games))
-	for _, game := range games {
-		if keyword != "" && !strings.Contains(strings.ToLower(game.ID+" "+game.Name), keyword) {
+	categoryType := identityservice.CategoryType(strings.TrimSpace(c.Query("type")))
+	enabledRaw := strings.TrimSpace(c.Query("enabled"))
+	var enabled *bool
+	if enabledRaw != "" {
+		parsed, err := strconv.ParseBool(enabledRaw)
+		if err == nil {
+			enabled = &parsed
+		}
+	}
+	result := make([]identityservice.Category, 0, len(categories))
+	for _, category := range categories {
+		if keyword != "" && !strings.Contains(strings.ToLower(strconv.FormatInt(int64(category.ID), 10)+" "+category.Name), keyword) {
 			continue
 		}
-		if status != "" && game.Status != status {
+		if categoryType != "" && category.Type != categoryType {
 			continue
 		}
-		result = append(result, game)
+		if enabled != nil && category.Enabled != *enabled {
+			continue
+		}
+		result = append(result, category)
 	}
 	return result
 }
@@ -510,13 +536,18 @@ func parseTeamID(value string) (identityservice.TeamID, bool) {
 	return identityservice.TeamID(parsed), err == nil && parsed > 0
 }
 
+func parseCategoryID(value string) (identityservice.CategoryID, bool) {
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	return identityservice.CategoryID(parsed), err == nil && parsed > 0
+}
+
 func validRole(role identityservice.Role) bool {
 	return role == identityservice.RoleOperator || role == identityservice.RoleSeniorOperator || role == identityservice.RoleAdmin
 }
 
-func containsGame(gameIDs []string, gameID string) bool {
-	for _, candidate := range gameIDs {
-		if candidate == gameID {
+func containsCategory(categoryIDs []identityservice.CategoryID, categoryID identityservice.CategoryID) bool {
+	for _, candidate := range categoryIDs {
+		if candidate == categoryID {
 			return true
 		}
 	}
@@ -543,7 +574,10 @@ func filterUsers(users []identityservice.PublicUser, c *hertzapp.RequestContext)
 	username := strings.ToLower(strings.TrimSpace(c.Query("username")))
 	role := identityservice.Role(strings.TrimSpace(c.Query("role")))
 	status := identityservice.UserStatus(strings.TrimSpace(c.Query("status")))
-	gameID := strings.TrimSpace(c.Query("game_id"))
+	categoryID, validCategoryID := parseCategoryID(c.Query("category_id"))
+	if strings.TrimSpace(c.Query("category_id")) != "" && !validCategoryID {
+		return nil, identityservice.ErrInvalidInput
+	}
 	if role != "" && !validRole(role) {
 		return nil, identityservice.ErrInvalidInput
 	}
@@ -567,7 +601,7 @@ func filterUsers(users []identityservice.PublicUser, c *hertzapp.RequestContext)
 		if status != "" && user.Status != status {
 			continue
 		}
-		if gameID != "" && !containsGame(user.GameIDs, gameID) {
+		if categoryID > 0 && !containsCategory(user.CategoryIDs, categoryID) {
 			continue
 		}
 		result = append(result, user)
@@ -629,20 +663,18 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 		api.Conflict(c, 20002, "团队名称已被使用")
 	case errors.Is(err, identityservice.ErrTeamInUse):
 		api.Conflict(c, 20003, "该团队下还有用户或业务引用，不能删除，请先转移用户")
-	case errors.Is(err, identityservice.ErrGameIDTaken):
-		api.Conflict(c, 20006, "游戏ID已被使用")
-	case errors.Is(err, identityservice.ErrInvalidGameID):
-		api.BadRequest(c, 10004, "游戏ID仅支持32位以内字母或数字")
-	case errors.Is(err, identityservice.ErrGameNameTaken):
-		api.Conflict(c, 20004, "游戏名称已被使用")
-	case errors.Is(err, identityservice.ErrGameInUse):
-		api.Conflict(c, 20005, "该游戏已分配给用户或已有业务引用，不能停用或删除，请先调整用户游戏范围")
-	case errors.Is(err, identityservice.ErrGameUnavailable):
-		api.BadRequest(c, 10002, "请选择已启用的游戏")
+	case errors.Is(err, identityservice.ErrCategoryNameTaken):
+		api.Conflict(c, 20004, "类目名称已被使用")
+	case errors.Is(err, identityservice.ErrInvalidCategoryType):
+		api.BadRequest(c, 10004, "类目一级类型无效")
+	case errors.Is(err, identityservice.ErrCategoryInUse):
+		api.Conflict(c, 20005, "该类目已分配给用户或已有业务引用，不能停用或删除，请先调整用户类目范围")
+	case errors.Is(err, identityservice.ErrCategoryUnavailable):
+		api.BadRequest(c, 10002, "请选择已启用的类目")
 	case errors.Is(err, identityservice.ErrPasswordTooShort):
 		api.BadRequest(c, 10003, "密码至少需要6位")
 	case errors.Is(err, identityservice.ErrInvalidInput), errors.Is(err, identityservice.ErrBootstrapUnavailable):
-		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、团队、游戏ID或状态")
+		api.BadRequest(c, 10001, "输入信息格式错误，请检查用户名、角色、团队、类目ID或状态")
 	default:
 		if failure, ok := identityservice.DescribeAuthFailure(err); ok {
 			api.FailureCode(c, 401, 11001, failure.Message, failure.Code, nil, false, failure.RecoveryAction)

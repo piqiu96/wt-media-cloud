@@ -159,17 +159,17 @@ func verifyLiveGuideTask(t *testing.T, ctx context.Context, cfg config.Config, s
 		t.Fatalf("resolve guide template: id=%d err=%v", templateID, err)
 	}
 	var materialScope struct {
-		TeamID int64
-		GameID string
+		TeamID     int64
+		CategoryID identity.CategoryID
 	}
-	if err := database.DB().Raw("SELECT m.team_id, s.game_id FROM materials m JOIN source_contents s ON s.id = m.source_content_id WHERE m.id = ?", materialID).Scan(&materialScope).Error; err != nil || materialScope.TeamID == 0 || materialScope.GameID == "" {
-		t.Fatalf("resolve material scope: team=%d game=%s err=%v", materialScope.TeamID, materialScope.GameID, err)
+	if err := database.DB().Raw("SELECT m.team_id, s.category_id FROM materials m JOIN source_contents s ON s.id = m.source_content_id WHERE m.id = ?", materialID).Scan(&materialScope).Error; err != nil || materialScope.TeamID == 0 || materialScope.CategoryID <= 0 {
+		t.Fatalf("resolve material scope: team=%d category=%d err=%v", materialScope.TeamID, materialScope.CategoryID, err)
 	}
 	params, err := json.Marshal(map[string]any{"guide_video_url": guideURL, "insert_seconds": 1, "guide_duration_seconds": 1, "max_duration_seconds": 4})
 	if err != nil {
 		t.Fatal(err)
 	}
-	strategy, err := CreateComposeStrategy(admin, CreateStrategyInput{TeamID: materialScope.TeamID, GameID: materialScope.GameID, Name: "CHG093 引导视频链路验证", TemplateID: templateID, TemplateVersion: 1, Config: params, ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 1})
+	strategy, err := CreateComposeStrategy(admin, CreateStrategyInput{TeamID: materialScope.TeamID, CategoryID: materialScope.CategoryID, Name: "CHG093 引导视频链路验证", TemplateID: templateID, TemplateVersion: 1, Config: params, ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,11 +56,16 @@ func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
 		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片时间范围无效", "compose_output_invalid")
 		return
 	}
+	categoryID, err := parseOptionalCategoryID(c.Query("category_id"))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15214, "类目 ID 无效", "compose_output_invalid")
+		return
+	}
 	items, err := productionservice.ListComposeOutputs(current, productionservice.ListComposeOutputsInput{
 		PublishStatus: c.Query("publish_status"), Source: strings.TrimSpace(c.Query("source")),
 		Search: strings.TrimSpace(c.Query("search")), TriggerType: strings.TrimSpace(c.Query("trigger_type")),
-		GameID: strings.TrimSpace(c.Query("game_id")),
-		TeamID: teamID, OperatorID: operatorID, OperatorScope: scope,
+		CategoryID: categoryID,
+		TeamID:     teamID, OperatorID: operatorID, OperatorScope: scope,
 		CreatedFrom: from, CreatedBefore: before,
 	})
 	if err != nil {

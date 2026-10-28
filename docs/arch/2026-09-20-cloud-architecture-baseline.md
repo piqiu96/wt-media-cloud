@@ -209,7 +209,7 @@ Metrics 与 Tracing 当前为 Noop 实现。这是本阶段的刻意状态，不
 | B-08 | 依赖分类不准确 | `go.mod` | 执行 `go mod tidy`，将直接依赖从 indirect 修正 |
 | B-09 | Hertz 日志调用签名错误 | `internal/jobs/proxy_expiry.go` | 改用 `Infof`/`CtxInfof` |
 | B-10 | 架构测试对 `database/sql` 规则过宽 | `internal/architecture` | 当前 Repository 使用 `sql.ErrNoRows`、`*sql.Rows` 是合理的；应改为禁止 `sql.Open` 和直接持有 `*sql.DB`，避免大 allowlist |
-| B-11 | MediaAccount 保留单游戏 `game_id` 兼容投影 | `internal/modules/mediaaccount/model/model.go`、`dto/dto.go`、`handler.go`、`service/service.go`、`repository/store_mysql.go` | 项目未上线，直接收敛到 `game_ids` 多游戏模型；删除 `GameID` 字段、请求兼容参数、`CompatibilityGameID` 与单游戏投影。定向扫描显示 Cloud 前端未直接消费 MediaAccount 的 `game_id`，不需要为了该清理扩大前端改动 |
+| B-11 | MediaAccount 收敛为多类目 `category_ids` | `internal/modules/mediaaccount/model/model.go`、`dto/dto.go`、`handler.go`、`service/service.go`、`repository/store_mysql.go` | 项目未上线，直接收敛到 `category_ids` 多类目模型；删除单类目字段、请求兼容参数与单类目投影。Cloud 前端统一消费 `category_ids` |
 | B-12 | Discovery Worker 保留无 `operation` 快照的历史任务回退 | `internal/modules/contentpool/service/discovery.go` | 按理想态要求任务快照必须显式携带 `operation`；删除历史回退与对应 legacy 测试，避免继续扩大旧数据兼容 |
 
 ### P2：文档、脚本与低风险清理
@@ -237,10 +237,10 @@ Metrics 与 Tracing 当前为 Noop 实现。这是本阶段的刻意状态，不
    - 判断：保留。
    - 原因：这是当前 Cloud–Agent Contract 的注册与握手能力，不是旧版本兼容残留；不能按历史兼容代码删除。
 
-3. **MediaAccount 的 `CompatibilityGameID` / `game_id` 投影**
+3. **MediaAccount 的单类目兼容投影**
    - 位置：`internal/modules/mediaaccount` 的 model、DTO、Handler、Service、Repository。
    - 判断：清理。
-   - 原因：数据库已经迁移到 `media_account_games` 多游戏关系并删除 `media_accounts.game_id`；当前 `game_id` 仅是 API/内存投影兼容。项目未上线，应直接收敛到 `game_ids`。
+   - 原因：数据库已迁移到 `media_account_categories` 多类目关系并删除 `media_accounts.category_id`；项目未上线，应直接收敛到 `category_ids`。
 
 4. **Discovery Worker 的历史任务回退**
    - 位置：`internal/modules/contentpool/service/discovery.go`
@@ -290,7 +290,7 @@ Metrics 与 Tracing 当前为 Noop 实现。这是本阶段的刻意状态，不
 3. 删除 `users.legacy_id` 残留写入，保留用户创建核心链路测试。
 4. 删除 Redis / Health 占位配置及对应 Schema、加载逻辑和测试期望。
 5. 删除空目录、未使用 helper、死代码标记。
-6. 删除 MediaAccount 单游戏投影，统一 `game_ids`。
+6. 删除 MediaAccount 单类目投影，统一 `category_ids`。
 7. 删除 Discovery Worker 无 `operation` 快照的历史回退与 legacy 测试。
 8. 修正 proxy expiry 日志调用为 Hertz printf 风格。
 9. 执行 `go mod tidy`。
@@ -343,7 +343,7 @@ go test -race ./...
 
 1. **历史兼容**
    - 项目尚未上线，除 Cloud–Agent 当前契约能力外，不为旧数据、旧字段和旧任务形态保留额外兼容。
-   - MediaAccount 直接收敛 `game_ids`；Discovery 任务快照必须显式携带 `operation`。
+   - MediaAccount 直接收敛 `category_ids`；Discovery 任务快照必须显式携带 `operation`。
 
 2. **凭证**
    - 已确认允许 Cookie/API Key 写入配置文件。
@@ -384,7 +384,7 @@ go test -race ./...
    - 删除 `users.legacy_id` 残留写入。
    - 删除 Redis / Health 占位配置与 Schema。
    - 删除禁止或多余空目录。
-   - MediaAccount 收敛到 `game_ids`，移除单游戏 `game_id` 兼容投影。
+   - MediaAccount 收敛到 `category_ids`，移除单类目兼容投影。
    - Discovery 任务快照必须显式携带 `operation`，移除历史任务回退。
    - 修正 proxy expiry Hertz 日志调用。
    - 执行 `go mod tidy`。

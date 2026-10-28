@@ -161,7 +161,7 @@ func cloneSuccessfulTask(t *testing.T, requestKey string) int64 {
 	if err := database.DB().Raw(`SELECT id FROM compose_tasks WHERE status = 'success' AND template_code = 'basic_cut' ORDER BY id DESC LIMIT 1`).Row().Scan(&source); err != nil {
 		t.Skipf("no successful basic-cut compose task to clone: %v", err)
 	}
-	result := database.DB().Exec(`INSERT INTO compose_tasks (team_id, game_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, request_key, created_by, created_at, updated_at) SELECT team_id, game_id, 'manual', material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, 'pending', ?, created_by, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) FROM compose_tasks WHERE id = ?`, requestKey, source)
+	result := database.DB().Exec(`INSERT INTO compose_tasks (team_id, category_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, request_key, created_by, created_at, updated_at) SELECT team_id, category_id, 'manual', material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, 'pending', ?, created_by, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) FROM compose_tasks WHERE id = ?`, requestKey, source)
 	if result.Error != nil || result.RowsAffected != 1 {
 		t.Fatalf("clone task %d: rows=%d err=%v", source, result.RowsAffected, result.Error)
 	}

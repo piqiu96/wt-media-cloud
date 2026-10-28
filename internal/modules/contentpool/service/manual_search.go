@@ -262,7 +262,7 @@ func (s *contentService) importResults(actor identityservice.PublicUser, input d
 	if input.SourceType == "" {
 		input.SourceType = "search"
 	}
-	if team == nil || input.Platform != "douyin" || (input.SourceType != "search" && input.SourceType != "author") || len(input.Items) == 0 || len(input.Items) > maxImportResults {
+	if team == nil || input.CategoryID == nil || *input.CategoryID <= 0 || input.Platform != "douyin" || (input.SourceType != "search" && input.SourceType != "author") || len(input.Items) == 0 || len(input.Items) > maxImportResults {
 		return dto.ImportResultsResponse{}, ErrDiscoveryInvalid
 	}
 	normalized := make([]dto.SearchResult, len(input.Items))
@@ -282,7 +282,7 @@ func (s *contentService) importResults(actor identityservice.PublicUser, input d
 		}
 		created, createErr := s.createSource(actor, dto.SourceInput{
 			TeamID:            team,
-			GameID:            input.GameID,
+			CategoryID:        input.CategoryID,
 			Platform:          input.Platform,
 			PlatformContentID: item.PlatformContentID,
 			Title:             item.Title,

@@ -161,7 +161,7 @@ func (s *memoryStore) CreateUserDownloadTask(input repository.CreateUserDownload
 	}
 	return Task{
 		ID: input.ID, TeamID: input.TeamID, AssetType: input.AssetType, AssetID: input.AssetID,
-		AssetTitle: input.AssetTitle, GameName: input.GameName, PublishedAt: input.PublishedAt,
+		AssetTitle: input.AssetTitle, CategoryName: input.CategoryName, PublishedAt: input.PublishedAt,
 		SourceObjectKey: input.SourceObjectKey,
 		Purpose:         model.PurposeUserDownload, ExecutionScope: model.ExecutionLocalAgent,
 		Status: model.StatusPending, RequestedBy: input.RequestedBy,
@@ -354,7 +354,7 @@ func taskFixture(id string, status model.Status, user identityservice.UserID, te
 	published := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
 	return Task{
 		ID: id, TeamID: team, AssetType: model.AssetMaterial, AssetID: 42, AssetTitle: "演示素材",
-		GameName: "三角洲行动", PublishedAt: &published,
+		CategoryName: "三角洲行动", PublishedAt: &published,
 		SourceObjectKey: "materials/42/deadbeef.mp4", Purpose: model.PurposeUserDownload,
 		ExecutionScope: model.ExecutionLocalAgent, Status: status, RequestedBy: user,
 		ClaimedBy: claimedBy, AttemptID: attemptID, TotalBytes: 1000, ExpectedSHA256: strings.Repeat("a", 64),
@@ -797,9 +797,9 @@ func TestClaimTaskCarriesTheFactsTheExecutorNeeds(t *testing.T) {
 		t.Fatalf("lease = %+v", lease)
 	}
 	// The naming facts travel on the lease: the executor files the file under the
-	// game and can append the publish time, neither of which it can read itself.
-	if lease.GameName != "三角洲行动" {
-		t.Fatalf("lease game name = %q, want the material's game", lease.GameName)
+	// category and can append the publish time, neither of which it can read itself.
+	if lease.CategoryName != "三角洲行动" {
+		t.Fatalf("lease category name = %q, want the material's category", lease.CategoryName)
 	}
 	if lease.PublishedAt == nil || !lease.PublishedAt.Equal(time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)) {
 		t.Fatalf("lease published_at = %v, want the material's publish time", lease.PublishedAt)

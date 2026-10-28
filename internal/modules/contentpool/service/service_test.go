@@ -49,10 +49,10 @@ func (m *memoryStore) ListSources(f Filter) ([]SourceContentView, error) {
 		if f.SourceType != "" && item.SourceType != f.SourceType {
 			continue
 		}
-		if len(f.GameIDs) > 0 {
+		if len(f.CategoryIDs) > 0 {
 			matched := false
-			for _, gameID := range f.GameIDs {
-				if item.GameID != nil && *item.GameID == gameID {
+			for _, categoryID := range f.CategoryIDs {
+				if item.CategoryID != nil && *item.CategoryID == categoryID {
 					matched = true
 					break
 				}
@@ -154,74 +154,62 @@ func TestCreateSourceNormalizesAndRejectsDuplicate(t *testing.T) {
 	service.now = func() time.Time { return now }
 	team := identityservice.TeamID(10)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
-	first, err := service.CreateSource(actor, SourceInput{Platform: " douyin ", PlatformContentID: " aweme-1 ", SourceType: "search", RawJSON: json.RawMessage(`{"vid":"aweme-1"}`)})
+	first, err := service.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), Platform: " douyin ", PlatformContentID: " aweme-1 ", SourceType: "search", RawJSON: json.RawMessage(`{"vid":"aweme-1"}`)})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
 	if first.Platform != "douyin" || first.PlatformContentID != "aweme-1" || first.Status != StatusPending || first.TeamID != team {
 		t.Fatalf("unexpected source: %+v", first)
 	}
-	if _, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "aweme-1", SourceType: "search"}); !errors.Is(err, ErrDuplicate) {
+	if _, err := service.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), Platform: "douyin", PlatformContentID: "aweme-1", SourceType: "search"}); !errors.Is(err, ErrDuplicate) {
 		t.Fatalf("duplicate should be typed, got %v", err)
 	}
 }
 
-func TestCreateSourceDefaultsGameToOther(t *testing.T) {
+func TestCreateSourceRequiresCategory(t *testing.T) {
 	service := NewService(newMemoryStore())
 	team := identityservice.TeamID(10)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
-	created, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "no-game", SourceType: "search"})
-	if err != nil {
-		t.Fatalf("create source: %v", err)
-	}
-	if created.GameID == nil || *created.GameID != "other" {
-		t.Fatalf("game_id = %v, want other", created.GameID)
-	}
-	blank := "  "
-	created, err = service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "blank-game", SourceType: "search", GameID: &blank})
-	if err != nil {
-		t.Fatalf("create source with blank game: %v", err)
-	}
-	if created.GameID == nil || *created.GameID != "other" {
-		t.Fatalf("blank game_id = %v, want other", created.GameID)
+	if _, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "no-category", SourceType: "search"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("create source without category error = %v, want ErrInvalidInput", err)
 	}
 }
 
-func TestListSourcesFiltersMultipleGamesWithoutCrossingTeams(t *testing.T) {
+func TestListSourcesFiltersMultipleCategoriesWithoutCrossingTeams(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)
 	teamA, teamB := identityservice.TeamID(10), identityservice.TeamID(20)
 	operatorA := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &teamA}
 	operatorB := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &teamB}
-	hy, sjz, other := "hy", "sjz", "other"
+	hy, sjz, other := identityservice.CategoryID(1), identityservice.CategoryID(2), identityservice.CategoryID(3)
 	for index, input := range []SourceInput{
-		{Platform: "douyin", PlatformContentID: "a-hy", SourceType: "search", GameID: &hy},
-		{Platform: "douyin", PlatformContentID: "a-sjz", SourceType: "search", GameID: &sjz},
-		{Platform: "douyin", PlatformContentID: "a-other", SourceType: "search", GameID: &other},
+		{Platform: "douyin", PlatformContentID: "a-hy", SourceType: "search", CategoryID: &hy},
+		{Platform: "douyin", PlatformContentID: "a-sjz", SourceType: "search", CategoryID: &sjz},
+		{Platform: "douyin", PlatformContentID: "a-other", SourceType: "search", CategoryID: &other},
 	} {
 		if _, err := service.CreateSource(operatorA, input); err != nil {
 			t.Fatalf("create source %d: %v", index, err)
 		}
 	}
-	if _, err := service.CreateSource(operatorB, SourceInput{Platform: "douyin", PlatformContentID: "b-hy", SourceType: "search", GameID: &hy}); err != nil {
+	if _, err := service.CreateSource(operatorB, SourceInput{Platform: "douyin", PlatformContentID: "b-hy", SourceType: "search", CategoryID: &hy}); err != nil {
 		t.Fatalf("create other-team source: %v", err)
 	}
 
-	items, err := service.List(operatorA, Filter{GameIDs: []string{"hy", "sjz"}})
+	items, err := service.List(operatorA, Filter{CategoryIDs: []identityservice.CategoryID{hy, sjz}})
 	if err != nil {
 		t.Fatalf("list sources: %v", err)
 	}
 	if len(items) != 2 {
-		t.Fatalf("multi-game filter returned %d items, want 2: %+v", len(items), items)
+		t.Fatalf("multi-category filter returned %d items, want 2: %+v", len(items), items)
 	}
 	for _, item := range items {
-		if item.TeamID != teamA || (item.GameID == nil || (*item.GameID != "hy" && *item.GameID != "sjz")) {
+		if item.TeamID != teamA || (item.CategoryID == nil || (*item.CategoryID != identityservice.CategoryID(1) && *item.CategoryID != identityservice.CategoryID(2))) {
 			t.Fatalf("filter leaked an item: %+v", item)
 		}
 	}
 	forgedTeam := teamB
-	if _, err := service.List(operatorA, Filter{TeamID: &forgedTeam, GameIDs: []string{"hy"}}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("game filter crossed team boundary: %v", err)
+	if _, err := service.List(operatorA, Filter{TeamID: &forgedTeam, CategoryIDs: []identityservice.CategoryID{hy}}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("category filter crossed team boundary: %v", err)
 	}
 }
 
@@ -229,7 +217,7 @@ func TestMaterializeIsTeamScoped(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(store)
 	teamA, teamB := identityservice.TeamID(10), identityservice.TeamID(20)
-	created, err := service.CreateSource(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &teamA}, SourceInput{Platform: "douyin", PlatformContentID: "aweme-2", SourceType: "url", Title: "demo"})
+	created, err := service.CreateSource(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &teamA}, SourceInput{CategoryID: testCategoryID(), Platform: "douyin", PlatformContentID: "aweme-2", SourceType: "url", Title: "demo"})
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
@@ -247,11 +235,11 @@ func TestBatchSetStatusProcessesItemsIndependently(t *testing.T) {
 	service := NewService(store)
 	team := identityservice.TeamID(10)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
-	first, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "batch-1", SourceType: "search"})
+	first, err := service.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), Platform: "douyin", PlatformContentID: "batch-1", SourceType: "search"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "batch-2", SourceType: "search"})
+	second, err := service.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), Platform: "douyin", PlatformContentID: "batch-2", SourceType: "search"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,11 +279,11 @@ func TestBatchMaterializeProcessesItemsIndependently(t *testing.T) {
 	service := NewService(store)
 	team := identityservice.TeamID(10)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
-	first, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "material-1", SourceType: "search"})
+	first, err := service.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), Platform: "douyin", PlatformContentID: "material-1", SourceType: "search"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.CreateSource(actor, SourceInput{Platform: "douyin", PlatformContentID: "material-2", SourceType: "search"})
+	second, err := service.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), Platform: "douyin", PlatformContentID: "material-2", SourceType: "search"})
 	if err != nil {
 		t.Fatal(err)
 	}

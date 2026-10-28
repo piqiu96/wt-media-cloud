@@ -1,4 +1,4 @@
-// Package identity owns Cloud users, roles, game scopes, and sessions.
+// Package identity owns Cloud users, roles, category scopes, and sessions.
 package service
 
 import (
@@ -23,28 +23,30 @@ const (
 	RoleSeniorOperator = model.RoleSeniorOperator
 	RoleAdmin          = model.RoleAdmin
 
+	CategoryTypeGame  = model.CategoryTypeGame
+	CategoryTypeAI    = model.CategoryTypeAI
+	CategoryTypeAnime = model.CategoryTypeAnime
+
 	UserStatusEnabled  = model.UserStatusEnabled
 	UserStatusDisabled = model.UserStatusDisabled
-
-	GameStatusEnabled  = model.GameStatusEnabled
-	GameStatusDisabled = model.GameStatusDisabled
 )
 
 type (
-	Role                 = model.Role
-	UserID               = model.UserID
-	TeamID               = model.TeamID
-	UserStatus           = model.UserStatus
-	OperationTeam        = model.OperationTeam
-	GameStatus           = model.GameStatus
-	OperationGame        = model.OperationGame
-	GameReferenceSummary = model.GameReferenceSummary
-	GameReferenceUser    = model.GameReferenceUser
-	GameReferenceAccount = model.GameReferenceAccount
-	User                 = model.User
-	PublicUser           = model.PublicUser
-	Session              = model.Session
-	AuditEvent           = model.AuditEvent
+	Role                     = model.Role
+	UserID                   = model.UserID
+	TeamID                   = model.TeamID
+	CategoryID               = model.CategoryID
+	CategoryType             = model.CategoryType
+	UserStatus               = model.UserStatus
+	OperationTeam            = model.OperationTeam
+	Category                 = model.Category
+	CategoryReferenceSummary = model.CategoryReferenceSummary
+	CategoryReferenceUser    = model.CategoryReferenceUser
+	CategoryReferenceAccount = model.CategoryReferenceAccount
+	User                     = model.User
+	PublicUser               = model.PublicUser
+	Session                  = model.Session
+	AuditEvent               = model.AuditEvent
 )
 
 type (
@@ -77,12 +79,11 @@ var (
 	ErrUsernameTaken                    = model.ErrUsernameTaken
 	ErrTeamNameTaken                    = model.ErrTeamNameTaken
 	ErrTeamInUse                        = model.ErrTeamInUse
-	ErrGameIDTaken                      = model.ErrGameIDTaken
-	ErrInvalidGameID                    = model.ErrInvalidGameID
-	ErrGameNameTaken                    = model.ErrGameNameTaken
-	ErrGameInUse                        = model.ErrGameInUse
-	ErrUserGameScopeInUse               = model.ErrUserGameScopeInUse
-	ErrGameUnavailable                  = model.ErrGameUnavailable
+	ErrCategoryNameTaken                = model.ErrCategoryNameTaken
+	ErrInvalidCategoryType              = model.ErrInvalidCategoryType
+	ErrCategoryInUse                    = model.ErrCategoryInUse
+	ErrUserCategoryScopeInUse           = model.ErrUserCategoryScopeInUse
+	ErrCategoryUnavailable              = model.ErrCategoryUnavailable
 	ErrPasswordTooShort                 = model.ErrPasswordTooShort
 	ErrBootstrapUnavailable             = model.ErrBootstrapUnavailable
 	SessionInvalidReasonLogout          = model.SessionInvalidReasonLogout
@@ -158,19 +159,19 @@ type Store interface {
 	ListAuditLogs(limit int) ([]AuditEvent, error)
 }
 
-type operationGameStore interface {
-	CreateGameWithAudit(OperationGame, AuditEvent) error
-	FindGame(string) (OperationGame, bool, error)
-	ListGames() ([]OperationGame, error)
-	UpdateGameWithAudit(OperationGame, AuditEvent) error
-	DeleteGameWithAudit(string, AuditEvent) error
-	GameHasReferences(string) (bool, error)
+type operationCategoryStore interface {
+	CreateCategoryWithAudit(Category, AuditEvent) (CategoryID, error)
+	FindCategory(CategoryID) (Category, bool, error)
+	ListCategories() ([]Category, error)
+	UpdateCategoryWithAudit(Category, AuditEvent) error
+	DeleteCategoryWithAudit(CategoryID, AuditEvent) error
+	CategoryHasReferences(CategoryID) (bool, error)
 }
 
-type gameReferenceStore interface {
-	ListGameReferenceSummaries() (map[string]GameReferenceSummary, error)
-	GameReferences(string) (model.GameReferences, error)
-	UserHasGameReferencesOutsideScope(UserID, []string) (bool, error)
+type categoryReferenceStore interface {
+	ListCategoryReferenceSummaries() (map[CategoryID]CategoryReferenceSummary, error)
+	CategoryReferences(CategoryID) (model.CategoryReferences, error)
+	UserHasCategoryReferencesOutsideScope(UserID, []CategoryID) (bool, error)
 }
 
 type Service struct {
@@ -254,7 +255,7 @@ func (s *Service) CreateUser(actorID UserID, input CreateUserInput) (PublicUser,
 		return PublicUser{}, err
 	}
 	event := s.newAuditEvent(actor.ID, "user.create", "user", 0, map[string]string{
-		"role": string(user.Role), "username": user.Username, "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
+		"role": string(user.Role), "username": user.Username, "team_id": formatTeamID(user.TeamID), "category_ids": formatCategoryIDs(user.CategoryIDs),
 	})
 	userID, err := s.store.CreateUserWithAudit(user, event)
 	if err != nil {
@@ -283,14 +284,14 @@ func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 	if err != nil {
 		return User{}, "", err
 	}
-	gameIDs := normalizeGameIDs(input.GameIDs)
+	categoryIDs := normalizeCategoryIDs(input.CategoryIDs)
 	teamName := ""
 	if input.Role == RoleAdmin {
-		if input.TeamID != nil || len(gameIDs) != 0 {
+		if input.TeamID != nil || len(categoryIDs) != 0 {
 			return User{}, "", ErrInvalidInput
 		}
 	} else {
-		if input.TeamID == nil || *input.TeamID <= 0 || len(gameIDs) == 0 {
+		if input.TeamID == nil || *input.TeamID <= 0 || len(categoryIDs) == 0 {
 			return User{}, "", ErrInvalidInput
 		}
 		team, found, err := s.store.FindTeam(*input.TeamID)
@@ -301,7 +302,7 @@ func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 			return User{}, "", ErrInvalidInput
 		}
 		teamName = team.Name
-		if err := s.ensureGamesAssignable(gameIDs); err != nil {
+		if err := s.ensureCategoriesAssignable(categoryIDs); err != nil {
 			return User{}, "", err
 		}
 	}
@@ -312,7 +313,7 @@ func (s *Service) prepareUser(input CreateUserInput) (User, string, error) {
 		Role:         input.Role,
 		Status:       UserStatusEnabled,
 		TeamID:       cloneTeamID(input.TeamID),
-		GameIDs:      gameIDs,
+		CategoryIDs:  categoryIDs,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -530,7 +531,7 @@ func (s *Service) SetUserStatus(actorID, userID UserID, status UserStatus) error
 	if !ok {
 		return ErrInvalidInput
 	}
-	_, err = s.updateUser(actorID, userID, user.Role, user.TeamID, user.GameIDs, status, "user.status.update")
+	_, err = s.updateUser(actorID, userID, user.Role, user.TeamID, user.CategoryIDs, status, "user.status.update")
 	return err
 }
 
@@ -584,18 +585,18 @@ func (s *Service) passwordUpdatedUser(user User, newPassword string) (User, erro
 	return user, nil
 }
 
-func (s *Service) ensureGamesAssignable(gameIDs []string) error {
-	gameStore, ok := s.store.(operationGameStore)
+func (s *Service) ensureCategoriesAssignable(categoryIDs []CategoryID) error {
+	categoryStore, ok := s.store.(operationCategoryStore)
 	if !ok {
 		return nil
 	}
-	for _, gameID := range gameIDs {
-		game, found, err := gameStore.FindGame(gameID)
+	for _, categoryID := range categoryIDs {
+		category, found, err := categoryStore.FindCategory(categoryID)
 		if err != nil {
 			return err
 		}
-		if !found || game.Status != GameStatusEnabled {
-			return ErrGameUnavailable
+		if !found || !category.Enabled {
+			return ErrCategoryUnavailable
 		}
 	}
 	return nil
@@ -622,14 +623,14 @@ func (s *Service) ResolveUser(userID UserID) (PublicUser, bool, error) {
 	return publicUser(user), true, nil
 }
 
-// ResolveGame exposes an operation-game fact to trusted in-process modules.
-// It intentionally does not apply the caller's user game-scope permissions.
-func (s *Service) ResolveGame(gameID string) (OperationGame, bool, error) {
-	gameStore, ok := s.store.(operationGameStore)
+// ResolveCategory exposes an operation-category fact to trusted in-process modules.
+// It intentionally does not apply the caller's user category-scope permissions.
+func (s *Service) ResolveCategory(categoryID CategoryID) (Category, bool, error) {
+	categoryStore, ok := s.store.(operationCategoryStore)
 	if !ok {
-		return OperationGame{}, false, nil
+		return Category{}, false, nil
 	}
-	return gameStore.FindGame(strings.TrimSpace(gameID))
+	return categoryStore.FindCategory(categoryID)
 }
 
 func (s *Service) ListAuditLogs(limit int) ([]AuditEvent, error) {
@@ -725,53 +726,46 @@ func (s *Service) DeleteTeam(actorID UserID, teamID TeamID) error {
 	return s.store.DeleteTeamWithAudit(teamID, event)
 }
 
-func (s *Service) CreateGame(actorID UserID, id, name, remark string) (OperationGame, error) {
+func (s *Service) CreateCategory(actorID UserID, categoryType CategoryType, name, remark string) (Category, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
-		return OperationGame{}, err
+		return Category{}, err
 	}
-	gameStore, okStore := s.store.(operationGameStore)
-	id = strings.TrimSpace(id)
+	categoryStore, okStore := s.store.(operationCategoryStore)
 	name = strings.TrimSpace(name)
 	remark = strings.TrimSpace(remark)
-	if !ok || !isAdmin(actor) || !okStore || name == "" || len(name) > 128 || len(remark) > 255 {
-		return OperationGame{}, ErrInvalidInput
-	}
-	if !validGameID(id) {
-		return OperationGame{}, ErrInvalidGameID
-	}
-	if _, exists, err := gameStore.FindGame(id); err != nil {
-		return OperationGame{}, err
-	} else if exists {
-		return OperationGame{}, ErrGameIDTaken
+	if !ok || !isAdmin(actor) || !okStore || name == "" || len([]rune(name)) > 128 || len([]rune(remark)) > 255 || !validCategoryType(categoryType) {
+		return Category{}, ErrInvalidInput
 	}
 	now := s.now()
-	game := OperationGame{ID: id, Name: name, Status: GameStatusEnabled, Remark: remark, CreatedAt: now, UpdatedAt: now}
-	event := s.newAuditEvent(actor.ID, "operation_game.create", "operation_game", 0, map[string]string{"game_id": id, "name": name})
-	if err := gameStore.CreateGameWithAudit(game, event); err != nil {
-		return OperationGame{}, err
+	category := Category{Type: categoryType, Name: name, Enabled: true, Remark: remark, CreatedAt: now, UpdatedAt: now}
+	event := s.newAuditEvent(actor.ID, "category.create", "category", 0, map[string]string{"name": name, "type": string(categoryType)})
+	id, err := categoryStore.CreateCategoryWithAudit(category, event)
+	if err != nil {
+		return Category{}, err
 	}
-	return game, nil
+	category.ID = id
+	return category, nil
 }
 
-func (s *Service) ListGames(actorID UserID) ([]OperationGame, error) {
-	return s.listGames(actorID, true)
+func (s *Service) ListCategories(actorID UserID) ([]Category, error) {
+	return s.listCategories(actorID, true)
 }
 
-// ListAllGames returns the global game dictionary for pages where the game is a
+// ListAllCategories returns the global category dictionary for pages where the category is a
 // filter rather than an authorization boundary. Non-admins still only see
-// enabled games, but not just the games assigned to them.
-func (s *Service) ListAllGames(actorID UserID) ([]OperationGame, error) {
-	return s.listGames(actorID, false)
+// enabled categories, but not just the categories assigned to them.
+func (s *Service) ListAllCategories(actorID UserID) ([]Category, error) {
+	return s.listCategories(actorID, false)
 }
 
-// ListManagementGames answers the game-management page for senior operators:
-// every game with its real status, but without reference summaries. The summary
+// ListManagementCategories answers the category-management page for senior operators:
+// every category with its real status, but without reference summaries. The summary
 // counts users and accounts that the caller cannot open — the admin-only
 // reference detail — so leaving it out keeps the read-only page from implying a
 // drill-down it cannot offer. Admins ask for scope=all instead, which carries
 // the summaries.
-func (s *Service) ListManagementGames(actorID UserID) ([]OperationGame, error) {
+func (s *Service) ListManagementCategories(actorID UserID) ([]Category, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return nil, err
@@ -779,14 +773,14 @@ func (s *Service) ListManagementGames(actorID UserID) ([]OperationGame, error) {
 	if !ok || (actor.Role != RoleSeniorOperator && actor.Role != RoleAdmin) {
 		return nil, ErrForbidden
 	}
-	gameStore, okStore := s.store.(operationGameStore)
+	categoryStore, okStore := s.store.(operationCategoryStore)
 	if !okStore {
 		return nil, ErrForbidden
 	}
-	return gameStore.ListGames()
+	return categoryStore.ListCategories()
 }
 
-func (s *Service) listGames(actorID UserID, assignedOnly bool) ([]OperationGame, error) {
+func (s *Service) listCategories(actorID UserID, assignedOnly bool) ([]Category, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return nil, err
@@ -794,128 +788,126 @@ func (s *Service) listGames(actorID UserID, assignedOnly bool) ([]OperationGame,
 	if !ok {
 		return nil, ErrForbidden
 	}
-	gameStore, okStore := s.store.(operationGameStore)
+	categoryStore, okStore := s.store.(operationCategoryStore)
 	if !okStore {
 		return nil, ErrForbidden
 	}
-	games, err := gameStore.ListGames()
+	categories, err := categoryStore.ListCategories()
 	if err != nil {
 		return nil, err
 	}
 	if !isAdmin(actor) {
-		enabled := make([]OperationGame, 0, len(games))
-		for _, game := range games {
-			if game.Status != GameStatusEnabled {
+		enabled := make([]Category, 0, len(categories))
+		for _, category := range categories {
+			if !category.Enabled {
 				continue
 			}
-			if assignedOnly && !containsGame(actor.GameIDs, game.ID) {
+			if assignedOnly && !containsCategory(actor.CategoryIDs, category.ID) {
 				continue
 			}
-			enabled = append(enabled, game)
+			enabled = append(enabled, category)
 		}
 		return enabled, nil
 	}
-	if references, ok := s.store.(gameReferenceStore); ok {
-		summaries, err := references.ListGameReferenceSummaries()
+	if references, ok := s.store.(categoryReferenceStore); ok {
+		summaries, err := references.ListCategoryReferenceSummaries()
 		if err != nil {
 			return nil, err
 		}
-		for index := range games {
-			summary := summaries[games[index].ID]
+		for index := range categories {
+			summary := summaries[categories[index].ID]
 			summary.TotalCount = summary.UserScopeCount + summary.MediaAccountCount
-			games[index].ReferenceSummary = &summary
+			categories[index].ReferenceSummary = &summary
 		}
 	}
-	return games, nil
+	return categories, nil
 }
 
-func (s *Service) GameReferences(actorID UserID, gameID string) (model.GameReferences, error) {
+func (s *Service) CategoryReferences(actorID UserID, categoryID CategoryID) (model.CategoryReferences, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
-		return model.GameReferences{}, err
+		return model.CategoryReferences{}, err
 	}
 	if !ok || !isAdmin(actor) {
-		return model.GameReferences{}, ErrForbidden
+		return model.CategoryReferences{}, ErrForbidden
 	}
-	gameStore, ok := s.store.(operationGameStore)
+	categoryStore, ok := s.store.(operationCategoryStore)
 	if !ok {
-		return model.GameReferences{}, ErrForbidden
+		return model.CategoryReferences{}, ErrForbidden
 	}
-	if _, found, err := gameStore.FindGame(strings.TrimSpace(gameID)); err != nil {
-		return model.GameReferences{}, err
+	if _, found, err := categoryStore.FindCategory(categoryID); err != nil {
+		return model.CategoryReferences{}, err
 	} else if !found {
-		return model.GameReferences{}, ErrInvalidInput
+		return model.CategoryReferences{}, ErrInvalidInput
 	}
-	references, ok := s.store.(gameReferenceStore)
+	references, ok := s.store.(categoryReferenceStore)
 	if !ok {
-		return model.GameReferences{}, ErrForbidden
+		return model.CategoryReferences{}, ErrForbidden
 	}
-	return references.GameReferences(strings.TrimSpace(gameID))
+	return references.CategoryReferences(categoryID)
 }
 
-func (s *Service) UpdateGame(actorID UserID, id, name string, status GameStatus, remark string) (OperationGame, error) {
+func (s *Service) UpdateCategory(actorID UserID, id CategoryID, name string, enabled bool, remark string) (Category, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
-		return OperationGame{}, err
+		return Category{}, err
 	}
-	gameStore, okStore := s.store.(operationGameStore)
-	id = strings.TrimSpace(id)
+	categoryStore, okStore := s.store.(operationCategoryStore)
 	name = strings.TrimSpace(name)
 	remark = strings.TrimSpace(remark)
-	if !ok || !isAdmin(actor) || !okStore || id == "" || name == "" || len(name) > 128 || len(remark) > 255 || !validGameStatus(status) {
-		return OperationGame{}, ErrInvalidInput
+	if !ok || !isAdmin(actor) || !okStore || id <= 0 || name == "" || len([]rune(name)) > 128 || len([]rune(remark)) > 255 {
+		return Category{}, ErrInvalidInput
 	}
-	game, found, err := gameStore.FindGame(id)
+	category, found, err := categoryStore.FindCategory(id)
 	if err != nil {
-		return OperationGame{}, err
+		return Category{}, err
 	}
 	if !found {
-		return OperationGame{}, ErrInvalidInput
+		return Category{}, ErrInvalidInput
 	}
-	if game.Status != GameStatusDisabled && status == GameStatusDisabled {
-		referenced, err := gameStore.GameHasReferences(id)
+	if category.Enabled && !enabled {
+		referenced, err := categoryStore.CategoryHasReferences(id)
 		if err != nil {
-			return OperationGame{}, err
+			return Category{}, err
 		}
 		if referenced {
-			return OperationGame{}, ErrGameInUse
+			return Category{}, ErrCategoryInUse
 		}
 	}
-	game.Name = name
-	game.Status = status
-	game.Remark = remark
-	game.UpdatedAt = s.now()
-	event := s.newAuditEvent(actor.ID, "operation_game.update", "operation_game", 0, map[string]string{"game_id": id, "status": string(status)})
-	if err := gameStore.UpdateGameWithAudit(game, event); err != nil {
-		return OperationGame{}, err
+	category.Name = name
+	category.Enabled = enabled
+	category.Remark = remark
+	category.UpdatedAt = s.now()
+	event := s.newAuditEvent(actor.ID, "category.update", "category", 0, map[string]string{"category_id": strconv.FormatInt(int64(id), 10), "enabled": strconv.FormatBool(enabled)})
+	if err := categoryStore.UpdateCategoryWithAudit(category, event); err != nil {
+		return Category{}, err
 	}
-	return game, nil
+	return category, nil
 }
 
-func (s *Service) DeleteGame(actorID UserID, id string) error {
+func (s *Service) DeleteCategory(actorID UserID, id CategoryID) error {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return err
 	}
-	gameStore, okStore := s.store.(operationGameStore)
-	id = strings.TrimSpace(id)
-	if !ok || !isAdmin(actor) || !okStore || id == "" {
+	categoryStore, okStore := s.store.(operationCategoryStore)
+	if !ok || !isAdmin(actor) || !okStore || id <= 0 {
 		return ErrForbidden
 	}
-	if _, found, err := gameStore.FindGame(id); err != nil {
+	if _, found, err := categoryStore.FindCategory(id); err != nil {
 		return err
 	} else if !found {
 		return ErrInvalidInput
 	}
-	referenced, err := gameStore.GameHasReferences(id)
+	referenced, err := categoryStore.CategoryHasReferences(id)
 	if err != nil {
 		return err
 	}
 	if referenced {
-		return ErrGameInUse
+		return ErrCategoryInUse
 	}
-	event := s.newAuditEvent(actor.ID, "operation_game.delete", "operation_game", 0, map[string]string{"game_id": id})
-	return gameStore.DeleteGameWithAudit(id, event)
+	event := s.newAuditEvent(actor.ID, "category.delete", "category", 0, map[string]string{"category_id": strconv.FormatInt(int64(id), 10)})
+	return categoryStore.DeleteCategoryWithAudit(id, event)
 }
 
 func (s *Service) DeleteUser(actorID, userID UserID) error {
@@ -935,17 +927,17 @@ func (s *Service) DeleteUser(actorID, userID UserID) error {
 	return s.store.DeleteUserWithAudit(userID, event)
 }
 
-func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string) (PublicUser, error) {
-	return s.updateUser(actorID, userID, role, teamID, gameIDs, "", "user.access.update")
+func (s *Service) UpdateUserAccess(actorID, userID UserID, role Role, teamID *TeamID, categoryIDs []CategoryID) (PublicUser, error) {
+	return s.updateUser(actorID, userID, role, teamID, categoryIDs, "", "user.access.update")
 }
 
 // UpdateUser applies the complete admin form as one validated transaction so
-// callers never observe a partial role/team/game/status update.
-func (s *Service) UpdateUser(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string, status UserStatus) (PublicUser, error) {
-	return s.updateUser(actorID, userID, role, teamID, gameIDs, status, "user.update")
+// callers never observe a partial role/team/category/status update.
+func (s *Service) UpdateUser(actorID, userID UserID, role Role, teamID *TeamID, categoryIDs []CategoryID, status UserStatus) (PublicUser, error) {
+	return s.updateUser(actorID, userID, role, teamID, categoryIDs, status, "user.update")
 }
 
-func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string, status UserStatus, action string) (PublicUser, error) {
+func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, categoryIDs []CategoryID, status UserStatus, action string) (PublicUser, error) {
 	actor, ok, err := s.store.FindUser(actorID)
 	if err != nil {
 		return PublicUser{}, err
@@ -969,14 +961,14 @@ func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, 
 	if !validStatus(status) || (actorID == userID && status != user.Status) {
 		return PublicUser{}, ErrInvalidInput
 	}
-	normalizedGameIDs := normalizeGameIDs(gameIDs)
+	normalizedCategoryIDs := normalizeCategoryIDs(categoryIDs)
 	teamName := ""
 	if role == RoleAdmin {
-		if teamID != nil || len(normalizedGameIDs) != 0 {
+		if teamID != nil || len(normalizedCategoryIDs) != 0 {
 			return PublicUser{}, ErrInvalidInput
 		}
 	} else {
-		if teamID == nil || *teamID <= 0 || len(normalizedGameIDs) == 0 {
+		if teamID == nil || *teamID <= 0 || len(normalizedCategoryIDs) == 0 {
 			return PublicUser{}, ErrInvalidInput
 		}
 		if team, found, err := s.store.FindTeam(*teamID); err != nil {
@@ -986,26 +978,26 @@ func (s *Service) updateUser(actorID, userID UserID, role Role, teamID *TeamID, 
 		} else {
 			teamName = team.Name
 		}
-		if err := s.ensureGamesAssignable(normalizedGameIDs); err != nil {
+		if err := s.ensureCategoriesAssignable(normalizedCategoryIDs); err != nil {
 			return PublicUser{}, err
 		}
-		if references, ok := s.store.(gameReferenceStore); ok {
-			inUse, err := references.UserHasGameReferencesOutsideScope(user.ID, normalizedGameIDs)
+		if references, ok := s.store.(categoryReferenceStore); ok {
+			inUse, err := references.UserHasCategoryReferencesOutsideScope(user.ID, normalizedCategoryIDs)
 			if err != nil {
 				return PublicUser{}, err
 			}
 			if inUse {
-				return PublicUser{}, ErrUserGameScopeInUse
+				return PublicUser{}, ErrUserCategoryScopeInUse
 			}
 		}
 	}
 	user.Role = role
 	user.Status = status
 	user.TeamID = cloneTeamID(teamID)
-	user.GameIDs = normalizedGameIDs
+	user.CategoryIDs = normalizedCategoryIDs
 	user.UpdatedAt = s.now()
 	event := s.newAuditEvent(actor.ID, action, "user", user.ID, map[string]string{
-		"role": string(role), "status": string(status), "team_id": formatTeamID(user.TeamID), "game_ids": strings.Join(user.GameIDs, ","),
+		"role": string(role), "status": string(status), "team_id": formatTeamID(user.TeamID), "category_ids": formatCategoryIDs(user.CategoryIDs),
 	})
 	reason := SessionInvalidReasonSuperseded
 	if user.Status == UserStatusDisabled {
@@ -1038,19 +1030,19 @@ func (s *Service) newAuditEvent(actorID UserID, action, targetType string, targe
 	}
 }
 
-func (s *Service) CanAccessGame(userID UserID, gameID string) bool {
+func (s *Service) CanAccessCategory(userID UserID, categoryID CategoryID) bool {
 	user, ok, err := s.store.FindUser(userID)
 	if err != nil {
 		return false
 	}
-	if !ok || user.Status != UserStatusEnabled || strings.TrimSpace(gameID) == "" {
+	if !ok || user.Status != UserStatusEnabled || categoryID <= 0 {
 		return false
 	}
 	if user.Role == RoleAdmin {
 		return true
 	}
-	for _, assigned := range user.GameIDs {
-		if assigned == gameID {
+	for _, assigned := range user.CategoryIDs {
+		if assigned == categoryID {
 			return true
 		}
 	}
@@ -1066,7 +1058,7 @@ func publicUser(user User) PublicUser {
 	if !validAvatarID(avatarID) {
 		avatarID = "sky"
 	}
-	return PublicUser{ID: user.ID, Username: user.Username, Nickname: nickname, AvatarID: avatarID, Role: user.Role, Status: user.Status, TeamID: cloneTeamID(user.TeamID), TeamName: user.TeamName, GameIDs: append([]string(nil), user.GameIDs...)}
+	return PublicUser{ID: user.ID, Username: user.Username, Nickname: nickname, AvatarID: avatarID, Role: user.Role, Status: user.Status, TeamID: cloneTeamID(user.TeamID), TeamName: user.TeamName, CategoryIDs: append([]CategoryID(nil), user.CategoryIDs...)}
 }
 
 func validAvatarID(id string) bool {
@@ -1120,50 +1112,48 @@ func formatTeamID(value *TeamID) string {
 	return strconv.FormatInt(int64(*value), 10)
 }
 
+func formatCategoryIDs(values []CategoryID) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.FormatInt(int64(value), 10))
+	}
+	return strings.Join(parts, ",")
+}
+
 func validStatus(status UserStatus) bool {
 	return status == UserStatusEnabled || status == UserStatusDisabled
 }
 
-func validGameStatus(status GameStatus) bool {
-	return status == GameStatusEnabled || status == GameStatusDisabled
-}
-
-func validGameID(id string) bool {
-	if id == "" || len(id) > 32 {
+func validCategoryType(categoryType CategoryType) bool {
+	switch categoryType {
+	case CategoryTypeGame, CategoryTypeAI, CategoryTypeAnime:
+		return true
+	default:
 		return false
 	}
-	for _, ch := range id {
-		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
-func normalizeGameIDs(values []string) []string {
-	unique := make(map[string]struct{}, len(values))
+func normalizeCategoryIDs(values []CategoryID) []CategoryID {
+	unique := make(map[CategoryID]struct{}, len(values))
 	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
+		if value > 0 {
 			unique[value] = struct{}{}
 		}
 	}
-	result := make([]string, 0, len(unique))
+	result := make([]CategoryID, 0, len(unique))
 	for value := range unique {
 		result = append(result, value)
 	}
-	sort.Strings(result)
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
 }
 
-func containsGame(gameIDs []string, gameID string) bool {
-	gameID = strings.TrimSpace(gameID)
-	if gameID == "" {
+func containsCategory(categoryIDs []CategoryID, categoryID CategoryID) bool {
+	if categoryID <= 0 {
 		return false
 	}
-	for _, assigned := range gameIDs {
-		if assigned == gameID {
+	for _, assigned := range categoryIDs {
+		if assigned == categoryID {
 			return true
 		}
 	}
@@ -1319,7 +1309,7 @@ func (s *memoryStore) UpdateUserAndInvalidateSessions(user User, event AuditEven
 		delete(s.byName, current.Username)
 		s.byName[user.Username] = user.ID
 	}
-	user.GameIDs = append([]string(nil), user.GameIDs...)
+	user.CategoryIDs = append([]CategoryID(nil), user.CategoryIDs...)
 	s.users[user.ID] = user
 	for hash, session := range s.sessions {
 		if session.UserID == user.ID && session.InvalidAt == nil {
@@ -1655,7 +1645,7 @@ func (s *memoryStore) AuditEvents() []AuditEvent {
 
 func cloneUser(user User) User {
 	user.TeamID = cloneTeamID(user.TeamID)
-	user.GameIDs = append([]string(nil), user.GameIDs...)
+	user.CategoryIDs = append([]CategoryID(nil), user.CategoryIDs...)
 	return user
 }
 

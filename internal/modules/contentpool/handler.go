@@ -15,30 +15,31 @@ import (
 	contentservice "github.com/wt-media/wt-media-cloud/internal/modules/contentpool/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 type sourceRequest struct {
-	TeamID            *identityservice.TeamID `json:"team_id"`
-	GameID            *string                 `json:"game_id"`
-	Platform          string                  `json:"platform"`
-	PlatformContentID string                  `json:"platform_content_id"`
-	Title             string                  `json:"title"`
-	Description       string                  `json:"description"`
-	CoverURL          string                  `json:"cover_url"`
-	SourceURL         string                  `json:"source_url"`
-	AuthorID          string                  `json:"author_id"`
-	AuthorSecUID      string                  `json:"author_sec_uid"`
-	AuthorUID         string                  `json:"author_uid"`
-	AuthorHomeURL     string                  `json:"author_home_url"`
-	AuthorName        string                  `json:"author_name"`
-	SourceType        string                  `json:"source_type"`
-	LikeCount         int64                   `json:"like_count"`
-	FavoriteCount     int64                   `json:"favorite_count"`
-	ViewCount         int64                   `json:"view_count"`
-	CommentCount      int64                   `json:"comment_count"`
-	ShareCount        int64                   `json:"share_count"`
-	PublishedAt       string                  `json:"published_at"`
-	RawJSON           json.RawMessage         `json:"raw_json"`
+	TeamID            *identityservice.TeamID    `json:"team_id"`
+	CategoryID        *sharedidentity.CategoryID `json:"category_id"`
+	Platform          string                     `json:"platform"`
+	PlatformContentID string                     `json:"platform_content_id"`
+	Title             string                     `json:"title"`
+	Description       string                     `json:"description"`
+	CoverURL          string                     `json:"cover_url"`
+	SourceURL         string                     `json:"source_url"`
+	AuthorID          string                     `json:"author_id"`
+	AuthorSecUID      string                     `json:"author_sec_uid"`
+	AuthorUID         string                     `json:"author_uid"`
+	AuthorHomeURL     string                     `json:"author_home_url"`
+	AuthorName        string                     `json:"author_name"`
+	SourceType        string                     `json:"source_type"`
+	LikeCount         int64                      `json:"like_count"`
+	FavoriteCount     int64                      `json:"favorite_count"`
+	ViewCount         int64                      `json:"view_count"`
+	CommentCount      int64                      `json:"comment_count"`
+	ShareCount        int64                      `json:"share_count"`
+	PublishedAt       string                     `json:"published_at"`
+	RawJSON           json.RawMessage            `json:"raw_json"`
 }
 type statusRequest struct {
 	Status    model.Status `json:"status"`
@@ -52,27 +53,28 @@ type batchStatusRequest struct {
 	AuditNote string       `json:"audit_note"`
 }
 type strategyRequest struct {
-	TeamID       *identityservice.TeamID `json:"team_id"`
-	GameID       *string                 `json:"game_id"`
-	Name         string                  `json:"name"`
-	StrategyType string                  `json:"strategy_type"`
-	Platform     string                  `json:"platform"`
-	Config       map[string]any          `json:"config"`
-	Schedule     string                  `json:"schedule"`
-	Timezone     string                  `json:"timezone"`
-	Status       model.StrategyStatus    `json:"status"`
+	TeamID       *identityservice.TeamID    `json:"team_id"`
+	CategoryID   *sharedidentity.CategoryID `json:"category_id"`
+	Name         string                     `json:"name"`
+	StrategyType string                     `json:"strategy_type"`
+	Platform     string                     `json:"platform"`
+	Config       map[string]any             `json:"config"`
+	Schedule     string                     `json:"schedule"`
+	Timezone     string                     `json:"timezone"`
+	Status       model.StrategyStatus       `json:"status"`
 }
 type manualSearchRequest struct {
-	TeamID    *identityservice.TeamID `json:"team_id"`
-	Platform  string                  `json:"platform"`
-	Keyword   string                  `json:"keyword"`
-	Query     string                  `json:"query"`
-	Author    string                  `json:"author"`
-	URL       string                  `json:"url"`
-	URLs      []string                `json:"urls"`
-	Limit     int                     `json:"limit"`
-	Offset    int                     `json:"offset"`
-	MaxCursor int64                   `json:"max_cursor"`
+	TeamID     *identityservice.TeamID    `json:"team_id"`
+	CategoryID *sharedidentity.CategoryID `json:"category_id"`
+	Platform   string                     `json:"platform"`
+	Keyword    string                     `json:"keyword"`
+	Query      string                     `json:"query"`
+	Author     string                     `json:"author"`
+	URL        string                     `json:"url"`
+	URLs       []string                   `json:"urls"`
+	Limit      int                        `json:"limit"`
+	Offset     int                        `json:"offset"`
+	MaxCursor  int64                      `json:"max_cursor"`
 }
 
 func actor(c *hertzapp.RequestContext) (identityservice.PublicUser, bool) {
@@ -87,24 +89,29 @@ func contentID(c *hertzapp.RequestContext, name, message string) (int64, bool) {
 	return value, true
 }
 
-func parseGameIDs(raw string) ([]string, bool) {
-	gameIDs := make([]string, 0)
-	seen := make(map[string]struct{})
+func parseCategoryIDs(raw string) ([]sharedidentity.CategoryID, bool) {
+	categoryIDs := make([]sharedidentity.CategoryID, 0)
+	seen := make(map[sharedidentity.CategoryID]struct{})
 	for _, value := range strings.Split(raw, ",") {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
-		if _, exists := seen[value]; exists {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed <= 0 {
+			return nil, false
+		}
+		categoryID := sharedidentity.CategoryID(parsed)
+		if _, exists := seen[categoryID]; exists {
 			continue
 		}
-		seen[value] = struct{}{}
-		gameIDs = append(gameIDs, value)
+		seen[categoryID] = struct{}{}
+		categoryIDs = append(categoryIDs, categoryID)
 	}
-	if len(gameIDs) > 50 {
+	if len(categoryIDs) > 50 {
 		return nil, false
 	}
-	return gameIDs, true
+	return categoryIDs, true
 }
 
 func teamQuery(c *hertzapp.RequestContext) (*identityservice.TeamID, bool) {
@@ -137,13 +144,13 @@ func ListContent(_ context.Context, c *hertzapp.RequestContext) {
 		team = &teamValue
 	}
 	filter := dto.Filter{TeamID: team, Platform: c.Query("platform"), Status: model.Status(c.Query("status")), SourceType: c.Query("source_type"), Search: c.Query("search"), PublishedFrom: c.Query("published_from"), PublishedTo: c.Query("published_to"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")}
-	if raw := strings.TrimSpace(c.Query("game_ids")); raw != "" {
-		gameIDs, valid := parseGameIDs(raw)
+	if raw := strings.TrimSpace(c.Query("category_ids")); raw != "" {
+		categoryIDs, valid := parseCategoryIDs(raw)
 		if !valid {
-			api.BadRequest(c, 10001, "游戏筛选无效")
+			api.BadRequest(c, 10001, "类目筛选无效")
 			return
 		}
-		filter.GameIDs = gameIDs
+		filter.CategoryIDs = categoryIDs
 	}
 	if raw := strings.TrimSpace(c.Query("content_id")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
@@ -216,7 +223,7 @@ func CreateContent(_ context.Context, c *hertzapp.RequestContext) {
 		}
 		published = &value
 	}
-	item, err := contentservice.CreateSource(actor, dto.SourceInput{TeamID: request.TeamID, GameID: request.GameID, Platform: request.Platform, PlatformContentID: request.PlatformContentID, Title: request.Title, Description: request.Description, CoverURL: request.CoverURL, SourceURL: request.SourceURL, AuthorID: request.AuthorID, AuthorSecUID: request.AuthorSecUID, AuthorUID: request.AuthorUID, AuthorHomeURL: request.AuthorHomeURL, AuthorName: request.AuthorName, SourceType: request.SourceType, LikeCount: request.LikeCount, FavoriteCount: request.FavoriteCount, ViewCount: request.ViewCount, CommentCount: request.CommentCount, ShareCount: request.ShareCount, PublishedAt: published, RawJSON: request.RawJSON})
+	item, err := contentservice.CreateSource(actor, dto.SourceInput{TeamID: request.TeamID, CategoryID: request.CategoryID, Platform: request.Platform, PlatformContentID: request.PlatformContentID, Title: request.Title, Description: request.Description, CoverURL: request.CoverURL, SourceURL: request.SourceURL, AuthorID: request.AuthorID, AuthorSecUID: request.AuthorSecUID, AuthorUID: request.AuthorUID, AuthorHomeURL: request.AuthorHomeURL, AuthorName: request.AuthorName, SourceType: request.SourceType, LikeCount: request.LikeCount, FavoriteCount: request.FavoriteCount, ViewCount: request.ViewCount, CommentCount: request.CommentCount, ShareCount: request.ShareCount, PublishedAt: published, RawJSON: request.RawJSON})
 	if err != nil {
 		writeContentError(c, err)
 		return
@@ -360,6 +367,7 @@ func createURLImportTask(c *hertzapp.RequestContext) {
 		request.Limit = 20
 	}
 	config := map[string]any{"limit": request.Limit, "offset": request.Offset}
+	config["category_id"] = request.CategoryID
 	urls := append([]string{}, request.URLs...)
 	if strings.TrimSpace(request.URL) != "" {
 		urls = append([]string{strings.TrimSpace(request.URL)}, urls...)
@@ -415,7 +423,7 @@ func CreateDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	} else if actor.Role != identityservice.RoleAdmin && actor.TeamID != nil {
 		team = *actor.TeamID
 	}
-	item, err := contentservice.CreateStrategy(actor, model.DiscoveryStrategy{TeamID: team, GameID: request.GameID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
+	item, err := contentservice.CreateStrategy(actor, model.DiscoveryStrategy{TeamID: team, CategoryID: request.CategoryID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return
@@ -457,7 +465,7 @@ func UpdateDiscoveryStrategy(_ context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &request) {
 		return
 	}
-	item, err := contentservice.UpdateStrategy(actor, id, model.DiscoveryStrategy{GameID: request.GameID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
+	item, err := contentservice.UpdateStrategy(actor, id, model.DiscoveryStrategy{CategoryID: request.CategoryID, Name: request.Name, StrategyType: request.StrategyType, Platform: request.Platform, Config: request.Config, Schedule: request.Schedule, Timezone: request.Timezone, Status: request.Status})
 	if err != nil {
 		writeDiscoveryError(c, err)
 		return

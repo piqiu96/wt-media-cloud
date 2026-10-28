@@ -260,7 +260,7 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 			return CreateComposeTasksResult{}, ErrComposeTaskNotFound
 		}
 		task := model.ComposeTask{
-			TeamID: strategy.TeamID, GameID: strategy.GameID, OperatorID: strategy.OperatorID, TriggerType: "manual",
+			TeamID: strategy.TeamID, CategoryID: strategy.CategoryID, OperatorID: strategy.OperatorID, TriggerType: "manual",
 			DisplayName: model.ComposeTaskBatchDisplayName(input.Name, index, len(input.Items), material.Title, item.MaterialID, strategy.Name),
 			MaterialID:  item.MaterialID, StrategyID: strategy.ID,
 			TemplateCode: template.Code, TemplateVersion: strategy.TemplateVersion,
@@ -332,10 +332,10 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 		return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
 	}
 	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
-	// Operators stay inside the games they cover; seniors and admins see every
-	// game of the team they are allowed to read.
+	// Operators stay inside the categories they cover; seniors and admins see every
+	// category of the team they are allowed to read.
 	if actor.Role == identity.RoleOperator {
-		filter.GameIDs = actor.GameIDs
+		filter.CategoryIDs = actor.CategoryIDs
 	}
 	items, err := s.tasks.List(filter)
 	if err != nil {
@@ -458,7 +458,7 @@ func (s *ComposeTaskService) Cancel(actor identity.PublicUser, id int64) (model.
 }
 
 // canReadComposeTask scopes the page: admins see everything, seniors see
-// every game of their team, operators only their own tasks inside the games
+// every category of their team, operators only their own tasks inside the categories
 // they cover.
 func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool {
 	if actor.Status != identity.UserStatusEnabled {
@@ -476,13 +476,13 @@ func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool 
 	if actor.Role != identity.RoleOperator {
 		return false
 	}
-	inGame := false
-	for _, gameID := range actor.GameIDs {
-		if gameID == item.GameID {
-			inGame = true
+	inCategory := false
+	for _, categoryID := range actor.CategoryIDs {
+		if categoryID == item.CategoryID {
+			inCategory = true
 		}
 	}
-	if !inGame {
+	if !inCategory {
 		return false
 	}
 	// Historical rows have no operator. Their creator still reaches them,
@@ -492,8 +492,8 @@ func canReadComposeTask(actor identity.PublicUser, item model.ComposeTask) bool 
 
 // materialFailure returns the named rejection for one material, or nil when it
 // may feed the strategy. Admins browse globally; everyone else stays inside
-// their team, and the material's game must be the strategy's game when the
-// source row knows its game.
+// their team, and the material's category must be the strategy's category when the
+// source row knows its category.
 func (s *ComposeTaskService) materialFailure(actor identity.PublicUser, strategy model.ComposeStrategy, materialID int64) (*CreateComposeTaskFailure, error) {
 	material, found, err := s.materials.FindMaterial(materialID)
 	if err != nil {
@@ -508,8 +508,8 @@ func (s *ComposeTaskService) materialFailure(actor identity.PublicUser, strategy
 	if actor.Role != identity.RoleAdmin && (actor.TeamID == nil || material.TeamID != *actor.TeamID) {
 		return &CreateComposeTaskFailure{MaterialID: materialID, Err: ErrComposeTaskForbidden, Message: "素材不在你的团队范围内"}, nil
 	}
-	if material.GameID != nil && *material.GameID != strategy.GameID {
-		return invalid("素材的游戏与策略不匹配"), nil
+	if material.CategoryID != nil && *material.CategoryID != strategy.CategoryID {
+		return invalid("素材的类目与策略不匹配"), nil
 	}
 	return nil, nil
 }

@@ -71,12 +71,12 @@ func create(db *gorm.DB, record model.AccountRecord) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := lastInsertID(db)
+	id, err := lastInsertID(tx)
 	if err != nil {
 		return "", err
 	}
 	accountID := strconv.FormatInt(id, 10)
-	if err := replaceAccountGameIDs(tx, accountID, record.GameIDs); err != nil {
+	if err := replaceAccountCategoryIDs(tx, accountID, record.CategoryIDs); err != nil {
 		return "", err
 	}
 	if err := tx.Commit().Error; err != nil {
@@ -128,17 +128,17 @@ func findByQuery(db *gorm.DB, query string, args ...any) (model.AccountRecord, b
 		return model.AccountRecord{}, false, err
 	}
 	records := []model.AccountRecord{record}
-	if err := loadGameIDs(db, records); err != nil {
+	if err := loadCategoryIDs(db, records); err != nil {
 		return model.AccountRecord{}, false, err
 	}
 	return records[0], true, nil
 }
 
-func Update(record model.AccountRecord, replaceGameIDs *[]string) error {
-	return update(database.DB(), record, replaceGameIDs)
+func Update(record model.AccountRecord, replaceCategoryIDs *[]sharedidentity.CategoryID) error {
+	return update(database.DB(), record, replaceCategoryIDs)
 }
 
-func update(db *gorm.DB, record model.AccountRecord, replaceGameIDs *[]string) error {
+func update(db *gorm.DB, record model.AccountRecord, replaceCategoryIDs *[]sharedidentity.CategoryID) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	result, err := execSQL(tx,
@@ -158,8 +158,8 @@ func update(db *gorm.DB, record model.AccountRecord, replaceGameIDs *[]string) e
 	if result == 0 {
 		return model.ErrNotFound
 	}
-	if replaceGameIDs != nil {
-		if err := replaceAccountGameIDs(tx, record.ID, *replaceGameIDs); err != nil {
+	if replaceCategoryIDs != nil {
+		if err := replaceAccountCategoryIDs(tx, record.ID, *replaceCategoryIDs); err != nil {
 			return err
 		}
 	}
@@ -178,10 +178,10 @@ func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
 		conditions = append(conditions, "ma.user_id = ?")
 		args = append(args, query.UserID)
 	}
-	if len(query.GameIDs) > 0 {
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_games mag WHERE mag.media_account_id = ma.id AND mag.game_id IN (`+placeholders(len(query.GameIDs))+`))`)
-		for _, gameID := range query.GameIDs {
-			args = append(args, gameID)
+	if len(query.CategoryIDs) > 0 {
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_categories mag WHERE mag.media_account_id = ma.id AND mag.category_id IN (`+placeholders(len(query.CategoryIDs))+`))`)
+		for _, categoryID := range query.CategoryIDs {
+			args = append(args, categoryID)
 		}
 	}
 	if query.Platform != "" {
@@ -227,7 +227,7 @@ func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := loadGameIDs(db, records); err != nil {
+	if err := loadCategoryIDs(db, records); err != nil {
 		return nil, err
 	}
 	if len(query.AnyTags) == 0 && len(query.AllTags) == 0 && len(query.ExcludeTags) == 0 {
@@ -250,21 +250,24 @@ func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
 	return filtered, nil
 }
 
-func replaceAccountGameIDs(db *gorm.DB, accountID string, gameIDs []string) error {
-	if err := db.Exec(`DELETE FROM media_account_games WHERE media_account_id = ?`, accountID).Error; err != nil {
+func replaceAccountCategoryIDs(db *gorm.DB, accountID string, categoryIDs []sharedidentity.CategoryID) error {
+	if err := db.Exec(`DELETE FROM media_account_categories WHERE media_account_id = ?`, accountID).Error; err != nil {
 		return err
 	}
-	for _, gameID := range gameIDs {
-		if err := db.Exec(`INSERT INTO media_account_games (media_account_id, game_id) VALUES (?, ?)`, accountID, gameID).Error; err != nil {
+	for _, categoryID := range categoryIDs {
+		if err := db.Exec(`INSERT INTO media_account_categories (media_account_id, category_id) VALUES (?, ?)`, accountID, categoryID).Error; err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func loadGameIDs(db *gorm.DB, records []model.AccountRecord) error {
+func loadCategoryIDs(db *gorm.DB, records []model.AccountRecord) error {
 	if len(records) == 0 {
 		return nil
+	}
+	for index := range records {
+		records[index].CategoryIDs = []sharedidentity.CategoryID{}
 	}
 	ids := make([]string, 0, len(records))
 	byID := make(map[string]*model.AccountRecord, len(records))
@@ -277,7 +280,7 @@ func loadGameIDs(db *gorm.DB, records []model.AccountRecord) error {
 		args[index] = id
 	}
 	rows, err := queryRows(db,
-		`SELECT media_account_id, game_id FROM media_account_games WHERE media_account_id IN (`+placeholders(len(ids))+`) ORDER BY media_account_id, game_id`,
+		`SELECT media_account_id, category_id FROM media_account_categories WHERE media_account_id IN (`+placeholders(len(ids))+`) ORDER BY media_account_id, category_id`,
 		args...,
 	)
 	if err != nil {
@@ -285,12 +288,13 @@ func loadGameIDs(db *gorm.DB, records []model.AccountRecord) error {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var accountID, gameID string
-		if err := rows.Scan(&accountID, &gameID); err != nil {
+		var accountID string
+		var categoryID sharedidentity.CategoryID
+		if err := rows.Scan(&accountID, &categoryID); err != nil {
 			return err
 		}
 		if record := byID[accountID]; record != nil {
-			record.GameIDs = append(record.GameIDs, gameID)
+			record.CategoryIDs = append(record.CategoryIDs, categoryID)
 		}
 	}
 	if err := rows.Err(); err != nil {

@@ -25,16 +25,16 @@ var (
 )
 
 type ListComposeOutputsInput struct {
-	PublishStatus string    `json:"publish_status"`
-	Source        string    `json:"source"`
-	Search        string    `json:"search"`
-	TriggerType   string    `json:"trigger_type"`
-	GameID        string    `json:"game_id"`
-	TeamID        int64     `json:"team_id"`
-	OperatorID    int64     `json:"operator_id"`
-	OperatorScope string    `json:"operator_scope"`
-	CreatedFrom   time.Time `json:"created_from"`
-	CreatedBefore time.Time `json:"created_before"`
+	PublishStatus string              `json:"publish_status"`
+	Source        string              `json:"source"`
+	Search        string              `json:"search"`
+	TriggerType   string              `json:"trigger_type"`
+	CategoryID    identity.CategoryID `json:"category_id"`
+	TeamID        int64               `json:"team_id"`
+	OperatorID    int64               `json:"operator_id"`
+	OperatorScope string              `json:"operator_scope"`
+	CreatedFrom   time.Time           `json:"created_from"`
+	CreatedBefore time.Time           `json:"created_before"`
 }
 
 // ComposeOutputRepository is the my-outputs read and the one actor-facing
@@ -119,10 +119,10 @@ type ComposeOutputService struct {
 	// needs — an output is never prepared in the cloud, so this service has no
 	// reason to name the preparation half of TransferCreator.
 	transfers outputTransferCreator
-	// resolveGame names the game a download is filed under, stubbed by the
+	// resolveCategory names the category a download is filed under, stubbed by the
 	// unit tests the same way the material download's is.
-	resolveGame func(gameID string) (string, bool, error)
-	now         func() time.Time
+	resolveCategory func(categoryID identity.CategoryID) (string, bool, error)
+	now             func() time.Time
 }
 
 // outputTransferCreator is the slice of TransferCreator a download of an
@@ -135,9 +135,9 @@ func NewComposeOutputService(outputs ComposeOutputRepository, materials composeO
 	return &ComposeOutputService{
 		outputs: outputs, materials: materials, usages: usages, strategies: strategies, tasks: tasks, links: links,
 		transfers: transfers, now: time.Now,
-		resolveGame: func(gameID string) (string, bool, error) {
-			game, ok, err := identity.ResolveGame(gameID)
-			return game.Name, ok, err
+		resolveCategory: func(categoryID identity.CategoryID) (string, bool, error) {
+			category, ok, err := identity.ResolveCategory(categoryID)
+			return category.Name, ok, err
 		},
 	}
 }
@@ -170,7 +170,7 @@ func CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task
 
 // List scopes the page exactly like the compose-task list — admins the target
 // team or every team, seniors their whole team, operators only what they
-// created inside the games they cover (PRD §5.10.2/§5.10.3). A caller without
+// created inside the categories they cover (PRD §5.10.2/§5.10.3). A caller without
 // a scope answers an empty page rather than an error, because the scope is
 // legitimate and simply contains nothing.
 func (s *ComposeOutputService) List(actor identity.PublicUser, input ListComposeOutputsInput) ([]model.CompositeOutput, error) {
@@ -210,19 +210,19 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 		return nil, fmt.Errorf("%w: %v", ErrComposeOutputInvalid, err)
 	}
 	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
-	gameID := strings.TrimSpace(input.GameID)
-	if len([]rune(gameID)) > 32 {
-		return nil, fmt.Errorf("%w: game_id is too long", ErrComposeOutputInvalid)
+	categoryID := input.CategoryID
+	if categoryID < 0 {
+		return nil, fmt.Errorf("%w: category_id is invalid", ErrComposeOutputInvalid)
 	}
-	// The game is a narrowing filter, never a grant: an operator may only name a
-	// game they cover, and everyone else still reads within the team scope above.
-	if gameID != "" {
-		if actor.Role == identity.RoleOperator && !slices.Contains(actor.GameIDs, gameID) {
+	// The category is a narrowing filter, never a grant: an operator may only name a
+	// category they cover, and everyone else still reads within the team scope above.
+	if categoryID > 0 {
+		if actor.Role == identity.RoleOperator && !slices.Contains(actor.CategoryIDs, categoryID) {
 			return nil, ErrComposeOutputForbidden
 		}
-		filter.GameIDs = []string{gameID}
+		filter.CategoryIDs = []identity.CategoryID{categoryID}
 	} else if actor.Role == identity.RoleOperator {
-		filter.GameIDs = actor.GameIDs
+		filter.CategoryIDs = actor.CategoryIDs
 	}
 	items, err := s.outputs.List(filter)
 	if err != nil {
@@ -343,12 +343,12 @@ func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, i
 	if err != nil {
 		return transferdto.Task{}, err
 	}
-	gameName := ""
-	if output.GameID != "" {
-		// Same swallow as the material path's `gameNameOf`: a game that cannot be
+	categoryName := ""
+	if output.CategoryID > 0 {
+		// Same swallow as the material path's `categoryNameOf`: a category that cannot be
 		// resolved names no file rather than failing the download.
-		if name, ok, err := s.resolveGame(output.GameID); err == nil && ok {
-			gameName = name
+		if name, ok, err := s.resolveCategory(output.CategoryID); err == nil && ok {
+			categoryName = name
 		}
 	}
 	task, err := s.transfers.CreateUserDownload(transferservice.CreateUserDownloadInput{
@@ -356,7 +356,7 @@ func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, i
 		AssetType:       transfermodel.AssetCompositeOutput,
 		AssetID:         output.ID,
 		AssetTitle:      fmt.Sprintf("成片-%d", output.ID),
-		GameName:        gameName,
+		CategoryName:    categoryName,
 		SourceObjectKey: output.ObjectKey,
 		RequestedBy:     actor.ID,
 		TotalBytes:      output.FileSizeBytes,
@@ -397,7 +397,7 @@ func (s *ComposeOutputService) withOperatorName(item model.CompositeOutput) (mod
 }
 
 // canReadComposeOutput scopes the page like canReadComposeTask: admins see
-// everything, seniors every game of their team, operators only their own.
+// everything, seniors every category of their team, operators only their own.
 func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput) bool {
 	if actor.Role == identity.RoleAdmin {
 		return true
@@ -411,13 +411,13 @@ func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput)
 	if actor.Role != identity.RoleOperator {
 		return false
 	}
-	inGame := false
-	for _, gameID := range actor.GameIDs {
-		if gameID == item.GameID {
-			inGame = true
+	inCategory := false
+	for _, categoryID := range actor.CategoryIDs {
+		if categoryID == item.CategoryID {
+			inCategory = true
 		}
 	}
-	if !inGame {
+	if !inCategory {
 		return false
 	}
 	// Same fallback as tasks: a historical row with no operator stays

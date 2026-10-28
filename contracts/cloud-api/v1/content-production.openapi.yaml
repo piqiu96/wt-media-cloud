@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.27.4
+  version: 2026.10.29.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -20,12 +20,12 @@ paths:
         Senior operators name only their own team; administrators must pass the
         target team. An ordinary operator has no directory (403). A person is
         eligible when enabled, holds the operator or senior_operator role and
-        belongs to the team; a game_id narrows the result to people responsible
-        for that game.
+        belongs to the team; a category_id narrows the result to people responsible
+        for that category.
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: team_id, required: false, description: Required for administrators; senior operators may omit it and are pinned to their own team., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: game_id, required: false, description: Optional exact game ID; the strategy form passes the game it will bind., schema: {type: string}}
+        - {in: query, name: category_id, required: false, description: Optional exact category ID; the strategy form passes the category it will bind., schema: {type: integer, format: int64, minimum: 1}}
       responses:
         '200': {description: '[ComposeOperatorOption] sorted by display name.'}
         '400': {description: Missing or invalid team (named compose_operator_invalid).}
@@ -33,11 +33,11 @@ paths:
   /api/v1/compose-strategies:
     get:
       operationId: listComposeStrategies
-      summary: List strategies in the actor's team and game scope; an ordinary operator sees only enabled strategies assigned to them.
+      summary: List strategies in the actor's team and category scope; an ordinary operator sees only enabled strategies assigned to them.
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: search, required: false, description: Strategy name substring, or exact strategy ID when numeric., schema: {type: string, maxLength: 100}}
-        - {in: query, name: game_id, required: false, description: Exact game ID., schema: {type: string}}
+        - {in: query, name: category_id, required: false, description: Exact category ID., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: template_id, required: false, description: Exact compose template ID; non-positive values are refused., schema: {type: integer, minimum: 1}}
         - {in: query, name: status, required: false, description: Exact strategy status. Unknown values are refused., schema: {type: string, enum: [enabled, disabled]}}
       responses:
@@ -55,7 +55,7 @@ paths:
       responses:
         '201': {description: Created strategy, read back from storage.}
         '400': {description: Invalid input or config outside the bound template schema.}
-        '403': {description: Actor cannot manage the target team or game.}
+        '403': {description: Actor cannot manage the target team or category.}
         '409': {description: Template version is inactive or not executable.}
   /api/v1/compose-strategies/{strategy_id}:
     get:
@@ -394,10 +394,10 @@ paths:
       summary: List compose outputs visible in the current user's scope.
       description: >-
         The my-outputs page. Scope follows the compose-task shape — admins see
-        everything or one named team, senior operators see every game of their
+        everything or one named team, senior operators see every category of their
         team, operators only outputs assigned to them (and, for historical rows,
-        ones they created while unassigned) inside the games they cover. The
-        game_id filter only narrows that scope; it never widens it. The response
+        ones they created while unassigned) inside the categories they cover. The
+        category_id filter only narrows that scope; it never widens it. The response
         never carries an object address; previews go through the video-url
         endpoint.
       security: [{sessionCookie: []}]
@@ -406,16 +406,16 @@ paths:
         - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
         - {in: query, name: search, required: false, description: Output ID, source material ID/title, or strategy name substring., schema: {type: string, maxLength: 100}}
         - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, scheduled]}}
-        - {in: query, name: game_id, required: false, description: Exact game of the output. A narrowing filter, not a grant; an ordinary operator naming a game they do not cover answers 403., schema: {type: string, maxLength: 32}}
+        - {in: query, name: category_id, required: false, description: Exact category of the output. A narrowing filter, not a grant; an ordinary operator naming a category they do not cover answers 403., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
         - {$ref: '#/components/parameters/CreatedFrom'}
         - {$ref: '#/components/parameters/CreatedBefore'}
       responses:
-        '200': {description: '[ComposeOutput] — newest first, optional source, game and time filters.'}
+        '200': {description: '[ComposeOutput] — newest first, optional source, category and time filters.'}
         '400': {description: Invalid filter (named compose_output_invalid).}
-        '403': {description: game_id is outside an ordinary operator's covered games (named compose_output_forbidden).}
+        '403': {description: category_id is outside an ordinary operator's covered categories (named compose_output_forbidden).}
   /api/v1/compose-outputs/{output_id}:
     get:
       operationId: getComposeOutput
@@ -485,11 +485,11 @@ paths:
   /api/v1/materials:
     get:
       operationId: listMaterials
-      summary: List the team's public material library, optionally narrowed by game and usage dimensions.
+      summary: List the team's public material library, optionally narrowed by category and usage dimensions.
       description: >-
         The library is the team's public selection pool, not each operator's own
         working set. An ordinary or senior operator sees every material in their
-        team regardless of which games they are responsible for; a game is a
+        team regardless of which categories they are responsible for; a category is a
         filter, not a visibility boundary. An administrator must name the target
         team to read one team's library. Each material carries the viewer's own
         relation (`usage_status` / `added_at`), whether the viewer has produced a
@@ -503,8 +503,8 @@ paths:
       parameters:
         - {in: query, name: search, required: false, description: Material ID, title, platform content ID or author name substring., schema: {type: string, maxLength: 100}}
         - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: game_ids, required: false, description: One or more exact game IDs, comma separated (at most 50). Narrows the list; it does not restrict visibility., schema: {type: string}}
-        - {in: query, name: game_id, required: false, description: Legacy single exact game ID, combined with `game_ids` when both are present., schema: {type: string}}
+        - {in: query, name: category_ids, required: false, description: One or more exact numeric category IDs, comma separated (at most 50). Narrows the list; it does not restrict visibility., schema: {type: string}}
+        - {in: query, name: category_id, required: false, description: Exact category ID, combined with `category_ids` when both are present., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: joined, required: false, description: '`joined`: the viewer has an active material usage. `not_joined`: no active usage, which includes a relation that was removed.', schema: {type: string, enum: [joined, not_joined]}}
         - {in: query, name: my_usage, required: false, description: '`used`: the viewer is the operator of at least one successful composite output. `unused`: no such output.', schema: {type: string, enum: [used, unused]}}
         - {in: query, name: team_usage, required: false, description: '`used`: at least one successful composite output has a known operator. `unused`: no such output. Historical outputs without an operator count as an output but not as known use.', schema: {type: string, enum: [used, unused]}}
@@ -656,11 +656,11 @@ components:
         display_name: {type: string, description: Nickname when set, otherwise username.}
     ComposeStrategy:
       type: object
-      required: [id, team_id, game_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
+      required: [id, team_id, category_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
-        game_id: {type: string}
+        category_id: {type: integer, format: int64, minimum: 1}
         operator_id: {type: [integer, 'null'], format: int64, description: Null on historical rows written before assignment existed; never backfilled from created_by.}
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         name: {type: string}
@@ -769,11 +769,11 @@ components:
     CreateComposeStrategy:
       type: object
       additionalProperties: false
-      required: [game_id, operator_id, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
+      required: [category_id, operator_id, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
       properties:
         team_id: {type: integer, format: int64, description: Required for administrators; senior operators use their own team.}
-        game_id: {type: string}
-        operator_id: {type: integer, format: int64, minimum: 1, description: An enabled operator or senior_operator on the team who is responsible for the game.}
+        category_id: {type: integer, format: int64, minimum: 1}
+        operator_id: {type: integer, format: int64, minimum: 1, description: An enabled operator or senior_operator on the team who is responsible for the category.}
         name: {type: string}
         compose_template_id: {type: integer, format: int64}
         compose_template_version: {type: integer, minimum: 1}
@@ -851,11 +851,11 @@ components:
     ComposeOutput:
       type: object
       additionalProperties: false
-      required: [id, team_id, game_id, operator_id, operator_name, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, file_size_bytes, sha256, media, publish_status, created_by, created_at, updated_at]
+      required: [id, team_id, category_id, operator_id, operator_name, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, file_size_bytes, sha256, media, publish_status, created_by, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
-        game_id: {type: string}
+        category_id: {type: integer, format: int64, minimum: 1}
         operator_id: {type: [integer, 'null'], format: int64, description: Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by.}
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         material_id: {type: integer, format: int64}
@@ -889,12 +889,12 @@ components:
         trace: {$ref: '#/components/schemas/ComposeOutputTrace'}
     ComposeTask:
       type: object
-      required: [id, team_id, game_id, operator_id, operator_name, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
+      required: [id, team_id, category_id, operator_id, operator_name, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         display_name: {type: string, description: Creation-time material title and strategy name; empty for legacy tasks that cannot be safely reconstructed.}
         team_id: {type: integer, format: int64}
-        game_id: {type: string}
+        category_id: {type: integer, format: int64, minimum: 1}
         operator_id: {type: [integer, 'null'], format: int64, description: The strategy's operator at creation time, frozen on the task; null on historical rows, never backfilled from created_by.}
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         trigger_type: {type: string, enum: [manual, scheduled]}

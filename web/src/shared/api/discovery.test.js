@@ -6,7 +6,7 @@ function ok(data) {
 }
 
 describe('discovery api client', () => {
-  it('passes the game catalog scope and team filter through to the API', async () => {
+  it('passes the category catalog scope and team filter through to the API', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(ok([]))
       .mockResolvedValueOnce(ok([]))
@@ -14,11 +14,11 @@ describe('discovery api client', () => {
     const client = createDiscoveryClient({ fetch })
 
     await client.listStrategies({ teamId: 10, search: '热点' })
-    await client.listGames({ scope: 'all' })
+    await client.listCategories({ scope: 'all' })
     await client.listTasks({ team_id: 10 })
 
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/discovery-strategies?search=%E7%83%AD%E7%82%B9&team_id=10')
-    expect(fetch.mock.calls[1][0]).toBe('/api/v1/games?scope=all')
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/categories?scope=all')
     expect(fetch.mock.calls[2][0]).toBe('/api/v1/crawl-tasks?team_id=10')
   })
 })

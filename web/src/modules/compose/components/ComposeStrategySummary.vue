@@ -7,11 +7,11 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 // 策略详情的只读正文：合成策略页的「使用范围 / 合成配置」两段，单列出来给任务详情里的
 // 关联策略抽屉复用（交互规范 §9.4：复用已有详情能力，不复制第二套业务详情）。
 //
-// 团队与游戏的名称由宿主解析后传进来 —— 两处宿主各有一份自己的团队/游戏表，组件不认识它们。
+// 团队与类目的名称由宿主解析后传进来 —— 两处宿主各有一份自己的团队/类目表，组件不认识它们。
 const props = defineProps({
   strategy: { type: Object, required: true },
   team: { type: String, default: '' },
-  game: { type: String, default: '' },
+  category: { type: String, default: '' },
   templates: { type: Array, default: () => [] },
   // 引导视频的下载地址只在策略管理页出现：它是带签名的地址（与任务快照同一条边界），
   // 任务视图里不渲染这一组。空串=这一组三行都不出现。
@@ -42,7 +42,7 @@ const guideName = computed(() => {
         <div class="strategy-overview-field"><span>模板版本</span><strong>v{{ strategy.compose_template_version }}</strong></div>
         <div class="strategy-overview-field"><span>状态</span><strong>{{ strategy.status === 'enabled' ? '已启用' : '已停用' }}</strong></div>
         <div class="strategy-overview-field"><span>所属团队</span><strong>{{ team || '—' }}</strong></div>
-        <div class="strategy-overview-field"><span>所属游戏</span><strong>{{ game || '—' }}</strong></div>
+        <div class="strategy-overview-field"><span>所属类目</span><strong>{{ category || '—' }}</strong></div>
         <div class="strategy-overview-field"><span>负责人</span><strong>{{ strategy.operator_name || '未记录' }}</strong></div>
         <div class="strategy-overview-field"><span>合成模板</span><strong>{{ templateLabel(templates, strategy.compose_template_id) }}</strong></div>
         <div class="strategy-overview-field"><span>创建时间</span><strong>{{ formatDateTime(strategy.created_at) }}</strong></div>
@@ -71,7 +71,7 @@ const guideName = computed(() => {
       <h4 class="strategy-detail-section">使用范围</h4>
       <div class="strategy-detail-grid">
         <div class="strategy-drawer__field"><span>所属团队</span><strong>{{ team }}</strong></div>
-        <div class="strategy-drawer__field"><span>所属游戏</span><strong>{{ game }}</strong></div>
+        <div class="strategy-drawer__field"><span>所属类目</span><strong>{{ category }}</strong></div>
         <div class="strategy-drawer__field"><span>负责人</span><strong>{{ strategy.operator_name || '未记录' }}</strong></div>
       </div>
     </section>

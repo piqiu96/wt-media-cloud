@@ -587,7 +587,7 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 func profileActor(userID string) identityservice.PublicUser {
 	parsed, _ := strconv.ParseInt(strings.TrimPrefix(userID, "user-"), 10, 64)
 	teamID := identityservice.TeamID(parsed)
-	return identityservice.PublicUser{ID: identityservice.UserID(parsed), Role: identityservice.RoleOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID, GameIDs: []string{"game-a"}}
+	return identityservice.PublicUser{ID: identityservice.UserID(parsed), Role: identityservice.RoleOperator, Status: identityservice.UserStatusEnabled, TeamID: &teamID, CategoryIDs: []identityservice.CategoryID{1}}
 }
 
 func newTestService(store Store) *Service {

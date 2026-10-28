@@ -115,7 +115,7 @@ components:
             it; Cloud refuses a report from an earlier attempt with `transfer_task_conflict` rather than
             letting stale work settle the task.
         # 2026.10.13（CHG-20261013-085）：与业务侧 FileTransferTask 同一次加宽——成片
-        # 租约的 title/game_name/published_at 语义见各自字段描述（成片无后两者时可缺省）。
+        # 租约的 title/category_name/published_at 语义见各自字段描述（成片无后两者时可缺省）。
         asset_type: {type: string, enum: [composite_output, material]}
         asset_id: {type: integer, format: int64}
         title:
@@ -125,10 +125,10 @@ components:
             it for its own filesystem, because the reserved names and separators differ per operating system
             and only the executor knows which one it runs on. For a composite output the cloud side already
             resolves a display name (成片-<output_id> 形), so the executor never derives one from the id.
-        game_name:
+        category_name:
           type: string
           description: >-
-            The game's name as the operator chose it, or absent when the asset has no game. The executor
+            The category's name as the operator chose it, or absent when the asset has no category. The executor
             uses it to name the file, falling back to a fixed placeholder when it is absent.
         published_at:
           type: string
@@ -136,7 +136,7 @@ components:
           description: >-
             When the asset was published, copied onto the task when it was created. Optional: an asset
             without a publish time sends no value and the executor omits that segment of the file name
-            (`YYYYMMDD/<game_name>-<asset_id>[-<YYYYMMDD>][-<title>].<ext>`). A composite output has no
+            (`YYYYMMDD/<category_name>-<asset_id>[-<YYYYMMDD>][-<title>].<ext>`). A composite output has no
             publish time and never sends it.
         total_bytes:
           type: integer

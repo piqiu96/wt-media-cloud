@@ -70,7 +70,7 @@ func (f *scheduleBatchFake) FindRun(int64, time.Time) (model.ComposeScheduleRun,
 
 func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled"}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, CategoryID: 1, Status: "enabled"}}
 	slot := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
 	store := &scheduleBatchFake{
 		tasks:   []model.ComposeTask{{ID: 1, Status: "success"}, {ID: 2, Status: "failed", ErrorCode: "execution_failed"}},
@@ -85,9 +85,9 @@ func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 	if _, err := svc.Batch(actor, 12, slot); !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("missing strategy error=%v", err)
 	}
-	actor.GameIDs = []string{"other"}
+	actor.CategoryIDs = []identity.CategoryID{4}
 	if _, err := svc.Batch(actor, 11, slot); err != nil {
-		t.Fatalf("senior manages every game of the team: %v", err)
+		t.Fatalf("senior manages every category of the team: %v", err)
 	}
 	otherTeam := identity.TeamID(8)
 	actor.TeamID = &otherTeam
@@ -111,7 +111,7 @@ func TestComposeBatchViewScopesReadbackAndCarriesCounts(t *testing.T) {
 
 func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled"}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, CategoryID: 1, Status: "enabled"}}
 	store := &scheduleFake{runs: []model.ComposeScheduleRun{{StrategyID: 11, Skipped: []model.ComposeScheduleSkip{{MaterialID: 4, Reason: "already_produced"}}}}}
 	svc := NewComposeSchedulerService(store, strategies)
 	runs, err := svc.ListRuns(actor, 11)
@@ -121,9 +121,9 @@ func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 	if _, err := svc.ListRuns(actor, 12); !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("missing strategy error=%v", err)
 	}
-	actor.GameIDs = []string{"other"}
+	actor.CategoryIDs = []identity.CategoryID{4}
 	if _, err := svc.ListRuns(actor, 11); err != nil {
-		t.Fatalf("senior manages every game of the team: %v", err)
+		t.Fatalf("senior manages every category of the team: %v", err)
 	}
 	otherTeam := identity.TeamID(8)
 	actor.TeamID = &otherTeam
@@ -134,7 +134,7 @@ func TestComposeScheduleRunsScopedReadback(t *testing.T) {
 
 func TestComposeScheduleRunHistoryScopesAndPassesFilters(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled"}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, CategoryID: 1, Status: "enabled"}}
 	store := &scheduleFake{runs: []model.ComposeScheduleRun{{StrategyID: 11}}}
 	svc := NewComposeSchedulerService(store, strategies)
 	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
@@ -143,9 +143,9 @@ func TestComposeScheduleRunHistoryScopesAndPassesFilters(t *testing.T) {
 	if err != nil || page.Total != 1 || store.historyOptions.StrategyID != 11 || store.historyOptions.Page != 2 || store.historyOptions.TriggerType != "manual" || !store.historyOptions.CreatedFrom.Equal(from) {
 		t.Fatalf("page=%+v options=%+v err=%v", page, store.historyOptions, err)
 	}
-	actor.GameIDs = []string{"other"}
+	actor.CategoryIDs = []identity.CategoryID{4}
 	if _, err := svc.RunHistory(actor, 11, options); err != nil {
-		t.Fatalf("senior manages every game of the team: %v", err)
+		t.Fatalf("senior manages every category of the team: %v", err)
 	}
 	otherTeam := identity.TeamID(8)
 	actor.TeamID = &otherTeam
@@ -166,7 +166,7 @@ func TestComposeSchedulerContinuesAfterOneStrategyFails(t *testing.T) {
 func TestComposeRunNowChecksActorAndUsesStableRequestKey(t *testing.T) {
 	_, strategies, actor := strategyFixture()
 	schedule := model.ComposeSchedule{Mode: "manual", Timezone: "Asia/Shanghai"}
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled", OperatorID: operatorIDPtr(9), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Schedule: &schedule}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, CategoryID: 1, Status: "enabled", OperatorID: operatorIDPtr(9), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Schedule: &schedule}}
 	store := &scheduleFake{}
 	svc := NewComposeSchedulerService(store, strategies)
 	svc.operators = func() ([]identity.PublicUser, error) { return []identity.PublicUser{actor}, nil }
@@ -185,13 +185,13 @@ func TestComposeRunNowChecksActorAndUsesStableRequestKey(t *testing.T) {
 
 func TestComposeRunNowUsesTheSeniorTeamScope(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "other", Status: "enabled", OperatorID: operatorIDPtr(10), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, CategoryID: 4, Status: "enabled", OperatorID: operatorIDPtr(10), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}}
 	store := &scheduleFake{}
 	svc := NewComposeSchedulerService(store, strategies)
-	other := identity.PublicUser{ID: 10, Username: "operator10", Nickname: "十号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: actor.TeamID, GameIDs: []string{"other"}}
+	other := identity.PublicUser{ID: 10, Username: "operator10", Nickname: "十号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: actor.TeamID, CategoryIDs: []identity.CategoryID{4}}
 	svc.operators = func() ([]identity.PublicUser, error) { return []identity.PublicUser{actor, other}, nil }
 	if _, err := svc.RunNow(actor, 11, "request-001"); err != nil || len(store.options) != 1 {
-		t.Fatalf("senior runs another game of the team: err=%v options=%+v", err, store.options)
+		t.Fatalf("senior runs another category of the team: err=%v options=%+v", err, store.options)
 	}
 	otherTeam := identity.TeamID(8)
 	actor.TeamID = &otherTeam
@@ -202,12 +202,12 @@ func TestComposeRunNowUsesTheSeniorTeamScope(t *testing.T) {
 
 func TestComposeRunNowRefusesAnUnavailableOperatorBeforeRunning(t *testing.T) {
 	_, strategies, actor := strategyFixture()
-	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, GameID: "delta", Status: "enabled", OperatorID: operatorIDPtr(10), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}}
+	strategies.items = []model.ComposeStrategy{{ID: 11, TeamID: 7, CategoryID: 1, Status: "enabled", OperatorID: operatorIDPtr(10), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2}}
 	store := &scheduleFake{}
 	svc := NewComposeSchedulerService(store, strategies)
 	team := identity.TeamID(7)
 	svc.operators = func() ([]identity.PublicUser, error) {
-		return []identity.PublicUser{{ID: 9, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}}, nil
+		return []identity.PublicUser{{ID: 9, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}}, nil
 	}
 	if _, err := svc.RunNow(actor, 11, "request-001"); !errors.Is(err, ErrStrategyInvalid) {
 		t.Fatalf("unavailable operator error = %v", err)

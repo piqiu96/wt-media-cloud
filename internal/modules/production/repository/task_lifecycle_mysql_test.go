@@ -21,7 +21,7 @@ func sqlmockIDRows(ids ...int64) *sqlmock.Rows {
 func modelStatusRunning() model.ComposeTaskStatus { return model.ComposeTaskRunning }
 
 func composeOutputFixture(taskID int64) model.CompositeOutput {
-	return model.CompositeOutput{TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: int64Ptr(9), TaskID: taskID, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "outputs/final", FileSizeBytes: 1024, SHA256: "abc", Media: json.RawMessage(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 11}
+	return model.CompositeOutput{TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: int64Ptr(9), TaskID: taskID, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "outputs/final", FileSizeBytes: 1024, SHA256: "abc", Media: json.RawMessage(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 11}
 }
 
 // CHG-20261013-083 (M4-C5): the worker lifecycle writes. Each test pins the
@@ -166,7 +166,7 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 	step := closingCommitStep(now)
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `composite_outputs`").
-		WithArgs(int64(7), "delta", nil, int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
+		WithArgs(int64(7), 1, nil, int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
 		WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").
 		WithArgs("outputs/final", int64(55), now, now, int64(77), int64(9), 1, now).

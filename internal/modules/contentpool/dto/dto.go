@@ -11,7 +11,7 @@ import (
 
 type SourceInput struct {
 	TeamID            *sharedidentity.TeamID
-	GameID            *string
+	CategoryID            *sharedidentity.CategoryID
 	Platform          string
 	PlatformContentID string
 	Title             string
@@ -39,7 +39,7 @@ type SourceInput struct {
 type Filter struct {
 	ID            *int64
 	TeamID        *sharedidentity.TeamID
-	GameIDs       []string
+	CategoryIDs       []sharedidentity.CategoryID
 	Platform      string
 	Status        model.Status
 	SourceType    string
@@ -110,7 +110,7 @@ type SearchResponse struct {
 
 type ImportResultsRequest struct {
 	TeamID     *sharedidentity.TeamID `json:"team_id,omitempty"`
-	GameID     *string                `json:"game_id,omitempty"`
+	CategoryID     *sharedidentity.CategoryID                `json:"category_id,omitempty"`
 	Platform   string                 `json:"platform"`
 	SourceType string                 `json:"source_type,omitempty"`
 	Items      []SearchResult         `json:"items"`

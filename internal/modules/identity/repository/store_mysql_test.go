@@ -43,15 +43,15 @@ func TestFindUserByUsernameUsesGORMAndMapsStoredUser(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "username", "nickname", "avatar_id", "password_hash", "role", "status", "team_id", "team_name", "created_at", "updated_at",
 		}).AddRow(int64(1), "admin", "Admin", "sky", "hash", "admin", "enabled", nil, "", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT game_id FROM user_game_scopes")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT category_id FROM user_category_scopes")).
 		WithArgs(int64(1)).
-		WillReturnRows(sqlmock.NewRows([]string{"game_id"}).AddRow("game-a"))
+		WillReturnRows(sqlmock.NewRows([]string{"category_id"}).AddRow(1))
 
 	user, found, err := findUserByUsername(db, "admin")
 	if err != nil || !found {
 		t.Fatalf("findUserByUsername() = %v, %v, want found without error", found, err)
 	}
-	if user.ID != 1 || user.Username != "admin" || user.Nickname != "Admin" || user.AvatarID != "sky" || len(user.GameIDs) != 1 || user.GameIDs[0] != "game-a" {
+	if user.ID != 1 || user.Username != "admin" || user.Nickname != "Admin" || user.AvatarID != "sky" || len(user.CategoryIDs) != 1 || user.CategoryIDs[0] != model.CategoryID(1) {
 		t.Fatalf("user = %#v", user)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

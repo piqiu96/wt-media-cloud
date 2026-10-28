@@ -12,10 +12,11 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
+	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
-const composeTaskColumns = `id, display_name, team_id, game_id, operator_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
+const composeTaskColumns = `id, display_name, team_id, category_id, operator_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
 
 // ErrComposeTaskMaterialUsed reports that the same (strategy, material) pair
 // already has a task row, whatever its status: a pair is produced once, and a
@@ -34,7 +35,7 @@ type ComposeTaskFilter struct {
 	// "mine": a historical row without an operator stays visible to the person
 	// who created it, without pretending that person is the operator.
 	IncludeUnownedCreatedBy int64
-	GameIDs                 []string
+	CategoryIDs             []identity.CategoryID
 	Status                  model.ComposeTaskStatus
 	TriggerType             string
 	StrategyID              int64
@@ -70,7 +71,7 @@ func createComposeTaskAudited(db *gorm.DB, item model.ComposeTask, action string
 
 func appendComposeTaskAudit(tx *gorm.DB, item model.ComposeTask, action string, actorID int64, now time.Time) error {
 	summary, err := json.Marshal(map[string]any{
-		"team_id": item.TeamID, "game_id": item.GameID, "operator_id": item.OperatorID, "status": item.Status,
+		"team_id": item.TeamID, "category_id": item.CategoryID, "operator_id": item.OperatorID, "status": item.Status,
 		"material_id": item.MaterialID, "template_code": item.TemplateCode, "template_version": item.TemplateVersion,
 	})
 	if err != nil {
@@ -302,14 +303,14 @@ func (ComposeTaskStore) List(filter ComposeTaskFilter) ([]model.ComposeTask, err
 
 func listComposeTasks(db *gorm.DB, filter ComposeTaskFilter) ([]model.ComposeTask, error) {
 	query := `SELECT ` + composeTaskColumns + ` FROM compose_tasks WHERE 1=1`
-	args := make([]any, 0, len(filter.GameIDs)+4)
+	args := make([]any, 0, len(filter.CategoryIDs)+4)
 	if filter.TeamID > 0 {
 		query += ` AND team_id = ?`
 		args = append(args, filter.TeamID)
 	}
-	if len(filter.GameIDs) > 0 {
-		query += ` AND game_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.GameIDs)), ",") + `)`
-		for _, id := range filter.GameIDs {
+	if len(filter.CategoryIDs) > 0 {
+		query += ` AND category_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.CategoryIDs)), ",") + `)`
+		for _, id := range filter.CategoryIDs {
 			args = append(args, id)
 		}
 	}
@@ -398,7 +399,7 @@ func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 	var snapshot []byte
 	var operatorID, usageID, claimedNode, compositeOutput sql.NullInt64
 	var leaseExpires, heartbeat, nextAttempt, started, finished sql.NullTime
-	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.GameID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.CategoryID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.ComposeTask{}, err
 	}

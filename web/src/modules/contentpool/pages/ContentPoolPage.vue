@@ -14,7 +14,7 @@ import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import ContentPoolSourceDrawer from '../components/ContentPoolSourceDrawer.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { enabledGames } from '../../../shared/utils/games.js'
+import { enabledCategories } from '../../../shared/utils/categories.js'
 import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
 import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 
@@ -63,12 +63,12 @@ const manualPagination = ref({ nextOffset: 0, maxCursor: 0, hasMore: false })
 const manualForm = ref({ platform: 'douyin', idList: [], keyword: '', keywords: [] })
 const manualTeamId = ref('')
 const manualTeamLocked = ref(false)
-const manualGameId = ref('')
+const manualCategoryId = ref('')
 const teams = ref([])
-const games = ref([])
+const categories = ref([])
 const currentUser = ref(null)
 const teamFilter = ref('')
-const gameFilter = ref([])
+const categoryFilter = ref([])
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const imageViewerVisible = ref(false)
 const imageViewerImages = ref([])
@@ -99,7 +99,7 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 80, sorter: true },
   { colKey: 'title', title: '内容', width: 340 },
   { colKey: 'platform', title: '平台', width: 110 },
-  { colKey: 'game', title: '游戏', width: 110 },
+  { colKey: 'category', title: '类目', width: 110 },
   { colKey: 'author_name', title: '作者', width: 140 },
   // 互动列为较长的带千分位数值留出宽度。
   { colKey: 'interaction', title: '互动', width: 120 },
@@ -122,7 +122,7 @@ const tableScroll = computed(() => ({
 }))
 
 onMounted(async () => {
-  // 先拿到当前用户的负责游戏，首次列表才能按默认游戏筛选加载。
+  // 先拿到当前用户的负责类目，首次列表才能按默认类目筛选加载。
   await loadManualContext()
   await load()
 })
@@ -133,7 +133,7 @@ async function load({ quiet = false } = {}) {
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const result = await client.list({ search: search.value.trim(), content_id: contentID.value.trim() || undefined, platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, team_id: teamFilter.value || undefined, game_ids: gameFilter.value.length ? gameFilter.value : undefined, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined, material_id: materialFilter.value || undefined, published_from: publishedRange.value?.[0] || undefined, published_to: publishedRange.value?.[1] || undefined, sort_by: sortBy.value, sort_order: sortOrder.value })
+    const result = await client.list({ search: search.value.trim(), content_id: contentID.value.trim() || undefined, platform: platform.value, source_type: sourceType.value, status: isLibrary.value ? 'material_created' : status.value, team_id: teamFilter.value || undefined, category_ids: categoryFilter.value.length ? categoryFilter.value : undefined, strategy_id: strategyFilter.value || undefined, crawl_task_id: taskFilter.value || undefined, material_id: materialFilter.value || undefined, published_from: publishedRange.value?.[0] || undefined, published_to: publishedRange.value?.[1] || undefined, sort_by: sortBy.value, sort_order: sortOrder.value })
     rows.value = Array.isArray(result) ? result : []
     if (!quiet) pagination.value.current = 1
   } catch (e) {
@@ -149,25 +149,25 @@ useAutoRefresh(() => load({ quiet: true }), {
 })
 
 function reset() {
-  search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []; teamFilter.value = ''; gameFilter.value = defaultGameIDs()
+  search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []; teamFilter.value = ''; categoryFilter.value = defaultCategoryIDs()
   load()
 }
 
-// 选择与筛选用启用游戏；名称解析仍读全量目录，停用游戏的历史行不会显示成裸 ID。
-const enabledGameOptions = computed(() => enabledGames(games.value))
+// 选择与筛选用启用类目；名称解析仍读全量目录，停用类目的历史行不会显示成裸 ID。
+const enabledCategoryOptions = computed(() => enabledCategories(categories.value))
 
-// 游戏范围是“负责游戏”，不是可见边界：默认只勾本人负责的游戏，清空即看全团队。
-// 与启用集合取交集：停用游戏已不在筛选项里，勾上等于挂一个删不掉的条件。
-function defaultGameIDs() {
-  const ids = currentUser.value?.role === 'admin' ? [] : [...(currentUser.value?.game_ids || [])]
-  if (!games.value.length) return ids
-  const enabledIds = new Set(enabledGameOptions.value.map((game) => game.id))
+// 类目范围是“负责类目”，不是可见边界：默认只勾本人负责的类目，清空即看全团队。
+// 与启用集合取交集：停用类目已不在筛选项里，勾上等于挂一个删不掉的条件。
+function defaultCategoryIDs() {
+  const ids = currentUser.value?.role === 'admin' ? [] : [...(currentUser.value?.category_ids || [])]
+  if (!categories.value.length) return ids
+  const enabledIds = new Set(enabledCategoryOptions.value.map((category) => category.id))
   return ids.filter((id) => enabledIds.has(id))
 }
 
 function changeTeamFilter() {
-  // 游戏目录是全局的，切团队后保留上一团队的勾选没有意义。
-  gameFilter.value = []
+  // 类目目录是全局的，切团队后保留上一团队的勾选没有意义。
+  categoryFilter.value = []
   load()
 }
 
@@ -199,16 +199,16 @@ async function loadManualContext() {
     manualTeamId.value = user?.role === 'admin' ? '' : (user?.team_id || '')
     const data = await users.listTeams()
     teams.value = Array.isArray(data) ? data : []
-    // 游戏名称映射与人工导入需要完整目录，非管理员也要看到本团队其他游戏。
-    const gameData = await users.listGames({ scope: 'all' })
-    games.value = Array.isArray(gameData) ? gameData : []
-    // 默认负责游戏要在目录到位后再取，否则与启用集合的交集算不出来。
-    if (!gameFilter.value.length) gameFilter.value = defaultGameIDs()
-    const enabled = enabledGameOptions.value
-    if (!manualGameId.value && enabled.length) manualGameId.value = (enabled.find((g) => g.id === 'other') || enabled[0]).id
+    // 类目名称映射与人工导入需要完整目录，非管理员也要看到本团队其他类目。
+    const categoryData = await users.listCategories({ scope: 'all' })
+    categories.value = Array.isArray(categoryData) ? categoryData : []
+    // 默认负责类目要在目录到位后再取，否则与启用集合的交集算不出来。
+    if (!categoryFilter.value.length) categoryFilter.value = defaultCategoryIDs()
+    const enabled = enabledCategoryOptions.value
+    if (!manualCategoryId.value && enabled.length) manualCategoryId.value = (enabled.find((g) => g.id === 'other') || enabled[0]).id
   } catch {
     teams.value = []
-    games.value = []
+    categories.value = []
   }
 }
 
@@ -217,9 +217,9 @@ function teamName(id) {
   return team?.name || '未知团队'
 }
 
-function gameName(id) {
-  const game = games.value.find((item) => item.id === id)
-  return game?.name || '-'
+function categoryName(id) {
+  const category = categories.value.find((item) => item.id === id)
+  return category?.name || '-'
 }
 
 function selectedTeamID() {
@@ -304,7 +304,7 @@ async function confirmSelected() {
   manualLoading.value = true
   try {
     const selected = manualResults.value.filter((item) => selectedResultKeys.value.includes(item.platform_content_id))
-    const result = await discovery.importResults({ platform: manualForm.value.platform, team_id: selectedTeamID(), game_id: manualGameId.value || null, source_type: 'search', items: selected })
+    const result = await discovery.importResults({ platform: manualForm.value.platform, team_id: selectedTeamID(), category_id: manualCategoryId.value || null, source_type: 'search', items: selected })
     manualVisible.value = false
     await load()
     feedback.toast.success(`成功导入 ${result.imported || 0} 条，重复 ${result.duplicate || 0} 条`)
@@ -572,7 +572,7 @@ function openImageViewer(url) {
             <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></label>
             <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
-            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilter" multiple clearable placeholder="全部"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
+            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">类目</span><t-select v-model="categoryFilter" multiple clearable placeholder="全部"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></t-select></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
@@ -600,7 +600,7 @@ function openImageViewer(url) {
               </div>
             </template>
             <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
-            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
+            <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
             <template #author_name="{ row }">
               <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
               <span v-else>{{ authorLabel(row) }}</span>
@@ -727,10 +727,10 @@ function openImageViewer(url) {
           </div>
 
           <div class="discover-section">
-            <div class="discover-section__title"><span class="discover-no">①</span>基础信息<small>选择平台和归属游戏，用于内容分类和数据统计</small></div>
+            <div class="discover-section__title"><span class="discover-no">①</span>基础信息<small>选择平台和归属类目，用于内容分类和数据统计</small></div>
             <t-form label-width="80px">
               <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-              <t-form-item label="所属游戏"><t-select v-model="manualGameId" clearable placeholder="选择游戏分类"><t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></t-form-item>
+              <t-form-item label="所属类目"><t-select v-model="manualCategoryId" clearable placeholder="选择类目分类"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></t-select></t-form-item>
               <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
             </t-form>
           </div>

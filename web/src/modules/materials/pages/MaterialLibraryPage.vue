@@ -17,7 +17,7 @@ import {
   JOIN_FILTERS,
   MY_USAGE_FILTERS,
   TEAM_USAGE_FILTERS,
-  gameName,
+  categoryName,
   joinStatus,
   materialStatusLabel,
   materialStatusTone,
@@ -45,10 +45,10 @@ const joinedFilter = ref('')
 const myUsageFilter = ref('')
 const teamUsageFilter = ref('')
 const teamFilter = ref('')
-const gameFilters = ref([])
+const categoryFilters = ref([])
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
-const games = ref([])
+const categories = ref([])
 const teams = ref([])
 const currentUser = ref(null)
 const detailVisible = ref(false)
@@ -62,24 +62,24 @@ const isAdmin = computed(() => currentUser.value?.role === 'admin')
 // 使用情况对全部角色可见：服务端对所有角色都返回成片数与使用人数，只对普通运营
 // 把姓名置空。所以这一列、筛选和详情段按同一套渲染，不需要角色开关。
 
-// 普通运营与高级运营进入页面时，游戏多选默认本人负责的游戏；管理员默认不筛，
-// 读的是所选团队（未选则跨团队）的库。清空筛选即可看到本团队全部游戏。
-function responsibleGames() {
+// 普通运营与高级运营进入页面时，类目多选默认本人负责的类目；管理员默认不筛，
+// 读的是所选团队（未选则跨团队）的库。清空筛选即可看到本团队全部类目。
+function responsibleCategories() {
   if (isAdmin.value) return []
-  return Array.isArray(currentUser.value?.game_ids) ? [...currentUser.value.game_ids] : []
+  return Array.isArray(currentUser.value?.category_ids) ? [...currentUser.value.category_ids] : []
 }
 
-// 默认勾选只取「本人负责 ∩ 已启用」：游戏管理里停用的游戏不进选项，选中它
+// 默认勾选只取「本人负责 ∩ 已启用」：类目管理里停用的类目不进选项，选中它
 // 只会得到一个永远空的筛选；字典还没读到时也不预选，避免选中不在选项里的 id。
-function defaultGameFilters() {
-  const enabled = new Set(games.value.map((game) => game.id))
-  return responsibleGames().filter((id) => enabled.has(id))
+function defaultCategoryFilters() {
+  const enabled = new Set(categories.value.map((category) => category.id))
+  return responsibleCategories().filter((id) => enabled.has(id))
 }
 
 // 每一列都必须声明 width，不许只写 minWidth —— 理由与实测数据见
 // shared/testing/listPageConventions.js 里那条断言上面的说明（WebKit 的 fixed 布局下
 // minWidth 不产生确定列宽，这些列会被压成「剩余空间列」）。
-// 素材 ID 是第一业务列（规范 §5.1，用户裁定保留）；游戏不并进「素材」副行，它有自己的一列。
+// 素材 ID 是第一业务列（规范 §5.1，用户裁定保留）；类目不并进「素材」副行，它有自己的一列。
 // 三个使用维度各自成列：加入状态（查看者自己的关系）、我的使用（查看者是否做过成功
 // 成片）、使用情况（本团队成功成片汇总）。它们不是同一个问题的不同画法，规范 §7.2
 // 明令不得合并。缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到
@@ -90,7 +90,7 @@ function defaultGameFilters() {
 const columns = [
   { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 360 },
-  { colKey: 'game', title: '游戏', width: 100 },
+  { colKey: 'category', title: '类目', width: 100 },
   { colKey: 'material_status', title: '素材状态', width: 100 },
   { colKey: 'joined', title: '加入状态', width: 100 },
   { colKey: 'my_usage', title: '我的使用', width: 100 },
@@ -110,9 +110,9 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + pagination.value.pageSize)
 })
 
-// 选项是游戏管理里已启用的全量游戏，不是本人负责的那几个，也不依赖当前页加载过
-// 哪些行：默认勾选只决定第一次看到什么，能筛到哪些游戏由游戏管理决定。
-const gameOptions = computed(() => games.value.map((game) => ({ id: game.id, name: game.name })))
+// 选项是类目管理里已启用的全量类目，不是本人负责的那几个，也不依赖当前页加载过
+// 哪些行：默认勾选只决定第一次看到什么，能筛到哪些类目由类目管理决定。
+const categoryOptions = computed(() => categories.value.map((category) => ({ id: category.id, name: category.name })))
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
 async function load({ quiet = false } = {}) {
@@ -122,7 +122,7 @@ async function load({ quiet = false } = {}) {
     const data = await client.list({
       search: search.value,
       team_id: teamFilter.value,
-      game_ids: gameFilters.value,
+      category_ids: categoryFilters.value,
       joined: joinedFilter.value,
       my_usage: myUsageFilter.value,
       team_usage: teamUsageFilter.value,
@@ -142,26 +142,26 @@ useAutoRefresh(() => load({ quiet: true }), {
   shouldSkip: () => detailVisible.value || detailLoading.value || usageVisible.value,
 })
 
-async function loadGames() {
+async function loadCategories() {
   try {
-    // 游戏只做筛选，不再是可见边界；名字字典用全量 enabled 游戏，
-    // 否则清空筛选后出现的其他游戏只能显示 id。
-    const data = await users.listGames({ scope: 'all', status: 'enabled' })
-    games.value = Array.isArray(data) ? data : []
+    // 类目只做筛选，不再是可见边界；名字字典用全量 enabled 类目，
+    // 否则清空筛选后出现的其他类目只能显示 id。
+    const data = await users.listCategories({ scope: 'all', enabled: true })
+    categories.value = Array.isArray(data) ? data : []
   } catch {
-    // 游戏名只是展示：拿不到就退回 id（labels.js 的 gameName 已经这么做了），
+    // 类目名只是展示：拿不到就退回 id（labels.js 的 categoryName 已经这么做了），
     // 不因此把整页标成出错 —— 素材本身是好的。
-    games.value = []
+    categories.value = []
   }
 }
 
-// 角色与本人游戏范围来自会话，只用于默认筛选；服务端仍然自己决定团队边界。
-// 默认勾选要等游戏字典一起到齐后再算（见 onMounted），这里不提前写 gameFilters。
+// 角色与本人类目范围来自会话，只用于默认筛选；服务端仍然自己决定团队边界。
+// 默认勾选要等类目字典一起到齐后再算（见 onMounted），这里不提前写 categoryFilters。
 async function loadSession() {
   try {
     currentUser.value = await sessionClient.me()
   } catch {
-    // 读不到会话时不给默认游戏筛选：服务端按团队返回，少一层缩小是安全的方向。
+    // 读不到会话时不给默认类目筛选：服务端按团队返回，少一层缩小是安全的方向。
     currentUser.value = null
   }
 }
@@ -254,7 +254,7 @@ function reset() {
   myUsageFilter.value = ''
   teamUsageFilter.value = ''
   teamFilter.value = ''
-  gameFilters.value = defaultGameFilters()
+  categoryFilters.value = defaultCategoryFilters()
   load()
 }
 
@@ -270,9 +270,9 @@ function changeSort(sort) {
 }
 
 onMounted(async () => {
-  // 默认勾选 = 本人负责 ∩ 游戏管理启用；两者都到齐后先算出筛选，再取列表。
-  await Promise.all([loadSession(), loadGames()])
-  gameFilters.value = defaultGameFilters()
+  // 默认勾选 = 本人负责 ∩ 类目管理启用；两者都到齐后先算出筛选，再取列表。
+  await Promise.all([loadSession(), loadCategories()])
+  categoryFilters.value = defaultCategoryFilters()
   load()
   loadTeams()
   openFromQuery()
@@ -288,7 +288,7 @@ onMounted(async () => {
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="teamFilter" clearable placeholder="全部"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="gameFilters" multiple clearable placeholder="全部"><t-option v-for="game in gameOptions" :key="game.id" :value="game.id" :label="game.name" /></t-select></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="categoryFilters" multiple clearable placeholder="全部"><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
@@ -308,7 +308,7 @@ onMounted(async () => {
                 </div>
               </div>
             </template>
-            <template #game="{ row }">{{ gameName(games, row.game_id) }}</template>
+            <template #category="{ row }">{{ categoryName(categories, row.category_id) }}</template>
             <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的。 -->
             <template #material_status="{ row }">
               <ResourceStatusBadge v-if="row.status" :tone="materialStatusTone(row.status)" :label="materialStatusLabel(row.status)" />
@@ -346,7 +346,7 @@ onMounted(async () => {
         v-model:visible="detailVisible"
         :material="detail"
         :loading="detailLoading"
-        :games="games"
+        :categories="categories"
         :mine="detail?.usage_status === 'active'"
         mode="library"
         @add="addToMine"

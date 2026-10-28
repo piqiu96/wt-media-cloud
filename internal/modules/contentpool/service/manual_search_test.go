@@ -78,11 +78,11 @@ func (s *searchClientStub) FindAuthor(_ context.Context, request douyinclient.Fi
 
 func TestKeywordSearchReturnsItemsWithoutCreatingTask(t *testing.T) {
 	client := &searchClientStub{}
-	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Keyword: "游戏", Limit: 15, Offset: 10}, client)
+	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Keyword: "类目", Limit: 15, Offset: 10}, client)
 	if err != nil || client.searchCalls != 1 || len(result.Items) != 1 || result.Items[0].PlatformContentID != "keyword-1" {
 		t.Fatalf("result=%+v calls=%d err=%v", result, client.searchCalls, err)
 	}
-	if client.searchReq.Keyword != "游戏" || client.searchReq.Count != 15 || client.searchReq.Offset != 10 {
+	if client.searchReq.Keyword != "类目" || client.searchReq.Count != 15 || client.searchReq.Offset != 10 {
 		t.Fatalf("search request=%+v", client.searchReq)
 	}
 	item := result.Items[0]
@@ -197,7 +197,7 @@ func TestImportResultsUsesExistingContentPoolDeduplication(t *testing.T) {
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
 	store := newMemoryStore()
 	service := newContentService(store)
-	request := dto.ImportResultsRequest{Platform: "douyin", Items: []dto.SearchResult{
+	request := dto.ImportResultsRequest{Platform: "douyin", CategoryID: testCategoryID(), Items: []dto.SearchResult{
 		{PlatformContentID: "a1", Title: "first", SourceURL: "https://www.douyin.com/video/a1"},
 		{PlatformContentID: "a1", Title: "duplicate", SourceURL: "https://www.douyin.com/video/a1"},
 	}}
@@ -213,7 +213,7 @@ func TestImportResultsPreservesRawPlatformPayload(t *testing.T) {
 	store := newMemoryStore()
 	service := newContentService(store)
 	raw := json.RawMessage(`{"aweme_id":"raw-1","desc":"raw result","statistics":{"play_count":999}}`)
-	_, err := service.importResults(actor, dto.ImportResultsRequest{Platform: "douyin", Items: []dto.SearchResult{{
+	_, err := service.importResults(actor, dto.ImportResultsRequest{Platform: "douyin", CategoryID: testCategoryID(), Items: []dto.SearchResult{{
 		PlatformContentID: "raw-1", Title: "raw result", SourceURL: "https://www.douyin.com/video/raw-1", Raw: raw,
 	}}})
 	if err != nil {

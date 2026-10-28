@@ -146,18 +146,18 @@ describe('my materials page', () => {
    * 规范 §7.2：使用状态与文件状态并排、不合并——同一个素材可以同时是「使用中 + 准备失败」，
    * 压成一个混合状态最先丢掉的正是运营要做判断的那种组合。
    *
-   * 游戏收进「素材」格副行（与作者同格），不单独占列：它与素材识别信息说的是同一件事，
+   * 类目收进「素材」格副行（与作者同格），不单独占列：它与素材识别信息说的是同一件事，
    * 而列本身占了 100px。
    */
-  it('carries 使用状态 next to 文件状态 and folds the game into the 素材 cell', () => {
+  it('carries 使用状态 next to 文件状态 and folds the category into the 素材 cell', () => {
     expect(source).toContain("{ colKey: 'usage_status', title: '使用状态'")
     expect(source.indexOf("{ colKey: 'usage_status'")).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
     expect(source.indexOf("{ colKey: 'usage_status'")).toBeLessThan(source.indexOf("{ colKey: 'added_at'"))
-    expect(source).not.toContain("{ colKey: 'game'")
+    expect(source).not.toContain("{ colKey: 'category'")
     expect(source).toContain('usageStatusLabel(row.usage_status)')
     expect(source).toContain('usageStatusTone(row.usage_status)')
-    // 副行是「游戏 · 作者」。
-    expect(source).toContain('gameName(games.value, row.game_id)')
+    // 副行是「类目 · 作者」。
+    expect(source).toContain('categoryName(categories.value, row.category_id)')
     expect(source).toContain('row.author_name')
   })
 

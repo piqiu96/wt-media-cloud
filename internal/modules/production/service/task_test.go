@@ -194,12 +194,12 @@ func composeTaskFixture() (*ComposeTaskService, *taskMemoryStore, *strategyMemor
 	team := identity.TeamID(7)
 	definition := executor.BasicCutV1()
 	strategies := &strategyMemoryStore{
-		items:    []model.ComposeStrategy{{ID: 5, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "切段", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 9}},
+		items:    []model.ComposeStrategy{{ID: 5, TeamID: 7, CategoryID: 1, TemplateID: 3, TemplateVersion: 1, Name: "切段", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 9}},
 		template: model.ComposeTemplate{ID: 3, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"},
 	}
 	materials := &taskMaterialMemoryStore{items: []model.Material{
-		{ID: 42, TeamID: 7, GameID: strPtr("delta"), Title: "素材一"},
-		{ID: 43, TeamID: 7, GameID: strPtr("delta"), Title: "素材二"},
+		{ID: 42, TeamID: 7, CategoryID: categoryPtr(1), Title: "素材一"},
+		{ID: 43, TeamID: 7, CategoryID: categoryPtr(1), Title: "素材二"},
 	}}
 	tasks := &taskMemoryStore{usages: []model.MaterialUsage{
 		{ID: 91, TeamID: 7, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive},
@@ -207,11 +207,11 @@ func composeTaskFixture() (*ComposeTaskService, *taskMemoryStore, *strategyMemor
 		{ID: 93, TeamID: 7, MaterialID: 42, UserID: 10, Status: model.MaterialUsageActive},
 	}}
 	svc := NewComposeTaskService(tasks, strategies, materials)
-	actor := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	actor := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	return svc, tasks, strategies, materials, actor
 }
 
-func strPtr(s string) *string { return &s }
+func categoryPtr(id identity.CategoryID) *identity.CategoryID { return &id }
 
 func composeTaskSnapshot(t *testing.T, raw json.RawMessage) map[string]any {
 	t.Helper()
@@ -243,7 +243,7 @@ func TestCreateComposeTasksCreatesPerItemWithMergedSnapshot(t *testing.T) {
 	if first.DisplayName != "素材一 · 切段" {
 		t.Fatalf("task name must capture creation-time material and strategy: %q", first.DisplayName)
 	}
-	if first.MaterialID != 42 || usageIDValue(first.MaterialUsageID) != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.GameID != "delta" || first.TemplateCode != "basic_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
+	if first.MaterialID != 42 || usageIDValue(first.MaterialUsageID) != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.CategoryID != 1 || first.TemplateCode != "basic_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
 		t.Fatalf("first task facts drifted: %+v", first)
 	}
 	snapshot := composeTaskSnapshot(t, first.ConfigSnapshot)
@@ -402,9 +402,9 @@ func TestCreateComposeTasksNamedFailuresAreZeroWrite(t *testing.T) {
 			},
 		},
 		{
-			name: "material game does not match strategy game",
+			name: "material category does not match strategy category",
 			mutate: func(_ *taskMemoryStore, _ *strategyMemoryStore, materials *taskMaterialMemoryStore) {
-				materials.items[0].GameID = strPtr("echo")
+				materials.items[0].CategoryID = categoryPtr(2)
 			},
 			check: func(t *testing.T, res CreateComposeTasksResult, err error, _ *taskMemoryStore) {
 				if err != nil || len(res.Failed) != 1 || !errors.Is(res.Failed[0].Err, ErrComposeTaskInvalid) {
@@ -446,7 +446,7 @@ func TestCreateComposeTasksNamedFailuresAreZeroWrite(t *testing.T) {
 			},
 		},
 	}
-	keys := []string{"rk-usage-001", "rk-scope-001", "rk-game-001", "rk-inact-001", "rk-oscope-01", "rk-tmpl-001"}
+	keys := []string{"rk-usage-001", "rk-scope-001", "rk-category-001", "rk-inact-001", "rk-oscope-01", "rk-tmpl-001"}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, tasks, strategies, materials, actor := composeTaskFixture()
@@ -478,7 +478,7 @@ func TestCreateComposeTasksSameRequestKeyIsIdempotent(t *testing.T) {
 
 func TestCreateComposeTasksRejectsKeyClaimedByAnotherUser(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
-	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, GameID: "delta", Status: model.ComposeTaskPending, RequestKey: "rk-taken-001", CreatedBy: 9})
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskPending, RequestKey: "rk-taken-001", CreatedBy: 9})
 	other := actor
 	other.ID = 10
 	other.Role = identity.RoleSeniorOperator
@@ -510,7 +510,7 @@ func TestCreateComposeTasksDuplicateKeysInOneRequestRejected(t *testing.T) {
 // the handler's mapping table, so the service leaves Message empty.
 func TestCreateComposeTasksRefusesMaterialAlreadyInFlight(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
-	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, GameID: "delta", StrategyID: 5, MaterialID: 43, Status: model.ComposeTaskRunning, RequestKey: "rk-flight-01", CreatedBy: 9})
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, CategoryID: 1, StrategyID: 5, MaterialID: 43, Status: model.ComposeTaskRunning, RequestKey: "rk-flight-01", CreatedBy: 9})
 	res, err := svc.Create(actor, CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{
 		{MaterialID: 42, RequestKey: "rk-flight-02"},
 		{MaterialID: 43, RequestKey: "rk-flight-03"},
@@ -529,7 +529,7 @@ func TestCreateComposeTasksRefusesMaterialAlreadyInFlight(t *testing.T) {
 // 再生成一版 behaviour of the previous round).
 func TestCreateComposeTasksRefusesAPairWithAnyTaskRecord(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
-	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, GameID: "delta", StrategyID: 5, MaterialID: 42, Status: model.ComposeTaskSuccess, RequestKey: "rk-regen-01", CreatedBy: 9})
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, CategoryID: 1, StrategyID: 5, MaterialID: 42, Status: model.ComposeTaskSuccess, RequestKey: "rk-regen-01", CreatedBy: 9})
 	res, err := svc.Create(actor, CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-regen-02"}}})
 	if err != nil || len(res.Created) != 0 || len(res.Failed) != 1 {
 		t.Fatalf("res=%+v err=%v", res, err)
@@ -634,8 +634,8 @@ func TestCreateComposeTasksSnapshotFrozenAfterStrategyEdit(t *testing.T) {
 func TestCancelComposeTaskPendingOnlyAndNamed(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
 	tasks.tasks = append(tasks.tasks,
-		model.ComposeTask{ID: 500, TeamID: 7, GameID: "delta", Status: model.ComposeTaskPending, CreatedBy: 9},
-		model.ComposeTask{ID: 501, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 9},
+		model.ComposeTask{ID: 500, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskPending, CreatedBy: 9},
+		model.ComposeTask{ID: 501, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskSuccess, CreatedBy: 9},
 	)
 
 	cancelled, err := svc.Cancel(actor, 500)
@@ -657,7 +657,7 @@ func TestCancelComposeTaskPendingOnlyAndNamed(t *testing.T) {
 
 func TestCancelComposeTaskLostRaceReloadsToNotCancellable(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
-	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, GameID: "delta", Status: model.ComposeTaskPending, CreatedBy: 9})
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 500, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskPending, CreatedBy: 9})
 	tasks.cancelBlocked = true
 	if _, err := svc.Cancel(actor, 500); !errors.Is(err, ErrComposeTaskNotCancellable) {
 		t.Fatalf("lost-race cancel error = %v", err)
@@ -672,7 +672,7 @@ func TestCancelComposeTaskLostRaceReloadsToNotCancellable(t *testing.T) {
 // confirms. Only a terminal row is not cancellable.
 func TestCancelComposeTaskRunningRequestsControlledStop(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
-	running := model.ComposeTask{ID: 502, TeamID: 7, GameID: "delta", Status: model.ComposeTaskRunning, CreatedBy: 9}
+	running := model.ComposeTask{ID: 502, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskRunning, CreatedBy: 9}
 	tasks.tasks = append(tasks.tasks, running)
 
 	stored, err := svc.Cancel(actor, 502)
@@ -699,7 +699,7 @@ func TestCancelComposeTaskTerminalRowsAreNamed(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
 	for _, status := range []model.ComposeTaskStatus{model.ComposeTaskSuccess, model.ComposeTaskFailed, model.ComposeTaskCancelled} {
 		id := 503 + int64(statusIndex(status))
-		tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: id, TeamID: 7, GameID: "delta", Status: status, CreatedBy: 9})
+		tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: id, TeamID: 7, CategoryID: 1, Status: status, CreatedBy: 9})
 		if _, err := svc.Cancel(actor, id); !errors.Is(err, ErrComposeTaskNotCancellable) {
 			t.Fatalf("%s cancel error = %v", status, err)
 		}
@@ -713,7 +713,7 @@ func TestCancelComposeTaskLostRequestOnTerminalRowRefuses(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
 	// The worker finished the task between the service's read and the flag
 	// write: the request lands on nothing and the reloaded row is terminal.
-	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 506, TeamID: 7, GameID: "delta", Status: model.ComposeTaskRunning, CreatedBy: 9})
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 506, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskRunning, CreatedBy: 9})
 	tasks.requestBlocked = true
 	if _, err := svc.Cancel(actor, 506); !errors.Is(err, ErrComposeTaskNotCancellable) {
 		t.Fatalf("lost-race running cancel error = %v", err)
@@ -741,9 +741,9 @@ func statusIndex(status model.ComposeTaskStatus) int {
 func TestRetryComposeTaskRequiresSeniorRoleAndTakesEveryFailureButUncertain(t *testing.T) {
 	svc, tasks, _, _, operator := composeTaskFixture()
 	team := identity.TeamID(7)
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	failed := func(id int64, code string) model.ComposeTask {
-		return model.ComposeTask{ID: id, TeamID: 7, GameID: "delta", Status: model.ComposeTaskFailed, ErrorCode: code, CreatedBy: 9}
+		return model.ComposeTask{ID: id, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskFailed, ErrorCode: code, CreatedBy: 9}
 	}
 
 	// A plain operator who can read the task is forbidden, not 404.
@@ -805,7 +805,7 @@ func TestRetryComposeTaskRequiresSeniorRoleAndTakesEveryFailureButUncertain(t *t
 	}
 
 	// A task the senior cannot read is 404, same as the list scope.
-	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 511, TeamID: 7, GameID: "delta", Status: model.ComposeTaskFailed, ErrorCode: "storage_error", CreatedBy: 10})
+	tasks.tasks = append(tasks.tasks, model.ComposeTask{ID: 511, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskFailed, ErrorCode: "storage_error", CreatedBy: 10})
 	if _, err := svc.Retry(operator, 511); !errors.Is(err, ErrComposeTaskNotFound) {
 		t.Fatalf("foreign retry error = %v", err)
 	}
@@ -823,28 +823,28 @@ func TestListComposeTasksScopesByRole(t *testing.T) {
 	if _, err := svc.List(actor, ListComposeTasksInput{Status: "pending"}); err != nil {
 		t.Fatalf("list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 9 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 1 || tasks.lastFilter.GameIDs[0] != "delta" || tasks.lastFilter.Status != model.ComposeTaskPending {
+	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 9 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.CategoryIDs) != 1 || tasks.lastFilter.CategoryIDs[0] != 1 || tasks.lastFilter.Status != model.ComposeTaskPending {
 		t.Fatalf("operator filter = %+v", tasks.lastFilter)
 	}
 
 	team := identity.TeamID(7)
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	if _, err := svc.List(senior, ListComposeTasksInput{}); err != nil {
 		t.Fatalf("senior list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 0 {
+	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.CategoryIDs) != 0 {
 		t.Fatalf("senior default filter = %+v", tasks.lastFilter)
 	}
 	if _, err := svc.List(senior, ListComposeTasksInput{OperatorScope: "team"}); err != nil {
 		t.Fatalf("senior team list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.GameIDs) != 0 {
+	if tasks.lastFilter.OperatorID != 0 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || tasks.lastFilter.TeamID != 7 || len(tasks.lastFilter.CategoryIDs) != 0 {
 		t.Fatalf("senior team filter = %+v", tasks.lastFilter)
 	}
 	if _, err := svc.List(senior, ListComposeTasksInput{OperatorID: 9}); err != nil {
 		t.Fatalf("senior operator list err=%v", err)
 	}
-	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || len(tasks.lastFilter.GameIDs) != 0 {
+	if tasks.lastFilter.OperatorID != 9 || tasks.lastFilter.IncludeUnownedCreatedBy != 0 || len(tasks.lastFilter.CategoryIDs) != 0 {
 		t.Fatalf("senior named-operator filter = %+v", tasks.lastFilter)
 	}
 
@@ -867,7 +867,7 @@ func TestCreateComposeTasksSnapshotsTheStrategyOperator(t *testing.T) {
 	svc, tasks, strategies, _, actor := composeTaskFixture()
 	team := identity.TeamID(7)
 	svc.operators = func() ([]identity.PublicUser, error) {
-		return []identity.PublicUser{{ID: 9, Username: "op9", Nickname: "九号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}}, nil
+		return []identity.PublicUser{{ID: 9, Username: "op9", Nickname: "九号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}}, nil
 	}
 	input := CreateComposeTasksInput{StrategyID: 5, OperatorID: 10, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-op-0001"}}}
 	if _, err := svc.Create(actor, input); !errors.Is(err, ErrComposeTaskInvalid) || tasks.creates != 0 {
@@ -889,16 +889,16 @@ func TestCreateComposeTasksSnapshotsTheStrategyOperator(t *testing.T) {
 	}
 }
 
-func TestComposeTaskSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
+func TestComposeTaskSeniorReadsEveryCategoryOfTheirTeam(t *testing.T) {
 	svc, tasks, _, _, _ := composeTaskFixture()
 	team := identity.TeamID(7)
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	tasks.tasks = []model.ComposeTask{
-		{ID: 611, TeamID: 7, GameID: "omega", Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(9)},
-		{ID: 612, TeamID: 8, GameID: "omega", Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(9)},
+		{ID: 611, TeamID: 7, CategoryID: 2, Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(9)},
+		{ID: 612, TeamID: 8, CategoryID: 2, Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(9)},
 	}
 	if _, err := svc.Get(senior, 611); err != nil {
-		t.Fatalf("senior must read a teammate's task in another game of the same team: %v", err)
+		t.Fatalf("senior must read a teammate's task in another category of the same team: %v", err)
 	}
 	if _, err := svc.Get(senior, 612); !errors.Is(err, ErrComposeTaskNotFound) {
 		t.Fatalf("senior must not read another team's task: %v", err)
@@ -908,9 +908,9 @@ func TestComposeTaskSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
 func TestComposeTaskOperatorMineKeepsLegacyCreatorRowsVisible(t *testing.T) {
 	svc, tasks, _, _, actor := composeTaskFixture()
 	tasks.tasks = []model.ComposeTask{
-		{ID: 601, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 9},
-		{ID: 602, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 10},
-		{ID: 603, TeamID: 7, GameID: "delta", Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(10)},
+		{ID: 601, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskSuccess, CreatedBy: 9},
+		{ID: 602, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskSuccess, CreatedBy: 10},
+		{ID: 603, TeamID: 7, CategoryID: 1, Status: model.ComposeTaskSuccess, CreatedBy: 9, OperatorID: operatorIDPtr(10)},
 	}
 	if _, err := svc.Get(actor, 601); err != nil {
 		t.Fatalf("legacy row for its creator must stay visible: %v", err)

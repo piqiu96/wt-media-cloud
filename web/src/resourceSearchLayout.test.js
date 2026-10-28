@@ -10,7 +10,7 @@ import ProfilesPage from './modules/profiles/pages/ProfilesPage.vue'
 import ProxyPage from './modules/proxy/pages/ProxyPage.vue'
 import UsersPage from './apps/cloud/pages/users/UsersPage.vue'
 import TeamsPage from './apps/cloud/pages/users/TeamsPage.vue'
-import GamesPage from './apps/cloud/pages/users/GamesPage.vue'
+import CategoriesPage from './apps/cloud/pages/users/CategoriesPage.vue'
 
 const pages = [
   ['素材库', MaterialLibraryPage, './modules/materials/pages/MaterialLibraryPage.vue'],
@@ -23,7 +23,7 @@ const pages = [
   ['代理管理', ProxyPage, './modules/proxy/pages/ProxyPage.vue'],
   ['用户管理', UsersPage, './apps/cloud/pages/users/UsersPage.vue'],
   ['运营团队', TeamsPage, './apps/cloud/pages/users/TeamsPage.vue'],
-  ['游戏管理', GamesPage, './apps/cloud/pages/users/GamesPage.vue'],
+  ['类目管理', CategoriesPage, './apps/cloud/pages/users/CategoriesPage.vue'],
 ]
 
 describe('resource search layout', () => {

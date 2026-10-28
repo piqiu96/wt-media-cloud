@@ -10,8 +10,8 @@ describe('public object read URL', () => {
   it('uses the same rule for material videos and existing objects in the data bucket', () => {
     expect(publicObjectReadUrl('https://s3.oss.longyanyue.cn/data/wt_media/dev/materials/30/a.mp4?X-Amz-Signature=secret'))
       .toBe('https://data.bucket.oss.longyanyue.cn/wt_media/dev/materials/30/a.mp4')
-    expect(publicObjectReadUrl('https://s3.oss.longyanyue.cn/data/2026h2/game_img/ksgjc.png'))
-      .toBe('https://data.bucket.oss.longyanyue.cn/2026h2/game_img/ksgjc.png')
+    expect(publicObjectReadUrl('https://s3.oss.longyanyue.cn/data/2026h2/category_img/ksgjc.png'))
+      .toBe('https://data.bucket.oss.longyanyue.cn/2026h2/category_img/ksgjc.png')
   })
 
   it('leaves other buckets and storage hosts unchanged', () => {

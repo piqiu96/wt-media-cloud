@@ -47,15 +47,15 @@ const localFiles = ref({})
 const downloadKnown = ref(false)
 const strategies = ref([])
 const teams = ref([])
-const games = ref([])
-const enabledGames = ref([])
+const categories = ref([])
+const enabledCategories = ref([])
 const templates = ref([])
 const loading = ref(false)
 const error = ref('')
 const currentUser = ref(null)
 const operatorOptions = ref([])
 const operatorsLoading = ref(false)
-const filters = ref({ search: '', trigger: '', download: '', created_range: [], team_id: '', game_id: '', operator: '' })
+const filters = ref({ search: '', trigger: '', download: '', created_range: [], team_id: '', category_id: '', operator: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 const selectedRowKeys = ref([])
 const batchDownloading = ref(false)
@@ -76,13 +76,13 @@ const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const canFilterOperators = computed(() => isSenior.value || isAdmin.value)
 // 负责人候选只有本团队启用的成员（含本人）：未选择就是团队全部，不造伪选项。
 const operatorFilterOptions = computed(() => operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
-// 游戏选项只取游戏管理里启用的游戏；普通运营再与本人负责游戏取交集，
-// 因为他本来就只能读这些游戏的成片，列出点下去必空的游戏是一种误导。
-const gameFilterOptions = computed(() => {
-  const own = new Set(Array.isArray(currentUser.value?.game_ids) ? currentUser.value.game_ids : [])
-  return enabledGames.value
-    .filter((game) => isAdmin.value || isSenior.value || own.has(game.id))
-    .map((game) => ({ value: game.id, label: game.name }))
+// 类目选项只取类目管理里启用的类目；普通运营再与本人负责类目取交集，
+// 因为他本来就只能读这些类目的成片，列出点下去必空的类目是一种误导。
+const categoryFilterOptions = computed(() => {
+  const own = new Set(Array.isArray(currentUser.value?.category_ids) ? currentUser.value.category_ids : [])
+  return enabledCategories.value
+    .filter((category) => isAdmin.value || isSenior.value || own.has(category.id))
+    .map((category) => ({ value: category.id, label: category.name }))
 })
 
 const columns = computed(() => [
@@ -90,7 +90,7 @@ const columns = computed(() => [
   { colKey: 'id', title: '成片 ID', width: 90 },
   { colKey: 'output', title: '成片', width: 260 },
   { colKey: 'material_id', title: '来源素材', width: 190 },
-  { colKey: 'game', title: '游戏', width: 100 },
+  { colKey: 'category', title: '类目', width: 100 },
   { colKey: 'strategy', title: '合成策略', width: 180 },
   { colKey: 'operator', title: '负责人', width: 110 },
   { colKey: 'trigger', title: '生成方式', width: 95 },
@@ -176,21 +176,21 @@ async function refreshDownloadFacts() {
 }
 
 async function loadLookups() {
-  const [materialRows, strategyRows, composeTasks, teamRows, gameRows, enabledGameRows] = await Promise.all([
+  const [materialRows, strategyRows, composeTasks, teamRows, categoryRows, enabledCategoryRows] = await Promise.all([
     materialsClient.list().catch(() => []),
     client.listStrategies().catch(() => []),
     client.listComposeTasks({}).catch(() => []),
     client.listTeams().catch(() => []),
-    // 名称字典要全量（停用游戏的历史成片也能显示名字）；筛选项另取启用游戏。
-    client.listGames({ scope: 'all' }).catch(() => []),
-    client.listGames({ scope: 'all', status: 'enabled' }).catch(() => []),
+    // 名称字典要全量（停用类目的历史成片也能显示名字）；筛选项另取启用类目。
+    client.listCategories({ scope: 'all' }).catch(() => []),
+    client.listCategories({ scope: 'all', enabled: true }).catch(() => []),
   ])
   materials.value = [...new Map([...materials.value, ...(Array.isArray(materialRows) ? materialRows : [])].map((item) => [item.id, item])).values()]
   strategies.value = Array.isArray(strategyRows) ? strategyRows : []
   taskRows.value = Array.isArray(composeTasks) ? composeTasks : []
   teams.value = Array.isArray(teamRows) ? teamRows : []
-  games.value = Array.isArray(gameRows) ? gameRows : []
-  enabledGames.value = Array.isArray(enabledGameRows) ? enabledGameRows : []
+  categories.value = Array.isArray(categoryRows) ? categoryRows : []
+  enabledCategories.value = Array.isArray(enabledCategoryRows) ? enabledCategoryRows : []
   lookupsReady.value = true
 }
 
@@ -229,7 +229,7 @@ async function load({ resetPage = false, quiet = false } = {}) {
     // 负责人筛选与任务页一致：普通运营没有这个控件（服务端固定本人）；
     // 高级运营不发参数就是本团队全部，选中成员只发 operator_id；管理员按团队筛选。
     const namedOperator = operatorIdFromOption(filters.value.operator)
-    if (filters.value.game_id) params.game_id = filters.value.game_id
+    if (filters.value.category_id) params.category_id = filters.value.category_id
     if (isAdmin.value && filters.value.team_id) params.team_id = Number(filters.value.team_id)
     if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator
     const data = await client.listComposeOutputs(params)
@@ -249,7 +249,7 @@ useAutoRefresh(() => load({ quiet: true }), {
 })
 
 function reset() {
-  filters.value = { search: '', trigger: '', download: '', created_range: [], team_id: '', game_id: '', operator: '' }
+  filters.value = { search: '', trigger: '', download: '', created_range: [], team_id: '', category_id: '', operator: '' }
   load({ resetPage: true })
 }
 
@@ -293,7 +293,7 @@ async function openTask(id) {
 }
 
 function teamName(id) { return teams.value.find((item) => item.id === id)?.name || String(id || '—') }
-function gameName(id) { return games.value.find((item) => item.id === id)?.name || String(id || '—') }
+function categoryName(id) { return categories.value.find((item) => item.id === id)?.name || String(id || '—') }
 
 const detailVisible = ref(false)
 const detail = ref(null)
@@ -430,7 +430,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="filters.team_id" clearable placeholder="全部" @change="onTeamFilterChange">
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
           </t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" :options="gameFilterOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="filters.category_id" :options="categoryFilterOptions" clearable placeholder="全部" /></label>
           <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">生成方式</span><t-select v-model="filters.trigger" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">下载状态</span><t-select v-model="filters.download" :options="downloadOptions" clearable placeholder="全部" /></label>
@@ -458,7 +458,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
               </div>
             </template>
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link><span class="output-related-cell__sub output-source-title">{{ materialFor(row)?.title || '—' }}</span></template>
-            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
+            <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
             <template #strategy="{ row }">
               <div class="output-related-cell">
                 <t-link theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link>
@@ -507,9 +507,9 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
           />
         </t-loading>
       </t-drawer>
-      <MaterialDetailDrawer :visible="materialDrawer.visible" :material="materialDrawer.row" :loading="materialDrawer.loading" :games="games" mode="readonly" :show-page-link="false" @update:visible="materialDrawer.visible = $event" />
+      <MaterialDetailDrawer :visible="materialDrawer.visible" :material="materialDrawer.row" :loading="materialDrawer.loading" :categories="categories" mode="readonly" :show-page-link="false" @update:visible="materialDrawer.visible = $event" />
       <t-drawer :visible="strategyDrawer.visible" header="策略详情" size="min(62vw, 880px)" :close-btn="true" :footer="false" @update:visible="strategyDrawer.visible = $event">
-        <t-loading :loading="strategyDrawer.loading" :show-overlay="true"><ComposeStrategySummary v-if="strategyDrawer.row" :strategy="strategyDrawer.row" :team="teamName(strategyDrawer.row.team_id)" :game="gameName(strategyDrawer.row.game_id)" :templates="templates" /></t-loading>
+        <t-loading :loading="strategyDrawer.loading" :show-overlay="true"><ComposeStrategySummary v-if="strategyDrawer.row" :strategy="strategyDrawer.row" :team="teamName(strategyDrawer.row.team_id)" :category="categoryName(strategyDrawer.row.category_id)" :templates="templates" /></t-loading>
       </t-drawer>
       <t-drawer :visible="taskDrawer.visible" header="任务详情" size="min(62vw, 880px)" :close-btn="true" :footer="false" @update:visible="taskDrawer.visible = $event">
         <t-loading :loading="taskDrawer.loading" :show-overlay="true">

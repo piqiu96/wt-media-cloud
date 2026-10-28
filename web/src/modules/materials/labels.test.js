@@ -10,7 +10,7 @@ import {
   downloadActionLabel,
   downloadStatusLabel,
   downloadStatusTone,
-  gameName,
+  categoryName,
   joinStatus,
   libraryNextStepHint,
   materialStatusLabel,
@@ -87,12 +87,12 @@ describe('material labels', () => {
     }
   })
 
-  // 素材带了 game_id 而游戏表里没有它时，显示 id 而不是「-」：
-  // 「不知道叫什么」和「没有游戏」是两件事。
-  it('falls back to the game id rather than claiming there is no game', () => {
-    expect(gameName([{ id: 'naruto', name: '火影忍者' }], 'naruto')).toBe('火影忍者')
-    expect(gameName([{ id: 'naruto', name: '火影忍者' }], 'other')).toBe('other')
-    expect(gameName([], '')).toBe('-')
+  // 素材带了 category_id 而类目表里没有它时，显示 id 而不是「-」：
+  // 「不知道叫什么」和「没有类目」是两件事。
+  it('falls back to the category id rather than claiming there is no category', () => {
+    expect(categoryName([{ id: 'naruto', name: '火影忍者' }], 'naruto')).toBe('火影忍者')
+    expect(categoryName([{ id: 'naruto', name: '火影忍者' }], 'other')).toBe('other')
+    expect(categoryName([], '')).toBe('-')
   })
 
   // 体积格式化在 shared/utils/units.js，用例随之搬走。

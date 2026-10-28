@@ -35,9 +35,9 @@ type AuthContext struct {
 }
 
 type CreateUserInput struct {
-	Username string
-	Password string
-	Role     model.Role
-	TeamID   *model.TeamID
-	GameIDs  []string
+	Username    string
+	Password    string
+	Role        model.Role
+	TeamID      *model.TeamID
+	CategoryIDs []model.CategoryID
 }

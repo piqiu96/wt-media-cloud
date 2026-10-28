@@ -259,7 +259,7 @@ func claimedTask(id int64) model.ComposeTask {
 	node := int64(9)
 	usage := int64(9)
 	return model.ComposeTask{
-		ID: id, TeamID: 7, GameID: "delta", TriggerType: "manual", MaterialID: 42, MaterialUsageID: &usage,
+		ID: id, TeamID: 7, CategoryID: 4, TriggerType: "manual", MaterialID: 42, MaterialUsageID: &usage,
 		StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1,
 		Status: model.ComposeTaskRunning, ClaimedNodeID: &node,
 		AttemptCount: 1, MaxAttempts: 3, CreatedBy: 11,

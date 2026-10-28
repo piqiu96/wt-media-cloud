@@ -28,10 +28,10 @@ type ComposeOperatorOption struct {
 }
 
 // ListComposeOperators answers who may be assigned in this team, optionally
-// narrowed to one game. Production owns the endpoint so the identity module's own /users
+// narrowed to one category. Production owns the endpoint so the identity module's own /users
 // permission stays unchanged: a senior names only their own team, an admin
 // names the target team explicitly, and an ordinary operator has no directory.
-func ListComposeOperators(actor identity.PublicUser, teamID int64, gameID string) ([]ComposeOperatorOption, error) {
+func ListComposeOperators(actor identity.PublicUser, teamID int64, categoryID identity.CategoryID) ([]ComposeOperatorOption, error) {
 	if actor.Status != identity.UserStatusEnabled {
 		return nil, ErrComposeOperatorForbidden
 	}
@@ -48,21 +48,20 @@ func ListComposeOperators(actor identity.PublicUser, teamID int64, gameID string
 	default:
 		return nil, ErrComposeOperatorForbidden
 	}
-	gameID = strings.TrimSpace(gameID)
 	users, err := identity.ListUsers()
 	if err != nil {
 		return nil, err
 	}
-	return composeOperatorOptions(users, teamID, gameID), nil
+	return composeOperatorOptions(users, teamID, categoryID), nil
 }
 
-// composeOperatorOptions filters the team directory. An empty gameID skips the
-// game check: the task and output pages narrow by team alone, while strategy
-// assignment always names its exact game.
-func composeOperatorOptions(users []identity.PublicUser, teamID int64, gameID string) []ComposeOperatorOption {
+// composeOperatorOptions filters the team directory. An empty categoryID skips the
+// category check: the task and output pages narrow by team alone, while strategy
+// assignment always names its exact category.
+func composeOperatorOptions(users []identity.PublicUser, teamID int64, categoryID identity.CategoryID) []ComposeOperatorOption {
 	options := make([]ComposeOperatorOption, 0)
 	for _, user := range users {
-		if composeOperatorTeamMember(user, teamID) && (gameID == "" || slices.Contains(user.GameIDs, gameID)) {
+		if composeOperatorTeamMember(user, teamID) && (categoryID <= 0 || slices.Contains(user.CategoryIDs, categoryID)) {
 			options = append(options, ComposeOperatorOption{ID: int64(user.ID), Username: user.Username, Nickname: user.Nickname, DisplayName: composeOperatorDisplayName(user)})
 		}
 	}
@@ -85,16 +84,16 @@ func composeOperatorTeamMember(user identity.PublicUser, teamID int64) bool {
 }
 
 // composeOperatorMatches is the one definition of a valid assignee: a team
-// member responsible for the strategy's game.
-func composeOperatorMatches(user identity.PublicUser, teamID int64, gameID string) bool {
-	return gameID != "" && composeOperatorTeamMember(user, teamID) && slices.Contains(user.GameIDs, gameID)
+// member responsible for the strategy's category.
+func composeOperatorMatches(user identity.PublicUser, teamID int64, categoryID identity.CategoryID) bool {
+	return categoryID > 0 && composeOperatorTeamMember(user, teamID) && slices.Contains(user.CategoryIDs, categoryID)
 }
 
 // resolveComposeOperator validates an operator id against the same rule as the
 // picker. A nil directory means the caller did not wire identity (unit tests);
 // nothing can be validated there, so the reference is refused rather than
 // assumed valid.
-func resolveComposeOperator(operators func() ([]identity.PublicUser, error), teamID int64, gameID string, operatorID int64) (identity.PublicUser, bool, error) {
+func resolveComposeOperator(operators func() ([]identity.PublicUser, error), teamID int64, categoryID identity.CategoryID, operatorID int64) (identity.PublicUser, bool, error) {
 	if operators == nil || operatorID <= 0 {
 		return identity.PublicUser{}, false, nil
 	}
@@ -104,7 +103,7 @@ func resolveComposeOperator(operators func() ([]identity.PublicUser, error), tea
 	}
 	for _, user := range users {
 		if int64(user.ID) == operatorID {
-			return user, composeOperatorMatches(user, teamID, gameID), nil
+			return user, composeOperatorMatches(user, teamID, categoryID), nil
 		}
 	}
 	return identity.PublicUser{}, false, nil

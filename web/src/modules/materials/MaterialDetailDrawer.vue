@@ -19,7 +19,7 @@ import {
   downloadActionLabel,
   downloadStatusLabel,
   downloadStatusTone,
-  gameName,
+  categoryName,
   joinStatus,
   libraryNextStepHint,
   materialStatusLabel,
@@ -39,7 +39,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
-  games: { type: Array, default: () => [] },
+  categories: { type: Array, default: () => [] },
   // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支，
   // readonly 只读（关联实体引用的那类打开方式）——正文照旧，页脚一个动作都不给。
   mode: { type: String, default: 'library' },
@@ -245,7 +245,7 @@ async function openDirectory() {
               <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">{{ material.title || '未命名素材' }}</a>
               <span v-else>{{ material.title || '未命名素材' }}</span>
             </h3>
-            <!-- 副行只留平台 · 作者：游戏在列表里有列、在详情最后一段有行。 -->
+            <!-- 副行只留平台 · 作者：类目在列表里有列、在详情最后一段有行。 -->
             <p class="detail-source-line">
               <template v-if="material.platform">{{ platformLabel(material.platform) }}</template>
               <template v-if="material.platform && (material.author_name || material.author_home_url)"> · </template>
@@ -377,7 +377,7 @@ async function openDirectory() {
           <h4 class="detail-card__title">基本信息</h4>
           <dl class="detail-card__grid detail-card__grid--3">
             <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
-            <div><dt>游戏</dt><dd>{{ gameName(games, material.game_id) }}</dd></div>
+            <div><dt>类目</dt><dd>{{ categoryName(categories, material.category_id) }}</dd></div>
             <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
             <!-- 操作人 = 素材创建人；目录里已没有此人时回退 —，不伪造姓名。 -->
             <div><dt>操作人</dt><dd>{{ material.created_by_name || '-' }}</dd></div>

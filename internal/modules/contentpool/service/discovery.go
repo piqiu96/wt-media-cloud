@@ -12,6 +12,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/model"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 type (
@@ -115,13 +116,51 @@ func (s *discoveryService) listStrategiesFiltered(actor identityservice.PublicUs
 }
 
 func validStrategy(input model.DiscoveryStrategy) bool {
-	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Platform) != "douyin" || (input.StrategyType != "keyword" && input.StrategyType != "author") {
+	if input.CategoryID == nil || *input.CategoryID <= 0 || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Platform) != "douyin" || (input.StrategyType != "keyword" && input.StrategyType != "author") {
 		return false
 	}
 	if input.StrategyType == "keyword" {
 		return strings.TrimSpace(fmt.Sprint(input.Config["keyword"])) != "" || len(anyStringSlice(input.Config["keywords"])) > 0
 	}
 	return strings.TrimSpace(fmt.Sprint(input.Config["author"])) != "" || strings.TrimSpace(fmt.Sprint(input.Config["author_id"])) != ""
+}
+
+func optionalCategoryID(value any) *sharedidentity.CategoryID {
+	if value == nil {
+		return nil
+	}
+	var id int64
+	switch typed := value.(type) {
+	case *sharedidentity.CategoryID:
+		if typed == nil || *typed <= 0 {
+			return nil
+		}
+		categoryID := *typed
+		return &categoryID
+	case int:
+		id = int64(typed)
+	case int64:
+		id = typed
+	case float64:
+		id = int64(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return nil
+		}
+		id = parsed
+	default:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(fmt.Sprint(value)), 10, 64)
+		if err != nil {
+			return nil
+		}
+		id = parsed
+	}
+	if id <= 0 {
+		return nil
+	}
+	categoryID := sharedidentity.CategoryID(id)
+	return &categoryID
 }
 
 func normalizeMaterialConfig(config map[string]any) bool {
@@ -142,7 +181,6 @@ func (s *discoveryService) createStrategy(actor identityservice.PublicUser, inpu
 	if input.Config == nil {
 		input.Config = map[string]any{}
 	}
-	input.GameID = defaultGameID(input.GameID)
 	if !validStrategy(input) || !normalizeMaterialConfig(input.Config) {
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
@@ -226,7 +264,7 @@ func (s *discoveryService) updateStrategy(actor identityservice.PublicUser, id i
 		return model.DiscoveryStrategy{}, ErrDiscoveryInvalid
 	}
 	current.Name, current.StrategyType, current.Platform, current.Config, current.Schedule, current.Timezone, current.Status, current.UpdatedAt = strings.TrimSpace(input.Name), input.StrategyType, input.Platform, input.Config, input.Schedule, input.Timezone, input.Status, s.now()
-	current.GameID = defaultGameID(input.GameID)
+	current.CategoryID = input.CategoryID
 	actorID := actor.ID
 	current.UpdatedBy = &actorID
 	return s.store.UpdateStrategy(current)
@@ -274,7 +312,7 @@ func (s *discoveryService) createRun(actor identityservice.PublicUser, strategyI
 	snapshot["platform"] = strategy.Platform
 	snapshot["schedule"] = strategy.Schedule
 	snapshot["operation"] = strategy.StrategyType
-	snapshot["game_id"] = strategy.GameID
+	snapshot["category_id"] = strategy.CategoryID
 	return s.store.CreateCrawlTask(model.CrawlTask{TeamID: strategy.TeamID, StrategyID: &strategy.ID, ScheduleKey: scheduleKey, TaskType: "discovery_task", Platform: strategy.Platform, Status: model.CrawlPending, Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now})
 }
 
@@ -290,11 +328,16 @@ func (s *discoveryService) createManualRunWithTeam(actor identityservice.PublicU
 	if team == nil || strings.TrimSpace(platform) != "douyin" || (operation != "url" && operation != "keyword" && operation != "author") {
 		return model.CrawlTask{}, ErrDiscoveryInvalid
 	}
+	categoryID := optionalCategoryID(config["category_id"])
+	if categoryID == nil {
+		return model.CrawlTask{}, ErrDiscoveryInvalid
+	}
 	if (operation == "url" && strings.TrimSpace(fmt.Sprint(config["url"])) == "" && len(anyStringSlice(config["urls"])) == 0) || (operation == "keyword" && strings.TrimSpace(fmt.Sprint(config["keyword"])) == "") || (operation == "author" && strings.TrimSpace(fmt.Sprint(config["author"])) == "") {
 		return model.CrawlTask{}, ErrDiscoveryInvalid
 	}
 	now := s.now()
 	snapshot := cloneMap(config)
+	snapshot["category_id"] = *categoryID
 	snapshot["operation"] = operation
 	return s.store.CreateCrawlTask(model.CrawlTask{TeamID: *team, TaskType: "manual_discovery_task", Platform: "douyin", Status: model.CrawlPending, Snapshot: snapshot, CreatedBy: actor.ID, CreatedAt: now, UpdatedAt: now})
 }
@@ -393,7 +436,7 @@ func (s *discoveryService) projectDiscoveredItem(task *model.CrawlTask, item map
 		AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]),
 		SourceType: sourceType, StrategyID: task.StrategyID, CrawlTaskID: &taskID,
 		LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]),
-		PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item), GameID: optionalString(task.Snapshot["game_id"]),
+		PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item), CategoryID: optionalCategoryID(task.Snapshot["category_id"]),
 	})
 	switch {
 	case errors.Is(err, ErrDuplicate):
@@ -678,7 +721,7 @@ func (s *discoveryService) confirmResults(actor identityservice.PublicUser, id i
 		if promoted, _ := item["promoted"].(bool); promoted {
 			continue
 		}
-		_, createErr := s.content.createSource(actor, dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: contentID, Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]), PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item), GameID: optionalString(task.Snapshot["game_id"])})
+		_, createErr := s.content.createSource(actor, dto.SourceInput{TeamID: &team, Platform: task.Platform, PlatformContentID: contentID, Title: fmt.Sprint(item["title"]), Description: fmt.Sprint(item["description"]), CoverURL: fmt.Sprint(item["cover_url"]), SourceURL: fmt.Sprint(item["source_url"]), AuthorID: fmt.Sprint(item["author_id"]), AuthorSecUID: fmt.Sprint(item["author_sec_uid"]), AuthorUID: fmt.Sprint(item["author_uid"]), AuthorHomeURL: fmt.Sprint(item["author_home_url"]), AuthorName: fmt.Sprint(item["author_name"]), SourceType: sourceType, LikeCount: int64Value(item["like_count"]), FavoriteCount: int64Value(item["favorite_count"]), ViewCount: int64Value(item["view_count"]), CommentCount: int64Value(item["comment_count"]), ShareCount: int64Value(item["share_count"]), PublishedAt: parsePublishedAt(item["published_at"]), RawJSON: mustJSON(item), CategoryID: optionalCategoryID(task.Snapshot["category_id"])})
 		if errors.Is(createErr, ErrDuplicate) {
 			task.Stats.Duplicate++
 			item["promoted"] = true
