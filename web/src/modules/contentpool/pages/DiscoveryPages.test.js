@@ -26,9 +26,9 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('判断方式')
     expect(source).not.toContain('判断条件')
     expect(source).toContain('策略状态')
-    expect(source).toContain('所属游戏')
-    expect(source).toContain('listGames')
-    expect(source).toContain('gameName')
+    expect(source).toContain('所属类目')
+    expect(source).toContain('listCategories')
+    expect(source).toContain('categoryName')
     expect(source).toContain('查询')
     expect(source).toContain('重置')
     expect(source).toContain('挖掘规则')
@@ -83,8 +83,8 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('placeholder="搜索任务 ID / 任务名称 / 来源策略"')
     expect(source).toContain('任务来源')
     expect(source).toContain('触发方式')
-    expect(source).toContain("colKey: 'game'")
-    expect(source).toContain('gameName(row.snapshot?.game_id)')
+    expect(source).toContain("colKey: 'category'")
+    expect(source).toContain('categoryName(row.snapshot?.category_id)')
     expect(source).toContain('发现结果')
     expect(source).toContain('执行时间')
     expect(source).toContain('taskName')
@@ -130,7 +130,7 @@ describe('discovery strategy and task pages', () => {
     expect(tasks).toContain('v-if="canManage && detail && hasFailed(detail)"')
   })
 
-  it('lets admins pick a team and shows the team column, using the full game catalog', () => {
+  it('lets admins pick a team and shows the team column, using the full category catalog', () => {
     for (const page of ['DiscoveryStrategiesPage.vue', 'CrawlTasksPage.vue']) {
       const source = read(page)
       expect(source).toContain('createSessionClient')
@@ -139,7 +139,7 @@ describe('discovery strategy and task pages', () => {
       expect(source).toContain('v-model="teamFilter"')
       expect(source).toContain("colKey: 'team'")
       expect(source).toContain('teamName(row.team_id)')
-      expect(source).toContain("listGames({ scope: 'all' })")
+      expect(source).toContain("listCategories({ scope: 'all' })")
     }
     const strategies = read('DiscoveryStrategiesPage.vue')
     expect(strategies).toContain('teamId: teamFilter.value || undefined')
@@ -149,16 +149,16 @@ describe('discovery strategy and task pages', () => {
     expect(tasks).toContain('team_id: teamFilter.value || undefined')
   })
 
-  // 「所属游戏」只列启用游戏。编辑一条挂在停用游戏上的历史策略时，原游戏以不可选项补回：
-  // 不补，表单显示不出原值，保存一次就把游戏悄悄换掉了。
-  it('offers only enabled games in the strategy form and keeps a disabled current game visible', () => {
+  // 「所属类目」只列启用类目。编辑一条挂在停用类目上的历史策略时，原类目以不可选项补回：
+  // 不补，表单显示不出原值，保存一次就把类目悄悄换掉了。
+  it('offers only enabled categories in the strategy form and keeps a disabled current category visible', () => {
     const strategies = read('DiscoveryStrategiesPage.vue')
-    expect(strategies).toContain("import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'")
-    expect(strategies).toContain('const formGameOptions = computed')
+    expect(strategies).toContain("import { enabledCategories } from '../../../shared/utils/categories.js'")
+    expect(strategies).toContain('const formCategoryOptions = computed')
     expect(strategies).toContain("options.unshift({ id: current.id, label: `${current.name}（已停用）`, disabled: true })")
-    expect(strategies).toContain('v-for="game in formGameOptions"')
-    expect(strategies).toContain(':disabled="game.disabled"')
-    expect(strategies).not.toContain('v-for="game in games"')
+    expect(strategies).toContain('v-for="category in formCategoryOptions"')
+    expect(strategies).toContain(':disabled="category.disabled"')
+    expect(strategies).not.toContain('v-for="category in categories"')
   })
 
   it('sends both discovery list filters to the backend instead of filtering locally', () => {

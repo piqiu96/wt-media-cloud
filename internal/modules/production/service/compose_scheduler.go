@@ -154,7 +154,7 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 	if err != nil {
 		return model.ComposeScheduleRun{}, err
 	}
-	if !found || !inGameScope(actor, strategy.TeamID, strategy.GameID) {
+	if !found || !inCategoryScope(actor, strategy.TeamID, strategy.CategoryID) {
 		return model.ComposeScheduleRun{}, ErrStrategyNotFound
 	}
 	if strategy.Status != model.ComposeStrategyEnabled {
@@ -164,7 +164,7 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 	if strategy.OperatorID != nil {
 		operatorID = *strategy.OperatorID
 	}
-	if _, ok, err := resolveComposeOperator(s.operators, strategy.TeamID, strategy.GameID, operatorID); err != nil {
+	if _, ok, err := resolveComposeOperator(s.operators, strategy.TeamID, strategy.CategoryID, operatorID); err != nil {
 		return model.ComposeScheduleRun{}, err
 	} else if !ok {
 		return model.ComposeScheduleRun{}, fmt.Errorf("%w: strategy operator is unavailable", ErrStrategyInvalid)

@@ -15,10 +15,10 @@ import {
 // 发布时间与点赞数的次序刻意都与素材 ID 的次序相反：排序用例如果在「按 id 排」的实现下
 // 也能通过，那它证明不了任何事。
 const CANDIDATES = [
-  { id: 12, title: '开镜集锦', game_id: 'delta', published_at: '2026-10-10T08:00:00Z', like_count: 30 },
-  { id: 15, title: '跑图实况', game_id: 'delta', published_at: '2026-10-14T08:00:00Z', like_count: 90 },
-  { id: 21, title: '夜景混剪', game_id: 'delta', published_at: '2026-10-16T08:00:00Z', like_count: 10 },
-  { id: 33, title: '露娜高光', game_id: 'echo', published_at: null, like_count: 500 },
+  { id: 12, title: '开镜集锦', category_id: 'delta', published_at: '2026-10-10T08:00:00Z', like_count: 30 },
+  { id: 15, title: '跑图实况', category_id: 'delta', published_at: '2026-10-14T08:00:00Z', like_count: 90 },
+  { id: 21, title: '夜景混剪', category_id: 'delta', published_at: '2026-10-16T08:00:00Z', like_count: 10 },
+  { id: 33, title: '露娜高光', category_id: 'echo', published_at: null, like_count: 500 },
 ]
 
 // 策略下的三种履历：成功过、正在跑、只取消过。素材 33 没有任何状态 —— 它是唯一未使用过的。

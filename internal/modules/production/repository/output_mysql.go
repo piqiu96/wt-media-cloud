@@ -12,11 +12,12 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
+	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
 // ComposeOutputFilter scopes the my-outputs list the same way the compose-task
-// list is scoped: admins pass nothing, everyone else passes their team, games
+// list is scoped: admins pass nothing, everyone else passes their team, categories
 // and (for operators) the created-by narrowing.
 type ComposeOutputFilter struct {
 	TeamID     int64
@@ -24,7 +25,7 @@ type ComposeOutputFilter struct {
 	// IncludeUnownedCreatedBy mirrors ComposeTaskFilter: historical outputs
 	// without an operator remain visible to their creator under "mine".
 	IncludeUnownedCreatedBy int64
-	GameIDs                 []string
+	CategoryIDs             []identity.CategoryID
 	PublishStatus           string
 	Source                  string
 	Search                  string
@@ -33,7 +34,7 @@ type ComposeOutputFilter struct {
 	CreatedBefore           time.Time
 }
 
-const composeOutputColumns = `id, team_id, game_id, operator_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at`
+const composeOutputColumns = `id, team_id, category_id, operator_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at`
 
 // ComposeOutputStore reads the verified-output asset table and archives rows.
 // Writes to this table belong to the worker's success transaction; the only
@@ -54,14 +55,14 @@ func (ComposeOutputStore) Archive(id, actorID int64, now time.Time) (bool, error
 
 func listComposeOutputs(db *gorm.DB, filter ComposeOutputFilter) ([]model.CompositeOutput, error) {
 	query := `SELECT ` + composeOutputColumns + ` FROM composite_outputs WHERE 1=1`
-	args := make([]any, 0, len(filter.GameIDs)+4)
+	args := make([]any, 0, len(filter.CategoryIDs)+4)
 	if filter.TeamID > 0 {
 		query += ` AND team_id = ?`
 		args = append(args, filter.TeamID)
 	}
-	if len(filter.GameIDs) > 0 {
-		query += ` AND game_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.GameIDs)), ",") + `)`
-		for _, id := range filter.GameIDs {
+	if len(filter.CategoryIDs) > 0 {
+		query += ` AND category_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.CategoryIDs)), ",") + `)`
+		for _, id := range filter.CategoryIDs {
 			args = append(args, id)
 		}
 	}
@@ -167,7 +168,7 @@ func scanComposeOutput(row composeOutputScanner) (model.CompositeOutput, error) 
 	var item model.CompositeOutput
 	var media []byte
 	var operatorID, usageID sql.NullInt64
-	err := row.Scan(&item.ID, &item.TeamID, &item.GameID, &operatorID, &item.MaterialID, &usageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.TeamID, &item.CategoryID, &operatorID, &item.MaterialID, &usageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return model.CompositeOutput{}, err
 	}

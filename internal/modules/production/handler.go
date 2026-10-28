@@ -62,15 +62,19 @@ func parseComposeListScope(c *hertzapp.RequestContext) (int64, int64, string, er
 	return teamID, operatorID, scope, nil
 }
 
-const materialGameFilterLimit = 50
+const materialCategoryFilterLimit = 50
 
 // parseMaterialListFilter reads the library's filters. The service still owns
 // the scope decision; this only turns the query string into typed values and
 // refuses shapes that cannot mean anything.
 func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFilter, error) {
+	categoryID, err := parseOptionalCategoryID(c.Query("category_id"))
+	if err != nil {
+		return repository.MaterialFilter{}, errors.New("category_id 无效")
+	}
 	filter := repository.MaterialFilter{
 		Search:      strings.TrimSpace(c.Query("search")),
-		GameID:      strings.TrimSpace(c.Query("game_id")),
+		CategoryID:  categoryID,
 		VideoStatus: strings.TrimSpace(c.Query("video_status")),
 		SortBy:      strings.TrimSpace(c.Query("sort_by")),
 		SortOrder:   strings.TrimSpace(c.Query("sort_order")),
@@ -83,21 +87,24 @@ func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFil
 		teamID := identityservice.TeamID(value)
 		filter.TeamID = &teamID
 	}
-	if raw := strings.TrimSpace(c.Query("game_ids")); raw != "" {
-		seen := make(map[string]struct{})
+	if raw := strings.TrimSpace(c.Query("category_ids")); raw != "" {
+		seen := make(map[identityservice.CategoryID]struct{})
 		for _, part := range strings.Split(raw, ",") {
-			gameID := strings.TrimSpace(part)
-			if gameID == "" {
+			categoryID, err := parseOptionalCategoryID(part)
+			if err != nil {
+				return repository.MaterialFilter{}, errors.New("category_ids 无效")
+			}
+			if categoryID <= 0 {
 				continue
 			}
-			if _, ok := seen[gameID]; ok {
+			if _, ok := seen[categoryID]; ok {
 				continue
 			}
-			seen[gameID] = struct{}{}
-			filter.GameIDs = append(filter.GameIDs, gameID)
+			seen[categoryID] = struct{}{}
+			filter.CategoryIDs = append(filter.CategoryIDs, categoryID)
 		}
-		if len(filter.GameIDs) > materialGameFilterLimit {
-			return repository.MaterialFilter{}, errors.New("game_ids 过多")
+		if len(filter.CategoryIDs) > materialCategoryFilterLimit {
+			return repository.MaterialFilter{}, errors.New("category_ids 过多")
 		}
 	}
 	for _, enum := range []struct {
@@ -119,6 +126,18 @@ func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFil
 		*enum.value = raw
 	}
 	return filter, nil
+}
+
+func parseOptionalCategoryID(raw string) (identityservice.CategoryID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return 0, errors.New("category_id 无效")
+	}
+	return identityservice.CategoryID(value), nil
 }
 
 func ListMaterials(_ context.Context, c *hertzapp.RequestContext) {

@@ -24,7 +24,7 @@ func (mysqlContentStore) ListSources(v dto.Filter) ([]model.SourceContentView, e
 	return repository.ListSources(repository.Filter{
 		ID:            v.ID,
 		TeamID:        v.TeamID,
-		GameIDs:       v.GameIDs,
+		CategoryIDs:       v.CategoryIDs,
 		Platform:      v.Platform,
 		Status:        v.Status,
 		SourceType:    v.SourceType,

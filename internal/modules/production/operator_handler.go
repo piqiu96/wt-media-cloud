@@ -29,7 +29,12 @@ func ListComposeOperators(_ context.Context, c *hertzapp.RequestContext) {
 		}
 		teamID = value
 	}
-	options, err := productionservice.ListComposeOperators(current, teamID, strings.TrimSpace(c.Query("game_id")))
+	categoryID, err := parseOptionalCategoryID(c.Query("category_id"))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15220, "类目 ID 无效", "compose_operator_invalid")
+		return
+	}
+	options, err := productionservice.ListComposeOperators(current, teamID, categoryID)
 	if err != nil {
 		writeComposeOperatorError(c, err)
 		return

@@ -312,16 +312,16 @@ func (s *memoryStore) RestoreUsageByID(usageID int64, userID sharedidentity.User
 	return nil
 }
 
-// A game is a filter, not a visibility boundary (§5.3.3): an operator may join
-// a material in their team even when someone else is responsible for its game.
-func TestAddUsageAllowsAnotherGameInTheActorsTeam(t *testing.T) {
+// A category is a filter, not a visibility boundary (§5.3.3): an operator may join
+// a material in their team even when someone else is responsible for its category.
+func TestAddUsageAllowsAnotherCategoryInTheActorsTeam(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-b"
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, createdUsage: true}
+	category := sharedidentity.CategoryID(7)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}, createdUsage: true}
 	svc := testService(store)
-	_, _, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	_, _, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42)
 	if err != nil {
-		t.Fatalf("AddUsage() error = %v, want the team's other game to be allowed", err)
+		t.Fatalf("AddUsage() error = %v, want the team's other category to be allowed", err)
 	}
 	if store.created.MaterialID != 42 || store.created.TeamID != team {
 		t.Fatalf("store creation = %+v, want the team's material", store.created)
@@ -344,12 +344,12 @@ func TestAddUsageRejectsAMaterialInAnotherTeam(t *testing.T) {
 
 func TestAddUsageCreatesTheSoleMaterialUsageForScopedActor(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, createdUsage: true}
+	category := sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}, createdUsage: true}
 	svc := testService(store)
 	now := time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
-	usage, created, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	usage, created, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42)
 	if err != nil {
 		t.Fatalf("AddUsage() error = %v", err)
 	}
@@ -367,11 +367,11 @@ func TestAddUsageCreatesTheSoleMaterialUsageForScopedActor(t *testing.T) {
 // green.
 func TestAddUsageReportsAnAlreadyActiveRelationAsNotCreated(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+	category := sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}}
 	svc := testService(store)
 
-	usage, created, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	usage, created, err := svc.AddUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42)
 	if err != nil {
 		t.Fatalf("AddUsage() error = %v", err)
 	}
@@ -384,27 +384,27 @@ func TestAddUsageReportsAnAlreadyActiveRelationAsNotCreated(t *testing.T) {
 }
 
 // Detail, add and download share this visibility check. The team is the
-// boundary; the actor's responsible games are not, so an operator sees a
-// material of another game in the same team and an admin crosses teams. A
+// boundary; the actor's responsible categories are not, so an operator sees a
+// material of another category in the same team and an admin crosses teams. A
 // senior is still pinned to their own team.
-func TestGetMaterialScopesVisibilityByTeamNotGame(t *testing.T) {
+func TestGetMaterialScopesVisibilityByTeamNotCategory(t *testing.T) {
 	team := service.TeamID(7)
 	otherTeam := service.TeamID(8)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	for _, testCase := range []struct {
 		name    string
 		actor   service.PublicUser
 		wantErr bool
 	}{
-		{"operator other game in team", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, false},
+		{"operator other category in team", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{7}}, false},
 		{"operator other team", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam}, true},
-		{"senior other game in team", service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-b"}}, false},
+		{"senior other category in team", service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{7}}, false},
 		{"senior other team", service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam}, true},
 		{"admin across teams", service.PublicUser{ID: 1, Role: service.RoleAdmin, Status: service.UserStatusEnabled}, false},
 		{"disabled", service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusDisabled, TeamID: &team}, true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}}
+			store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}}
 			svc := testService(store)
 			_, err := svc.GetMaterial(testCase.actor, 42)
 			if testCase.wantErr {
@@ -420,22 +420,22 @@ func TestGetMaterialScopesVisibilityByTeamNotGame(t *testing.T) {
 	}
 }
 
-// The library query is scoped by team, not by the actor's responsible games.
-// Games travel only because the caller asked to narrow to them, and the viewer
+// The library query is scoped by team, not by the actor's responsible categories.
+// Categories travel only because the caller asked to narrow to them, and the viewer
 // travels so the store can answer the relation and usage filters.
-func TestListMaterialsScopesTheQueryByTeamAndLeavesGamesAsFilters(t *testing.T) {
+func TestListMaterialsScopesTheQueryByTeamAndLeavesCategoriesAsFilters(t *testing.T) {
 	team := service.TeamID(7)
 	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}}
 	svc := testService(store)
-	filter := repository.MaterialFilter{GameIDs: []string{"game-a", "game-b"}, Search: "demo", Joined: "not_joined"}
-	items, err := svc.ListMaterialsFiltered(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, filter)
+	filter := repository.MaterialFilter{CategoryIDs: []sharedidentity.CategoryID{6, 7}, Search: "demo", Joined: "not_joined"}
+	items, err := svc.ListMaterialsFiltered(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, filter)
 	if err != nil {
 		t.Fatalf("ListMaterialsFiltered() error = %v", err)
 	}
 	if len(items) != 1 || store.filter.TeamID == nil || *store.filter.TeamID != team {
 		t.Fatalf("items=%+v filter=%+v", items, store.filter)
 	}
-	if !slices.Equal(store.filter.GameIDs, []string{"game-a", "game-b"}) || store.filter.Search != "demo" || store.filter.Joined != "not_joined" || store.filter.UserID != 9 {
+	if !slices.Equal(store.filter.CategoryIDs, []sharedidentity.CategoryID{6, 7}) || store.filter.Search != "demo" || store.filter.Joined != "not_joined" || store.filter.UserID != 9 {
 		t.Fatalf("the caller's filters were not carried through: %+v", store.filter)
 	}
 }
@@ -480,22 +480,22 @@ func TestListMaterialsLetsAnAdminReadAcrossTeamsWhenNoTeamIsNamed(t *testing.T) 
 	}
 }
 
-// A senior operator reads every game of their own team. The games they are
+// A senior operator reads every category of their own team. The categories they are
 // responsible for narrow a request when they ask, but they must not narrow the
 // team behind their back (§5.3.3); another team stays refused and is not even
 // queried.
-func TestListMaterialsLetsASeniorReadEveryGameOfTheirTeam(t *testing.T) {
+func TestListMaterialsLetsASeniorReadEveryCategoryOfTheirTeam(t *testing.T) {
 	team := service.TeamID(7)
 	otherTeam := service.TeamID(8)
 	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team}}
 	svc := testService(store)
-	senior := service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+	senior := service.PublicUser{ID: 2, Role: service.RoleSeniorOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}
 
 	if _, err := svc.ListMaterialsFiltered(senior, repository.MaterialFilter{}); err != nil {
 		t.Fatalf("ListMaterialsFiltered() error = %v", err)
 	}
-	if store.filter.TeamID == nil || *store.filter.TeamID != team || len(store.filter.GameIDs) != 0 {
-		t.Fatalf("senior filter = %+v, want the whole team and no game scope", store.filter)
+	if store.filter.TeamID == nil || *store.filter.TeamID != team || len(store.filter.CategoryIDs) != 0 {
+		t.Fatalf("senior filter = %+v, want the whole team and no category scope", store.filter)
 	}
 
 	store.factsIDs = nil
@@ -662,11 +662,11 @@ func usageIDValue(id *int64) int64 {
 
 func TestListMyMaterialsReturnsOnlyUsagesWithCurrentlyVisibleMaterials(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}, usages: []model.MaterialUsage{usage}}
 	svc := testService(store)
-	items, err := svc.ListMyMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}})
+	items, err := svc.ListMyMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}})
 	if err != nil {
 		t.Fatalf("ListMyMaterials() error = %v", err)
 	}
@@ -701,9 +701,9 @@ func TestDownloadStatusOfMapsRawTaskStatusesToTheUserFacingBuckets(t *testing.T)
 // material's own cloud-side video_status untouched.
 func TestListMyMaterialsFillsTheDerivedDownloadStatusPerUsage(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
-	material42 := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady}
-	material30 := model.Material{ID: 30, TeamID: team, GameID: &game, VideoStatus: model.VideoReady}
+	category := sharedidentity.CategoryID(6)
+	material42 := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady}
+	material30 := model.Material{ID: 30, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady}
 	store := &memoryStore{
 		found:    true,
 		material: material42,
@@ -716,7 +716,7 @@ func TestListMyMaterialsFillsTheDerivedDownloadStatusPerUsage(t *testing.T) {
 	}
 	transfers := &stubTransfers{downloadStatuses: map[int64]string{42: "success", 30: "pending"}}
 	svc := NewService(store, transfers, &stubLinks{})
-	items, err := svc.ListMyMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}})
+	items, err := svc.ListMyMaterials(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}})
 	if err != nil {
 		t.Fatalf("ListMyMaterials() error = %v", err)
 	}
@@ -742,9 +742,9 @@ func TestListMyMaterialsFillsTheDerivedDownloadStatusPerUsage(t *testing.T) {
 // the placeholder cover with nothing failing.
 func TestBothListsCarryTheSourceRowLinksWithoutFiltering(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
-	material := model.Material{ID: 42, TeamID: team, GameID: &game, CoverURL: "https://cover/42.jpg", AuthorHomeURL: "https://author/42"}
-	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+	category := sharedidentity.CategoryID(6)
+	material := model.Material{ID: 42, TeamID: team, CategoryID: &category, CoverURL: "https://cover/42.jpg", AuthorHomeURL: "https://author/42"}
+	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}
 	store := &memoryStore{found: true, material: material, usages: []model.MaterialUsage{{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}}}
 	svc := testService(store)
 
@@ -774,17 +774,17 @@ func TestBothListsCarryTheSourceRowLinksWithoutFiltering(t *testing.T) {
 func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T) {
 	ctx := context.Background()
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	size := int64(4096)
-	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
-	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+	ready := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	operator := service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}
 
 	// Out of scope: the material's team is the boundary, and this actor is in
 	// another one.
 	otherTeam := service.TeamID(8)
 	store := &memoryStore{found: true, material: ready}
 	svc := testService(store)
-	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam, GameIDs: []string{"game-a"}}, 42); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &otherTeam, CategoryIDs: []sharedidentity.CategoryID{6}}, 42); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("out-of-scope VideoURL() error = %v, want ErrForbidden", err)
 	}
 
@@ -831,15 +831,15 @@ func TestVideoURLChecksScopeThenReadinessBeforeComposingTheAddress(t *testing.T)
 // between the store read and the signature must reach the signer cancelled.
 func TestVideoURLHandsTheCallersContextToTheLinker(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	size := int64(4096)
-	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	ready := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
 	links := &stubLinks{url: "http://unused"}
 	svc := NewService(&memoryStore{found: true, material: ready}, &stubTransfers{}, links)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err != nil {
+	if _, err := svc.VideoURL(ctx, service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42); err != nil {
 		t.Fatalf("VideoURL() error = %v", err)
 	}
 	if links.ctx == nil {
@@ -855,12 +855,12 @@ func TestVideoURLHandsTheCallersContextToTheLinker(t *testing.T) {
 // the fault surfaces as an error, not as a URL composed from a half-empty key.
 func TestVideoURLReportsAReadyRowWithIncompleteFactsAsAFault(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
-	incomplete := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4"}
+	category := sharedidentity.CategoryID(6)
+	incomplete := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4"}
 	store := &memoryStore{found: true, material: incomplete}
 	links := &stubLinks{url: "http://unused"}
 	svc := NewService(store, &stubTransfers{}, links)
-	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil {
+	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42); err == nil {
 		t.Fatal("VideoURL() succeeded for a ready row with no size or hash, want a fault")
 	}
 	if links.key != "" {
@@ -875,12 +875,12 @@ func TestVideoURLReportsAReadyRowWithIncompleteFactsAsAFault(t *testing.T) {
 // rather than replacing it with a generic one.
 func TestVideoURLPropagatesTheLinkerRefusal(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	size := int64(4096)
-	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	ready := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
 	store := &memoryStore{found: true, material: ready}
 	svc := NewService(store, &stubTransfers{}, &stubLinks{err: errors.New("minting refused")})
-	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); err == nil || !strings.Contains(err.Error(), "minting refused") {
+	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42); err == nil || !strings.Contains(err.Error(), "minting refused") {
 		t.Fatalf("VideoURL() error = %v, want the linker's refusal to propagate", err)
 	}
 }
@@ -890,12 +890,12 @@ func TestVideoURLPropagatesTheLinkerRefusal(t *testing.T) {
 // drawer, so the same 409 the download route gives is the answer here.
 func TestVideoURLRefusesAReadyMaterialWhoseObjectIsGone(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	size := int64(4096)
-	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	ready := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
 	links := &stubLinks{url: "http://unused", missing: map[string]bool{ready.SourceObjectKey: true}}
 	svc := NewService(&memoryStore{found: true, material: ready}, &stubTransfers{}, links)
-	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42); !errors.Is(err, ErrMaterialUnavailable) {
+	if _, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42); !errors.Is(err, ErrMaterialUnavailable) {
 		t.Fatalf("VideoURL() error = %v, want ErrMaterialUnavailable", err)
 	}
 	if links.key != "" {
@@ -908,12 +908,12 @@ func TestVideoURLRefusesAReadyMaterialWhoseObjectIsGone(t *testing.T) {
 // and no address may be signed on an unknown answer.
 func TestVideoURLReportsABucketCheckFailure(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	size := int64(4096)
-	ready := model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
+	ready := model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoReady, SourceObjectKey: "materials/42/x.mp4", VideoSizeBytes: &size, VideoSHA256: "0f343b0931126a20f133d67c2b018a3b"}
 	links := &stubLinks{url: "http://unused", existsErr: errors.New("storage unreachable")}
 	svc := NewService(&memoryStore{found: true, material: ready}, &stubTransfers{}, links)
-	_, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 42)
+	_, err := svc.VideoURL(context.Background(), service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 42)
 	if err == nil || !strings.Contains(err.Error(), "storage unreachable") {
 		t.Fatalf("VideoURL() error = %v, want the bucket failure to propagate", err)
 	}
@@ -964,11 +964,11 @@ func TestRemoveUsageReportsAMissingUsageSeparatelyFromAMissingMaterial(t *testin
 // even if the user never reached the store, so both are checked.
 func TestRemoveUsageScopesTheSoftRemovalToTheActingUser(t *testing.T) {
 	team := service.TeamID(7)
-	game := "game-a"
+	category := sharedidentity.CategoryID(6)
 	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}, usages: []model.MaterialUsage{usage}}
 	svc := testService(store)
-	if err := svc.RemoveUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}, 5); err != nil {
+	if err := svc.RemoveUsage(service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{6}}, 5); err != nil {
 		t.Fatalf("RemoveUsage() error = %v", err)
 	}
 	if store.removed != 5 || store.removedFor != 9 {
@@ -986,17 +986,17 @@ func TestRemoveUsageScopesTheSoftRemovalToTheActingUser(t *testing.T) {
 // asserted on the argument, because a list read for the wrong user returns rows
 // that look perfectly ordinary.
 func TestListMyMaterialsKeepsTheGivenUpRelationWithItsOwnState(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
 	givenUpAt := time.Date(2026, 9, 27, 11, 0, 0, 0, time.UTC)
 	store := &memoryStore{
 		found:    true,
-		material: model.Material{ID: 42, TeamID: team, GameID: &game},
+		material: model.Material{ID: 42, TeamID: team, CategoryID: &category},
 		usages: []model.MaterialUsage{
 			{ID: 6, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageRemoved, RemovedAt: &givenUpAt},
 			{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive},
 		},
 	}
-	items, err := testService(store).ListMyMaterials(scopedActor(team, game))
+	items, err := testService(store).ListMyMaterials(scopedActor(team, category))
 	if err != nil {
 		t.Fatalf("ListMyMaterials() error = %v", err)
 	}
@@ -1050,10 +1050,10 @@ func TestRestoreUsageReportsAMissingUsageSeparatelyFromAMissingMaterial(t *testi
 // not be able to put another operator's given-up row back into use. The ID alone
 // would pass even if the user never reached the store.
 func TestRestoreUsageScopesTheRestorationToTheActingUser(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
 	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageRemoved}
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
-	if err := testService(store).RestoreUsage(scopedActor(team, game), 5); err != nil {
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}, usages: []model.MaterialUsage{usage}}
+	if err := testService(store).RestoreUsage(scopedActor(team, category), 5); err != nil {
 		t.Fatalf("RestoreUsage() error = %v", err)
 	}
 	if store.restored != 5 || store.restoredFor != 9 {
@@ -1071,18 +1071,18 @@ func TestRestoreUsageScopesTheRestorationToTheActingUser(t *testing.T) {
 // read cannot see. Both are the same answer to the user, so the assertion is that
 // answer rather than which of the two produced it.
 func TestRestoreUsageTreatsARelationAlreadyInUseAsDone(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
 	usage := model.MaterialUsage{ID: 5, TeamID: team, MaterialID: 42, UserID: 9, Status: model.MaterialUsageActive}
-	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, GameID: &game}, usages: []model.MaterialUsage{usage}}
-	if err := testService(store).RestoreUsage(scopedActor(team, game), 5); err != nil {
+	store := &memoryStore{found: true, material: model.Material{ID: 42, TeamID: team, CategoryID: &category}, usages: []model.MaterialUsage{usage}}
+	if err := testService(store).RestoreUsage(scopedActor(team, category), 5); err != nil {
 		t.Fatalf("RestoreUsage() error = %v, want the relation it was asked to reach", err)
 	}
 }
 
-func readyMaterial(team service.TeamID, game string) model.Material {
+func readyMaterial(team service.TeamID, category sharedidentity.CategoryID) model.Material {
 	size := int64(2048)
 	return model.Material{
-		ID: 42, TeamID: team, GameID: &game, Title: "示例视频",
+		ID: 42, TeamID: team, CategoryID: &category, Title: "示例视频",
 		VideoStatus:     model.VideoReady,
 		SourceObjectKey: "materials/42/aaaaaaaa.mp4",
 		VideoSizeBytes:  &size,
@@ -1090,14 +1090,14 @@ func readyMaterial(team service.TeamID, game string) model.Material {
 	}
 }
 
-func scopedActor(team service.TeamID, game string) service.PublicUser {
-	return service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, GameIDs: []string{game}}
+func scopedActor(team service.TeamID, category sharedidentity.CategoryID) service.PublicUser {
+	return service.PublicUser{ID: 9, Role: service.RoleOperator, Status: service.UserStatusEnabled, TeamID: &team, CategoryIDs: []sharedidentity.CategoryID{category}}
 }
 
-// stubResolveGame stands in for the identity store call `CreateDownload` makes to
-// name the game a download is filed under; the real resolver hits the global DB,
+// stubResolveCategory stands in for the identity store call `CreateDownload` makes to
+// name the category a download is filed under; the real resolver hits the global DB,
 // which no unit test here has.
-var stubResolveGame = func(gameID string) (string, bool, error) {
+var stubResolveCategory = func(categoryID sharedidentity.CategoryID) (string, bool, error) {
 	return "三角洲行动", true, nil
 }
 
@@ -1105,16 +1105,16 @@ var stubResolveGame = func(gameID string) (string, bool, error) {
 // be polling: any machine that user logs in on may claim the task, so the only
 // identity the route puts on it is the actor.
 func TestCreateDownloadAddressesTheTaskToTheActor(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	material := readyMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	material := readyMaterial(team, category)
 	store := &memoryStore{found: true, material: material}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 	now := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
 
-	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -1127,7 +1127,7 @@ func TestCreateDownloadAddressesTheTaskToTheActor(t *testing.T) {
 	}
 	// The executor runs later, on another machine, and may not read `materials`:
 	// everything it needs to name, size and verify the file has to be on the task.
-	if got.AssetTitle != "示例视频" || got.GameName != "三角洲行动" || got.SourceObjectKey != "materials/42/aaaaaaaa.mp4" || got.TotalBytes != 2048 || got.ExpectedSHA256 != strings.Repeat("a", 64) {
+	if got.AssetTitle != "示例视频" || got.CategoryName != "三角洲行动" || got.SourceObjectKey != "materials/42/aaaaaaaa.mp4" || got.TotalBytes != 2048 || got.ExpectedSHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("the material facts must travel with the task: %+v", got)
 	}
 	if task.ID != "transfer-1" {
@@ -1139,13 +1139,13 @@ func TestCreateDownloadAddressesTheTaskToTheActor(t *testing.T) {
 // it is an action from "My Materials" (§5.3.4). A direct API call by a viewer
 // with no active relation must fail closed, before anything is queued.
 func TestCreateDownloadRequiresTheActorsActiveUsage(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
 
-	store := &memoryStore{found: true, material: readyMaterial(team, game), usageMissing: true}
+	store := &memoryStore{found: true, material: readyMaterial(team, category), usageMissing: true}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
-	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); !errors.Is(err, ErrUsageForbidden) {
+	svc.resolveCategory = stubResolveCategory
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42); !errors.Is(err, ErrUsageForbidden) {
 		t.Fatalf("CreateDownload() error = %v, want ErrUsageForbidden", err)
 	}
 	if transfers.count != 0 || transfers.prepareCount != 0 || store.preparedCount != 0 {
@@ -1157,11 +1157,11 @@ func TestCreateDownloadRequiresTheActorsActiveUsage(t *testing.T) {
 
 	// The allowed arm is what makes the refusal meaningful: the same viewer with
 	// an active relation gets the task, and the relation was actually consulted.
-	store = &memoryStore{found: true, material: readyMaterial(team, game)}
+	store = &memoryStore{found: true, material: readyMaterial(team, category)}
 	transfers = &stubTransfers{}
 	svc = NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
-	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
+	svc.resolveCategory = stubResolveCategory
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v, want the relation to allow it", err)
 	}
 	if transfers.count != 1 || !slices.Equal(store.usageChecks, []int64{42}) {
@@ -1174,8 +1174,8 @@ func TestCreateDownloadRequiresTheActorsActiveUsage(t *testing.T) {
 // any two of them would answer 404 or 500 where the frozen contract publishes a
 // 409.
 func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	actor := scopedActor(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	actor := scopedActor(team, category)
 
 	for _, testCase := range []struct {
 		name        string
@@ -1186,21 +1186,21 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 	}{
 		{
 			name:        "the transfer module rejects the input",
-			material:    readyMaterial(team, game),
+			material:    readyMaterial(team, category),
 			found:       true,
 			transferErr: transferservice.ErrInvalidInput,
 			want:        ErrInvalidInput,
 		},
 		{
 			name:     "outside the actor's team",
-			material: func() model.Material { m := readyMaterial(service.TeamID(8), "game-b"); return m }(),
+			material: func() model.Material { m := readyMaterial(service.TeamID(8), 7); return m }(),
 			found:    true,
 			want:     ErrForbidden,
 		},
 		{
 			name: "no prepared video",
 			material: func() model.Material {
-				m := readyMaterial(team, game)
+				m := readyMaterial(team, category)
 				m.VideoStatus = model.VideoNotDownloaded
 				m.SourceObjectKey = ""
 				m.VideoSizeBytes = nil
@@ -1220,7 +1220,7 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 		store := &memoryStore{found: testCase.found, material: testCase.material}
 		transfers := &stubTransfers{err: testCase.transferErr}
 		svc := NewService(store, transfers, &stubLinks{})
-		svc.resolveGame = stubResolveGame
+		svc.resolveCategory = stubResolveCategory
 
 		if _, err := svc.CreateDownload(context.Background(), actor, 42); !errors.Is(err, testCase.want) {
 			t.Fatalf("%s: error = %v, want %v", testCase.name, err, testCase.want)
@@ -1244,15 +1244,15 @@ func TestCreateDownloadRefusesBeforeItQueuesAnything(t *testing.T) {
 // module's own inconsistency, and answering the user's 409 ("try again later")
 // would hide it behind a status that says the system is working.
 func TestCreateDownloadDoesNotPresentAnIncompleteReadyRowAsUnavailable(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	material := readyMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	material := readyMaterial(team, category)
 	material.VideoSHA256 = ""
 	store := &memoryStore{found: true, material: material}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	_, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	_, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err == nil {
 		t.Fatal("a ready material with no hash must not be queued for download")
 	}
@@ -1264,8 +1264,8 @@ func TestCreateDownloadDoesNotPresentAnIncompleteReadyRowAsUnavailable(t *testin
 	}
 }
 
-func pendingMaterial(team service.TeamID, game string) model.Material {
-	material := readyMaterial(team, game)
+func pendingMaterial(team service.TeamID, category sharedidentity.CategoryID) model.Material {
+	material := readyMaterial(team, category)
 	material.VideoStatus = model.VideoNotDownloaded
 	material.SourceObjectKey = ""
 	material.VideoSizeBytes = nil
@@ -1282,13 +1282,13 @@ func pendingMaterial(team service.TeamID, game string) model.Material {
 // carried a placeholder hash or a zero size would be a task an executor could
 // claim and then fail to verify against, which is worse than one it cannot claim.
 func TestCreateDownloadQueuesAWaitingTaskForAMaterialWithNoPreparedVideo(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: true}
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: pendingMaterial(team, category), preparing: true}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -1322,13 +1322,13 @@ func TestCreateDownloadQueuesAWaitingTaskForAMaterialWithNoPreparedVideo(t *test
 // could be taken for every click and the tests above would still pass, having
 // only ever exercised one branch.
 func TestCreateDownloadQueuesNoPreparationForAPreparedMaterial(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	store := &memoryStore{found: true, material: readyMaterial(team, game), preparing: true}
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: readyMaterial(team, category), preparing: true}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
 	if transfers.prepareCount != 0 {
@@ -1347,14 +1347,14 @@ func TestCreateDownloadQueuesNoPreparationForAPreparedMaterial(t *testing.T) {
 // between the read and the write must be fetched now, not held back behind a
 // preparation nobody needs any more.
 func TestCreateDownloadFetchesDirectlyWhenTheVideoBecameReadyMidRequest(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	fresh := readyMaterial(team, game)
-	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &fresh}
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	fresh := readyMaterial(team, category)
+	store := &memoryStore{found: true, material: pendingMaterial(team, category), preparing: false, refind: &fresh}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
 	if store.findCount != 2 {
@@ -1373,15 +1373,15 @@ func TestCreateDownloadFetchesDirectlyWhenTheVideoBecameReadyMidRequest(t *testi
 // wait was designed for, and it must still wait — not fall through to a direct
 // download with empty facts, which the transfer module would refuse.
 func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	stillPending := pendingMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	stillPending := pendingMaterial(team, category)
 	stillPending.VideoStatus = model.VideoDownloading
-	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: false, refind: &stillPending}
+	store := &memoryStore{found: true, material: pendingMaterial(team, category), preparing: false, refind: &stillPending}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -1399,18 +1399,18 @@ func TestCreateDownloadStillWaitsWhenAPreparationIsAlreadyRunning(t *testing.T) 
 // read with is what the assertion pins — a service that passed a zero timestamp
 // would still move the row in the fake and fail in production.
 func TestCreateDownloadRepreparesAReadyMaterialWhoseObjectIsGone(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
 	preparedAt := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
-	material := readyMaterial(team, game)
+	material := readyMaterial(team, category)
 	material.SourceURL = "https://www.douyin.com/video/42"
 	material.VideoPreparedAt = &preparedAt
 	store := &memoryStore{found: true, material: material, repreparing: true}
 	links := &stubLinks{missing: map[string]bool{material.SourceObjectKey: true}}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, links)
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -1442,10 +1442,10 @@ func TestCreateDownloadRepreparesAReadyMaterialWhoseObjectIsGone(t *testing.T) {
 // "another preparation is still running", and guessing wrong strands a download
 // behind a preparation nobody needs any more.
 func TestCreateDownloadReReadsAfterTheTakeBackWasRefused(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	gone := readyMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	gone := readyMaterial(team, category)
 	gone.SourceURL = "https://www.douyin.com/video/42"
-	fresh := readyMaterial(team, game)
+	fresh := readyMaterial(team, category)
 	fresh.SourceObjectKey = "materials/42/bbbbbbbb.mp4"
 
 	for _, tc := range []struct {
@@ -1457,7 +1457,7 @@ func TestCreateDownloadReReadsAfterTheTakeBackWasRefused(t *testing.T) {
 	}{
 		{"ready again with the object present", fresh, nil, nil, true},
 		{"ready again but the object is still gone", fresh, map[string]bool{fresh.SourceObjectKey: true}, ErrMaterialUnavailable, false},
-		{"still being prepared", model.Material{ID: 42, TeamID: team, GameID: &game, VideoStatus: model.VideoDownloading, SourceURL: gone.SourceURL}, nil, nil, false},
+		{"still being prepared", model.Material{ID: 42, TeamID: team, CategoryID: &category, VideoStatus: model.VideoDownloading, SourceURL: gone.SourceURL}, nil, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			refreshed := tc.refreshed
@@ -1468,9 +1468,9 @@ func TestCreateDownloadReReadsAfterTheTakeBackWasRefused(t *testing.T) {
 			}
 			transfers := &stubTransfers{}
 			svc := NewService(store, transfers, links)
-			svc.resolveGame = stubResolveGame
+			svc.resolveCategory = stubResolveCategory
 
-			task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+			task, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 			if tc.want != nil {
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("error = %v, want %v", err, tc.want)
@@ -1509,14 +1509,14 @@ func TestCreateDownloadReReadsAfterTheTakeBackWasRefused(t *testing.T) {
 // outage as a missing object would queue a preparation for a material that is
 // fine, and the route would report a download in progress that nobody needs.
 func TestCreateDownloadReportsABucketCheckFailure(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	store := &memoryStore{found: true, material: readyMaterial(team, game)}
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: readyMaterial(team, category)}
 	links := &stubLinks{existsErr: errors.New("storage unreachable")}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, links)
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	_, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	_, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err == nil || !strings.Contains(err.Error(), "storage unreachable") {
 		t.Fatalf("error = %v, want the bucket failure to propagate", err)
 	}
@@ -1529,15 +1529,15 @@ func TestCreateDownloadReportsABucketCheckFailure(t *testing.T) {
 // the only honest answer is the 409 the drawer already reads as "no prepared
 // video right now". A preparation task here could only fail.
 func TestCreateDownloadRefusesAReadyMaterialWhoseObjectIsGoneAndHasNoSource(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	material := readyMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	material := readyMaterial(team, category)
 	store := &memoryStore{found: true, material: material}
 	links := &stubLinks{missing: map[string]bool{material.SourceObjectKey: true}}
 	transfers := &stubTransfers{}
 	svc := NewService(store, transfers, links)
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); !errors.Is(err, ErrMaterialUnavailable) {
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42); !errors.Is(err, ErrMaterialUnavailable) {
 		t.Fatalf("error = %v, want ErrMaterialUnavailable", err)
 	}
 	if transfers.prepareCount != 0 || transfers.count != 0 {
@@ -1550,13 +1550,13 @@ func TestCreateDownloadRefusesAReadyMaterialWhoseObjectIsGoneAndHasNoSource(t *t
 // the client must receive the attached body — the one that now carries the
 // object key — rather than the pending row it would otherwise be stuck with.
 func TestCreateDownloadReturnsTheAttachedTaskBody(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	store := &memoryStore{found: true, material: pendingMaterial(team, game), preparing: true}
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: pendingMaterial(team, category), preparing: true}
 	transfers := &stubTransfers{attachOK: true, attachTask: transferdto.Task{ID: "transfer-1", Status: "pending", TotalBytes: 2048}}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	task, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42)
+	task, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42)
 	if err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
@@ -1572,13 +1572,13 @@ func TestCreateDownloadReturnsTheAttachedTaskBody(t *testing.T) {
 // it. Without this arm the attach could be called unconditionally and every
 // other test would still pass.
 func TestCreateDownloadDoesNotAttachWithoutADependency(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	store := &memoryStore{found: true, material: readyMaterial(team, game)}
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	store := &memoryStore{found: true, material: readyMaterial(team, category)}
 	transfers := &stubTransfers{attachOK: true}
 	svc := NewService(store, transfers, &stubLinks{})
-	svc.resolveGame = stubResolveGame
+	svc.resolveCategory = stubResolveCategory
 
-	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, game), 42); err != nil {
+	if _, err := svc.CreateDownload(context.Background(), scopedActor(team, category), 42); err != nil {
 		t.Fatalf("CreateDownload() error = %v", err)
 	}
 	if transfers.attachCount != 0 {
@@ -1690,8 +1690,8 @@ func TestMarkVideoFailedPassesOnAStoreFailure(t *testing.T) {
 // provider for -- which is exactly how the two came to be confused: the worker
 // asked for the local row id and every provider answered "no such video".
 func TestPreparationSourceCarriesThePlatformContentTheWorkerResolvesFrom(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	material := pendingMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	material := pendingMaterial(team, category)
 	material.Platform = "douyin"
 	// The local `source_contents` row id, which is *not* an id the provider knows.
 	material.SourceContentID = 42
@@ -1719,8 +1719,8 @@ func TestPreparationSourceCarriesThePlatformContentTheWorkerResolvesFrom(t *test
 // same answer an id that never existed gets. A distinct "forbidden" here would
 // invite a caller to try a different team.
 func TestPreparationSourceRefusesAMaterialOutsideTheTasksTeam(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	material := pendingMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	material := pendingMaterial(team, category)
 	material.Platform = "douyin"
 	material.SourceContentID = 7123456789012345678
 	store := &memoryStore{found: true, material: material}
@@ -1739,7 +1739,7 @@ func TestPreparationSourceRefusesAMaterialOutsideTheTasksTeam(t *testing.T) {
 // preparation cannot run is a property of the row. The worker's failure message is
 // the only place an operator sees why, so the two are kept apart.
 func TestPreparationSourceRefusesAMaterialWithNothingToResolveFrom(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
 	for _, testCase := range []struct {
 		name      string
 		platform  string
@@ -1751,7 +1751,7 @@ func TestPreparationSourceRefusesAMaterialWithNothingToResolveFrom(t *testing.T)
 		{"neither", "  ", ""},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			material := pendingMaterial(team, game)
+			material := pendingMaterial(team, category)
 			material.Platform = testCase.platform
 			material.PlatformContentID = testCase.contentID
 			// The local row id is present throughout, so a refusal can only come
@@ -1778,8 +1778,8 @@ func TestPreparationSourceRefusesAMaterialWithNothingToResolveFrom(t *testing.T)
 // sending it anyway would spend a provider call to be told the video does not
 // exist, which reads the same as a video that really is gone.
 func TestPreparationSourceRefusesAPlatformContentIdThatIsNotAnId(t *testing.T) {
-	team, game := service.TeamID(7), "game-a"
-	material := pendingMaterial(team, game)
+	team, category := service.TeamID(7), sharedidentity.CategoryID(6)
+	material := pendingMaterial(team, category)
 	material.Platform = "douyin"
 	material.SourceContentID = 42
 	material.PlatformContentID = "https://www.douyin.com/video/7123456789012345678"
@@ -1798,7 +1798,7 @@ func TestPreparationSourceRefusesAPlatformContentIdThatIsNotAnId(t *testing.T) {
 }
 
 func TestPreparationSourceRefusesAnIncompleteScope(t *testing.T) {
-	store := &memoryStore{found: true, material: pendingMaterial(service.TeamID(7), "game-a")}
+	store := &memoryStore{found: true, material: pendingMaterial(service.TeamID(7), 6)}
 	for _, testCase := range []struct {
 		name       string
 		teamID     service.TeamID

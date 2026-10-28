@@ -6,7 +6,7 @@ describe('session client', () => {
   it('uses the HttpOnly cookie and never persists credentials', async () => {
     const fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ errcode: 0, data: { id: 1, username: 'admin', role: 'admin', status: 'enabled', team_id: null, team_name: '', game_ids: [] } }),
+      json: async () => ({ errcode: 0, data: { id: 1, username: 'admin', role: 'admin', status: 'enabled', team_id: null, team_name: '', category_ids: [] } }),
     }))
     const storage = { setItem: vi.fn(), getItem: vi.fn(), removeItem: vi.fn() }
     const client = createSessionClient({ fetch, storage })
@@ -22,7 +22,7 @@ describe('session client', () => {
   it('loads the current user with cookie credentials', async () => {
     const fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ errcode: 0, data: { id: 1, username: 'admin', role: 'admin', status: 'enabled', team_id: null, team_name: '', game_ids: [] } }),
+      json: async () => ({ errcode: 0, data: { id: 1, username: 'admin', role: 'admin', status: 'enabled', team_id: null, team_name: '', category_ids: [] } }),
     }))
     const client = createSessionClient({ fetch, storage: {} })
 

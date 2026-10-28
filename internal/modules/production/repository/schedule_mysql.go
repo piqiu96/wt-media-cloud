@@ -12,6 +12,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	"github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -202,7 +203,7 @@ func scheduledTaskKey(runKey string, materialID int64) string {
 
 type scheduleCandidate struct {
 	MaterialID    int64
-	GameID        sql.NullString
+	CategoryID    sql.NullInt64
 	Status        string
 	Title         string
 	PublishedAt   sql.NullTime
@@ -317,7 +318,7 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 			pool = append(pool, candidate)
 		}
 		created, skipped, err := executeComposePriorityRules(strategy.PriorityRules, pool, now, strategy.SingleLimit, strategy.DailyLimit-dailyCount, func(candidate scheduleCandidate) (bool, error) {
-			task := model.ComposeTask{TeamID: strategy.TeamID, GameID: strategy.GameID, OperatorID: strategy.OperatorID, TriggerType: trigger,
+			task := model.ComposeTask{TeamID: strategy.TeamID, CategoryID: strategy.CategoryID, OperatorID: strategy.OperatorID, TriggerType: trigger,
 				DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, strategy.Name),
 				MaterialID:  candidate.MaterialID, StrategyID: strategy.ID,
 				TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: append(json.RawMessage(nil), strategy.Config...),
@@ -400,24 +401,24 @@ func executeComposePriorityRules(rules []model.ComposePriorityRule, pool []sched
 
 // composeOperatorAvailable is the scheduler's copy of the strategy operator
 // gate: an enabled operator or senior operator in the strategy's team whose
-// responsible games include the strategy's game. A NULL operator is a legacy
+// responsible categories include the strategy's category. A NULL operator is a legacy
 // row that has not been assigned; it is skipped rather than guessed.
 func composeOperatorAvailable(tx *gorm.DB, strategy model.ComposeStrategy) (bool, error) {
 	if strategy.OperatorID == nil || *strategy.OperatorID <= 0 {
 		return false, nil
 	}
 	var count int
-	err := tx.Raw(`SELECT COUNT(*) FROM users u JOIN user_game_scopes s ON s.user_id = u.id WHERE u.id = ? AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = ? AND s.game_id = ?`, *strategy.OperatorID, strategy.TeamID, strategy.GameID).Row().Scan(&count)
+	err := tx.Raw(`SELECT COUNT(*) FROM users u JOIN user_category_scopes s ON s.user_id = u.id WHERE u.id = ? AND u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = ? AND s.category_id = ?`, *strategy.OperatorID, strategy.TeamID, strategy.CategoryID).Row().Scan(&count)
 	return count > 0, err
 }
 
 // listComposeScheduleCandidates reads the strategy team's material pool. A
 // personal usage row is not required: scheduled production belongs to the
 // strategy operator, and neither the creator's nor the operator's "my
-// materials" list is touched. The game is kept in the row for the other_game
+// materials" list is touched. The category is kept in the row for the other_category
 // skip reason, not as a WHERE clause, so candidate_count keeps its meaning.
 func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) ([]scheduleCandidate, error) {
-	rows, err := tx.Raw(`SELECT m.id, sc.game_id, m.status, m.title, sc.published_at, sc.like_count, sc.favorite_count FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? ORDER BY m.id`, strategy.TeamID).Rows()
+	rows, err := tx.Raw(`SELECT m.id, sc.category_id, m.status, m.title, sc.published_at, sc.like_count, sc.favorite_count FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? ORDER BY m.id`, strategy.TeamID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +426,7 @@ func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) 
 	result := make([]scheduleCandidate, 0)
 	for rows.Next() {
 		var item scheduleCandidate
-		if err := rows.Scan(&item.MaterialID, &item.GameID, &item.Status, &item.Title, &item.PublishedAt, &item.LikeCount, &item.FavoriteCount); err != nil {
+		if err := rows.Scan(&item.MaterialID, &item.CategoryID, &item.Status, &item.Title, &item.PublishedAt, &item.LikeCount, &item.FavoriteCount); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -434,8 +435,8 @@ func listComposeScheduleCandidates(tx *gorm.DB, strategy model.ComposeStrategy) 
 }
 
 func composeCandidateSkipReason(tx *gorm.DB, strategy model.ComposeStrategy, candidate scheduleCandidate, createdCount, dailyCount int) (string, error) {
-	if !candidate.GameID.Valid || candidate.GameID.String != strategy.GameID {
-		return "other_game", nil
+	if !candidate.CategoryID.Valid || identity.CategoryID(candidate.CategoryID.Int64) != strategy.CategoryID {
+		return "other_category", nil
 	}
 	if candidate.Status != "available" {
 		return "material_unavailable", nil

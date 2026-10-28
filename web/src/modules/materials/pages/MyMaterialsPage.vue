@@ -15,7 +15,7 @@ import {
   downloadActionLabel,
   downloadStatusLabel,
   downloadStatusTone,
-  gameName,
+  categoryName,
   usageStatusLabel,
   usageStatusTone,
   videoStatusLabel,
@@ -43,7 +43,7 @@ const search = ref('')
 const statusFilter = ref('')
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
-const games = ref([])
+const categories = ref([])
 const detailVisible = ref(false)
 const detail = ref(null)
 const detailLoading = ref(false)
@@ -54,7 +54,7 @@ const batchLoading = ref(false)
 // 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
 // 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
 //
-// 走查七轮：游戏不再独立成列，收进「素材」格的副行（与作者同格），腾出的位置给
+// 走查七轮：类目不再独立成列，收进「素材」格的副行（与作者同格），腾出的位置给
 // 「使用状态」——这一页第一次同时有两个状态维度要并排（规范 §7.2）。使用状态是
 // 关系自己的状态，文件状态是素材的，两者不合并。
 //
@@ -110,11 +110,11 @@ function fileStatus(row) {
   return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
 }
 
-// 「素材」格副行：游戏 · 作者。游戏查不到名字时 gameName 退回 id（那是真实数据），
+// 「素材」格副行：类目 · 作者。类目查不到名字时 categoryName 退回 id（那是真实数据），
 // 作者没有就不留一个空的间隔号。
 function cellSubline(row) {
-  const game = gameName(games.value, row.game_id)
-  return row.author_name ? `${game} · ${row.author_name}` : game
+  const category = categoryName(categories.value, row.category_id)
+  return row.author_name ? `${category} · ${row.author_name}` : category
 }
 
 // 「本机那一份文件还在不在」，按任务表里的文件名索引（同 MaterialDetailDrawer 与下载中心）。
@@ -211,12 +211,12 @@ function changeSort(sort) {
   load()
 }
 
-async function loadGames() {
+async function loadCategories() {
   try {
-    const data = await users.listGames()
-    games.value = Array.isArray(data) ? data : []
+    const data = await users.listCategories()
+    categories.value = Array.isArray(data) ? data : []
   } catch {
-    games.value = []
+    categories.value = []
   }
 }
 
@@ -297,7 +297,7 @@ async function batchDownload() {
 
 onMounted(() => {
   load()
-  loadGames()
+  loadCategories()
   // `/my-material?material_id=7` 与素材库同源（详情抽屉里的操作会带上它）。
   const raw = route.query.material_id
   if (raw && /^\d+$/.test(String(raw))) {
@@ -329,7 +329,7 @@ onMounted(() => {
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="我的素材还是空的">
             <template #id="{ row }">{{ row.id }}</template>
-            <!-- 封面、标题与「游戏 · 作者」合成一格（走查七轮起副行是这两样；素材库那一页
+            <!-- 封面、标题与「类目 · 作者」合成一格（走查七轮起副行是这两样；素材库那一页
                  的副行仍是来源平台）。标题就是去来源平台的入口，蓝色可点；没有落地页的
                  素材退回普通文本。 -->
             <template #material="{ row }">
@@ -380,7 +380,7 @@ onMounted(() => {
         v-model:visible="detailVisible"
         :material="detail"
         :loading="detailLoading"
-        :games="games"
+        :categories="categories"
         mode="mine"
         @download="download"
         @redownload="download"

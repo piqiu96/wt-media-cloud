@@ -142,9 +142,9 @@ type Service struct {
 	transfers TransferCreator
 	links     ObjectLinker
 	now       func() time.Time
-	// resolveGame names the game a download is filed under. It is a field so the
+	// resolveCategory names the category a download is filed under. It is a field so the
 	// unit tests can stub the store call; the constructor installs the real one.
-	resolveGame func(gameID string) (string, bool, error)
+	resolveCategory func(categoryID identityservice.CategoryID) (string, bool, error)
 	// operators is the identity directory the usage summary reads names from.
 	// It stays nil in unit tests that only exercise counts; the wired service
 	// installs the real lookup.
@@ -154,9 +154,9 @@ type Service struct {
 func NewService(store Store, transfers TransferCreator, links ObjectLinker) *Service {
 	return &Service{
 		store: store, transfers: transfers, links: links, now: time.Now,
-		resolveGame: func(gameID string) (string, bool, error) {
-			game, ok, err := identityservice.ResolveGame(gameID)
-			return game.Name, ok, err
+		resolveCategory: func(categoryID identityservice.CategoryID) (string, bool, error) {
+			category, ok, err := identityservice.ResolveCategory(categoryID)
+			return category.Name, ok, err
 		},
 	}
 }
@@ -249,9 +249,9 @@ func (s *Service) ListMaterials(actor identityservice.PublicUser, search string)
 	return s.ListMaterialsFiltered(actor, repository.MaterialFilter{Search: search})
 }
 
-// ListMaterialsFiltered reads the team's public library. A game is a filter,
-// not a visibility boundary (§5.3.3): an ordinary operator sees every game in
-// their team and may narrow the list to the games they are responsible for.
+// ListMaterialsFiltered reads the team's public library. A category is a filter,
+// not a visibility boundary (§5.3.3): an ordinary operator sees every category in
+// their team and may narrow the list to the categories they are responsible for.
 // The team itself is still enforced server-side — an ordinary or senior
 // operator cannot ask for another team, and an admin may name the target team.
 func (s *Service) ListMaterialsFiltered(actor identityservice.PublicUser, filter repository.MaterialFilter) ([]model.Material, error) {
@@ -477,7 +477,7 @@ func (s *Service) RemoveUsage(actor identityservice.PublicUser, usageID int64) e
 // The checks are the removal's, in the removal's order, because they refuse the
 // same two things: a relation that is not the actor's (answered as absent, so that
 // one operator cannot probe another's rows by id) and a material outside the
-// actor's game scope.
+// actor's category scope.
 //
 // A relation that is already in use is not a refusal — the click asked for exactly
 // that state. The common way to ask twice is a double-click arriving before the
@@ -583,7 +583,7 @@ func (s *Service) CreateDownload(ctx context.Context, actor identityservice.Publ
 		TeamID:          material.TeamID,
 		AssetID:         material.ID,
 		AssetTitle:      material.Title,
-		GameName:        s.gameNameOf(material),
+		CategoryName:    s.categoryNameOf(material),
 		PublishedAt:     material.PublishedAt,
 		SourceObjectKey: objectKey,
 		RequestedBy:     actor.ID,
@@ -776,15 +776,15 @@ func (s *Service) PreparationSource(teamID identityservice.TeamID, materialID in
 	}, nil
 }
 
-// gameNameOf names the game a download should be filed under, or "" when there
-// is none to name. Naming is cosmetic: a lookup that fails (no game assigned, an
+// categoryNameOf names the category a download should be filed under, or "" when there
+// is none to name. Naming is cosmetic: a lookup that fails (no category assigned, an
 // unknown id, a store error) degrades to empty and the executor falls back to a
 // fixed placeholder rather than blocking the download on it.
-func (s *Service) gameNameOf(material model.Material) string {
-	if material.GameID == nil {
+func (s *Service) categoryNameOf(material model.Material) string {
+	if material.CategoryID == nil {
 		return ""
 	}
-	name, ok, err := s.resolveGame(*material.GameID)
+	name, ok, err := s.resolveCategory(*material.CategoryID)
 	if err != nil || !ok {
 		return ""
 	}
@@ -804,10 +804,10 @@ func videoFacts(material model.Material) (string, int64, string, error) {
 	return material.SourceObjectKey, *material.VideoSizeBytes, material.VideoSHA256, nil
 }
 
-// canAccessMaterial is the team boundary, not a game boundary: the library is
-// the team's public pool (§5.3.3), and a material's game is only a filter. An
+// canAccessMaterial is the team boundary, not a category boundary: the library is
+// the team's public pool (§5.3.3), and a material's category is only a filter. An
 // admin reads across teams and may narrow the list by target team. A material
-// without a game is visible too — it is still the team's material.
+// without a category is visible too — it is still the team's material.
 func canAccessMaterial(actor identityservice.PublicUser, material model.Material) bool {
 	if actor.Status != identityservice.UserStatusEnabled {
 		return false

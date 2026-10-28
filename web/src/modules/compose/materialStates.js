@@ -71,7 +71,7 @@ export function matchesKeyword(candidate, keyword) {
   return `${candidate.title || ''} ${candidate.id}`.toLowerCase().includes(needle)
 }
 
-// 两组各自的条数，供下拉里的「未使用过（5）」。分母是传进来的这批候选（游戏筛选之后、
+// 两组各自的条数，供下拉里的「未使用过（5）」。分母是传进来的这批候选（类目筛选之后、
 // 关键词之前）：跟着输入框抖动的数字不算信息。
 export function usageCounts(candidates, byId) {
   const counts = { unused: 0, used: 0 }

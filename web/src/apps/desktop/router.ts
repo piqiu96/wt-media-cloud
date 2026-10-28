@@ -36,7 +36,7 @@ export const desktopRoutes = [
       // 系统管理复用 Cloud 的同一批组件文件，而不是在 Desktop 再写一套。
       { path: "users", name: "Users", component: () => import("../cloud/pages/users/UsersPage.vue") },
       { path: "operation-teams", name: "OperationTeams", component: () => import("../cloud/pages/users/TeamsPage.vue") },
-      { path: "games", name: "Games", component: () => import("../cloud/pages/users/GamesPage.vue") },
+      { path: "categories", name: "Categories", component: () => import("../cloud/pages/users/CategoriesPage.vue") },
       // Desktop 独有页面
       { path: "logs", name: "LocalLogs", component: () => import("./features/local-logs/LocalLogsPage.vue") },
       { path: "settings", name: "LocalSettings", component: () => import("./features/local-settings/LocalSettingsPage.vue") },

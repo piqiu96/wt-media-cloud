@@ -10,7 +10,7 @@ import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { enabledGames } from '../../../shared/utils/games.js'
+import { enabledCategories } from '../../../shared/utils/categories.js'
 import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import { schemaFields } from '../schemaFields.js'
 import { TRIGGER_TYPE_OPTIONS, triggerLabel } from '../labels.js'
@@ -26,9 +26,9 @@ const sessionClient = createSessionClient()
 
 const rows = ref([])
 const templates = ref([])
-const games = ref([])
-// 选择与筛选只列启用游戏；名称解析仍读全量目录，停用游戏的历史策略不显示裸 ID。
-const enabledGameOptions = computed(() => enabledGames(games.value))
+const categories = ref([])
+// 选择与筛选只列启用类目；名称解析仍读全量目录，停用类目的历史策略不显示裸 ID。
+const enabledCategoryOptions = computed(() => enabledCategories(categories.value))
 const teams = ref([])
 const operatorOptions = ref([])
 const operatorsLoading = ref(false)
@@ -187,15 +187,15 @@ function openDetail(row) {
   loadRunHistory(row.id)
 }
 
-// 筛选走列表接口（search/game_id/template_id/status），页面只对返回行做分页切片。
-const filters = ref({ search: '', game_id: '', template_id: '', status: '' })
+// 筛选走列表接口（search/category_id/template_id/status），页面只对返回行做分页切片。
+const filters = ref({ search: '', category_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 
 const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', width: 220 },
   { colKey: 'template', title: '合成模板', width: 180 },
-  { colKey: 'game', title: '所属游戏', width: 130 },
+  { colKey: 'category', title: '所属类目', width: 130 },
   { colKey: 'team', title: '所属团队', width: 130 },
   { colKey: 'operator', title: '负责人', width: 120 },
   { colKey: 'schedule', title: '执行计划', width: 150 },
@@ -251,13 +251,13 @@ async function load({ quiet = false } = {}) {
     // 团队列表所有角色都可读（服务端仅要求登录），编辑/详情要把 team_id 映射成团队名；
     // 管理员的创建表单另用它选目标团队。
     if (!quiet || !currentUser.value) currentUser.value = await sessionClient.me()
-    const [strategyRows, templateRows, gameRows, teamRows] = await Promise.all([
-      client.listStrategies({ search: filters.value.search.trim(), game_id: filters.value.game_id, template_id: filters.value.template_id, status: filters.value.status }),
-      client.listTemplates(), client.listGames(), client.listTeams().catch(() => []),
+    const [strategyRows, templateRows, categoryRows, teamRows] = await Promise.all([
+      client.listStrategies({ search: filters.value.search.trim(), category_id: filters.value.category_id, template_id: filters.value.template_id, status: filters.value.status }),
+      client.listTemplates(), client.listCategories(), client.listTeams().catch(() => []),
     ])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
     templates.value = Array.isArray(templateRows) ? templateRows : []
-    games.value = Array.isArray(gameRows) ? gameRows : []
+    categories.value = Array.isArray(categoryRows) ? categoryRows : []
     teams.value = Array.isArray(teamRows) ? teamRows : []
     if (!quiet) pagination.value.current = 1
   } catch (e) {
@@ -274,7 +274,7 @@ useAutoRefresh(() => load({ quiet: true }), {
 function defaultForm() {
   return {
     team_id: '',
-    game_id: '',
+    category_id: '',
     operator_id: '',
     name: '',
     compose_template_id: '',
@@ -287,24 +287,24 @@ function defaultForm() {
   }
 }
 
-// 负责人候选只由团队＋游戏决定（服务端同一条有效性规则）。编辑既有策略时团队和游戏
-// 不可改，直接用行上的值；新建时管理员先选团队、所有人先选游戏。
+// 负责人候选只由团队＋类目决定（服务端同一条有效性规则）。编辑既有策略时团队和类目
+// 不可改，直接用行上的值；新建时管理员先选团队、所有人先选类目。
 async function loadOperatorOptions() {
   const sequence = ++operatorSequence
   const teamID = isAdmin.value ? Number(form.value.team_id) || 0 : Number(currentUser.value?.team_id) || 0
-  const gameID = form.value.game_id
+  const categoryID = form.value.category_id
   operatorError.value = ''
-  if (!teamID || !gameID) {
+  if (!teamID || !categoryID) {
     operatorOptions.value = []
     operatorsLoading.value = false
     return
   }
   operatorsLoading.value = true
   try {
-    const options = await client.listComposeOperators({ team_id: teamID, game_id: gameID })
+    const options = await client.listComposeOperators({ team_id: teamID, category_id: categoryID })
     if (sequence !== operatorSequence) return
     operatorOptions.value = Array.isArray(options) ? options : []
-    // 原来选的人已不在候选里（停用／改团队／不再负责该游戏）就不再声称已指派。
+    // 原来选的人已不在候选里（停用／改团队／不再负责该类目）就不再声称已指派。
     if (form.value.operator_id && !operatorOptions.value.some((option) => option.id === Number(form.value.operator_id))) form.value.operator_id = ''
   } catch (e) {
     if (sequence !== operatorSequence) return
@@ -315,7 +315,7 @@ async function loadOperatorOptions() {
   }
 }
 
-watch(() => [visible.value, form.value.team_id, form.value.game_id], () => {
+watch(() => [visible.value, form.value.team_id, form.value.category_id], () => {
   if (visible.value) loadOperatorOptions()
 })
 
@@ -341,7 +341,7 @@ watch(() => [visible.value, form.value.execution_mode, form.value.schedule.mode,
 })
 
 function resetFilters() {
-  filters.value = { search: '', game_id: '', template_id: '', status: '' }
+  filters.value = { search: '', category_id: '', template_id: '', status: '' }
   pagination.value.current = 1
   load()
 }
@@ -362,7 +362,7 @@ function openEdit(row) {
   editingID.value = row.id
   form.value = {
     team_id: row.team_id,
-    game_id: row.game_id,
+    category_id: row.category_id,
     operator_id: row.operator_id || '',
     name: row.name,
     compose_template_id: row.compose_template_id,
@@ -605,7 +605,7 @@ async function save() {
     } else {
       const template = templates.value.find((item) => item.id === Number(form.value.compose_template_id))
       const payload = {
-        game_id: form.value.game_id,
+        category_id: form.value.category_id,
         name,
         operator_id: Number(form.value.operator_id),
         compose_template_id: template.id,
@@ -627,8 +627,8 @@ async function save() {
   }
 }
 
-function gameName(id) {
-  return games.value.find((game) => game.id === id)?.name || id
+function categoryName(id) {
+  return categories.value.find((category) => category.id === id)?.name || id
 }
 
 function teamName(id) {
@@ -686,8 +686,8 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="load" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.game_id" clearable placeholder="全部">
-            <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" />
+          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="filters.category_id" clearable placeholder="全部">
+            <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
           </t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
             <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
@@ -709,7 +709,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 <span class="strategy-name-cell__main" :title="row.name">{{ row.name }}</span>
               </div>
             </template>
-            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
+            <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
             <template #team="{ row }">{{ teamName(row.team_id) }}</template>
             <!-- 历史策略没有负责人来源：显示“未记录”，不拿创建人冒充。 -->
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
@@ -752,25 +752,25 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                       <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
                     </t-select>
                   </t-form-item>
-                  <t-form-item label="所属游戏" required-mark>
-                    <t-select v-model="form.game_id" clearable placeholder="选择游戏">
-                      <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="game.name" />
+                  <t-form-item label="所属类目" required-mark>
+                    <t-select v-model="form.category_id" clearable placeholder="选择类目">
+                      <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
                     </t-select>
                   </t-form-item>
                 </template>
-                <!-- 编辑时归属不可改（服务端 Update 不动 team/game），但要展示出来让人知道策略挂在哪。 -->
+                <!-- 编辑时归属不可改（服务端 Update 不动 team/category），但要展示出来让人知道策略挂在哪。 -->
                 <template v-else>
                   <t-form-item label="所属团队"><strong class="strategy-readonly">{{ teamName(form.team_id) }}</strong></t-form-item>
-                  <t-form-item label="所属游戏"><strong class="strategy-readonly">{{ gameName(form.game_id) }}</strong></t-form-item>
+                  <t-form-item label="所属类目"><strong class="strategy-readonly">{{ categoryName(form.category_id) }}</strong></t-form-item>
                 </template>
-                <!-- 负责人是策略的必填归属：任务与成片都从这里继承。候选跟着团队＋游戏走。 -->
+                <!-- 负责人是策略的必填归属：任务与成片都从这里继承。候选跟着团队＋类目走。 -->
                 <t-form-item label="负责人" required-mark>
                   <div class="strategy-field">
-                    <t-select v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="!form.game_id || !operatorTeamReady" :placeholder="!form.game_id ? '先选择游戏' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
+                    <t-select v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="!form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
                       <t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" />
                     </t-select>
                     <p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p>
-                    <p v-else-if="form.game_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与游戏下没有可指派的运营</p>
+                    <p v-else-if="form.category_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与类目下没有可指派的运营</p>
                   </div>
                 </t-form-item>
                 <t-form-item label="合成模板" required-mark>
@@ -877,7 +877,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
           <div class="strategy-editor__aside">
             <div class="strategy-aside">
               <div class="strategy-aside__title">配置说明</div>
-              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略；所属团队与游戏决定普通运营的可见范围。</span></div>
+              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略；所属团队与类目决定普通运营的可见范围。</span></div>
               <div class="strategy-aside__item"><strong>② 合成配置</strong><span>参数由合成模板定义（如基础切段的开始/结束秒数），保存时按模板 schema 校验。</span></div>
               <div class="strategy-aside__tip">小提示：模板版本创建后固定，模板停用不影响已保存的策略。</div>
             </div>
@@ -909,7 +909,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 overview
                 :strategy="detailRow"
                 :team="teamName(detailRow.team_id)"
-                :game="gameName(detailRow.game_id)"
+                :category="categoryName(detailRow.category_id)"
                 :templates="templates"
                 :guide-url="detailRow.config?.guide_video_url || ''"
               />

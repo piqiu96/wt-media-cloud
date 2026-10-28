@@ -118,7 +118,7 @@ describe('material detail drawer', () => {
    * 走查七轮（用户提示词第十节「详情信息顺序」）：第一段回答「我现在处理到哪一步，
    * 下一步是什么」，字段往后放。
    *
-   * 「基本信息」剩下的三行（素材 ID / 游戏 / 入库时间）与 2026-10-27 新增的操作人
+   * 「基本信息」剩下的三行（素材 ID / 类目 / 入库时间）与 2026-10-27 新增的操作人
    * **没有删**，挪到最后一段：
    * 提示词那四段是「建议」，而没有一段提到这两样东西该去哪，直接删掉就是一次用户没
    * 裁定过的信息损失 —— 素材 ID 还是运营要复制去别处查的那串数字。顺序上官方那三段
@@ -284,7 +284,7 @@ describe('material detail drawer', () => {
   // 顶部把「这是什么」（来源副行 + 状态徽章）一次说清，正文才用于解释细节。
   it('heads the drawer with the source line and the status badges', () => {
     expect(template).toContain('material.author_name')
-    expect(source).toContain('gameName(games, material.game_id)')
+    expect(source).toContain('categoryName(categories, material.category_id)')
     expect(template).toContain('已加入我的素材')
     expect(source).toContain("mine: { type: Boolean, default: false }")
   })
@@ -306,11 +306,11 @@ describe('material detail drawer', () => {
     expect(hero).toContain('material.author_name')
   })
 
-  // 游戏在列表里有列、在正文里有行，再在副行里说第三遍就是重复。
-  it('keeps 游戏 out of the hero source line', () => {
+  // 类目在列表里有列、在正文里有行，再在副行里说第三遍就是重复。
+  it('keeps 类目 out of the hero source line', () => {
     const hero = sliceBetween(template, 'detail-hero', 'detail-card')
     const line = sliceBetween(hero, 'detail-source-line', '</p>')
-    expect(line).not.toContain('gameName')
+    expect(line).not.toContain('categoryName')
     expect(line).toContain('material.platform')
   })
 

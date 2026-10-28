@@ -18,7 +18,7 @@ const (
 type SourceContent struct {
 	ID                int64                  `json:"id"`
 	TeamID            sharedidentity.TeamID  `json:"team_id"`
-	GameID            *string                `json:"game_id,omitempty"`
+	CategoryID            *sharedidentity.CategoryID                `json:"category_id,omitempty"`
 	Platform          string                 `json:"platform"`
 	PlatformContentID string                 `json:"platform_content_id"`
 	Title             string                 `json:"title"`
@@ -82,7 +82,7 @@ const (
 type DiscoveryStrategy struct {
 	ID            int64                  `json:"id"`
 	TeamID        sharedidentity.TeamID  `json:"team_id"`
-	GameID        *string                `json:"game_id,omitempty"`
+	CategoryID        *sharedidentity.CategoryID                `json:"category_id,omitempty"`
 	Name          string                 `json:"name"`
 	StrategyType  string                 `json:"strategy_type"`
 	Platform      string                 `json:"platform"`

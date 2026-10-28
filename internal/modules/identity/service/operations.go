@@ -71,8 +71,8 @@ func ResolveUser(userID UserID) (PublicUser, bool, error) {
 	return newService(mysqlStore{}).ResolveUser(userID)
 }
 
-func ResolveGame(gameID string) (OperationGame, bool, error) {
-	return newService(mysqlStore{}).ResolveGame(gameID)
+func ResolveCategory(categoryID CategoryID) (Category, bool, error) {
+	return newService(mysqlStore{}).ResolveCategory(categoryID)
 }
 
 func ListAuditLogs(limit int) ([]AuditEvent, error) {
@@ -95,46 +95,46 @@ func DeleteTeam(actorID UserID, teamID TeamID) error {
 	return newService(mysqlStore{}).DeleteTeam(actorID, teamID)
 }
 
-func CreateGame(actorID UserID, id, name, remark string) (OperationGame, error) {
-	return newService(mysqlStore{}).CreateGame(actorID, id, name, remark)
+func CreateCategory(actorID UserID, categoryType CategoryType, name, remark string) (Category, error) {
+	return newService(mysqlStore{}).CreateCategory(actorID, categoryType, name, remark)
 }
 
-func ListGames(actorID UserID) ([]OperationGame, error) {
-	return newService(mysqlStore{}).ListGames(actorID)
+func ListCategories(actorID UserID) ([]Category, error) {
+	return newService(mysqlStore{}).ListCategories(actorID)
 }
 
-func ListAllGames(actorID UserID) ([]OperationGame, error) {
-	return newService(mysqlStore{}).ListAllGames(actorID)
+func ListAllCategories(actorID UserID) ([]Category, error) {
+	return newService(mysqlStore{}).ListAllCategories(actorID)
 }
 
-func ListManagementGames(actorID UserID) ([]OperationGame, error) {
-	return newService(mysqlStore{}).ListManagementGames(actorID)
+func ListManagementCategories(actorID UserID) ([]Category, error) {
+	return newService(mysqlStore{}).ListManagementCategories(actorID)
 }
 
-func GameReferences(actorID UserID, gameID string) (model.GameReferences, error) {
-	return newService(mysqlStore{}).GameReferences(actorID, gameID)
+func CategoryReferences(actorID UserID, categoryID CategoryID) (model.CategoryReferences, error) {
+	return newService(mysqlStore{}).CategoryReferences(actorID, categoryID)
 }
 
-func UpdateGame(actorID UserID, id, name string, status GameStatus, remark string) (OperationGame, error) {
-	return newService(mysqlStore{}).UpdateGame(actorID, id, name, status, remark)
+func UpdateCategory(actorID UserID, id CategoryID, name string, enabled bool, remark string) (Category, error) {
+	return newService(mysqlStore{}).UpdateCategory(actorID, id, name, enabled, remark)
 }
 
-func DeleteGame(actorID UserID, id string) error {
-	return newService(mysqlStore{}).DeleteGame(actorID, id)
+func DeleteCategory(actorID UserID, id CategoryID) error {
+	return newService(mysqlStore{}).DeleteCategory(actorID, id)
 }
 
 func DeleteUser(actorID, userID UserID) error {
 	return newService(mysqlStore{}).DeleteUser(actorID, userID)
 }
 
-func UpdateUserAccess(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string) (PublicUser, error) {
-	return newService(mysqlStore{}).UpdateUserAccess(actorID, userID, role, teamID, gameIDs)
+func UpdateUserAccess(actorID, userID UserID, role Role, teamID *TeamID, categoryIDs []CategoryID) (PublicUser, error) {
+	return newService(mysqlStore{}).UpdateUserAccess(actorID, userID, role, teamID, categoryIDs)
 }
 
-func UpdateUser(actorID, userID UserID, role Role, teamID *TeamID, gameIDs []string, status UserStatus) (PublicUser, error) {
-	return newService(mysqlStore{}).UpdateUser(actorID, userID, role, teamID, gameIDs, status)
+func UpdateUser(actorID, userID UserID, role Role, teamID *TeamID, categoryIDs []CategoryID, status UserStatus) (PublicUser, error) {
+	return newService(mysqlStore{}).UpdateUser(actorID, userID, role, teamID, categoryIDs, status)
 }
 
-func CanAccessGame(userID UserID, gameID string) bool {
-	return newService(mysqlStore{}).CanAccessGame(userID, gameID)
+func CanAccessCategory(userID UserID, categoryID CategoryID) bool {
+	return newService(mysqlStore{}).CanAccessCategory(userID, categoryID)
 }

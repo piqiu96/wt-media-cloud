@@ -842,7 +842,7 @@ func expectTaskByDedupeKey(mock sqlmock.Sqlmock, dedupeKey string, now time.Time
 }
 
 func taskColumns() []string {
-	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "game_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "claimed_by", "attempt_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
+	return []string{"id", "team_id", "asset_type", "asset_id", "asset_title", "category_name", "published_at", "source_object_key", "purpose", "execution_scope", "status", "requested_by", "claimed_by", "attempt_id", "dependency_task_id", "total_bytes", "transferred_bytes", "speed_bytes_per_sec", "eta_seconds", "attempt_count", "max_attempts", "lease_expires_at", "heartbeat_at", "started_at", "finished_at", "cancel_requested_at", "expected_sha256", "file_name", "error_code", "error_message", "integrity_sha256", "integrity_bytes", "created_at", "updated_at"}
 }
 
 // taskDefaults is the value each column reads as in a row builder call that did
@@ -859,7 +859,7 @@ func taskDefaults(column string, now time.Time) (driver.Value, bool) {
 		return int64(42), true
 	case "asset_title":
 		return "示例视频", true
-	case "game_name":
+	case "category_name":
 		return "三角洲行动", true
 	case "published_at":
 		return time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC), true

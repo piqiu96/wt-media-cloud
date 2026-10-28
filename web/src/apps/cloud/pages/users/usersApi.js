@@ -10,7 +10,7 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
         role: filters.role,
         team_id: filters.teamId,
         status: filters.status,
-        game_id: filters.gameId,
+        category_id: filters.categoryId,
       })
     },
     createUser(input) {
@@ -37,24 +37,25 @@ export function createUsersClient({ base = '/api/v1', fetch = globalThis.fetch }
     deleteTeam(teamId) {
       return api.delete(`/operation-teams/${teamId}`)
     },
-    listGames(filters = {}) {
-      return api.get('/games', {
+    listCategories(filters = {}) {
+      return api.get('/categories', {
         keyword: filters.keyword,
-        status: filters.status,
+        type: filters.type,
+        enabled: filters.enabled,
         scope: filters.scope,
       })
     },
-    getGameReferences(gameId) {
-      return api.get(`/games/${encodeURIComponent(gameId)}/references`)
+    getCategoryReferences(categoryId) {
+      return api.get(`/categories/${encodeURIComponent(categoryId)}/references`)
     },
-    createGame(input) {
-      return api.post('/games', { id: input.id, name: input.name, remark: input.remark })
+    createCategory(input) {
+      return api.post('/categories', { type: input.type, name: input.name, remark: input.remark })
     },
-    updateGame(gameId, input) {
-      return api.patch(`/games/${gameId}`, { name: input.name, status: input.status, remark: input.remark })
+    updateCategory(categoryId, input) {
+      return api.patch(`/categories/${categoryId}`, { name: input.name, enabled: input.enabled, remark: input.remark })
     },
-    deleteGame(gameId) {
-      return api.delete(`/games/${gameId}`)
+    deleteCategory(categoryId) {
+      return api.delete(`/categories/${categoryId}`)
     },
   }
 }
@@ -64,7 +65,7 @@ function userPayload(input, includeCredentials) {
     role: input.role,
     team_id: input.role === 'admin' ? null : Number(input.teamId),
     status: input.status,
-    game_ids: input.role === 'admin' ? [] : input.gameIds,
+    category_ids: input.role === 'admin' ? [] : input.categoryIds,
   }
   if (includeCredentials) {
     payload.username = input.username

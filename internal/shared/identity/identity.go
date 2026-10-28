@@ -9,6 +9,9 @@ type UserID int64
 // TeamID is the stable numeric identity of an operation team.
 type TeamID int64
 
+// CategoryID is the stable numeric identity of an operation category.
+type CategoryID int64
+
 // AuditEvent is the cross-module audit record contract.
 type AuditEvent struct {
 	ID          string

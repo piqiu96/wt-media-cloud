@@ -15,7 +15,7 @@ const cookieText = ref("")
 const parsedCookies = ref([])
 const step = ref(1)
 const importPlatform = ref("douyin")
-const importGameId = ref("")
+const importCategoryId = ref("")
 
 // Step 2: Preview + Proxy Assignment
 const proxies = ref([])
@@ -29,7 +29,7 @@ function parseCookies() {
     id: `row-${i}`,
     raw,
     platform: importPlatform.value,
-    game_id: importGameId.value,
+    category_id: importCategoryId.value,
     status: "pending",
     account: null,
     error: "",
@@ -65,7 +65,7 @@ async function executeOpening() {
     try {
       // Step 1: Create media account
       const account = await accountClient.create({
-        gameId: row.game_id,
+        categoryId: row.category_id,
         platform: row.platform,
         originalCookie: row.raw,
       })
@@ -88,7 +88,7 @@ async function retryFailed() {
     row.error = ""
     try {
       const account = await accountClient.create({
-        gameId: row.game_id,
+        categoryId: row.category_id,
         platform: row.platform,
         originalCookie: row.raw,
       })
@@ -131,8 +131,8 @@ const stats = computed(() => {
             <t-option v-for="option in ACCOUNT_OPENING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
           </t-select>
         </t-form-item>
-        <t-form-item label="游戏">
-          <t-input v-model="importGameId" placeholder="游戏 ID" style="width:160px" />
+        <t-form-item label="类目">
+          <t-input v-model="importCategoryId" placeholder="类目 ID" style="width:160px" />
         </t-form-item>
       </t-form>
       <t-textarea v-model="cookieText" :rows="8" placeholder="粘贴 Cookie，每行一条..." />

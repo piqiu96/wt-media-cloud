@@ -31,11 +31,11 @@ func mustCreateOperator(t *testing.T, service *Service, adminID UserID, username
 	t.Helper()
 	team := mustCreateTeam(t, service, adminID, "登录会话组")
 	user, err := service.CreateUser(adminID, CreateUserInput{
-		Username: username,
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    username,
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser(%s) error = %v", username, err)

@@ -35,21 +35,21 @@ describe('materials api client', () => {
     expect(fetch.mock.calls[5][1].method).toBe('POST')
   })
 
-  // 服务端读 `search` / `team_id` / `game_ids` / `game_id` / `joined` / `my_usage` /
+  // 服务端读 `search` / `team_id` / `category_ids` / `category_id` / `joined` / `my_usage` /
   // `team_usage` / `video_status` / `sort_by` / `sort_order`（parseMaterialListFilter）。
   // 团队范围仍由服务端决定角色边界，`team_id` 只是管理员的目标团队；页面传它不等于
-  // 自己获得权限。多选游戏在客户端序列化成逗号分隔的一个参数，调用点只交数组。
-  it('forwards every server-side filter and joins the multi-game selection', async () => {
+  // 自己获得权限。多选类目在客户端序列化成逗号分隔的一个参数，调用点只交数组。
+  it('forwards every server-side filter and joins the multi-category selection', async () => {
     const fetch = vi.fn().mockResolvedValue(ok([]))
     const client = createMaterialsClient({ fetch })
 
     await client.list({
-      search: 'x', team_id: 10, game_ids: ['naruto', 'onepiece'], game_id: 'legacy',
+      search: 'x', team_id: 10, category_ids: ['naruto', 'onepiece'], category_id: 'legacy',
       joined: 'joined', my_usage: 'used', team_usage: 'unused',
       video_status: 'ready', sort_by: 'published_at', sort_order: 'desc',
     })
 
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/materials?search=x&team_id=10&game_ids=naruto%2Conepiece&game_id=legacy&joined=joined&my_usage=used&team_usage=unused&video_status=ready&sort_by=published_at&sort_order=desc')
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/materials?search=x&team_id=10&category_ids=naruto%2Conepiece&category_id=legacy&joined=joined&my_usage=used&team_usage=unused&video_status=ready&sort_by=published_at&sort_order=desc')
   })
 
   // 200（已在我的素材里）与 201（新建或恢复）的响应体完全一样，`parseResponse` 两种

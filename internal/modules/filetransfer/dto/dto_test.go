@@ -203,9 +203,9 @@ func TestLeaseAndTerminalMatchTheFrozenExecutorContract(t *testing.T) {
 			sort.Strings(got)
 		}
 		if testCase.schema == "LocalLease" {
-			// `game_name` and `published_at` are optional, so they are omitted until
+			// `category_name` and `published_at` are optional, so they are omitted until
 			// a material has them.
-			got = append(got, "game_name", "published_at")
+			got = append(got, "category_name", "published_at")
 			sort.Strings(got)
 		}
 		if !reflect.DeepEqual(got, want) {

@@ -33,7 +33,8 @@ func TestCreateRunQueuesAndWorkerProjectsSource(t *testing.T) {
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
-		TeamID: team, Name: "Cloud 热点", StrategyType: "keyword", Platform: "douyin",
+		CategoryID: testCategoryID(),
+		TeamID:     team, Name: "Cloud 热点", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled,
 	})
 	if err != nil {
@@ -74,7 +75,8 @@ func TestWorkerProjectsTaskResultDetails(t *testing.T) {
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
-		TeamID: team, Name: "指标策略", StrategyType: "keyword", Platform: "douyin",
+		CategoryID: testCategoryID(),
+		TeamID:     team, Name: "指标策略", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{"keyword": "三角洲", "auto_material": false}, Status: StrategyEnabled,
 	})
 	if err != nil {
@@ -128,7 +130,8 @@ func TestAutomaticMaterializationUsesTaskThresholdSnapshot(t *testing.T) {
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
-		TeamID: team, Name: "自动素材", StrategyType: "keyword", Platform: "douyin",
+		CategoryID: testCategoryID(),
+		TeamID:     team, Name: "自动素材", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{
 			"keyword": "三角洲", "auto_material": true, "material_rule": "AND",
 			"like_threshold": 10000, "favorite_threshold": 500,
@@ -174,7 +177,8 @@ func TestAutomaticMaterializationSupportsORRule(t *testing.T) {
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
-		TeamID: team, Name: "OR 素材", StrategyType: "keyword", Platform: "douyin",
+		CategoryID: testCategoryID(),
+		TeamID:     team, Name: "OR 素材", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{
 			"keyword": "热点", "auto_material": true, "material_rule": "OR",
 			"like_threshold": 10000, "favorite_threshold": 500,
@@ -205,7 +209,8 @@ func TestAutomaticMaterializationUsesRuleGroups(t *testing.T) {
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{
-		TeamID: team, Name: "规则组素材", StrategyType: "keyword", Platform: "douyin",
+		CategoryID: testCategoryID(),
+		TeamID:     team, Name: "规则组素材", StrategyType: "keyword", Platform: "douyin",
 		Config: map[string]any{
 			"keyword": "热点",
 			"material_rules": []any{
@@ -262,11 +267,11 @@ func TestRetryFailedUsesPublishedAtForDateRules(t *testing.T) {
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	oldTime := time.Now().UTC().Add(-72 * time.Hour)
 	freshTime := time.Now().UTC().Add(-time.Hour)
-	oldSource, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-old", SourceType: "strategy", LikeCount: 12000, PublishedAt: &oldTime})
+	oldSource, err := content.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), TeamID: &team, Platform: "douyin", PlatformContentID: "retry-old", SourceType: "strategy", LikeCount: 12000, PublishedAt: &oldTime})
 	if err != nil {
 		t.Fatal(err)
 	}
-	freshSource, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-fresh", SourceType: "strategy", LikeCount: 12000, PublishedAt: &freshTime})
+	freshSource, err := content.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), TeamID: &team, Platform: "douyin", PlatformContentID: "retry-fresh", SourceType: "strategy", LikeCount: 12000, PublishedAt: &freshTime})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,11 +320,11 @@ func TestRetryFailedOnlyProcessesFailedItems(t *testing.T) {
 	}))
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
-	source, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-failed", SourceType: "strategy", LikeCount: 12000, FavoriteCount: 700})
+	source, err := content.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), TeamID: &team, Platform: "douyin", PlatformContentID: "retry-failed", SourceType: "strategy", LikeCount: 12000, FavoriteCount: 700})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := content.CreateSource(actor, SourceInput{TeamID: &team, Platform: "douyin", PlatformContentID: "retry-pending", SourceType: "strategy"})
+	pending, err := content.CreateSource(actor, SourceInput{CategoryID: testCategoryID(), TeamID: &team, Platform: "douyin", PlatformContentID: "retry-pending", SourceType: "strategy"})
 	if err != nil {
 		t.Fatal(err)
 	}

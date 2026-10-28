@@ -84,10 +84,10 @@ func createUserTx(tx *gorm.DB, user model.User) (model.UserID, error) {
 		return 0, err
 	}
 	user.ID = model.UserID(insertedID)
-	for _, gameID := range user.GameIDs {
+	for _, categoryID := range user.CategoryIDs {
 		if _, err := execSQL(tx,
-			`INSERT INTO user_game_scopes (user_id, game_id, created_at) VALUES (?, ?, ?)`,
-			user.ID, gameID, user.CreatedAt,
+			`INSERT INTO user_category_scopes (user_id, category_id, created_at) VALUES (?, ?, ?)`,
+			user.ID, categoryID, user.CreatedAt,
 		); err != nil {
 			return 0, err
 		}
@@ -137,30 +137,30 @@ func findUserByQuery(db *gorm.DB, query string, arg any) (model.User, bool, erro
 		value := model.TeamID(teamID.Int64)
 		user.TeamID = &value
 	}
-	gameIDs, err := findGameIDs(db, user.ID)
+	categoryIDs, err := findCategoryIDs(db, user.ID)
 	if err != nil {
 		return model.User{}, false, err
 	}
-	user.GameIDs = gameIDs
+	user.CategoryIDs = categoryIDs
 	return user, true, nil
 }
 
-func findGameIDs(db *gorm.DB, userID model.UserID) ([]string, error) {
-	rows, err := queryRows(db, `SELECT game_id FROM user_game_scopes WHERE user_id = ? ORDER BY game_id`, userID)
+func findCategoryIDs(db *gorm.DB, userID model.UserID) ([]model.CategoryID, error) {
+	rows, err := queryRows(db, `SELECT category_id FROM user_category_scopes WHERE user_id = ? ORDER BY category_id`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var gameIDs []string
+	var categoryIDs []model.CategoryID
 	for rows.Next() {
-		var gameID string
-		if err := rows.Scan(&gameID); err != nil {
+		var categoryID model.CategoryID
+		if err := rows.Scan(&categoryID); err != nil {
 			return nil, err
 		}
-		gameIDs = append(gameIDs, gameID)
+		categoryIDs = append(categoryIDs, categoryID)
 	}
-	return gameIDs, rows.Err()
+	return categoryIDs, rows.Err()
 }
 
 func UpdateUser(user model.User) error {
@@ -227,13 +227,13 @@ func updateUserTx(tx *gorm.DB, user model.User) error {
 	if rows == 0 {
 		return model.ErrInvalidInput
 	}
-	if _, err := execSQL(tx, `DELETE FROM user_game_scopes WHERE user_id = ?`, user.ID); err != nil {
+	if _, err := execSQL(tx, `DELETE FROM user_category_scopes WHERE user_id = ?`, user.ID); err != nil {
 		return err
 	}
-	for _, gameID := range user.GameIDs {
+	for _, categoryID := range user.CategoryIDs {
 		if _, err := execSQL(tx,
-			`INSERT INTO user_game_scopes (user_id, game_id, created_at) VALUES (?, ?, ?)`,
-			user.ID, gameID, user.UpdatedAt,
+			`INSERT INTO user_category_scopes (user_id, category_id, created_at) VALUES (?, ?, ?)`,
+			user.ID, categoryID, user.UpdatedAt,
 		); err != nil {
 			return err
 		}
@@ -266,7 +266,7 @@ func deleteUser(db *gorm.DB, userID model.UserID) error {
 	}
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	if _, err := execSQL(tx, `DELETE FROM user_game_scopes WHERE user_id = ?`, userID); err != nil {
+	if _, err := execSQL(tx, `DELETE FROM user_category_scopes WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	if _, err := execSQL(tx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
@@ -299,7 +299,7 @@ func deleteUserWithAudit(db *gorm.DB, userID model.UserID, event model.AuditEven
 	if references > 0 {
 		return model.ErrTeamInUse
 	}
-	if _, err := execSQL(tx, `DELETE FROM user_game_scopes WHERE user_id = ?`, userID); err != nil {
+	if _, err := execSQL(tx, `DELETE FROM user_category_scopes WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	result, err := execSQL(tx, `DELETE FROM users WHERE id = ?`, userID)
@@ -380,8 +380,7 @@ const teamColumns = `SELECT t.id, t.name, t.created_at, t.updated_at,
 
 func findTeam(db *gorm.DB, teamID model.TeamID) (model.OperationTeam, bool, error) {
 	var team model.OperationTeam
-	err := queryRow(db, teamColumns+` WHERE t.id = ?`, teamID,
-	).Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt, &team.UserCount)
+	err := queryRow(db, teamColumns+` WHERE t.id = ?`, teamID).Scan(&team.ID, &team.Name, &team.CreatedAt, &team.UpdatedAt, &team.UserCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.OperationTeam{}, false, nil
 	}
@@ -520,74 +519,84 @@ func teamHasReferences(db *gorm.DB, teamID model.TeamID) (bool, error) {
 	return count > 0, err
 }
 
-func CreateGameWithAudit(game model.OperationGame, event model.AuditEvent) error {
-	return createGameWithAudit(database.DB(), game, event)
+func CreateCategoryWithAudit(category model.Category, event model.AuditEvent) (model.CategoryID, error) {
+	return createCategoryWithAudit(database.DB(), category, event)
 }
 
-func createGameWithAudit(db *gorm.DB, game model.OperationGame, event model.AuditEvent) error {
+func createCategoryWithAudit(db *gorm.DB, category model.Category, event model.AuditEvent) (model.CategoryID, error) {
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	if _, err := execSQL(tx, `INSERT INTO operation_games (id, name, status, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, game.ID, game.Name, game.Status, game.Remark, game.CreatedAt, game.UpdatedAt); err != nil {
+	if _, err := execSQL(tx, `INSERT INTO categories (type, name, enabled, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		category.Type, category.Name, category.Enabled, category.Remark, category.CreatedAt, category.UpdatedAt); err != nil {
 		if duplicateKey(err) {
-			return model.ErrGameNameTaken
+			return 0, model.ErrCategoryNameTaken
 		}
-		return err
+		return 0, err
+	}
+	id, err := lastInsertID(tx)
+	if err != nil {
+		return 0, err
 	}
 	if err := appendAuditTx(tx, event); err != nil {
-		return err
+		return 0, err
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+	return model.CategoryID(id), nil
 }
 
-func FindGame(id string) (model.OperationGame, bool, error) {
-	return findGame(database.DB(), id)
+func FindCategory(id model.CategoryID) (model.Category, bool, error) {
+	return findCategory(database.DB(), id)
 }
 
-func findGame(db *gorm.DB, id string) (model.OperationGame, bool, error) {
-	var game model.OperationGame
-	err := queryRow(db, `SELECT id, name, status, remark, created_at, updated_at FROM operation_games WHERE id = ?`, id).Scan(&game.ID, &game.Name, &game.Status, &game.Remark, &game.CreatedAt, &game.UpdatedAt)
+func findCategory(db *gorm.DB, id model.CategoryID) (model.Category, bool, error) {
+	var category model.Category
+	err := queryRow(db, `SELECT id, type, name, enabled, remark, created_at, updated_at FROM categories WHERE id = ?`, id).
+		Scan(&category.ID, &category.Type, &category.Name, &category.Enabled, &category.Remark, &category.CreatedAt, &category.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return model.OperationGame{}, false, nil
+		return model.Category{}, false, nil
 	}
-	return game, err == nil, err
+	return category, err == nil, err
 }
 
-func ListGames() ([]model.OperationGame, error) {
-	return listGames(database.DB())
+func ListCategories() ([]model.Category, error) {
+	return listCategories(database.DB())
 }
 
-func listGames(db *gorm.DB) ([]model.OperationGame, error) {
-	rows, err := queryRows(db, `SELECT id, name, status, remark, created_at, updated_at FROM operation_games ORDER BY status, name, id`)
+func listCategories(db *gorm.DB) ([]model.Category, error) {
+	rows, err := queryRows(db, `SELECT id, type, name, enabled, remark, created_at, updated_at FROM categories ORDER BY enabled DESC, type, name, id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var games []model.OperationGame
+	var categories []model.Category
 	for rows.Next() {
-		var game model.OperationGame
-		if err := rows.Scan(&game.ID, &game.Name, &game.Status, &game.Remark, &game.CreatedAt, &game.UpdatedAt); err != nil {
+		var category model.Category
+		if err := rows.Scan(&category.ID, &category.Type, &category.Name, &category.Enabled, &category.Remark, &category.CreatedAt, &category.UpdatedAt); err != nil {
 			return nil, err
 		}
-		games = append(games, game)
+		categories = append(categories, category)
 	}
-	return games, rows.Err()
+	return categories, rows.Err()
 }
 
-func UpdateGameWithAudit(game model.OperationGame, event model.AuditEvent) error {
-	return updateGameWithAudit(database.DB(), game, event)
+func UpdateCategoryWithAudit(category model.Category, event model.AuditEvent) error {
+	return updateCategoryWithAudit(database.DB(), category, event)
 }
 
-func updateGameWithAudit(db *gorm.DB, game model.OperationGame, event model.AuditEvent) error {
+func updateCategoryWithAudit(db *gorm.DB, category model.Category, event model.AuditEvent) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	result, err := execSQL(tx, `UPDATE operation_games SET name = ?, status = ?, remark = ?, updated_at = ? WHERE id = ?`, game.Name, game.Status, game.Remark, game.UpdatedAt, game.ID)
+	result, err := execSQL(tx, `UPDATE categories SET name = ?, enabled = ?, remark = ?, updated_at = ? WHERE id = ?`,
+		category.Name, category.Enabled, category.Remark, category.UpdatedAt, category.ID)
 	if err != nil {
 		if duplicateKey(err) {
-			return model.ErrGameNameTaken
+			return model.ErrCategoryNameTaken
 		}
 		return err
 	}
-	if rows := result; rows == 0 {
+	if result == 0 {
 		return model.ErrInvalidInput
 	}
 	if err := appendAuditTx(tx, event); err != nil {
@@ -596,21 +605,21 @@ func updateGameWithAudit(db *gorm.DB, game model.OperationGame, event model.Audi
 	return tx.Commit().Error
 }
 
-func DeleteGameWithAudit(id string, event model.AuditEvent) error {
-	return deleteGameWithAudit(database.DB(), id, event)
+func DeleteCategoryWithAudit(id model.CategoryID, event model.AuditEvent) error {
+	return deleteCategoryWithAudit(database.DB(), id, event)
 }
 
-func deleteGameWithAudit(db *gorm.DB, id string, event model.AuditEvent) error {
+func deleteCategoryWithAudit(db *gorm.DB, id model.CategoryID, event model.AuditEvent) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	result, err := execSQL(tx, `DELETE FROM operation_games WHERE id = ?`, id)
+	result, err := execSQL(tx, `DELETE FROM categories WHERE id = ?`, id)
 	if err != nil {
 		if foreignKeyReferenced(err) {
-			return model.ErrGameInUse
+			return model.ErrCategoryInUse
 		}
 		return err
 	}
-	if rows := result; rows == 0 {
+	if result == 0 {
 		return model.ErrInvalidInput
 	}
 	if err := appendAuditTx(tx, event); err != nil {
@@ -619,65 +628,65 @@ func deleteGameWithAudit(db *gorm.DB, id string, event model.AuditEvent) error {
 	return tx.Commit().Error
 }
 
-func GameHasReferences(id string) (bool, error) {
-	return gameHasReferences(database.DB(), id)
+func CategoryHasReferences(id model.CategoryID) (bool, error) {
+	return categoryHasReferences(database.DB(), id)
 }
 
-func gameHasReferences(db *gorm.DB, id string) (bool, error) {
+func categoryHasReferences(db *gorm.DB, id model.CategoryID) (bool, error) {
 	var count int
 	err := queryRow(db, `SELECT
-        (SELECT COUNT(*) FROM user_game_scopes WHERE game_id = ?) +
-		(SELECT COUNT(*) FROM media_account_games WHERE game_id = ?)`,
+        (SELECT COUNT(*) FROM user_category_scopes WHERE category_id = ?) +
+		(SELECT COUNT(*) FROM media_account_categories WHERE category_id = ?)`,
 		id, id,
 	).Scan(&count)
 	return count > 0, err
 }
 
-func ListGameReferenceSummaries() (map[string]model.GameReferenceSummary, error) {
-	return listGameReferenceSummaries(database.DB())
+func ListCategoryReferenceSummaries() (map[model.CategoryID]model.CategoryReferenceSummary, error) {
+	return listCategoryReferenceSummaries(database.DB())
 }
 
-func listGameReferenceSummaries(db *gorm.DB) (map[string]model.GameReferenceSummary, error) {
+func listCategoryReferenceSummaries(db *gorm.DB) (map[model.CategoryID]model.CategoryReferenceSummary, error) {
 	rows, err := queryRows(db, `SELECT g.id, COALESCE(scopes.count, 0), COALESCE(accounts.count, 0)
-		FROM operation_games g
-		LEFT JOIN (SELECT game_id, COUNT(*) AS count FROM user_game_scopes GROUP BY game_id) scopes ON scopes.game_id = g.id
-		LEFT JOIN (SELECT game_id, COUNT(*) AS count FROM media_account_games GROUP BY game_id) accounts ON accounts.game_id = g.id`)
+		FROM categories g
+		LEFT JOIN (SELECT category_id, COUNT(*) AS count FROM user_category_scopes GROUP BY category_id) scopes ON scopes.category_id = g.id
+		LEFT JOIN (SELECT category_id, COUNT(*) AS count FROM media_account_categories GROUP BY category_id) accounts ON accounts.category_id = g.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	summaries := make(map[string]model.GameReferenceSummary)
+	summaries := make(map[model.CategoryID]model.CategoryReferenceSummary)
 	for rows.Next() {
-		var gameID string
-		var summary model.GameReferenceSummary
-		if err := rows.Scan(&gameID, &summary.UserScopeCount, &summary.MediaAccountCount); err != nil {
+		var categoryID model.CategoryID
+		var summary model.CategoryReferenceSummary
+		if err := rows.Scan(&categoryID, &summary.UserScopeCount, &summary.MediaAccountCount); err != nil {
 			return nil, err
 		}
-		summaries[gameID] = summary
+		summaries[categoryID] = summary
 	}
 	return summaries, rows.Err()
 }
 
-func GameReferences(gameID string) (model.GameReferences, error) {
-	return gameReferences(database.DB(), gameID)
+func CategoryReferences(categoryID model.CategoryID) (model.CategoryReferences, error) {
+	return categoryReferences(database.DB(), categoryID)
 }
 
-func gameReferences(db *gorm.DB, gameID string) (model.GameReferences, error) {
-	references := model.GameReferences{GameID: gameID, Users: []model.GameReferenceUser{}, MediaAccounts: []model.GameReferenceAccount{}}
+func categoryReferences(db *gorm.DB, categoryID model.CategoryID) (model.CategoryReferences, error) {
+	references := model.CategoryReferences{CategoryID: categoryID, Users: []model.CategoryReferenceUser{}, MediaAccounts: []model.CategoryReferenceAccount{}}
 	userRows, err := queryRows(db, `SELECT u.id, u.username, u.role, u.team_id, COALESCE(t.name, '')
-		FROM user_game_scopes scopes
+		FROM user_category_scopes scopes
 		JOIN users u ON u.id = scopes.user_id
 		LEFT JOIN operation_teams t ON t.id = u.team_id
-		WHERE scopes.game_id = ? ORDER BY u.id`, gameID)
+		WHERE scopes.category_id = ? ORDER BY u.id`, categoryID)
 	if err != nil {
-		return model.GameReferences{}, err
+		return model.CategoryReferences{}, err
 	}
 	defer userRows.Close()
 	for userRows.Next() {
-		var reference model.GameReferenceUser
+		var reference model.CategoryReferenceUser
 		var teamID sql.NullInt64
 		if err := userRows.Scan(&reference.UserID, &reference.Username, &reference.Role, &teamID, &reference.TeamName); err != nil {
-			return model.GameReferences{}, err
+			return model.CategoryReferences{}, err
 		}
 		if teamID.Valid {
 			value := model.TeamID(teamID.Int64)
@@ -686,38 +695,38 @@ func gameReferences(db *gorm.DB, gameID string) (model.GameReferences, error) {
 		references.Users = append(references.Users, reference)
 	}
 	if err := userRows.Err(); err != nil {
-		return model.GameReferences{}, err
+		return model.CategoryReferences{}, err
 	}
 	accountRows, err := queryRows(db, `SELECT ma.id, COALESCE(ma.name, ''), ma.platform, ma.user_id, u.username
-		FROM media_account_games relations
+		FROM media_account_categories relations
 		JOIN media_accounts ma ON ma.id = relations.media_account_id
 		JOIN users u ON u.id = ma.user_id
-		WHERE relations.game_id = ? ORDER BY ma.id`, gameID)
+		WHERE relations.category_id = ? ORDER BY ma.id`, categoryID)
 	if err != nil {
-		return model.GameReferences{}, err
+		return model.CategoryReferences{}, err
 	}
 	defer accountRows.Close()
 	for accountRows.Next() {
-		var reference model.GameReferenceAccount
+		var reference model.CategoryReferenceAccount
 		if err := accountRows.Scan(&reference.AccountID, &reference.Name, &reference.Platform, &reference.UserID, &reference.Username); err != nil {
-			return model.GameReferences{}, err
+			return model.CategoryReferences{}, err
 		}
 		references.MediaAccounts = append(references.MediaAccounts, reference)
 	}
 	return references, accountRows.Err()
 }
 
-func UserHasGameReferencesOutsideScope(userID model.UserID, gameIDs []string) (bool, error) {
-	return userHasGameReferencesOutsideScope(database.DB(), userID, gameIDs)
+func UserHasCategoryReferencesOutsideScope(userID model.UserID, categoryIDs []model.CategoryID) (bool, error) {
+	return userHasCategoryReferencesOutsideScope(database.DB(), userID, categoryIDs)
 }
 
-func userHasGameReferencesOutsideScope(db *gorm.DB, userID model.UserID, gameIDs []string) (bool, error) {
-	query := `SELECT EXISTS(SELECT 1 FROM media_accounts accounts JOIN media_account_games relations ON relations.media_account_id = accounts.id WHERE accounts.user_id = ?`
+func userHasCategoryReferencesOutsideScope(db *gorm.DB, userID model.UserID, categoryIDs []model.CategoryID) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM media_accounts accounts JOIN media_account_categories relations ON relations.media_account_id = accounts.id WHERE accounts.user_id = ?`
 	args := []any{userID}
-	if len(gameIDs) > 0 {
-		query += ` AND relations.game_id NOT IN (` + strings.TrimRight(strings.Repeat("?,", len(gameIDs)), ",") + `)`
-		for _, gameID := range gameIDs {
-			args = append(args, gameID)
+	if len(categoryIDs) > 0 {
+		query += ` AND relations.category_id NOT IN (` + strings.TrimRight(strings.Repeat("?,", len(categoryIDs)), ",") + `)`
+		for _, categoryID := range categoryIDs {
+			args = append(args, categoryID)
 		}
 	}
 	query += `)`
@@ -982,11 +991,11 @@ func listUsers(db *gorm.DB) ([]model.User, error) {
 		return nil, err
 	}
 	for i := range users {
-		gameIDs, err := findGameIDs(db, users[i].ID)
+		categoryIDs, err := findCategoryIDs(db, users[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		users[i].GameIDs = gameIDs
+		users[i].CategoryIDs = categoryIDs
 	}
 	return users, nil
 }
