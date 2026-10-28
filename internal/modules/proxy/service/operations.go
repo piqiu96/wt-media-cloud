@@ -145,6 +145,13 @@ func MutateProxy(ctx context.Context, input dto.ProxyMutationInput) (dto.ProxyMu
 	}, nil
 }
 
+func ApplyProxy(ctx context.Context, input dto.ProxyMutationInput) (agentclient.ProxyAssignmentResult, error) {
+	return agentclient.Get().ApplyProxy(ctx, agentclient.ProxyMutationRequest{
+		ProfileID: input.ProfileID, ProxyProtocol: string(input.ProxyProtocol),
+		Host: input.Host, Port: input.Port, Username: input.Username, Password: input.Password,
+	})
+}
+
 // MarkExpiringProxies 保留为调度入口，但到期状态改为读取时由 expires_at 现算。
 // 任务只汇报页面会显示的到期项，不再把「已到期」写进检测结果列，避免健康代理
 // 被所有读取方当成检测失败。

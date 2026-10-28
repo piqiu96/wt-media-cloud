@@ -29,6 +29,7 @@ import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
+import { classifyObservedAssignment, isUncertainAssignmentError } from "./proxyAssignmentOutcome.js"
 // 静态导入：打包后的 Tauri WebView 无法解析动态 import() 的裸模块名。invoke 只在
 // __TAURI_INTERNALS__ 保护的代码里调用，Cloud Web 导入它是惰性的。
 import { invoke } from "@tauri-apps/api/core"
@@ -539,7 +540,7 @@ function isIdentityMismatch(e) {
 }
 
 function isUncertainProxyError(e) {
-  return e?.errcode === 30008 || e?.code === "30008"
+  return isUncertainAssignmentError(e)
 }
 
 function isTimeoutError(e) {
@@ -1417,7 +1418,6 @@ async function runProxyAction(kind, profile, targetProxy) {
   try {
     await callProxyAction(kind, profile, targetProxy)
     progressItems.value[0].status = "success"
-    await afterProxyChange()
   } catch (e) {
     if (isUncertainProxyError(e) && kind !== "release") {
       progressItems.value[0].status = "unconfirmed"
@@ -1428,6 +1428,9 @@ async function runProxyAction(kind, profile, targetProxy) {
     }
   } finally {
     progressPhase.value = "done"
+  }
+  if (progressItems.value[0].status === "success") {
+    try { await afterProxyChange() } catch { feedback.toast.error("代理已应用，但列表刷新失败，请手动刷新。") }
   }
 }
 
@@ -1458,12 +1461,6 @@ async function afterProxyChange() {
 async function verifyProxyAction() {
   const payload = retryPayload.value
   if (!payload || payload.mode !== "proxy-action") return
-  const profile = profiles.value.find((item) => item.id === payload.profileId) || {
-    id: payload.profileId,
-    bit_profile_id: payload.bitProfileId,
-    name: payload.profileName,
-    proxy_id: payload.kind === "release" ? "" : "",
-  }
   let snapshot
   try {
     snapshot = await localAgent.profileScan()
@@ -1473,7 +1470,7 @@ async function verifyProxyAction() {
   }
   const observed = (snapshot?.profiles || []).find((item) => item.bit_profile_id === payload.bitProfileId)
   if (!observed) {
-    progressItems.value[0].status = "failed"
+    progressItems.value[0].status = "unconfirmed"
     progressItems.value[0].reason = "本次扫描没有返回该窗口，无法核对；请重新同步窗口。"
     return
   }
@@ -1484,23 +1481,13 @@ async function verifyProxyAction() {
       progressItems.value[0].reason = "目标代理已不存在，不能继续核对。"
       return
     }
-    const matches = String(observed.proxy_type || "").toLowerCase() === String(target.proxy_protocol || "").toLowerCase()
-      && String(observed.proxy_host || "") === String(target.host || "")
-      && Number(observed.proxy_port || 0) === Number(target.port || 0)
-    if (!matches) {
+    if (classifyObservedAssignment(observed, target) === "different") {
       progressItems.value[0].status = "failed"
       progressItems.value[0].reason = "比特中的实际配置与目标不一致，可重试应用。"
       return
     }
-    try {
-      await proxyClient.assign(target.id, profile.id)
-      progressItems.value[0].status = "success"
-      progressItems.value[0].reason = "实际配置已一致，正式关系已确认。"
-      await afterProxyChange()
-    } catch (e) {
-      progressItems.value[0].status = "failed"
-      progressItems.value[0].reason = e.message || "代理关系确认失败"
-    }
+    progressItems.value[0].status = "unconfirmed"
+    progressItems.value[0].reason = "协议与地址已匹配，认证信息无法核对；请同步窗口并检查代理后再处理。"
     return
   }
   const cleared = !observed.proxy_host && Number(observed.proxy_port || 0) === 0
@@ -1509,18 +1496,8 @@ async function verifyProxyAction() {
     progressItems.value[0].reason = "比特中的代理尚未清除，可重试解绑。"
     return
   }
-  try {
-    if (payload.kind === "unbind") {
-      if (profile.proxy_id) await proxyClient.unbind(profile.proxy_id, profile.id)
-      else await proxyClient.clearProfileProxy(profile.id)
-    }
-    progressItems.value[0].status = "success"
-    progressItems.value[0].reason = "实际代理已清除，关系已确认。"
-    await afterProxyChange()
-  } catch (e) {
-    progressItems.value[0].status = "failed"
-    progressItems.value[0].reason = e.message || "关系清除失败"
-  }
+  progressItems.value[0].status = "unconfirmed"
+  progressItems.value[0].reason = "已读取到直连状态，请同步窗口确认系统关系。"
 }
 
 async function runSync() {
@@ -1896,23 +1873,12 @@ async function verifyBatchProxy() {
     const profile = profiles.value.find((candidate) => candidate.id === item.key)
     if (!assignment || !target || !profile) continue
     const observed = (snapshot?.profiles || []).find((candidate) => candidate.bit_profile_id === profile.bit_profile_id)
-    const matches = observed
-      && String(observed.proxy_type || "").toLowerCase() === String(target.proxy_protocol || "").toLowerCase()
-      && String(observed.proxy_host || "") === String(target.host || "")
-      && Number(observed.proxy_port || 0) === Number(target.port || 0)
-    if (!matches) {
+    if (classifyObservedAssignment(observed, target) === "different") {
       item.status = "failed"
       item.reason = "实际配置与目标不一致，可重试。"
       continue
     }
-    try {
-      await proxyClient.assign(target.id, profile.id)
-      item.status = "success"
-      item.reason = "实际配置已一致，正式关系已确认。"
-    } catch (e) {
-      item.status = "failed"
-      item.reason = e.message || "代理关系确认失败"
-    }
+    item.reason = observed ? "协议与地址已匹配，认证信息无法核对；请同步窗口并检查代理后再处理。" : "未读取到窗口，请同步窗口后核对。"
   }
   payload.failedIds = progressItems.value.filter((item) => item.status === "failed").map((item) => item.key)
   await reloadAll()
@@ -2406,7 +2372,7 @@ function syncIssueAction(profile) {
                 :label="proxyConfigMismatch(detailProfile, managedProxy(detailProfile)) ? '配置不一致' : '协议与地址记录一致'"
               />
             </t-descriptions-item>
-            <t-descriptions-item v-if="isManaged(detailProfile) && managedProxy(detailProfile)" label="认证信息">待核实</t-descriptions-item>
+            <t-descriptions-item v-if="isManaged(detailProfile) && managedProxy(detailProfile)" label="认证信息">未单独核对</t-descriptions-item>
             <t-descriptions-item label="最近窗口同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
           </ResourceDescriptions>
 

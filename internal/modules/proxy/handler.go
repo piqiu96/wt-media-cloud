@@ -8,6 +8,7 @@ import (
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
@@ -62,6 +63,8 @@ var (
 	errProfileProxyUnauthorized = errors.New("profile proxy operation is forbidden")
 	errProxyQuotaFull           = errors.New("proxy profile quota is full")
 	errProxyReadback            = errors.New("proxy agent readback failed")
+	errProxyRejected            = errors.New("bitbrowser rejected proxy assignment")
+	errProxyAgentUpgrade        = errors.New("local agent does not support proxy assignment")
 	errProxyForbidden           = errors.New("proxy operation is forbidden")
 	errProxyTeamRequired        = errors.New("proxy team is required")
 	errProxyTeamUnknown         = errors.New("proxy team does not exist")
@@ -1046,6 +1049,25 @@ func ownedActiveProfile(actor identityservice.PublicUser, profileID string) (pro
 	return profile, nil
 }
 
+func classifyAssignmentAck(result agentclient.ProxyAssignmentResult, err error, profileID string) error {
+	if err != nil {
+		var response *agentclient.ResponseError
+		if errors.As(err, &response) {
+			switch response.Status {
+			case 400, 409:
+				return errProxyRejected
+			case 404:
+				return errProxyAgentUpgrade
+			}
+		}
+		return errProxyReadback
+	}
+	if !result.Accepted || result.ProfileID != profileID {
+		return errProxyReadback
+	}
+	return nil
+}
+
 func assignProxyToProfile(ctx context.Context, actor identityservice.PublicUser, proxyID, profileID string) (profilebindingservice.BrowserProfile, error) {
 	profile, err := ownedActiveProfile(actor, profileID)
 	if err != nil {
@@ -1070,18 +1092,18 @@ func assignProxyToProfile(ctx context.Context, actor identityservice.PublicUser,
 			assignmentFailure = errors.Join(proxyservice.ErrNotAssignable, errors.New(reason))
 			return nil
 		}
-		result, mutateErr := proxyservice.MutateProxy(ctx, proxyservice.ProxyMutationInput{
+		result, mutateErr := proxyservice.ApplyProxy(ctx, proxyservice.ProxyMutationInput{
 			Operation: "assign", ProfileID: profile.BitProfileID, ProxyProtocol: proxy.ProxyProtocol,
 			Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password,
 		})
-		if mutateErr != nil || !result.Readback || result.ProfileID != profile.BitProfileID ||
-			result.ProxyProtocol != proxy.ProxyProtocol || result.Host != proxy.Host || result.Port != proxy.Port {
-			assignmentFailure = errProxyReadback
+		if ackErr := classifyAssignmentAck(result, mutateErr, profile.BitProfileID); ackErr != nil {
+			assignmentFailure = ackErr
 			return nil
 		}
-		bound, bindErr := profilebindingservice.BindProxy(profile.ID, proxy.ID, string(result.ProxyProtocol), result.Host, result.Port)
+		bound, bindErr := profilebindingservice.BindProxy(profile.ID, proxy.ID, string(proxy.ProxyProtocol), proxy.Host, proxy.Port)
 		if bindErr != nil {
-			return bindErr
+			assignmentFailure = errProxyReadback
+			return nil
 		}
 		updated = bound
 		return nil
@@ -1104,7 +1126,11 @@ func writeProxyAssignmentError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, proxyservice.ErrAssignmentLocked):
 		api.Conflict(c, 23009, "代理正在被其他操作占用，请稍后重试")
 	case errors.Is(err, errProxyReadback):
-		api.Failure(c, 503, 30008, "Agent 写入或读回代理失败", nil)
+		api.Failure(c, 503, 30008, "代理应用结果待确认，请读取比特配置核对", nil)
+	case errors.Is(err, errProxyRejected):
+		api.Failure(c, 409, 23010, "比特拒绝应用代理，原托管关系未更改", nil)
+	case errors.Is(err, errProxyAgentUpgrade):
+		api.Failure(c, 409, 23011, "本机 Agent 版本过旧，请升级后重试", nil)
 	case errors.Is(err, proxyservice.ErrNotFound), errors.Is(err, proxyservice.ErrInvalidInput), errors.Is(err, proxyservice.ErrNotAssignable), errors.Is(err, errProxyForbidden):
 		writeProxyError(c, err)
 	default:
@@ -1132,7 +1158,11 @@ func proxyAssignmentFailureMessage(err error) string {
 	case errors.Is(err, proxyservice.ErrAssignmentLocked):
 		return "代理正在被其他操作占用，请稍后重试"
 	case errors.Is(err, errProxyReadback):
-		return "Agent 写入或读回代理失败"
+		return "代理应用结果待确认，请读取比特配置核对"
+	case errors.Is(err, errProxyRejected):
+		return "比特拒绝应用代理，原托管关系未更改"
+	case errors.Is(err, errProxyAgentUpgrade):
+		return "本机 Agent 版本过旧，请升级后重试"
 	default:
 		return "代理正式关系更新失败"
 	}

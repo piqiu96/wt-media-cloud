@@ -57,6 +57,20 @@ type ProxyMutationResult struct {
 	Readback      bool   `json:"readback"`
 }
 
+type ProxyAssignmentResult struct {
+	ProfileID string `json:"profile_id"`
+	Accepted  bool   `json:"accepted"`
+}
+
+type ResponseError struct {
+	Status int
+	Body   string
+}
+
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("agent response status %d: %s", e.Status, e.Body)
+}
+
 type Client struct {
 	origin    string
 	token     string
@@ -139,7 +153,21 @@ func (c *Client) MutateProxy(ctx context.Context, request ProxyMutationRequest) 
 	return result, err
 }
 
+func (c *Client) ApplyProxy(ctx context.Context, request ProxyMutationRequest) (ProxyAssignmentResult, error) {
+	var result ProxyAssignmentResult
+	err := c.postOnce(ctx, "/api/v1/proxy-assignment", request, &result)
+	return result, err
+}
+
 func (c *Client) post(ctx context.Context, path string, input, output any) error {
+	return c.postRequest(ctx, path, input, output, false)
+}
+
+func (c *Client) postOnce(ctx context.Context, path string, input, output any) error {
+	return c.postRequest(ctx, path, input, output, true)
+}
+
+func (c *Client) postRequest(ctx context.Context, path string, input, output any, noRetry bool) error {
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
@@ -153,6 +181,9 @@ func (c *Client) post(ctx context.Context, path string, input, output any) error
 	request.SetRequestURI(c.origin + path)
 	request.SetBodyRaw(body)
 	request.Header.Set("Content-Type", "application/json")
+	if noRetry {
+		request.Header.Set("X-WT-No-Retry", "1")
+	}
 	if c.token != "" {
 		request.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -161,7 +192,7 @@ func (c *Client) post(ctx context.Context, path string, input, output any) error
 		return err
 	}
 	if response.StatusCode() < 200 || response.StatusCode() >= 300 {
-		return fmt.Errorf("agent response status %d: %s", response.StatusCode(), strings.TrimSpace(string(response.BodyBytes())))
+		return &ResponseError{Status: response.StatusCode(), Body: strings.TrimSpace(string(response.BodyBytes()))}
 	}
 
 	var envelope struct {

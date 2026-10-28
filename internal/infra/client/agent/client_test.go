@@ -154,3 +154,42 @@ func closeHTTPClient(t *testing.T, closer func() error) {
 		}
 	})
 }
+
+func TestApplyProxyNeverRetriesWhenResponseIsLost(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if r.URL.Path != "/api/v1/proxy-assignment" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.Close()
+	}))
+	defer server.Close()
+	client := NewWithClient(server.URL, config.AgentCredentialConfig{}, newTransport(3))
+	_, err := client.ApplyProxy(context.Background(), ProxyMutationRequest{ProfileID: "p1", ProxyProtocol: "socks5", Host: "127.0.0.1", Port: 1080})
+	if err == nil {
+		t.Fatal("response loss must be uncertain")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
+func TestApplyProxyAcceptsAcknowledgementWithoutReadback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/proxy-assignment" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":{"profile_id":"p1","accepted":true}}`))
+	}))
+	defer server.Close()
+	client := NewWithClient(server.URL, config.AgentCredentialConfig{}, newTransport(2))
+	result, err := client.ApplyProxy(context.Background(), ProxyMutationRequest{ProfileID: "p1", ProxyProtocol: "socks5", Host: "127.0.0.1", Port: 1080})
+	if err != nil || !result.Accepted || result.ProfileID != "p1" {
+		t.Fatalf("ack = %+v, err = %v", result, err)
+	}
+}
