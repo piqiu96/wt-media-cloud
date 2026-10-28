@@ -2469,8 +2469,18 @@ function syncIssueAction(profile) {
 
       <ResourceOverlay v-model:visible="noteVisible" title="运营备注" :width="560" :busy="noteSaving">
         <FeedbackAlert v-if="noteError" :message="noteError" theme="error" style="margin-bottom:12px" />
-        <ResourceNotice>{{ noteProfile?.name || "-" }} · ID {{ noteProfile?.id || "-" }}</ResourceNotice>
-        <ResourceForm><t-form-item label="运营备注"><t-textarea v-model="noteText" :autosize="{ minRows: 4, maxRows: 8 }" placeholder="供授权成员协作，不修改比特备注" /></t-form-item></ResourceForm>
+        <div class="window-note-context">
+          <ResourceDescriptions size="small">
+            <t-descriptions-item label="窗口">{{ noteProfile?.name || "-" }}</t-descriptions-item>
+            <t-descriptions-item label="窗口 ID">{{ noteProfile?.id || "-" }}</t-descriptions-item>
+          </ResourceDescriptions>
+        </div>
+        <ResourceForm class="window-note-form">
+          <t-form-item label="运营备注">
+            <t-textarea v-model="noteText" :autosize="{ minRows: 4, maxRows: 8 }" placeholder="填写运营备注" />
+            <p class="note-help">供授权成员协作，不修改比特备注。</p>
+          </t-form-item>
+        </ResourceForm>
         <template #footer><t-button theme="default" variant="outline" :disabled="noteSaving" @click="noteVisible = false">取消</t-button><t-button theme="primary" :loading="noteSaving" @click="saveNote">保存</t-button></template>
       </ResourceOverlay>
 
@@ -2971,6 +2981,15 @@ function syncIssueAction(profile) {
 
 <style scoped>
 .window-resource-card { padding: 18px 20px; }
+/* 备注弹窗：关联对象与编辑区分组，沿用公共描述和表单语义。 */
+.window-note-context { margin-bottom: 24px; }
+.window-note-context :deep(.t-descriptions__label), .window-note-context :deep(.t-descriptions__content) { padding-top: 4px; padding-bottom: 4px; font-size: 14px; line-height: 22px; }
+.window-note-context :deep(tr:not(:last-child) .t-descriptions__label), .window-note-context :deep(tr:not(:last-child) .t-descriptions__content) { padding-bottom: 16px; }
+.window-note-form :deep(.t-form__label) { color: var(--wt-text-tertiary); font-size: 14px; line-height: 22px; }
+.window-note-form :deep(.t-form__controls-content) { gap: 8px; }
+.window-note-form :deep(.t-textarea__inner) { font-size: 14px; line-height: 22px; }
+.note-help { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 20px; }
+
 .window-address { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .window-id { color: var(--td-text-color-secondary); font-variant-numeric: tabular-nums; }
 .window-name { color: var(--wt-text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
