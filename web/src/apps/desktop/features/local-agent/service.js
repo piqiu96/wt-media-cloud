@@ -122,20 +122,20 @@ export function createLocalAgentService({ invoke }) {
     async bitAccountBind({ rebind = false } = {}) {
       return invoke(LOCAL_AGENT_COMMANDS.bitAccountBind, { rebind });
     },
-    async accountCheck({ taskId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
+    async accountCheck({ operationId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
       return invoke(LOCAL_AGENT_COMMANDS.accountCheck, {
         args: {
-          task_id: taskId,
+          operation_id: operationId,
           bit_profile_id: bitProfileId,
           platform,
           expected_platform_account_id: expectedPlatformAccountId,
         },
       });
     },
-    async cookieRead({ taskId, bitProfileId }) {
+    async cookieRead({ operationId, bitProfileId }) {
       return invoke(LOCAL_AGENT_COMMANDS.cookieRead, {
         args: {
-          task_id: taskId,
+          operation_id: operationId,
           bit_profile_id: bitProfileId,
         },
       });

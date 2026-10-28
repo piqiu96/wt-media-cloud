@@ -52,7 +52,7 @@ describe('local agent desktop service', () => {
       if (command === LOCAL_AGENT_COMMANDS.accountCheck) {
         expect(args).toEqual({
           args: {
-            task_id: 'task-1',
+            operation_id: 'task-1',
             bit_profile_id: 'bit-profile-1',
             platform: 'bilibili',
             expected_platform_account_id: '123',
@@ -65,7 +65,7 @@ describe('local agent desktop service', () => {
     const service = createLocalAgentService({ invoke })
 
     await expect(service.accountCheck({
-      taskId: 'task-1',
+      operationId: 'task-1',
       bitProfileId: 'bit-profile-1',
       platform: 'bilibili',
       expectedPlatformAccountId: '123',

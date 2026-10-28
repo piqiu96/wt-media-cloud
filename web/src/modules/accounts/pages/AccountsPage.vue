@@ -559,7 +559,7 @@ async function desktopLocalAgentService() {
 async function runSingleAccountCheck(account, service) {
   const start = await accountClient.check(account.id)
   const localResult = await service.accountCheck({
-    taskId: start.operation_id,
+    operationId: start.operation_id,
     bitProfileId: start.bit_profile_id,
     platform: start.platform,
     expectedPlatformAccountId: start.expected_platform_account_id || "",
@@ -592,7 +592,7 @@ async function readProfileCookieFor(account) {
     const service = await desktopLocalAgentService()
     const start = await accountClient.startCookieReadSync(target.id)
     const localResult = await service.cookieRead({
-      taskId: start.operation_id,
+      operationId: start.operation_id,
       bitProfileId: start.bit_profile_id,
     })
     const cookies = localResult.cookies || []
