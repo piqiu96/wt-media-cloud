@@ -192,7 +192,7 @@ func TestSelectHTTPClientConfigsDefaultsToAllAndSupportsNames(t *testing.T) {
 }
 
 // The scheduler plan assembles no clients, so nothing on its call path may
-// reach douyinclient.Get()/agentclient.Get()/httpclient.Get(), which panic
+// reach douyinclient.Get()/httpclient.Get(), which panic
 // before Initialize and would kill the process from an unrecovered job
 // goroutine. The scheduling service is kept crawler-free on purpose:
 // contentpool's defaultSchedulerDiscoveryService (see its TestSchedulerDiscoveryServiceCarriesNoCrawler).

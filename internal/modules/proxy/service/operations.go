@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/repository"
@@ -107,10 +106,8 @@ func WithAssignmentLock(proxyID string, fn func() error) error {
 type (
 	ProxyCheckInput       = dto.ProxyCheckInput
 	ProxyCheckResult      = dto.ProxyCheckResult
-	ProxyExtractionInput  = dto.ProxyExtractionInput
 	ProxyExtractionResult = dto.ProxyExtractionResult
-	ProxyMutationInput    = dto.ProxyMutationInput
-	ProxyMutationResult   = dto.ProxyMutationResult
+	ProxyRefreshIntent    = dto.ProxyRefreshIntent
 )
 
 // CheckProxy 探测已保存的代理。检测在 Cloud 进程内执行，不依赖本机 Agent，
@@ -138,42 +135,6 @@ func CheckProxy(id string) (model.Proxy, dto.ProxyCheckResult, error) {
 		}, nil
 	}
 	return updated, result, nil
-}
-
-// ExtractProxy 仍在运营工作站执行：动态代理商 URL 要用运营可用的网络抓取，
-// 取到的地址再由 Cloud 保存并检测。
-func ExtractProxy(ctx context.Context, input dto.ProxyExtractionInput) (dto.ProxyExtractionResult, error) {
-	result, err := agentclient.Get().ExtractProxy(ctx, agentclient.ProxyExtractionRequest{
-		ExtractURL: input.ExtractURL, ProxyProtocol: string(input.Protocol),
-	})
-	if err != nil {
-		return dto.ProxyExtractionResult{}, err
-	}
-	return dto.ProxyExtractionResult{
-		Protocol: model.Protocol(result.ProxyProtocol), Host: result.Host, Port: result.Port,
-		Username: result.Username, Password: result.Password,
-	}, nil
-}
-
-func MutateProxy(ctx context.Context, input dto.ProxyMutationInput) (dto.ProxyMutationResult, error) {
-	result, err := agentclient.Get().MutateProxy(ctx, agentclient.ProxyMutationRequest{
-		Operation: input.Operation, ProfileID: input.ProfileID, ProxyProtocol: string(input.Protocol),
-		Host: input.Host, Port: input.Port, Username: input.Username, Password: input.Password,
-	})
-	if err != nil {
-		return dto.ProxyMutationResult{}, err
-	}
-	return dto.ProxyMutationResult{
-		Operation: result.Operation, ProfileID: result.ProfileID, Protocol: model.Protocol(result.ProxyProtocol),
-		Host: result.Host, Port: result.Port, Readback: result.Readback,
-	}, nil
-}
-
-func ApplyProxy(ctx context.Context, input dto.ProxyMutationInput) (agentclient.ProxyAssignmentResult, error) {
-	return agentclient.Get().ApplyProxy(ctx, agentclient.ProxyMutationRequest{
-		ProfileID: input.ProfileID, ProxyProtocol: string(input.Protocol),
-		Host: input.Host, Port: input.Port, Username: input.Username, Password: input.Password,
-	})
 }
 
 // MarkExpiringProxies 保留为调度入口，但到期状态改为读取时由 expires_at 现算。

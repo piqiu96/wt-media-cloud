@@ -73,6 +73,29 @@ describe('local agent desktop service', () => {
     expect(invoke).toHaveBeenCalledWith('local_agent_account_check', expect.any(Object))
   })
 
+  it('extracts dynamic proxy addresses through the Desktop Agent bridge', async () => {
+    const result = { proxy_protocol: 'socks5', host: '127.0.0.1', port: 1080, username: '', password: '' }
+    const invoke = vi.fn(async (command, args) => {
+      if (command === LOCAL_AGENT_COMMANDS.proxyExtract) {
+        expect(args).toEqual({
+          args: {
+            extract_url: 'https://provider.example/extract',
+            proxy_protocol: 'socks5',
+          },
+        })
+        return result
+      }
+      return {}
+    })
+    const service = createLocalAgentService({ invoke })
+
+    await expect(service.proxyExtract({
+      extractUrl: 'https://provider.example/extract',
+      proxyProtocol: 'socks5',
+    })).resolves.toEqual(result)
+    expect(invoke).toHaveBeenCalledWith('local_agent_proxy_extract', expect.any(Object))
+  })
+
   it('proxies account row window operations through Tauri invoke', async () => {
     const invoke = vi.fn(async (command, args) => ({ command, args }))
     const service = createLocalAgentService({ invoke })

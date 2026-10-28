@@ -118,6 +118,12 @@ type ProxyCheckResult struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
+type ProxyRefreshIntent struct {
+	ProxyID    string         `json:"proxy_id"`
+	ExtractURL string         `json:"extract_url"`
+	Protocol   model.Protocol `json:"protocol"`
+}
+
 type ProxyExtractionInput struct {
 	ExtractURL string         `json:"extract_url"`
 	Protocol   model.Protocol `json:"protocol"`
