@@ -11,7 +11,6 @@ import (
 	"time"
 
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	profileguardservice "github.com/wt-media/wt-media-cloud/internal/modules/profileguard/service"
 )
 
 func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
@@ -27,7 +26,7 @@ func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
-	if account.IdentificationStatus != IdentificationPending || account.BusinessStatus != BusinessEnabled || account.LoginStatus != LoginUnknown {
+	if account.IdentificationStatus != IdentificationPending || !account.Enabled || account.PlatformLoginStatus != PlatformLoginUnknown {
 		t.Fatalf("account defaults = %#v", account)
 	}
 	stored, _, _ := store.Find(account.ID)
@@ -158,7 +157,7 @@ func TestServiceSeniorCanManageButCannotCreateSameTeamCategoryAccountForAnotherU
 	store.records["account-2"] = AccountRecord{Account: Account{
 		ID: "account-2", UserID: 2, TeamID: &teamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformDouyin,
 	}}
-	if _, err := service.UpdateAccount(actor, "account-2", UpdateAccountInput{BusinessStatus: BusinessDisabled}); err != nil {
+	if _, err := service.UpdateAccount(actor, "account-2", UpdateAccountInput{Enabled: boolPtr(false)}); err != nil {
 		t.Fatalf("UpdateAccount(same team/category) error=%v", err)
 	}
 }
@@ -200,7 +199,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identified, err := service.IdentifyAccount(actor, first.ID, IdentifyAccountInput{PlatformAccountID: "platform-42", Name: "main", AvatarURL: "https://example.invalid/a.png", LoginStatus: LoginNormal})
+	identified, err := service.IdentifyAccount(actor, first.ID, IdentifyAccountInput{PlatformAccountID: "platform-42", PlatformName: "main", PlatformAvatarURL: "https://example.invalid/a.png", PlatformLoginStatus: PlatformLoginNormal})
 	if err != nil {
 		t.Fatalf("IdentifyAccount() error = %v", err)
 	}
@@ -212,7 +211,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate, err := service.IdentifyAccount(actor, candidate.ID, IdentifyAccountInput{PlatformAccountID: "platform-42", Name: "duplicate", LoginStatus: LoginNormal})
+	duplicate, err := service.IdentifyAccount(actor, candidate.ID, IdentifyAccountInput{PlatformAccountID: "platform-42", PlatformName: "duplicate", PlatformLoginStatus: PlatformLoginNormal})
 	if !errors.Is(err, ErrDuplicateAccount) {
 		t.Fatalf("duplicate error = %v", err)
 	}
@@ -236,26 +235,26 @@ func TestServiceIdentityUniquenessIsPerUser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := service.IdentifyAccount(admin, account.ID, IdentifyAccountInput{PlatformAccountID: "same-platform-id", LoginStatus: LoginNormal}); err != nil {
+		if _, err := service.IdentifyAccount(admin, account.ID, IdentifyAccountInput{PlatformAccountID: "same-platform-id", PlatformLoginStatus: PlatformLoginNormal}); err != nil {
 			t.Fatalf("user %d identify error = %v", userID, err)
 		}
 	}
 }
 
-func TestServiceValidatesBusinessAndLoginStatusesIndependently(t *testing.T) {
+func TestServiceValidatesBusinessAndPlatformLoginStatusesIndependently(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformDouyin})
 
-	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{BusinessStatus: BusinessDisabled, LoginStatus: LoginVerificationNeeded})
+	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Enabled: boolPtr(false), PlatformLoginStatus: PlatformLoginVerificationNeeded})
 	if err != nil {
 		t.Fatalf("UpdateAccount() error = %v", err)
 	}
-	if updated.BusinessStatus != BusinessDisabled || updated.LoginStatus != LoginVerificationNeeded {
+	if updated.Enabled || updated.PlatformLoginStatus != PlatformLoginVerificationNeeded {
 		t.Fatalf("updated = %#v", updated)
 	}
-	_, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{BusinessStatus: BusinessStatus("bad")})
+	_, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{PlatformLoginStatus: PlatformLoginStatus("bad")})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("invalid status error = %v", err)
 	}
@@ -311,7 +310,7 @@ func TestServiceBindsOnlySameUserActiveProfileAndOnePlatform(t *testing.T) {
 		t.Fatalf("BindProfile() account=%#v error=%v", bound, err)
 	}
 	storedFirst, _, _ := store.Find(first.ID)
-	if storedFirst.LoginStatus != LoginUnknown || storedFirst.LastCheckedAt != nil {
+	if storedFirst.PlatformLoginStatus != PlatformLoginUnknown || storedFirst.LastCheckAt != nil {
 		t.Fatalf("binding must reset login check facts: %#v", storedFirst)
 	}
 	if _, err := service.BindProfile(actor, second.ID, "profile-1"); !errors.Is(err, ErrProfilePlatformTaken) {
@@ -350,27 +349,26 @@ func TestServiceUnbindsProfileAndRejectsDisabledBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnbindProfile() error=%v", err)
 	}
-	if unbound.BrowserProfileID != "" || unbound.LoginStatus != LoginUnknown {
+	if unbound.BrowserProfileID != "" || unbound.PlatformLoginStatus != PlatformLoginUnknown {
 		t.Fatalf("unbound account = %#v", unbound)
 	}
-	store.records[account.ID] = AccountRecord{Account: Account{ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, BusinessStatus: BusinessDisabled, LoginStatus: LoginUnknown}}
+	store.records[account.ID] = AccountRecord{Account: Account{ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, Enabled: false, PlatformLoginStatus: PlatformLoginUnknown}}
 	if _, err := service.BindProfile(actor, account.ID, "profile-1"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("disabled BindProfile() error=%v, want ErrInvalidInput", err)
 	}
 }
 
-func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testing.T) {
+func TestServiceStartsLocalAccountCheckWithoutPersistentAuthorization(t *testing.T) {
 	store := newMemoryStore()
 	facts := &fakeProfileFacts{profiles: map[string]fakeProfileFact{
 		"profile-1": {id: "profile-1", userID: 1, bitProfileID: "bit-profile-1", active: true},
 	}}
-	tasks := &fakeSensitiveTasks{}
-	service := newTestServiceForAccountCheck(store, facts, tasks)
+	service := newTestServiceForAccountCheck(store, facts)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili})
 	store.records[account.ID] = AccountRecord{Account: Account{
 		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+		BrowserProfileID: "profile-1", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 	}}
 
 	start, err := service.StartLocalAccountCheck(actor, account.ID, AccountCheckStartInput{})
@@ -380,12 +378,8 @@ func TestServiceStartsLocalAccountCheckByCreatingSensitiveAuthorization(t *testi
 	if start.BitProfileID != "bit-profile-1" || start.Platform != PlatformBilibili {
 		t.Fatalf("start=%#v", start)
 	}
-	if len(tasks.tasks) != 1 {
-		t.Fatalf("created sensitive tasks=%d, want 1", len(tasks.tasks))
-	}
-	task := tasks.tasks[0]
-	if task.Operation != profileguardservice.OperationAuthenticatedAccountCheck || task.BitProfileID != "bit-profile-1" {
-		t.Fatalf("task=%#v", task)
+	if start.OperationID == "" {
+		t.Fatal("operation id is empty")
 	}
 }
 
@@ -398,23 +392,22 @@ func TestLocalOperationsFollowAccountOwnership(t *testing.T) {
 	admin := identityservice.PublicUser{ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
 	store.records["own"] = AccountRecord{Account: Account{
 		ID: "own", UserID: senior.ID, TeamID: &teamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		BrowserProfileID: "profile-senior", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+		BrowserProfileID: "profile-senior", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 	}}
 	store.records["teammate"] = AccountRecord{Account: Account{
 		ID: "teammate", UserID: 2, TeamID: &teamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		BrowserProfileID: "profile-teammate", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+		BrowserProfileID: "profile-teammate", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 	}}
 	store.records["admin-own"] = AccountRecord{Account: Account{
 		ID: "admin-own", UserID: admin.ID, TeamID: &teamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		BrowserProfileID: "profile-admin", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+		BrowserProfileID: "profile-admin", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 	}}
 	facts := &fakeProfileFacts{profiles: map[string]fakeProfileFact{
 		"profile-senior":   {id: "profile-senior", userID: senior.ID, bitProfileID: "bit-senior", active: true},
 		"profile-teammate": {id: "profile-teammate", userID: 2, bitProfileID: "bit-teammate", active: true},
 		"profile-admin":    {id: "profile-admin", userID: admin.ID, bitProfileID: "bit-admin", active: true},
 	}}
-	tasks := &fakeSensitiveTasks{}
-	service := newTestServiceForAccountCheck(store, facts, tasks)
+	service := newTestServiceForAccountCheck(store, facts)
 
 	if _, err := service.StartLocalAccountCheck(senior, "own", AccountCheckStartInput{}); err != nil {
 		t.Fatalf("senior own StartLocalAccountCheck error=%v", err)
@@ -435,9 +428,6 @@ func TestLocalOperationsFollowAccountOwnership(t *testing.T) {
 		if _, err := service.StartCookieRead(admin, accountID, CookieReadStartInput{}); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("admin %s StartCookieRead error=%v, want ErrForbidden", accountID, err)
 		}
-	}
-	if len(tasks.tasks) != 2 {
-		t.Fatalf("created sensitive tasks=%d, want 2 (only the senior's own account)", len(tasks.tasks))
 	}
 }
 
@@ -462,20 +452,20 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	second, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili})
 	store.records[first.ID] = AccountRecord{Account: Account{
 		ID: first.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		PlatformAccountID: "uid-1", IdentificationStatus: IdentificationIdentified, BusinessStatus: BusinessEnabled, LoginStatus: LoginNormal,
+		PlatformAccountID: "uid-1", IdentificationStatus: IdentificationIdentified, Enabled: true, PlatformLoginStatus: PlatformLoginNormal,
 	}}
 	store.records[second.ID] = AccountRecord{Account: Account{
 		ID: second.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		BrowserProfileID: "profile-2", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+		BrowserProfileID: "profile-2", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 	}}
 
 	updated, err := service.ApplyLocalAccountCheckResult(actor, second.ID, AccountCheckResultInput{
-		TaskID: "task-1", PlatformAccountID: "uid-1", LoginStatus: LoginNormal,
+		OperationID: "task-1", PlatformAccountID: "uid-1", PlatformLoginStatus: PlatformLoginNormal,
 	})
 	if err != nil {
 		t.Fatalf("ApplyLocalAccountCheckResult() error=%v", err)
 	}
-	if updated.LoginStatus != LoginAccountMismatch || updated.IdentificationStatus != IdentificationDuplicate || updated.DuplicateOfAccountID != first.ID {
+	if updated.PlatformLoginStatus != PlatformLoginAccountMismatch || updated.IdentificationStatus != IdentificationDuplicate || updated.DuplicateOfAccountID != first.ID {
 		t.Fatalf("updated=%#v", updated)
 	}
 }
@@ -493,7 +483,7 @@ func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
 	}{
 		{
 			name:           "checked active proxy passes both checks",
-			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "active", lastCheckResult: "ok", expiresAt: &future, bound: true},
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", enabled: true, lastCheckResult: "ok", expiresAt: &future, bound: true},
 			wantProxyOK:    "pass",
 			wantExpiration: "pass",
 		},
@@ -505,19 +495,19 @@ func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
 		},
 		{
 			name:           "unchecked proxy fails connectivity without claiming expiry",
-			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "active", lastCheckResult: "", expiresAt: &future, bound: true},
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", enabled: true, lastCheckResult: "", expiresAt: &future, bound: true},
 			wantProxyOK:    "fail",
 			wantExpiration: "pass",
 		},
 		{
 			name:           "paused proxy fails both checks",
-			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "paused", lastCheckResult: "ok", expiresAt: &future, bound: true},
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", enabled: false, lastCheckResult: "ok", expiresAt: &future, bound: true},
 			wantProxyOK:    "fail",
 			wantExpiration: "fail",
 		},
 		{
 			name:           "expired proxy fails both checks",
-			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", businessStatus: "active", lastCheckResult: "ok", expiresAt: &past, bound: true},
+			proxyFact:      fakeProfileProxyFact{proxyID: "proxy-1", enabled: true, lastCheckResult: "ok", expiresAt: &past, bound: true},
 			wantProxyOK:    "fail",
 			wantExpiration: "fail",
 		},
@@ -532,27 +522,27 @@ func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
 				},
 				proxyFacts: map[string]fakeProfileProxyFact{"profile-1": tc.proxyFact},
 			}
-			service := newTestServiceForAccountCheck(store, facts, &fakeSensitiveTasks{})
+			service := newTestServiceForAccountCheck(store, facts)
 			account, err := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili})
 			if err != nil {
 				t.Fatal(err)
 			}
 			store.records[account.ID] = AccountRecord{Account: Account{
 				ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-				BrowserProfileID: "profile-1", BusinessStatus: BusinessEnabled, LoginStatus: LoginUnknown,
+				BrowserProfileID: "profile-1", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 			}}
 
 			updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
-				TaskID: "task-1", PlatformAccountID: "platform-account-1", LoginStatus: LoginNormal,
+				OperationID: "task-1", PlatformAccountID: "platform-account-1", PlatformLoginStatus: PlatformLoginNormal,
 			})
 			if err != nil {
 				t.Fatalf("ApplyLocalAccountCheckResult() error=%v", err)
 			}
-			if got := accountCheckStatus(t, updated.CheckItems, "proxy_ok"); got != tc.wantProxyOK {
-				t.Fatalf("proxy_ok=%q, want %q; checks=%#v", got, tc.wantProxyOK, updated.CheckItems)
+			if got := accountCheckStatus(t, updated.LastCheckItems, "proxy_ok"); got != tc.wantProxyOK {
+				t.Fatalf("proxy_ok=%q, want %q; checks=%#v", got, tc.wantProxyOK, updated.LastCheckItems)
 			}
-			if got := accountCheckStatus(t, updated.CheckItems, "proxy_expired"); got != tc.wantExpiration {
-				t.Fatalf("proxy_expired=%q, want %q; checks=%#v", got, tc.wantExpiration, updated.CheckItems)
+			if got := accountCheckStatus(t, updated.LastCheckItems, "proxy_expired"); got != tc.wantExpiration {
+				t.Fatalf("proxy_expired=%q, want %q; checks=%#v", got, tc.wantExpiration, updated.LastCheckItems)
 			}
 		})
 	}
@@ -564,17 +554,17 @@ func TestServiceCreateAccountStoresName(t *testing.T) {
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
 	account, err := service.CreateAccount(actor, CreateAccountInput{
-		CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, Name: "  测试昵称  ",
+		CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, PlatformName: "  测试昵称  ",
 	})
 	if err != nil {
 		t.Fatalf("CreateAccount() error = %v", err)
 	}
-	if account.Name != "测试昵称" {
-		t.Fatalf("account.Name = %q, want %q", account.Name, "测试昵称")
+	if account.PlatformName != "测试昵称" {
+		t.Fatalf("account.PlatformName = %q, want %q", account.PlatformName, "测试昵称")
 	}
 	stored, _, _ := store.Find(account.ID)
-	if stored.Name != "测试昵称" {
-		t.Fatalf("stored.Name = %q, want %q", stored.Name, "测试昵称")
+	if stored.PlatformName != "测试昵称" {
+		t.Fatalf("stored.PlatformName = %q, want %q", stored.PlatformName, "测试昵称")
 	}
 }
 
@@ -582,22 +572,22 @@ func TestServiceUpdateAccountName(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, Name: "原名"})
+	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, PlatformName: "原名"})
 
-	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Name: strPtr("  新名  ")})
+	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{PlatformName: strPtr("  新名  ")})
 	if err != nil {
 		t.Fatalf("UpdateAccount() error = %v", err)
 	}
-	if updated.Name != "新名" {
-		t.Fatalf("updated.Name = %q, want %q", updated.Name, "新名")
+	if updated.PlatformName != "新名" {
+		t.Fatalf("updated.PlatformName = %q, want %q", updated.PlatformName, "新名")
 	}
 
-	cleared, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Name: strPtr("")})
+	cleared, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{PlatformName: strPtr("")})
 	if err != nil {
 		t.Fatalf("UpdateAccount(clear) error = %v", err)
 	}
-	if cleared.Name != "" {
-		t.Fatalf("cleared.Name = %q, want empty", cleared.Name)
+	if cleared.PlatformName != "" {
+		t.Fatalf("cleared.PlatformName = %q, want empty", cleared.PlatformName)
 	}
 }
 
@@ -630,29 +620,29 @@ func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
 
 	// name 为空时回填
 	updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
-		TaskID: "task-1", PlatformAccountID: "uid-1", Name: "回填昵称", LoginStatus: LoginNormal,
+		OperationID: "task-1", PlatformAccountID: "uid-1", PlatformName: "回填昵称", PlatformLoginStatus: PlatformLoginNormal,
 	})
 	if err != nil {
 		t.Fatalf("ApplyLocalAccountCheckResult() error = %v", err)
 	}
-	if updated.Name != "回填昵称" {
-		t.Fatalf("backfilled name = %q, want %q", updated.Name, "回填昵称")
+	if updated.PlatformName != "回填昵称" {
+		t.Fatalf("backfilled name = %q, want %q", updated.PlatformName, "回填昵称")
 	}
 
 	// 已有 name 不被覆盖
 	store.records[account.ID] = AccountRecord{Account: Account{
 		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
-		PlatformAccountID: "uid-1", Name: "已有名", IdentificationStatus: IdentificationIdentified,
-		BusinessStatus: BusinessEnabled, LoginStatus: LoginNormal,
+		PlatformAccountID: "uid-1", PlatformName: "已有名", IdentificationStatus: IdentificationIdentified,
+		Enabled: true, PlatformLoginStatus: PlatformLoginNormal,
 	}}
 	kept, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
-		TaskID: "task-2", PlatformAccountID: "uid-1", Name: "新名", LoginStatus: LoginNormal,
+		OperationID: "task-2", PlatformAccountID: "uid-1", PlatformName: "新名", PlatformLoginStatus: PlatformLoginNormal,
 	})
 	if err != nil {
 		t.Fatalf("ApplyLocalAccountCheckResult(keep) error = %v", err)
 	}
-	if kept.Name != "已有名" {
-		t.Fatalf("existing name overwritten = %q", kept.Name)
+	if kept.PlatformName != "已有名" {
+		t.Fatalf("existing name overwritten = %q", kept.PlatformName)
 	}
 }
 
@@ -663,15 +653,15 @@ func TestServiceFiltersByStatusAndSearch(t *testing.T) {
 	first, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, Remark: "重点账号"})
 	second, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBaidu, Remark: "普通账号"})
 	firstRecord, _, _ := store.Find(first.ID)
-	firstRecord.BusinessStatus = BusinessDisabled
-	firstRecord.LoginStatus = LoginExpired
+	firstRecord.Enabled = false
+	firstRecord.PlatformLoginStatus = PlatformLoginExpired
 	store.records[first.ID] = firstRecord
 	secondRecord, _, _ := store.Find(second.ID)
-	secondRecord.LoginStatus = LoginNormal
+	secondRecord.PlatformLoginStatus = PlatformLoginNormal
 	store.records[second.ID] = secondRecord
 
-	assertAccountIDs(t, service, actor, AccountFilter{BusinessStatus: BusinessDisabled, LoginStatus: LoginExpired, Search: "重点"}, first.ID)
-	assertAccountIDs(t, service, actor, AccountFilter{LoginStatus: LoginNormal, Search: "普通"}, second.ID)
+	assertAccountIDs(t, service, actor, AccountFilter{Enabled: boolPtr(false), PlatformLoginStatus: PlatformLoginExpired, Search: "重点"}, first.ID)
+	assertAccountIDs(t, service, actor, AccountFilter{PlatformLoginStatus: PlatformLoginNormal, Search: "普通"}, second.ID)
 }
 
 func assertAccountIDs(t *testing.T, service *accountService, actor identityservice.PublicUser, filter AccountFilter, want ...string) {
@@ -702,7 +692,7 @@ func TestServiceAccountGroupCRUD(t *testing.T) {
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
 	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{
-		Name: "重点账号", Filters: AccountGroupFilters{Platform: PlatformBilibili, BusinessStatus: BusinessEnabled},
+		Name: "重点账号", Filters: AccountGroupFilters{Platform: PlatformBilibili, Enabled: boolPtr(true)},
 	})
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -793,14 +783,13 @@ func newTestServiceWithProfiles(store Store, resolver profileResolver) *accountS
 	}))
 }
 
-func newTestServiceForAccountCheck(store Store, facts profileFactResolver, tasks sensitiveTaskCreator) *accountService {
+func newTestServiceForAccountCheck(store Store, facts profileFactResolver) *accountService {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	next := 0
 	return newAccountService(store,
 		withUserResolver(testUserResolver()),
 		withCategoryResolver(defaultTestCategoryResolver()),
 		withProfileFactResolver(facts),
-		withSensitiveTaskCreator(tasks),
 		withClock(func() time.Time { return now }),
 		withIDGenerator(func(prefix string) string {
 			next++
@@ -890,10 +879,10 @@ func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {
 		if query.Platform != "" && record.Platform != query.Platform {
 			continue
 		}
-		if query.BusinessStatus != "" && record.BusinessStatus != query.BusinessStatus {
+		if query.Enabled != nil && record.Enabled != *query.Enabled {
 			continue
 		}
-		if query.LoginStatus != "" && record.LoginStatus != query.LoginStatus {
+		if query.PlatformLoginStatus != "" && record.PlatformLoginStatus != query.PlatformLoginStatus {
 			continue
 		}
 		if query.Search != "" && !recordMatchesSearch(record, query.Search) {
@@ -924,7 +913,7 @@ func intersects(values, wanted []identityservice.CategoryID) bool {
 
 func recordMatchesSearch(record AccountRecord, search string) bool {
 	search = strings.ToLower(search)
-	for _, value := range []string{record.ID, record.PlatformAccountID, record.Name, record.Remark} {
+	for _, value := range []string{record.ID, record.PlatformAccountID, record.PlatformName, record.Remark} {
 		if strings.Contains(strings.ToLower(value), search) {
 			return true
 		}
@@ -1047,7 +1036,7 @@ type fakeProfileFact struct {
 
 type fakeProfileProxyFact struct {
 	proxyID         string
-	businessStatus  string
+	enabled         bool
 	lastCheckResult string
 	expiresAt       *time.Time
 	bound           bool
@@ -1063,12 +1052,12 @@ func (r *fakeProfileFacts) ResolveProfileForAccountCheck(profileID string) (stri
 	return profile.id, profile.userID, profile.bitProfileID, !profile.outOfScope, profile.active, found, nil
 }
 
-func (r *fakeProfileFacts) ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
+func (r *fakeProfileFacts) ResolveProxyForAccountCheck(profileID string) (string, bool, string, *time.Time, bool, error) {
 	proxy, found := r.proxyFacts[profileID]
 	if !found {
-		return "", "", "", nil, false, nil
+		return "", false, "", nil, false, nil
 	}
-	return proxy.proxyID, proxy.businessStatus, proxy.lastCheckResult, proxy.expiresAt, proxy.bound, nil
+	return proxy.proxyID, proxy.enabled, proxy.lastCheckResult, proxy.expiresAt, proxy.bound, nil
 }
 
 func accountCheckStatus(t *testing.T, items []AccountCheckItem, key string) string {
@@ -1080,15 +1069,6 @@ func accountCheckStatus(t *testing.T, items []AccountCheckItem, key string) stri
 	}
 	t.Fatalf("missing check item %q: %#v", key, items)
 	return ""
-}
-
-type fakeSensitiveTasks struct {
-	tasks []profileguardservice.SensitiveTask
-}
-
-func (s *fakeSensitiveTasks) CreateAuthorizedTask(task profileguardservice.SensitiveTask) error {
-	s.tasks = append(s.tasks, task)
-	return nil
 }
 
 type fakeUserResolver struct {
@@ -1127,3 +1107,5 @@ func testUserResolver() userResolver {
 func mediaActor(userID identityservice.UserID, teamID identityservice.TeamID, role identityservice.Role) identityservice.PublicUser {
 	return identityservice.PublicUser{ID: userID, Role: role, Status: identityservice.UserStatusEnabled, TeamID: &teamID, CategoryIDs: []identityservice.CategoryID{1, 2, 3}}
 }
+
+func boolPtr(value bool) *bool { return &value }

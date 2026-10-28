@@ -18,6 +18,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   profileCreate: "local_agent_profile_create",
   profileUpdate: "local_agent_profile_update",
   profileRestore: "local_agent_profile_restore",
+  profileProxyOperation: "local_agent_profile_proxy_operation",
 });
 
 const DEFAULT_STATUS = Object.freeze({
@@ -175,6 +176,19 @@ export function createLocalAgentService({ invoke }) {
     async profileRestore(profiles) {
       return invoke(LOCAL_AGENT_COMMANDS.profileRestore, { profiles });
     },
+    async profileProxyOperation({ action, bitProfileId, proxyProtocol = "", host = "", port = null, username = "", password = "" }) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileProxyOperation, {
+        args: {
+          action,
+          bit_profile_id: bitProfileId,
+          proxy_protocol: proxyProtocol,
+          host,
+          port,
+          username,
+          password,
+        },
+      });
+    },
   };
 }
 
@@ -260,6 +274,9 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
         fields: ["name", "group_id", "group_name", "remark"].map((field) => ({ field, status: "verified" })),
         snapshot: { main_user_id: "main-user-mock", profiles: [updated] },
       };
+    },
+    async profileProxyOperation({ action, bitProfileId }) {
+      return { action, bit_profile_id: bitProfileId, readback: true };
     },
     async profileRestore(profiles) {
       return {

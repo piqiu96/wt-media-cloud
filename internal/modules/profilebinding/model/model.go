@@ -36,19 +36,12 @@ type BitAccountStatus string
 
 const BitAccountBound BitAccountStatus = "bound"
 
-type ProfileLocalStatus string
+type ProfileLocalState string
 
 const (
-	ProfileActive       ProfileLocalStatus = "active"
-	ProfileLocalMissing ProfileLocalStatus = "local_missing"
-	ProfileArchived     ProfileLocalStatus = "archived"
-)
-
-type ProfileBusinessStatus string
-
-const (
-	ProfileBusinessEnabled  ProfileBusinessStatus = "enabled"
-	ProfileBusinessDisabled ProfileBusinessStatus = "disabled"
+	ProfileActive       ProfileLocalState = "active"
+	ProfileLocalMissing ProfileLocalState = "local_missing"
+	ProfileArchived     ProfileLocalState = "archived"
 )
 
 type ScanStatus string
@@ -68,36 +61,38 @@ const (
 
 type BitAccountBinding struct {
 	UserID         sharedidentity.UserID `json:"user_id"`
-	MainUserID     string                `json:"main_user_id"`
+	BitMainUserID  string                `json:"bit_main_user_id"`
 	Status         BitAccountStatus      `json:"status"`
 	BoundAt        *time.Time            `json:"bound_at,omitempty"`
 	LastVerifiedAt *time.Time            `json:"last_verified_at,omitempty"`
 }
 
 type BrowserProfile struct {
-	ID             string                 `json:"id"`
-	UserID         sharedidentity.UserID  `json:"user_id"`
-	TeamID         *sharedidentity.TeamID `json:"team_id"`
-	BitProfileID   string                 `json:"bit_profile_id"`
-	MainUserID     string                 `json:"main_user_id"`
-	ProfileUserID  string                 `json:"profile_user_id"`
-	Name           string                 `json:"name"`
-	Seq            int                    `json:"seq,omitempty"`
-	GroupID        string                 `json:"group_id,omitempty"`
-	GroupName      string                 `json:"group_name,omitempty"`
-	BitStatus      string                 `json:"bit_status,omitempty"`
-	BitUpdatedAt   string                 `json:"bit_updated_at,omitempty"`
-	ProxyType      string                 `json:"proxy_type,omitempty"`
-	ProxyHost      string                 `json:"proxy_host,omitempty"`
-	ProxyPort      int                    `json:"proxy_port,omitempty"`
-	ProxyID        string                 `json:"proxy_id,omitempty"`
-	Remark         string                 `json:"remark,omitempty"`
-	CloudRemark    string                 `json:"cloud_remark,omitempty"`
-	BusinessStatus ProfileBusinessStatus  `json:"business_status"`
-	LocalStatus    ProfileLocalStatus     `json:"local_status"`
-	LastSyncedAt   time.Time              `json:"last_synced_at"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID               string                 `json:"id"`
+	UserID           sharedidentity.UserID  `json:"user_id"`
+	TeamID           *sharedidentity.TeamID `json:"team_id"`
+	BitProfileID     string                 `json:"bit_profile_id"`
+	BitMainUserID    string                 `json:"bit_main_user_id"`
+	BitUserID        string                 `json:"bit_user_id"`
+	BitName          string                 `json:"bit_name"`
+	BitSeq           int                    `json:"bit_seq"`
+	BitGroupID       string                 `json:"bit_group_id,omitempty"`
+	BitGroupName     string                 `json:"bit_group_name,omitempty"`
+	BitProfileStatus string                 `json:"bit_profile_status,omitempty"`
+	BitUpdatedAt     string                 `json:"bit_updated_at,omitempty"`
+	BitProxyType     string                 `json:"bit_proxy_type,omitempty"`
+	BitProxyHost     string                 `json:"bit_proxy_host,omitempty"`
+	BitProxyPort     int                    `json:"bit_proxy_port,omitempty"`
+	ProxyID          string                 `json:"proxy_id,omitempty"`
+	ReservedProxyID  string                 `json:"reserved_proxy_id,omitempty"`
+	ReservedSince    *time.Time             `json:"reserved_since,omitempty"`
+	BitRemark        string                 `json:"bit_remark,omitempty"`
+	Remark           string                 `json:"remark,omitempty"`
+	Enabled          bool                   `json:"enabled"`
+	LocalState       ProfileLocalState      `json:"local_state"`
+	LastSyncedAt     time.Time              `json:"last_synced_at"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
 	// OwnershipConflict 是扫描时的证据，不是存储列：同一比特窗口已登记在其他
 	// 运营名下，不能被最后扫描到的人认领。
 	OwnershipConflict string `json:"ownership_conflict,omitempty"`
@@ -111,14 +106,14 @@ type ProfileDiff struct {
 }
 
 type ProfileScan struct {
-	ID          string                 `json:"id"`
-	UserID      sharedidentity.UserID  `json:"user_id"`
-	TeamID      *sharedidentity.TeamID `json:"team_id"`
-	MainUserID  string                 `json:"main_user_id"`
-	Status      ScanStatus             `json:"status"`
-	Profiles    []BrowserProfile       `json:"profiles"`
-	Diff        []ProfileDiff          `json:"diff"`
-	CreatedAt   time.Time              `json:"created_at"`
-	ExpiresAt   time.Time              `json:"expires_at"`
-	ConfirmedAt *time.Time             `json:"confirmed_at,omitempty"`
+	ID            string                 `json:"id"`
+	UserID        sharedidentity.UserID  `json:"user_id"`
+	TeamID        *sharedidentity.TeamID `json:"team_id"`
+	BitMainUserID string                 `json:"bit_main_user_id"`
+	Status        ScanStatus             `json:"status"`
+	Profiles      []BrowserProfile       `json:"profiles"`
+	Diff          []ProfileDiff          `json:"diff"`
+	CreatedAt     time.Time              `json:"created_at"`
+	ExpiresAt     time.Time              `json:"expires_at"`
+	ConfirmedAt   *time.Time             `json:"confirmed_at,omitempty"`
 }

@@ -29,7 +29,7 @@ import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.v
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
-import { classifyObservedAssignment, isUncertainAssignmentError } from "./proxyAssignmentOutcome.js"
+import { classifyObservedAssignment } from "./proxyAssignmentOutcome.js"
 // 静态导入：打包后的 Tauri WebView 无法解析动态 import() 的裸模块名。invoke 只在
 // __TAURI_INTERNALS__ 保护的代码里调用，Cloud Web 导入它是惰性的。
 import { invoke } from "@tauri-apps/api/core"
@@ -537,10 +537,6 @@ function isNotBoundError(e) {
 
 function isIdentityMismatch(e) {
   return e?.code === "BIT_MAIN_USER_MISMATCH" || e?.errcode === 23002
-}
-
-function isUncertainProxyError(e) {
-  return isUncertainAssignmentError(e)
 }
 
 function isTimeoutError(e) {
@@ -1419,13 +1415,8 @@ async function runProxyAction(kind, profile, targetProxy) {
     await callProxyAction(kind, profile, targetProxy)
     progressItems.value[0].status = "success"
   } catch (e) {
-    if (isUncertainProxyError(e) && kind !== "release") {
-      progressItems.value[0].status = "unconfirmed"
-      progressItems.value[0].reason = "写入已发出但未能核实，请先读取比特中的实际配置再确认。"
-    } else {
-      progressItems.value[0].status = "failed"
-      progressItems.value[0].reason = isUncertainProxyError(e) ? "请求可能已生效，请重新读取窗口后确认。" : (e.message || `${actionLabel}失败`)
-    }
+    progressItems.value[0].status = "failed"
+    progressItems.value[0].reason = e.message || `${actionLabel}失败，可直接重试`
   } finally {
     progressPhase.value = "done"
   }
@@ -1435,22 +1426,37 @@ async function runProxyAction(kind, profile, targetProxy) {
 }
 
 async function callProxyAction(kind, profile, targetProxy) {
-  if (kind === "assign" || kind === "resync") {
-    if (!targetProxy) throw new Error("目标代理不存在")
-    await proxyClient.assign(targetProxy.id, profile.id)
-    return
+  const action = kind === "release" ? "release" : kind === "unbind" ? "unbind" : "apply"
+  const proxyID = action === "apply" ? targetProxy?.id : profile.proxy_id
+  if (action === "apply" && !proxyID) throw new Error("目标代理不存在")
+  if (action !== "apply" && !proxyID) throw new Error("该窗口没有系统托管关系")
+  const operation = await proxyClient.operate(profile.id, { action, proxy_id: proxyID })
+  if (!operation.agent_required) return operation
+  try {
+    await localAgent.profileProxyOperation({
+      action,
+      bitProfileId: operation.bit_profile_id,
+      proxyProtocol: operation.protocol,
+      host: operation.host,
+      port: operation.port,
+      username: operation.username,
+      password: operation.password,
+    })
+  } catch (e) {
+    await proxyClient.finishOperation(profile.id, {
+      action,
+      proxy_id: operation.proxy_id,
+      outcome: "failed",
+      message: e.message || "Desktop 本机代理写入失败",
+    }).catch(() => {})
+    throw e
   }
-  if (kind === "release") {
-    if (!profile.proxy_id) throw new Error("该窗口没有系统托管关系")
-    await proxyClient.release(profile.proxy_id, profile.id)
-    return
-  }
-  if (kind === "unbind") {
-    if (profile.proxy_id) await proxyClient.unbind(profile.proxy_id, profile.id)
-    else await proxyClient.clearProfileProxy(profile.id)
-    return
-  }
-  throw new Error("未知的代理操作")
+  return proxyClient.finishOperation(profile.id, {
+    action,
+    proxy_id: operation.proxy_id,
+    outcome: "success",
+    message: "",
+  })
 }
 
 async function afterProxyChange() {
@@ -1515,12 +1521,11 @@ async function runSync() {
   progressItems.value = [
     { key: "scan", label: "读取本机窗口", status: "pending" },
     { key: "submit", label: "提交并比对", status: "pending" },
-    { key: "proxy", label: "读取代理差异", status: "pending" },
   ]
   retryPayload.value = { mode: "sync" }
   progressPhase.value = "running"
   progressVisible.value = true
-  const [scanItem, submitItem, proxyItem] = progressItems.value
+  const [scanItem, submitItem] = progressItems.value
 
   scanItem.status = "processing"
   let snapshot
@@ -1558,19 +1563,9 @@ async function runSync() {
     return
   }
 
-  proxyItem.status = "processing"
-  try {
-    const preview = await proxyClient.previewLocalScan(scan.id)
-    syncPreview.value = preview
-    proxyItem.status = "success"
-    syncSelectedAdded.value = []
-    syncSelectedUnknown.value = []
-  } catch (e) {
-    proxyItem.status = "failed"
-    proxyItem.reason = e.message || "读取代理差异失败"
-  } finally {
-    progressPhase.value = "done"
-  }
+  syncSelectedAdded.value = []
+  syncSelectedUnknown.value = []
+  progressPhase.value = "done"
 }
 
 function toggleSyncAdded(profile, checked) {
@@ -1589,7 +1584,6 @@ function toggleSyncUnknown(change, checked) {
 async function acceptSync() {
   if (!syncScan.value) return
   const added = syncSelectedAdded.value.length
-  const proxyCount = syncActionableProxyChanges.value.length
   progressMode.value = "sync-accept"
   progressTitle.value = "接受本机变化"
   progressRunningLabel.value = "正在处理"
@@ -1597,16 +1591,11 @@ async function acceptSync() {
   progressRetryLabel.value = "重试未完成项"
   progressItems.value = [
     { key: "windows", label: `接受窗口变化（${added} 个新增窗口）`, status: "pending" },
-    { key: "proxy", label: `核对代理关系（${proxyCount} 项）`, status: proxyCount ? "pending" : "skipped", reason: proxyCount ? "" : "没有需要处理的代理差异" },
   ]
-  retryPayload.value = {
-    mode: "sync-accept",
-    appliedAdded: syncSelectedAdded.value.length,
-    proxyCount,
-  }
+  retryPayload.value = { mode: "sync-accept", appliedAdded: syncSelectedAdded.value.length }
   progressPhase.value = "running"
   progressVisible.value = true
-  const [windowItem, proxyItem] = progressItems.value
+  const [windowItem] = progressItems.value
   syncError.value = ""
   try {
     windowItem.status = "processing"
@@ -1618,23 +1607,7 @@ async function acceptSync() {
     progressPhase.value = "done"
     return
   }
-  if (proxyCount) {
-    proxyItem.status = "processing"
-    const autoProxy = autoProxyChangeCount()
-    try {
-      const result = await proxyClient.confirmLocalScan(syncScan.value.id, syncSelectedUnknown.value)
-      syncPreview.value = result
-      proxyItem.status = "success"
-      finalizeSyncResult(syncSelectedAdded.value.length, syncSelectedUnknown.value.length + autoProxy)
-    } catch (e) {
-      proxyItem.status = "failed"
-      proxyItem.reason = e.message || "核对代理关系失败"
-      syncError.value = "窗口变化已接受，但代理关系核对未完成。重新同步会以本机实际状态继续核对。"
-      finalizeSyncResult(syncSelectedAdded.value.length, 0)
-    }
-  } else {
-    finalizeSyncResult(syncSelectedAdded.value.length, 0)
-  }
+  finalizeSyncResult(syncSelectedAdded.value.length, 0)
   progressPhase.value = "done"
   await reloadAll()
   reconcileSyncAdded()
@@ -1838,17 +1811,12 @@ async function startBatchProxy() {
     }
     item.status = "processing"
     try {
-      await proxyClient.assign(target.id, profile.id)
+      await callProxyAction("assign", profile, target)
       item.status = "success"
     } catch (e) {
-      if (isUncertainProxyError(e)) {
-        item.status = "unconfirmed"
-        item.reason = "写入已发出但未能核实，请读取实际配置核对。"
-      } else {
-        item.status = "failed"
-        item.reason = e.message || "应用代理失败"
-        failures.push(profile.id)
-      }
+      item.status = "failed"
+      item.reason = e.message || "应用代理失败，可直接重试"
+      failures.push(profile.id)
     }
   }
   retryPayload.value.failedIds = failures
@@ -1951,36 +1919,8 @@ function retryFailed() {
 }
 
 async function retryProxyStage() {
-  const payload = retryPayload.value
-  if (!payload || !syncScan.value) return
-  const planned = syncSelectedUnknown.value.length + autoProxyChangeCount()
-  progressMode.value = "sync-accept"
-  progressTitle.value = "核对代理关系"
-  progressRunningLabel.value = "正在核对"
-  progressLabels.value = {}
-  progressRetryLabel.value = "重试未完成项"
-  progressPhase.value = "running"
-  progressItems.value = [
-    { key: "windows", label: "接受窗口变化", status: "skipped", reason: "窗口变化已接受" },
-    { key: "proxy", label: `核对代理关系（${planned} 项）`, status: "processing" },
-  ]
-  progressVisible.value = true
-  try {
-    const result = await proxyClient.confirmLocalScan(syncScan.value.id, syncSelectedUnknown.value)
-    syncPreview.value = result
-    progressItems.value[1].status = "success"
-    syncError.value = ""
-    finalizeSyncResult(payload.appliedAdded, planned)
-  } catch (e) {
-    progressItems.value[1].status = "failed"
-    progressItems.value[1].reason = e.message || "核对代理关系失败"
-    syncError.value = "窗口变化已接受，但代理关系核对未完成。重新同步会以本机实际状态继续核对。"
-    finalizeSyncResult(payload.appliedAdded, 0)
-  } finally {
-    progressPhase.value = "done"
-    await reloadAll()
-    reconcileSyncAdded()
-  }
+  await reloadAll()
+  reconcileSyncAdded()
 }
 
 async function retryEditCloud() {

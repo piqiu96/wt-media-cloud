@@ -15,25 +15,24 @@ import (
 // ProfileListFilter 只包含列表页筛选条件。窗口运行状态由 Desktop 实时提供，不属于
 // Cloud 行字段。
 type ProfileListFilter struct {
-	ID             string
-	Name           string
-	Group          string
-	BitProfileID   string
-	Remark         string
-	LocalStatus    string
-	BusinessStatus string
+	ID           string
+	BitName      string
+	BitGroup     string
+	BitProfileID string
+	Remark       string
+	LocalState   string
+	Enabled      *bool
 }
 
 type (
-	BitAccountStatus      = model.BitAccountStatus
-	ProfileLocalStatus    = model.ProfileLocalStatus
-	ProfileBusinessStatus = model.ProfileBusinessStatus
-	ScanStatus            = model.ScanStatus
-	DiffKind              = model.DiffKind
-	BitAccountBinding     = model.BitAccountBinding
-	BrowserProfile        = model.BrowserProfile
-	ProfileDiff           = model.ProfileDiff
-	ProfileScan           = model.ProfileScan
+	BitAccountStatus  = model.BitAccountStatus
+	ProfileLocalState = model.ProfileLocalState
+	ScanStatus        = model.ScanStatus
+	DiffKind          = model.DiffKind
+	BitAccountBinding = model.BitAccountBinding
+	BrowserProfile    = model.BrowserProfile
+	ProfileDiff       = model.ProfileDiff
+	ProfileScan       = model.ProfileScan
 
 	ProfileInput        = dto.ProfileInput
 	SnapshotInput       = dto.SnapshotInput
@@ -58,17 +57,15 @@ var (
 )
 
 const (
-	BitAccountBound         = model.BitAccountBound
-	ProfileActive           = model.ProfileActive
-	ProfileLocalMissing     = model.ProfileLocalMissing
-	ProfileArchived         = model.ProfileArchived
-	ProfileBusinessEnabled  = model.ProfileBusinessEnabled
-	ProfileBusinessDisabled = model.ProfileBusinessDisabled
-	ScanReady               = model.ScanReady
-	ScanConfirmed           = model.ScanConfirmed
-	DiffAdded               = model.DiffAdded
-	DiffChanged             = model.DiffChanged
-	DiffMissing             = model.DiffMissing
+	BitAccountBound     = model.BitAccountBound
+	ProfileActive       = model.ProfileActive
+	ProfileLocalMissing = model.ProfileLocalMissing
+	ProfileArchived     = model.ProfileArchived
+	ScanReady           = model.ScanReady
+	ScanConfirmed       = model.ScanConfirmed
+	DiffAdded           = model.DiffAdded
+	DiffChanged         = model.DiffChanged
+	DiffMissing         = model.DiffMissing
 )
 
 type Store interface {
@@ -81,9 +78,11 @@ type Store interface {
 	GetProfileInScope(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
+	FindScanByUser(userID identityservice.UserID) (ProfileScan, bool, error)
+	DeleteScanByUser(userID identityservice.UserID) error
 	ApplyScan(scan ProfileScan, observedBitProfileIDs []string, at time.Time) error
 	DeleteProfile(id string) error
-	UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
+	UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
 	ProfileHasDependencies(profileID string) (bool, error)
 	// ListProfileOwners 把 bit_profile_id 映射到同一比特主账号下已登记的运营，
@@ -138,7 +137,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	if !validActor(actor) {
 		return ProfileScan{}, ErrForbidden
 	}
-	mainUserID := strings.TrimSpace(input.MainUserID)
+	mainUserID := strings.TrimSpace(input.BitMainUserID)
 	if mainUserID == "" || len(input.Profiles) == 0 {
 		return ProfileScan{}, ErrIdentityUnverifiable
 	}
@@ -152,7 +151,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	if !hasBinding {
 		return ProfileScan{}, ErrBitNotBound
 	}
-	if binding.MainUserID != mainUserID {
+	if binding.BitMainUserID != mainUserID {
 		return ProfileScan{}, ErrBitMainUserMismatch
 	}
 	existing, err := s.store.ListProfiles(actor.ID, ProfileListFilter{})
@@ -170,9 +169,9 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	diff := make([]ProfileDiff, 0)
 	for _, item := range input.Profiles {
 		bitProfileID := strings.TrimSpace(item.BitProfileID)
-		itemMainUserID := strings.TrimSpace(item.MainUserID)
-		profileUserID := strings.TrimSpace(item.ProfileUserID)
-		if bitProfileID == "" || itemMainUserID == "" || profileUserID == "" || itemMainUserID != mainUserID {
+		itemBitMainUserID := strings.TrimSpace(item.BitMainUserID)
+		profileUserID := strings.TrimSpace(item.BitUserID)
+		if bitProfileID == "" || itemBitMainUserID == "" || profileUserID == "" || itemBitMainUserID != mainUserID {
 			return ProfileScan{}, ErrIdentityUnverifiable
 		}
 		if _, duplicate := seen[bitProfileID]; duplicate {
@@ -180,32 +179,32 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		}
 		seen[bitProfileID] = struct{}{}
 		candidate := BrowserProfile{
-			ID:            s.newID("browser_profile"),
-			UserID:        actor.ID,
-			TeamID:        actor.TeamID,
-			BitProfileID:  bitProfileID,
-			MainUserID:    mainUserID,
-			ProfileUserID: profileUserID,
-			Name:          strings.TrimSpace(item.Name),
-			Seq:           item.Seq,
-			GroupID:       strings.TrimSpace(item.GroupID),
-			GroupName:     strings.TrimSpace(item.GroupName),
-			BitStatus:     strings.TrimSpace(item.BitStatus),
-			BitUpdatedAt:  strings.TrimSpace(item.BitUpdatedAt),
-			ProxyType:     strings.TrimSpace(item.ProxyType),
-			ProxyHost:     strings.TrimSpace(item.ProxyHost),
-			ProxyPort:     item.ProxyPort,
-			Remark:        strings.TrimSpace(item.Remark),
-			LocalStatus:   ProfileActive,
-			LastSyncedAt:  now,
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			ID:               s.newID("browser_profile"),
+			UserID:           actor.ID,
+			TeamID:           actor.TeamID,
+			BitProfileID:     bitProfileID,
+			BitMainUserID:    mainUserID,
+			BitUserID:        profileUserID,
+			BitName:          strings.TrimSpace(item.BitName),
+			BitSeq:           item.BitSeq,
+			BitGroupID:       strings.TrimSpace(item.BitGroupID),
+			BitGroupName:     strings.TrimSpace(item.BitGroupName),
+			BitProfileStatus: strings.TrimSpace(item.BitProfileStatus),
+			BitUpdatedAt:     strings.TrimSpace(item.BitUpdatedAt),
+			BitProxyType:     strings.TrimSpace(item.BitProxyType),
+			BitProxyHost:     strings.TrimSpace(item.BitProxyHost),
+			BitProxyPort:     item.BitProxyPort,
+			BitRemark:        strings.TrimSpace(item.BitRemark),
+			LocalState:       ProfileActive,
+			LastSyncedAt:     now,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		}
 		if current, ok := existingByBitID[bitProfileID]; ok {
 			candidate.ID = current.ID
 			candidate.CreatedAt = current.CreatedAt
 			fields := changedFields(current, candidate)
-			if len(fields) > 0 || current.LocalStatus != ProfileActive {
+			if len(fields) > 0 || current.LocalState != ProfileActive {
 				diff = append(diff, ProfileDiff{Kind: DiffChanged, BitProfileID: bitProfileID, ProfileID: current.ID, Fields: fields})
 			}
 		} else {
@@ -214,8 +213,8 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		candidates = append(candidates, candidate)
 	}
 	for _, current := range existing {
-		if _, ok := seen[current.BitProfileID]; !ok && current.LocalStatus != ProfileArchived {
-			diff = append(diff, ProfileDiff{Kind: DiffMissing, BitProfileID: current.BitProfileID, ProfileID: current.ID, Fields: []string{"local_status"}})
+		if _, ok := seen[current.BitProfileID]; !ok && current.LocalState != ProfileArchived {
+			diff = append(diff, ProfileDiff{Kind: DiffMissing, BitProfileID: current.BitProfileID, ProfileID: current.ID, Fields: []string{"local_state"}})
 		}
 	}
 	sort.Slice(diff, func(i, j int) bool {
@@ -230,7 +229,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	}
 	annotateOwnership(candidates, owners, existingByBitID, actor.ID)
 	scan := ProfileScan{
-		ID: s.newID("profile_scan"), UserID: actor.ID, TeamID: actor.TeamID, MainUserID: mainUserID,
+		ID: s.newID("profile_scan"), UserID: actor.ID, TeamID: actor.TeamID, BitMainUserID: mainUserID,
 		Status: ScanReady, Profiles: candidates, Diff: diff, CreatedAt: now, ExpiresAt: now.Add(s.scanTTL),
 	}
 	if err := s.store.CreateScan(scan); err != nil {
@@ -251,7 +250,7 @@ func (s *Service) GetScan(actor identityservice.PublicUser, scanID string) (Prof
 		return ProfileScan{}, ErrForbidden
 	}
 	if scan.UserID == actor.ID {
-		if owners, ownerErr := s.store.ListProfileOwners(scan.MainUserID); ownerErr != nil {
+		if owners, ownerErr := s.store.ListProfileOwners(scan.BitMainUserID); ownerErr != nil {
 			return ProfileScan{}, ownerErr
 		} else {
 			annotateOwnership(scan.Profiles, owners, nil, actor.ID)
@@ -294,7 +293,7 @@ func (s *Service) BindBitAccount(userID identityservice.UserID, input BitAccount
 	if userID <= 0 {
 		return BitAccountBinding{}, ErrForbidden
 	}
-	mainUserID := strings.TrimSpace(input.MainUserID)
+	mainUserID := strings.TrimSpace(input.BitMainUserID)
 	if mainUserID == "" {
 		return BitAccountBinding{}, ErrIdentityUnverifiable
 	}
@@ -328,10 +327,10 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, a
 	if !found {
 		return ProfileScan{}, ErrBitNotBound
 	}
-	if binding.MainUserID != scan.MainUserID {
+	if binding.BitMainUserID != scan.BitMainUserID {
 		return ProfileScan{}, ErrBitMainUserMismatch
 	}
-	owners, err := s.store.ListProfileOwners(scan.MainUserID)
+	owners, err := s.store.ListProfileOwners(scan.BitMainUserID)
 	if err != nil {
 		return ProfileScan{}, err
 	}
@@ -370,15 +369,41 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, a
 	if err := s.store.ApplyScan(scan, observed, now); err != nil {
 		return ProfileScan{}, err
 	}
-	scan.Profiles = nil
-	stored, found, err := s.store.FindScan(scan.ID)
+	return scan, nil
+}
+
+func (s *Service) GetCurrentSync(actor identityservice.PublicUser) (ProfileScan, error) {
+	if !validActor(actor) {
+		return ProfileScan{}, ErrForbidden
+	}
+	scan, found, err := s.store.FindScanByUser(actor.ID)
 	if err != nil {
 		return ProfileScan{}, err
 	}
 	if !found {
 		return ProfileScan{}, ErrScanNotFound
 	}
-	return stored, nil
+	return scan, nil
+}
+
+func (s *Service) ConfirmCurrentSync(actor identityservice.PublicUser, adoptBitProfileIDs []string) (ProfileScan, error) {
+	scan, err := s.GetCurrentSync(actor)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	return s.ConfirmScan(actor, scan.ID, adoptBitProfileIDs)
+}
+
+func (s *Service) RejectCurrentSync(actor identityservice.PublicUser) error {
+	if !validActor(actor) {
+		return ErrForbidden
+	}
+	if _, found, err := s.store.FindScanByUser(actor.ID); err != nil {
+		return err
+	} else if !found {
+		return ErrScanNotFound
+	}
+	return s.store.DeleteScanByUser(actor.ID)
 }
 
 // observationFresh 判断观察是否仍可用于决策。零值表示 Agent 没有说明观察时间，
@@ -472,7 +497,7 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	}
 	// 同步删除只允许已停用的窗口：BitBrowser 中已不存在（扫描报告缺失）且业务已
 	// 停用，Cloud 镜像不再有价值。启用的窗口不允许删除。
-	if profile.BusinessStatus != ProfileBusinessDisabled {
+	if profile.Enabled {
 		return ErrProfileNotDisabled
 	}
 	referenced, err := s.store.ProfileHasDependencies(profile.ID)
@@ -485,7 +510,7 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	return s.store.DeleteProfile(profileID)
 }
 
-func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus) (BrowserProfile, error) {
+func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID string, remark *string, enabled *bool) (BrowserProfile, error) {
 	if !validActor(actor) {
 		return BrowserProfile{}, ErrForbidden
 	}
@@ -501,16 +526,13 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 	// 避免用隐藏或过期的运行状态去停用他人窗口。
 	isTeamSenior := actor.Role == identityservice.RoleSeniorOperator && actor.TeamID != nil &&
 		profile.TeamID != nil && *actor.TeamID == *profile.TeamID
-	if !isOwner && !(isTeamSenior && cloudRemark != nil) {
+	if !isOwner && !(isTeamSenior && remark != nil) {
 		return BrowserProfile{}, ErrForbidden
 	}
-	if !isOwner && businessStatus != nil {
+	if !isOwner && enabled != nil {
 		return BrowserProfile{}, ErrForbidden
 	}
-	if businessStatus != nil && *businessStatus != ProfileBusinessEnabled && *businessStatus != ProfileBusinessDisabled {
-		return BrowserProfile{}, ErrInvalidInput
-	}
-	if err := s.store.UpdateProfile(profileID, cloudRemark, businessStatus, s.now()); err != nil {
+	if err := s.store.UpdateProfile(profileID, remark, enabled, s.now()); err != nil {
 		return BrowserProfile{}, err
 	}
 	updated, found, err := s.store.GetProfileInScope(profileID)
@@ -537,7 +559,7 @@ func (s *Service) GetActiveProfile(actor identityservice.PublicUser, profileID s
 	if profile.UserID != actor.ID {
 		return BrowserProfile{}, ErrForbidden
 	}
-	if profile.LocalStatus != ProfileActive {
+	if profile.LocalState != ProfileActive {
 		return BrowserProfile{}, ErrProfileInactive
 	}
 	return profile, nil
@@ -558,37 +580,37 @@ func validActor(actor identityservice.PublicUser) bool {
 
 func changedFields(current, candidate BrowserProfile) []string {
 	fields := make([]string, 0, 7)
-	if current.MainUserID != candidate.MainUserID {
-		fields = append(fields, "main_user_id")
+	if current.BitMainUserID != candidate.BitMainUserID {
+		fields = append(fields, "bit_main_user_id")
 	}
-	if current.ProfileUserID != candidate.ProfileUserID {
-		fields = append(fields, "profile_user_id")
+	if current.BitUserID != candidate.BitUserID {
+		fields = append(fields, "bit_user_id")
 	}
-	if current.Name != candidate.Name {
-		fields = append(fields, "name")
+	if current.BitName != candidate.BitName {
+		fields = append(fields, "bit_name")
 	}
-	if current.Seq != candidate.Seq {
-		fields = append(fields, "seq")
+	if current.BitSeq != candidate.BitSeq {
+		fields = append(fields, "bit_seq")
 	}
-	if current.GroupID != candidate.GroupID {
-		fields = append(fields, "group_id")
+	if current.BitGroupID != candidate.BitGroupID {
+		fields = append(fields, "bit_group_id")
 	}
-	if current.GroupName != candidate.GroupName {
-		fields = append(fields, "group_name")
+	if current.BitGroupName != candidate.BitGroupName {
+		fields = append(fields, "bit_group_name")
 	}
-	if current.Remark != candidate.Remark {
-		fields = append(fields, "remark")
+	if current.BitRemark != candidate.BitRemark {
+		fields = append(fields, "bit_remark")
 	}
 	// bit_status 是开关窗口的运行状态，bit_updated_at 是 BitBrowser 时间戳，二者
 	// 都会随开关变化，不属于窗口配置，不触发 changed 差异。
-	if current.ProxyType != candidate.ProxyType {
-		fields = append(fields, "proxy_type")
+	if current.BitProxyType != candidate.BitProxyType {
+		fields = append(fields, "bit_proxy_type")
 	}
-	if current.ProxyHost != candidate.ProxyHost {
-		fields = append(fields, "proxy_host")
+	if current.BitProxyHost != candidate.BitProxyHost {
+		fields = append(fields, "bit_proxy_host")
 	}
-	if current.ProxyPort != candidate.ProxyPort {
-		fields = append(fields, "proxy_port")
+	if current.BitProxyPort != candidate.BitProxyPort {
+		fields = append(fields, "bit_proxy_port")
 	}
 	return fields
 }

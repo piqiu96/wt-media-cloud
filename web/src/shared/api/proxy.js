@@ -1,22 +1,33 @@
 import { createApiClient } from './http.js'
 
+function normalizeProxy(proxy) {
+  if (!proxy || typeof proxy !== 'object') return proxy
+  return {
+    ...proxy,
+    business_status: proxy.enabled === true ? 'active' : proxy.enabled === false ? 'paused' : proxy.business_status,
+    proxy_protocol: proxy.protocol ?? proxy.proxy_protocol,
+    max_profile_count: proxy.max_profiles ?? proxy.max_profile_count,
+  }
+}
+
+function normalizeProxies(rows) {
+  return Array.isArray(rows) ? rows.map(normalizeProxy) : rows
+}
+
 export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
     list(params) {
-      return api.get('/proxies', params)
+      return api.get('/proxies', params).then(normalizeProxies)
     },
     get(id) {
-      return api.get(`/proxies/${id}`)
+      return api.get(`/proxies/${id}`).then(normalizeProxy)
     },
     create(data) {
-      return api.post('/proxies', data)
+      return api.post('/proxies', data).then(normalizeProxy)
     },
     update(id, data) {
-      return api.patch(`/proxies/${id}`, data)
-    },
-    updateStatus(id, businessStatus) {
-      return api.patch(`/proxies/${id}/status`, { business_status: businessStatus })
+      return api.patch(`/proxies/${id}`, data).then(normalizeProxy)
     },
     delete(id) {
       return api.delete(`/proxies/${id}`)
@@ -37,37 +48,22 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
       return api.get(`/proxies/${id}/bindings`)
     },
     refreshDynamic(id) {
-      return api.post(`/proxies/${id}/refresh`)
+      return api.post(`/proxies/${id}/refresh`).then(normalizeProxy)
     },
     check(id) {
-      return api.post(`/proxies/${id}/check`)
+      return api.post(`/proxies/${id}/check`).then(normalizeProxy)
     },
     setMaxProfileCount(proxyId, maxProfiles) {
-      return api.post(`/proxies/${proxyId}/quota`, { max_profiles: maxProfiles })
-    },
-    assign(proxyId, profileId) {
-      return api.post(`/proxies/${proxyId}/assign`, { profile_id: profileId })
+      return api.patch(`/proxies/${proxyId}`, { max_profiles: maxProfiles }).then(normalizeProxy)
     },
     recommend(profileIds) {
-      return api.get('/proxies/recommendations', { profile_ids: profileIds.join(',') })
+      return api.get('/proxies/recommendations', { profile_ids: profileIds.join(',') }).then(normalizeProxies)
     },
-    assignBatch(proxyId, profileIds) {
-      return api.post(`/proxies/${proxyId}/assign-batch`, { profile_ids: profileIds })
+    operate(profileId, { action, proxy_id }) {
+      return api.post(`/browser-profiles/${profileId}/proxy-operation`, { action, proxy_id })
     },
-    unbind(proxyId, profileId) {
-      return api.post(`/proxies/${proxyId}/unbind`, { profile_id: profileId })
-    },
-    release(proxyId, profileId) {
-      return api.post(`/proxies/${proxyId}/release`, { profile_id: profileId })
-    },
-    clearProfileProxy(profileId) {
-      return api.post('/proxies/profile-unbind', { profile_id: profileId })
-    },
-    previewLocalScan(scanId) {
-      return api.post('/proxies/local-scan/preview', { scan_id: scanId })
-    },
-    confirmLocalScan(scanId, selectedProfileIds = []) {
-      return api.post('/proxies/local-scan/confirm', { scan_id: scanId, selected_profile_ids: selectedProfileIds })
+    finishOperation(profileId, { action, proxy_id, outcome, message }) {
+      return api.post(`/browser-profiles/${profileId}/proxy-operation/result`, { action, proxy_id, outcome, message })
     },
   }
 }

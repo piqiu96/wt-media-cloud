@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const proxyColumns = `id, team_id, name, source_type, proxy_protocol, host, port, username, password, region, supplier, tags_json, extract_url, expires_at, business_status, max_profile_count, last_check_at, last_check_result, observed_exit_ip, remark, created_at, updated_at`
+const proxyColumns = `id, team_id, name, source, protocol, host, port, username, password, region, supplier, tags, extract_url, expires_at, enabled, max_profiles, last_check_at, last_check_result, last_check_message, remark, created_at, updated_at`
 
 // ConnectionKey 是团队内查重用的规范化连接标识；带上所属记录，预览才能指出
 // 与哪一条冲突。
@@ -23,45 +23,44 @@ type ConnectionKey struct {
 	Port     int
 }
 
-func Create(p model.ProxyConfig) error {
+func Create(p model.Proxy) error {
 	return create(database.DB(), p)
 }
 
-func create(db *gorm.DB, p model.ProxyConfig) error {
+func create(db *gorm.DB, p model.Proxy) error {
 	err := execSQL(db,
-		`INSERT INTO proxy_configs (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.TeamID, p.Name, p.SourceType, p.ProxyProtocol, p.Host, p.Port,
+		`INSERT INTO proxies (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.TeamID, p.Name, p.Source, p.Protocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
 		nullIfEmpty(p.Region), nullIfEmpty(p.Supplier), nullIfEmpty(joinTags(p.Tags)), nullIfEmpty(p.ExtractURL),
-		p.ExpiresAt, p.BusinessStatus, p.MaxProfileCount,
-		p.LastCheckAt, nullIfEmpty(p.LastCheckResult),
-		nullIfEmpty(p.ObservedExitIP), nullIfEmpty(p.Remark),
+		p.ExpiresAt, p.Enabled, p.MaxProfiles,
+		p.LastCheckAt, nullIfEmpty(p.LastCheckResult), p.LastCheckMessage, nullIfEmpty(p.Remark),
 		p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
 
-func FindByID(id string) (model.ProxyConfig, bool, error) {
+func FindByID(id string) (model.Proxy, bool, error) {
 	return findByID(database.DB(), id)
 }
 
-func findByID(db *gorm.DB, id string) (model.ProxyConfig, bool, error) {
-	row := queryRow(db, `SELECT `+proxyColumns+` FROM proxy_configs WHERE id = ?`, id)
+func findByID(db *gorm.DB, id string) (model.Proxy, bool, error) {
+	row := queryRow(db, `SELECT `+proxyColumns+` FROM proxies WHERE id = ?`, id)
 	p, err := scanProxy(row)
 	if err == sql.ErrNoRows {
-		return model.ProxyConfig{}, false, nil
+		return model.Proxy{}, false, nil
 	}
 	if err != nil {
-		return model.ProxyConfig{}, false, err
+		return model.Proxy{}, false, err
 	}
 	return p, true, nil
 }
 
-func List(filter ProxyFilter) ([]model.ProxyConfig, error) {
+func List(filter ProxyFilter) ([]model.Proxy, error) {
 	return list(database.DB(), filter)
 }
 
-func list(db *gorm.DB, filter ProxyFilter) ([]model.ProxyConfig, error) {
+func list(db *gorm.DB, filter ProxyFilter) ([]model.Proxy, error) {
 	var conditions []string
 	var args []interface{}
 
@@ -69,9 +68,9 @@ func list(db *gorm.DB, filter ProxyFilter) ([]model.ProxyConfig, error) {
 		conditions = append(conditions, "team_id = ?")
 		args = append(args, *filter.TeamID)
 	}
-	if filter.BusinessStatus != "" {
-		conditions = append(conditions, "business_status = ?")
-		args = append(args, filter.BusinessStatus)
+	if filter.Enabled != nil {
+		conditions = append(conditions, "enabled = ?")
+		args = append(args, *filter.Enabled)
 	}
 	if filter.Supplier != "" {
 		conditions = append(conditions, "supplier = ?")
@@ -92,7 +91,7 @@ func list(db *gorm.DB, filter ProxyFilter) ([]model.ProxyConfig, error) {
 		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query := fmt.Sprintf("SELECT %s FROM proxy_configs%s ORDER BY created_at DESC LIMIT ? OFFSET ?", proxyColumns, where)
+	query := fmt.Sprintf("SELECT %s FROM proxies%s ORDER BY created_at DESC LIMIT ? OFFSET ?", proxyColumns, where)
 	args = append(args, filter.Limit, filter.Offset)
 
 	rows, err := queryRows(db, query, args...)
@@ -102,7 +101,7 @@ func list(db *gorm.DB, filter ProxyFilter) ([]model.ProxyConfig, error) {
 	defer rows.Close()
 
 	// Keep collection endpoints JSON-array shaped even when the database is empty.
-	results := make([]model.ProxyConfig, 0)
+	results := make([]model.Proxy, 0)
 	for rows.Next() {
 		p, err := scanProxy(rows)
 		if err != nil {
@@ -120,7 +119,7 @@ func ListConnectionKeys(teamID sharedidentity.TeamID) ([]ConnectionKey, error) {
 }
 
 func listConnectionKeys(db *gorm.DB, teamID sharedidentity.TeamID) ([]ConnectionKey, error) {
-	rows, err := queryRows(db, `SELECT id, proxy_protocol, host, port FROM proxy_configs WHERE team_id = ?`, teamID)
+	rows, err := queryRows(db, `SELECT id, protocol, host, port FROM proxies WHERE team_id = ?`, teamID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,19 +136,18 @@ func listConnectionKeys(db *gorm.DB, teamID sharedidentity.TeamID) ([]Connection
 	return keys, rows.Err()
 }
 
-func Update(p model.ProxyConfig) error {
+func Update(p model.Proxy) error {
 	return update(database.DB(), p)
 }
 
-func update(db *gorm.DB, p model.ProxyConfig) error {
+func update(db *gorm.DB, p model.Proxy) error {
 	err := execSQL(db,
-		`UPDATE proxy_configs SET name=?, source_type=?, proxy_protocol=?, host=?, port=?, username=?, password=?, region=?, supplier=?, tags_json=?, extract_url=?, expires_at=?, business_status=?, max_profile_count=?, last_check_at=?, last_check_result=?, observed_exit_ip=?, remark=?, updated_at=? WHERE id=?`,
-		p.Name, p.SourceType, p.ProxyProtocol, p.Host, p.Port,
+		`UPDATE proxies SET name=?, source=?, protocol=?, host=?, port=?, username=?, password=?, region=?, supplier=?, tags=?, extract_url=?, expires_at=?, enabled=?, max_profiles=?, last_check_at=?, last_check_result=?, last_check_message=?, remark=?, updated_at=? WHERE id=?`,
+		p.Name, p.Source, p.Protocol, p.Host, p.Port,
 		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
 		nullIfEmpty(p.Region), nullIfEmpty(p.Supplier), nullIfEmpty(joinTags(p.Tags)), nullIfEmpty(p.ExtractURL),
-		p.ExpiresAt, p.BusinessStatus, p.MaxProfileCount,
-		p.LastCheckAt, nullIfEmpty(p.LastCheckResult),
-		nullIfEmpty(p.ObservedExitIP), nullIfEmpty(p.Remark),
+		p.ExpiresAt, p.Enabled, p.MaxProfiles,
+		p.LastCheckAt, nullIfEmpty(p.LastCheckResult), p.LastCheckMessage, nullIfEmpty(p.Remark),
 		p.UpdatedAt, p.ID,
 	)
 	return err
@@ -157,24 +155,24 @@ func update(db *gorm.DB, p model.ProxyConfig) error {
 
 // RecordCheckResult 仅在代理仍保持探测时的连接时写入结果。没有连接条件，
 // 针对旧地址的慢检测会覆盖新地址的结果。
-func RecordCheckResult(id, protocol, host string, port int, result string, checkedAt time.Time) (bool, error) {
-	return recordCheckResult(database.DB(), id, protocol, host, port, result, checkedAt)
+func RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
+	return recordCheckResult(database.DB(), id, protocol, host, port, result, message, checkedAt)
 }
 
-func recordCheckResult(db *gorm.DB, id, protocol, host string, port int, result string, checkedAt time.Time) (bool, error) {
+func recordCheckResult(db *gorm.DB, id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
 	applied := db.Exec(
-		`UPDATE proxy_configs SET last_check_at = ?, last_check_result = ?, updated_at = ? WHERE id = ? AND proxy_protocol = ? AND host = ? AND port = ?`,
-		checkedAt, nullIfEmpty(result), checkedAt, id, protocol, host, port,
+		`UPDATE proxies SET last_check_at = ?, last_check_result = ?, last_check_message = ?, updated_at = ? WHERE id = ? AND protocol = ? AND host = ? AND port = ?`,
+		checkedAt, nullIfEmpty(result), nullIfEmpty(message), checkedAt, id, protocol, host, port,
 	)
 	return applied.RowsAffected > 0, applied.Error
 }
 
-func SetMaxProfileCount(id string, maxProfileCount int, now time.Time) (bool, error) {
-	return setMaxProfileCount(database.DB(), id, maxProfileCount, now)
+func SetMaxProfiles(id string, maxProfileCount int, now time.Time) (bool, error) {
+	return setMaxProfiles(database.DB(), id, maxProfileCount, now)
 }
 
-func setMaxProfileCount(db *gorm.DB, id string, maxProfileCount int, now time.Time) (bool, error) {
-	result := db.Exec(`UPDATE proxy_configs SET max_profile_count = ?, updated_at = ? WHERE id = ?`, maxProfileCount, now, id)
+func setMaxProfiles(db *gorm.DB, id string, maxProfileCount int, now time.Time) (bool, error) {
+	result := db.Exec(`UPDATE proxies SET max_profiles = ?, updated_at = ? WHERE id = ?`, maxProfileCount, now, id)
 	return result.RowsAffected > 0, result.Error
 }
 
@@ -183,7 +181,7 @@ func Delete(id string) error {
 }
 
 func delete(db *gorm.DB, id string) error {
-	err := execSQL(db, `DELETE FROM proxy_configs WHERE id = ?`, id)
+	err := execSQL(db, `DELETE FROM proxies WHERE id = ?`, id)
 	return err
 }
 
@@ -222,21 +220,21 @@ type scannable interface {
 	Scan(dest ...interface{}) error
 }
 
-func scanProxy(row scannable) (model.ProxyConfig, error) {
-	var p model.ProxyConfig
+func scanProxy(row scannable) (model.Proxy, error) {
+	var p model.Proxy
 	var teamID int64
-	var name, username, password, region, supplier, tagsJSON, extractURL, lastCheckResult, observedExitIP, remark sql.NullString
+	var name, username, password, region, supplier, tagsJSON, extractURL, lastCheckResult, lastCheckMessage, remark sql.NullString
 	var expiresAt, lastCheckAt sql.NullTime
 
 	err := row.Scan(
-		&p.ID, &teamID, &name, &p.SourceType, &p.ProxyProtocol, &p.Host, &p.Port,
+		&p.ID, &teamID, &name, &p.Source, &p.Protocol, &p.Host, &p.Port,
 		&username, &password, &region, &supplier, &tagsJSON,
-		&extractURL, &expiresAt, &p.BusinessStatus, &p.MaxProfileCount,
-		&lastCheckAt, &lastCheckResult, &observedExitIP, &remark,
+		&extractURL, &expiresAt, &p.Enabled, &p.MaxProfiles,
+		&lastCheckAt, &lastCheckResult, &lastCheckMessage, &remark,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
-		return model.ProxyConfig{}, err
+		return model.Proxy{}, err
 	}
 
 	p.TeamID = sharedidentity.TeamID(teamID)
@@ -254,7 +252,7 @@ func scanProxy(row scannable) (model.ProxyConfig, error) {
 		p.LastCheckAt = &lastCheckAt.Time
 	}
 	p.LastCheckResult = lastCheckResult.String
-	p.ObservedExitIP = observedExitIP.String
+	p.LastCheckMessage = lastCheckMessage.String
 	p.Remark = remark.String
 
 	return p, nil

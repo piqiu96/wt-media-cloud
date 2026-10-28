@@ -71,9 +71,9 @@ const columns = computed(() => [
   { colKey: "id", title: "ID", width: 70 },
   { colKey: "name", title: "名称 / 地址", width: 200 },
   { colKey: "region_supplier", title: "地区 / 供应商", width: 130 },
-  { colKey: "source_type", title: "来源", width: 80 },
+  { colKey: "source", title: "来源", width: 80 },
   { colKey: "usage", title: "已用 / 额度", width: 110 },
-  { colKey: "business_status", title: "资源启停", width: 100 },
+  { colKey: "enabled", title: "资源启停", width: 100 },
   { colKey: "last_check_result", title: "检测结果", width: 110 },
   { colKey: "expires_at", title: "到期时间", width: 120 },
   { colKey: "remark", title: "备注", width: 170 },
@@ -151,7 +151,7 @@ async function loadProxies() {
   try {
     const params = {}
     if (isAdmin.value && filterTeam.value) params.team_id = filterTeam.value
-    if (filterStatus.value) params.business_status = filterStatus.value
+    if (filterStatus.value) params.enabled = filterStatus.value === "active"
     if (filterRegion.value.trim()) params.region = filterRegion.value.trim()
     if (filterSupplier.value.trim()) params.supplier = filterSupplier.value.trim()
     if (filterText.value.trim()) params.search = filterText.value.trim()
@@ -199,9 +199,9 @@ function onTeamChanged() {
 
 function emptyForm() {
   return {
-    name: "", team_id: "", region: "", supplier: "", source_type: "static",
-    proxy_protocol: "http", proxy_address: "", extract_url: "", host: "", port: undefined,
-    username: "", password: "", tags: [], expires_at: null, max_profile_count: 3, remark: "",
+    name: "", team_id: "", region: "", supplier: "", source: "static",
+    protocol: "http", proxy_address: "", extract_url: "", host: "", port: undefined,
+    username: "", password: "", tags: [], expires_at: null, max_profiles: 3, remark: "",
   }
 }
 
@@ -221,8 +221,8 @@ function openEdit(proxy) {
     team_id: String(proxy.team_id || ""),
     region: proxy.region || "",
     supplier: proxy.supplier || "",
-    source_type: proxy.source_type || "static",
-    proxy_protocol: proxy.proxy_protocol || "http",
+    source: proxy.source || "static",
+    protocol: proxy.protocol || "http",
     proxy_address: "",
     extract_url: "",
     host: proxy.host || "",
@@ -231,7 +231,7 @@ function openEdit(proxy) {
     password: "",
     tags: Array.isArray(proxy.tags) ? [...proxy.tags] : [],
     expires_at: proxy.expires_at ? new Date(proxy.expires_at).getTime() : null,
-    max_profile_count: Number(proxy.max_profile_count) || 3,
+    max_profiles: Number(proxy.max_profiles) || 3,
     remark: proxy.remark || "",
   }
   formError.value = ""
@@ -241,19 +241,19 @@ function openEdit(proxy) {
 const connectionChanged = computed(() => {
   if (formMode.value !== "edit" || !editingProxy.value) return false
   const proxy = editingProxy.value
-  return form.value.proxy_protocol !== proxy.proxy_protocol
+  return form.value.protocol !== proxy.protocol
     || form.value.host.trim() !== (proxy.host || "")
     || Number(form.value.port) !== Number(proxy.port)
     || (form.value.username.trim() !== "" && form.value.username.trim() !== (proxy.username || ""))
     || form.value.password !== ""
-    || form.value.source_type !== proxy.source_type
+    || form.value.source !== proxy.source
 })
 
 const editAffectedWindows = computed(() => Number(editingProxy.value?.assigned_profile_count || 0))
 
 function applyParsedAddress(parsed) {
   if (!parsed) return
-  form.value.proxy_protocol = parsed.proxy_protocol || form.value.proxy_protocol
+  form.value.protocol = parsed.protocol || form.value.protocol
   form.value.host = parsed.host || ""
   form.value.port = Number(parsed.port) || 0
   form.value.username = parsed.username || ""
@@ -287,7 +287,7 @@ async function extractAddress() {
   try {
     applyParsedAddress(await proxyClient.previewExtract({
       extract_url: form.value.extract_url.trim(),
-      proxy_protocol: form.value.proxy_protocol,
+      protocol: form.value.protocol,
     }))
     feedback.toast.info("已提取一条地址；保存后才会写入资源，检测成功前不能分配。")
   } catch (e) {
@@ -332,11 +332,11 @@ async function saveForm() {
     formError.value = "请选择目标团队。"
     return
   }
-  if (target.source_type === "static" && (!target.host.trim() || !Number(target.port))) {
+  if (target.source === "static" && (!target.host.trim() || !Number(target.port))) {
     formError.value = "静态代理需要地址和端口。"
     return
   }
-  if (target.source_type === "api") {
+  if (target.source === "api") {
     const hasStoredExtractURL = formMode.value === "edit" && Boolean(editingProxy.value?.extract_url_configured)
     if (!target.extract_url.trim() && !hasStoredExtractURL && !target.host.trim()) {
       formError.value = "动态代理需要提取地址，或先手动填写地址。"
@@ -351,8 +351,8 @@ async function saveForm() {
   try {
     const payload = {
       name: target.name.trim(),
-      source_type: target.source_type,
-      proxy_protocol: target.proxy_protocol,
+      source: target.source,
+      protocol: target.protocol,
       host: target.host.trim(),
       port: Number(target.port) || 0,
       username: target.username.trim(),
@@ -366,7 +366,7 @@ async function saveForm() {
     if (target.expires_at) payload.expires_at = new Date(target.expires_at).toISOString()
     if (formMode.value === "create") {
       payload.team_id = isAdmin.value ? Number(target.team_id) : undefined
-      payload.max_profile_count = Number(target.max_profile_count) || 3
+      payload.max_profiles = Number(target.max_profiles) || 3
       await proxyClient.create(payload)
       feedback.toast.success(`代理「${payload.name}」已创建；检测通过后才能分配窗口。`)
     } else {
@@ -428,7 +428,7 @@ async function confirmStatusChange() {
   if (!proxy) return
   statusConfirmVisible.value = false
   try {
-    await proxyClient.updateStatus(proxy.id, statusNext.value ? "active" : "paused")
+    await proxyClient.update(proxy.id, { enabled: statusNext.value })
     feedback.toast.success(statusNext.value
       ? "代理已启用；仍需有效期内且检测正常才可分配。"
       : "代理已停用；现有窗口配置和已占名额保持不变，仅阻止新分配。")
@@ -462,7 +462,7 @@ async function deleteProxy(proxy) {
 
 function openQuota(proxy) {
   quotaProxy.value = proxy
-  quotaValue.value = Number(proxy.max_profile_count) || 3
+  quotaValue.value = Number(proxy.max_profiles) || 3
   quotaError.value = ""
   quotaVisible.value = true
 }
@@ -828,19 +828,19 @@ function closeImport() {
               <div>{{ row.region || "-" }}</div>
               <div class="proxy-sub">{{ row.supplier || "-" }}</div>
             </template>
-            <template #source_type="{ row }"><span>{{ sourceLabel(row.source_type) }}</span></template>
+            <template #source="{ row }"><span>{{ sourceLabel(row.source) }}</span></template>
             <template #usage="{ row }">
-              <span>{{ row.assigned_profile_count || 0 }} / {{ row.max_profile_count || 3 }}</span>
-              <div class="proxy-sub">剩余 {{ row.remaining_profile_count ?? ((row.max_profile_count || 3) - (row.assigned_profile_count || 0)) }}</div>
+              <span>{{ row.assigned_profile_count || 0 }} / {{ row.max_profiles || 3 }}</span>
+              <div class="proxy-sub">剩余 {{ row.remaining_profile_count ?? ((row.max_profiles || 3) - (row.assigned_profile_count || 0)) }}</div>
             </template>
-            <template #business_status="{ row }">
+            <template #enabled="{ row }">
               <t-switch
                 v-if="isGovernor"
-                :value="row.business_status === 'active'"
+                :value="row.enabled === true"
                 size="small"
                 @change="(value) => requestStatusChange(row, value)"
               />
-              <ResourceStatusBadge v-else :tone="row.business_status === 'active' ? 'success' : 'neutral'" :label="row.business_status === 'active' ? '启用' : '停用'" />
+              <ResourceStatusBadge v-else :tone="row.enabled === true ? 'success' : 'neutral'" :label="row.enabled === true ? '启用' : '停用'" />
             </template>
             <template #last_check_result="{ row }">
               <ResourceStatusBadge :tone="checkTone(row.last_check_result)" :label="checkResultLabel(row.last_check_result)" />
@@ -889,7 +889,7 @@ function closeImport() {
             </t-form-item>
             <t-form-item v-else label="运营团队"><span class="resource-form-value">{{ formMode === 'create' ? ownTeamLabel : (editingProxy?.team_name || ownTeamLabel) }}</span></t-form-item>
             <t-form-item v-if="formMode === 'create' || isGovernor" label="资源来源" class="resource-form-full">
-              <ResourceChoiceCards v-model="form.source_type" :options="[
+              <ResourceChoiceCards v-model="form.source" :options="[
                 { value: 'static', label: '静态地址', description: '使用固定的连接地址' },
                 { value: 'api', label: '动态代理', description: '从供应商链接提取地址' },
               ]" />
@@ -898,7 +898,7 @@ function closeImport() {
         </ResourceSection>
         <ResourceSection v-if="formMode === 'create' || isGovernor" title="连接配置" variant="form">
           <ResourceForm class="resource-form-grid">
-            <t-form-item v-if="form.source_type === 'static'" label="粘贴代理地址" class="resource-form-full">
+            <t-form-item v-if="form.source === 'static'" label="粘贴代理地址" class="resource-form-full">
               <t-input v-model="form.proxy_address" placeholder="host:port 或 socks5://账号:密码@host:port" @blur="parseAddress" />
             </t-form-item>
             <template v-else>
@@ -909,7 +909,7 @@ function closeImport() {
                 <span v-if="!canExtract" class="form-hint">请在本人桌面端提取，或手动填写已有地址。</span>
               </t-form-item>
             </template>
-            <t-form-item label="协议"><t-select v-model="form.proxy_protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
+            <t-form-item label="协议"><t-select v-model="form.protocol"><t-option value="http" label="HTTP" /><t-option value="https" label="HTTPS" /><t-option value="socks5" label="SOCKS5" /></t-select></t-form-item>
             <t-form-item label="端口" required-mark><t-input-number v-model="form.port" :min="1" :max="65535" /></t-form-item>
             <t-form-item label="主机地址" required-mark class="resource-form-full"><t-input v-model="form.host" placeholder="主机名或 IP 地址" /></t-form-item>
             <t-form-item label="认证用户名"><t-input v-model="form.username" :placeholder="formMode === 'edit' ? '留空保留原认证信息' : '无认证可留空'" /></t-form-item>
@@ -920,7 +920,7 @@ function closeImport() {
           <ResourceForm class="resource-form-grid">
             <t-form-item label="地区"><t-input v-model="form.region" placeholder="例如：上海" /></t-form-item>
             <t-form-item label="供应商"><t-input v-model="form.supplier" placeholder="供应商名称" /></t-form-item>
-            <t-form-item v-if="isGovernor && formMode === 'create'" label="初始窗口额度"><t-input-number v-model="form.max_profile_count" :min="1" :max="1000" /></t-form-item>
+            <t-form-item v-if="isGovernor && formMode === 'create'" label="初始窗口额度"><t-input-number v-model="form.max_profiles" :min="1" :max="1000" /></t-form-item>
             <t-form-item v-if="isGovernor" label="到期时间"><t-date-picker v-model="form.expires_at" value-type="time-stamp" clearable :placeholder="formMode === 'create' ? '不填表示长期有效' : '留空保留原日期'" /></t-form-item>
             <t-form-item label="业务标签" class="resource-form-full"><t-tag-input v-model="form.tags" clearable placeholder="回车添加标签" /></t-form-item>
             <t-form-item label="备注" class="resource-form-full"><t-textarea v-model="form.remark" :autosize="{ minRows: 3, maxRows: 6 }" placeholder="补充线路用途或使用注意事项" /></t-form-item>
@@ -941,8 +941,8 @@ function closeImport() {
               <t-descriptions-item label="代理ID">{{ detailProxy.id }}</t-descriptions-item>
               <t-descriptions-item label="名称">{{ detailProxy.name || "-" }}</t-descriptions-item>
               <t-descriptions-item label="所属团队">{{ detailProxy.team_name || "-" }}</t-descriptions-item>
-              <t-descriptions-item label="来源">{{ sourceLabel(detailProxy.source_type) }}<span v-if="detailProxy.extract_url_configured" class="proxy-sub">（已配置提取地址）</span></t-descriptions-item>
-              <t-descriptions-item label="协议 / 地址">{{ detailProxy.proxy_protocol }}://{{ detailProxy.host || "-" }}:{{ detailProxy.port || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="来源">{{ sourceLabel(detailProxy.source) }}<span v-if="detailProxy.extract_url_configured" class="proxy-sub">（已配置提取地址）</span></t-descriptions-item>
+              <t-descriptions-item label="协议 / 地址">{{ detailProxy.protocol }}://{{ detailProxy.host || "-" }}:{{ detailProxy.port || "-" }}</t-descriptions-item>
               </ResourceDescriptions></ResourceSection>
             <ResourceSection title="连接信息"><ResourceDescriptions size="small">
               <t-descriptions-item label="认证用户名">
@@ -957,14 +957,14 @@ function closeImport() {
             <ResourceSection title="使用与检测"><ResourceDescriptions size="small">
               <t-descriptions-item label="地区 / 供应商">{{ detailProxy.region || "-" }} / {{ detailProxy.supplier || "-" }}</t-descriptions-item>
               <t-descriptions-item label="业务标签">{{ (detailProxy.tags || []).join("、") || "-" }}</t-descriptions-item>
-              <t-descriptions-item label="资源启停">{{ detailProxy.business_status === "active" ? "启用" : "停用" }}</t-descriptions-item>
+              <t-descriptions-item label="资源启停">{{ detailProxy.enabled ? "启用" : "停用" }}</t-descriptions-item>
               <t-descriptions-item label="到期时间">
                 <span :class="{ 'proxy-expired': isExpired(detailProxy) }">{{ formatDate(detailProxy.expires_at) }}</span>
                 <span v-if="isExpired(detailProxy)" class="proxy-expired">（已到期）</span>
               </t-descriptions-item>
               <t-descriptions-item label="检测结果">{{ checkResultLabel(detailProxy.last_check_result) }}（{{ formatTime(detailProxy.last_check_at) }}）</t-descriptions-item>
-              <t-descriptions-item label="出口IP">{{ detailProxy.observed_exit_ip || "-" }}</t-descriptions-item>
-              <t-descriptions-item label="窗口额度">{{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profile_count || 3 }} 已用</t-descriptions-item>
+              <t-descriptions-item label="检测原因">{{ detailProxy.last_check_message || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="窗口额度">{{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profiles || 3 }} 已用</t-descriptions-item>
               <t-descriptions-item label="备注"><span class="proxy-detail-remark">{{ detailProxy.remark || "-" }}</span></t-descriptions-item>
             </ResourceDescriptions></ResourceSection>
             <ResourceSection :title="`关联窗口 · ${detailBindings.length} 个`">
@@ -977,11 +977,11 @@ function closeImport() {
                 { colKey: 'name', title: '窗口名称', width: 180 },
                 { colKey: 'bit_profile_id', title: '比特窗口ID', width: 150 },
                 { colKey: 'user_id', title: '运营UID', width: 90 },
-                { colKey: 'local_status', title: '状态', width: 90 },
+                { colKey: 'local_state', title: '状态', width: 90 },
               ]"
               empty="暂无关联窗口"
             >
-              <template #local_status="{ row }">{{ row.local_status === 'active' ? '在册' : row.local_status === 'local_missing' ? '窗口缺失' : '尚未确认' }}</template>
+              <template #local_state="{ row }">{{ row.local_state === 'active' ? '在册' : row.local_state === 'local_missing' ? '窗口缺失' : '尚未确认' }}</template>
             </t-table>
             </ResourceSection>
           </template>

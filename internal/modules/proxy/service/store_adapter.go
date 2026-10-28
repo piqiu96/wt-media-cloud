@@ -12,24 +12,24 @@ import (
 
 type mysqlStore struct{}
 
-func (mysqlStore) Create(proxy model.ProxyConfig) error { return repository.Create(proxy) }
-func (mysqlStore) FindByID(id string) (model.ProxyConfig, bool, error) {
+func (mysqlStore) Create(proxy model.Proxy) error { return repository.Create(proxy) }
+func (mysqlStore) FindByID(id string) (model.Proxy, bool, error) {
 	return repository.FindByID(id)
 }
-func (mysqlStore) List(filter dto.ProxyFilter) ([]model.ProxyConfig, error) {
+func (mysqlStore) List(filter dto.ProxyFilter) ([]model.Proxy, error) {
 	return repository.List(repository.ProxyFilter{
-		TeamID:         filter.TeamID,
-		Platform:       filter.Platform,
-		Supplier:       filter.Supplier,
-		BusinessStatus: filter.BusinessStatus,
-		Region:         filter.Region,
-		Search:         filter.Search,
-		Limit:          filter.Limit,
-		Offset:         filter.Offset,
+		TeamID:   filter.TeamID,
+		Platform: filter.Platform,
+		Supplier: filter.Supplier,
+		Enabled:  filter.Enabled,
+		Region:   filter.Region,
+		Search:   filter.Search,
+		Limit:    filter.Limit,
+		Offset:   filter.Offset,
 	})
 }
-func (mysqlStore) Update(proxy model.ProxyConfig) error { return repository.Update(proxy) }
-func (mysqlStore) Delete(id string) error               { return repository.Delete(id) }
+func (mysqlStore) Update(proxy model.Proxy) error { return repository.Update(proxy) }
+func (mysqlStore) Delete(id string) error         { return repository.Delete(id) }
 
 func (mysqlStore) ListConnectionKeys(teamID sharedidentity.TeamID) ([]StoredConnectionKey, error) {
 	keys, err := repository.ListConnectionKeys(teamID)
@@ -43,12 +43,12 @@ func (mysqlStore) ListConnectionKeys(teamID sharedidentity.TeamID) ([]StoredConn
 	return results, nil
 }
 
-func (mysqlStore) SetMaxProfileCount(id string, maxProfileCount int, now time.Time) (bool, error) {
-	return repository.SetMaxProfileCount(id, maxProfileCount, now)
+func (mysqlStore) SetMaxProfiles(id string, maxProfileCount int, now time.Time) (bool, error) {
+	return repository.SetMaxProfiles(id, maxProfileCount, now)
 }
 
-func (mysqlStore) RecordCheckResult(id, protocol, host string, port int, result string, checkedAt time.Time) (bool, error) {
-	return repository.RecordCheckResult(id, protocol, host, port, result, checkedAt)
+func (mysqlStore) RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
+	return repository.RecordCheckResult(id, protocol, host, port, result, message, checkedAt)
 }
 
 func (mysqlStore) WithAssignmentLock(proxyID string, fn func() error) error {

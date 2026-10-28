@@ -40,7 +40,7 @@ function parseCookies() {
 async function previewOpening() {
   error.value = ""
   try {
-    proxies.value = await proxyClient.list({ business_status: "active" })
+    proxies.value = await proxyClient.list({ enabled: true })
   } catch (e) {
     error.value = e.message
   }

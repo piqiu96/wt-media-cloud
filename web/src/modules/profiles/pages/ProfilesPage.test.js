@@ -71,11 +71,10 @@ describe('browser window resource page', () => {
     expect(source).toContain('本机发现但 Cloud 尚无关联的窗口。勾选后才会建立关联；不勾选不会认领，其他运营已登记的窗口不可选择。')
   })
 
-  it('accepts a scan through two explicit stages instead of one combined action', () => {
+  it('accepts one user-scoped sync without a separate proxy scan stage', () => {
     expect(source).toContain('await bindingClient.confirm(syncScan.value.id, syncSelectedAdded.value)')
-    expect(source).toContain('await proxyClient.confirmLocalScan(syncScan.value.id, syncSelectedUnknown.value)')
-    expect(source).toContain('async function retryProxyStage()')
-    expect(source).toContain('窗口变化已接受，但代理关系核对未完成。重新同步会以本机实际状态继续核对。')
+    expect(source).not.toContain('proxyClient.confirmLocalScan')
+    expect(source).not.toContain('proxyClient.previewLocalScan')
   })
 
   it('never retries a create that may already have happened', () => {
@@ -86,11 +85,12 @@ describe('browser window resource page', () => {
     expect(source).toContain('const createUncertain = ref(false)')
   })
 
-  it('drives proxy changes through the server-side scan endpoints', () => {
-    expect(source).toContain('proxyClient.previewLocalScan(')
-    expect(source).toContain('proxyClient.clearProfileProxy(')
-    expect(source).toContain('proxyClient.release(')
-    expect(source).toContain('proxyClient.unbind(')
+  it('drives proxy changes through Cloud intent plus the Desktop Agent bridge', () => {
+    expect(source).toContain('proxyClient.operate(')
+    expect(source).toContain('localAgent.profileProxyOperation(')
+    expect(source).toContain('proxyClient.finishOperation(')
+    expect(source).not.toContain('proxyClient.assign(')
+    expect(source).not.toContain('proxyClient.unbind(')
   })
 
   it('uses real Agent and Cloud results instead of prototype timers or mock data', () => {

@@ -12,7 +12,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
-	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -20,7 +19,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
-	"github.com/wt-media/wt-media-cloud/internal/modules/profileguard"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
@@ -48,8 +46,6 @@ func registerModuleRoutes(engine *server.Hertz) {
 	cloudagent.RegisterRoutes(engine)
 	identity.RegisterRoutes(engine)
 	localagent.RegisterRoutes(engine)
-	executionpreflight.RegisterRoutes(engine)
-	profileguard.RegisterRoutes(engine)
 	profilebinding.RegisterRoutes(engine)
 	mediaaccount.RegisterRoutes(engine)
 	proxy.RegisterRoutes(engine)

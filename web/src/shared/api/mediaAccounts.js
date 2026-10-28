@@ -5,17 +5,26 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
   const sanitize = (account) => {
     if (!account || typeof account !== 'object') return account
     const { original_cookie: _originalCookie, active_cookie: _activeCookie, ...safe } = account
-    return safe
+    return {
+      ...safe,
+      name: safe.platform_name ?? safe.name,
+      avatar_url: safe.platform_avatar_url ?? safe.avatar_url,
+      business_status: safe.enabled === true ? 'enabled' : safe.enabled === false ? 'disabled' : safe.business_status,
+      login_status: safe.platform_login_status ?? safe.login_status,
+      last_checked_at: safe.last_check_at ?? safe.last_checked_at,
+      check_items: safe.last_check_items ?? safe.check_items,
+      active_cookie_updated_at: safe.cookie_updated_at ?? safe.active_cookie_updated_at,
+    }
   }
   return {
     list(params) {
       const query = params ? { ...params } : undefined
       if (query?.businessStatus !== undefined) {
-        query.business_status = query.businessStatus
+        query.enabled = query.businessStatus === 'enabled'
         delete query.businessStatus
       }
       if (query?.loginStatus !== undefined) {
-        query.login_status = query.loginStatus
+        query.platform_login_status = query.loginStatus
         delete query.loginStatus
       }
       if (query?.allTags !== undefined) {
@@ -45,7 +54,7 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
       if (categoryIds !== undefined) body.category_ids = categoryIds
       body.platform = platform
       if (userId) body.user_id = userId
-      if (name) body.name = name
+      if (name) body.platform_name = name
       if (originalCookie) body.original_cookie = originalCookie
       if (browserProfileId) body.browser_profile_id = browserProfileId
       if (remark) body.remark = remark
@@ -54,20 +63,20 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     },
     update(accountId, { businessStatus, loginStatus, remark, categoryIds, name }) {
       const body = {
-        business_status: businessStatus,
-        login_status: loginStatus,
         remark,
-        name,
       }
+      if (businessStatus !== undefined) body.enabled = businessStatus === 'enabled'
+      if (loginStatus !== undefined) body.platform_login_status = loginStatus
+      if (name !== undefined) body.platform_name = name
       if (categoryIds !== undefined) body.category_ids = categoryIds
       return api.patch(`/media-accounts/${accountId}`, body).then(sanitize)
     },
     identify(accountId, { platformAccountId, name, avatarUrl, loginStatus }) {
       return api.post(`/media-accounts/${accountId}/identify`, {
         platform_account_id: platformAccountId,
-        name,
-        avatar_url: avatarUrl,
-        login_status: loginStatus,
+        platform_name: name,
+        platform_avatar_url: avatarUrl,
+        platform_login_status: loginStatus,
       }).then(sanitize)
     },
     bindProfile(accountId, browserProfileId) {
@@ -81,11 +90,11 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     },
     submitCheckResult(accountId, { taskId, platformAccountId, name, avatarUrl, loginStatus, message, checkItems = [] }) {
       return api.post(`/media-accounts/${accountId}/check/result`, {
-        task_id: taskId,
+        operation_id: taskId,
         platform_account_id: platformAccountId,
-        name,
-        avatar_url: avatarUrl,
-        login_status: loginStatus,
+        platform_name: name,
+        platform_avatar_url: avatarUrl,
+        platform_login_status: loginStatus,
         message,
         check_items: checkItems,
       }).then(sanitize)
@@ -104,7 +113,7 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     },
     submitCookieReadResult(accountId, { taskId, cookies }) {
       return api.post(`/media-accounts/${accountId}/cookies/read-sync/result`, {
-        task_id: taskId,
+        operation_id: taskId,
         cookies,
       }).then(sanitize)
     },

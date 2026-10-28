@@ -43,7 +43,7 @@ func (o ProbeOptions) normalized() ProbeOptions {
 
 // Probe 在 Cloud 侧执行检测，结果不依赖运营当前用哪台工作站，也不要求比特
 // 窗口已打开。它走 HTTP CONNECT 或 SOCKS5，并按代理的实际应答分类。
-func Probe(protocol model.ProxyProtocol, host string, port int, username, password string, opts ProbeOptions) dto.ProxyCheckResult {
+func Probe(protocol model.Protocol, host string, port int, username, password string, opts ProbeOptions) dto.ProxyCheckResult {
 	opts = opts.normalized()
 	host = strings.TrimSpace(host)
 	if host == "" || port < 1 || port > 65535 {
@@ -71,7 +71,7 @@ func Probe(protocol model.ProxyProtocol, host string, port int, username, passwo
 	return probeHTTPConnect(conn, opts.Target, username, password)
 }
 
-func dialProxy(ctx context.Context, protocol model.ProxyProtocol, host string, port int, timeout time.Duration) (net.Conn, error) {
+func dialProxy(ctx context.Context, protocol model.Protocol, host string, port int, timeout time.Duration) (net.Conn, error) {
 	address := proxyDialAddress(host, port)
 	dialer := &net.Dialer{Timeout: timeout}
 	if protocol != ProtocolHTTPS {

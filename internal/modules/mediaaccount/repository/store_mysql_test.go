@@ -31,8 +31,8 @@ func TestFindByIDUsesGORM(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.id, ma.user_id, ma.team_id, ma.platform")).
 		WithArgs("account-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "team_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id", "remark", "identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie", "cookie_status", "active_cookie_updated_at", "last_checked_at", "check_items", "created_at", "updated_at", "user_name"}).
-			AddRow("account-1", 1, nil, "douyin", "platform-1", "account", nil, nil, nil, "identified", nil, "enabled", "normal", nil, nil, nil, nil, nil, nil, now, now, "运营张三"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "team_id", "platform", "platform_account_id", "platform_name", "platform_avatar_url", "browser_profile_id", "remark", "identification_status", "duplicate_of_account_id", "enabled", "platform_login_status", "original_cookie", "active_cookie", "cookie_status", "cookie_updated_at", "last_check_at", "last_check_items", "created_at", "updated_at", "user_name"}).
+			AddRow("account-1", 1, nil, "douyin", "platform-1", "account", nil, nil, nil, "identified", nil, true, "normal", nil, nil, nil, nil, nil, nil, now, now, "运营张三"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT media_account_id, category_id FROM media_account_categories")).
 		WithArgs("account-1").
 		WillReturnRows(sqlmock.NewRows([]string{"media_account_id", "category_id"}).AddRow("account-1", int64(1)))
@@ -65,7 +65,7 @@ func TestCreateReadsAutoIncrementIDFromTheSameTransaction(t *testing.T) {
 
 	got, err := create(db, model.AccountRecord{Account: model.Account{
 		UserID: 1, Platform: model.PlatformBilibili, IdentificationStatus: model.IdentificationPending,
-		BusinessStatus: model.BusinessEnabled, LoginStatus: model.LoginUnknown, Tags: []string{}, CreatedAt: now, UpdatedAt: now,
+		Enabled: true, PlatformLoginStatus: model.PlatformLoginUnknown, Tags: []string{}, CreatedAt: now, UpdatedAt: now,
 	}})
 	if err != nil || got != "41" {
 		t.Fatalf("create() = %q, %v, want transaction-local auto increment ID 41", got, err)
@@ -80,8 +80,8 @@ func TestFindReturnsAnEmptyCategorySliceWhenTheAccountHasNoRelations(t *testing.
 	defer closeDB()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.id, ma.user_id, ma.team_id, ma.platform")).WithArgs("account-empty").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "team_id", "platform", "platform_account_id", "name", "avatar_url", "browser_profile_id", "remark", "identification_status", "duplicate_of_account_id", "business_status", "login_status", "original_cookie", "active_cookie", "cookie_status", "active_cookie_updated_at", "last_checked_at", "check_items", "created_at", "updated_at", "user_name"}).
-			AddRow("account-empty", 1, nil, "bilibili", nil, "未分类账号", nil, nil, nil, "pending_identification", nil, "enabled", "unknown", nil, nil, nil, nil, nil, nil, now, now, "运营张三"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "team_id", "platform", "platform_account_id", "platform_name", "platform_avatar_url", "browser_profile_id", "remark", "identification_status", "duplicate_of_account_id", "enabled", "platform_login_status", "original_cookie", "active_cookie", "cookie_status", "cookie_updated_at", "last_check_at", "last_check_items", "created_at", "updated_at", "user_name"}).
+			AddRow("account-empty", 1, nil, "bilibili", nil, "未分类账号", nil, nil, nil, "pending_identification", nil, true, "unknown", nil, nil, nil, nil, nil, nil, now, now, "运营张三"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT media_account_id, category_id FROM media_account_categories")).WithArgs("account-empty").
 		WillReturnRows(sqlmock.NewRows([]string{"media_account_id", "category_id"}))
 

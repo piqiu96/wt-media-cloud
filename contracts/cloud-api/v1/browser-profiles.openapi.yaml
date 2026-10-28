@@ -3,94 +3,80 @@ info:
   title: WT Media Cloud Browser Profile API
   version: 2026.10.29.2
   description: >
-    Browser Profile mirrors are read by role and team: operators see their own
-    windows, senior operators see their team, admins see every team. BitBrowser
-    writes still happen only on Desktop through the Local Agent; Cloud records the
-    mirror after the Agent reports what it actually did.
+    Browser-window mirrors are read by role and team. BitBrowser is written only by
+    Desktop through the Local Agent; Cloud stores intent, reservations and the
+    result it actually receives. Every BitBrowser-derived field is prefixed `bit_`.
 paths:
   /api/v1/local-agent/bit-account:
     get:
       operationId: getBitAccountBinding
       security: [{sessionCookie: []}]
-      summary: The BitBrowser account this user is bound to, masked.
-      description: >
-        Full `main_user_id` stays between the Agent and the Cloud; the page only receives
-        enough to say which account it is. An account of eight characters or fewer is
-        masked in full, otherwise the first and last four are kept.
+      summary: Read the current user's masked BitBrowser main-account binding.
       responses:
         '200':
+          description: Binding facts without the full main account id.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/BitAccountView'}
+                properties: {data: {$ref: '#/components/schemas/BitAccountView'}}
   /api/v1/local-agent/bit-account/bind:
     post:
       operationId: bindBitAccount
       security: [{agentBearer: []}]
-      summary: Bind the main account the Local Agent actually read.
-      description: >
-        Strict Agent Token only, so the `main_user_id` in the body is an observation made
-        by the Agent rather than an assertion typed by a user. Bind rules: no bound account
-        → write it; same account → refresh `last_verified_at`; different account with
-        `rebind: false` → `BIT_MAIN_USER_MISMATCH` and no write; different account with
-        `rebind: true` (the user confirmed in the UI) → rebind. Rebinding never migrates,
-        deletes or invalidates the Profiles of the previous account.
+      summary: Bind the BitBrowser main account observed by the Local Agent.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/BitAccountBindInput'}}}
       responses:
-        '200': {description: The binding after the call, with the account masked.}
-        '409': {description: 'BIT_MAIN_USER_MISMATCH, or stale observation (BIT_BROWSER_OFFLINE).'}
-        '401': {description: Missing or replaced Agent Token.}
-  /api/v1/bit-browser/profile-scans:
+        '200': {description: Binding refreshed or created.}
+        '401': {description: Missing or invalid Agent Token.}
+        '409': {description: Stale observation or a different main account without explicit rebind.}
+  /api/v1/browser-profiles/sync:
     post:
-      operationId: submitProfileScan
+      operationId: submitBrowserProfileSync
       security: [{sessionCookie: []}]
-      summary: Stage a BitBrowser snapshot without changing formal Profile data.
+      summary: Replace the caller's current BitBrowser snapshot and compute its diff.
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/SnapshotInput'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/ProfileSyncInput'}}}
       responses:
         '201':
-          description: Secret-free scan staged with a diff against the current mirror; formal Profile data is unchanged.
+          description: Current snapshot staged; formal windows are unchanged.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/ProfileScan'}
-        '409': {description: Empty, mixed, missing, or mismatched BitBrowser main identity, or a stale observation.}
-  /api/v1/bit-browser/profile-scans/{scan_id}:
+                properties: {data: {$ref: '#/components/schemas/ProfileSync'}}
+        '409': {description: Empty, stale, or mismatched BitBrowser identity.}
     get:
-      operationId: getProfileScan
+      operationId: getBrowserProfileSync
       security: [{sessionCookie: []}]
-      parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
+      summary: Read the caller's one current snapshot.
       responses:
         '200':
-          description: Current user's staged scan and Diff.
+          description: Current snapshot and diff.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/ProfileScan'}
-        '404': {description: Scan not found.}
-  /api/v1/bit-browser/profile-scans/{scan_id}/confirm:
-    post:
-      operationId: confirmProfileScan
+                properties: {data: {$ref: '#/components/schemas/ProfileSync'}}
+        '404': {description: No current snapshot.}
+    delete:
+      operationId: rejectBrowserProfileSync
       security: [{sessionCookie: []}]
-      summary: Accept the scan and apply the selected windows to the formal mirror.
-      description: >
-        Only `added` windows are optional. A window already registered to another
-        operator of the same account, or one carrying an ownership conflict, is
-        skipped and never claimed by accepting the scan. `changed` and `missing`
-        entries are applied without per-window selection.
-      parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
+      summary: Discard the caller's current snapshot.
+      responses:
+        '200': {description: Snapshot discarded; formal windows are unchanged.}
+        '404': {description: No current snapshot.}
+  /api/v1/browser-profiles/sync/confirm:
+    post:
+      operationId: confirmBrowserProfileSync
+      security: [{sessionCookie: []}]
+      summary: Apply accepted changes and delete the one-shot snapshot.
       requestBody:
         required: false
         content:
@@ -102,79 +88,50 @@ paths:
                 adopt_bit_profile_ids:
                   type: array
                   items: {type: string}
-                  description: BitBrowser ids of `added` windows the operator accepted. Unselected additions are not registered.
+                  description: New windows selected for ownership. Unselected additions are ignored; conflicts are never claimed.
       responses:
         '200':
-          description: Formal Profile mirror of the currently bound main account applied transactionally.
+          description: Formal mirrors updated from the current user's snapshot.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/ProfileScan'}
-        '409': {description: Scan not ready or identity mismatch.}
-        '410': {description: Scan expired.}
-  /api/v1/bit-browser/profile-scans/{scan_id}/reject:
-    post:
-      operationId: rejectProfileScan
-      security: [{sessionCookie: []}]
-      summary: Discard a staged scan.
-      parameters: [{in: path, name: scan_id, required: true, schema: {type: string}}]
-      responses:
-        '204': {description: Rejected; formal Profile data is unchanged.}
-        '404': {description: Scan not found.}
+                properties: {data: {$ref: '#/components/schemas/ProfileSync'}}
+        '404': {description: No current snapshot.}
+        '409': {description: Expired snapshot or mismatched BitBrowser identity.}
   /api/v1/browser-profiles:
     get:
       operationId: listBrowserProfiles
       security: [{sessionCookie: []}]
-      description: >
-        Operators always read their own windows. Senior operators read the windows
-        of their team and may scope to one visible member with `user_id`. Admins
-        read every team or one user when `user_id` is given. A user who has not
-        bound a BitBrowser account yet receives a BitBrowser-not-bound error rather
-        than an empty list, so the page can show the binding guide.
       parameters:
-        - {in: query, name: user_id, schema: {type: integer, format: int64}, description: Admin or senior-operator owner filter. Operators can only read themselves regardless of this value.}
-        - {in: query, name: id, schema: {type: string}, description: Profile ID substring.}
-        - {in: query, name: name, schema: {type: string}, description: Window name substring.}
-        - {in: query, name: group, schema: {type: string}, description: Group ID or group name substring.}
-        - {in: query, name: bit_profile_id, schema: {type: string}, description: BitBrowser profile ID substring.}
-        - {in: query, name: remark, schema: {type: string}, description: BitBrowser remark substring.}
-        - {in: query, name: local_status, schema: {type: string, enum: [active, local_missing, archived]}, description: Exact local status.}
-        - {in: query, name: business_status, schema: {type: string, enum: [enabled, disabled]}, description: Exact business status.}
+        - {in: query, name: user_id, schema: {type: integer, format: int64}}
+        - {in: query, name: id, schema: {type: string}}
+        - {in: query, name: bit_name, schema: {type: string}}
+        - {in: query, name: bit_group, schema: {type: string}}
+        - {in: query, name: bit_profile_id, schema: {type: string}}
+        - {in: query, name: remark, schema: {type: string}, description: Cloud operational remark.}
+        - {in: query, name: local_state, schema: {type: string, enum: [active, local_missing, archived]}}
+        - {in: query, name: enabled, schema: {type: boolean}}
       responses:
         '200':
-          description: Visible confirmed Profile mirrors, including a formal proxy_id only after successful Agent read-back.
+          description: Visible browser-window mirrors.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
                 properties:
-                  data:
-                    type: array
-                    items: {$ref: '#/components/schemas/BrowserProfile'}
-        '400': {description: Invalid status filter or user id.}
-        '403': {description: The caller may not read the requested user.}
-        '409': {description: The target user has not bound a BitBrowser main account.}
-    post:
-      operationId: createBrowserProfile
-      security: [{sessionCookie: []}]
-      summary: Cloud Web compatibility stub; window creation runs on Desktop.
-      responses:
-        '401': {description: Not authenticated.}
-        '409': {description: Browser-window local operations are Desktop-only.}
+                  data: {type: array, items: {$ref: '#/components/schemas/BrowserProfile'}}
+        '400': {description: Invalid filter.}
+        '403': {description: The requested user is outside the caller's scope.}
   /api/v1/browser-profiles/{id}:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string}}
     patch:
       operationId: updateBrowserProfile
       security: [{sessionCookie: []}]
-      summary: Update the Cloud-side remark or business status of one window.
-      description: >
-        The owner and admins may change both fields. A senior operator may change
-        the Cloud remark of a window in their own team but never its business
-        status; the running state can be stale or hidden from them.
-      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      summary: Update Cloud operational fields only.
       requestBody:
         required: true
         content:
@@ -183,53 +140,73 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                cloud_remark: {type: string}
-                business_status: {type: string, enum: [enabled, disabled]}
+                remark: {type: string, maxLength: 500}
+                enabled: {type: boolean}
       responses:
         '200':
-          description: Updated Profile mirror.
+          description: Updated window mirror.
           content:
             application/json:
               schema:
                 type: object
                 required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/BrowserProfile'}
-        '400': {description: Invalid business status.}
-        '403': {description: The caller may not edit this window or this field.}
-        '404': {description: Profile does not exist in the caller's scope.}
+                properties: {data: {$ref: '#/components/schemas/BrowserProfile'}}
+        '403': {description: The caller cannot edit this window or field.}
+        '404': {description: Window absent from the caller's scope.}
     delete:
       operationId: deleteBrowserProfile
       security: [{sessionCookie: []}]
-      summary: Remove a disabled window mirror that is no longer present in BitBrowser.
-      description: >
-        Deletion only applies to a business-disabled window with no remaining
-        dependencies (accounts, scripts or other references). An enabled window is
-        never deleted; disable it first.
-      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      summary: Delete a disabled local-missing window with no references.
       responses:
-        '204': {description: Deleted.}
+        '200': {description: Window mirror deleted.}
         '403': {description: Only the owner or an admin may delete the mirror.}
-        '404': {description: Profile does not exist in the caller's scope.}
-        '409': {description: The window is still enabled or still referenced.}
-  /api/v1/browser-profiles/{id}/open:
+        '409': {description: Window is enabled or still referenced.}
+  /api/v1/browser-profiles/{id}/proxy-operation:
     post:
-      operationId: openBrowserProfile
+      operationId: startBrowserProfileProxyOperation
       security: [{sessionCookie: []}]
-      summary: Cloud Web compatibility stub; opening a window runs on Desktop.
-      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      summary: Validate scope/quota and reserve a proxy operation for Desktop execution.
+      description: >
+        `apply` and `unbind` return credentials/instruction for Desktop and require
+        the result endpoint. `release` only clears the formal relation while keeping
+        BitBrowser-managed proxy facts and completes immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProfileProxyOperationRequest'}
       responses:
-        '401': {description: Not authenticated.}
-        '409': {description: Browser-window local operations are Desktop-only.}
-  /api/v1/browser-profiles/{id}/close:
+        '201':
+          description: Reserved operation or completed release.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties: {data: {$ref: '#/components/schemas/ProfileProxyOperationStart'}}
+        '403': {description: Window or proxy outside the caller's team scope.}
+        '409': {description: Busy, unavailable proxy, expired proxy, or exhausted quota.}
+  /api/v1/browser-profiles/{id}/proxy-operation/result:
     post:
-      operationId: closeBrowserProfile
+      operationId: finishBrowserProfileProxyOperation
       security: [{sessionCookie: []}]
-      summary: Cloud Web compatibility stub; closing a window runs on Desktop.
-      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      summary: Settle a reserved proxy operation from Desktop's actual result.
+      description: Success commits the formal relation. Every failure clears the reservation and keeps the previous formal relation for a direct retry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProfileProxyOperationResult'}
       responses:
-        '401': {description: Not authenticated.}
-        '409': {description: Browser-window local operations are Desktop-only.}
+        '200':
+          description: Window read back after settlement.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties: {data: {$ref: '#/components/schemas/BrowserProfile'}}
+        '409': {description: Reservation missing, stale, or already settled.}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
@@ -240,57 +217,54 @@ components:
       required: [bound]
       properties:
         bound: {type: boolean}
-        main_user_id_masked: {type: string, description: 'First four + **** + last four; the whole value as **** when eight characters or fewer. Absent when not bound.'}
+        main_user_id_masked: {type: string}
         bound_at: {type: string, format: date-time}
         last_verified_at: {type: string, format: date-time}
     BitAccountBindInput:
       type: object
-      required: [main_user_id, observed_at]
+      required: [bit_main_user_id, observed_at]
       additionalProperties: false
       properties:
-        main_user_id: {type: string, description: Read from the running BitBrowser by the Local Agent; never typed by a user.}
-        observed_at: {type: string, format: date-time, description: When the Agent read it. Stale observations are refused.}
-        rebind: {type: boolean, default: false, description: The user confirmed switching to the observed account.}
-    SnapshotInput:
+        bit_main_user_id: {type: string}
+        observed_at: {type: string, format: date-time}
+        rebind: {type: boolean, default: false}
+    ProfileSyncInput:
       type: object
-      required: [main_user_id, observed_at, profiles]
+      required: [bit_main_user_id, observed_at, profiles]
       additionalProperties: false
       properties:
-        main_user_id: {type: string, description: Must equal the currently bound account.}
-        observed_at: {type: string, format: date-time, description: When the Agent scanned; a stale scan is refused.}
+        bit_main_user_id: {type: string}
+        observed_at: {type: string, format: date-time}
         profiles: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ProfileInput'}}
     ProfileInput:
       type: object
-      required: [bit_profile_id, main_user_id, profile_user_id]
+      required: [bit_profile_id, bit_main_user_id, bit_user_id]
       additionalProperties: false
       properties:
         bit_profile_id: {type: string}
-        main_user_id: {type: string, description: Must equal the snapshot main_user_id.}
-        profile_user_id: {type: string, description: Normalized from BitBrowser userId for Profile/sub-account audit.}
-        name: {type: string}
-        seq: {type: integer}
-        group_id: {type: string}
-        group_name: {type: string}
-        bit_status: {type: string}
+        bit_main_user_id: {type: string}
+        bit_user_id: {type: string}
+        bit_name: {type: string}
+        bit_seq: {type: integer}
+        bit_group_id: {type: string}
+        bit_group_name: {type: string}
+        bit_profile_status: {type: string}
         bit_updated_at: {type: string}
-        proxy_type: {type: string, description: BitBrowser proxy type read by the Agent.}
-        proxy_host: {type: string}
-        proxy_port: {type: integer}
-        remark: {type: string}
-    ProfileScan:
+        bit_proxy_type: {type: string}
+        bit_proxy_host: {type: string}
+        bit_proxy_port: {type: integer}
+        bit_remark: {type: string}
+    ProfileSync:
       type: object
-      required: [id, user_id, status, created_at, expires_at]
+      required: [id, user_id, bit_main_user_id, profiles, diff, created_at, expires_at]
       properties:
         id: {type: string}
         user_id: {type: integer, format: int64}
-        team_id: {type: integer, format: int64, nullable: true}
-        main_user_id: {type: string}
-        status: {type: string, enum: [ready, confirmed]}
-        profiles: {type: array, items: {$ref: '#/components/schemas/BrowserProfile'}, description: Observed windows; omitted after confirmation.}
+        bit_main_user_id: {type: string}
+        profiles: {type: array, items: {$ref: '#/components/schemas/BrowserProfile'}}
         diff: {type: array, items: {$ref: '#/components/schemas/ProfileDiff'}}
         created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
-        confirmed_at: {type: string, format: date-time, nullable: true}
     ProfileDiff:
       type: object
       required: [kind, bit_profile_id, fields]
@@ -301,29 +275,61 @@ components:
         fields: {type: array, items: {type: string}}
     BrowserProfile:
       type: object
-      required: [id, user_id, bit_profile_id, main_user_id, local_status, business_status]
+      required: [id, user_id, bit_profile_id, bit_main_user_id, local_state, enabled]
       properties:
         id: {type: string}
         user_id: {type: integer, format: int64}
         team_id: {type: integer, format: int64, nullable: true}
         bit_profile_id: {type: string}
-        main_user_id: {type: string, description: The bound account this row belongs to.}
-        profile_user_id: {type: string}
-        name: {type: string}
-        seq: {type: integer}
-        group_id: {type: string}
-        group_name: {type: string}
-        bit_status: {type: string}
+        bit_main_user_id: {type: string}
+        bit_user_id: {type: string}
+        bit_name: {type: string}
+        bit_seq: {type: integer}
+        bit_group_id: {type: string}
+        bit_group_name: {type: string}
+        bit_profile_status: {type: string}
         bit_updated_at: {type: string}
-        local_status: {type: string, enum: [active, local_missing, archived]}
-        business_status: {type: string, enum: [enabled, disabled]}
-        remark: {type: string, description: BitBrowser window remark, read-only mirror.}
-        cloud_remark: {type: string, description: Operational remark maintained in Cloud.}
-        proxy_id: {type: string, nullable: true, description: Cloud formal relation, updated only after Agent write/read-back verification.}
-        proxy_type: {type: string, nullable: true}
-        proxy_host: {type: string, nullable: true}
-        proxy_port: {type: integer, nullable: true}
+        bit_proxy_type: {type: string}
+        bit_proxy_host: {type: string}
+        bit_proxy_port: {type: integer}
+        bit_remark: {type: string}
+        remark: {type: string, description: Cloud operational remark.}
+        enabled: {type: boolean}
+        local_state: {type: string, enum: [active, local_missing, archived]}
+        proxy_id: {type: string, nullable: true}
+        reserved_proxy_id: {type: string, nullable: true}
+        reserved_since: {type: string, format: date-time, nullable: true}
         last_synced_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
-        ownership_conflict: {type: string, description: 'Scan-time evidence only: the BitBrowser window is registered to another operator and cannot be claimed. Not stored.'}
+        ownership_conflict: {type: string}
+    ProfileProxyOperationRequest:
+      type: object
+      required: [action]
+      additionalProperties: false
+      properties:
+        action: {type: string, enum: [apply, unbind, release]}
+        proxy_id: {type: string, description: Required for apply; ignored for unbind/release.}
+    ProfileProxyOperationStart:
+      type: object
+      required: [action, profile_id, bit_profile_id, agent_required]
+      properties:
+        action: {type: string, enum: [apply, unbind, release]}
+        profile_id: {type: string}
+        bit_profile_id: {type: string}
+        proxy_id: {type: string}
+        protocol: {type: string, enum: [http, https, socks5]}
+        host: {type: string}
+        port: {type: integer}
+        username: {type: string}
+        password: {type: string, format: password}
+        agent_required: {type: boolean}
+    ProfileProxyOperationResult:
+      type: object
+      required: [action, proxy_id, outcome]
+      additionalProperties: false
+      properties:
+        action: {type: string, enum: [apply, unbind]}
+        proxy_id: {type: string}
+        outcome: {type: string, enum: [success, failed]}
+        message: {type: string}

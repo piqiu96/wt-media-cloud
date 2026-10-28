@@ -19,13 +19,13 @@ func TestFindByIDUsesGORM(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + proxyColumns)).
 		WithArgs("proxy-1").
 		WillReturnRows(sqlmock.NewRows(proxyColumnNames()).
-			AddRow("proxy-1", 7, "香港-01", "static", "socks5", "127.0.0.1", 1080, nil, nil, nil, nil, `["备用","直播"]`, nil, now, "active", 3, now, "ok", nil, "", now, now))
+			AddRow("proxy-1", 7, "香港-01", "static", "socks5", "127.0.0.1", 1080, nil, nil, nil, nil, `["备用","直播"]`, nil, now, true, 3, now, "ok", "ok", "", now, now))
 
 	proxy, found, err := findByID(db, "proxy-1")
 	if err != nil || !found {
 		t.Fatalf("findByID() = %v, %v, want found without error", found, err)
 	}
-	if proxy.ID != "proxy-1" || proxy.ProxyProtocol != model.ProtocolSOCKS5 || proxy.Host != "127.0.0.1" {
+	if proxy.ID != "proxy-1" || proxy.Protocol != model.ProtocolSOCKS5 || proxy.Host != "127.0.0.1" {
 		t.Fatalf("proxy = %#v", proxy)
 	}
 	if proxy.TeamID != 7 || proxy.Name != "香港-01" || len(proxy.Tags) != 2 {
@@ -40,11 +40,11 @@ func TestRecordCheckResultOnlyAppliesToTheMeasuredConnection(t *testing.T) {
 	db, mock, closeDB := newProxyMockGORM(t)
 	defer closeDB()
 	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE proxy_configs SET last_check_at = ?, last_check_result = ?, updated_at = ? WHERE id = ? AND proxy_protocol = ? AND host = ? AND port = ?")).
-		WithArgs(now, "ok", now, "proxy-1", "socks5", "10.0.0.1", 1080).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE proxies SET last_check_at = ?, last_check_result = ?, last_check_message = ?, updated_at = ? WHERE id = ? AND protocol = ? AND host = ? AND port = ?")).
+		WithArgs(now, "ok", "ok", now, "proxy-1", "socks5", "10.0.0.1", 1080).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	applied, err := recordCheckResult(db, "proxy-1", "socks5", "10.0.0.1", 1080, "ok", now)
+	applied, err := recordCheckResult(db, "proxy-1", "socks5", "10.0.0.1", 1080, "ok", "ok", now)
 	if err != nil {
 		t.Fatalf("recordCheckResult() error = %v", err)
 	}
@@ -59,9 +59,9 @@ func TestRecordCheckResultOnlyAppliesToTheMeasuredConnection(t *testing.T) {
 func TestListConnectionKeysIsTeamScoped(t *testing.T) {
 	db, mock, closeDB := newProxyMockGORM(t)
 	defer closeDB()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, proxy_protocol, host, port FROM proxy_configs WHERE team_id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, protocol, host, port FROM proxies WHERE team_id = ?")).
 		WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "proxy_protocol", "host", "port"}).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "protocol", "host", "port"}).
 			AddRow("proxy-1", "http", "10.0.0.1", 8080).
 			AddRow("proxy-2", "socks5", "10.0.0.2", 1080))
 
@@ -79,10 +79,10 @@ func TestListConnectionKeysIsTeamScoped(t *testing.T) {
 
 func proxyColumnNames() []string {
 	return []string{
-		"id", "team_id", "name", "source_type", "proxy_protocol", "host", "port",
-		"username", "password", "region", "supplier", "tags_json", "extract_url",
-		"expires_at", "business_status", "max_profile_count", "last_check_at",
-		"last_check_result", "observed_exit_ip", "remark", "created_at", "updated_at",
+		"id", "team_id", "name", "source", "protocol", "host", "port",
+		"username", "password", "region", "supplier", "tags", "extract_url",
+		"expires_at", "enabled", "max_profiles", "last_check_at",
+		"last_check_result", "last_check_message", "remark", "created_at", "updated_at",
 	}
 }
 

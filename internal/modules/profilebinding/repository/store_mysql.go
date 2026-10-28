@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, proxy_id, remark, cloud_remark, business_status, local_status, last_synced_at, created_at, updated_at`
+const profileColumnsSQL = `id, user_id, team_id, bit_profile_id, bit_main_user_id, bit_user_id, bit_name, bit_seq, bit_group_id, bit_group_name, bit_profile_status, bit_updated_at, bit_proxy_type, bit_proxy_host, bit_proxy_port, proxy_id, reserved_proxy_id, reserved_since, bit_remark, remark, enabled, local_state, last_synced_at, created_at, updated_at`
 
 // profileColumnsWithPrefix 给每一列加上表别名，供需要 join users 的查询使用。
 func profileColumnsWithPrefix(alias string) string {
@@ -62,7 +62,7 @@ func findBinding(db *gorm.DB, userID sharedidentity.UserID) (model.BitAccountBin
 	if !mainUserID.Valid || mainUserID.String == "" {
 		return model.BitAccountBinding{}, false, nil
 	}
-	binding.MainUserID = mainUserID.String
+	binding.BitMainUserID = mainUserID.String
 	binding.Status = model.BitAccountStatus(status.String)
 	if boundAt.Valid {
 		value := boundAt.Time
@@ -78,14 +78,14 @@ func findBinding(db *gorm.DB, userID sharedidentity.UserID) (model.BitAccountBin
 // ProfileListFilter 是列表页的筛选条件。运行态不在这里：它来自 Desktop 运行时，
 // 不来自 Cloud 数据行。
 type ProfileListFilter struct {
-	UserID         sharedidentity.UserID
-	ID             string
-	Name           string
-	Group          string
-	BitProfileID   string
-	Remark         string
-	LocalStatus    string
-	BusinessStatus string
+	UserID       sharedidentity.UserID
+	ID           string
+	BitName      string
+	BitGroup     string
+	BitProfileID string
+	Remark       string
+	LocalState   string
+	Enabled      *bool
 }
 
 func ListProfiles(filter ProfileListFilter) ([]model.BrowserProfile, error) {
@@ -95,7 +95,7 @@ func ListProfiles(filter ProfileListFilter) ([]model.BrowserProfile, error) {
 func listProfiles(db *gorm.DB, filter ProfileListFilter) ([]model.BrowserProfile, error) {
 	// join 是作用域的另一半：只有 main_user_id 仍等于所有者当前绑定时行才可见。
 	// 旧主账号下的行继续保留，但在重新绑定该主账号之前不会出现在任何正常查询中。
-	query := `SELECT ` + profileColumnsWithPrefix("bp") + ` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.main_user_id = u.bit_main_user_id`
+	query := `SELECT ` + profileColumnsWithPrefix("bp") + ` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.bit_main_user_id = u.bit_main_user_id`
 	args := make([]any, 0, 10)
 	if filter.UserID > 0 {
 		query += ` AND bp.user_id = ?`
@@ -105,13 +105,13 @@ func listProfiles(db *gorm.DB, filter ProfileListFilter) ([]model.BrowserProfile
 		query += ` AND bp.id LIKE ? ESCAPE '!'`
 		args = append(args, profileLikeContains(filter.ID))
 	}
-	if filter.Name != "" {
-		query += ` AND bp.name LIKE ? ESCAPE '!'`
-		args = append(args, profileLikeContains(filter.Name))
+	if filter.BitName != "" {
+		query += ` AND bp.bit_name LIKE ? ESCAPE '!'`
+		args = append(args, profileLikeContains(filter.BitName))
 	}
-	if filter.Group != "" {
-		like := profileLikeContains(filter.Group)
-		query += ` AND (bp.group_id LIKE ? ESCAPE '!' OR bp.group_name LIKE ? ESCAPE '!')`
+	if filter.BitGroup != "" {
+		like := profileLikeContains(filter.BitGroup)
+		query += ` AND (bp.bit_group_id LIKE ? ESCAPE '!' OR bp.bit_group_name LIKE ? ESCAPE '!')`
 		args = append(args, like, like)
 	}
 	if filter.BitProfileID != "" {
@@ -122,16 +122,16 @@ func listProfiles(db *gorm.DB, filter ProfileListFilter) ([]model.BrowserProfile
 		query += ` AND bp.remark LIKE ? ESCAPE '!'`
 		args = append(args, profileLikeContains(filter.Remark))
 	}
-	if filter.LocalStatus != "" {
-		query += ` AND bp.local_status = ?`
-		args = append(args, filter.LocalStatus)
+	if filter.LocalState != "" {
+		query += ` AND bp.local_state = ?`
+		args = append(args, filter.LocalState)
 	}
-	if filter.BusinessStatus != "" {
-		query += ` AND bp.business_status = ?`
-		args = append(args, filter.BusinessStatus)
+	if filter.Enabled != nil {
+		query += ` AND bp.enabled = ?`
+		args = append(args, *filter.Enabled)
 	}
 	// BitBrowser scans keep the scanned order; the page shows the newest first.
-	query += ` ORDER BY bp.seq DESC, bp.id DESC`
+	query += ` ORDER BY bp.bit_seq DESC, bp.id DESC`
 	return listProfilesByQuery(db, query, args...)
 }
 
@@ -164,10 +164,10 @@ func ResolveProfile(profileID string) (sharedidentity.UserID, bool, bool, bool, 
 
 func resolveProfile(db *gorm.DB, profileID string) (sharedidentity.UserID, bool, bool, bool, error) {
 	var userID sharedidentity.UserID
-	var status model.ProfileLocalStatus
+	var status model.ProfileLocalState
 	var inScope bool
 	err := queryRow(db,
-		`SELECT bp.user_id, bp.local_status, IFNULL(bp.main_user_id = u.bit_main_user_id, 0) FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ?`,
+		`SELECT bp.user_id, bp.local_state, IFNULL(bp.bit_main_user_id = u.bit_main_user_id, 0) FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ?`,
 		profileID,
 	).Scan(&userID, &status, &inScope)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -187,10 +187,10 @@ func resolveProfileForAccountCheck(db *gorm.DB, profileID string) (string, share
 	var id string
 	var userID sharedidentity.UserID
 	var bitProfileID string
-	var status model.ProfileLocalStatus
+	var status model.ProfileLocalState
 	var inScope bool
 	err := queryRow(db,
-		`SELECT bp.id, bp.user_id, bp.bit_profile_id, bp.local_status, IFNULL(bp.main_user_id = u.bit_main_user_id, 0) FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ?`,
+		`SELECT bp.id, bp.user_id, bp.bit_profile_id, bp.local_state, IFNULL(bp.bit_main_user_id = u.bit_main_user_id, 0) FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ?`,
 		profileID,
 	).Scan(&id, &userID, &bitProfileID, &status, &inScope)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -204,31 +204,32 @@ func resolveProfileForAccountCheck(db *gorm.DB, profileID string) (string, share
 
 // ResolveProxyForAccountCheck 只返回渲染媒体账号检测项所需的代理健康事实。
 // 这个跨模块读模型不查询、也不返回代理凭据与来源 URL。
-func ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
+func ResolveProxyForAccountCheck(profileID string) (string, bool, string, *time.Time, bool, error) {
 	return resolveProxyForAccountCheck(database.DB(), profileID)
 }
 
-func resolveProxyForAccountCheck(db *gorm.DB, profileID string) (string, string, string, *time.Time, bool, error) {
-	var proxyID, businessStatus, lastCheckResult sql.NullString
+func resolveProxyForAccountCheck(db *gorm.DB, profileID string) (string, bool, string, *time.Time, bool, error) {
+	var proxyID, lastCheckResult sql.NullString
+	var enabled sql.NullBool
 	var expiresAt sql.NullTime
-	err := queryRow(db, `SELECT bp.proxy_id, pc.business_status, pc.last_check_result, pc.expires_at
+	err := queryRow(db, `SELECT bp.proxy_id, pc.enabled, pc.last_check_result, pc.expires_at
 		FROM browser_profiles bp
 		JOIN users u ON u.id = bp.user_id
-		JOIN proxy_configs pc ON pc.id = bp.proxy_id
-		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.proxy_id <> '' AND bp.main_user_id = u.bit_main_user_id`, profileID).
-		Scan(&proxyID, &businessStatus, &lastCheckResult, &expiresAt)
+		JOIN proxies pc ON pc.id = bp.proxy_id
+		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.proxy_id <> '' AND bp.bit_main_user_id = u.bit_main_user_id`, profileID).
+		Scan(&proxyID, &enabled, &lastCheckResult, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", "", nil, false, nil
+		return "", false, "", nil, false, nil
 	}
 	if err != nil {
-		return "", "", "", nil, false, err
+		return "", false, "", nil, false, err
 	}
 	var value *time.Time
 	if expiresAt.Valid {
 		at := expiresAt.Time
 		value = &at
 	}
-	return proxyID.String, businessStatus.String, lastCheckResult.String, value, proxyID.String != "", nil
+	return proxyID.String, enabled.Bool, lastCheckResult.String, value, proxyID.String != "", nil
 }
 
 func GetProfile(profileID string) (model.BrowserProfile, bool, error) {
@@ -255,7 +256,7 @@ func GetProfileInScope(profileID string) (model.BrowserProfile, bool, error) {
 
 func getProfileInScope(db *gorm.DB, profileID string) (model.BrowserProfile, bool, error) {
 	row := queryRow(db,
-		`SELECT `+profileColumnsWithPrefix("bp")+` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.main_user_id = u.bit_main_user_id`,
+		`SELECT `+profileColumnsWithPrefix("bp")+` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.bit_main_user_id = u.bit_main_user_id`,
 		profileID,
 	)
 	profile, err := scanProfile(row)
@@ -268,34 +269,27 @@ func getProfileInScope(db *gorm.DB, profileID string) (model.BrowserProfile, boo
 	return profile, true, nil
 }
 
+type profileSyncSnapshot struct {
+	Profiles []model.BrowserProfile `json:"profiles"`
+	Diff     []model.ProfileDiff    `json:"diff"`
+}
+
 func CreateScan(scan model.ProfileScan) error {
 	return createScan(database.DB(), scan)
 }
 
 func createScan(db *gorm.DB, scan model.ProfileScan) error {
-	diffJSON, err := json.Marshal(scan.Diff)
+	snapshot, err := json.Marshal(profileSyncSnapshot{Profiles: scan.Profiles, Diff: scan.Diff})
 	if err != nil {
 		return err
 	}
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	if _, err := execSQL(tx,
-		`INSERT INTO profile_sync_scans (id, user_id, team_id, main_user_id, status, diff_json, created_at, expires_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		scan.ID, scan.UserID, scan.TeamID, scan.MainUserID, scan.Status, diffJSON, scan.CreatedAt, scan.ExpiresAt, scan.ConfirmedAt,
-	); err != nil {
-		return err
-	}
-	for _, profile := range scan.Profiles {
-		if _, err := execSQL(tx,
-			`INSERT INTO profile_sync_candidates (scan_id, profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			scan.ID, profile.ID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
-			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
-			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nullIfEmpty(profile.Remark), profile.CreatedAt, profile.UpdatedAt,
-		); err != nil {
-			return err
-		}
-	}
-	return tx.Commit().Error
+	_, err = execSQL(db,
+		`INSERT INTO browser_profile_syncs (id, user_id, bit_main_user_id, snapshot, observed_at, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE bit_main_user_id = VALUES(bit_main_user_id), snapshot = VALUES(snapshot), observed_at = VALUES(observed_at), expires_at = VALUES(expires_at), created_at = VALUES(created_at)`,
+		scan.ID, scan.UserID, scan.BitMainUserID, string(snapshot), scan.CreatedAt, scan.ExpiresAt, scan.CreatedAt,
+	)
+	return err
 }
 
 func FindScan(scanID string) (model.ProfileScan, bool, error) {
@@ -304,53 +298,49 @@ func FindScan(scanID string) (model.ProfileScan, bool, error) {
 
 func findScan(db *gorm.DB, scanID string) (model.ProfileScan, bool, error) {
 	var scan model.ProfileScan
-	var diffJSON []byte
-	var confirmedAt sql.NullTime
+	var snapshot []byte
 	err := queryRow(db,
-		`SELECT id, user_id, team_id, main_user_id, status, diff_json, created_at, expires_at, confirmed_at FROM profile_sync_scans WHERE id = ?`, scanID,
-	).Scan(&scan.ID, &scan.UserID, &scan.TeamID, &scan.MainUserID, &scan.Status, &diffJSON, &scan.CreatedAt, &scan.ExpiresAt, &confirmedAt)
+		`SELECT id, user_id, bit_main_user_id, snapshot, observed_at, expires_at, created_at FROM browser_profile_syncs WHERE id = ?`, scanID,
+	).Scan(&scan.ID, &scan.UserID, &scan.BitMainUserID, &snapshot, &scan.CreatedAt, &scan.ExpiresAt, &scan.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ProfileScan{}, false, nil
 	}
 	if err != nil {
 		return model.ProfileScan{}, false, err
 	}
-	if err := json.Unmarshal(diffJSON, &scan.Diff); err != nil {
+	var payload profileSyncSnapshot
+	if err := json.Unmarshal(snapshot, &payload); err != nil {
 		return model.ProfileScan{}, false, err
 	}
-	if confirmedAt.Valid {
-		value := confirmedAt.Time
-		scan.ConfirmedAt = &value
+	scan.Status = model.ScanReady
+	scan.Profiles = payload.Profiles
+	scan.Diff = payload.Diff
+	return scan, true, nil
+}
+
+func FindScanByUser(userID sharedidentity.UserID) (model.ProfileScan, bool, error) {
+	return findScanByUser(database.DB(), userID)
+}
+
+func findScanByUser(db *gorm.DB, userID sharedidentity.UserID) (model.ProfileScan, bool, error) {
+	var scanID string
+	err := queryRow(db, `SELECT id FROM browser_profile_syncs WHERE user_id = ?`, userID).Scan(&scanID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.ProfileScan{}, false, nil
 	}
-	rows, err := queryRows(db,
-		`SELECT profile_id, bit_profile_id, main_user_id, profile_user_id, name, seq, group_id, group_name, bit_status, bit_updated_at, proxy_type, proxy_host, proxy_port, remark, created_at, updated_at FROM profile_sync_candidates WHERE scan_id = ? ORDER BY bit_profile_id`, scanID,
-	)
 	if err != nil {
 		return model.ProfileScan{}, false, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var profile model.BrowserProfile
-		var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, remark sql.NullString
-		var proxyPort sql.NullInt64
-		if err := rows.Scan(&profile.ID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &remark, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
-			return model.ProfileScan{}, false, err
-		}
-		profile.UserID = scan.UserID
-		profile.TeamID = scan.TeamID
-		profile.GroupID, profile.GroupName, profile.BitStatus, profile.BitUpdatedAt = groupID.String, groupName.String, bitStatus.String, bitUpdatedAt.String
-		profile.ProxyType, profile.ProxyHost, profile.Remark = proxyType.String, proxyHost.String, remark.String
-		if proxyPort.Valid {
-			profile.ProxyPort = int(proxyPort.Int64)
-		}
-		profile.LocalStatus = model.ProfileActive
-		profile.LastSyncedAt = scan.CreatedAt
-		scan.Profiles = append(scan.Profiles, profile)
-	}
-	if err := rows.Err(); err != nil {
-		return model.ProfileScan{}, false, err
-	}
-	return scan, true, nil
+	return findScan(db, scanID)
+}
+
+func DeleteScanByUser(userID sharedidentity.UserID) error {
+	return deleteScanByUser(database.DB(), userID)
+}
+
+func deleteScanByUser(db *gorm.DB, userID sharedidentity.UserID) error {
+	_, err := execSQL(db, `DELETE FROM browser_profile_syncs WHERE user_id = ?`, userID)
+	return err
 }
 
 // BindBitAccount 以行锁串行化同一用户的绑定写入，保证并发观察不会相互覆盖。
@@ -422,7 +412,7 @@ func bindBitAccount(db *gorm.DB, userID sharedidentity.UserID, mainUserID string
 		return model.BitAccountBinding{}, err
 	}
 	return model.BitAccountBinding{
-		UserID: userID, MainUserID: mainUserID, Status: model.BitAccountBound,
+		UserID: userID, BitMainUserID: mainUserID, Status: model.BitAccountBound,
 		BoundAt: &firstBoundAt, LastVerifiedAt: &at,
 	}, nil
 }
@@ -434,71 +424,70 @@ func ApplyScan(scan model.ProfileScan, observedBitProfileIDs []string, at time.T
 func applyScan(db *gorm.DB, scan model.ProfileScan, observedBitProfileIDs []string, at time.Time) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
-	// 提交扫描前再次核对绑定：扫描暂存期间用户可能已重绑，旧扫描不能写入新主账号。
 	var boundMain sql.NullString
 	err := queryRow(tx, `SELECT bit_main_user_id FROM users WHERE id = ? FOR UPDATE`, scan.UserID).Scan(&boundMain)
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.ErrForbidden
-	}
 	if err != nil {
 		return err
 	}
 	if !boundMain.Valid || boundMain.String == "" {
 		return model.ErrBitNotBound
 	}
-	if boundMain.String != scan.MainUserID {
+	if boundMain.String != scan.BitMainUserID {
 		return model.ErrBitMainUserMismatch
 	}
 	for _, profile := range scan.Profiles {
-		// 唯一键是 (user_id, main_user_id, bit_profile_id)：同一 bit_profile_id 在
-		// 不同主账号下会插入新行。business_status 与 cloud_remark 属于 Cloud 侧，
-		// 重复时不覆盖。
 		if _, err := execSQL(tx,
-			`INSERT INTO browser_profiles (`+profileColumnsSQL+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE profile_user_id = VALUES(profile_user_id), name = VALUES(name), seq = VALUES(seq), group_id = VALUES(group_id), group_name = VALUES(group_name), remark = VALUES(remark), bit_status = VALUES(bit_status), bit_updated_at = VALUES(bit_updated_at), proxy_type = VALUES(proxy_type), proxy_host = VALUES(proxy_host), proxy_port = VALUES(proxy_port), local_status = VALUES(local_status), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
-			profile.UserID, profile.TeamID, profile.BitProfileID, profile.MainUserID, profile.ProfileUserID, profile.Name, profile.Seq,
-			nullIfEmpty(profile.GroupID), nullIfEmpty(profile.GroupName), nullIfEmpty(profile.BitStatus), nullIfEmpty(profile.BitUpdatedAt),
-			nullIfEmpty(profile.ProxyType), nullIfEmpty(profile.ProxyHost), profile.ProxyPort, nil, nullIfEmpty(profile.Remark),
-			"", model.ProfileBusinessEnabled, model.ProfileActive, at, profile.CreatedAt, at,
+			`INSERT INTO browser_profiles (
+				user_id, team_id, bit_profile_id, bit_main_user_id, bit_user_id,
+				bit_name, bit_seq, bit_group_id, bit_group_name, bit_profile_status, bit_updated_at,
+				bit_proxy_type, bit_proxy_host, bit_proxy_port, bit_remark, enabled, local_state,
+				last_synced_at, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE
+				bit_user_id = VALUES(bit_user_id), bit_name = VALUES(bit_name), bit_seq = VALUES(bit_seq),
+				bit_group_id = VALUES(bit_group_id), bit_group_name = VALUES(bit_group_name),
+				bit_profile_status = VALUES(bit_profile_status), bit_updated_at = VALUES(bit_updated_at),
+				bit_proxy_type = VALUES(bit_proxy_type), bit_proxy_host = VALUES(bit_proxy_host),
+				bit_proxy_port = VALUES(bit_proxy_port), bit_remark = VALUES(bit_remark),
+				local_state = VALUES(local_state), last_synced_at = VALUES(last_synced_at), updated_at = VALUES(updated_at)`,
+			profile.UserID, profile.TeamID, profile.BitProfileID, profile.BitMainUserID, profile.BitUserID,
+			profile.BitName, profile.BitSeq, nullIfEmpty(profile.BitGroupID), nullIfEmpty(profile.BitGroupName),
+			nullIfEmpty(profile.BitProfileStatus), nullIfEmpty(profile.BitUpdatedAt), nullIfEmpty(profile.BitProxyType),
+			nullIfEmpty(profile.BitProxyHost), profile.BitProxyPort, nullIfEmpty(profile.BitRemark), model.ProfileActive,
+			at, profile.CreatedAt, at,
 		); err != nil {
 			return err
 		}
 	}
-	// 缺失判定要用全部观测窗口，包括运营选择不登记的：未勾选不代表窗口消失，
-	// 同一窗口的旧记录因此不能标为缺失。
 	bitIDs := make([]string, 0, len(observedBitProfileIDs))
 	for _, bitID := range observedBitProfileIDs {
 		bitIDs = append(bitIDs, bitID)
 	}
-	notIn := placeholders(len(bitIDs))
 	if len(bitIDs) > 0 {
-		// 缺失窗口只标记 local_missing，且只作用于同一 user + main。不删除行：
-		// 切回旧主账号时这些 Profile 需要恢复可见，媒体账号引用也不能被清空。
-		markArgs := []any{model.ProfileLocalMissing, at, at, scan.UserID, scan.MainUserID}
+		markArgs := []any{model.ProfileLocalMissing, at, at, scan.UserID, scan.BitMainUserID}
 		for _, bitID := range bitIDs {
 			markArgs = append(markArgs, bitID)
 		}
 		markArgs = append(markArgs, model.ProfileArchived)
 		if _, err := execSQL(tx,
-			`UPDATE browser_profiles SET local_status = ?, last_synced_at = ?, updated_at = ? WHERE user_id = ? AND main_user_id = ? AND bit_profile_id NOT IN (`+notIn+`) AND local_status <> ?`,
+			`UPDATE browser_profiles SET local_state = ?, last_synced_at = ?, updated_at = ?
+			 WHERE user_id = ? AND bit_main_user_id = ? AND bit_profile_id NOT IN (`+placeholders(len(bitIDs))+`) AND local_state <> ?`,
 			markArgs...,
 		); err != nil {
 			return err
 		}
 	}
-	result, err := execSQL(tx,
-		`UPDATE profile_sync_scans SET status = ?, confirmed_at = ? WHERE id = ? AND user_id = ? AND status = ?`,
-		model.ScanConfirmed, at, scan.ID, scan.UserID, model.ScanReady,
-	)
+	result, err := execSQL(tx, `DELETE FROM browser_profile_syncs WHERE id = ? AND user_id = ?`, scan.ID, scan.UserID)
 	if err != nil {
 		return err
 	}
 	if result == 0 {
 		return model.ErrScanNotReady
 	}
-	summary, _ := json.Marshal(map[string]any{"main_user_id": scan.MainUserID, "profile_count": len(scan.Profiles)})
+	summary, _ := json.Marshal(map[string]any{"bit_main_user_id": scan.BitMainUserID, "profile_count": len(scan.Profiles)})
 	if _, err := execSQL(tx,
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id.NewID("audit"), scan.UserID, "bitbrowser.profile_scan.confirm", "profile_sync_scan", scan.ID, summary, at,
+		id.NewID("audit"), scan.UserID, "bitbrowser.profile_sync.confirm", "browser_profile_sync", scan.ID, summary, at,
 	); err != nil {
 		return err
 	}
@@ -509,17 +498,34 @@ type scanner interface{ Scan(...any) error }
 
 func scanProfile(row scanner) (model.BrowserProfile, error) {
 	var profile model.BrowserProfile
-	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, proxyID, remark, cloudRemark sql.NullString
+	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, proxyID, reservedProxyID, bitRemark, remark sql.NullString
 	var proxyPort sql.NullInt64
-	err := row.Scan(&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.MainUserID, &profile.ProfileUserID, &profile.Name, &profile.Seq, &groupID, &groupName, &bitStatus, &bitUpdatedAt, &proxyType, &proxyHost, &proxyPort, &proxyID, &remark, &cloudRemark, &profile.BusinessStatus, &profile.LocalStatus, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt)
+	var reservedSince sql.NullTime
+	err := row.Scan(
+		&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.BitMainUserID, &profile.BitUserID,
+		&profile.BitName, &profile.BitSeq, &groupID, &groupName, &bitStatus, &bitUpdatedAt,
+		&proxyType, &proxyHost, &proxyPort, &proxyID, &reservedProxyID, &reservedSince,
+		&bitRemark, &remark, &profile.Enabled, &profile.LocalState, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt,
+	)
 	if err != nil {
 		return model.BrowserProfile{}, err
 	}
-	profile.GroupID, profile.GroupName, profile.BitStatus, profile.BitUpdatedAt = groupID.String, groupName.String, bitStatus.String, bitUpdatedAt.String
-	profile.ProxyType, profile.ProxyHost, profile.ProxyID, profile.Remark = proxyType.String, proxyHost.String, proxyID.String, remark.String
-	profile.CloudRemark = cloudRemark.String
+	profile.BitGroupID = groupID.String
+	profile.BitGroupName = groupName.String
+	profile.BitProfileStatus = bitStatus.String
+	profile.BitUpdatedAt = bitUpdatedAt.String
+	profile.BitProxyType = proxyType.String
+	profile.BitProxyHost = proxyHost.String
+	profile.ProxyID = proxyID.String
+	profile.ReservedProxyID = reservedProxyID.String
+	profile.BitRemark = bitRemark.String
+	profile.Remark = remark.String
 	if proxyPort.Valid {
-		profile.ProxyPort = int(proxyPort.Int64)
+		profile.BitProxyPort = int(proxyPort.Int64)
+	}
+	if reservedSince.Valid {
+		value := reservedSince.Time
+		profile.ReservedSince = &value
 	}
 	return profile, nil
 }
@@ -531,55 +537,37 @@ func nullIfEmpty(value string) any {
 	return value
 }
 
-func placeholders(count int) string { return strings.TrimRight(strings.Repeat("?, ", count), ", ") }
-
-func DeleteProfile(id string) error {
-	return deleteProfile(database.DB(), id)
+func placeholders(count int) string {
+	return strings.TrimRight(strings.Repeat("?, ", count), ", ")
 }
 
-func deleteProfile(db *gorm.DB, id string) error {
-	// 只用于删除 BitBrowser 侧已消失的停用窗口；账号/任务/permit 引用由
-	// service 层先行拦截。
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	if _, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ?`, id); err != nil {
-		return err
-	}
-	return tx.Commit().Error
+func DeleteProfile(id string) error {
+	_, err := execSQL(database.DB(), `DELETE FROM browser_profiles WHERE id = ?`, id)
+	return err
 }
 
 func ProfileHasDependencies(profileID string) (bool, error) {
-	return profileHasDependencies(database.DB(), profileID)
-}
-
-func profileHasDependencies(db *gorm.DB, profileID string) (bool, error) {
 	var count int
-	if err := queryRow(db,
-		`SELECT (
-			(SELECT COUNT(*) FROM media_accounts WHERE browser_profile_id = ?) +
-			(SELECT COUNT(*) FROM sensitive_browser_tasks WHERE profile_id = ?) +
-			(SELECT COUNT(*) FROM sensitive_profile_permits WHERE profile_id = ?)
-		)`, profileID, profileID, profileID,
-	).Scan(&count); err != nil {
+	if err := queryRow(database.DB(), `SELECT COUNT(*) FROM media_accounts WHERE browser_profile_id = ?`, profileID).Scan(&count); err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func UpdateProfile(profileID string, cloudRemark *string, businessStatus *model.ProfileBusinessStatus, at time.Time) error {
-	return updateProfile(database.DB(), profileID, cloudRemark, businessStatus, at)
+func UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time) error {
+	return updateProfile(database.DB(), profileID, remark, enabled, at)
 }
 
-func updateProfile(db *gorm.DB, profileID string, cloudRemark *string, businessStatus *model.ProfileBusinessStatus, at time.Time) error {
+func updateProfile(db *gorm.DB, profileID string, remark *string, enabled *bool, at time.Time) error {
 	var sets []string
 	var args []any
-	if cloudRemark != nil {
-		sets = append(sets, "cloud_remark = ?")
-		args = append(args, nullIfEmpty(*cloudRemark))
+	if remark != nil {
+		sets = append(sets, "remark = ?")
+		args = append(args, nullIfEmpty(*remark))
 	}
-	if businessStatus != nil {
-		sets = append(sets, "business_status = ?")
-		args = append(args, string(*businessStatus))
+	if enabled != nil {
+		sets = append(sets, "enabled = ?")
+		args = append(args, *enabled)
 	}
 	if len(sets) == 0 {
 		return nil
@@ -597,7 +585,7 @@ func CountProfilesByProxyID(proxyID string) (int, error) {
 
 func countProfilesByProxyID(db *gorm.DB, proxyID string) (int, error) {
 	var count int
-	if err := queryRow(db, `SELECT COUNT(*) FROM browser_profiles WHERE proxy_id = ? AND local_status = ?`, proxyID, model.ProfileActive).Scan(&count); err != nil {
+	if err := queryRow(db, `SELECT COUNT(*) FROM browser_profiles WHERE proxy_id = ? AND local_state = ?`, proxyID, model.ProfileActive).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -609,7 +597,7 @@ func BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (
 
 func bindProxy(db *gorm.DB, profileID, proxyID, proxyType, proxyHost string, proxyPort int) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
-		`UPDATE browser_profiles SET proxy_id = ?, proxy_type = ?, proxy_host = ?, proxy_port = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE browser_profiles SET proxy_id = ?, bit_proxy_type = ?, bit_proxy_host = ?, bit_proxy_port = ?, updated_at = ? WHERE id = ?`,
 		proxyID, nullIfEmpty(proxyType), nullIfEmpty(proxyHost), proxyPort, time.Now(), profileID,
 	)
 	if err != nil {
@@ -635,7 +623,7 @@ func UnbindProxy(profileID, expectedProxyID string) (model.BrowserProfile, error
 
 func unbindProxy(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
-		`UPDATE browser_profiles SET proxy_id = NULL, proxy_type = NULL, proxy_host = NULL, proxy_port = 0, updated_at = ? WHERE id = ? AND proxy_id = ?`,
+		`UPDATE browser_profiles SET proxy_id = NULL, bit_proxy_type = NULL, bit_proxy_host = NULL, bit_proxy_port = 0, updated_at = ? WHERE id = ? AND proxy_id = ?`,
 		time.Now(), profileID, expectedProxyID,
 	)
 	if err != nil {
@@ -683,7 +671,7 @@ func ClearObservedProxy(profileID string) (model.BrowserProfile, error) {
 
 func clearObservedProxy(db *gorm.DB, profileID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
-		`UPDATE browser_profiles SET proxy_type = NULL, proxy_host = NULL, proxy_port = 0, updated_at = ? WHERE id = ? AND COALESCE(proxy_id, '') = ''`,
+		`UPDATE browser_profiles SET bit_proxy_type = NULL, bit_proxy_host = NULL, bit_proxy_port = 0, updated_at = ? WHERE id = ? AND COALESCE(proxy_id, '') = ''`,
 		time.Now(), profileID,
 	)
 	if err != nil {
@@ -715,7 +703,7 @@ func profileHasAccountReferences(db *gorm.DB, profileID string) (bool, error) {
 // 「我的」「已登记」「别人的」，再决定是否提供登记入口。
 func ListProfileOwners(mainUserID string) (map[string]sharedidentity.UserID, error) {
 	rows, err := queryRows(database.DB(),
-		`SELECT bit_profile_id, user_id FROM browser_profiles WHERE main_user_id = ?`, mainUserID)
+		`SELECT bit_profile_id, user_id FROM browser_profiles WHERE bit_main_user_id = ?`, mainUserID)
 	if err != nil {
 		return nil, err
 	}

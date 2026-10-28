@@ -18,7 +18,7 @@ func TestProxyDialAddressSupportsIPv6(t *testing.T) {
 func TestParseProxyLineAcceptsBothOperatorFormats(t *testing.T) {
 	cases := []struct {
 		raw      string
-		protocol ProxyProtocol
+		protocol Protocol
 		host     string
 		port     int
 		user     string
@@ -33,7 +33,7 @@ func TestParseProxyLineAcceptsBothOperatorFormats(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseProxyLine(%q) error = %v", tc.raw, err)
 		}
-		if parsed.ProxyProtocol != tc.protocol || parsed.Host != tc.host || parsed.Port != tc.port ||
+		if parsed.Protocol != tc.protocol || parsed.Host != tc.host || parsed.Port != tc.port ||
 			parsed.Username != tc.user || parsed.Password != tc.pass {
 			t.Fatalf("parseProxyLine(%q) = %#v", tc.raw, parsed)
 		}
@@ -57,14 +57,14 @@ func TestCreateRequiresTeamAndNormalizesTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if created.TeamID != 7 || created.Name != "香港-01" || created.BusinessStatus != BizActive {
+	if created.TeamID != 7 || created.Name != "香港-01" || !created.Enabled {
 		t.Fatalf("created = %#v", created)
 	}
 	if len(created.Tags) != 2 || created.Tags[0] != "备用" || created.Tags[1] != "直播" {
 		t.Fatalf("tags = %v, want trimmed, de-duplicated, sorted", created.Tags)
 	}
-	if created.MaxProfileCount != DefaultMaxProfiles {
-		t.Fatalf("max profile count = %d", created.MaxProfileCount)
+	if created.MaxProfiles != DefaultMaxProfiles {
+		t.Fatalf("max profile count = %d", created.MaxProfiles)
 	}
 }
 
@@ -72,7 +72,7 @@ func TestDynamicResourceCanBeRegisteredBeforeItsFirstExtraction(t *testing.T) {
 	store := newFakeStore()
 	svc := newTestProxyService(store)
 	created, err := svc.Create(CreateProxyInput{
-		Name: "动态-01", SourceType: ProxySourceAPI, ExtractURL: "https://supplier.example.com/extract",
+		Name: "动态-01", Source: ProxySourceAPI, ExtractURL: "https://supplier.example.com/extract",
 	}, 7)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -86,14 +86,14 @@ func TestDynamicResourceCanBeRegisteredBeforeItsFirstExtraction(t *testing.T) {
 	if _, err := svc.Create(CreateProxyInput{Name: "静态-无地址"}, 7); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("static proxy without address error = %v", err)
 	}
-	if _, err := svc.Create(CreateProxyInput{Name: "动态-无提取", SourceType: ProxySourceAPI, Host: "10.0.0.1", Port: 8080}, 7); !errors.Is(err, ErrInvalidInput) {
+	if _, err := svc.Create(CreateProxyInput{Name: "动态-无提取", Source: ProxySourceAPI, Host: "10.0.0.1", Port: 8080}, 7); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("dynamic proxy without extract URL error = %v", err)
 	}
 }
 
 func TestOperatorUpdateCannotChangeConnection(t *testing.T) {
 	store := newFakeStore()
-	store.seed(ProxyConfig{ID: "proxy-1", TeamID: 7, Name: "旧名称", Host: "10.0.0.1", Port: 8080, ProxyProtocol: ProtocolHTTP, BusinessStatus: BizActive, MaxProfileCount: 3, LastCheckResult: CheckOK})
+	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Name: "旧名称", Host: "10.0.0.1", Port: 8080, Protocol: ProtocolHTTP, Enabled: true, MaxProfiles: 3, LastCheckResult: CheckOK})
 	svc := newTestProxyService(store)
 
 	updated, err := svc.Update("proxy-1", CreateProxyInput{Name: "新名称", Host: "10.9.9.9", Port: 1, Remark: "备注"}, false)
@@ -113,17 +113,17 @@ func TestOperatorUpdateCannotChangeConnection(t *testing.T) {
 
 func TestGovernedEditKeepsTheQuotaWhenTheFormOmitsIt(t *testing.T) {
 	store := newFakeStore()
-	store.seed(ProxyConfig{ID: "proxy-1", TeamID: 7, Name: "旧名称", SourceType: ProxySourceAPI, ExtractURL: "https://supplier.example.com/extract", Host: "10.0.0.1", Port: 8080, ProxyProtocol: ProtocolHTTP, BusinessStatus: BizActive, MaxProfileCount: 9})
+	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Name: "旧名称", Source: ProxySourceAPI, ExtractURL: "https://supplier.example.com/extract", Host: "10.0.0.1", Port: 8080, Protocol: ProtocolHTTP, Enabled: true, MaxProfiles: 9})
 	svc := newTestProxyService(store)
 
 	updated, err := svc.Update("proxy-1", CreateProxyInput{
-		Name: "新名称", SourceType: ProxySourceAPI, Host: "10.0.0.1", Port: 8080, ProxyProtocol: ProtocolHTTP,
+		Name: "新名称", Source: ProxySourceAPI, Host: "10.0.0.1", Port: 8080, Protocol: ProtocolHTTP,
 	}, true)
 	if err != nil {
 		t.Fatalf("Update() error = %v, want the stored extract URL to satisfy the dynamic source", err)
 	}
-	if updated.MaxProfileCount != 9 {
-		t.Fatalf("max profile count = %d, want the stored quota", updated.MaxProfileCount)
+	if updated.MaxProfiles != 9 {
+		t.Fatalf("max profile count = %d, want the stored quota", updated.MaxProfiles)
 	}
 	if updated.ExtractURL != "https://supplier.example.com/extract" {
 		t.Fatalf("extract URL = %q, want the stored one", updated.ExtractURL)
@@ -132,10 +132,10 @@ func TestGovernedEditKeepsTheQuotaWhenTheFormOmitsIt(t *testing.T) {
 
 func TestGovernedConnectionChangeInvalidatesPreviousCheck(t *testing.T) {
 	store := newFakeStore()
-	store.seed(ProxyConfig{ID: "proxy-1", TeamID: 7, Name: "旧名称", Host: "10.0.0.1", Port: 8080, ProxyProtocol: ProtocolHTTP, BusinessStatus: BizActive, MaxProfileCount: 3, LastCheckResult: CheckOK})
+	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Name: "旧名称", Host: "10.0.0.1", Port: 8080, Protocol: ProtocolHTTP, Enabled: true, MaxProfiles: 3, LastCheckResult: CheckOK})
 	svc := newTestProxyService(store)
 
-	updated, err := svc.Update("proxy-1", CreateProxyInput{Name: "新名称", Host: "10.0.0.2", Port: 8080, ProxyProtocol: ProtocolHTTP}, true)
+	updated, err := svc.Update("proxy-1", CreateProxyInput{Name: "新名称", Host: "10.0.0.2", Port: 8080, Protocol: ProtocolHTTP}, true)
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -203,16 +203,16 @@ func TestAssignmentBlockerReportsTheFirstRealReason(t *testing.T) {
 	now := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
 	expired := now.Add(-time.Hour)
 	cases := []struct {
-		proxy     ProxyConfig
+		proxy     Proxy
 		remaining int
 		want      string
 	}{
-		{proxy: ProxyConfig{BusinessStatus: BizPaused, LastCheckResult: CheckOK}, remaining: 1, want: "代理已停用"},
-		{proxy: ProxyConfig{BusinessStatus: BizActive, ExpiresAt: &expired, LastCheckResult: CheckOK}, remaining: 1, want: "代理已到期"},
-		{proxy: ProxyConfig{BusinessStatus: BizActive}, remaining: 1, want: "代理尚未检测"},
-		{proxy: ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckAuthFailed}, remaining: 1, want: "代理认证失败"},
-		{proxy: ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckOK}, remaining: 0, want: "代理窗口配额已满"},
-		{proxy: ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckOK}, remaining: 1, want: ""},
+		{proxy: Proxy{Enabled: false, LastCheckResult: CheckOK}, remaining: 1, want: "代理已停用"},
+		{proxy: Proxy{Enabled: true, ExpiresAt: &expired, LastCheckResult: CheckOK}, remaining: 1, want: "代理已到期"},
+		{proxy: Proxy{Enabled: true}, remaining: 1, want: "代理尚未检测"},
+		{proxy: Proxy{Enabled: true, LastCheckResult: CheckAuthFailed}, remaining: 1, want: "代理认证失败"},
+		{proxy: Proxy{Enabled: true, LastCheckResult: CheckOK}, remaining: 0, want: "代理窗口配额已满"},
+		{proxy: Proxy{Enabled: true, LastCheckResult: CheckOK}, remaining: 1, want: ""},
 	}
 	for index, tc := range cases {
 		if got := AssignmentBlocker(tc.proxy, now, tc.remaining); got != tc.want {
@@ -220,18 +220,18 @@ func TestAssignmentBlockerReportsTheFirstRealReason(t *testing.T) {
 		}
 	}
 	// 检测成功不会让已到期资源复活。
-	if !(ProxyConfig{ExpiresAt: &expired}).Expired(now) {
+	if !(Proxy{ExpiresAt: &expired}).Expired(now) {
 		t.Fatal("Expired() = false for a past date")
 	}
 }
 
 func TestRecordCheckResultReportsWhenTheResultWasDropped(t *testing.T) {
 	store := newFakeStore()
-	store.seed(ProxyConfig{ID: "proxy-1", TeamID: 7, BusinessStatus: BizActive, Host: "10.0.0.1", Port: 8080})
+	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Enabled: true, Host: "10.0.0.1", Port: 8080})
 	store.checkApplied = false
 	svc := newTestProxyService(store)
 
-	_, applied, err := svc.RecordCheckResult("proxy-1", dto.ProxyCheckInput{ProxyProtocol: ProtocolHTTP, Host: "10.0.0.1", Port: 8080}, CheckOK)
+	_, applied, err := svc.RecordCheckResult("proxy-1", dto.ProxyCheckInput{Protocol: ProtocolHTTP, Host: "10.0.0.1", Port: 8080}, CheckOK, "")
 	if err != nil {
 		t.Fatalf("RecordCheckResult() error = %v", err)
 	}
@@ -252,39 +252,39 @@ func TestWithAssignmentLockTranslatesStoreTimeout(t *testing.T) {
 // --- 测试替身 ---
 
 type fakeStore struct {
-	proxies      map[string]ProxyConfig
+	proxies      map[string]Proxy
 	existing     []StoredConnectionKey
-	created      []ProxyConfig
+	created      []Proxy
 	checkApplied bool
 	lockTimeout  bool
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{proxies: make(map[string]ProxyConfig), checkApplied: true}
+	return &fakeStore{proxies: make(map[string]Proxy), checkApplied: true}
 }
 
-func (f *fakeStore) seed(proxy ProxyConfig) { f.proxies[proxy.ID] = proxy }
+func (f *fakeStore) seed(proxy Proxy) { f.proxies[proxy.ID] = proxy }
 
-func (f *fakeStore) Create(proxy ProxyConfig) error {
+func (f *fakeStore) Create(proxy Proxy) error {
 	f.proxies[proxy.ID] = proxy
 	f.created = append(f.created, proxy)
 	return nil
 }
 
-func (f *fakeStore) FindByID(id string) (ProxyConfig, bool, error) {
+func (f *fakeStore) FindByID(id string) (Proxy, bool, error) {
 	proxy, ok := f.proxies[id]
 	return proxy, ok, nil
 }
 
-func (f *fakeStore) List(ProxyFilter) ([]ProxyConfig, error) {
-	results := make([]ProxyConfig, 0, len(f.proxies))
+func (f *fakeStore) List(ProxyFilter) ([]Proxy, error) {
+	results := make([]Proxy, 0, len(f.proxies))
 	for _, proxy := range f.proxies {
 		results = append(results, proxy)
 	}
 	return results, nil
 }
 
-func (f *fakeStore) Update(proxy ProxyConfig) error {
+func (f *fakeStore) Update(proxy Proxy) error {
 	f.proxies[proxy.ID] = proxy
 	return nil
 }
@@ -298,18 +298,18 @@ func (f *fakeStore) ListConnectionKeys(sharedidentity.TeamID) ([]StoredConnectio
 	return f.existing, nil
 }
 
-func (f *fakeStore) SetMaxProfileCount(id string, maxProfileCount int, now time.Time) (bool, error) {
+func (f *fakeStore) SetMaxProfiles(id string, maxProfileCount int, now time.Time) (bool, error) {
 	proxy, ok := f.proxies[id]
 	if !ok {
 		return false, nil
 	}
-	proxy.MaxProfileCount = maxProfileCount
+	proxy.MaxProfiles = maxProfileCount
 	proxy.UpdatedAt = now
 	f.proxies[id] = proxy
 	return true, nil
 }
 
-func (f *fakeStore) RecordCheckResult(id, protocol, host string, port int, result string, checkedAt time.Time) (bool, error) {
+func (f *fakeStore) RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
 	if !f.checkApplied {
 		return false, nil
 	}
@@ -343,16 +343,16 @@ func TestAssignmentBlockerForExistingBindingOnlyWaivesQuota(t *testing.T) {
 	expired := now.Add(-time.Hour)
 	cases := []struct {
 		name    string
-		proxy   ProxyConfig
+		proxy   Proxy
 		current bool
 		want    string
 	}{
-		{"existing full", ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckOK}, true, ""},
-		{"new full", ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckOK}, false, "代理窗口配额已满"},
-		{"existing paused", ProxyConfig{BusinessStatus: BizPaused, LastCheckResult: CheckOK}, true, "代理已停用"},
-		{"existing expired", ProxyConfig{BusinessStatus: BizActive, ExpiresAt: &expired, LastCheckResult: CheckOK}, true, "代理已到期"},
-		{"existing unchecked", ProxyConfig{BusinessStatus: BizActive}, true, "代理尚未检测"},
-		{"existing failed", ProxyConfig{BusinessStatus: BizActive, LastCheckResult: CheckAuthFailed}, true, "代理认证失败"},
+		{"existing full", Proxy{Enabled: true, LastCheckResult: CheckOK}, true, ""},
+		{"new full", Proxy{Enabled: true, LastCheckResult: CheckOK}, false, "代理窗口配额已满"},
+		{"existing paused", Proxy{Enabled: false, LastCheckResult: CheckOK}, true, "代理已停用"},
+		{"existing expired", Proxy{Enabled: true, ExpiresAt: &expired, LastCheckResult: CheckOK}, true, "代理已到期"},
+		{"existing unchecked", Proxy{Enabled: true}, true, "代理尚未检测"},
+		{"existing failed", Proxy{Enabled: true, LastCheckResult: CheckAuthFailed}, true, "代理认证失败"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

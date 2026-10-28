@@ -10,21 +10,47 @@ import (
 
 type CreateProxyInput struct {
 	// TeamID 由管理员指定；运营和高级运营固定落在本人团队，处理器会覆盖此值。
-	TeamID          *sharedidentity.TeamID `json:"team_id,omitempty"`
-	Name            string                 `json:"name"`
-	SourceType      model.ProxySourceType  `json:"source_type"`
-	ProxyProtocol   model.ProxyProtocol    `json:"proxy_protocol"`
-	Host            string                 `json:"host"`
-	Port            int                    `json:"port"`
-	Username        string                 `json:"username"`
-	Password        string                 `json:"password"`
-	Region          string                 `json:"region"`
-	Supplier        string                 `json:"supplier"`
-	Tags            []string               `json:"tags"`
-	ExtractURL      string                 `json:"extract_url"`
-	ExpiresAt       *time.Time             `json:"expires_at"`
-	Remark          string                 `json:"remark"`
-	MaxProfileCount int                    `json:"max_profile_count"`
+	TeamID      *sharedidentity.TeamID `json:"team_id,omitempty"`
+	Name        string                 `json:"name"`
+	Source      model.ProxySource      `json:"source"`
+	Protocol    model.Protocol         `json:"protocol"`
+	Host        string                 `json:"host"`
+	Port        int                    `json:"port"`
+	Username    string                 `json:"username"`
+	Password    string                 `json:"password"`
+	Region      string                 `json:"region"`
+	Supplier    string                 `json:"supplier"`
+	Tags        []string               `json:"tags"`
+	ExtractURL  string                 `json:"extract_url"`
+	ExpiresAt   *time.Time             `json:"expires_at"`
+	Enabled     *bool                  `json:"enabled"`
+	Remark      string                 `json:"remark"`
+	MaxProfiles int                    `json:"max_profiles"`
+}
+
+type ProfileProxyOperationInput struct {
+	Action  string `json:"action"`
+	ProxyID string `json:"proxy_id"`
+}
+
+type ProfileProxyOperationResultInput struct {
+	Action  string `json:"action"`
+	ProxyID string `json:"proxy_id"`
+	Outcome string `json:"outcome"`
+	Message string `json:"message"`
+}
+
+type ProfileProxyOperationStart struct {
+	Action        string         `json:"action"`
+	ProfileID     string         `json:"profile_id"`
+	BitProfileID  string         `json:"bit_profile_id"`
+	ProxyID       string         `json:"proxy_id,omitempty"`
+	Protocol      model.Protocol `json:"protocol,omitempty"`
+	Host          string         `json:"host,omitempty"`
+	Port          int            `json:"port,omitempty"`
+	Username      string         `json:"username,omitempty"`
+	Password      string         `json:"password,omitempty"`
+	AgentRequired bool           `json:"agent_required"`
 }
 
 type BulkImportRow struct {
@@ -68,23 +94,23 @@ type ImportResult struct {
 }
 
 type ProxyFilter struct {
-	TeamID         *sharedidentity.TeamID `json:"team_id"`
-	Platform       string                 `json:"platform"`
-	Supplier       string                 `json:"supplier"`
-	BusinessStatus string                 `json:"business_status"`
-	Region         string                 `json:"region"`
-	Search         string                 `json:"search"`
-	Limit          int                    `json:"limit"`
-	Offset         int                    `json:"offset"`
+	TeamID   *sharedidentity.TeamID `json:"team_id"`
+	Platform string                 `json:"platform"`
+	Supplier string                 `json:"supplier"`
+	Enabled  *bool                  `json:"enabled"`
+	Region   string                 `json:"region"`
+	Search   string                 `json:"search"`
+	Limit    int                    `json:"limit"`
+	Offset   int                    `json:"offset"`
 }
 
 type ProxyCheckInput struct {
-	ProxyID       string              `json:"proxy_id,omitempty"`
-	ProxyProtocol model.ProxyProtocol `json:"proxy_protocol"`
-	Host          string              `json:"host"`
-	Port          int                 `json:"port"`
-	Username      string              `json:"username,omitempty"`
-	Password      string              `json:"password,omitempty"`
+	ProxyID  string         `json:"proxy_id,omitempty"`
+	Protocol model.Protocol `json:"protocol"`
+	Host     string         `json:"host"`
+	Port     int            `json:"port"`
+	Username string         `json:"username,omitempty"`
+	Password string         `json:"password,omitempty"`
 }
 
 type ProxyCheckResult struct {
@@ -93,33 +119,33 @@ type ProxyCheckResult struct {
 }
 
 type ProxyExtractionInput struct {
-	ExtractURL    string              `json:"extract_url"`
-	ProxyProtocol model.ProxyProtocol `json:"proxy_protocol"`
+	ExtractURL string         `json:"extract_url"`
+	Protocol   model.Protocol `json:"protocol"`
 }
 
 type ProxyExtractionResult struct {
-	ProxyProtocol model.ProxyProtocol `json:"proxy_protocol"`
-	Host          string              `json:"host"`
-	Port          int                 `json:"port"`
-	Username      string              `json:"username,omitempty"`
-	Password      string              `json:"password,omitempty"`
+	Protocol model.Protocol `json:"protocol"`
+	Host     string         `json:"host"`
+	Port     int            `json:"port"`
+	Username string         `json:"username,omitempty"`
+	Password string         `json:"password,omitempty"`
 }
 
 type ProxyMutationInput struct {
-	Operation     string              `json:"operation,omitempty"`
-	ProfileID     string              `json:"profile_id"`
-	ProxyProtocol model.ProxyProtocol `json:"proxy_protocol"`
-	Host          string              `json:"host"`
-	Port          int                 `json:"port"`
-	Username      string              `json:"username,omitempty"`
-	Password      string              `json:"password,omitempty"`
+	Operation string         `json:"operation,omitempty"`
+	ProfileID string         `json:"profile_id"`
+	Protocol  model.Protocol `json:"protocol"`
+	Host      string         `json:"host"`
+	Port      int            `json:"port"`
+	Username  string         `json:"username,omitempty"`
+	Password  string         `json:"password,omitempty"`
 }
 
 type ProxyMutationResult struct {
-	Operation     string              `json:"operation,omitempty"`
-	ProfileID     string              `json:"profile_id"`
-	ProxyProtocol model.ProxyProtocol `json:"proxy_protocol"`
-	Host          string              `json:"host"`
-	Port          int                 `json:"port"`
-	Readback      bool                `json:"readback"`
+	Operation string         `json:"operation,omitempty"`
+	ProfileID string         `json:"profile_id"`
+	Protocol  model.Protocol `json:"protocol"`
+	Host      string         `json:"host"`
+	Port      int            `json:"port"`
+	Readback  bool           `json:"readback"`
 }

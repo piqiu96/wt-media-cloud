@@ -19,7 +19,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
-	"github.com/wt-media/wt-media-cloud/internal/modules/executionpreflight"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
@@ -164,7 +163,6 @@ func bitBrowserResource() resourceStep {
 		open: func() (func() error, error) {
 			freshFor := config.Get().App.BitBrowser.ObservationFreshFor.Duration
 			profileservice.ConfigureObservedFreshFor(freshFor)
-			executionpreflight.ConfigureObservedFreshFor(freshFor)
 			return nil, nil
 		},
 	}

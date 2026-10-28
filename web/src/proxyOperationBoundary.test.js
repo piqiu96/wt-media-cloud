@@ -17,12 +17,9 @@ describe('proxy operation page boundary', () => {
   it('puts proxy binding and readback in the browser profiles page', () => {
     expect(profilesPage).toContain('createProxyClient')
     expect(profilesPage).toContain('"管理代理"')
-    expect(profilesPage).toContain('proxyClient.assign(')
-    expect(profilesPage).toContain('proxyClient.unbind(')
-    expect(profilesPage).toContain('proxyClient.release(')
-    expect(profilesPage).toContain('proxyClient.clearProfileProxy(')
-    expect(profilesPage).toContain('proxyClient.previewLocalScan(')
-    expect(profilesPage).toContain('proxyClient.confirmLocalScan(')
+    expect(profilesPage).toContain('proxyClient.operate(')
+    expect(profilesPage).toContain('proxyClient.finishOperation(')
+    expect(profilesPage).toContain('localAgent.profileProxyOperation(')
     expect(profilesPage).toContain('>批量设置代理</t-button>')
   })
 

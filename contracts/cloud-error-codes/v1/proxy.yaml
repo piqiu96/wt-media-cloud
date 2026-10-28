@@ -1,6 +1,7 @@
 schema_version: 1
-revision: "2026.10.29.1"
+revision: "2026.10.29.2"
 errors:
-  proxy_assignment_unconfirmed: {http_status: 503, code: 30008, retryable: false, recovery_action: inspect_actual_state}
-  proxy_assignment_rejected: {http_status: 409, code: 23101, retryable: false, recovery_action: inspect_bitbrowser}
-  proxy_agent_upgrade_required: {http_status: 409, code: 23102, retryable: false, recovery_action: upgrade_agent}
+  proxy_operation_busy: {http_status: 409, code: 20009, retryable: true, recovery_action: retry_after_result}
+  proxy_quota_full: {http_status: 409, code: 23002, retryable: true, recovery_action: choose_another_proxy}
+  proxy_not_assignable: {http_status: 409, code: 23003, retryable: true, recovery_action: enable_or_check_proxy}
+  proxy_operation_stale: {http_status: 409, code: 23004, retryable: true, recovery_action: start_again}

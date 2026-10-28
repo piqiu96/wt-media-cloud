@@ -30,7 +30,7 @@ func parseURLProxy(raw string) (*CreateProxyInput, error) {
 	if err != nil {
 		return nil, fmt.Errorf("地址格式无效: %s", raw)
 	}
-	protocol := ProxyProtocol(strings.ToLower(parsed.Scheme))
+	protocol := Protocol(strings.ToLower(parsed.Scheme))
 	switch protocol {
 	case ProtocolHTTP, ProtocolHTTPS, ProtocolSOCKS5:
 	default:
@@ -44,7 +44,7 @@ func parseURLProxy(raw string) (*CreateProxyInput, error) {
 	if host == "" {
 		return nil, errors.New("代理地址缺少主机")
 	}
-	input := &CreateProxyInput{ProxyProtocol: protocol, Host: host, Port: port}
+	input := &CreateProxyInput{Protocol: protocol, Host: host, Port: port}
 	if parsed.User != nil {
 		input.Username = parsed.User.Username()
 		input.Password, _ = parsed.User.Password()
@@ -65,7 +65,7 @@ func parseColonProxy(raw string) (*CreateProxyInput, error) {
 	if err != nil || port < 1 || port > 65535 {
 		return nil, errors.New("代理端口无效")
 	}
-	input := &CreateProxyInput{ProxyProtocol: ProtocolHTTP, Host: host, Port: port}
+	input := &CreateProxyInput{Protocol: ProtocolHTTP, Host: host, Port: port}
 	if len(parts) >= 3 {
 		input.Username = parts[2]
 	}

@@ -1,7 +1,6 @@
 schema_version: 1
-revision: "2026.10.23.1"
-# Display/audit only: preflight and admission read `users.bit_main_user_id`, never this.
+revision: "2026.10.29.2"
 bit_account_statuses: [bound]
-profile_local_statuses: [active, local_missing, archived]
-profile_scan_statuses: [ready, confirmed]
+profile_local_states: [active, local_missing, archived]
 profile_diff_kinds: [added, changed, missing]
+profile_proxy_actions: [apply, unbind, release]

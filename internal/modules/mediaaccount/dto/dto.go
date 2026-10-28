@@ -9,7 +9,7 @@ import (
 type CreateAccountInput struct {
 	UserID           sharedidentity.UserID
 	CategoryIDs      []sharedidentity.CategoryID
-	Name             string
+	PlatformName     string
 	Platform         model.Platform
 	OriginalCookie   string
 	BrowserProfileID string
@@ -18,38 +18,38 @@ type CreateAccountInput struct {
 }
 
 type IdentifyAccountInput struct {
-	PlatformAccountID string
-	Name              string
-	AvatarURL         string
-	LoginStatus       model.LoginStatus
+	PlatformAccountID   string
+	PlatformName        string
+	PlatformAvatarURL   string
+	PlatformLoginStatus model.PlatformLoginStatus
 }
 
 type AccountCheckStartInput struct{}
 
 type AccountCheckStart struct {
-	TaskID                    string            `json:"task_id"`
-	AccountID                 string            `json:"account_id"`
-	BrowserProfileID          string            `json:"browser_profile_id"`
-	BitProfileID              string            `json:"bit_profile_id"`
-	Platform                  model.Platform    `json:"platform"`
-	ExpectedPlatformAccountID string            `json:"expected_platform_account_id,omitempty"`
-	LoginStatus               model.LoginStatus `json:"login_status"`
+	OperationID               string                    `json:"operation_id"`
+	AccountID                 string                    `json:"account_id"`
+	BrowserProfileID          string                    `json:"browser_profile_id"`
+	BitProfileID              string                    `json:"bit_profile_id"`
+	Platform                  model.Platform            `json:"platform"`
+	ExpectedPlatformAccountID string                    `json:"expected_platform_account_id,omitempty"`
+	PlatformLoginStatus       model.PlatformLoginStatus `json:"platform_login_status"`
 }
 
 type AccountCheckResultInput struct {
-	TaskID            string
-	PlatformAccountID string
-	Name              string
-	AvatarURL         string
-	LoginStatus       model.LoginStatus
-	Message           string
-	CheckItems        []model.AccountCheckItem
+	OperationID         string
+	PlatformAccountID   string
+	PlatformName        string
+	PlatformAvatarURL   string
+	PlatformLoginStatus model.PlatformLoginStatus
+	Message             string
+	LastCheckItems      []model.AccountCheckItem
 }
 
 type CookieReadStartInput struct{}
 
 type CookieReadStart struct {
-	TaskID           string         `json:"task_id"`
+	OperationID      string         `json:"operation_id"`
 	AccountID        string         `json:"account_id"`
 	BrowserProfileID string         `json:"browser_profile_id"`
 	BitProfileID     string         `json:"bit_profile_id"`
@@ -57,29 +57,29 @@ type CookieReadStart struct {
 }
 
 type CookieReadResultInput struct {
-	TaskID  string
-	Cookies []map[string]any
+	OperationID string
+	Cookies     []map[string]any
 }
 
 type UpdateAccountInput struct {
-	BusinessStatus model.BusinessStatus
-	LoginStatus    model.LoginStatus
-	Remark         *string
-	CategoryIDs    *[]sharedidentity.CategoryID
-	Name           *string
+	PlatformLoginStatus model.PlatformLoginStatus
+	Enabled             *bool
+	Remark              *string
+	CategoryIDs         *[]sharedidentity.CategoryID
+	PlatformName        *string
 }
 
 type AccountFilter struct {
-	UserID         sharedidentity.UserID
-	CategoryIDs    []sharedidentity.CategoryID
-	Platform       model.Platform
-	BusinessStatus model.BusinessStatus
-	LoginStatus    model.LoginStatus
-	Search         string
-	ProfileSearch  string
-	AnyTags        []string
-	AllTags        []string
-	ExcludeTags    []string
+	UserID              sharedidentity.UserID
+	CategoryIDs         []sharedidentity.CategoryID
+	Platform            model.Platform
+	Enabled             *bool
+	PlatformLoginStatus model.PlatformLoginStatus
+	Search              string
+	ProfileSearch       string
+	AnyTags             []string
+	AllTags             []string
+	ExcludeTags         []string
 }
 
 type AccountGroupFilters = model.AccountGroupFilters

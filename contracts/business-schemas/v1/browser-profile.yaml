@@ -1,39 +1,43 @@
 schema_version: 1
-revision: "2026.10.23.1"
+revision: "2026.10.29.2"
 schemas:
   BrowserProfile:
     type: object
     description: >
-      One BitBrowser Profile as the Cloud knows it. Reads, updates, assignments and
-      preflight all scope on `user_id + main_user_id`; a row under another main account
-      is simply not found. Switching the Bit main account back makes those rows visible
-      again — they are never migrated or deleted.
-    required: [id, user_id, team_id, bit_profile_id, main_user_id, profile_user_id, name, local_status, last_synced_at]
+      One BitBrowser Profile mirror as Cloud knows it. Reads and writes scope on
+      `user_id + bit_main_user_id`; a row under another main account is not visible.
+    required: [id, user_id, team_id, bit_profile_id, bit_main_user_id, bit_user_id, bit_name, local_state, enabled, last_synced_at]
     properties:
       id: {type: string}
       user_id: {type: integer, format: int64}
       team_id: {type: integer, format: int64, nullable: true}
       bit_profile_id: {type: string}
-      main_user_id:
-        type: string
-        source: BitBrowser.mainUserId
-        description: BitBrowser main account this row belongs to; half of the data scope.
-      profile_user_id: {type: string, source: BitBrowser.userId}
-      name: {type: string}
-      seq: {type: integer}
-      group_id: {type: string}
-      group_name: {type: string}
-      bit_status: {type: string}
+      bit_main_user_id: {type: string, source: BitBrowser.mainUserId}
+      bit_user_id: {type: string, source: BitBrowser.userId}
+      bit_name: {type: string}
+      bit_seq: {type: integer}
+      bit_group_id: {type: string}
+      bit_group_name: {type: string}
+      bit_profile_status: {type: string}
       bit_updated_at: {type: string}
-      local_status: {type: string, enum: [active, local_missing, archived]}
+      bit_proxy_type: {type: string}
+      bit_proxy_host: {type: string}
+      bit_proxy_port: {type: integer}
+      bit_remark: {type: string}
+      remark: {type: string}
+      enabled: {type: boolean}
+      local_state: {type: string, enum: [active, local_missing, archived]}
+      proxy_id: {type: string, nullable: true}
+      reserved_proxy_id: {type: string, nullable: true}
+      reserved_since: {type: string, format: date-time, nullable: true}
       last_synced_at: {type: string, format: date-time}
     forbidden_properties: [cookie, password, proxy_username, proxy_password, oper_user_id]
   BitAccountBinding:
     type: object
-    required: [user_id, main_user_id, status]
+    required: [user_id, bit_main_user_id, status]
     properties:
       user_id: {type: integer, format: int64}
-      main_user_id: {type: string}
+      bit_main_user_id: {type: string}
       status: {type: string, enum: [bound]}
       bound_at: {type: string, format: date-time}
       last_verified_at: {type: string, format: date-time}
@@ -51,9 +55,10 @@ schemas:
       last_verified_at: {type: string, format: date-time}
     forbidden_properties: [main_user_id]
 sync_policy:
-  scan_is_staged: true
+  snapshot_is_staged: true
   confirmation_required: true
   automatic_rebind: false
-  scan_carries_main_user_id: true
-  scan_carries_observed_at: true
-  scan_never_deletes_unseen_profiles: true
+  one_snapshot_per_user: true
+  snapshot_carries_bit_main_user_id: true
+  snapshot_carries_observed_at: true
+  confirmation_never_deletes_unseen_profiles: true

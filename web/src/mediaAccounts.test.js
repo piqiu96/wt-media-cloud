@@ -37,7 +37,7 @@ describe('media account client', () => {
     })
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/v1/media-accounts?search=%E9%87%8D%E7%82%B9&business_status=enabled&login_status=unknown&any_tags=launch&exclude_tags=retired',
+      '/api/v1/media-accounts?search=%E9%87%8D%E7%82%B9&enabled=true&platform_login_status=unknown&any_tags=launch&exclude_tags=retired',
       expect.objectContaining({ credentials: 'include' }),
     )
   })
@@ -121,11 +121,11 @@ describe('media account client', () => {
       method: 'POST',
       credentials: 'include',
       body: JSON.stringify({
-        task_id: 'task-1',
+        operation_id: 'task-1',
         platform_account_id: '123',
-        name: '',
-        avatar_url: '',
-        login_status: 'normal',
+        platform_name: '',
+        platform_avatar_url: '',
+        platform_login_status: 'normal',
         message: 'ok',
         check_items: [],
       }),
@@ -176,14 +176,14 @@ describe('media account client', () => {
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili', name: '测试昵称' }),
+      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili', platform_name: '测试昵称' }),
     }))
 
     await client.update('account-1', { name: '新名' })
 
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/account-1', expect.objectContaining({
       method: 'PATCH',
-      body: JSON.stringify({ name: '新名' }),
+      body: JSON.stringify({ platform_name: '新名' }),
     }))
   })
 

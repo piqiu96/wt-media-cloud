@@ -44,7 +44,7 @@ describe('proxy resource page', () => {
   // AdminUI 规范 §4.1：属性与关联在前，状态与检测结果紧随其后。把状态放回供应商
   // 后面会让「这台还能不能用」先于「这台绑了谁」出现，读表顺序与运营的判断顺序相反。
   it('puts the status columns after capacity and bindings', () => {
-    const ordered = ['region_supplier', 'source_type', 'usage', 'business_status', 'last_check_result', 'expires_at']
+    const ordered = ['region_supplier', 'source', 'usage', 'enabled', 'last_check_result', 'expires_at']
     const offsets = ordered.map((key) => source.indexOf(`{ colKey: "${key}"`))
     expect(offsets.every((at) => at > -1), '六列都必须找得到').toBe(true)
     for (let i = 1; i < offsets.length; i += 1) {

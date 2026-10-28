@@ -1,9 +1,9 @@
 schema_version: 1
-revision: "2026.10.29.1"
+revision: "2026.10.29.2"
 schemas:
   MediaAccount:
     type: object
-    required: [id, user_id, team_id, category_ids, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+    required: [id, user_id, team_id, category_ids, platform, identification_status, enabled, platform_login_status, tags, created_at, updated_at]
     properties:
       id: {type: string}
       user_id: {type: integer, format: int64}
@@ -14,8 +14,8 @@ schemas:
         description: Empty means the account is intentionally not classified yet.
       platform: {type: string, enum: [douyin, bilibili, baidu]}
       platform_account_id: {type: string, nullable: true}
-      name: {type: string, nullable: true}
-      avatar_url: {type: string, nullable: true}
+      platform_name: {type: string, nullable: true}
+      platform_avatar_url: {type: string, nullable: true}
       browser_profile_id:
         type: string
         nullable: true
@@ -25,11 +25,12 @@ schemas:
           answers PROFILE_NOT_FOUND; it becomes reachable again if the user switches back.
       identification_status: {type: string, enum: [pending_identification, identified, duplicate]}
       duplicate_of_account_id: {type: string, nullable: true}
-      business_status: {type: string, enum: [enabled, disabled, retired]}
-      login_status: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
+      enabled: {type: boolean}
+      platform_login_status: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
       cookie_status: {type: string, nullable: true}
-      active_cookie_updated_at: {type: string, format: date-time, nullable: true}
-      last_checked_at: {type: string, format: date-time, nullable: true}
+      cookie_updated_at: {type: string, format: date-time, nullable: true}
+      last_check_at: {type: string, format: date-time, nullable: true}
+      last_check_items: {type: array, items: {type: object}}
       tags: {type: array, items: {type: string}}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
