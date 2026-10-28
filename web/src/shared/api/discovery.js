@@ -4,7 +4,7 @@ export function createDiscoveryClient({ base = '/api/v1', fetch = globalThis.fet
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
     listStrategies(filters = {}) { return api.get('/discovery-strategies', { search: filters.search, type: filters.type, status: filters.status, team_id: filters.teamId }) },
-    listGames(filters = {}) { return api.get('/games', { status: filters.status, scope: filters.scope }) },
+    listCategories(filters = {}) { return api.get('/categories', { type: filters.type, enabled: filters.enabled, scope: filters.scope }) },
     createStrategy(data) { return api.post('/discovery-strategies', data) },
     updateStrategy(id, data) { return api.put(`/discovery-strategies/${id}`, data) },
     setStrategyStatus(id, status) { return api.post(`/discovery-strategies/${id}/status`, { status }) },

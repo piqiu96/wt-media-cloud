@@ -11,19 +11,19 @@ describe('users api client', () => {
       .mockResolvedValueOnce(ok([]))
       .mockResolvedValueOnce(ok({ user: { id: 2 }, one_time_password: 'temporary-secret' }))
       .mockResolvedValueOnce(ok([{ id: 10, name: '火影组' }]))
-      .mockResolvedValueOnce(ok([{ id: 'naruto', name: '火影忍者', status: 'enabled' }]))
+      .mockResolvedValueOnce(ok([{ id: 1, type: 'game', name: '游戏.三角洲', enabled: true }]))
       .mockResolvedValueOnce(ok(null))
     const client = createUsersClient({ fetch })
 
-    await client.listUsers({ uid: 2, username: 'operator', role: 'operator', teamId: 10, status: 'enabled', gameId: 'game-a' })
-    await client.createUser({ username: 'operator', password: 'temporary-secret', role: 'operator', teamId: 10, gameIds: ['game-a'] })
+    await client.listUsers({ uid: 2, username: 'operator', role: 'operator', teamId: 10, status: 'enabled', categoryId: 8 })
+    await client.createUser({ username: 'operator', password: 'temporary-secret', role: 'operator', teamId: 10, categoryIds: [8] })
     await client.listTeams()
-    await client.listGames({ keyword: '火影', status: 'enabled', scope: 'all' })
+    await client.listCategories({ keyword: '火影', type: 'game', enabled: true, scope: 'all' })
 
-    expect(fetch.mock.calls[0][0]).toContain('/users?uid=2&username=operator&role=operator&team_id=10&status=enabled&game_id=game-a')
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ username: 'operator', password: 'temporary-secret', role: 'operator', team_id: 10, game_ids: ['game-a'] })
+    expect(fetch.mock.calls[0][0]).toContain('/users?uid=2&username=operator&role=operator&team_id=10&status=enabled&category_id=8')
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ username: 'operator', password: 'temporary-secret', role: 'operator', team_id: 10, category_ids: [8] })
     expect(fetch.mock.calls[2][0]).toBe('/api/v1/operation-teams')
-    expect(fetch.mock.calls[3][0]).toContain('/games?keyword=%E7%81%AB%E5%BD%B1&status=enabled&scope=all')
+    expect(fetch.mock.calls[3][0]).toContain('/categories?keyword=%E7%81%AB%E5%BD%B1&type=game&enabled=true&scope=all')
   })
 
   it('returns the service error message for referenced team deletion', async () => {
@@ -36,11 +36,11 @@ describe('users api client', () => {
     await expect(client.deleteTeam(10)).rejects.toMatchObject({ message: '对象仍有业务引用，不能删除', errcode: 20003 })
   })
 
-  it('loads game reference details from the dedicated endpoint', async () => {
-    const fetch = vi.fn().mockResolvedValue(ok({ game_id: 'naruto', users: [], media_accounts: [] }))
+  it('loads category reference details from the dedicated endpoint', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok({ category_id: 7, users: [], media_accounts: [] }))
     const client = createUsersClient({ fetch })
 
-    await expect(client.getGameReferences('naruto')).resolves.toMatchObject({ game_id: 'naruto' })
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/games/naruto/references')
+    await expect(client.getCategoryReferences(7)).resolves.toMatchObject({ category_id: 7 })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/categories/7/references')
   })
 })

@@ -19,6 +19,7 @@ import (
 	model "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 func TestRegisterRoutesBindsMaterialEndpoints(t *testing.T) {
@@ -539,18 +540,18 @@ func TestParseMaterialListFilter(t *testing.T) {
 		return parseMaterialListFilter(ctx)
 	}
 
-	filter, err := parse("team_id=8&game_ids=game-a,%20game-b,game-a&game_id=legacy&joined=joined&my_usage=used&team_usage=unused&search=%20demo%20&video_status=ready")
+	filter, err := parse("team_id=8&category_ids=6,%207,6&category_id=5&joined=joined&my_usage=used&team_usage=unused&search=%20demo%20&video_status=ready")
 	if err != nil {
 		t.Fatalf("parseMaterialListFilter() error = %v", err)
 	}
-	if filter.TeamID == nil || *filter.TeamID != 8 || !slices.Equal(filter.GameIDs, []string{"game-a", "game-b"}) || filter.GameID != "legacy" {
-		t.Fatalf("filter = %+v, want the named team, deduplicated games and the legacy single game", filter)
+	if filter.TeamID == nil || *filter.TeamID != 8 || !slices.Equal(filter.CategoryIDs, []sharedidentity.CategoryID{6, 7}) || filter.CategoryID != 5 {
+		t.Fatalf("filter = %+v, want the named team, deduplicated categories and the legacy single category", filter)
 	}
 	if filter.Joined != "joined" || filter.MyUsage != "used" || filter.TeamUsage != "unused" || filter.Search != "demo" || filter.VideoStatus != "ready" {
 		t.Fatalf("filter = %+v, want every parsed dimension", filter)
 	}
 
-	if empty, err := parse(""); err != nil || empty.TeamID != nil || len(empty.GameIDs) != 0 || empty.Joined != "" {
+	if empty, err := parse(""); err != nil || empty.TeamID != nil || len(empty.CategoryIDs) != 0 || empty.Joined != "" {
 		t.Fatalf("an absent query parsed to %+v, %v", empty, err)
 	}
 
@@ -566,15 +567,15 @@ func TestParseMaterialListFilter(t *testing.T) {
 		}
 	}
 
-	games := make([]string, materialGameFilterLimit+1)
-	for i := range games {
-		games[i] = "game-" + strconv.Itoa(i)
+	categories := make([]string, materialCategoryFilterLimit+1)
+	for i := range categories {
+		categories[i] = strconv.Itoa(i + 1)
 	}
-	if _, err := parse("game_ids=" + strings.Join(games, ",")); err == nil {
-		t.Fatalf("%d games must be rejected", len(games))
+	if _, err := parse("category_ids=" + strings.Join(categories, ",")); err == nil {
+		t.Fatalf("%d categories must be rejected", len(categories))
 	}
-	if filter, err := parse("game_ids=" + strings.Join(games[:materialGameFilterLimit], ",")); err != nil || len(filter.GameIDs) != materialGameFilterLimit {
-		t.Fatalf("at the limit: %d games, err=%v", len(filter.GameIDs), err)
+	if filter, err := parse("category_ids=" + strings.Join(categories[:materialCategoryFilterLimit], ",")); err != nil || len(filter.CategoryIDs) != materialCategoryFilterLimit {
+		t.Fatalf("at the limit: %d categories, err=%v", len(filter.CategoryIDs), err)
 	}
 }
 

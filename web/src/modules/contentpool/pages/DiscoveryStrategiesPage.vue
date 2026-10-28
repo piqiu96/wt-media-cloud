@@ -14,7 +14,7 @@ import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import KeywordTags from '../../../shared/ui/resource/KeywordTags.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
-import { GAME_STATUS_ENABLED, enabledGames } from '../../../shared/utils/games.js'
+import { enabledCategories } from '../../../shared/utils/categories.js'
 import { MINING_PLATFORM_OPTIONS, platformLabel } from '../../../shared/utils/platforms.js'
 import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import { defaultCondition, displayRules, materialRulesSummary, resolveMaterialRules, saveRules } from '../miningRules.js'
@@ -26,7 +26,7 @@ const users = createUsersClient()
 const route = useRoute()
 const rows = ref([])
 const tasks = ref([])
-const games = ref([])
+const categories = ref([])
 const teams = ref([])
 const currentUser = ref(null)
 const teamFilter = ref('')
@@ -92,7 +92,7 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 70 },
   { colKey: 'name', title: '策略名称', width: 180 },
   { colKey: 'team', title: '运营团队', width: 120 },
-  { colKey: 'game', title: '游戏', width: 120 },
+  { colKey: 'category', title: '类目', width: 120 },
   { colKey: 'type', title: '类型', width: 90 },
   { colKey: 'rule', title: '挖掘规则', width: 130 },
   { colKey: 'schedule', title: '执行周期', width: 130 },
@@ -170,7 +170,7 @@ function defaultForm() {
   return {
     name: '',
     team_id: '',
-    game_id: '',
+    category_id: '',
     strategy_type: 'keyword',
     platform: 'douyin',
     config: {
@@ -192,11 +192,11 @@ async function load({ quiet = false } = {}) {
   if (!quiet) error.value = ''
   try {
     const query = { search: String(filters.value.search || '').trim(), type: filters.value.type, status: filters.value.status, teamId: teamFilter.value || undefined }
-    const [strategyRows, taskRows, gameRows] = await Promise.all([client.listStrategies(query), client.listTasks({ team_id: teamFilter.value || undefined }), client.listGames({ scope: 'all' })])
+    const [strategyRows, taskRows, categoryRows] = await Promise.all([client.listStrategies(query), client.listTasks({ team_id: teamFilter.value || undefined }), client.listCategories({ scope: 'all' })])
     rows.value = Array.isArray(strategyRows) ? strategyRows : []
     if (!quiet) pagination.value.current = 1
     tasks.value = Array.isArray(taskRows) ? taskRows : []
-    games.value = Array.isArray(gameRows) ? gameRows : []
+    categories.value = Array.isArray(categoryRows) ? categoryRows : []
   } catch (e) {
     if (!quiet) error.value = e.message || '策略加载失败'
   } finally {
@@ -236,7 +236,7 @@ function fillForm(row) {
   form.value = {
     name: row.name,
     team_id: row.team_id || '',
-    game_id: row.game_id || '',
+    category_id: row.category_id || '',
     strategy_type: row.strategy_type,
     platform: row.platform,
     config: {
@@ -321,8 +321,8 @@ async function save() {
       ...withoutLegacyMaterialKeys(form.value.config),
       material_rules: saveRules(materialRules),
     }
-    if (!String(form.value.game_id || '').trim()) {
-      feedback.toast.error('请选择所属游戏')
+    if (!String(form.value.category_id || '').trim()) {
+      feedback.toast.error('请选择所属类目')
       return
     }
     if (!String(form.value.platform || '').trim()) {
@@ -388,17 +388,17 @@ function isRunning(row) {
   return runningSet.value.has(row.id)
 }
 
-function gameName(id) {
-  const game = games.value.find((item) => item.id === id)
-  return game?.name || '-'
+function categoryName(id) {
+  const category = categories.value.find((item) => item.id === id)
+  return category?.name || '-'
 }
 
-// 只列启用游戏。编辑一条挂在停用游戏上的历史策略时，把当前游戏补成不可选选项：
-// 不补，原值显示不出来，保存一次就把游戏悄悄换掉了。
-const formGameOptions = computed(() => {
-  const options = enabledGames(games.value).map((game) => ({ id: game.id, label: game.name, disabled: false }))
-  const current = games.value.find((game) => game.id === form.value.game_id)
-  if (current && current.status !== GAME_STATUS_ENABLED) {
+// 只列启用类目。编辑一条挂在停用类目上的历史策略时，把当前类目补成不可选选项：
+// 不补，原值显示不出来，保存一次就把类目悄悄换掉了。
+const formCategoryOptions = computed(() => {
+  const options = enabledCategories(categories.value).map((category) => ({ id: category.id, label: category.name, disabled: false }))
+  const current = categories.value.find((category) => category.id === form.value.category_id)
+  if (current && !current.enabled) {
     options.unshift({ id: current.id, label: `${current.name}（已停用）`, disabled: true })
   }
   return options
@@ -497,7 +497,7 @@ function latestStats(row) {
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘策略">
             <template #team="{ row }">{{ teamName(row.team_id) }}</template>
-            <template #game="{ row }">{{ gameName(row.game_id) }}</template>
+            <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
             <template #type="{ row }">{{ typeLabel(row.strategy_type) }}</template>
             <template #rule="{ row }">
               <a class="strategy-rule-link" @click="row.strategy_type === 'author' ? openAuthors(row) : openKeywords(row)">{{ ruleLabel(row) }}</a>
@@ -538,7 +538,7 @@ function latestStats(row) {
               <t-form label-width="88px">
                 <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
                 <t-form-item v-if="isAdmin && !editingID" label="目标团队" required-mark><t-select v-model="form.team_id" placeholder="选择运营团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-                <t-form-item label="所属游戏" required-mark><t-select v-model="form.game_id" clearable placeholder="选择游戏分类"><t-option v-for="game in formGameOptions" :key="game.id" :value="game.id" :label="game.label" :disabled="game.disabled" /></t-select></t-form-item>
+                <t-form-item label="所属类目" required-mark><t-select v-model="form.category_id" clearable placeholder="选择类目分类"><t-option v-for="category in formCategoryOptions" :key="category.id" :value="category.id" :label="category.label" :disabled="category.disabled" /></t-select></t-form-item>
                 <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
                 <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>
               </t-form>
@@ -605,7 +605,7 @@ function latestStats(row) {
           <div class="strategy-editor__aside">
             <div class="strategy-aside">
               <div class="strategy-aside__title">配置说明</div>
-              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略，游戏仅用于内容分类和数据统计。</span></div>
+              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略，类目仅用于内容分类和数据统计。</span></div>
               <div class="strategy-aside__item"><strong>② 挖掘对象</strong><span>可配置关键词或作者，系统将根据配置对象发现相关内容。</span></div>
               <div class="strategy-aside__item"><strong>③ 执行计划</strong><span>支持手动执行和定时执行，定时执行按设定时间自动运行。</span></div>
               <div class="strategy-aside__item"><strong>④ 转素材规则</strong><span>规则按优先级从上往下匹配，命中「过滤」不转素材，命中「命中」自动转素材；无规则时只采集。</span></div>
@@ -649,7 +649,7 @@ function latestStats(row) {
       <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="min(92vw, 560px)" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(detailRow.game_id) }}</strong></div>
+          <div class="strategy-drawer__field"><span>类目</span><strong>{{ categoryName(detailRow.category_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(detailRow.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ typeLabel(detailRow.strategy_type) }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (detailRow.config?.keywords || []).join('、') || detailRow.config?.author || '-' }}</strong></div>

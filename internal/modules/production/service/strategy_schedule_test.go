@@ -72,7 +72,7 @@ func TestComposeScheduleRespectsStrategyStatusAndCopy(t *testing.T) {
 	svc, store, actor := strategyFixture()
 	now := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
-	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, GameID: "delta", TemplateID: 3, TemplateVersion: 1, Name: "原策略", Config: []byte(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 9}}
+	store.items = []model.ComposeStrategy{{ID: 4, TeamID: 7, CategoryID: 1, TemplateID: 3, TemplateVersion: 1, Name: "原策略", Config: []byte(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2, Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 9}}
 	schedule := model.ComposeSchedule{Mode: "interval", IntervalMinutes: 15, Timezone: "Asia/Shanghai"}
 	updated, err := svc.Update(actor, 4, UpdateStrategyInput{Name: "原策略", Config: []byte(`{"start_seconds":5,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionScheduled, Schedule: &schedule, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2})
 	if err != nil || updated.NextRunAt == nil || !updated.NextRunAt.After(now) {

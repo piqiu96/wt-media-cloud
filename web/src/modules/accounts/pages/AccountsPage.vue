@@ -9,6 +9,7 @@ import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
 import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
+import { categoryTypeLabel } from "../../../shared/utils/categories.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
@@ -32,7 +33,7 @@ const isDesktop = window.__WT_MEDIA_APP__ === "desktop"
 const user = ref(null)
 const accounts = ref([])
 const profiles = ref([])
-const games = ref([])
+const categories = ref([])
 const loading = ref(true)
 const error = ref("")
 
@@ -41,7 +42,7 @@ const searchPlatform = ref("")
 const searchBizStatus = ref("")
 const searchLoginStatus = ref("")
 const searchTags = ref("")
-const searchGameIds = ref([])
+const searchCategoryIds = ref([])
 const pagination = ref({ current: 1, pageSize: 20, total: 0, showJumper: true })
 
 const showCreate = ref(false)
@@ -60,7 +61,7 @@ const editVisible = ref(false)
 const editAccount = ref(null)
 const editName = ref("")
 const editRemark = ref("")
-const editGameIds = ref([])
+const editCategoryIds = ref([])
 const editProfileId = ref("")
 const editTags = ref([])
 const savingEdit = ref(false)
@@ -108,7 +109,7 @@ watch(searchOwner, () => {
 function defaultCreateForm() {
   return {
     userId: "",
-    gameIds: [],
+    categoryIds: [],
     name: "",
     platform: "bilibili",
     browserProfileId: "",
@@ -118,12 +119,12 @@ function defaultCreateForm() {
 }
 
 async function loadAuxiliaryData() {
-  const [profileList, gameList] = await Promise.all([
+  const [profileList, categoryList] = await Promise.all([
     profileClient.listProfiles().catch(() => []),
-    usersClient.listGames({ status: "enabled" }).catch(() => []),
+    usersClient.listCategories({ enabled: true }).catch(() => []),
   ])
   profiles.value = Array.isArray(profileList) ? profileList : []
-  games.value = Array.isArray(gameList) ? gameList : []
+  categories.value = Array.isArray(categoryList) ? categoryList : []
 }
 
 async function loadAccounts() {
@@ -133,7 +134,7 @@ async function loadAccounts() {
   if (searchPlatform.value) params.platform = searchPlatform.value
   if (searchBizStatus.value) params.businessStatus = searchBizStatus.value
   if (searchLoginStatus.value) params.loginStatus = searchLoginStatus.value
-  if (searchGameIds.value.length) params.gameIds = searchGameIds.value
+  if (searchCategoryIds.value.length) params.categoryIds = searchCategoryIds.value
   if (searchTags.value) params.anyTags = [searchTags.value]
   if (searchProfile.value) params.profile = searchProfile.value
   try {
@@ -155,7 +156,7 @@ function resetFilters() {
   searchBizStatus.value = ""
   searchLoginStatus.value = ""
   searchTags.value = ""
-  searchGameIds.value = []
+  searchCategoryIds.value = []
   searchProfile.value = ""
   searchOwner.value = defaultOwnerFilter()
   loadAccounts()
@@ -167,7 +168,7 @@ function applyStatFilter(key) {
   searchBizStatus.value = ""
   searchLoginStatus.value = ""
   searchTags.value = ""
-  searchGameIds.value = []
+  searchCategoryIds.value = []
   searchProfile.value = ""
   if (key === "enabled") searchBizStatus.value = "enabled"
   else if (key === "disabled") searchBizStatus.value = "disabled"
@@ -186,11 +187,16 @@ function openCreate() {
 
 async function createAccount() {
   error.value = ""
+  const categoryError = validateCategorySelection(createForm.value.categoryIds)
+  if (categoryError) {
+    createError.value = categoryError
+    return
+  }
   creating.value = true
   try {
     await accountClient.create({
       userId: user.value?.role === "admin" ? Number(createForm.value.userId) || undefined : undefined,
-      gameIds: createForm.value.gameIds,
+      categoryIds: createForm.value.categoryIds,
       name: createForm.value.name || undefined,
       platform: createForm.value.platform,
       browserProfileId: isDesktop && !isAdmin.value ? createForm.value.browserProfileId : "",
@@ -299,7 +305,7 @@ function openEdit(account) {
   editAccount.value = account
   editName.value = account.name || ""
   editRemark.value = account.remark || ""
-  editGameIds.value = Array.isArray(account.game_ids) ? [...account.game_ids] : []
+  editCategoryIds.value = Array.isArray(account.category_ids) ? [...account.category_ids] : []
   editProfileId.value = account.browser_profile_id || ""
   editTags.value = [...(account.tags || [])]
   editError.value = ""
@@ -308,13 +314,18 @@ function openEdit(account) {
 
 async function saveEdit() {
   if (!editAccount.value) return
+  const categoryError = validateCategorySelection(editCategoryIds.value)
+  if (categoryError) {
+    editError.value = categoryError
+    return
+  }
   savingEdit.value = true
   error.value = ""
   try {
     let updated = await accountClient.update(editAccount.value.id, {
       name: editName.value || undefined,
       remark: editRemark.value,
-      gameIds: editGameIds.value,
+      categoryIds: editCategoryIds.value,
     })
     // 绑定窗口差异：只有本人账号才允许改绑定，管理员与他人账号保持原绑定。
     if (isDesktop && canOperateLocalAccount(editAccount.value) && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
@@ -355,12 +366,29 @@ function splitTags(value) {
   return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
 }
 
-function gameNames(gameIds) {
-  const values = Array.isArray(gameIds) ? gameIds : []
-  if (!values.length) return "未绑定游戏"
-  return values.map(gameId => {
-    const game = games.value.find(item => item.id === gameId)
-    return game ? game.name : `${gameId}（超出用户游戏范围）`
+
+function selectedCategoryType(categoryIds) {
+  const values = Array.isArray(categoryIds) ? categoryIds : []
+  return categories.value.find((category) => values.includes(category.id))?.type || ""
+}
+
+function categoryOptionDisabled(category, categoryIds) {
+  const selectedType = selectedCategoryType(categoryIds)
+  return Boolean(selectedType && category.type !== selectedType && !(categoryIds || []).includes(category.id))
+}
+
+function validateCategorySelection(categoryIds) {
+  const selected = new Set(categoryIds || [])
+  const types = new Set(categories.value.filter((category) => selected.has(category.id)).map((category) => category.type))
+  return types.size > 1 ? "同一个社媒账号的多个类目必须属于同一一级类型" : ""
+}
+
+function categoryNames(categoryIds) {
+  const values = Array.isArray(categoryIds) ? categoryIds : []
+  if (!values.length) return "未绑定类目"
+  return values.map(categoryId => {
+    const category = categories.value.find(item => item.id === categoryId)
+    return category ? category.name : `${categoryId}（超出用户类目范围）`
   }).join("、")
 }
 
@@ -398,7 +426,7 @@ function executableText(account) {
   const roleHint = isDesktop ? localOperationHint(account) : ""
   if (roleHint) return `不可执行：${roleHint}`
   if (account.business_status !== "enabled") return "不可执行：账号已停用"
-  if (!(account.game_ids || []).length) return "不可执行：未绑定游戏"
+  if (!(account.category_ids || []).length) return "不可执行：未绑定类目"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   const profile = profileForAccount(account)
   if (profile && (profile.local_status !== "active" || profile.business_status === "disabled")) return "不可执行：绑定窗口已停用"
@@ -506,7 +534,7 @@ function checkItemStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  return isDesktop && canOperateLocalAccount(account) && account?.business_status === "enabled" && (account.game_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
+  return isDesktop && canOperateLocalAccount(account) && account?.business_status === "enabled" && (account.category_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
@@ -817,7 +845,7 @@ const columns = [
   { colKey: "platform", title: "平台", width: 70 },
   { colKey: "account_info", title: "账号信息", width: 190 },
   { colKey: "user_name", title: "使用人", width: 100 },
-  { colKey: "game_ids", title: "游戏", width: 160 },
+  { colKey: "category_ids", title: "类目", width: 160 },
   { colKey: "tags", title: "标签", width: 140 },
   { colKey: "window_info", title: "浏览器窗口", width: 180 },
   { colKey: "business_status", title: "业务状态", width: 80, minWidth: 80 },
@@ -854,8 +882,8 @@ const columns = [
             <t-option value="all" label="全部成员" />
             <t-option v-for="option in ownerOptions" :key="option.value" :value="option.value" :label="option.label" />
           </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="searchGameIds" multiple clearable placeholder="全部">
-            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+        <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="searchCategoryIds" multiple clearable placeholder="全部">
+            <t-option v-for="category in categories" :key="category.id" :value="category.id" :label="category.name" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
@@ -919,7 +947,7 @@ const columns = [
         </div>
       </template>
       <template #user_name="{ row }">{{ row.user_name || '--' }}</template>
-      <template #game_ids="{ row }">{{ gameNames(row.game_ids) }}</template>
+      <template #category_ids="{ row }">{{ categoryNames(row.category_ids) }}</template>
       <template #tags="{ row }">
         <div class="account-tags">
           <t-tag v-for="tag in (row.tags || []).slice(0, 2)" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
@@ -975,7 +1003,7 @@ const columns = [
           <t-descriptions-item label="平台UID">{{ accountInfoPopup.platform_account_id || '--' }}</t-descriptions-item>
           <t-descriptions-item label="平台昵称">{{ accountInfoPopup.name || '--' }}</t-descriptions-item>
           <t-descriptions-item label="使用人">{{ accountInfoPopup.user_name || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="所属游戏">{{ gameNames(accountInfoPopup.game_ids) }}</t-descriptions-item>
+          <t-descriptions-item label="所属类目">{{ categoryNames(accountInfoPopup.category_ids) }}</t-descriptions-item>
           <t-descriptions-item label="标签">{{ (accountInfoPopup.tags || []).join('、') || '--' }}</t-descriptions-item>
           <t-descriptions-item label="业务状态">{{ bizStatusText(accountInfoPopup.business_status) }}</t-descriptions-item>
           <t-descriptions-item label="账号状态">{{ accountStatusText(accountInfoPopup) }}</t-descriptions-item>
@@ -1024,9 +1052,9 @@ const columns = [
         <t-form-item v-if="user?.role === 'admin'" label="归属用户 UID">
           <t-input-number v-model="createForm.userId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
-        <t-form-item label="游戏">
-          <t-select v-model="createForm.gameIds" multiple clearable placeholder="可先不绑定；启用执行前必须绑定游戏">
-            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+        <t-form-item label="类目">
+          <t-select v-model="createForm.categoryIds" multiple clearable placeholder="可先不绑定；启用执行前必须绑定类目">
+            <t-option v-for="category in categories" :key="category.id" :value="category.id" :label="`${categoryTypeLabel(category.type)} / ${category.name}`" :disabled="categoryOptionDisabled(category, createForm.categoryIds)" />
           </t-select>
         </t-form-item>
         <t-form-item label="平台">
@@ -1081,9 +1109,9 @@ const columns = [
         <t-form-item label="账号名称">
           <t-input v-model="editName" maxlength="128" placeholder="账号名称，留空由检查回填" />
         </t-form-item>
-        <t-form-item label="所属游戏">
-          <t-select v-model="editGameIds" multiple clearable placeholder="选择游戏">
-            <t-option v-for="game in games" :key="game.id" :value="game.id" :label="game.name" />
+        <t-form-item label="所属类目">
+          <t-select v-model="editCategoryIds" multiple clearable placeholder="选择类目">
+            <t-option v-for="category in categories" :key="category.id" :value="category.id" :label="`${categoryTypeLabel(category.type)} / ${category.name}`" :disabled="categoryOptionDisabled(category, editCategoryIds)" />
           </t-select>
         </t-form-item>
         <div class="form-section">业务分类</div>
@@ -1130,7 +1158,7 @@ const columns = [
         <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
         <t-descriptions-item label="平台">{{ platformLabel(detailAccount.platform) }}</t-descriptions-item>
         <t-descriptions-item label="使用人">{{ detailAccount.user_name || '--' }}</t-descriptions-item>
-        <t-descriptions-item label="游戏">{{ gameNames(detailAccount.game_ids) }}</t-descriptions-item>
+        <t-descriptions-item label="类目">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
         <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
         <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>
       </t-descriptions>

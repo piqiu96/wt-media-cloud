@@ -177,7 +177,7 @@ describe('the two ends keep their route tables straight', () => {
   // 不许各写一套。角色可见性由 `shared/utils/roles.js` 与两端 main.ts 的守卫决定，
   // 不靠路由表缺项来隐藏。
   it('serves the system management pages from one file on both ends', () => {
-    for (const path of ['users', 'operation-teams', 'games']) {
+    for (const path of ['users', 'operation-teams', 'categories']) {
       expect(cloudByPath.has(path), path).toBe(true)
       expect(desktopByPath.has(path), path).toBe(true)
       const cloud = loaderFile(cloudByPath.get(path), cloudBase)

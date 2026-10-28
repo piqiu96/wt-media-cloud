@@ -11,6 +11,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 // CHG-20261026-105: scheduled production reads the strategy team's material
@@ -37,9 +38,9 @@ func TestLiveComposeScheduleReadsTheTeamPoolWithoutPersonalUsages(t *testing.T) 
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	var teamID, operatorID, creatorID int64
-	var gameID string
-	if err := tx.Raw(`SELECT u.id, u.team_id, g.game_id FROM users u JOIN user_game_scopes g ON g.user_id = u.id WHERE u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id IS NOT NULL ORDER BY u.id, g.game_id LIMIT 1`).Row().Scan(&operatorID, &teamID, &gameID); err != nil {
-		t.Skipf("no enabled operator with a game scope: %v", err)
+	var categoryID sharedidentity.CategoryID
+	if err := tx.Raw(`SELECT u.id, u.team_id, g.category_id FROM users u JOIN user_category_scopes g ON g.user_id = u.id WHERE u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id IS NOT NULL ORDER BY u.id, g.category_id LIMIT 1`).Row().Scan(&operatorID, &teamID, &categoryID); err != nil {
+		t.Skipf("no enabled operator with a category scope: %v", err)
 	}
 	if err := tx.Raw(`SELECT id FROM users WHERE role = 'admin' AND status = 'enabled' ORDER BY id LIMIT 1`).Row().Scan(&creatorID); err != nil {
 		t.Skipf("no enabled administrator: %v", err)
@@ -48,24 +49,24 @@ func TestLiveComposeScheduleReadsTheTeamPoolWithoutPersonalUsages(t *testing.T) 
 	if err := tx.Raw(`SELECT id FROM compose_templates WHERE code = 'basic_cut' AND version = 1 AND status = 'active' ORDER BY id LIMIT 1`).Row().Scan(&templateID); err != nil {
 		t.Skipf("no active basic cut template: %v", err)
 	}
-	// A pool material whose like_count is unique inside the game, so the rule
+	// A pool material whose like_count is unique inside the category, so the rule
 	// below can select exactly this one; and no usage for either person.
 	var materialID, likeCount int64
-	if err := tx.Raw(`SELECT m.id, sc.like_count FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? AND sc.game_id = ? AND m.status = 'available' AND NOT EXISTS (SELECT 1 FROM material_usages mu WHERE mu.material_id = m.id AND mu.user_id IN (?, ?)) AND (SELECT COUNT(*) FROM materials m2 JOIN source_contents sc2 ON sc2.id = m2.source_content_id WHERE m2.team_id = ? AND sc2.game_id = ? AND sc2.like_count = sc.like_count) = 1 ORDER BY m.id LIMIT 1`, teamID, gameID, creatorID, operatorID, teamID, gameID).Row().Scan(&materialID, &likeCount); err != nil {
+	if err := tx.Raw(`SELECT m.id, sc.like_count FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? AND sc.category_id = ? AND m.status = 'available' AND NOT EXISTS (SELECT 1 FROM material_usages mu WHERE mu.material_id = m.id AND mu.user_id IN (?, ?)) AND (SELECT COUNT(*) FROM materials m2 JOIN source_contents sc2 ON sc2.id = m2.source_content_id WHERE m2.team_id = ? AND sc2.category_id = ? AND sc2.like_count = sc.like_count) = 1 ORDER BY m.id LIMIT 1`, teamID, categoryID, creatorID, operatorID, teamID, categoryID).Row().Scan(&materialID, &likeCount); err != nil {
 		t.Skipf("no team material without creator/operator usage: %v", err)
 	}
 	// A different material with a real usage lets the same transaction exercise
 	// the manual "my materials" path, which must keep writing the usage id.
 	var usageID, usageMaterialID, usageUserID int64
-	var usageGame string
-	if err := tx.Raw(`SELECT mu.id, mu.material_id, mu.user_id, sc.game_id FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.team_id = ? AND mu.status = 'active' AND m.status = 'available' AND mu.material_id <> ? ORDER BY mu.id LIMIT 1`, teamID, materialID).Row().Scan(&usageID, &usageMaterialID, &usageUserID, &usageGame); err != nil {
+	var usageCategory sharedidentity.CategoryID
+	if err := tx.Raw(`SELECT mu.id, mu.material_id, mu.user_id, sc.category_id FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id WHERE mu.team_id = ? AND mu.status = 'active' AND m.status = 'available' AND mu.material_id <> ? ORDER BY mu.id LIMIT 1`, teamID, materialID).Row().Scan(&usageID, &usageMaterialID, &usageUserID, &usageCategory); err != nil {
 		t.Skipf("team has no other active usage to exercise the manual path: %v", err)
 	}
 
 	rules := []model.ComposePriorityRule{{Priority: 1, Action: "match", Logic: "all", Conditions: []model.ComposeCondition{{Field: "like_count", Operator: "eq", Value: json.RawMessage(strconv.FormatInt(likeCount, 10))}}}}
 	rulesJSON, _ := json.Marshal(rules)
 	stored, err := createComposeStrategyAudited(tx, model.ComposeStrategy{
-		TeamID: teamID, GameID: gameID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1,
+		TeamID: teamID, CategoryID: categoryID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1,
 		Name: "团队素材池验证", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`),
 		ExecutionMode: model.ComposeExecutionManual, PriorityRules: rules, RulesJSON: rulesJSON,
 		SingleLimit: 1, DailyLimit: 1, Status: model.ComposeStrategyEnabled,
@@ -132,24 +133,24 @@ func TestLiveComposeScheduleReadsTheTeamPoolWithoutPersonalUsages(t *testing.T) 
 		t.Fatalf("scheduling created %d personal usage rows for material %d", joinedUsages, materialID)
 	}
 
-	var crossGame int
-	if err := tx.Raw(`SELECT COUNT(*) FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? AND (sc.game_id IS NULL OR sc.game_id <> ?)`, teamID, gameID).Row().Scan(&crossGame); err != nil {
+	var crossCategory int
+	if err := tx.Raw(`SELECT COUNT(*) FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? AND (sc.category_id IS NULL OR sc.category_id <> ?)`, teamID, categoryID).Row().Scan(&crossCategory); err != nil {
 		t.Fatal(err)
 	}
-	if crossGame > 0 {
-		otherGameSkipped := false
+	if crossCategory > 0 {
+		otherCategorySkipped := false
 		for _, skipped := range run.Skipped {
-			if skipped.Reason == "other_game" {
-				otherGameSkipped = true
+			if skipped.Reason == "other_category" {
+				otherCategorySkipped = true
 			}
 		}
-		if !otherGameSkipped {
-			t.Fatalf("team has %d out-of-game materials but the run recorded no other_game skip: %v", crossGame, run.Skipped)
+		if !otherCategorySkipped {
+			t.Fatalf("team has %d out-of-category materials but the run recorded no other_category skip: %v", crossCategory, run.Skipped)
 		}
-	} else if reason, err := composeCandidateSkipReason(tx, stored, scheduleCandidate{MaterialID: -999, GameID: sql.NullString{String: gameID + "-other", Valid: true}, Status: "available"}, 0, 0); err != nil || reason != "other_game" {
-		t.Fatalf("other_game skip=%q err=%v", reason, err)
+	} else if reason, err := composeCandidateSkipReason(tx, stored, scheduleCandidate{MaterialID: -999, CategoryID: sql.NullInt64{Int64: int64(categoryID) + 1000, Valid: true}, Status: "available"}, 0, 0); err != nil || reason != "other_category" {
+		t.Fatalf("other_category skip=%q err=%v", reason, err)
 	}
-	if reason, err := composeCandidateSkipReason(tx, stored, scheduleCandidate{MaterialID: -999, GameID: sql.NullString{String: gameID, Valid: true}, Status: "paused"}, 0, 0); err != nil || reason != "material_unavailable" {
+	if reason, err := composeCandidateSkipReason(tx, stored, scheduleCandidate{MaterialID: -999, CategoryID: sql.NullInt64{Int64: int64(categoryID), Valid: true}, Status: "paused"}, 0, 0); err != nil || reason != "material_unavailable" {
 		t.Fatalf("material_unavailable skip=%q err=%v", reason, err)
 	}
 
@@ -171,7 +172,7 @@ func TestLiveComposeScheduleReadsTheTeamPoolWithoutPersonalUsages(t *testing.T) 
 	// an otherwise valid strategy from producing.
 	rulesJSON, _ = json.Marshal(rules)
 	disabledCreatorStrategy, err := createComposeStrategyAudited(tx, model.ComposeStrategy{
-		TeamID: teamID, GameID: gameID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1,
+		TeamID: teamID, CategoryID: categoryID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1,
 		Name: "禁用创建者验证", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`),
 		ExecutionMode: model.ComposeExecutionManual, PriorityRules: rules, RulesJSON: rulesJSON,
 		SingleLimit: 1, DailyLimit: 1, Status: model.ComposeStrategyEnabled,
@@ -202,7 +203,7 @@ func TestLiveComposeScheduleReadsTheTeamPoolWithoutPersonalUsages(t *testing.T) 
 	t.Logf("disabled creator strategy=%d created=%d task_created_by=%d", disabledCreatorStrategy.ID, disabledRun.CreatedCount, disabledTaskCreator)
 
 	manual, written, err := createForUsage(tx, model.ComposeTask{
-		TeamID: teamID, GameID: usageGame, OperatorID: &operatorID, TriggerType: "manual",
+		TeamID: teamID, CategoryID: usageCategory, OperatorID: &operatorID, TriggerType: "manual",
 		MaterialID: usageMaterialID, StrategyID: stored.ID, TemplateCode: "basic_cut", TemplateVersion: 1,
 		ConfigSnapshot: json.RawMessage(`{}`), Status: model.ComposeTaskPending,
 		RequestKey: "t03-manual-usage-001", CreatedBy: usageUserID,

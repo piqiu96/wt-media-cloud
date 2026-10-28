@@ -6,17 +6,17 @@ import { createUsersClient } from './usersApi.js'
 import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../../shared/ui/resource/ResourceStatusBadge.vue'
-import { enabledGames } from '../../../../shared/utils/games.js'
+import { enabledCategories } from '../../../../shared/utils/categories.js'
 import { useAutoRefresh } from '../../../../shared/utils/useAutoRefresh.js'
 
 const client = createUsersClient()
 const users = ref([])
 const teams = ref([])
-const games = ref([])
+const categories = ref([])
 const loading = ref(true)
 const error = ref('')
 
-const filters = ref({ uid: '', username: '', role: '', teamId: '', status: '', gameId: '' })
+const filters = ref({ uid: '', username: '', role: '', teamId: '', status: '', categoryId: '' })
 const pagination = ref({ current: 1, pageSize: 10 })
 const userDialogVisible = ref(false)
 const editingUser = ref(null)
@@ -29,8 +29,8 @@ const passwordTarget = ref(null)
 const newPassword = ref('')
 
 const roleLabels = { admin: '管理员', senior_operator: '高级运营', operator: '普通运营' }
-const enabledGameOptions = computed(() => enabledGames(games.value))
-const gameNameMap = computed(() => new Map(games.value.map((game) => [game.id, game.name])))
+const enabledCategoryOptions = computed(() => enabledCategories(categories.value))
+const categoryNameMap = computed(() => new Map(categories.value.map((category) => [category.id, category.name])))
 const requiresScope = computed(() => userForm.value.role !== 'admin')
 const pagedUsers = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
@@ -42,7 +42,7 @@ const columns = [
   { colKey: 'username', title: '用户名', width: 150 },
   { colKey: 'role', title: '角色', width: 120 },
   { colKey: 'team_name', title: '运营团队', width: 140 },
-  { colKey: 'game_ids', title: '游戏范围', width: 220 },
+  { colKey: 'category_ids', title: '类目范围', width: 220 },
   { colKey: 'status', title: '状态', width: 90 },
   { colKey: 'operations', title: '操作', width: 280, fixed: 'right' },
 ]
@@ -52,7 +52,7 @@ const tableScroll = computed(() => ({ x: `${columns.reduce((sum, col) => sum + c
 onMounted(loadAll)
 
 function emptyUserForm() {
-  return { username: '', password: '', role: 'operator', teamId: '', status: 'enabled', gameIds: [] }
+  return { username: '', password: '', role: 'operator', teamId: '', status: 'enabled', categoryIds: [] }
 }
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
@@ -60,14 +60,14 @@ async function loadAll({ quiet = false } = {}) {
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const [userRows, teamRows, gameRows] = await Promise.all([
+    const [userRows, teamRows, categoryRows] = await Promise.all([
       client.listUsers(filters.value),
       client.listTeams(),
-      client.listGames(),
+      client.listCategories(),
     ])
     users.value = userRows || []
     teams.value = teamRows || []
-    games.value = gameRows || []
+    categories.value = categoryRows || []
     if (!quiet) pagination.value.current = 1
   } catch (e) {
     if (!quiet) error.value = friendlyError(e)
@@ -94,7 +94,7 @@ async function applyFilters() {
 }
 
 function clearFilters() {
-  filters.value = { uid: '', username: '', role: '', teamId: '', status: '', gameId: '' }
+  filters.value = { uid: '', username: '', role: '', teamId: '', status: '', categoryId: '' }
   applyFilters()
 }
 
@@ -112,7 +112,7 @@ function openEditUser(user) {
     role: user.role,
     teamId: user.team_id || '',
     status: user.status,
-    gameIds: [...(user.game_ids || [])],
+    categoryIds: [...(user.category_ids || [])],
   }
   userDialogVisible.value = true
 }
@@ -130,8 +130,8 @@ async function saveUser() {
     error.value = '普通运营和高级运营必须选择运营团队'
     return
   }
-  if (requiresScope.value && !userForm.value.gameIds.length) {
-    error.value = '普通运营和高级运营必须选择至少一个游戏'
+  if (requiresScope.value && !userForm.value.categoryIds.length) {
+    error.value = '普通运营和高级运营必须选择至少一个类目'
     return
   }
   savingUser.value = true
@@ -158,7 +158,7 @@ async function toggleUser(user) {
       role: user.role,
       teamId: user.team_id,
       status: user.status === 'enabled' ? 'disabled' : 'enabled',
-      gameIds: user.game_ids || [],
+      categoryIds: user.category_ids || [],
     })
     await loadAll()
   } catch (e) {
@@ -214,17 +214,17 @@ function friendlyError(e) {
   return e?.message || '操作失败，请检查输入后重试'
 }
 
-function gameScopeText(gameIds) {
-  gameIds = Array.isArray(gameIds) ? gameIds : []
-  if (!gameIds.length) return '全部游戏'
-  return gameIds.map((id) => gameNameMap.value.get(id) || id).join(', ')
+function categoryScopeText(categoryIds) {
+  categoryIds = Array.isArray(categoryIds) ? categoryIds : []
+  if (!categoryIds.length) return '全部类目'
+  return categoryIds.map((id) => categoryNameMap.value.get(id) || id).join(', ')
 }
 </script>
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
     <div class="wt-resource-page">
-    <ResourcePageHeader title="用户管理" description="管理用户权限、运营团队与游戏范围">
+    <ResourcePageHeader title="用户管理" description="管理用户权限、运营团队与类目范围">
       <template #actions>
         <t-button theme="primary" @click="openCreateUser">新增用户</t-button>
       </template>
@@ -242,8 +242,8 @@ function gameScopeText(gameIds) {
         <label class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="filters.teamId" placeholder="全部" clearable>
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">游戏</span><t-select v-model="filters.gameId" placeholder="全部" clearable>
-          <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
+        <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="filters.categoryId" placeholder="全部" clearable>
+          <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="`${category.name}（${category.id}）`" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" placeholder="全部" clearable>
           <t-option value="enabled" label="启用" />
@@ -255,7 +255,7 @@ function gameScopeText(gameIds) {
       <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedUsers" :columns="columns" size="small" hover row-key="id" :scroll="tableScroll">
         <template #role="{ row }"><t-tag size="small">{{ roleLabels[row.role] || row.role }}</t-tag></template>
         <template #team_name="{ row }">{{ row.team_name || '全局' }}</template>
-        <template #game_ids="{ row }">{{ gameScopeText(row.game_ids) }}</template>
+        <template #category_ids="{ row }">{{ categoryScopeText(row.category_ids) }}</template>
         <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
         <template #operations="{ row }">
           <t-space>
@@ -285,9 +285,9 @@ function gameScopeText(gameIds) {
         <t-form-item v-if="requiresScope" label="运营团队">
           <t-select v-model="userForm.teamId"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select>
         </t-form-item>
-        <t-form-item v-if="requiresScope" label="游戏范围">
-          <t-select v-model="userForm.gameIds" multiple filterable placeholder="请选择已启用游戏">
-            <t-option v-for="game in enabledGameOptions" :key="game.id" :value="game.id" :label="`${game.name}（${game.id}）`" />
+        <t-form-item v-if="requiresScope" label="类目范围">
+          <t-select v-model="userForm.categoryIds" multiple filterable placeholder="请选择已启用类目">
+            <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="`${category.name}（${category.id}）`" />
           </t-select>
         </t-form-item>
       </t-form>

@@ -76,12 +76,12 @@ export function downloadActionLabel(status) {
 }
 
 /**
- * 游戏名。查不到就退回 id 而不是 `-`：素材的 `game_id` 是一份真实数据，
- * 游戏表里没有它只是「这一页拿不到名字」，把它显示成「没有游戏」是另一回事。
+ * 类目名。查不到就退回 id 而不是 `-`：素材的 `category_id` 是一份真实数据，
+ * 类目表里没有它只是「这一页拿不到名字」，把它显示成「没有类目」是另一回事。
  */
-export function gameName(games, id) {
+export function categoryName(categories, id) {
   if (!id) return '-'
-  return games.find((item) => item.id === id)?.name || id
+  return categories.find((item) => item.id === id)?.name || id
 }
 
 /** 摘要在表里放不下整串，但也不该断成两行：截到 16 位再加省略号。 */

@@ -3,6 +3,8 @@ package repository
 import (
 	"regexp"
 	"testing"
+
+	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -16,7 +18,7 @@ func TestListSourceViewsProjectsNamesAndFiltersMaterial(t *testing.T) {
 	defer db.Close()
 	created := time.Date(2026, 9, 21, 14, 30, 0, 0, time.UTC)
 	columns := []string{
-		"id", "team_id", "game_id", "platform", "platform_content_id", "title", "description", "cover_url", "source_url",
+		"id", "team_id", "category_id", "platform", "platform_content_id", "title", "description", "cover_url", "source_url",
 		"author_id", "author_sec_uid", "author_uid", "author_home_url", "author_name", "source_type", "strategy_id", "crawl_task_id",
 		"like_count", "favorite_count", "view_count", "comment_count", "share_count",
 		"published_at", "status", "ignored_reason", "audit_note", "failure_reason", "material_id", "created_by", "updated_by", "audited_by", "audited_at",
@@ -60,7 +62,7 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 	defer db.Close()
 	created := time.Date(2026, 9, 21, 14, 30, 0, 0, time.UTC)
 	columns := []string{
-		"id", "team_id", "game_id", "platform", "platform_content_id", "title", "description", "cover_url", "source_url",
+		"id", "team_id", "category_id", "platform", "platform_content_id", "title", "description", "cover_url", "source_url",
 		"author_id", "author_sec_uid", "author_uid", "author_home_url", "author_name", "source_type", "strategy_id", "crawl_task_id",
 		"like_count", "favorite_count", "view_count", "comment_count", "share_count",
 		"published_at", "status", "ignored_reason", "audit_note", "failure_reason", "material_id", "created_by", "updated_by", "audited_by", "audited_at",
@@ -91,16 +93,16 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 	}
 }
 
-func TestSourceViewConditionsBuildsGameMultiSelect(t *testing.T) {
-	conditions, args := sourceViewConditions(Filter{GameIDs: []string{"hy", "sjz"}})
-	if len(conditions) != 1 || conditions[0] != "s.game_id IN (?,?)" {
-		t.Fatalf("conditions = %#v, want game IN clause", conditions)
+func TestSourceViewConditionsBuildsCategoryMultiSelect(t *testing.T) {
+	conditions, args := sourceViewConditions(Filter{CategoryIDs: []identity.CategoryID{1, 3}})
+	if len(conditions) != 1 || conditions[0] != "s.category_id IN (?,?)" {
+		t.Fatalf("conditions = %#v, want category IN clause", conditions)
 	}
-	if len(args) != 2 || args[0] != "hy" || args[1] != "sjz" {
+	if len(args) != 2 || args[0] != identity.CategoryID(1) || args[1] != identity.CategoryID(3) {
 		t.Fatalf("args = %#v, want hy and sjz", args)
 	}
-	empty, emptyArgs := sourceViewConditions(Filter{GameIDs: []string{"", "  "}})
+	empty, emptyArgs := sourceViewConditions(Filter{CategoryIDs: []identity.CategoryID{0, 0}})
 	if len(empty) != 0 || len(emptyArgs) != 0 {
-		t.Fatalf("blank game ids should not filter: conditions=%#v args=%#v", empty, emptyArgs)
+		t.Fatalf("blank category ids should not filter: conditions=%#v args=%#v", empty, emptyArgs)
 	}
 }

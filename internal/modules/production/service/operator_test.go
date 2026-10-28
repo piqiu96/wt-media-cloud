@@ -11,16 +11,16 @@ func TestComposeOperatorOptionsKeepOnlyEnabledTeamResponsiblePeople(t *testing.T
 	team := identity.TeamID(7)
 	otherTeam := identity.TeamID(8)
 	users := []identity.PublicUser{
-		{ID: 9, Username: "op9", Nickname: "小王", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}},
-		{ID: 11, Username: "senior11", Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta", "gamma"}},
-		{ID: 10, Username: "op10", Role: identity.RoleOperator, Status: identity.UserStatusDisabled, TeamID: &team, GameIDs: []string{"delta"}},
-		{ID: 12, Username: "op12", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &otherTeam, GameIDs: []string{"delta"}},
-		{ID: 13, Username: "admin13", Role: identity.RoleAdmin, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}},
-		{ID: 14, Username: "op14", Nickname: "阿李", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"gamma"}},
+		{ID: 9, Username: "op9", Nickname: "小王", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}},
+		{ID: 11, Username: "senior11", Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1, 2}},
+		{ID: 10, Username: "op10", Role: identity.RoleOperator, Status: identity.UserStatusDisabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}},
+		{ID: 12, Username: "op12", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &otherTeam, CategoryIDs: []identity.CategoryID{1}},
+		{ID: 13, Username: "admin13", Role: identity.RoleAdmin, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}},
+		{ID: 14, Username: "op14", Nickname: "阿李", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{2}},
 	}
-	options := composeOperatorOptions(users, 7, "delta")
+	options := composeOperatorOptions(users, 7, 1)
 	if len(options) != 2 || options[0].ID != 11 || options[1].ID != 9 {
-		// Eligibility: 9 and 11 only; 14 is responsible for another game.
+		// Eligibility: 9 and 11 only; 14 is responsible for another category.
 		// Sorted by display name, ASCII before CJK.
 		t.Fatalf("options = %+v", options)
 	}
@@ -32,33 +32,33 @@ func TestComposeOperatorOptionsKeepOnlyEnabledTeamResponsiblePeople(t *testing.T
 		t.Fatalf("display names = %+v", got)
 	}
 	if _, ok := got[14]; ok {
-		t.Fatalf("an operator responsible for another game must not be offered: %+v", options)
+		t.Fatalf("an operator responsible for another category must not be offered: %+v", options)
 	}
-	teamWide := composeOperatorOptions(users, 7, "")
+	teamWide := composeOperatorOptions(users, 7, 0)
 	if len(teamWide) != 3 || teamWide[0].ID != 11 || teamWide[1].ID != 9 || teamWide[2].ID != 14 {
-		t.Fatalf("team directory without a game = %+v", teamWide)
+		t.Fatalf("team directory without a category = %+v", teamWide)
 	}
 }
 
 func TestListComposeOperatorsRefusesBeforeTouchingIdentity(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
-	if _, err := ListComposeOperators(operator, 7, "delta"); !errors.Is(err, ErrComposeOperatorForbidden) {
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
+	if _, err := ListComposeOperators(operator, 7, 1); !errors.Is(err, ErrComposeOperatorForbidden) {
 		t.Fatalf("ordinary operator error = %v", err)
 	}
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
-	if _, err := ListComposeOperators(senior, 8, "delta"); !errors.Is(err, ErrComposeOperatorForbidden) {
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
+	if _, err := ListComposeOperators(senior, 8, 1); !errors.Is(err, ErrComposeOperatorForbidden) {
 		t.Fatalf("senior other-team error = %v", err)
 	}
 	admin := identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
-	if _, err := ListComposeOperators(admin, 0, "delta"); !errors.Is(err, ErrComposeOperatorInvalid) {
+	if _, err := ListComposeOperators(admin, 0, 1); !errors.Is(err, ErrComposeOperatorInvalid) {
 		t.Fatalf("admin missing-team error = %v", err)
 	}
 }
 
 func TestComposeListScopePerRole(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	scope, err := resolveComposeListScope(operator, 0, 0, "")
 	if err != nil || scope.TeamID != 7 || scope.OperatorID != 9 || scope.IncludeUnowned != 9 {
 		t.Fatalf("operator default scope=%+v err=%v", scope, err)
@@ -70,7 +70,7 @@ func TestComposeListScopePerRole(t *testing.T) {
 		t.Fatalf("operator foreign operator error = %v", err)
 	}
 
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	scope, err = resolveComposeListScope(senior, 0, 0, "")
 	if err != nil || scope.TeamID != 7 || scope.OperatorID != 0 || scope.IncludeUnowned != 0 {
 		t.Fatalf("senior default scope=%+v err=%v", scope, err)

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -89,7 +88,7 @@ func (f *outputLinkerFake) PresignObjectURL(_ context.Context, key string) (stri
 }
 
 func outputFixture(id int64) model.CompositeOutput {
-	return model.CompositeOutput{ID: id, TeamID: 7, GameID: "delta", MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
+	return model.CompositeOutput{ID: id, TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
 }
 
 func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks *outputTaskFake, linker *outputLinkerFake) *ComposeOutputService {
@@ -101,8 +100,8 @@ func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks 
 // task can read them back.
 func newOutputDownloadService(store *outputMemoryStore, transfers *stubTransfers) *ComposeOutputService {
 	svc := NewComposeOutputService(store, &outputTraceFakes{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{}, transfers)
-	svc.resolveGame = func(gameID string) (string, bool, error) {
-		if gameID == "delta" {
+	svc.resolveCategory = func(categoryID identity.CategoryID) (string, bool, error) {
+		if categoryID == 1 {
 			return "三角洲行动", true, nil
 		}
 		return "", false, nil
@@ -112,7 +111,7 @@ func newOutputDownloadService(store *outputMemoryStore, transfers *stubTransfers
 
 func TestListComposeOutputsScopesLikeTheTaskPage(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 
@@ -127,7 +126,7 @@ func TestListComposeOutputsScopesLikeTheTaskPage(t *testing.T) {
 		t.Fatalf("filters = %d", len(store.filters))
 	}
 	filter := store.filters[0]
-	if filter.TeamID != 7 || len(filter.GameIDs) != 1 || filter.GameIDs[0] != "delta" || filter.OperatorID != 9 || filter.IncludeUnownedCreatedBy != 9 {
+	if filter.TeamID != 7 || len(filter.CategoryIDs) != 1 || filter.CategoryIDs[0] != 1 || filter.OperatorID != 9 || filter.IncludeUnownedCreatedBy != 9 {
 		t.Fatalf("operator filter = %+v", filter)
 	}
 	if filter.PublishStatus != "pending_publish" {
@@ -143,7 +142,7 @@ func TestListComposeOutputsScopesLikeTheTaskPage(t *testing.T) {
 
 func TestListComposeOutputsRefusesUnknownPublishStatus(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	svc := newOutputService(&outputMemoryStore{}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	if _, err := svc.List(operator, ListComposeOutputsInput{PublishStatus: "published_by_hand"}); err == nil {
 		t.Fatal("an unknown publish status must be named invalid")
@@ -152,82 +151,82 @@ func TestListComposeOutputsRefusesUnknownPublishStatus(t *testing.T) {
 
 func TestListComposeOutputsSeniorSeesTeamScopeNotOnlyOwn(t *testing.T) {
 	team := identity.TeamID(7)
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	if _, err := svc.List(senior, ListComposeOutputsInput{}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	filter := store.filters[0]
-	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 || len(filter.GameIDs) != 0 {
-		t.Fatalf("senior default scope must be the whole team and every game: %+v", filter)
+	if filter.OperatorID != 0 || filter.IncludeUnownedCreatedBy != 0 || filter.TeamID != 7 || len(filter.CategoryIDs) != 0 {
+		t.Fatalf("senior default scope must be the whole team and every category: %+v", filter)
 	}
 }
 
-func TestListComposeOutputsNarrowsByGameWithoutWideningTheScope(t *testing.T) {
+func TestListComposeOutputsNarrowsByCategoryWithoutWideningTheScope(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta", "omega"}}
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1, 2}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	admin := identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled, TeamID: &team}
 
 	store := &outputMemoryStore{}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
-	if _, err := svc.List(operator, ListComposeOutputsInput{GameID: "omega"}); err != nil {
-		t.Fatalf("operator own game: %v", err)
+	if _, err := svc.List(operator, ListComposeOutputsInput{CategoryID: 2}); err != nil {
+		t.Fatalf("operator own category: %v", err)
 	}
-	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 1 || got.GameIDs[0] != "omega" || got.TeamID != 7 || got.OperatorID != 9 {
-		t.Fatalf("operator game filter = %+v", got)
+	if got := store.filters[len(store.filters)-1]; len(got.CategoryIDs) != 1 || got.CategoryIDs[0] != 2 || got.TeamID != 7 || got.OperatorID != 9 {
+		t.Fatalf("operator category filter = %+v", got)
 	}
 
-	// A foreign game is refused rather than silently widened back to the actor's games.
+	// A foreign category is refused rather than silently widened back to the actor's categories.
 	before := len(store.filters)
-	if _, err := svc.List(operator, ListComposeOutputsInput{GameID: "jql"}); !errors.Is(err, ErrComposeOutputForbidden) {
-		t.Fatalf("operator foreign game = %v", err)
+	if _, err := svc.List(operator, ListComposeOutputsInput{CategoryID: 3}); !errors.Is(err, ErrComposeOutputForbidden) {
+		t.Fatalf("operator foreign category = %v", err)
 	}
 	if len(store.filters) != before {
-		t.Fatal("a refused game must not reach the store")
+		t.Fatal("a refused category must not reach the store")
 	}
 
-	// Empty game keeps the role's original scope.
+	// Empty category keeps the role's original scope.
 	if _, err := svc.List(operator, ListComposeOutputsInput{}); err != nil {
-		t.Fatalf("operator without game: %v", err)
+		t.Fatalf("operator without category: %v", err)
 	}
-	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 2 || got.GameIDs[0] != "delta" || got.GameIDs[1] != "omega" {
-		t.Fatalf("operator default games = %+v", got)
+	if got := store.filters[len(store.filters)-1]; len(got.CategoryIDs) != 2 || got.CategoryIDs[0] != 1 || got.CategoryIDs[1] != 2 {
+		t.Fatalf("operator default categories = %+v", got)
 	}
 
-	// Seniors and admins may name any game; the team filter still does the narrowing.
-	if _, err := svc.List(senior, ListComposeOutputsInput{GameID: "omega"}); err != nil {
-		t.Fatalf("senior any game: %v", err)
+	// Seniors and admins may name any category; the team filter still does the narrowing.
+	if _, err := svc.List(senior, ListComposeOutputsInput{CategoryID: 2}); err != nil {
+		t.Fatalf("senior any category: %v", err)
 	}
-	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 1 || got.GameIDs[0] != "omega" || got.TeamID != 7 {
-		t.Fatalf("senior game filter = %+v", got)
+	if got := store.filters[len(store.filters)-1]; len(got.CategoryIDs) != 1 || got.CategoryIDs[0] != 2 || got.TeamID != 7 {
+		t.Fatalf("senior category filter = %+v", got)
 	}
-	if _, err := svc.List(admin, ListComposeOutputsInput{GameID: "omega"}); err != nil {
-		t.Fatalf("admin any game: %v", err)
+	if _, err := svc.List(admin, ListComposeOutputsInput{CategoryID: 2}); err != nil {
+		t.Fatalf("admin any category: %v", err)
 	}
-	if got := store.filters[len(store.filters)-1]; len(got.GameIDs) != 1 || got.GameIDs[0] != "omega" {
-		t.Fatalf("admin game filter = %+v", got)
+	if got := store.filters[len(store.filters)-1]; len(got.CategoryIDs) != 1 || got.CategoryIDs[0] != 2 {
+		t.Fatalf("admin category filter = %+v", got)
 	}
 
 	before = len(store.filters)
-	if _, err := svc.List(admin, ListComposeOutputsInput{GameID: strings.Repeat("a", 33)}); !errors.Is(err, ErrComposeOutputInvalid) {
-		t.Fatalf("overlong game = %v", err)
+	if _, err := svc.List(admin, ListComposeOutputsInput{CategoryID: identity.CategoryID(-1)}); !errors.Is(err, ErrComposeOutputInvalid) {
+		t.Fatalf("overlong category = %v", err)
 	}
 	if len(store.filters) != before {
-		t.Fatal("an invalid game must not reach the store")
+		t.Fatal("an invalid category must not reach the store")
 	}
 }
 
-func TestComposeOutputSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
+func TestComposeOutputSeniorReadsEveryCategoryOfTheirTeam(t *testing.T) {
 	team := identity.TeamID(7)
-	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"omega"}}
+	senior := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{2}}
 	otherTeam := outputFixture(2)
 	otherTeam.TeamID = 8
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1), otherTeam}}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	if _, err := svc.Get(senior, 1); err != nil {
-		t.Fatalf("senior must read a same-team output in another game: %v", err)
+		t.Fatalf("senior must read a same-team output in another category: %v", err)
 	}
 	if _, err := svc.Get(senior, 2); !errors.Is(err, ErrComposeOutputNotFound) {
 		t.Fatalf("senior must not read another team's output: %v", err)
@@ -236,7 +235,7 @@ func TestComposeOutputSeniorReadsEveryGameOfTheirTeam(t *testing.T) {
 
 func TestGetComposeOutputDetailTracesSources(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}}
 	traces := &outputTraceFakes{material: model.Material{ID: 42, Title: "素材甲"}, usage: model.MaterialUsage{ID: 9, Status: "active"}, strategy: model.ComposeStrategy{ID: 3, Name: "策略"}}
 	tasks := &outputTaskFake{task: model.ComposeTask{ID: 55, Status: model.ComposeTaskSuccess, ConfigSnapshot: []byte(`{"start_seconds":0,"end_seconds":1}`)}}
@@ -258,7 +257,7 @@ func TestGetComposeOutputDetailTracesSources(t *testing.T) {
 // empty instead of falling back to some other row or panicking on the nil id.
 func TestGetComposeOutputDetailLeavesUsageTraceEmptyForPoolOutputs(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	output := outputFixture(1)
 	output.MaterialUsageID = nil
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{output}}
@@ -277,7 +276,7 @@ func TestGetComposeOutputDetailLeavesUsageTraceEmptyForPoolOutputs(t *testing.T)
 
 func TestGetComposeOutputOutOfScopeAnswersNotFound(t *testing.T) {
 	team := identity.TeamID(7)
-	other := identity.PublicUser{ID: 20, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	other := identity.PublicUser{ID: 20, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}} // CreatedBy 9
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	if _, err := svc.Get(other, 1); err != ErrComposeOutputNotFound {
@@ -293,7 +292,7 @@ func TestGetComposeOutputOutOfScopeAnswersNotFound(t *testing.T) {
 
 func TestArchiveComposeOutputFlipsPendingPublishOnly(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 
@@ -308,7 +307,7 @@ func TestArchiveComposeOutputFlipsPendingPublishOnly(t *testing.T) {
 
 func TestArchiveComposeOutputRefusesBlockedRow(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}, archiveBlocked: true}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	if _, err := svc.Archive(operator, 1); err != ErrComposeOutputNotArchivable {
@@ -318,7 +317,7 @@ func TestArchiveComposeOutputRefusesBlockedRow(t *testing.T) {
 
 func TestComposeOutputVideoURLSignsTheOutputKey(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}}
 	linker := &outputLinkerFake{}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, linker)
@@ -342,7 +341,7 @@ func TestComposeOutputVideoURLSignsTheOutputKey(t *testing.T) {
 // anything.
 func TestCreateOutputDownloadQueuesTheOutputForTheActor(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
 	transfers := &stubTransfers{}
 	svc := newOutputDownloadService(store, transfers)
@@ -370,8 +369,8 @@ func TestCreateOutputDownloadQueuesTheOutputForTheActor(t *testing.T) {
 	if input.AssetTitle != "成片-5" {
 		t.Fatalf("title = %q, want the resolved output name", input.AssetTitle)
 	}
-	if input.GameName != "三角洲行动" {
-		t.Fatalf("game name = %q, want the resolved game", input.GameName)
+	if input.CategoryName != "三角洲行动" {
+		t.Fatalf("category name = %q, want the resolved category", input.CategoryName)
 	}
 	if input.SourceObjectKey != "compose-outputs/55/output.mp4" || input.TotalBytes != 1024 || input.ExpectedSHA256 != "abc" {
 		t.Fatalf("object facts = %+v, want the row's verified object", input)
@@ -390,7 +389,7 @@ func TestCreateOutputDownloadQueuesTheOutputForTheActor(t *testing.T) {
 
 func TestCreateOutputDownloadRefusesAnOutputOutsideTheActorsScope(t *testing.T) {
 	team := identity.TeamID(8)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(5)}}
 	transfers := &stubTransfers{}
 	svc := newOutputDownloadService(store, transfers)
@@ -405,7 +404,7 @@ func TestCreateOutputDownloadRefusesAnOutputOutsideTheActorsScope(t *testing.T) 
 
 func TestComposeOutputOperatorMineKeepsLegacyCreatorRowsVisible(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	legacy := outputFixture(1)
 	foreignLegacy := outputFixture(2)
 	foreignLegacy.CreatedBy = 10
@@ -425,14 +424,14 @@ func TestComposeOutputOperatorMineKeepsLegacyCreatorRowsVisible(t *testing.T) {
 
 func TestComposeOutputListRefusesForeignOperatorFiltersAndDecoratesNames(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}
+	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
 	assigned := outputFixture(1)
 	assigned.OperatorID = operatorIDPtr(9)
 	legacy := outputFixture(2)
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{assigned, legacy}}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	svc.operators = func() ([]identity.PublicUser, error) {
-		return []identity.PublicUser{{ID: 9, Username: "op9", Nickname: "九号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"delta"}}}, nil
+		return []identity.PublicUser{{ID: 9, Username: "op9", Nickname: "九号", Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}}, nil
 	}
 	items, err := svc.List(operator, ListComposeOutputsInput{})
 	if err != nil {

@@ -50,7 +50,7 @@ const menuItems = [
   { value: 'system', title: '系统管理', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
     { title: '运营团队', path: '/operation-teams', icon: 'view-organization' },
-    { title: '游戏管理', path: '/games', icon: 'gamepad' },
+    { title: '类目管理', path: '/categories', icon: 'categorypad' },
   ] },
 ]
 
@@ -89,7 +89,7 @@ const allItems = computed(() => {
   if (isDesktop() && !localAgentAllowed.value) {
     for (const path of localOnlyPaths) hiddenPaths.add(path)
   }
-  // 系统管理：用户管理仅管理员；运营团队 / 游戏管理 高级运营 + 管理员。
+  // 系统管理：用户管理仅管理员；运营团队 / 类目管理 高级运营 + 管理员。
   // Cloud Web 与 Desktop 走同一条规则。
   for (const path of SYSTEM_MANAGEMENT_PATHS) {
     if (!canViewSystemPath(currentUser.value?.role, path)) hiddenPaths.add(path)

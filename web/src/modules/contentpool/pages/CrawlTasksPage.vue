@@ -29,7 +29,7 @@ const detail = ref(null)
 const visible = ref(false)
 const retrying = ref(false)
 const activeTab = ref('overview')
-const games = ref([])
+const categories = ref([])
 const strategyDrawerVisible = ref(false)
 const strategyDrawer = ref(null)
 // 筛选走列表接口（search/status），页面只对返回行做分页切片。
@@ -44,7 +44,7 @@ const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUs
 //
 // 实测（用户实机截图按表头左边界间距反推）：本页三列只有 minWidth 的
 // 「任务名称」220→76、「任务来源」160→76.5、「发现结果」240→76.5，
-// 而所有声明 width 的列逐列精确（ID 69.5 / 游戏 110 / 触发方式 90 / 状态 100 /
+// 而所有声明 width 的列逐列精确（ID 69.5 / 类目 110 / 触发方式 90 / 状态 100 /
 // 执行时间 170 / 修改时间 170 / 修改人 110）。任务名称被压成「m3a…」就是这么来的。
 // 机理与「Chrome 看不出问题」的原因见 ContentPoolPage.vue 里 columns 上方的完整说明。
 const columns = [
@@ -52,7 +52,7 @@ const columns = [
   { colKey: 'name', title: '任务名称', width: 220 },
   { colKey: 'strategy', title: '任务来源', width: 160 },
   { colKey: 'team', title: '运营团队', width: 120 },
-  { colKey: 'game', title: '游戏', width: 110 },
+  { colKey: 'category', title: '类目', width: 110 },
   { colKey: 'trigger', title: '触发方式', width: 90 },
   // 竖排后列宽只由最宽的那一项决定：实测最宽是「自动素材 9,999,999」，
   // 111px（标签 48 + gap 6 + 数值 57），加 td 左右内边距 16px = 127px。
@@ -120,8 +120,8 @@ async function load({ quiet = false } = {}) {
     const data = await client.listTasks(params)
     rows.value = Array.isArray(data) ? data : []
     if (!quiet) pagination.value.current = 1
-    const gameRows = await client.listGames({ scope: 'all' })
-    games.value = Array.isArray(gameRows) ? gameRows : []
+    const categoryRows = await client.listCategories({ scope: 'all' })
+    categories.value = Array.isArray(categoryRows) ? categoryRows : []
   } catch (e) {
     if (!quiet) error.value = e.message || '任务加载失败'
   } finally {
@@ -186,9 +186,9 @@ function taskName(row) {
   return `${sourceName(row)}_${compactTime(row.created_at)}`
 }
 
-function gameName(id) {
-  const game = games.value.find((item) => item.id === id)
-  return game?.name || id || '-'
+function categoryName(id) {
+  const category = categories.value.find((item) => item.id === id)
+  return category?.name || id || '-'
 }
 
 function teamName(id) {
@@ -371,7 +371,7 @@ function hasFailed(task) {
               <span v-else>{{ sourceName(row) }}</span>
             </template>
             <template #team="{ row }">{{ teamName(row.team_id) }}</template>
-            <template #game="{ row }">{{ gameName(row.snapshot?.game_id) }}</template>
+            <template #category="{ row }">{{ categoryName(row.snapshot?.category_id) }}</template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
             <template #found="{ row }"><MetricList :items="foundStats(row)" /></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
@@ -396,7 +396,7 @@ function hasFailed(task) {
           </div>
           <div class="detail-meta">
             <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="task-source-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
-            <div><span>游戏</span><strong>{{ gameName(detail.snapshot?.game_id) }}</strong></div>
+            <div><span>类目</span><strong>{{ categoryName(detail.snapshot?.category_id) }}</strong></div>
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
             <div><span>创建时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
             <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
@@ -469,7 +469,7 @@ function hasFailed(task) {
       <t-drawer :close-btn="true" v-model:visible="strategyDrawerVisible" header="策略详情" size="min(92vw, 560px)" :footer="Boolean(strategyDrawer)">
         <div v-if="strategyDrawer" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>游戏</span><strong>{{ gameName(strategyDrawer.game_id) }}</strong></div>
+          <div class="strategy-drawer__field"><span>类目</span><strong>{{ categoryName(strategyDrawer.category_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(strategyDrawer.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>

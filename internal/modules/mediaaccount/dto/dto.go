@@ -8,7 +8,7 @@ import (
 
 type CreateAccountInput struct {
 	UserID           sharedidentity.UserID
-	GameIDs          []string
+	CategoryIDs      []sharedidentity.CategoryID
 	Name             string
 	Platform         model.Platform
 	OriginalCookie   string
@@ -65,13 +65,13 @@ type UpdateAccountInput struct {
 	BusinessStatus model.BusinessStatus
 	LoginStatus    model.LoginStatus
 	Remark         *string
-	GameIDs        *[]string
+	CategoryIDs    *[]sharedidentity.CategoryID
 	Name           *string
 }
 
 type AccountFilter struct {
 	UserID         sharedidentity.UserID
-	GameIDs        []string
+	CategoryIDs    []sharedidentity.CategoryID
 	Platform       model.Platform
 	BusinessStatus model.BusinessStatus
 	LoginStatus    model.LoginStatus

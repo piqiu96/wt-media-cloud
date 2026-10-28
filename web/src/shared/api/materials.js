@@ -7,10 +7,10 @@ import { isDesktop } from '../../utils.js'
  *
  * 两条容易写错的地方，写在调用点旁边：
  *
- * 1. `list` 的形参就是白名单：服务端读 `search`/`team_id`/`game_ids`/`game_id`/
+ * 1. `list` 的形参就是白名单：服务端读 `search`/`team_id`/`category_ids`/`category_id`/
  *    `joined`/`my_usage`/`team_usage`/`video_status`/`sort_by`/`sort_order`
  *    （`parseMaterialListFilter` + `ListMaterialsFiltered`）。团队范围由服务端决定：
- *    普通运营与高级运营固定本团队，只有管理员能命名目标团队；游戏只是筛选，不是
+ *    普通运营与高级运营固定本团队，只有管理员能命名目标团队；类目只是筛选，不是
  *    可见边界。解构而不是透传，是为了让这条边界在调用点就成立，而不是靠注释维持。
  *
  * 2. `addUsage` 的 200/201 之别在客户端**结构上不可见**：`parseResponse` 两种情况都
@@ -20,11 +20,11 @@ import { isDesktop } from '../../utils.js'
 export function createMaterialsClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    list({ search, team_id, game_ids, game_id, joined, my_usage, team_usage, video_status, sort_by, sort_order } = {}) {
-      // `game_ids` 在线上是逗号分隔的一个参数；页面拿数组表达多选，序列化留在这一层，
+    list({ search, team_id, category_ids, category_id, joined, my_usage, team_usage, video_status, sort_by, sort_order } = {}) {
+      // `category_ids` 在线上是逗号分隔的一个参数；页面拿数组表达多选，序列化留在这一层，
       // 免得每个调用点各自 join 一次、各自漏掉去重。
-      const games = Array.isArray(game_ids) ? game_ids.filter(Boolean).join(',') : game_ids
-      return api.get('/materials', { search, team_id, game_ids: games, game_id, joined, my_usage, team_usage, video_status, sort_by, sort_order })
+      const categories = Array.isArray(category_ids) ? category_ids.filter(Boolean).join(',') : category_ids
+      return api.get('/materials', { search, team_id, category_ids: categories, category_id, joined, my_usage, team_usage, video_status, sort_by, sort_order })
     },
     get(id) { return api.get(`/materials/${id}`) },
     addUsage(id) { return api.post(`/materials/${id}/usages`, {}) },

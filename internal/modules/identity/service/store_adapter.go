@@ -58,30 +58,30 @@ func (mysqlStore) DeleteTeamWithAudit(teamID model.TeamID, event model.AuditEven
 func (mysqlStore) TeamHasReferences(teamID model.TeamID) (bool, error) {
 	return repository.TeamHasReferences(teamID)
 }
-func (mysqlStore) CreateGameWithAudit(game model.OperationGame, event model.AuditEvent) error {
-	return repository.CreateGameWithAudit(game, event)
+func (mysqlStore) CreateCategoryWithAudit(category model.Category, event model.AuditEvent) (model.CategoryID, error) {
+	return repository.CreateCategoryWithAudit(category, event)
 }
-func (mysqlStore) FindGame(id string) (model.OperationGame, bool, error) {
-	return repository.FindGame(id)
+func (mysqlStore) FindCategory(id model.CategoryID) (model.Category, bool, error) {
+	return repository.FindCategory(id)
 }
-func (mysqlStore) ListGames() ([]model.OperationGame, error) { return repository.ListGames() }
-func (mysqlStore) UpdateGameWithAudit(game model.OperationGame, event model.AuditEvent) error {
-	return repository.UpdateGameWithAudit(game, event)
+func (mysqlStore) ListCategories() ([]model.Category, error) { return repository.ListCategories() }
+func (mysqlStore) UpdateCategoryWithAudit(category model.Category, event model.AuditEvent) error {
+	return repository.UpdateCategoryWithAudit(category, event)
 }
-func (mysqlStore) DeleteGameWithAudit(id string, event model.AuditEvent) error {
-	return repository.DeleteGameWithAudit(id, event)
+func (mysqlStore) DeleteCategoryWithAudit(id model.CategoryID, event model.AuditEvent) error {
+	return repository.DeleteCategoryWithAudit(id, event)
 }
-func (mysqlStore) GameHasReferences(id string) (bool, error) {
-	return repository.GameHasReferences(id)
+func (mysqlStore) CategoryHasReferences(id model.CategoryID) (bool, error) {
+	return repository.CategoryHasReferences(id)
 }
-func (mysqlStore) ListGameReferenceSummaries() (map[string]model.GameReferenceSummary, error) {
-	return repository.ListGameReferenceSummaries()
+func (mysqlStore) ListCategoryReferenceSummaries() (map[model.CategoryID]model.CategoryReferenceSummary, error) {
+	return repository.ListCategoryReferenceSummaries()
 }
-func (mysqlStore) GameReferences(gameID string) (model.GameReferences, error) {
-	return repository.GameReferences(gameID)
+func (mysqlStore) CategoryReferences(categoryID model.CategoryID) (model.CategoryReferences, error) {
+	return repository.CategoryReferences(categoryID)
 }
-func (mysqlStore) UserHasGameReferencesOutsideScope(userID model.UserID, gameIDs []string) (bool, error) {
-	return repository.UserHasGameReferencesOutsideScope(userID, gameIDs)
+func (mysqlStore) UserHasCategoryReferencesOutsideScope(userID model.UserID, categoryIDs []model.CategoryID) (bool, error) {
+	return repository.UserHasCategoryReferencesOutsideScope(userID, categoryIDs)
 }
 func (mysqlStore) CreateSession(session model.Session, replaceSessionID string) (model.SessionCreateResult, error) {
 	return repository.CreateSession(session, replaceSessionID)

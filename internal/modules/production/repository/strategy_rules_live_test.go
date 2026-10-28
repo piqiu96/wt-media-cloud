@@ -10,6 +10,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 func TestLiveStrategyRulesRoundTripAndImmediateRun(t *testing.T) {
@@ -39,8 +40,8 @@ func TestLiveStrategyRulesRoundTripAndImmediateRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = tx.Rollback().Error })
 	var userID, teamID, templateID int64
-	var gameID string
-	if err := tx.Raw(`SELECT mu.user_id, mu.team_id, sc.game_id FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id JOIN users u ON u.id = mu.user_id WHERE mu.status = 'active' AND m.status = 'available' AND u.status = 'enabled' AND sc.game_id IS NOT NULL ORDER BY mu.id LIMIT 1`).Row().Scan(&userID, &teamID, &gameID); err != nil {
+	var categoryID identity.CategoryID
+	if err := tx.Raw(`SELECT mu.user_id, mu.team_id, sc.category_id FROM material_usages mu JOIN materials m ON m.id = mu.material_id JOIN source_contents sc ON sc.id = m.source_content_id JOIN users u ON u.id = mu.user_id WHERE mu.status = 'active' AND m.status = 'available' AND u.status = 'enabled' AND sc.category_id IS NOT NULL ORDER BY mu.id LIMIT 1`).Row().Scan(&userID, &teamID, &categoryID); err != nil {
 		t.Skipf("no eligible local material: %v", err)
 	}
 	if err := tx.Raw(`SELECT id FROM compose_templates WHERE code = 'basic_cut' AND version = 1 AND status = 'active' ORDER BY id LIMIT 1`).Row().Scan(&templateID); err != nil {
@@ -48,15 +49,15 @@ func TestLiveStrategyRulesRoundTripAndImmediateRun(t *testing.T) {
 	}
 	// Scheduling no longer needs a personal usage of the creator, but it does
 	// need an operator who is enabled, in the strategy team and responsible for
-	// the strategy game. The creator above may be an admin or otherwise
+	// the strategy category. The creator above may be an admin or otherwise
 	// ineligible, so resolve the operator separately.
 	var operatorID int64
-	if err := tx.Raw(`SELECT u.id FROM users u JOIN user_game_scopes s ON s.user_id = u.id WHERE u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = ? AND s.game_id = ? ORDER BY u.id LIMIT 1`, teamID, gameID).Row().Scan(&operatorID); err != nil {
-		t.Skipf("no eligible operator for team %d game %s: %v", teamID, gameID, err)
+	if err := tx.Raw(`SELECT u.id FROM users u JOIN user_category_scopes s ON s.user_id = u.id WHERE u.status = 'enabled' AND u.role IN ('operator', 'senior_operator') AND u.team_id = ? AND s.category_id = ? ORDER BY u.id LIMIT 1`, teamID, categoryID).Row().Scan(&operatorID); err != nil {
+		t.Skipf("no eligible operator for team %d category %d: %v", teamID, categoryID, err)
 	}
 	rules := []model.ComposePriorityRule{{Priority: 1, Action: "match", Logic: "all", Conditions: []model.ComposeCondition{{Field: "like_count", Operator: "gte", Value: json.RawMessage(`0`)}}}}
 	rulesJSON, _ := json.Marshal(rules)
-	strategy := model.ComposeStrategy{TeamID: teamID, GameID: gameID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1, Name: "本机事务验证", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: rules, RulesJSON: rulesJSON, SingleLimit: 1, DailyLimit: 1, Status: model.ComposeStrategyEnabled, CreatedBy: userID, UpdatedBy: userID}
+	strategy := model.ComposeStrategy{TeamID: teamID, CategoryID: categoryID, OperatorID: &operatorID, TemplateID: templateID, TemplateVersion: 1, Name: "本机事务验证", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: rules, RulesJSON: rulesJSON, SingleLimit: 1, DailyLimit: 1, Status: model.ComposeStrategyEnabled, CreatedBy: userID, UpdatedBy: userID}
 	stored, err := createComposeStrategyAudited(tx, strategy, "compose_strategy.create", time.Now().UTC())
 	if err != nil || stored.ID == 0 || len(stored.PriorityRules) != 1 || stored.PriorityRules[0].Priority != 1 {
 		t.Fatalf("strategy readback=%+v err=%v", stored, err)
@@ -108,10 +109,10 @@ func TestLiveStrategyRulesRoundTripAndImmediateRun(t *testing.T) {
 		t.Fatalf("disabled strategy processed=%v err=%v", processed, err)
 	}
 	// The scheduler walks the strategy team's pool in material id order, so the
-	// pair that collides is the first available material of the strategy game,
+	// pair that collides is the first available material of the strategy category,
 	// not the first personal usage of the creator.
 	var firstMaterial int64
-	if err := tx.Raw(`SELECT m.id FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? AND sc.game_id = ? AND m.status = 'available' ORDER BY m.id LIMIT 1`, teamID, gameID).Row().Scan(&firstMaterial); err != nil {
+	if err := tx.Raw(`SELECT m.id FROM materials m JOIN source_contents sc ON sc.id = m.source_content_id WHERE m.team_id = ? AND sc.category_id = ? AND m.status = 'available' ORDER BY m.id LIMIT 1`, teamID, categoryID).Row().Scan(&firstMaterial); err != nil {
 		t.Fatal(err)
 	}
 	blocker := strategy
@@ -128,7 +129,7 @@ func TestLiveStrategyRulesRoundTripAndImmediateRun(t *testing.T) {
 	}
 	key := "local-rule-proof-failure"
 	runKey := scheduleRunKey(failureStrategy.ID, time.Time{}, key)
-	blockerTask := model.ComposeTask{TeamID: teamID, GameID: gameID, TriggerType: "manual", DisplayName: "占位任务", MaterialID: firstMaterial, StrategyID: blocker.ID, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: strategy.Config, Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, firstMaterial), CreatedBy: userID}
+	blockerTask := model.ComposeTask{TeamID: teamID, CategoryID: categoryID, TriggerType: "manual", DisplayName: "占位任务", MaterialID: firstMaterial, StrategyID: blocker.ID, TemplateCode: "basic_cut", TemplateVersion: 1, ConfigSnapshot: strategy.Config, Status: model.ComposeTaskPending, RequestKey: scheduledTaskKey(runKey, firstMaterial), CreatedBy: userID}
 	if err := composeTaskInsertWithAudit(tx, &blockerTask, "compose_task.schedule", userID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}

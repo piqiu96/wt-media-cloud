@@ -47,6 +47,13 @@ describe('media account resource page', () => {
     expect(source).toContain('ownerFilteredAccounts.value.slice(start, start + pagination.value.pageSize)')
   })
 
+  it('keeps media-account category selections within one code-owned type', () => {
+    expect(source).toContain('function categoryOptionDisabled(category, categoryIds)')
+    expect(source).toContain('同一个社媒账号的多个类目必须属于同一一级类型')
+    expect(source).toContain(':disabled="categoryOptionDisabled(category, createForm.categoryIds)"')
+    expect(source).toContain(':disabled="categoryOptionDisabled(category, editCategoryIds)"')
+  })
+
   // 2026-10-27：本地操作按账号归属：高级运营只能动本人账号，管理员一律只读。
   it('gates local account work by ownership on desktop', () => {
     expect(source).toContain('function canOperateLocalAccount(account)')

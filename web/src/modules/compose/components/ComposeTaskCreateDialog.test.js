@@ -29,13 +29,13 @@ describe('compose task create drawer', () => {
     expect(source).toContain('只列出「我的素材」里使用中的素材')
   })
 
-  // 停用游戏不能再建策略，也不该出现在素材的游戏筛选里。候选本身不缩小：
-  // 这里只决定「能筛哪些游戏」，已经选中的素材与全量候选都不受影响。
-  it('offers only enabled games in the candidate filter', () => {
-    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
-    expect(source).toContain('const enabledIds = new Set(enabledGames(games.value).map((game) => game.id))')
+  // 停用类目不能再建策略，也不该出现在素材的类目筛选里。候选本身不缩小：
+  // 这里只决定「能筛哪些类目」，已经选中的素材与全量候选都不受影响。
+  it('offers only enabled categories in the candidate filter', () => {
+    expect(source).toContain("import { enabledCategories } from '../../../shared/utils/categories.js'")
+    expect(source).toContain('const enabledIds = new Set(enabledCategories(categories.value).map((category) => category.id))')
     expect(source).toContain('.filter((id) => enabledIds.has(id))')
-    expect(source).toContain('games.value.find((game) => game.id === id)?.name || id')
+    expect(source).toContain('categories.value.find((category) => category.id === id)?.name || id')
   })
 
   // 负责人必须来自策略（M4-I）：提交时把它一起发出去，策略随后被改负责人时服务端
@@ -56,8 +56,8 @@ describe('compose task create drawer', () => {
   })
 
   // 候选是一张内联列表，不再是一个多选下拉：长标题在下拉里变成标签墙，与下面的已选列表
-  // 说的是同一件事，还把搜索框挤没了。筛选行（游戏 + 使用情况）+ 搜索框 + 行内按钮取代它。
-  it('lists candidates inline, filtered by game, usage and a keyword', () => {
+  // 说的是同一件事，还把搜索框挤没了。筛选行（类目 + 使用情况）+ 搜索框 + 行内按钮取代它。
+  it('lists candidates inline, filtered by category, usage and a keyword', () => {
     expect(source).toContain('v-model="candidateUsage"')
     expect(source).toContain(':options="usageOptions"')
     expect(source).toContain('v-model="candidateKeyword"')
@@ -107,7 +107,7 @@ describe('compose task create drawer', () => {
     expect(source).not.toContain('再生成一版')
   })
 
-  // 使用情况是一个字段（两个取值），与「游戏」并排；状态没读回来之前它不可用，行上的按钮
+  // 使用情况是一个字段（两个取值），与「类目」并排；状态没读回来之前它不可用，行上的按钮
   // 也不给 —— 此刻「没用过」和「不知道」长得一样。
   it('offers 未使用过/已使用过 as one field with counts', () => {
     expect(source).toContain("const candidateUsage = ref('unused')")
@@ -205,14 +205,14 @@ describe('compose task create drawer', () => {
     expect(source).toContain('<FormError :message="overrideErrors[field.key]" />')
   })
 
-  // 需求：选素材要能按游戏筛、按名称搜。切游戏只缩候选，已选素材不能跟着消失。
-  it('filters the candidates by game without losing the selection', () => {
-    expect(source).toContain('client.listGames()')
-    expect(source).toContain('v-model="gameFilter"')
+  // 需求：选素材要能按类目筛、按名称搜。切类目只缩候选，已选素材不能跟着消失。
+  it('filters the candidates by category without losing the selection', () => {
+    expect(source).toContain('client.listCategories()')
+    expect(source).toContain('v-model="categoryFilter"')
     expect(source).toContain('const visibleCandidates = computed')
-    expect(source).toContain('game_id: usage.material.game_id')
-    expect(source).toContain('按游戏筛选只缩小候选，不会取消已选中的素材')
-    // 已选取自**全量**候选：改成 visibleCandidates 会让切游戏时已选素材凭空消失。
+    expect(source).toContain('category_id: usage.material.category_id')
+    expect(source).toContain('按类目筛选只缩小候选，不会取消已选中的素材')
+    // 已选取自**全量**候选：改成 visibleCandidates 会让切类目时已选素材凭空消失。
     const selectedLine = source.slice(source.indexOf('const selected = computed'), source.indexOf('\n', source.indexOf('const selected = computed')))
     expect(selectedLine).toContain('candidates.value')
     expect(selectedLine).not.toContain('visibleCandidates')

@@ -2,16 +2,16 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const teamsSource = readFileSync(new URL('./TeamsPage.vue', import.meta.url), 'utf8')
-const gamesSource = readFileSync(new URL('./GamesPage.vue', import.meta.url), 'utf8')
+const categoriesSource = readFileSync(new URL('./CategoriesPage.vue', import.meta.url), 'utf8')
 const appLayoutSource = readFileSync(new URL('../../../../layout/AppLayout.vue', import.meta.url), 'utf8')
 
 describe('M2-A3 management pages', () => {
-  it('lists team and game management in the shared menu, gated by role', () => {
+  it('lists team and category management in the shared menu, gated by role', () => {
     expect(appLayoutSource).toContain('用户管理')
     expect(appLayoutSource).toContain('运营团队')
-    expect(appLayoutSource).toContain('游戏管理')
+    expect(appLayoutSource).toContain('类目管理')
     expect(appLayoutSource).toContain("'/operation-teams'")
-    expect(appLayoutSource).toContain("'/games'")
+    expect(appLayoutSource).toContain("'/categories'")
     // 2026-10-27：这三项从「仅 Cloud 的 adminOnly」改为按角色的公共路径表，
     // Desktop 与管理员的可见性都由它决定。
     expect(appLayoutSource).toContain('SYSTEM_MANAGEMENT_PATHS')
@@ -42,21 +42,21 @@ describe('M2-A3 management pages', () => {
     expect(teamsSource).toContain("if (canManage.value) base.push({ colKey: 'operations'")
   })
 
-  it('gives game page search/list/filter/pagination basics', () => {
-    for (const required of ['游戏管理', '综合搜索', '游戏 ID / 名称', '状态', '查询', '重置', '关联情况', '用户授权', '媒体账号', '新增游戏', 't-table', 't-pagination', '查看关联详情']) {
-      expect(gamesSource).toContain(required)
+  it('gives category page search/list/filter/pagination basics', () => {
+    for (const required of ['类目管理', '综合搜索', '类目 ID / 名称', '状态', '查询', '重置', '关联情况', '用户授权', '媒体账号', '新增类目', 't-table', 't-pagination', '查看关联详情']) {
+      expect(categoriesSource).toContain(required)
     }
-    expect(gamesSource).toContain(":disabled=\"row.status === 'enabled' && hasReferences(row)\"")
-    expect(gamesSource).toContain(':disabled="hasReferences(row)"')
+    expect(categoriesSource).toContain(":disabled=\"row.enabled && hasReferences(row)\"")
+    expect(categoriesSource).toContain(':disabled="hasReferences(row)"')
   })
 
   // 高级运营读的是 management 视图：全部状态、无关联摘要、无写入口。
   it('gives seniors the read-only management view and admins the full one', () => {
-    expect(gamesSource).toContain("const scope = canManage.value ? 'all' : 'management'")
-    expect(gamesSource).toContain('client.listGames({ ...filters.value, scope })')
-    expect(gamesSource).toContain('v-if="canManage" theme="primary" @click="openCreate"')
-    expect(gamesSource).toContain('if (!canManage.value) return')
-    expect(gamesSource).toContain("if (canManage.value) base.push({ colKey: 'references'")
-    expect(gamesSource).toContain("if (canManage.value) base.push({ colKey: 'operations'")
+    expect(categoriesSource).toContain("const scope = canManage.value ? 'all' : 'management'")
+    expect(categoriesSource).toContain('client.listCategories({ ...filters.value, scope })')
+    expect(categoriesSource).toContain('v-if="canManage" theme="primary" @click="openCreate"')
+    expect(categoriesSource).toContain('if (!canManage.value) return')
+    expect(categoriesSource).toContain("if (canManage.value) base.push({ colKey: 'references'")
+    expect(categoriesSource).toContain("if (canManage.value) base.push({ colKey: 'operations'")
   })
 })

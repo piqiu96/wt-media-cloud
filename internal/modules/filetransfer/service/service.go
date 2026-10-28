@@ -283,7 +283,7 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		AssetType:        assetType,
 		AssetID:          input.AssetID,
 		AssetTitle:       input.AssetTitle,
-		GameName:         input.GameName,
+		CategoryName:         input.CategoryName,
 		PublishedAt:      input.PublishedAt,
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
@@ -337,10 +337,10 @@ type CreateUserDownloadInput struct {
 	// a task no agent ever claims.
 	AssetType  model.AssetType
 	AssetTitle string
-	// GameName is what the executor files the download under, when the material
-	// has a game. Empty is a legal value: the executor falls back to a fixed
+	// CategoryName is what the executor files the download under, when the material
+	// has a category. Empty is a legal value: the executor falls back to a fixed
 	// placeholder.
-	GameName string
+	CategoryName string
 	// PublishedAt is when the material was published, carried to the executor for
 	// naming. Nil is a legal value: the executor omits that segment.
 	PublishedAt     *time.Time
@@ -883,7 +883,7 @@ func leaseBody(task model.Task, grant DownloadGrant, lease time.Duration) *dto.L
 		AssetType:            string(task.AssetType),
 		AssetID:              task.AssetID,
 		Title:                task.AssetTitle,
-		GameName:             task.GameName,
+		CategoryName:             task.CategoryName,
 		PublishedAt:          task.PublishedAt,
 		TotalBytes:           task.TotalBytes,
 		ExpectedSHA256:       task.ExpectedSHA256,

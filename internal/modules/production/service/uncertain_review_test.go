@@ -39,7 +39,7 @@ func (f *uncertainReviewMemory) ListUncertainReviews(int64) ([]model.ComposeUnce
 func uncertainTask() model.ComposeTask {
 	operatorID := int64(10)
 	return model.ComposeTask{
-		ID: 77, TeamID: 7, GameID: "game-a", OperatorID: &operatorID,
+		ID: 77, TeamID: 7, CategoryID: 6, OperatorID: &operatorID,
 		Status: model.ComposeTaskFailed, ErrorCode: "execution_uncertain", AttemptCount: 1,
 	}
 }
@@ -53,7 +53,7 @@ func TestSameTeamSeniorResolvesUncertainExecution(t *testing.T) {
 	store := &uncertainReviewMemory{task: &task}
 	svc := NewComposeUncertainReviewService(store)
 	team := identity.TeamID(7)
-	senior := identity.PublicUser{ID: 10, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
+	senior := identity.PublicUser{ID: 10, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{6}}
 	input := uncertainInput()
 
 	resolved, err := svc.Resolve(senior, 77, input)
@@ -72,8 +72,8 @@ func TestSameTeamSeniorResolvesUncertainExecution(t *testing.T) {
 func TestUncertainReviewRefusesOperatorsAndOtherTeams(t *testing.T) {
 	team := identity.TeamID(7)
 	otherTeam := identity.TeamID(8)
-	operator := identity.PublicUser{ID: 10, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, GameIDs: []string{"game-a"}}
-	seniorElsewhere := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &otherTeam, GameIDs: []string{"game-a"}}
+	operator := identity.PublicUser{ID: 10, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{6}}
+	seniorElsewhere := identity.PublicUser{ID: 11, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &otherTeam, CategoryIDs: []identity.CategoryID{6}}
 
 	task := uncertainTask()
 	store := &uncertainReviewMemory{task: &task}
