@@ -65,9 +65,9 @@ async function executeOpening() {
     try {
       // Step 1: Create media account
       const account = await accountClient.create({
-        categoryId: row.category_id,
+        category_ids: row.category_id ? [row.category_id] : [],
         platform: row.platform,
-        originalCookie: row.raw,
+        original_cookie: row.raw,
       })
       row.account = account
       row.status = "created"
@@ -88,9 +88,9 @@ async function retryFailed() {
     row.error = ""
     try {
       const account = await accountClient.create({
-        categoryId: row.category_id,
+        category_ids: row.category_id ? [row.category_id] : [],
         platform: row.platform,
-        originalCookie: row.raw,
+        original_cookie: row.raw,
       })
       row.account = account
       row.status = "created"

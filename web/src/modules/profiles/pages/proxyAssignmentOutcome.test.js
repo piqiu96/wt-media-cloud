@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { classifyObservedAssignment } from './proxyAssignmentOutcome.js'
 
 describe('proxy assignment observation', () => {
-  const target = { proxy_protocol: 'socks5', host: '127.0.0.1', port: 1080 }
+  const target = { protocol: 'socks5', host: '127.0.0.1', port: 1080 }
 
   it('accepts only an observed address that matches the target', () => {
     expect(classifyObservedAssignment(null, target)).toBe('different')

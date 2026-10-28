@@ -130,9 +130,7 @@ const candidateError = ref("")
 const syncVisible = ref(false)
 const syncScan = ref(null)
 const syncSnapshot = ref(null)
-const syncPreview = ref(null)
 const syncSelectedAdded = ref([])
-const syncSelectedUnknown = ref([])
 const syncError = ref("")
 const syncDone = ref(false)
 const syncResult = ref(null)
@@ -225,7 +223,7 @@ const baseProfiles = computed(() => {
   return scopedProfiles.value.filter((profile) => {
     if (filters.mode === "managed" && !profile.proxy_id) return false
     if (filters.mode === "self" && profile.proxy_id) return false
-    if (filters.business && profile.business_status !== filters.business) return false
+    if (filters.enabled && profile.enabled !== (filters.enabled === "enabled")) return false
     if (filters.running) {
       const state = runningState(profile)
       if (filters.running === "open" && state !== true) return false
@@ -233,7 +231,7 @@ const baseProfiles = computed(() => {
       if (filters.running === "unknown" && state !== undefined) return false
     }
     if (search) {
-      const haystack = [profile.name, profile.id, profile.bit_profile_id, profile.remark, profile.cloud_remark]
+      const haystack = [profile.bit_name, profile.id, profile.bit_profile_id, profile.remark, profile.bit_remark]
         .filter(Boolean)
         .join("\n")
         .toLowerCase()
@@ -278,14 +276,14 @@ const columns = computed(() => {
   const list = []
   if (isOwnDesktop.value) list.push({ colKey: "row-select", type: "multiple", width: 48 })
   list.push({ colKey: "id", title: "ID", width: 70 })
-  list.push({ colKey: "name", title: "窗口名称", width: 190 })
+  list.push({ colKey: "bit_name", title: "窗口名称", width: 190 })
   list.push({ colKey: "group_owner", title: rowOwnerTitle.value, width: 128 })
   if (isAdmin.value) list.push({ colKey: "team", title: "运营团队", width: 120 })
   list.push({ colKey: "proxy_mode", title: "代理方式", width: 96 })
   list.push({ colKey: "proxy_info", title: "代理信息", width: 180 })
   list.push({ colKey: "accounts", title: "关联账号", width: 170 })
-  list.push({ colKey: "cloud_remark", title: "运营备注", width: 170 })
-  list.push({ colKey: "business_status", title: "业务启停", width: 96 })
+  list.push({ colKey: "remark", title: "运营备注", width: 170 })
+  list.push({ colKey: "enabled", title: "业务启停", width: 96 })
   if (isOwnDesktop.value) list.push({ colKey: "running", title: "运行状态", width: 96 })
   list.push({ colKey: "last_sync", title: "最近同步", width: 118 })
   list.push({ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true, primary: isOwnDesktop.value }), fixed: "right" })
@@ -329,7 +327,7 @@ const batchProxyIssue = computed(() => {
   if (!batchProxyOptions.value.length) return "当前团队没有同时满足启用、未到期、检测正常且有余量的托管代理。"
   const assignments = batchProxyRows.value
   for (const row of assignments) {
-    if (!row.targetId) return `请为「${row.profile.name || row.profile.id}」选择目标代理。`
+    if (!row.targetId) return `请为「${row.profile.bit_name || row.profile.id}」选择目标代理。`
     const target = proxyById.value[row.targetId]
     if (!target) return "所选目标代理已不存在，请重新选择。"
     if (row.profile.proxy_id !== target.id && !proxySelectable(target, null)) {
@@ -338,7 +336,7 @@ const batchProxyIssue = computed(() => {
   }
   const demand = {}
   for (const row of assignments) {
-    if (row.profile.local_status !== "active") continue
+    if (row.profile.local_state !== "active") continue
     if (row.profile.proxy_id === row.targetId) continue
     demand[row.targetId] = (demand[row.targetId] || 0) + 1
   }
@@ -373,14 +371,11 @@ const syncMissingProfiles = computed(() => {
   const missing = new Set((scan.diff || []).filter((item) => item.kind === "missing").map((item) => item.bit_profile_id))
   return (scan.profiles || []).filter((profile) => missing.has(profile.bit_profile_id))
 })
-const syncProxyChanges = computed(() => syncPreview.value?.changes || [])
-const syncActionableProxyChanges = computed(() => syncProxyChanges.value.filter((change) => ["changed", "unbound", "unknown"].includes(change.kind)))
 const syncSelectableAdded = computed(() => syncAddedProfiles.value.filter((profile) => !profile.ownership_conflict))
 const syncHasChanges = computed(() => !syncDone.value && (
   syncSelectableAdded.value.length > 0
   || syncChangedProfiles.value.length > 0
   || syncMissingProfiles.value.length > 0
-  || syncActionableProxyChanges.value.length > 0
 ))
 const syncSummaryItems = computed(() => {
   const result = syncResult.value
@@ -390,7 +385,6 @@ const syncSummaryItems = computed(() => {
       { key: "added", label: "已建立关联", value: result.added, tone: "success" },
       { key: "updated", label: "已更新", value: result.updated, tone: "success" },
       { key: "missing", label: "标记缺失", value: result.missing, tone: "warning" },
-      { key: "proxy", label: "代理已核对", value: result.proxy, tone: "success" },
       { key: "skipped", label: "跳过", value: result.skipped, tone: "neutral" },
     ]
   }
@@ -399,7 +393,6 @@ const syncSummaryItems = computed(() => {
     { key: "added", label: "新增窗口", value: syncAddedProfiles.value.length, tone: "warning" },
     { key: "updated", label: "字段变更", value: syncChangedProfiles.value.length, tone: "warning" },
     { key: "missing", label: "窗口缺失", value: syncMissingProfiles.value.length, tone: "warning" },
-    { key: "proxy", label: "代理变化", value: syncProxyChanges.value.length, tone: "warning" },
   ]
 })
 
@@ -423,7 +416,7 @@ onMounted(async () => {
 })
 
 function emptyFilters() {
-  return { search: "", mode: "", business: "", running: "" }
+  return { search: "", mode: "", enabled: "", running: "" }
 }
 
 function emptyCreateForm() {
@@ -551,14 +544,14 @@ function proxyExpired(proxy) {
 function proxyRemaining(proxy) {
   if (!proxy) return 0
   if (proxy.remaining_profile_count !== undefined && proxy.remaining_profile_count !== null) return Number(proxy.remaining_profile_count)
-  return Math.max(Number(proxy.max_profile_count || 0) - Number(proxy.assigned_profile_count || 0), 0)
+  return Math.max(Number(proxy.max_profiles || 0) - Number(proxy.assigned_profile_count || 0), 0)
 }
 
 function proxySelectable(proxy, profile) {
   if (!proxy) return false
   const current = profile && profile.proxy_id === proxy.id
   if (proxy.assignment_blocker && !(current && proxy.assignment_blocker === "代理窗口配额已满")) return false
-  if (proxy.business_status !== "active") return false
+  if (proxy.enabled !== true) return false
   if (proxyExpired(proxy)) return false
   if (proxy.last_check_result !== "ok") return false
   return current || proxyRemaining(proxy) > 0
@@ -568,7 +561,7 @@ function proxyAvailabilityReason(proxy, profile) {
   if (!proxy) return "代理不存在"
   const current = profile && profile.proxy_id === proxy.id
   if (proxy.assignment_blocker && !(current && proxy.assignment_blocker === "代理窗口配额已满")) return proxy.assignment_blocker.replace(/^代理/, "")
-  if (proxy.business_status !== "active") return "已停用"
+  if (proxy.enabled !== true) return "已停用"
   if (proxyExpired(proxy)) return "已到期"
   if (proxy.last_check_result !== "ok") return "检测不可用"
   if (current) return "当前托管代理"
@@ -579,19 +572,19 @@ function proxyAvailabilityReason(proxy, profile) {
 // 重新同步不是新分配，但仍要求资源本身可用；同代理的幂等豁免不能盖住过期或停用。
 function proxyResyncable(proxy) {
   if (!proxy || (proxy.assignment_blocker && proxy.assignment_blocker !== "代理窗口配额已满")) return false
-  return proxy.business_status === "active" && !proxyExpired(proxy) && proxy.last_check_result === "ok"
+  return proxy.enabled === true && !proxyExpired(proxy) && proxy.last_check_result === "ok"
 }
 
 function proxyConfigMismatch(profile, proxy) {
   if (!profile?.proxy_id || !proxy) return false
-  return String(profile.proxy_type || "") !== String(proxy.proxy_protocol || "")
-    || String(profile.proxy_host || "") !== String(proxy.host || "")
-    || Number(profile.proxy_port || 0) !== Number(proxy.port || 0)
+  return String(profile.bit_proxy_type || "") !== String(proxy.protocol || "")
+    || String(profile.bit_proxy_host || "") !== String(proxy.host || "")
+    || Number(profile.bit_proxy_port || 0) !== Number(proxy.port || 0)
 }
 
 function anomalyReasons(profile) {
   const reasons = []
-  if (profile.local_status === "local_missing") reasons.push("窗口缺失")
+  if (profile.local_state === "local_missing") reasons.push("窗口缺失")
   if (!profile.proxy_id) return reasons
   const proxy = proxyById.value[profile.proxy_id]
   if (!proxy) {
@@ -614,7 +607,7 @@ function hasRowIssue(profile) {
 }
 
 function rowOperable(profile) {
-  return profile.local_status === "active" && profile.business_status === "enabled"
+  return profile.local_state === "active" && profile.enabled === true
 }
 
 function isManaged(profile) {
@@ -622,8 +615,8 @@ function isManaged(profile) {
 }
 
 function actualProxyText(profile) {
-  if (!profile.proxy_host || !profile.proxy_port) return ""
-  return `${profile.proxy_type ? `${profile.proxy_type}://` : ""}${profile.proxy_host}:${profile.proxy_port}`
+  if (!profile.bit_proxy_host || !profile.bit_proxy_port) return ""
+  return `${profile.bit_proxy_type ? `${profile.bit_proxy_type}://` : ""}${profile.bit_proxy_host}:${profile.bit_proxy_port}`
 }
 
 function proxySubText(profile) {
@@ -631,7 +624,7 @@ function proxySubText(profile) {
     const proxy = proxyById.value[profile.proxy_id]
     return proxy ? (proxy.name || `${proxy.host}:${proxy.port}`) : "托管资源不可用"
   }
-  return profile.proxy_host ? "比特当前代理" : "直连"
+  return profile.bit_proxy_host ? "比特当前代理" : "直连"
 }
 
 function managedProxy(profile) {
@@ -649,11 +642,11 @@ function accountsFor(profile) {
 function accountTitle(profile) {
   const accounts = accountsFor(profile)
   if (!accounts.length) return ""
-  return accounts.map((account) => `${platformLabel(account.platform)} ${account.name || account.platform_account_id || "未识别"}`).join("、")
+  return accounts.map((account) => `${platformLabel(account.platform)} ${account.platform_name || account.platform_account_id || "未识别"}`).join("、")
 }
 
 function accountLines(profile) {
-  return accountsFor(profile).slice(0, 2).map((account) => `${platformLabel(account.platform)} ${account.name || account.platform_account_id || "未识别"}`)
+  return accountsFor(profile).slice(0, 2).map((account) => `${platformLabel(account.platform)} ${account.platform_name || account.platform_account_id || "未识别"}`)
 }
 
 function ownerLabel(userId) {
@@ -671,7 +664,7 @@ function teamName(profile) {
 }
 
 function groupOwnerText(profile) {
-  if (isOwnDesktop.value || (!isAdmin.value && !isSenior.value)) return profile.group_name || profile.group_id || "-"
+  if (isOwnDesktop.value || (!isAdmin.value && !isSenior.value)) return profile.bit_group_name || profile.bit_group_id || "-"
   return ownerLabel(profile.user_id)
 }
 
@@ -754,7 +747,7 @@ function openDetail(profile) {
 
 function openNote(profile) {
   noteProfile.value = profile
-  noteText.value = profile.cloud_remark || ""
+  noteText.value = profile.remark || ""
   noteError.value = ""
   noteVisible.value = true
 }
@@ -764,7 +757,7 @@ async function saveNote() {
   noteSaving.value = true
   noteError.value = ""
   try {
-    await bindingClient.updateProfile(noteProfile.value.id, { cloud_remark: noteText.value })
+    await bindingClient.updateProfile(noteProfile.value.id, { remark: noteText.value })
     noteVisible.value = false
     feedback.toast.success("运营备注已保存")
     await reloadAll()
@@ -778,7 +771,7 @@ async function saveNote() {
 async function toggleRunning(profile) {
   if (!isOwnDesktop.value) return
   if (!rowOperable(profile)) {
-    feedback.toast.info(profile.local_status === "local_missing" ? "窗口已缺失，不能操作。" : "窗口已停用，请先启用。")
+    feedback.toast.info(profile.local_state === "local_missing" ? "窗口已缺失，不能操作。" : "窗口已停用，请先启用。")
     return
   }
   const state = runningState(profile)
@@ -799,19 +792,19 @@ async function toggleRunning(profile) {
   }
 }
 
-const businessTarget = ref(null)
-const businessNextEnabled = ref(false)
-const businessConfirmVisible = ref(false)
-const businessSaving = ref(false)
+const enabledTarget = ref(null)
+const nextEnabled = ref(false)
+const enabledConfirmVisible = ref(false)
+const enabledSaving = ref(false)
 
-async function requestBusinessChange(profile, value) {
+async function requestEnabledChange(profile, value) {
   if (!isOwnDesktop.value) return
-  const nextEnabled = Boolean(value)
-  if (profile.local_status !== "active") {
-    feedback.toast.info("窗口在本机缺失，不能修改业务启停。")
+  const targetEnabled = Boolean(value)
+  if (profile.local_state !== "active") {
+    feedback.toast.info("窗口在本机缺失，不能修改启停。")
     return
   }
-  if (!nextEnabled) {
+  if (!targetEnabled) {
     const snapshot = await refreshRunningStates({ silent: false })
     if (!snapshot) {
       feedback.notice({
@@ -836,25 +829,25 @@ async function requestBusinessChange(profile, value) {
       return
     }
   }
-  businessTarget.value = profile
-  businessNextEnabled.value = nextEnabled
-  businessConfirmVisible.value = true
+  enabledTarget.value = profile
+  nextEnabled.value = targetEnabled
+  enabledConfirmVisible.value = true
 }
 
-async function confirmBusinessChange() {
-  if (!businessTarget.value) return
-  businessSaving.value = true
+async function confirmEnabledChange() {
+  if (!enabledTarget.value) return
+  enabledSaving.value = true
   try {
-    await bindingClient.updateProfile(businessTarget.value.id, {
-      business_status: businessNextEnabled.value ? "enabled" : "disabled",
+    await bindingClient.updateProfile(enabledTarget.value.id, {
+      enabled: nextEnabled.value,
     })
-    businessConfirmVisible.value = false
-    feedback.toast.success(businessNextEnabled.value ? "窗口已启用" : "窗口已停用")
+    enabledConfirmVisible.value = false
+    feedback.toast.success(nextEnabled.value ? "窗口已启用" : "窗口已停用")
     await reloadAll()
   } catch (e) {
-    feedback.toast.error(e.message || "业务启停修改失败")
+    feedback.toast.error(e.message || "启停修改失败")
   } finally {
-    businessSaving.value = false
+    enabledSaving.value = false
   }
 }
 
@@ -1045,15 +1038,15 @@ function openCreatedProxy() {
 async function openEdit(profile) {
   if (!ensureLocalReady()) return
   if (!rowOperable(profile)) {
-    feedback.toast.info(profile.local_status === "local_missing" ? "窗口已缺失，不能编辑。" : "窗口已停用，请先启用再编辑。")
+    feedback.toast.info(profile.local_state === "local_missing" ? "窗口已缺失，不能编辑。" : "窗口已停用，请先启用再编辑。")
     return
   }
   editProfile.value = profile
   editForm.value = {
-    name: profile.name || "",
-    group_id: profile.group_id || "",
-    group_name: profile.group_name || "",
-    remark: profile.remark || "",
+    name: profile.bit_name || "",
+    group_id: profile.bit_group_id || "",
+    group_name: profile.bit_group_name || "",
+    remark: profile.bit_remark || "",
     proxy_intent: "self",
   }
   editGroups.value = []
@@ -1062,8 +1055,8 @@ async function openEdit(profile) {
   editVisible.value = true
   editGroupLoading.value = true
   const groups = await fetchProfileGroups()
-  if (profile.group_id && !groups.some((group) => group.id === profile.group_id)) {
-    groups.unshift({ id: profile.group_id, name: profile.group_name || profile.group_id })
+  if (profile.bit_group_id && !groups.some((group) => group.id === profile.bit_group_id)) {
+    groups.unshift({ id: profile.bit_group_id, name: profile.bit_group_name || profile.bit_group_id })
   }
   editGroups.value = groups
   editGroupLoading.value = false
@@ -1091,7 +1084,7 @@ async function submitEdit() {
   editPending.value = {
     profile,
     targets,
-    original: { name: profile.name || "", group_id: profile.group_id || "", group_name: profile.group_name || "", remark: profile.remark || "" },
+    original: { name: profile.bit_name || "", group_id: profile.bit_group_id || "", group_name: profile.bit_group_name || "", remark: profile.bit_remark || "" },
     snapshot: null,
     fields: [],
   }
@@ -1268,7 +1261,7 @@ function manageWarning(profile) {
   if (isManaged(profile) && !proxy) return "托管代理已不存在或不在当前团队范围内，请更换代理或改为比特自管。"
   if (isManaged(profile) && proxy) {
     if (proxyExpired(proxy)) return "该托管代理已到期，不能重新同步或分配给其他窗口；可更换代理或改为比特自管。"
-    if (proxy.business_status !== "active") return "该托管代理已停用，不能重新同步或分配给其他窗口；可更换代理或改为比特自管。"
+    if (proxy.enabled !== true) return "该托管代理已停用，不能重新同步或分配给其他窗口；可更换代理或改为比特自管。"
     if (!proxy.last_check_result) return "该托管代理尚未检测，不能重新同步或分配给其他窗口；可先到代理管理检测。"
     if (proxy.last_check_result !== "ok") return "该托管代理最近检测失败，不能重新同步或分配给其他窗口；可先到代理管理检测。"
     if (proxyConfigMismatch(profile, proxy)) return "比特中的代理与托管配置不一致；可重新同步托管配置，或保留当前代理改为比特自管。"
@@ -1277,7 +1270,7 @@ function manageWarning(profile) {
 }
 
 function openRowProxyAction(profile) {
-  if (profile.local_status === "local_missing") {
+  if (profile.local_state === "local_missing") {
     openMissing(profile)
     return
   }
@@ -1407,7 +1400,7 @@ async function runProxyAction(kind, profile, targetProxy) {
     kind,
     profileId: profile.id,
     bitProfileId: profile.bit_profile_id,
-    profileName: profile.name,
+    profileName: profile.bit_name,
     targetProxyId: targetProxy?.id || profile.proxy_id || "",
   }
   progressVisible.value = true
@@ -1564,7 +1557,6 @@ async function runSync() {
   }
 
   syncSelectedAdded.value = []
-  syncSelectedUnknown.value = []
   progressPhase.value = "done"
 }
 
@@ -1573,12 +1565,6 @@ function toggleSyncAdded(profile, checked) {
   syncSelectedAdded.value = checked
     ? [...new Set([...syncSelectedAdded.value, profile.bit_profile_id])]
     : syncSelectedAdded.value.filter((id) => id !== profile.bit_profile_id)
-}
-
-function toggleSyncUnknown(change, checked) {
-  syncSelectedUnknown.value = checked
-    ? [...new Set([...syncSelectedUnknown.value, change.profile_id])]
-    : syncSelectedUnknown.value.filter((id) => id !== change.profile_id)
 }
 
 async function acceptSync() {
@@ -1607,7 +1593,7 @@ async function acceptSync() {
     progressPhase.value = "done"
     return
   }
-  finalizeSyncResult(syncSelectedAdded.value.length, 0)
+  finalizeSyncResult(syncSelectedAdded.value.length)
   progressPhase.value = "done"
   await reloadAll()
   reconcileSyncAdded()
@@ -1619,36 +1605,25 @@ function reconcileSyncAdded() {
     .filter((bitProfileId) => profiles.value.some((profile) => profile.bit_profile_id === bitProfileId)).length
 }
 
-function autoProxyChangeCount() {
-  return syncProxyChanges.value.filter((change) => ["changed", "unbound"].includes(change.kind)).length
-}
-
-function finalizeSyncResult(appliedAdded, appliedProxy) {
-  const ownershipSkipped = syncProxyChanges.value
-    .filter((change) => ["conflict", "ownership_conflict"].includes(change.kind)).length
+function finalizeSyncResult(appliedAdded) {
   const unselectedAdded = Math.max(syncSelectableAdded.value.length - appliedAdded, 0)
-  const unselectedUnknown = syncProxyChanges.value
-    .filter((change) => ["unknown", "unregistered"].includes(change.kind) && !syncSelectedUnknown.value.includes(change.profile_id)).length
   syncDone.value = true
   syncResult.value = {
     total: syncSnapshot.value?.profiles?.length || 0,
     added: appliedAdded,
     updated: syncChangedProfiles.value.length,
     missing: syncMissingProfiles.value.length,
-    proxy: appliedProxy,
-    skipped: ownershipSkipped + unselectedAdded + unselectedUnknown,
+    skipped: unselectedAdded,
   }
 }
 
 function closeSyncDrawer() {
   syncVisible.value = false
   syncScan.value = null
-  syncPreview.value = null
   syncDone.value = false
   syncResult.value = null
   syncError.value = ""
   syncSelectedAdded.value = []
-  syncSelectedUnknown.value = []
 }
 
 async function startBatchWindow(kind, targets) {
@@ -1663,7 +1638,7 @@ async function startBatchWindow(kind, targets) {
   progressVerifyLabel.value = "读取并核对"
   progressItems.value = targets.map((profile) => ({
     key: profile.id,
-    label: `${profile.name || profile.id}（${profile.bit_profile_id}）`,
+    label: `${profile.bit_name || profile.id}（${profile.bit_profile_id}）`,
     status: "pending",
   }))
   retryPayload.value = { mode: "batch-window", kind, profileIds: targets.map((profile) => profile.id) }
@@ -1684,12 +1659,12 @@ async function startBatchWindow(kind, targets) {
   for (const item of progressItems.value) {
     const profile = targets.find((candidate) => candidate.id === item.key)
     const state = runningState(profile)
-    if (profile.local_status !== "active") {
+    if (profile.local_state !== "active") {
       item.status = "skipped"
       item.reason = "窗口缺失"
       continue
     }
-    if (profile.business_status !== "enabled") {
+    if (profile.enabled !== true) {
       item.status = "skipped"
       item.reason = "窗口已停用"
       continue
@@ -1778,7 +1753,7 @@ async function startBatchProxy() {
   progressVerifyLabel.value = "读取并核对"
   progressItems.value = assignments.map((row) => ({
     key: row.profile.id,
-    label: `${row.profile.name || row.profile.id} → ${proxyById.value[row.targetId]?.name || row.targetId}`,
+    label: `${row.profile.bit_name || row.profile.id} → ${proxyById.value[row.targetId]?.name || row.targetId}`,
     status: "pending",
   }))
   retryPayload.value = {
@@ -1793,7 +1768,7 @@ async function startBatchProxy() {
     const assignment = assignments.find((row) => row.profile.id === item.key)
     const profile = assignment.profile
     const target = proxyById.value[assignment.targetId]
-    if (profile.local_status !== "active") {
+    if (profile.local_state !== "active") {
       item.status = "skipped"
       item.reason = "窗口缺失"
       continue
@@ -2053,35 +2028,18 @@ function changedFieldsText(bitProfileId) {
   const diff = (syncScan.value?.diff || []).find((item) => item.kind === "changed" && item.bit_profile_id === bitProfileId)
   if (!diff || !(diff.fields || []).length) return "-"
   const labels = {
-    main_user_id: "比特身份",
-    profile_user_id: "环境 ID",
-    name: "窗口名称",
-    seq: "排序",
-    group_id: "分组",
-    group_name: "分组",
-    remark: "比特备注",
-    proxy_type: "代理协议",
-    proxy_host: "代理地址",
-    proxy_port: "代理端口",
+    bit_main_user_id: "比特身份",
+    bit_user_id: "环境 ID",
+    bit_name: "窗口名称",
+    bit_seq: "排序",
+    bit_group_id: "分组",
+    bit_group_name: "分组",
+    bit_remark: "比特备注",
+    bit_proxy_type: "代理协议",
+    bit_proxy_host: "代理地址",
+    bit_proxy_port: "代理端口",
   }
   return [...new Set((diff.fields || []).map((field) => labels[field] || field))].join("、") || "-"
-}
-
-function proxyChangeLabel(kind) {
-  return {
-    changed: "匹配到唯一代理",
-    unbound: "已无代理",
-    unknown: "新发现代理",
-    unregistered: "未登记",
-    conflict: "匹配到多个代理",
-    ownership_conflict: "归属冲突",
-  }[kind] || kind
-}
-
-function proxyChangeTone(kind) {
-  if (kind === "changed") return "success"
-  if (kind === "unbound" || kind === "unknown") return "warning"
-  return "neutral"
 }
 
 function openProxyList() {
@@ -2143,7 +2101,7 @@ function syncIssueAction(profile) {
           </label>
           <label class="wt-filter-field">
             <span class="wt-filter-field__label">业务状态</span>
-            <t-select v-model="filterDraft.business" clearable placeholder="全部">
+            <t-select v-model="filterDraft.enabled" clearable placeholder="全部">
               <t-option value="enabled" label="启用" />
               <t-option value="disabled" label="停用" />
             </t-select>
@@ -2181,8 +2139,8 @@ function syncIssueAction(profile) {
             empty="暂无符合条件的数据"
           >
             <template #id="{ row }"><span class="window-id">{{ row.id }}</span></template>
-            <template #name="{ row }">
-              <div class="window-name" :title="row.name || ''">{{ row.name || "-" }}</div>
+            <template #bit_name="{ row }">
+              <div class="window-name" :title="row.bit_name || ''">{{ row.bit_name || "-" }}</div>
             </template>
             <template #group_owner="{ row }">
               <span>{{ groupOwnerText(row) }}</span>
@@ -2206,21 +2164,21 @@ function syncIssueAction(profile) {
                 <div v-if="accountsFor(row).length > 2" class="window-sub">另 {{ accountsFor(row).length - 2 }} 个</div>
               </template>
             </template>
-            <template #cloud_remark="{ row }">
-              <span class="window-remark" :title="row.cloud_remark || ''">{{ row.cloud_remark || "-" }}</span>
+            <template #remark="{ row }">
+              <span class="window-remark" :title="row.remark || ''">{{ row.remark || "-" }}</span>
             </template>
-            <template #business_status="{ row }">
+            <template #enabled="{ row }">
               <t-switch
                 v-if="isOwnDesktop"
-                :value="row.business_status === 'enabled'"
-                :disabled="row.local_status !== 'active'"
+                :value="row.enabled === true"
+                :disabled="row.local_state !== 'active'"
                 size="small"
-                @change="(value) => requestBusinessChange(row, value)"
+                @change="(value) => requestEnabledChange(row, value)"
               />
               <ResourceStatusBadge
                 v-else
-                :tone="row.business_status === 'enabled' ? 'success' : 'neutral'"
-                :label="row.business_status === 'enabled' ? '启用' : '停用'"
+                :tone="row.enabled ? 'success' : 'neutral'"
+                :label="row.enabled ? '启用' : '停用'"
               />
             </template>
             <template #running="{ row }">
@@ -2269,7 +2227,7 @@ function syncIssueAction(profile) {
       <ResourceOverlay v-model:visible="detailVisible" title="窗口详情" :footer="false" kind="drawer" :width="800">
         <template v-if="detailProfile">
           <FeedbackAlert
-            v-if="detailProfile.local_status === 'local_missing'"
+            v-if="detailProfile.local_state === 'local_missing'"
             theme="warning"
             style="margin-bottom:14px"
             message="该窗口在最近一次同步中未找到。系统记录、关联账号和历史都会保留；请在比特中确认窗口是否仍存在，恢复后重新同步。"
@@ -2277,11 +2235,11 @@ function syncIssueAction(profile) {
           <ResourceSection title="窗口信息">
           <ResourceDescriptions size="small">
             <t-descriptions-item label="ID">{{ detailProfile.id }}</t-descriptions-item>
-            <t-descriptions-item label="窗口名称">{{ detailProfile.name || "-" }}</t-descriptions-item>
+            <t-descriptions-item label="窗口名称">{{ detailProfile.bit_name || "-" }}</t-descriptions-item>
             <t-descriptions-item label="比特窗口 ID">{{ detailProfile.bit_profile_id || "-" }}</t-descriptions-item>
-            <t-descriptions-item label="比特分组">{{ detailProfile.group_name || detailProfile.group_id || "-" }}</t-descriptions-item>
-            <t-descriptions-item label="比特备注">{{ detailProfile.remark || "-" }}</t-descriptions-item>
-            <t-descriptions-item label="窗口状态">{{ detailProfile.local_status === "local_missing" ? "窗口缺失" : "在册" }}</t-descriptions-item>
+            <t-descriptions-item label="比特分组">{{ detailProfile.bit_group_name || detailProfile.bit_group_id || "-" }}</t-descriptions-item>
+            <t-descriptions-item label="比特备注">{{ detailProfile.bit_remark || "-" }}</t-descriptions-item>
+            <t-descriptions-item label="窗口状态">{{ detailProfile.local_state === "local_missing" ? "窗口缺失" : "在册" }}</t-descriptions-item>
             <t-descriptions-item v-if="isOwnDesktop" label="运行状态">{{ runningLabel(detailProfile) }}</t-descriptions-item>
             <t-descriptions-item label="最近同步">{{ formatTime(detailProfile.last_synced_at) }}</t-descriptions-item>
           </ResourceDescriptions>
@@ -2320,7 +2278,7 @@ function syncIssueAction(profile) {
             <div class="config-compare">
               <div class="config-card">
                 <div class="config-card__title">托管配置</div>
-                <div class="config-row"><span>协议</span><strong>{{ managedProxy(detailProfile).proxy_protocol || "-" }}</strong></div>
+                <div class="config-row"><span>协议</span><strong>{{ managedProxy(detailProfile).protocol || "-" }}</strong></div>
                 <div class="config-row"><span>地址</span><strong>{{ managedProxy(detailProfile).host || "-" }}</strong></div>
                 <div class="config-row"><span>端口</span><strong>{{ managedProxy(detailProfile).port || "-" }}</strong></div>
               </div>
@@ -2328,15 +2286,15 @@ function syncIssueAction(profile) {
                 <div class="config-card__title">比特当前配置</div>
                 <div class="config-row">
                   <span>协议</span>
-                  <strong>{{ detailProfile.proxy_type || "-" }}<em v-if="String(detailProfile.proxy_type || '') !== String(managedProxy(detailProfile).proxy_protocol || '')">不同</em></strong>
+                  <strong>{{ detailProfile.bit_proxy_type || "-" }}<em v-if="String(detailProfile.bit_proxy_type || '') !== String(managedProxy(detailProfile).protocol || '')">不同</em></strong>
                 </div>
                 <div class="config-row">
                   <span>地址</span>
-                  <strong>{{ detailProfile.proxy_host || "-" }}<em v-if="String(detailProfile.proxy_host || '') !== String(managedProxy(detailProfile).host || '')">不同</em></strong>
+                  <strong>{{ detailProfile.bit_proxy_host || "-" }}<em v-if="String(detailProfile.bit_proxy_host || '') !== String(managedProxy(detailProfile).host || '')">不同</em></strong>
                 </div>
                 <div class="config-row">
                   <span>端口</span>
-                  <strong>{{ detailProfile.proxy_port || "-" }}<em v-if="Number(detailProfile.proxy_port || 0) !== Number(managedProxy(detailProfile).port || 0)">不同</em></strong>
+                  <strong>{{ detailProfile.bit_proxy_port || "-" }}<em v-if="Number(detailProfile.bit_proxy_port || 0) !== Number(managedProxy(detailProfile).port || 0)">不同</em></strong>
                 </div>
               </div>
             </div>
@@ -2351,14 +2309,14 @@ function syncIssueAction(profile) {
             :columns="[
               { colKey: 'id', title: 'ID', width: 80 },
               { colKey: 'platform', title: '平台', width: 90 },
-              { colKey: 'name', title: '账号名称' },
-              { colKey: 'login_status', title: '登录状态', width: 110 },
+              { colKey: 'platform_name', title: '账号名称' },
+              { colKey: 'platform_login_status', title: '登录状态', width: 110 },
             ]"
             empty="暂无关联账号"
           >
             <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
-            <template #name="{ row }">{{ row.name || row.platform_account_id || "未识别" }}</template>
-            <template #login_status="{ row }"><ResourceStatusBadge :tone="row.login_status === 'normal' ? 'success' : 'warning'" :label="loginStatusText(row.login_status)" /></template>
+            <template #platform_name="{ row }">{{ row.platform_name || row.platform_account_id || "未识别" }}</template>
+            <template #platform_login_status="{ row }"><ResourceStatusBadge :tone="row.platform_login_status === 'normal' ? 'success' : 'warning'" :label="loginStatusText(row.platform_login_status)" /></template>
           </t-table>
 
           </ResourceSection>
@@ -2366,8 +2324,8 @@ function syncIssueAction(profile) {
           <ResourceDescriptions size="small">
             <t-descriptions-item label="运营团队">{{ teamName(detailProfile) }}</t-descriptions-item>
             <t-descriptions-item label="授权运营">{{ ownerLabel(detailProfile.user_id) }}</t-descriptions-item>
-            <t-descriptions-item label="业务启停">{{ detailProfile.business_status === "enabled" ? "启用" : "停用" }}</t-descriptions-item>
-            <t-descriptions-item label="运营备注">{{ detailProfile.cloud_remark || "-" }}</t-descriptions-item>
+            <t-descriptions-item label="业务启停">{{ detailProfile.enabled ? "启用" : "停用" }}</t-descriptions-item>
+            <t-descriptions-item label="运营备注">{{ detailProfile.remark || "-" }}</t-descriptions-item>
           </ResourceDescriptions>
           </ResourceSection>
         </template>
@@ -2377,7 +2335,7 @@ function syncIssueAction(profile) {
         <FeedbackAlert v-if="noteError" :message="noteError" theme="error" style="margin-bottom:12px" />
         <div class="window-note-context">
           <ResourceDescriptions size="small">
-            <t-descriptions-item label="窗口">{{ noteProfile?.name || "-" }}</t-descriptions-item>
+            <t-descriptions-item label="窗口">{{ noteProfile?.bit_name || "-" }}</t-descriptions-item>
             <t-descriptions-item label="窗口 ID">{{ noteProfile?.id || "-" }}</t-descriptions-item>
           </ResourceDescriptions>
         </div>
@@ -2390,18 +2348,18 @@ function syncIssueAction(profile) {
         <template #footer><t-button theme="default" variant="outline" :disabled="noteSaving" @click="noteVisible = false">取消</t-button><t-button theme="primary" :loading="noteSaving" @click="saveNote">保存</t-button></template>
       </ResourceOverlay>
 
-      <ResourceOverlay v-model:visible="businessConfirmVisible" :title="businessNextEnabled ? '启用窗口' : '停用窗口'" :width="560" :busy="businessSaving">
+      <ResourceOverlay v-model:visible="enabledConfirmVisible" :title="nextEnabled ? '启用窗口' : '停用窗口'" :width="560" :busy="enabledSaving">
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ businessTarget?.name || "-" }}</t-descriptions-item>
-          <t-descriptions-item label="窗口 ID">{{ businessTarget?.id || "-" }}</t-descriptions-item>
-          <t-descriptions-item label="业务启停">{{ businessNextEnabled ? "启用" : "停用" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ enabledTarget?.bit_name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口 ID">{{ enabledTarget?.id || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="业务启停">{{ nextEnabled ? "启用" : "停用" }}</t-descriptions-item>
         </ResourceDescriptions>
         <p class="form-hint">
-          {{ businessNextEnabled
+          {{ nextEnabled
             ? "启用后窗口可用于后续业务操作，不会自动打开窗口，也不会改变代理关系。"
             : "停用不会关闭窗口、删除账号或清除代理关系；请确认窗口已关闭后再停用。" }}
         </p>
-              <template #footer><t-button theme="default" variant="outline" :disabled="businessSaving" @click="businessConfirmVisible = false">取消</t-button><t-button theme="primary" :loading="businessSaving" @click="confirmBusinessChange">{{ businessNextEnabled ? '确认启用' : '确认停用' }}</t-button></template>
+              <template #footer><t-button theme="default" variant="outline" :disabled="enabledSaving" @click="enabledConfirmVisible = false">取消</t-button><t-button theme="primary" :loading="enabledSaving" @click="confirmEnabledChange">{{ nextEnabled ? '确认启用' : '确认停用' }}</t-button></template>
       </ResourceOverlay>
 
       <ResourceOverlay
@@ -2440,7 +2398,7 @@ function syncIssueAction(profile) {
         <div class="create-success">
           <div class="create-success__icon">✓</div>
           <ResourceDescriptions size="small">
-            <t-descriptions-item label="窗口名称">{{ createdProfile?.name || createForm.name }}</t-descriptions-item>
+            <t-descriptions-item label="窗口名称">{{ createdProfile?.bit_name || createForm.name }}</t-descriptions-item>
             <t-descriptions-item label="ID">{{ createdProfile?.id || "-" }}</t-descriptions-item>
             <t-descriptions-item label="代理方式">{{ createdMode === "managed" ? "系统托管（待选择代理）" : "比特自管" }}</t-descriptions-item>
           </ResourceDescriptions>
@@ -2499,7 +2457,7 @@ function syncIssueAction(profile) {
       <ResourceOverlay v-model:visible="manageVisible" title="管理代理" :footer="false" :width="640">
         <FeedbackAlert v-if="manageNote" :message="manageNote" theme="warning" style="margin-bottom:12px" />
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ manageProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ manageProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="窗口 ID">{{ manageProfile?.id || "-" }}</t-descriptions-item>
           <t-descriptions-item label="管理方式">{{ proxyModeLabel(manageProfile || {}) }}</t-descriptions-item>
           <t-descriptions-item label="当前地址">{{ actualProxyText(manageProfile || {}) || "—" }}</t-descriptions-item>
@@ -2533,19 +2491,19 @@ function syncIssueAction(profile) {
         <h3 class="window-section">窗口信息</h3>
         <ResourceDescriptions bordered size="small">
           <t-descriptions-item label="窗口 ID">{{ missingProfile?.id || "-" }}</t-descriptions-item>
-          <t-descriptions-item label="窗口名称">{{ missingProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口名称">{{ missingProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="托管代理">{{ managedProxy(missingProfile || {})?.name || "—" }}</t-descriptions-item>
           <t-descriptions-item label="可执行状态"><ResourceStatusBadge tone="warning" label="暂不可操作" /></t-descriptions-item>
         </ResourceDescriptions>
         <h3 class="window-section">受影响账号（{{ accountsFor(missingProfile || {}).length }}）</h3>
         <t-table :data="accountsFor(missingProfile || {})" row-key="id" size="small" :columns="[
           { colKey: 'platform', title: '平台', width: 90 },
-          { colKey: 'name', title: '账号名称' },
-          { colKey: 'login_status', title: '登录状态', width: 110 },
+          { colKey: 'platform_name', title: '账号名称' },
+          { colKey: 'platform_login_status', title: '登录状态', width: 110 },
         ]" empty="暂无关联账号">
           <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
-          <template #name="{ row }">{{ row.name || row.platform_account_id || "未识别" }}</template>
-          <template #login_status="{ row }"><ResourceStatusBadge :tone="row.login_status === 'normal' ? 'success' : 'warning'" :label="loginStatusText(row.login_status)" /></template>
+          <template #platform_name="{ row }">{{ row.platform_name || row.platform_account_id || "未识别" }}</template>
+          <template #platform_login_status="{ row }"><ResourceStatusBadge :tone="row.platform_login_status === 'normal' ? 'success' : 'warning'" :label="loginStatusText(row.platform_login_status)" /></template>
         </t-table>
         <h3 class="window-section">重要提示</h3>
         <ol class="window-tips">
@@ -2561,21 +2519,21 @@ function syncIssueAction(profile) {
       <ResourceOverlay v-model:visible="mismatchVisible" title="处理代理不一致" :footer="true" kind="drawer" :width="800">
         <ResourceNotice tone="warning">比特配置与托管配置不同，请选择下方处理方式。</ResourceNotice>
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ mismatchProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ mismatchProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="窗口 ID">{{ mismatchProfile?.id || "-" }}</t-descriptions-item>
         </ResourceDescriptions>
         <div class="config-compare">
           <div class="config-card">
             <div class="config-card__title">托管配置</div>
-            <div class="config-row"><span>协议</span><strong>{{ managedProxy(mismatchProfile || {})?.proxy_protocol || "-" }}</strong></div>
+            <div class="config-row"><span>协议</span><strong>{{ managedProxy(mismatchProfile || {})?.protocol || "-" }}</strong></div>
             <div class="config-row"><span>地址</span><strong>{{ managedProxy(mismatchProfile || {})?.host || "-" }}</strong></div>
             <div class="config-row"><span>端口</span><strong>{{ managedProxy(mismatchProfile || {})?.port || "-" }}</strong></div>
           </div>
           <div class="config-card config-card--mismatch">
             <div class="config-card__title">比特当前配置</div>
-            <div class="config-row"><span>协议</span><strong>{{ mismatchProfile?.proxy_type || "-" }}</strong></div>
-            <div class="config-row"><span>地址</span><strong>{{ mismatchProfile?.proxy_host || "-" }}</strong></div>
-            <div class="config-row"><span>端口</span><strong>{{ mismatchProfile?.proxy_port || "-" }}</strong></div>
+            <div class="config-row"><span>协议</span><strong>{{ mismatchProfile?.bit_proxy_type || "-" }}</strong></div>
+            <div class="config-row"><span>地址</span><strong>{{ mismatchProfile?.bit_proxy_host || "-" }}</strong></div>
+            <div class="config-row"><span>端口</span><strong>{{ mismatchProfile?.bit_proxy_port || "-" }}</strong></div>
           </div>
         </div>
         <ResourceNotice v-if="accountsFor(mismatchProfile || {}).length" :details="accountTitle(mismatchProfile)" details-label="查看关联账号">涉及 {{ accountsFor(mismatchProfile).length }} 个关联账号。</ResourceNotice>
@@ -2597,7 +2555,7 @@ function syncIssueAction(profile) {
       <ResourceOverlay v-model:visible="releaseConfirmVisible" title="改为比特自管" :width="560" >
         <ResourceNotice>保留当前代理，改由比特维护，并释放 1 个系统名额。</ResourceNotice>
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ releaseProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ releaseProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="保留地址">{{ actualProxyText(releaseProfile || {}) || "—" }}</t-descriptions-item>
           <t-descriptions-item label="解除托管代理">{{ managedProxy(releaseProfile || {})?.name || managedProxy(releaseProfile || {})?.host || "—" }}</t-descriptions-item>
         </ResourceDescriptions>
@@ -2608,7 +2566,7 @@ function syncIssueAction(profile) {
       <ResourceOverlay v-model:visible="unbindConfirmVisible" title="解绑并改为直连" :width="560" >
         <ResourceNotice tone="warning">将清除代理并改用本机网络。请先确认平台操作可以切换网络。</ResourceNotice>
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ unbindProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ unbindProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="当前代理">{{ actualProxyText(unbindProfile || {}) || "—" }}</t-descriptions-item>
           <t-descriptions-item label="变更后">无代理 · 直连</t-descriptions-item>
         </ResourceDescriptions>
@@ -2618,7 +2576,7 @@ function syncIssueAction(profile) {
 
       <ResourceOverlay v-model:visible="resyncConfirmVisible" title="重新同步托管代理" :width="560" >
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ resyncProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ resyncProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="托管代理">{{ resyncProxy?.name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="应用地址">{{ resyncProxy?.host }}:{{ resyncProxy?.port }}</t-descriptions-item>
         </ResourceDescriptions>
@@ -2630,7 +2588,7 @@ function syncIssueAction(profile) {
       <ResourceOverlay v-model:visible="candidateVisible" title="选择托管代理" :footer="true" :width="proxies.length ? 960 : 560">
         <FeedbackAlert v-if="candidateError" :message="candidateError" theme="error" style="margin-bottom:12px" />
         <ResourceDescriptions size="small">
-          <t-descriptions-item label="窗口">{{ candidateProfile?.name || "-" }}</t-descriptions-item>
+          <t-descriptions-item label="窗口">{{ candidateProfile?.bit_name || "-" }}</t-descriptions-item>
           <t-descriptions-item label="当前方式">{{ proxyModeLabel(candidateProfile || {}) }}</t-descriptions-item>
         </ResourceDescriptions>
         <div v-if="proxies.length" class="candidate-filters">
@@ -2698,13 +2656,13 @@ function syncIssueAction(profile) {
             size="small"
             :columns="[
               { colKey: 'id', title: 'ID', width: 80 },
-              { colKey: 'name', title: '窗口' },
+              { colKey: 'bit_name', title: '窗口' },
               { colKey: 'issue', title: '结果' },
               { colKey: 'action', title: '操作', width: 90 },
             ]"
             empty="暂无待处理窗口"
           >
-            <template #name="{ row }">{{ row.name || "-" }}</template>
+            <template #bit_name="{ row }">{{ row.bit_name || "-" }}</template>
             <template #issue="{ row }"><ResourceStatusBadge tone="warning" :label="anomalyReasons(row).join('、')" /></template>
             <template #action="{ row }"><t-button size="small" variant="text" theme="primary" @click="syncIssueAction(row)">处理</t-button></template>
           </t-table>
@@ -2719,9 +2677,9 @@ function syncIssueAction(profile) {
               size="small"
               :columns="[
                 { colKey: 'selected', title: '选择', width: 64 },
-                { colKey: 'name', title: '窗口' },
+                { colKey: 'bit_name', title: '窗口' },
                 { colKey: 'bit_profile_id', title: '比特窗口 ID', width: 180 },
-                { colKey: 'group_name', title: '分组', width: 120 },
+                { colKey: 'bit_group_name', title: '分组', width: 120 },
                 { colKey: 'notice', title: '说明' },
               ]"
               empty="没有新增窗口"
@@ -2733,7 +2691,7 @@ function syncIssueAction(profile) {
                   @change="(checked) => toggleSyncAdded(row, checked)"
                 />
               </template>
-              <template #group_name="{ row }">{{ row.group_name || row.group_id || "-" }}</template>
+              <template #bit_group_name="{ row }">{{ row.bit_group_name || row.bit_group_id || "-" }}</template>
               <template #notice="{ row }">
                 <span v-if="row.ownership_conflict" class="window-issue">{{ row.ownership_conflict }}</span>
                 <span v-else class="window-sub">未建立关联</span>
@@ -2745,7 +2703,7 @@ function syncIssueAction(profile) {
             <h3 class="window-section">字段变更（{{ syncChangedProfiles.length }}）</h3>
             <p class="form-hint">名称、分组或比特备注已变化，接受后自动更新；运营备注、账号关系和业务启停不受影响。</p>
             <t-table :data="syncChangedProfiles" row-key="bit_profile_id" size="small" :columns="[
-              { colKey: 'name', title: '窗口' },
+              { colKey: 'bit_name', title: '窗口' },
               { colKey: 'bit_profile_id', title: '比特窗口 ID', width: 180 },
               { colKey: 'fields', title: '变化字段' },
             ]">
@@ -2757,38 +2715,9 @@ function syncIssueAction(profile) {
             <h3 class="window-section">本地缺失（{{ syncMissingProfiles.length }}）</h3>
             <p class="form-hint">接受后只标记为窗口缺失，不删除系统记录、关联账号或历史；恢复环境后可重新同步。</p>
             <t-table :data="syncMissingProfiles" row-key="bit_profile_id" size="small" :columns="[
-              { colKey: 'name', title: '窗口' },
+              { colKey: 'bit_name', title: '窗口' },
               { colKey: 'bit_profile_id', title: '比特窗口 ID', width: 180 },
             ]" />
-          </div>
-
-          <div v-if="syncProxyChanges.length" class="sync-section">
-            <h3 class="window-section">代理变化（{{ syncProxyChanges.length }}）</h3>
-            <p class="form-hint">已匹配到唯一代理的自动核对，已无代理的自动解除托管；新发现的地址需要勾选后才创建资源。冲突项不会自动处理。</p>
-            <t-table :data="syncProxyChanges" row-key="profile_id" size="small" :columns="[
-              { colKey: 'selected', title: '选择', width: 64 },
-              { colKey: 'profile_id', title: '窗口 ID', width: 100 },
-              { colKey: 'kind', title: '变化' },
-              { colKey: 'detail', title: '说明' },
-            ]">
-              <template #selected="{ row }">
-                <t-checkbox
-                  v-if="row.kind === 'unknown'"
-                  :checked="syncSelectedUnknown.includes(row.profile_id)"
-                  @change="(checked) => toggleSyncUnknown(row, checked)"
-                />
-                <span v-else class="window-sub">—</span>
-              </template>
-              <template #kind="{ row }">
-                <ResourceStatusBadge :tone="proxyChangeTone(row.kind)" :label="proxyChangeLabel(row.kind)" />
-              </template>
-              <template #detail="{ row }">
-                <span v-if="row.kind === 'changed'">匹配到 {{ proxyById[row.target_proxy_id]?.name || row.target_proxy_id }}</span>
-                <span v-else-if="row.kind === 'unbound'">比特中已无代理，接受后解除托管关系</span>
-                <span v-else-if="row.kind === 'unknown'">{{ row.proxy_protocol }}://{{ row.host }}:{{ row.port }}（新发现）</span>
-                <span v-else>{{ row.ownership_notice || "匹配到多个代理，不会自动处理" }}</span>
-              </template>
-            </t-table>
           </div>
 
           <FeedbackAlert
@@ -2847,7 +2776,7 @@ function syncIssueAction(profile) {
         ]">
           <template #id="{ row }">{{ row.profile.id }}</template>
           <template #name="{ row }">
-            <div>{{ row.profile.name || "-" }}</div>
+            <div>{{ row.profile.bit_name || "-" }}</div>
             <div class="window-sub">关联 {{ accountsFor(row.profile).length }} 个账号</div>
           </template>
           <template #mode="{ row }"><ResourceStatusBadge :tone="isManaged(row.profile) ? 'info' : 'neutral'" :label="proxyModeLabel(row.profile)" /></template>

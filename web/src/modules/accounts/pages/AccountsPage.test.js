@@ -13,7 +13,7 @@ describe('media account resource page', () => {
     expect(source).toContain('resourceAccountStats')
     expect(source).toContain('@click="openCreate"')
     expect(source).toContain('@click="checkFromRow(row)"')
-    expect(source).toContain('@click="toggleBizStatus(row)"')
+    expect(source).toContain('@click="toggleEnabled(row)"')
   })
 
   it('shows the routine account operations directly without a separate cookie column', () => {

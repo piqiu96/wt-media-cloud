@@ -1,33 +1,19 @@
 import { createApiClient } from './http.js'
 
-function normalizeProxy(proxy) {
-  if (!proxy || typeof proxy !== 'object') return proxy
-  return {
-    ...proxy,
-    business_status: proxy.enabled === true ? 'active' : proxy.enabled === false ? 'paused' : proxy.business_status,
-    proxy_protocol: proxy.protocol ?? proxy.proxy_protocol,
-    max_profile_count: proxy.max_profiles ?? proxy.max_profile_count,
-  }
-}
-
-function normalizeProxies(rows) {
-  return Array.isArray(rows) ? rows.map(normalizeProxy) : rows
-}
-
 export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
     list(params) {
-      return api.get('/proxies', params).then(normalizeProxies)
+      return api.get('/proxies', params)
     },
     get(id) {
-      return api.get(`/proxies/${id}`).then(normalizeProxy)
+      return api.get(`/proxies/${id}`)
     },
     create(data) {
-      return api.post('/proxies', data).then(normalizeProxy)
+      return api.post('/proxies', data)
     },
     update(id, data) {
-      return api.patch(`/proxies/${id}`, data).then(normalizeProxy)
+      return api.patch(`/proxies/${id}`, data)
     },
     delete(id) {
       return api.delete(`/proxies/${id}`)
@@ -48,16 +34,16 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
       return api.get(`/proxies/${id}/bindings`)
     },
     refreshDynamic(id) {
-      return api.post(`/proxies/${id}/refresh`).then(normalizeProxy)
+      return api.post(`/proxies/${id}/refresh`)
     },
     check(id) {
-      return api.post(`/proxies/${id}/check`).then(normalizeProxy)
+      return api.post(`/proxies/${id}/check`)
     },
-    setMaxProfileCount(proxyId, maxProfiles) {
-      return api.patch(`/proxies/${proxyId}`, { max_profiles: maxProfiles }).then(normalizeProxy)
+    updateMaxProfiles(proxyId, maxProfiles) {
+      return api.patch(`/proxies/${proxyId}`, { max_profiles: maxProfiles })
     },
     recommend(profileIds) {
-      return api.get('/proxies/recommendations', { profile_ids: profileIds.join(',') }).then(normalizeProxies)
+      return api.get('/proxies/recommendations', { profile_ids: profileIds.join(',') })
     },
     operate(profileId, { action, proxy_id }) {
       return api.post(`/browser-profiles/${profileId}/proxy-operation`, { action, proxy_id })

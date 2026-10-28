@@ -40,7 +40,7 @@ describe('profile binding client', () => {
     const client = createProfileBindingClient({ fetch })
 
     await client.review()
-    await client.updateProfile('profile-1', { cloud_remark: '新备注', business_status: 'disabled' })
+    await client.updateProfile('profile-1', { remark: '新备注', enabled: false })
     await client.deleteProfile('profile-1')
 
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/browser-profiles/sync')

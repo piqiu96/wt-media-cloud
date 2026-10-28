@@ -480,7 +480,7 @@ async function saveQuota() {
   }
   savingQuota.value = true
   try {
-    await proxyClient.setMaxProfileCount(quotaProxy.value.id, Number(quotaValue.value))
+    await proxyClient.updateMaxProfiles(quotaProxy.value.id, Number(quotaValue.value))
     feedback.toast.success("窗口额度已更新。")
     quotaVisible.value = false
     await loadProxies()

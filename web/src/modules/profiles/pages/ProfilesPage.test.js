@@ -26,7 +26,9 @@ describe('browser window resource page', () => {
   it('sends scoped filters to the backend and pages the returned set', () => {
     expect(source).toContain('bindingClient.listProfiles(filters)')
     expect(source).toContain('if (isSenior.value) filters.user_id = memberFilter.value || selfId.value')
-    expect(source).not.toContain('local_status: statusFilter.value')
+    expect(source).not.toContain('local_status')
+    expect(source).not.toContain('business_status')
+    expect(source).not.toContain('proxy_protocol')
     expect(source).toContain('const pagedProfiles = computed(')
     expect(source).toContain('<t-pagination')
   })
@@ -48,12 +50,12 @@ describe('browser window resource page', () => {
   })
 
   it('requires a fresh running-state read before disabling a window', () => {
-    const body = source.slice(source.indexOf('async function requestBusinessChange('))
-    const disable = body.slice(0, body.indexOf('businessTarget.value = profile'))
+    const body = source.slice(source.indexOf('async function requestEnabledChange('))
+    const disable = body.slice(0, body.indexOf('enabledTarget.value = profile'))
     expect(disable).toContain('refreshRunningStates({ silent: false })')
     expect(disable).toContain('state === true')
     expect(disable).toContain('state === undefined')
-    expect(disable).toContain('profile.local_status !== "active"')
+    expect(disable).toContain('profile.local_state !== "active"')
   })
 
   it('enables batch actions only for a consistent running state', () => {
