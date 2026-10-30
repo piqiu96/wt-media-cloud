@@ -14,7 +14,6 @@ var (
 	ErrForbidden                  = errors.New("media account operation is forbidden")
 	ErrInvalidInput               = errors.New("media account input is invalid")
 	ErrNotFound                   = errors.New("media account was not found")
-	ErrDuplicateAccount           = errors.New("media account already exists for this user and platform")
 	ErrProfileUnavailable         = errors.New("browser profile is unavailable")
 	ErrProfileNotFound            = errors.New("browser profile was not found")
 	ErrProfileAssignedToOtherUser = errors.New("browser profile belongs to another user")
@@ -34,7 +33,6 @@ type IdentificationStatus string
 const (
 	IdentificationPending    IdentificationStatus = "pending_identification"
 	IdentificationIdentified IdentificationStatus = "identified"
-	IdentificationDuplicate  IdentificationStatus = "duplicate"
 )
 
 type PlatformLoginStatus string
@@ -68,32 +66,32 @@ type Account struct {
 	UserID sharedidentity.UserID `json:"user_id"`
 	// UserName is the account owner's display name (nickname, falling back to
 	// username), resolved by the read query. It is a projection, never written.
-	UserName             string                      `json:"user_name"`
-	TeamID               *sharedidentity.TeamID      `json:"team_id"`
-	CategoryIDs          []sharedidentity.CategoryID `json:"category_ids"`
-	Platform             Platform                    `json:"platform"`
-	PlatformAccountID    string                      `json:"platform_account_id,omitempty"`
-	PlatformName         string                      `json:"platform_name,omitempty"`
-	PlatformAvatarURL    string                      `json:"platform_avatar_url,omitempty"`
-	BrowserProfileID     string                      `json:"browser_profile_id,omitempty"`
-	Remark               string                      `json:"remark,omitempty"`
-	IdentificationStatus IdentificationStatus        `json:"identification_status"`
-	DuplicateOfAccountID string                      `json:"duplicate_of_account_id,omitempty"`
-	Enabled              bool                        `json:"enabled"`
-	PlatformLoginStatus  PlatformLoginStatus         `json:"platform_login_status"`
-	CookieStatus         string                      `json:"cookie_status,omitempty"`
-	CookieUpdatedAt      *time.Time                  `json:"cookie_updated_at,omitempty"`
-	LastCheckStatus      string                      `json:"last_check_status"`
-	LastCheckMessage     string                      `json:"last_check_message"`
-	LastCheckIdentity    *CheckIdentity              `json:"last_check_identity,omitempty"`
-	CheckOperationID     string                      `json:"-"`
-	CheckProfileID       string                      `json:"-"`
-	CheckStartedAt       *time.Time                  `json:"-"`
-	LastCheckAt          *time.Time                  `json:"last_check_at,omitempty"`
-	LastCheckItems       []AccountCheckItem          `json:"last_check_items,omitempty"`
-	Tags                 []string                    `json:"tags"`
-	CreatedAt            time.Time                   `json:"created_at"`
-	UpdatedAt            time.Time                   `json:"updated_at"`
+	UserName              string                      `json:"user_name"`
+	TeamID                *sharedidentity.TeamID      `json:"team_id"`
+	CategoryIDs           []sharedidentity.CategoryID `json:"category_ids"`
+	Platform              Platform                    `json:"platform"`
+	PlatformAccountID     string                      `json:"platform_account_id,omitempty"`
+	PlatformName          string                      `json:"platform_name,omitempty"`
+	PlatformAvatarURL     string                      `json:"platform_avatar_url,omitempty"`
+	BrowserProfileID      string                      `json:"browser_profile_id,omitempty"`
+	Remark                string                      `json:"remark,omitempty"`
+	IdentificationStatus  IdentificationStatus        `json:"identification_status"`
+	SameIdentityAccountID string                      `json:"same_identity_account_id,omitempty"`
+	Enabled               bool                        `json:"enabled"`
+	PlatformLoginStatus   PlatformLoginStatus         `json:"platform_login_status"`
+	CookieStatus          string                      `json:"cookie_status,omitempty"`
+	CookieUpdatedAt       *time.Time                  `json:"cookie_updated_at,omitempty"`
+	LastCheckStatus       string                      `json:"last_check_status"`
+	LastCheckMessage      string                      `json:"last_check_message"`
+	LastCheckIdentity     *CheckIdentity              `json:"last_check_identity,omitempty"`
+	CheckOperationID      string                      `json:"-"`
+	CheckProfileID        string                      `json:"-"`
+	CheckStartedAt        *time.Time                  `json:"-"`
+	LastCheckAt           *time.Time                  `json:"last_check_at,omitempty"`
+	LastCheckItems        []AccountCheckItem          `json:"last_check_items,omitempty"`
+	Tags                  []string                    `json:"tags"`
+	CreatedAt             time.Time                   `json:"created_at"`
+	UpdatedAt             time.Time                   `json:"updated_at"`
 }
 
 type AccountRecord struct {
@@ -113,7 +111,6 @@ type AccountCounts struct {
 
 // CookieUpdate is private execution state, never part of Account projections.
 type CookieUpdate struct {
-	ExistingAccountID         string   `json:"existing_account_id,omitempty"`
 	RequestKey                string   `json:"request_key"`
 	RequestDigest             string   `json:"request_digest"`
 	OperationID               string   `json:"operation_id"`

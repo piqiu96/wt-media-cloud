@@ -351,8 +351,6 @@ func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 		api.Forbidden(c, 11003, "没有权限访问此媒体账号")
 	case errors.Is(err, accountservice.ErrNotFound):
 		api.NotFound(c, 20004, "媒体账号不存在")
-	case errors.Is(err, accountservice.ErrDuplicateAccount):
-		api.Conflict(c, 20009, "此平台账号已存在")
 	case errors.Is(err, accountservice.ErrProfilePlatformTaken):
 		api.Conflict(c, 23001, "此浏览器环境已绑定其他平台账号")
 	case errors.Is(err, accountservice.ErrProfileUnavailable):

@@ -105,6 +105,30 @@ func TestMySQLCheckAndMetadataSettlement(t *testing.T) {
 			t.Fatalf("filtered page/count disagree: rows=%d total=%d want=%d", len(rows), counts.Total, scenario.total)
 		}
 	}
+	// Same-UID detail hints are owner-scoped, optional and do not alter either window.
+	other := record
+	other.UserID = 4
+	other.BrowserProfileID = "28"
+	other.OriginalCookie = "other-owner-cookie"
+	if _, err = create(db, other); err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := findByID(db, accountID)
+	if err != nil || first.SameIdentityAccountID != "" {
+		t.Fatalf("another owner's identity must not be exposed: hint=%q err=%v", first.SameIdentityAccountID, err)
+	}
+	other.UserID = 3
+	other.BrowserProfileID = "29"
+	other.OriginalCookie = "second-window-cookie"
+	otherID, err := create(db, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, err = findByID(db, accountID)
+	second, _, secondErr := findByID(db, otherID)
+	if err != nil || secondErr != nil || first.SameIdentityAccountID != otherID || second.SameIdentityAccountID != accountID || first.BrowserProfileID != "27" || second.BrowserProfileID != "29" || first.OriginalCookie != "test-original" || second.OriginalCookie != "second-window-cookie" || first.PlatformLoginStatus != model.PlatformLoginNormal || second.PlatformLoginStatus != model.PlatformLoginNormal {
+		t.Fatalf("same-UID windows lost their own relation, credentials or normal result: errors=%v/%v hints=%q/%q", err, secondErr, first.SameIdentityAccountID, second.SameIdentityAccountID)
+	}
 	// The DB predicate (not a service-only pre-read) rejects duplicate and late writes.
 	if err = completeCheck(db, record); !errors.Is(err, model.ErrStaleCheck) {
 		t.Fatalf("duplicate completion=%v", err)

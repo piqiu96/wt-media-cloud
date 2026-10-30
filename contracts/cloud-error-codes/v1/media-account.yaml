@@ -1,12 +1,11 @@
 schema_version: 1
-revision: "2026.10.30.4"
+revision: "2026.10.31.1"
 errors:
   stale_account_check: {http_status: 409, code: 23002, retryable: false, recovery_action: refresh}
   authentication_required: {http_status: 401}
   forbidden: {http_status: 403}
   invalid_media_account_request: {http_status: 400}
   media_account_not_found: {http_status: 404}
-  duplicate_media_account: {http_status: 409}
   media_account_store_error: {http_status: 500}
   # Linking a Profile outside the caller's `user_id + main_user_id` scope.
   profile_not_found: {http_status: 404, code: 20004, retryable: false, recovery_action: choose_profile}

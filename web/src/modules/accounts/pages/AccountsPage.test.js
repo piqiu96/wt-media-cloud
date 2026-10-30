@@ -9,8 +9,8 @@ describe('account status after creating an unchecked ledger', () => {
   it('treats an unknown login result as pending, never as a failed check', () => {
     expect(status({ platform_login_status: 'unknown', identification_status: 'unidentified' })).toBe('pending')
   })
-  it('distinguishes duplicate ledger records from a different account logged into the window', () => {
-    expect(status({ identification_status: 'duplicate', duplicate_of_account_id: '10', platform_login_status: 'account_mismatch' })).toBe('duplicate')
+  it('keeps same-UID other windows normal while distinguishing a real UID mismatch', () => {
+    expect(status({ identification_status: 'identified', same_identity_account_id: '10', platform_login_status: 'normal' })).toBe('normal')
     expect(status({ identification_status: 'identified', platform_login_status: 'account_mismatch' })).toBe('account_mismatch')
   })
   it('continues to show actual check failures and environment errors', () => {

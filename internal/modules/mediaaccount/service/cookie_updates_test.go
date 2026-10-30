@@ -111,7 +111,7 @@ func TestCookieSnapshotRefusesActualOccupantAndUnknown(t *testing.T) {
 	}
 }
 
-func TestCookieDuplicatePointsToExistingWithoutTakingItOver(t *testing.T) {
+func TestCookieSameUIDInOtherWindowCompletesWithoutTakingItOver(t *testing.T) {
 	s, m, a := cookieFixture(t)
 	r := m.records["1"]
 	r.PlatformAccountID = ""
@@ -131,7 +131,7 @@ func TestCookieDuplicatePointsToExistingWithoutTakingItOver(t *testing.T) {
 		t.Fatal(e)
 	}
 	v, e := s.SettleCookieUpdate(a, "1", u.OperationID, CookieResultInput{Status: "applied", Applied: true, InputMatches: true, LoginStatus: "normal", PlatformAccountID: "existing", Cookies: []map[string]any{{"name": "BDUSS", "value": "new"}}})
-	if e != nil || v.Status != "failed" || v.ExistingAccountID != "2" || m.lock != "" || m.records["2"].ActiveCookie != "do-not-touch" || m.records["1"].PlatformAccountID != "" {
+	if e != nil || v.Status != "succeeded" || m.lock != "" || m.records["2"].ActiveCookie != "do-not-touch" || m.records["1"].PlatformAccountID != "existing" || m.records["1"].ActiveCookie == "" {
 		t.Fatal(v, e)
 	}
 }

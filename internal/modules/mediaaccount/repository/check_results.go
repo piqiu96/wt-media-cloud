@@ -31,9 +31,9 @@ func completeCheck(db *gorm.DB, record model.AccountRecord) error {
 		}
 		identity = string(b)
 	}
-	n, err := execSQL(db, `UPDATE media_accounts SET platform_account_id=?, platform_name=?, platform_avatar_url=?, identification_status=?, duplicate_of_account_id=?, platform_login_status=?, last_check_at=?, last_check_items=?, last_check_status=?, last_check_message=?, last_check_identity=?, updated_at=? WHERE id=? AND user_id=? AND check_operation_id=? AND check_profile_id=browser_profile_id AND last_check_status='running'`, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName), nullIfEmpty(record.PlatformAvatarURL), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.PlatformLoginStatus, record.LastCheckAt, marshalLastCheckItems(record.LastCheckItems), record.LastCheckStatus, nullIfEmpty(record.LastCheckMessage), identity, record.UpdatedAt, record.ID, record.UserID, record.CheckOperationID)
+	n, err := execSQL(db, `UPDATE media_accounts SET platform_account_id=?, platform_name=?, platform_avatar_url=?, identification_status=?, platform_login_status=?, last_check_at=?, last_check_items=?, last_check_status=?, last_check_message=?, last_check_identity=?, updated_at=? WHERE id=? AND user_id=? AND check_operation_id=? AND check_profile_id=browser_profile_id AND last_check_status='running'`, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName), nullIfEmpty(record.PlatformAvatarURL), record.IdentificationStatus, record.PlatformLoginStatus, record.LastCheckAt, marshalLastCheckItems(record.LastCheckItems), record.LastCheckStatus, nullIfEmpty(record.LastCheckMessage), identity, record.UpdatedAt, record.ID, record.UserID, record.CheckOperationID)
 	if duplicateKey(err) {
-		return model.ErrDuplicateAccount
+		return model.ErrProfilePlatformTaken
 	}
 	if err != nil {
 		return err

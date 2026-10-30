@@ -152,7 +152,7 @@ func (r importResources) ReleaseProfile(id, op string) error {
 }
 func (r importResources) FindIdentity(platform model.Platform, uid string) (string, error) {
 	var id string
-	e := queryRow(r.tx, `SELECT id FROM media_accounts WHERE user_id=? AND platform=? AND platform_account_id=? LIMIT 1`, r.uid, platform, uid).Scan(&id)
+	e := queryRow(r.tx, `SELECT id FROM media_accounts WHERE user_id=? AND platform=? AND platform_account_id=? ORDER BY id LIMIT 1`, r.uid, platform, uid).Scan(&id)
 	if errors.Is(e, sql.ErrNoRows) {
 		return "", nil
 	}

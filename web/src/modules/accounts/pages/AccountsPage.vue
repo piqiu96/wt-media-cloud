@@ -47,7 +47,7 @@ const importVisible=ref(false),importId=ref(''),importHistoryOnly=ref(false),rec
 async function loadRecentImport(){if(!isDesktop||isAdmin.value)return;try{recentImport.value=(await importClient.list()).find(b=>b.counts.pending+b.counts.failed+b.counts.uncertain+b.counts.running>0)||null}catch{}}
 function openImports(id='',historyOnly=false){importId.value=id;importHistoryOnly.value=historyOnly;importVisible.value=true}
 async function importsChanged(){await Promise.all([loadAccounts(),loadAuxiliaryData(),loadRecentImport()])}
-async function viewImportedAccount(id){try{detailAccount.value=await accountClient.get(id);detailVisible.value=true;importVisible.value=false}catch(e){feedback.toast.error(e.message||'读取账号失败')}}
+async function viewImportedAccount(id){try{const account=await accountClient.get(id);checkFailure.value="";checkFailureEnv.value=false;detailAccount.value=account;detailVisible.value=true;importVisible.value=false}catch(e){feedback.toast.error(e.message||'读取账号失败')}}
 const accountClient = createMediaAccountClient()
 const profileClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
@@ -300,11 +300,15 @@ async function createAccount() {
   }
 }
 
-function openDetail(account) {
+async function openDetail(account) {
   detailAccount.value = account
   checkFailure.value = ""
   checkFailureEnv.value = false
   detailVisible.value = true
+  try {
+    const current = await accountClient.get(account.id)
+    if (detailVisible.value && detailAccount.value?.id === account.id) detailAccount.value = current
+  } catch (e) { feedback.toast.error(e.message || "读取账号详情失败") }
 }
 
 function accountDisplayName(account) {
@@ -456,7 +460,7 @@ function rowMoreOptions(account) {
  return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"账号凭证",value:"credentials"}] : [])]
 }
 function usesRowMore(account) {
- const base = 2 + (account.identification_status === "duplicate" && account.duplicate_of_account_id ? 1 : canOperateLocalAccount(account) ? 1 : 0) + (canOperateLocalAccount(account) && showWindowToggle(account) ? 1 : 0)
+ const base = 2 + (canOperateLocalAccount(account) ? 1 : 0) + (canOperateLocalAccount(account) && showWindowToggle(account) ? 1 : 0)
  return base + rowMoreOptions(account).length > 5
 }
 function onRowMore(option, account) { if (option.value === "bind") openBind(account); else if (option.value === "credentials") openCookieDialog(account) }
@@ -514,7 +518,6 @@ function localOperationHint(account) {
 }
 
 function executableText(account) {
-  if (account.identification_status === "duplicate" && account.duplicate_of_account_id) return `账号已存在，请查看账号 ${account.duplicate_of_account_id}`
   if (!account.enabled) return "不可执行：账号已停用"
   if (!(account.category_ids || []).length) return "不可执行：未绑定类目"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
@@ -534,7 +537,6 @@ function enabledText(enabled) {
 const ACCOUNT_STATUS_MAP = {
   pending: { label: "待上号", color: "gray" },
   normal: { label: "正常", color: "green" },
-  duplicate: { label: "账号已存在", color: "orange" },
   not_logged_in: { label: "未登录", color: "orange" },
   expired: { label: "登录失效", color: "red" },
   account_mismatch: { label: "账号不匹配", color: "red" },
@@ -547,7 +549,6 @@ function accountStatusKey(account) {
   if (account.last_check_status === "failed") return "check_failed"
   const idStatus = account.identification_status || ""
   const login = account.platform_login_status || ""
-  if (idStatus === "duplicate" && account.duplicate_of_account_id) return "duplicate"
   if (login === "normal") return "normal"
   switch (login) {
     case "not_logged_in": return "not_logged_in"
@@ -699,10 +700,6 @@ async function submitCookieUpdate(reconcile=false) {
     // A lost response may already have persisted the operation. Reopen reads its receipt.
     try { const data=await accountClient.credentials(target.id);cookieOperation.value=data.current_update?.operation_id?data.current_update:cookieOperation.value } catch {}
   } finally {updatingCookie.value=false}
-}
-async function viewExistingCookieAccount() {
- try {const account=await accountClient.get(cookieOperation.value.existing_account_id);cookieUpdateVisible.value=false;showCookieDialog.value=false;detailAccount.value=account;detailVisible.value=true}
- catch(e){feedback.toast.error(e.message || "读取已有账号失败")}
 }
 async function copyCookie(field) {
  const value=cookieDialog.value?.[field];if(!value)return
@@ -924,7 +921,7 @@ const widestAccountActions = computed(() => {
   return accounts.value.reduce((widest, account) => {
     const local = canOperateLocalAccount(account)
     const labels = [
-      ...(account.identification_status === 'duplicate' && account.duplicate_of_account_id ? ['查看已有账号'] : local ? ['检查'] : []),
+      ...(local ? ['检查'] : []),
       '详情', ...(local && showWindowToggle(account) ? [profileIsOpen(account) ? '关闭窗口' : '打开窗口'] : []), '编辑',
       ...(usesRowMore(account) ? ['更多'] : rowMoreOptions(account).map(action => action.content)),
     ]
@@ -1064,8 +1061,7 @@ const columns = computed(() => [
       </template>
       <template #op="{ row }">
         <ResourceRowActions>
-          <t-button v-if="row.identification_status === 'duplicate' && row.duplicate_of_account_id" size="small" variant="text" class="is-primary" @click="viewImportedAccount(row.duplicate_of_account_id)">查看已有账号</t-button>
-          <t-button v-else-if="canOperateLocalAccount(row)" size="small" variant="text" class="is-primary" :loading="currentCheckingId === row.id" :disabled="batchChecking || Boolean(currentCheckingId) || (isDesktop && !canOperateLocalAccount(row))" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
+          <t-button v-if="canOperateLocalAccount(row)" size="small" variant="text" class="is-primary" :loading="currentCheckingId === row.id" :disabled="batchChecking || Boolean(currentCheckingId) || (isDesktop && !canOperateLocalAccount(row))" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
           <t-button v-if="canOperateLocalAccount(row) && showWindowToggle(row)" size="small" variant="text" :disabled="!canOperateLocalAccount(row) || !canOperateBoundWindow(row) || Boolean(operatingProfileId)" :title="localOperationHint(row)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
           <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
@@ -1176,6 +1172,17 @@ const columns = computed(() => [
     </ResourceOverlay>
 
     <ResourceOverlay v-model:visible="detailVisible" title="账号详情" kind="drawer" :width="800" :footer="false">
+      <FeedbackAlert v-if="checkFailure || detailAccount?.last_check_status === 'failed'" theme="error" style="margin-bottom:16px" :message="checkFailure || detailAccount.last_check_message || '本次检查失败，保留上次登录结论'">
+        <template #operation>
+          <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/personal-info')">前往个人中心检查设备</t-button>
+        </template>
+      </FeedbackAlert>
+      <FeedbackAlert v-if="detailAccount?.platform_login_status === 'account_mismatch'" theme="warning" style="margin-bottom:16px" message="当前窗口登录的 UID 与本条记录不一致，请核对下方两组身份。" />
+      <div v-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
+        <div><strong>已记录账号</strong><p>{{ detailAccount.platform_name || '待识别' }}</p><p>UID {{ detailAccount.platform_account_id || '—' }}</p></div>
+        <div><strong>窗口当前账号</strong><p>{{ detailAccount.last_check_identity.platform_name || '未取得昵称' }}</p><p>UID {{ detailAccount.last_check_identity.platform_account_id || '—' }}</p></div>
+      </div>
+      <FeedbackAlert v-else-if="detailAccount?.same_identity_account_id && detailAccount?.platform_login_status !== 'account_mismatch'" theme="info" style="margin-bottom:16px" message="该账号也在其他窗口使用，不影响当前窗口继续使用。"><template #operation><t-button theme="primary" variant="text" size="small" @click="viewImportedAccount(detailAccount.same_identity_account_id)">查看已有账号</t-button></template></FeedbackAlert>
       <div v-if="detailAccount" class="account-detail-heading">
         <t-avatar size="56px" :image="detailAccount.platform_avatar_url || undefined">{{ accountDisplayName(detailAccount).slice(0,1) }}</t-avatar>
         <div><h2>{{ accountDisplayName(detailAccount) }}</h2><p>{{ platformLabel(detailAccount.platform) }} · ID {{ detailAccount.id }} · UID {{ detailAccount.platform_account_id || '尚未识别' }}</p>
@@ -1196,21 +1203,11 @@ const columns = computed(() => [
       </ResourceDescriptions>
       </ResourceSection><ResourceSection title="账号检查">
       <ResourceDescriptions v-if="detailAccount">
-        <t-descriptions-item label="登录状态">{{ detailAccount.identification_status === "duplicate" && detailAccount.duplicate_of_account_id ? "账号已存在" : loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
+        <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
         <t-descriptions-item label="可执行性">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_check_at ? formatTime(detailAccount.last_check_at) : '尚未检查' }}</t-descriptions-item>
-        <t-descriptions-item label="账号资料">{{ detailAccount.identification_status === 'duplicate' && detailAccount.duplicate_of_account_id ? '已识别为已有账号' : detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
+        <t-descriptions-item label="账号资料">{{ detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
       </ResourceDescriptions>
-      <FeedbackAlert v-if="detailAccount?.identification_status === 'duplicate' && detailAccount?.duplicate_of_account_id" theme="warning" style="margin-top:16px" :message="`窗口识别出的账号「${detailAccount.last_check_identity?.platform_name || '未取得昵称'}」（UID ${detailAccount.last_check_identity?.platform_account_id || '—'}）已保存在账号 ${detailAccount.duplicate_of_account_id} 中，无需重复建账。`"><template #operation><t-button theme="primary" variant="text" size="small" @click="viewImportedAccount(detailAccount.duplicate_of_account_id)">查看已有账号</t-button></template></FeedbackAlert>
-      <div v-else-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
-        <div><strong>已记录账号</strong><p>{{ detailAccount.platform_name || '待识别' }}</p><p>UID {{ detailAccount.platform_account_id || '—' }}</p></div>
-        <div><strong>窗口当前账号</strong><p>{{ detailAccount.last_check_identity.platform_name || '未取得昵称' }}</p><p>UID {{ detailAccount.last_check_identity.platform_account_id || '—' }}</p></div>
-      </div>
-      <FeedbackAlert v-if="checkFailure || detailAccount?.last_check_status === 'failed'" theme="error" style="margin-top:12px" :message="checkFailure || detailAccount.last_check_message || '本次检查失败，保留上次登录结论'">
-        <template #operation>
-          <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/personal-info')">前往个人中心检查设备</t-button>
-        </template>
-      </FeedbackAlert>
     </ResourceSection>
 </ResourceOverlay>
 
@@ -1229,7 +1226,7 @@ const columns = computed(() => [
       <p class="form-tip">目标窗口：{{ profileForAccount(cookieDialog?.account)?.bit_name || '未绑定' }}</p>
       <ResourceForm v-if="!cookieUnresolved"><t-form-item label="新的 Cookie"><t-textarea v-model="cookieInput" :autosize="{minRows:7,maxRows:10}" placeholder="粘贴此账号的新 Cookie" :disabled="updatingCookie" /></t-form-item><p class="form-tip">更新当前平台的登录信息，完成后检查账号身份。首次导入的 Cookie 保留。</p></ResourceForm>
       <FeedbackAlert v-if="cookieError || cookieUnresolved" :theme="cookieUnresolved?'warning':'error'" :message="cookieError || cookieOperation?.message || '更新结果待确认，请核实当前登录状态'" />
-      <template #footer><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button v-if="cookieOperation?.existing_account_id" variant="outline" @click="viewExistingCookieAccount">查看已有账号</t-button><t-button variant="outline" :disabled="updatingCookie" @click="closeCookieUpdate">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></template>
+      <template #footer><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button variant="outline" :disabled="updatingCookie" @click="closeCookieUpdate">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></template>
     </ResourceOverlay>
   </div>
   </t-loading>

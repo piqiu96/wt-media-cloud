@@ -30,9 +30,6 @@ func (mysqlStore) Create(record model.AccountRecord) (string, error) {
 	return repository.Create(record)
 }
 func (mysqlStore) Find(id string) (model.AccountRecord, bool, error) { return repository.Find(id) }
-func (mysqlStore) FindByIdentity(userID identityservice.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
-	return repository.FindByIdentity(userID, platform, platformAccountID)
-}
 func (mysqlStore) FindByProfilePlatform(profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
 	return repository.FindByProfilePlatform(profileID, platform)
 }
