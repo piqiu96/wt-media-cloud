@@ -61,7 +61,6 @@ describe('media account resource page', () => {
     expect(source).toContain('管理员不执行本地操作')
     expect(source).toContain('仅账号本人可执行本地操作')
     expect(source).toContain('(isDesktop && !canOperateLocalAccount(row))')
-    expect(source).toContain(':disabled="!canOperateLocalAccount(editAccount)"')
     expect(source).toContain('已跳过 ${nonOwnedCount} 条非本人账号')
   })
 })

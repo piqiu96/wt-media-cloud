@@ -487,15 +487,16 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 func TestCheckPreservesIdentityOnMismatchAndRefreshesSameUID(t *testing.T) {
 	for _, tc := range []struct {
 		name, observed, wantUID, wantName string
-		wantStatus                        PlatformLoginStatus
+		initialStatus, wantStatus         PlatformLoginStatus
 	}{
-		{"same UID", "uid-1", "uid-1", "new name", PlatformLoginNormal},
-		{"different UID", "uid-2", "uid-1", "old name", PlatformLoginAccountMismatch},
+		{"same UID", "uid-1", "uid-1", "new name", PlatformLoginNormal, PlatformLoginNormal},
+		{"different UID", "uid-2", "uid-1", "old name", PlatformLoginNormal, PlatformLoginAccountMismatch},
+		{"recover mismatch", "uid-1", "uid-1", "new name", PlatformLoginAccountMismatch, PlatformLoginNormal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newMemoryStore()
 			actor := mediaActor(1, 10, identityservice.RoleOperator)
-			store.records["1"] = AccountRecord{Account: Account{ID: "1", UserID: actor.ID, TeamID: actor.TeamID, Platform: PlatformBilibili, PlatformAccountID: "uid-1", PlatformName: "old name", Enabled: true, PlatformLoginStatus: PlatformLoginNormal}}
+			store.records["1"] = AccountRecord{Account: Account{ID: "1", UserID: actor.ID, TeamID: actor.TeamID, Platform: PlatformBilibili, PlatformAccountID: "uid-1", PlatformName: "old name", Enabled: true, PlatformLoginStatus: tc.initialStatus}}
 			prepareCheckResult(store, "1", "check-1")
 			updated, err := newTestService(store).ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{ExecutionStatus: "completed", OperationID: "check-1", PlatformAccountID: tc.observed, PlatformName: "new name", PlatformLoginStatus: PlatformLoginNormal})
 			if err != nil {

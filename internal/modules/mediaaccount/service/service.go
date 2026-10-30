@@ -586,6 +586,7 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 	if input.PlatformLoginStatus == PlatformLoginNormal && platformAccountID != "" && record.PlatformAccountID != "" && platformAccountID != record.PlatformAccountID {
 		input.PlatformLoginStatus = PlatformLoginAccountMismatch
 	}
+	record.PlatformLoginStatus = input.PlatformLoginStatus
 	if input.PlatformLoginStatus == PlatformLoginNormal {
 		if platformAccountID == "" {
 			return Account{}, ErrInvalidInput
@@ -619,9 +620,6 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 	} else if platformAccountID != "" && record.PlatformAccountID != "" && platformAccountID != record.PlatformAccountID {
 		record.PlatformLoginStatus = PlatformLoginAccountMismatch
 	} else {
-		record.PlatformLoginStatus = input.PlatformLoginStatus
-	}
-	if record.PlatformLoginStatus != PlatformLoginAccountMismatch {
 		record.PlatformLoginStatus = input.PlatformLoginStatus
 	}
 	// 合成 8 项检查明细：1/2 来自本检查前置（能执行到此处说明前置通过）；

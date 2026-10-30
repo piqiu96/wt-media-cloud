@@ -77,7 +77,13 @@ const createCategoryType = ref("")
 const editCategoryType = ref("")
 const editRemark = ref("")
 const editCategoryIds = ref([])
-const editProfileId = ref("")
+const bindAccount = ref(null)
+const bindVisible = ref(false)
+const bindProfileId = ref("")
+const bindSearch = ref("")
+const bindingSaving = ref(false)
+const createdGuide = ref(null)
+const boundGuide = ref(null)
 const editTags = ref([])
 const savingEdit = ref(false)
 const editError = ref("")
@@ -126,7 +132,6 @@ function defaultCreateForm() {
   return {
     categoryIds: [],
     platform: "bilibili",
-    browserProfileId: "",
     remark: "",
     tags: [],
   }
@@ -210,7 +215,6 @@ function openCreate() {
   createCategoryType.value = ""
   createError.value = ""
   showCreate.value = true
-  if (isDesktop) loadBindingUsage(createForm.value.platform)
 }
 
 async function createAccount() {
@@ -228,11 +232,8 @@ async function createAccount() {
       remark: createForm.value.remark,
       tags: createForm.value.tags || [],
     })
-    if (isDesktop && !isAdmin.value && createForm.value.browserProfileId) {
-      try { await accountClient.bindProfile(created.id, createForm.value.browserProfileId) }
-      catch (e) { feedback.toast.error(`账号已创建，窗口未绑定：${e.message}`) }
-    }
     showCreate.value = false
+    createdGuide.value = created
     await loadAccounts()
   } catch (e) {
     createError.value = e.message || "创建媒体账号失败"
@@ -352,11 +353,9 @@ function openEdit(account) {
   editCategoryType.value = selectedCategoryType(account.category_ids)
   editRemark.value = account.remark || ""
   editCategoryIds.value = Array.isArray(account.category_ids) ? [...account.category_ids] : []
-  editProfileId.value = account.browser_profile_id || ""
   editTags.value = [...(account.tags || [])]
   editError.value = ""
   editVisible.value = true
-  if (canOperateLocalAccount(account)) loadBindingUsage(account.platform)
 }
 
 async function saveEdit() {
@@ -374,12 +373,6 @@ async function saveEdit() {
       remark: editRemark.value,
       category_ids: editCategoryIds.value,
     })
-    // 绑定窗口差异：只有本人账号才允许改绑定，管理员与他人账号保持原绑定。
-    if (isDesktop && canOperateLocalAccount(editAccount.value) && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
-      updated = editProfileId.value
-        ? await accountClient.bindProfile(editAccount.value.id, editProfileId.value)
-        : await accountClient.unbindProfile(editAccount.value.id)
-    }
     const newTags = updated.tags || []
     const idx = accounts.value.findIndex(a => a.id === editAccount.value.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated, tags: newTags }
@@ -405,9 +398,9 @@ async function toggleEnabled(account) {
 }
 
 function rowMoreOptions(account) {
- return [...(!isAdmin.value && isOwnAccount(account) ? [{content:"查看 Cookie",value:"credentials"}] : []),{content:account.enabled ? "停用" : "启用",value:"enabled"}]
+ return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"查看 Cookie",value:"credentials"}] : []),{content:account.enabled ? "停用" : "启用",value:"enabled"}]
 }
-function onRowMore(option, account) { if (option.value === "credentials") openCookieDialog(account); else if (option.value === "enabled") toggleEnabled(account) }
+function onRowMore(option, account) { if (option.value === "bind") openBind(account); else if (option.value === "credentials") openCookieDialog(account); else if (option.value === "enabled") toggleEnabled(account) }
 function splitTags(value) {
   return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
 }
@@ -814,15 +807,43 @@ async function loadBindingUsage(platform) {
  catch (e) {if(request===bindingRequest) bindingError.value=e.message || "暂时无法核对窗口占用"}
  finally {if(request===bindingRequest) bindingLoading.value=false}
 }
-watch(() => createForm.value.platform, platform => {if (showCreate.value && isDesktop) loadBindingUsage(platform)})
+
 function bindingUnavailableReason(profile) {
  if (bindingLoading.value) return "正在核对窗口"
  if (bindingError.value) return "暂时无法核对"
  if (profile.enabled === false) return "窗口已停用"
  if (profile.local_state !== "active") return "本机窗口不可用"
- const exceptId=editVisible.value ? editAccount.value?.id : ""
+ const exceptId=bindAccount.value?.id
  if (bindingUsage.value.some(account => account.id !== exceptId && String(account.browser_profile_id) === String(profile.id))) return "已绑定同平台账号"
  return ""
+}
+
+const bindingCandidates = computed(() => activeProfiles.value.filter(profile =>
+  [profile.bit_name, profile.bit_seq, profile.group_name].join(" ").toLowerCase().includes(bindSearch.value.trim().toLowerCase())))
+function openBind(account) {
+  if (!canOperateLocalAccount(account)) return
+  createdGuide.value = null
+  windowPopup.value = null
+  bindAccount.value = account
+  bindProfileId.value = ""
+  bindSearch.value = ""
+  bindingError.value = ""
+  bindVisible.value = true
+  loadBindingUsage(account.platform)
+}
+async function saveBinding() {
+  if (bindingSaving.value || !bindAccount.value) return
+  const profile = activeProfiles.value.find(p => p.id === bindProfileId.value)
+  if (!profile || bindingUnavailableReason(profile)) { feedback.toast.error("请选择一个可关联的窗口"); return }
+  if (bindAccount.value.browser_profile_id && !await feedback.confirmWarning({title:"确认更换窗口？", message:`将使用「${profile.bit_name}」，原窗口的登录信息保留。`,confirmText:"确认更换"})) return
+  bindingSaving.value = true
+  try {
+    const updated = await accountClient.bindProfile(bindAccount.value.id, profile.id)
+    bindVisible.value = false
+    boundGuide.value = updated
+    await loadAccounts()
+  } catch (e) { bindingError.value = e.message || "窗口未绑定，请重试" }
+  finally { bindingSaving.value = false }
 }
 
 
@@ -1135,18 +1156,37 @@ const columns = [
             </t-select>
           </div>
         </t-form-item>
-        <div class="form-section">关联资源</div>
-        <t-form-item v-if="isDesktop" label="绑定窗口">
-          <t-select v-model="createForm.browserProfileId" clearable :disabled="isAdmin" placeholder="可先不绑定">
-            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile) + (bindingUnavailableReason(profile) ? `（${bindingUnavailableReason(profile)}）` : '')" :disabled="Boolean(bindingUnavailableReason(profile))" />
-          </t-select>
-          <div v-if="isAdmin" class="form-tip">管理员不执行本地操作，窗口绑定由账号使用人完成。</div>
-        </t-form-item>
         <div class="form-section">备注</div>
         <t-form-item label="备注">
           <t-textarea v-model="createForm.remark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
       </t-form>
+    </t-dialog>
+
+    <t-dialog :visible="createdGuide !== null" @close="createdGuide = null" header="账号已保存" width="560px" :footer="false">
+      <p>可以继续绑定浏览器窗口，也可以稍后从账号列表继续。</p>
+      <t-space style="display:flex;justify-content:flex-end;margin-top:24px">
+        <t-button variant="outline" @click="createdGuide = null">稍后处理</t-button>
+        <t-button v-if="canOperateLocalAccount(createdGuide)" theme="primary" @click="openBind(createdGuide)">绑定窗口</t-button>
+      </t-space>
+    </t-dialog>
+    <t-dialog v-model:visible="bindVisible" :header="bindAccount?.browser_profile_id ? '更换浏览器窗口' : '绑定浏览器窗口'" width="960px" :confirm-btn="{content:bindAccount?.browser_profile_id ? '确认更换' : '绑定',loading:bindingSaving}" @confirm="saveBinding">
+      <p>{{ accountDisplayName(bindAccount) }} · {{ platformLabel(bindAccount?.platform) }}</p>
+      <p class="form-tip">关联已有窗口不会修改窗口内的登录信息。绑定后检查并识别当前账号。</p>
+      <FeedbackAlert v-if="bindingError" :message="bindingError" theme="error" />
+      <t-input v-model="bindSearch" clearable placeholder="搜索窗口名称 / 序号 / 分组" style="margin:16px 0" />
+      <t-table :data="bindingCandidates" row-key="id" size="small" :loading="bindingLoading" :max-height="360" :pagination="null" :columns="[{colKey:'select',title:'',width:48},{colKey:'bit_name',title:'窗口名称'},{colKey:'bit_seq',title:'序号',width:80},{colKey:'group_name',title:'分组'},{colKey:'usage',title:'使用情况',width:180}]">
+        <template #select="{row}"><t-radio :checked="bindProfileId === row.id" :disabled="Boolean(bindingUnavailableReason(row))" :aria-label="'选择' + row.bit_name" @change="bindProfileId = row.id" /></template>
+        <template #usage="{row}"><span :style="{color:bindingUnavailableReason(row) ? 'var(--td-text-color-secondary)' : 'var(--td-success-color)'}">{{ bindingUnavailableReason(row) || (row.id === bindAccount?.browser_profile_id ? '当前账号已绑定' : '可关联') }}</span></template>
+      </t-table>
+    </t-dialog>
+    <t-dialog :visible="boundGuide !== null" @close="boundGuide = null" header="窗口已绑定" width="560px" :footer="false">
+      <p>可以打开窗口完成登录，也可以直接检查已登录的账号。</p>
+      <t-space style="display:flex;justify-content:flex-end;margin-top:24px">
+        <t-button variant="outline" @click="boundGuide = null">稍后处理</t-button>
+        <t-button @click="checkFromRow(boundGuide); boundGuide = null">检查账号</t-button>
+        <t-button theme="primary" @click="toggleWindow(boundGuide); boundGuide = null">打开窗口</t-button>
+      </t-space>
     </t-dialog>
 
     <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
@@ -1185,16 +1225,6 @@ const columns = [
               </template>
             </t-select>
           </div>
-        </t-form-item>
-        <div class="form-section">关联资源</div>
-        <t-form-item v-if="isDesktop" label="绑定窗口">
-          <t-select v-model="editProfileId" clearable :disabled="!canOperateLocalAccount(editAccount)" placeholder="选择本人授权窗口">
-            <t-option v-for="profile in activeProfiles" :key="profile.id" :value="profile.id" :label="profileOptionLabel(profile) + (bindingUnavailableReason(profile) ? `（${bindingUnavailableReason(profile)}）` : '')" :disabled="Boolean(bindingUnavailableReason(profile))" />
-          </t-select>
-          <div v-if="localOperationHint(editAccount)" class="form-tip">{{ localOperationHint(editAccount) }}</div>
-        </t-form-item>
-        <t-form-item v-else label="操作边界">
-          <div class="form-tip">Cloud Web 只查看绑定关系；请在 Desktop 端绑定、解绑或换绑窗口。</div>
         </t-form-item>
         <div class="form-section">备注</div>
         <t-form-item label="备注">
