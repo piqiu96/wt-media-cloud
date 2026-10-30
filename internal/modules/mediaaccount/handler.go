@@ -45,11 +45,6 @@ type accountCheckResultRequest struct {
 	LastCheckItems      []accountservice.AccountCheckItem  `json:"check_items"`
 }
 
-type cookieReadResultRequest struct {
-	OperationID string           `json:"operation_id"`
-	Cookies     []map[string]any `json:"cookies"`
-}
-
 func CreateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -210,35 +205,7 @@ func ApplyMediaAccountCheckResult(ctx context.Context, c *hertzapp.RequestContex
 	}
 	api.Success(c, account)
 }
-func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	start, err := accountservice.StartCookieRead(actor, c.Param("account_id"), accountservice.CookieReadStartInput{})
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Created(c, start)
-}
-func ApplyMediaAccountCookieReadResult(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req cookieReadResultRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	account, err := accountservice.ApplyCookieReadResult(actor, c.Param("account_id"), accountservice.CookieReadResultInput{OperationID: req.OperationID, Cookies: req.Cookies})
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Success(c, account)
-}
-func GetMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
+func GetMediaAccountCredentials(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
@@ -247,15 +214,72 @@ func GetMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 		api.Forbidden(c, 11003, "仅本人运营账号可查看凭证")
 		return
 	}
-	account, err := accountservice.GetOwnedAccountRecord(actor, c.Param("account_id"))
+	record, err := accountservice.GetOwnedAccountRecord(actor, c.Param("account_id"))
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
 	}
-	api.Success(c, map[string]interface{}{
-		"original_cookie": account.OriginalCookie,
-		"active_cookie":   account.ActiveCookie,
-	})
+	api.Success(c, map[string]any{"original_cookie": record.OriginalCookie, "active_cookie": record.ActiveCookie, "cookie_updated_at": record.CookieUpdatedAt, "current_update": accountservice.CurrentCookieUpdate(record)})
+}
+func StartMediaAccountCookieUpdate(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var input accountservice.CookieStartInput
+	if !decodeAccountJSON(c, &input) {
+		return
+	}
+	out, err := accountservice.StartCookieUpdate(actor, c.Param("account_id"), input)
+	if err != nil {
+		writeMediaAccountError(c, err)
+		return
+	}
+	api.Success(c, out)
+}
+func SnapshotMediaAccountCookieUpdate(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var input accountservice.CookieSnapshotInput
+	if !decodeAccountJSON(c, &input) {
+		return
+	}
+	out, err := accountservice.SnapshotCookieUpdate(actor, c.Param("account_id"), c.Param("operation_id"), input)
+	if err != nil {
+		writeMediaAccountError(c, err)
+		return
+	}
+	api.Success(c, out)
+}
+func SettleMediaAccountCookieUpdate(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var input accountservice.CookieResultInput
+	if !decodeAccountJSON(c, &input) {
+		return
+	}
+	out, err := accountservice.SettleCookieUpdate(actor, c.Param("account_id"), c.Param("operation_id"), input)
+	if err != nil {
+		writeMediaAccountError(c, err)
+		return
+	}
+	api.Success(c, out)
+}
+func GetMediaAccountCookieUpdate(ctx context.Context, c *hertzapp.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	out, err := accountservice.GetCookieUpdate(actor, c.Param("account_id"), c.Param("operation_id"))
+	if err != nil {
+		writeMediaAccountError(c, err)
+		return
+	}
+	api.Success(c, out)
 }
 func BindMediaAccountProfile(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
@@ -317,6 +341,8 @@ func parseCategoryIDs(values []string) []identityservice.CategoryID {
 
 func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, accountservice.ErrCookieConflict):
+		api.FailureCode(c, 409, 23003, "窗口正在处理 Cookie 或操作已变化，请核实后继续", "cookie_operation_conflict", nil, false, "reconcile")
 	case errors.Is(err, accountservice.ErrStaleCheck):
 		api.FailureCode(c, 409, 23002, "检查目标已变化或结果已过期，请刷新后重新检查", "stale_account_check", nil, false, "refresh")
 	case errors.Is(err, accountservice.ErrForbidden):

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.30.2"
+revision: "2026.10.30.3"
 errors:
   stale_account_check: {http_status: 409, code: 23002, retryable: false, recovery_action: refresh}
   authentication_required: {http_status: 401}
@@ -11,3 +11,4 @@ errors:
   # Linking a Profile outside the caller's `user_id + main_user_id` scope.
   profile_not_found: {http_status: 404, code: 20004, retryable: false, recovery_action: choose_profile}
   profile_assigned_to_other_user: {http_status: 403, code: 11003, retryable: false, recovery_action: choose_own_profile}
+  cookie_operation_conflict: {http_status: 409, code: 23003, retryable: false, recovery_action: reconcile}

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.30.2"
+revision: "2026.10.30.3"
 schemas:
   MediaAccount:
     type: object
@@ -37,6 +37,6 @@ schemas:
       tags: {type: array, items: {type: string}}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
-    forbidden_properties: [original_cookie, active_cookie]
+    forbidden_properties: [original_cookie, active_cookie, before_cookie, cookie_update]
 identity_key: {scope: user, fields: [user_id, platform, platform_account_id]}
 assignment: {owner_field: user_id, category_cardinality: many, owner_handoff_supported: false}

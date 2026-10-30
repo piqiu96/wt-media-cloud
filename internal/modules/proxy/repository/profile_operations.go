@@ -62,7 +62,7 @@ func ReserveProfileProxy(profileID, proxyID string, teamID sharedidentity.TeamID
 	var target ProfileProxyTarget
 	var proxy model.Proxy
 	err := database.DB().Transaction(func(tx *gorm.DB) error {
-		row := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id, reserved_since FROM browser_profiles WHERE id = ? AND local_state = 'active' AND enabled = 1 FOR UPDATE`, profileID).Row()
+		row := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id, reserved_since FROM browser_profiles WHERE id = ? AND local_state = 'active' AND enabled = 1 AND cookie_operation_id IS NULL FOR UPDATE`, profileID).Row()
 		var gotTeam *sharedidentity.TeamID
 		var currentProxyID, reservedProxyID sql.NullString
 		var reservedSince *time.Time
@@ -118,7 +118,7 @@ func ReserveProfileUnbind(profileID string, teamID sharedidentity.TeamID, now ti
 			return ErrProxyOperationBusy
 		}
 		var scanErr error
-		proxy, scanErr = scanProxy(tx.Raw(`SELECT `+proxyColumns+` FROM proxies WHERE id = ? FOR UPDATE`, proxyID.String).Row())
+		proxy, scanErr = scanProxy(tx.Raw(`SELECT `+proxyColumns+` FROM proxies WHERE id = ? AND cookie_operation_id IS NULL FOR UPDATE`, proxyID.String).Row())
 		if scanErr != nil {
 			return scanErr
 		}
@@ -149,7 +149,7 @@ func ReleaseProfileProxy(profileID string, teamID sharedidentity.TeamID, now tim
 	err := database.DB().Transaction(func(tx *gorm.DB) error {
 		var proxyID, reservedProxyID sql.NullString
 		var gotTeam *sharedidentity.TeamID
-		if err := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id FROM browser_profiles WHERE id = ? FOR UPDATE`, profileID).Row().
+		if err := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id FROM browser_profiles WHERE id = ? AND cookie_operation_id IS NULL FOR UPDATE`, profileID).Row().
 			Scan(&target.ProfileID, &target.BitProfileID, &target.UserID, &gotTeam, &proxyID, &reservedProxyID); err != nil {
 			return err
 		}
@@ -206,7 +206,7 @@ func resolveProfileProxyOperationReceipt(db *gorm.DB, profileID, operationID, ac
 	return db.Transaction(func(tx *gorm.DB) error {
 		var raw []byte
 		var reserved sql.NullString
-		if err := tx.Raw(`SELECT proxy_operation, reserved_proxy_id FROM browser_profiles WHERE id = ? FOR UPDATE`, profileID).Row().Scan(&raw, &reserved); err != nil {
+		if err := tx.Raw(`SELECT proxy_operation, reserved_proxy_id FROM browser_profiles WHERE id = ? AND cookie_operation_id IS NULL FOR UPDATE`, profileID).Row().Scan(&raw, &reserved); err != nil {
 			return err
 		}
 		var receipt ProfileProxyReceipt

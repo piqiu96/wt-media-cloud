@@ -13,8 +13,6 @@ func TestMediaAccountDTOTypesAreDeclaredInDTOPackage(t *testing.T) {
 		{name: "CreateAccountInput", got: reflect.TypeFor[CreateAccountInput]()},
 		{name: "AccountCheckStartInput", got: reflect.TypeFor[AccountCheckStartInput]()},
 		{name: "AccountCheckResultInput", got: reflect.TypeFor[AccountCheckResultInput]()},
-		{name: "CookieReadStartInput", got: reflect.TypeFor[CookieReadStartInput]()},
-		{name: "CookieReadResultInput", got: reflect.TypeFor[CookieReadResultInput]()},
 		{name: "UpdateAccountInput", got: reflect.TypeFor[UpdateAccountInput]()},
 		{name: "AccountFilter", got: reflect.TypeFor[AccountFilter]()},
 	} {

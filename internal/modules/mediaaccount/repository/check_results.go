@@ -10,7 +10,7 @@ import (
 // StartCheck changes only current check facts, conditional on the selected window.
 func StartCheck(record model.AccountRecord) error { return startCheck(database.DB(), record) }
 func startCheck(db *gorm.DB, record model.AccountRecord) error {
-	n, err := execSQL(db, `UPDATE media_accounts SET check_operation_id=?, check_profile_id=?, check_started_at=?, last_check_status='running', last_check_message=NULL WHERE id=? AND user_id=? AND browser_profile_id=?`, record.CheckOperationID, record.CheckProfileID, record.CheckStartedAt, record.ID, record.UserID, record.CheckProfileID)
+	n, err := execSQL(db, `UPDATE media_accounts SET check_operation_id=?, check_profile_id=?, check_started_at=?, last_check_status='running', last_check_message=NULL WHERE id=? AND user_id=? AND browser_profile_id=? AND NOT EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id=media_accounts.browser_profile_id AND bp.cookie_operation_id IS NOT NULL)`, record.CheckOperationID, record.CheckProfileID, record.CheckStartedAt, record.ID, record.UserID, record.CheckProfileID)
 	if err != nil {
 		return err
 	}

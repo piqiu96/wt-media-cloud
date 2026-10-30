@@ -13,8 +13,6 @@ func TestMediaAccountServiceExposesPackageLevelOperations(t *testing.T) {
 		{name: "CreateAccount", got: CreateAccount},
 		{name: "StartAccountCheck", got: StartAccountCheck},
 		{name: "ApplyAccountCheckResult", got: ApplyAccountCheckResult},
-		{name: "StartCookieRead", got: StartCookieRead},
-		{name: "ApplyCookieReadResult", got: ApplyCookieReadResult},
 		{name: "ListAccounts", got: ListAccounts},
 	} {
 		if reflect.TypeOf(item.got).Kind() != reflect.Func {
