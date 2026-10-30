@@ -1185,7 +1185,7 @@ const columns = [
       <t-space style="display:flex;justify-content:flex-end;margin-top:24px">
         <t-button variant="outline" @click="boundGuide = null">稍后处理</t-button>
         <t-button @click="checkFromRow(boundGuide); boundGuide = null">检查账号</t-button>
-        <t-button theme="primary" @click="toggleWindow(boundGuide); boundGuide = null">打开窗口</t-button>
+        <t-button theme="primary" @click="!profileIsOpen(boundGuide) && toggleWindow(boundGuide); boundGuide = null">打开窗口</t-button>
       </t-space>
     </t-dialog>
 
