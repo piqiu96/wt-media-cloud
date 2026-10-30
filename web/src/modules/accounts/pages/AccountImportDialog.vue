@@ -1,5 +1,6 @@
 <script setup>
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
 import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
 import OperationResultSummary from "../../../shared/ui/feedback/OperationResultSummary.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
@@ -126,13 +127,12 @@ async function close(){
   <t-table class="wt-resource-table" :data="preview" row-key="row_number" :columns="[{colKey:'row_number',title:'原行号',width:90},{colKey:'account',title:'待接入资料',width:180},{colKey:'plan',title:'窗口安排',width:190},{colKey:'message',title:'校验结果',minWidth:240}]" :scroll="{x:'700px'}" :max-height="330" size="small"><template #account="{row}">输入第 {{ row.row_number }} 行</template><template #plan="{row}">{{ row.valid?'优先新建独立窗口':'不接入' }}</template><template #message="{row}"><span class="result-message" :class="{'error-text':!row.valid}">{{ row.message }}</span></template></t-table>
  </template>
  <template v-else-if="screen==='history'">
-  <p class="hint">最近 20 次接入，可随时查看和继续处理。</p><t-empty v-if="!history.length" description="暂无接入记录"/>
+  <p class="hint">最近 20 次接入，可随时查看和继续处理。</p><ResourceEmptyState v-if="!history.length" title="暂无接入记录"/>
   <button v-for="h in history" :key="h.id" class="history-row" @click="openBatch(h.id)"><span>{{ platformLabel(h.platform) }} · 接入 {{ h.counts.total }} 个账号<small>{{ new Date(h.created_at).toLocaleString() }}</small></span><span>成功 {{ h.counts.succeeded }} / 待处理 {{ h.counts.pending+h.counts.failed+h.counts.uncertain+h.counts.running }}　查看结果 →</span></button>
  </template>
  <template v-else-if="batch">
   <OperationResultSummary :title="resultPresentation.title" :tone="resultPresentation.tone" :running="busy" :description="resultPresentation.description" :counts="resultCounts"><span>{{ platformLabel(batch.platform) }} · {{ content.remark || '账号批量接入' }}</span></OperationResultSummary>
   <t-progress v-if="busy" :percentage="progress" :label="false" style="margin-bottom:16px"/>
-  <FeedbackAlert v-if="blocked&&!busy" message="有一项结果尚未确认，请先按行核实，再继续接入。" theme="warning"/>
   <t-tabs v-model="tab" class="result-tabs"><t-tab-panel value="all" label="全部"/><t-tab-panel value="attention" label="需要继续处理"/><t-tab-panel value="done" label="成功接入"/></t-tabs>
   <t-table class="wt-resource-table" :data="shownItems" :columns="columns" row-key="row_number" :max-height="360" :scroll="{x:'855px'}" size="small">
    <template #account="{row}"><div>{{ row.name||'待识别账号' }}<small v-if="row.platform_account_id">UID：{{ row.platform_account_id }}</small></div></template>

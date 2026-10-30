@@ -4,6 +4,7 @@ import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelect
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
 import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue"
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
 import CategoryFields from "../../../shared/ui/fields/CategoryFields.vue"
@@ -1094,7 +1095,7 @@ const columns = computed(() => [
     <!-- 全部标签弹窗 -->
     <ResourceOverlay :visible="allTagsPopup !== null" @close="allTagsPopup = null" title="全部标签" :footer="false" :width="560">
       <div v-if="allTagsPopup">
-        <t-space wrap class="account-detail-tags">
+        <t-space break-line class="account-detail-tags">
           <t-tag v-for="tag in (allTagsPopup.tags || [])" :key="tag" size="medium" variant="light">{{ tag }}</t-tag>
           <span v-if="!(allTagsPopup.tags || []).length" class="info-tip">暂无标签</span>
         </t-space>
@@ -1132,7 +1133,7 @@ const columns = computed(() => [
       <p class="form-tip">关联已有窗口不会修改窗口内的登录信息。绑定后检查并识别当前账号。</p>
       <FeedbackAlert v-if="bindingError" :message="bindingError" theme="error" />
       <label v-if="bindingLoading || activeProfiles.length" class="binding-search">搜索窗口<t-input v-model="bindSearch" clearable placeholder="搜索窗口名称 / 序号 / 分组" /></label>
-      <t-empty v-if="!bindingLoading && !activeProfiles.length" description="暂无可关联窗口"><template #action><t-button variant="outline" @click="refreshBindingCandidates">刷新窗口</t-button></template></t-empty>
+      <ResourceEmptyState v-if="!bindingLoading && !activeProfiles.length" title="暂无可关联窗口"><t-button variant="outline" @click="refreshBindingCandidates">刷新窗口</t-button></ResourceEmptyState>
       <t-table v-else class="wt-resource-table" :data="bindingCandidates" row-key="id" size="small" :loading="bindingLoading" :scroll="{x:'864px'}" :max-height="360" :pagination="null" :columns="[{colKey:'select',title:'',width:48},{colKey:'bit_name',title:'窗口名称',width:240},{colKey:'bit_seq',title:'序号',width:80},{colKey:'bit_group_name',title:'分组',width:160},{colKey:'usage',title:'使用情况',width:180}]">
         <template #select="{row}"><t-radio :checked="bindProfileId === row.id" :disabled="Boolean(bindingUnavailableReason(row))" :aria-label="'选择' + row.bit_name" @change="bindProfileId = row.id" /></template>
         <template #usage="{row}"><span :style="{color:bindingUnavailableReason(row) ? 'var(--td-text-color-secondary)' : 'var(--td-success-color)'}">{{ bindingUnavailableReason(row) || (row.id === bindAccount?.browser_profile_id ? '当前账号已绑定' : '可关联') }}</span></template>
@@ -1173,7 +1174,7 @@ const columns = computed(() => [
       <ResourceSection title="业务信息">
       <ResourceDescriptions v-if="detailAccount">
         <t-descriptions-item label="业务分类">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
-        <t-descriptions-item label="业务标签"><t-space size="small" wrap class="account-detail-tags"><t-tag v-for="tag in detailAccount.tags" :key="tag" size="small" variant="light">{{ tag }}</t-tag><span v-if="!detailAccount.tags?.length">—</span></t-space></t-descriptions-item>
+        <t-descriptions-item label="业务标签"><t-space size="small" break-line class="account-detail-tags"><t-tag v-for="tag in detailAccount.tags" :key="tag" size="small" variant="light">{{ tag }}</t-tag><span v-if="!detailAccount.tags?.length">—</span></t-space></t-descriptions-item>
         <t-descriptions-item label="运营备注">{{ detailAccount.remark || '—' }}</t-descriptions-item>
         <t-descriptions-item v-if="canFilterByOwner" label="使用人">{{ detailAccount.user_name || '—' }}</t-descriptions-item>
       </ResourceDescriptions>
@@ -1276,7 +1277,7 @@ const columns = computed(() => [
 .account-name { font-weight: 500; }
 .account-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
 .account-detail-tags { max-width:100%; }
-.account-detail-tags :deep(.t-space-item) { min-width:0;max-width:100%; }
+.account-detail-tags :deep(.t-space-item) { flex:0 0 auto;min-width:0;max-width:100%; }
 .account-detail-tags :deep(.t-tag) { max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere; }
 @media (max-width: 600px) { .identity-comparison { grid-template-columns: minmax(0,1fr); } }
 </style>
