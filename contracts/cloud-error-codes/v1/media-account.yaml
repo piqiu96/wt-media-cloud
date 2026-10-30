@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.30.3"
+revision: "2026.10.30.4"
 errors:
   stale_account_check: {http_status: 409, code: 23002, retryable: false, recovery_action: refresh}
   authentication_required: {http_status: 401}
@@ -12,3 +12,4 @@ errors:
   profile_not_found: {http_status: 404, code: 20004, retryable: false, recovery_action: choose_profile}
   profile_assigned_to_other_user: {http_status: 403, code: 11003, retryable: false, recovery_action: choose_own_profile}
   cookie_operation_conflict: {http_status: 409, code: 23003, retryable: false, recovery_action: reconcile}
+  import_conflict: {http_status: 409, code: 23004, retryable: false, recovery_action: refresh}

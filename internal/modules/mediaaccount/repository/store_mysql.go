@@ -59,6 +59,17 @@ func Create(record model.AccountRecord) (string, error) {
 func create(db *gorm.DB, record model.AccountRecord) (string, error) {
 	tx := db.Begin()
 	defer rollbackTx(tx)
+	id, err := createInTx(tx, record)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func createInTx(tx *gorm.DB, record model.AccountRecord) (string, error) {
 	_, err := execSQL(tx,
 		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.UserID, record.TeamID, record.Platform,
@@ -85,9 +96,6 @@ func create(db *gorm.DB, record model.AccountRecord) (string, error) {
 		if err := replaceAccountTags(tx, accountID, record.Tags, record.CreatedAt); err != nil {
 			return "", err
 		}
-	}
-	if err := tx.Commit().Error; err != nil {
-		return "", err
 	}
 	return accountID, nil
 }

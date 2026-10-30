@@ -341,6 +341,8 @@ func parseCategoryIDs(values []string) []identityservice.CategoryID {
 
 func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, accountservice.ErrImportConflict):
+		api.FailureCode(c, 409, 23004, "接入进度已变化，请刷新后继续", "import_conflict", nil, false, "refresh")
 	case errors.Is(err, accountservice.ErrCookieConflict):
 		api.FailureCode(c, 409, 23003, "窗口正在处理 Cookie 或操作已变化，请核实后继续", "cookie_operation_conflict", nil, false, "reconcile")
 	case errors.Is(err, accountservice.ErrStaleCheck):
