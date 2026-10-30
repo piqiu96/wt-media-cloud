@@ -1004,7 +1004,7 @@ const columns = [
       :data="pagedAccounts"
       :columns="columns"
       v-model:selected-row-keys="selectedAccountIds"
-      :row-key="(r) => r.id"
+      row-key="id"
       size="small"
       hover
       :scroll="{ x: 'max-content' }"
