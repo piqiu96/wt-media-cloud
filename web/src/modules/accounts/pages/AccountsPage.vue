@@ -552,7 +552,8 @@ function accountStatusKey(account) {
     case "expired": return "expired"
     case "account_mismatch": return "account_mismatch"
     case "restricted": case "verification_needed": return "restricted"
-    case "environment_error": case "unknown": return "check_failed"
+    case "unknown": return "pending"
+    case "environment_error": return "check_failed"
     default:
       // 未检查/待识别 → 待上号
       return idStatus !== "identified" ? "pending" : "check_failed"

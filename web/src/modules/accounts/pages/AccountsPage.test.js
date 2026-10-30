@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from 'vitest'
 
 const source = readFileSync(new URL('./AccountsPage.vue', import.meta.url), 'utf8')
 
+describe('account status after creating an unchecked ledger', () => {
+  const body = source.slice(source.indexOf('function accountStatusKey('), source.indexOf('\nfunction accountStatusText('))
+  const status = new Function(`${body}; return accountStatusKey`)()
+  it('treats an unknown login result as pending, never as a failed check', () => {
+    expect(status({ platform_login_status: 'unknown', identification_status: 'unidentified' })).toBe('pending')
+  })
+  it('continues to show actual check failures and environment errors', () => {
+    expect(status({ platform_login_status: 'unknown', last_check_status: 'failed' })).toBe('check_failed')
+    expect(status({ platform_login_status: 'environment_error' })).toBe('check_failed')
+  })
+})
+
 describe('media account resource page', () => {
   it('uses shared resource layout and preserves account operations', () => {
     expect(source).toContain('ResourcePageHeader')
