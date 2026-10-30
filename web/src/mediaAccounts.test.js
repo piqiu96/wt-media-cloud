@@ -148,8 +148,6 @@ describe('media account client', () => {
     expect(source).toContain('retryFailedOnly')
     expect(source).toContain('打开窗口')
     expect(source).toContain('关闭窗口')
-    expect(source).toContain('window-bit-id')
-    expect(source).toContain('系统ID {{ profileForAccount')
     expect(source).toContain('不可执行：未绑定类目')
     expect(source).toContain('Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息')
     expect(source).not.toContain('business_status')

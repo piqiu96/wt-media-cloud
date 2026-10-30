@@ -945,7 +945,7 @@ const columns = [
             <t-option value="all" label="全部成员" />
             <t-option v-for="option in ownerOptions" :key="option.value" :value="option.value" :label="option.label" />
           </t-select></label>
-        <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="searchTeam" clearable placeholder="全部团队"><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></t-select></label>
+        <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="searchTeam" clearable placeholder="全部"><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">一级分类</span><t-select v-model="searchCategoryType" clearable placeholder="全部" @change="searchCategoryIds=[]"><t-option value="game" label="游戏" /><t-option value="ai" label="AI" /><t-option value="anime" label="二次元" /></t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="searchCategoryIds" multiple clearable placeholder="全部">
             <t-option v-for="category in categories.filter(c => !searchCategoryType || c.type === searchCategoryType)" :key="category.id" :value="category.id" :label="category.name" />
@@ -968,7 +968,7 @@ const columns = [
         <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" multiple filterable placeholder="全部" clearable>
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">标签匹配</span><t-select v-model="searchTagMatch"><t-option value="any" label="任一标签" /><t-option value="all" label="全部标签" /><t-option value="exclude" label="排除标签" /></t-select></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">标签匹配</span><t-select v-model="searchTagMatch" placeholder="全部"><t-option value="any" label="任一标签" /><t-option value="all" label="全部标签" /><t-option value="exclude" label="排除标签" /></t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable /></label>
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadAccounts({ resetPage: true })">查询</t-button>
