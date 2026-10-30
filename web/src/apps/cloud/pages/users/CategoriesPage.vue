@@ -41,7 +41,7 @@ const canManage = computed(() => isAdminRole(currentUser.value))
 const columns = computed(() => {
   const base = [
     { colKey: 'id', title: '类目ID', width: 100 },
-    { colKey: 'type', title: '一级类型', width: 110 },
+    { colKey: 'type', title: '一级分类', width: 110 },
     { colKey: 'name', title: '类目名称', width: 220 },
   ]
   if (canManage.value) base.push({ colKey: 'references', title: '关联情况', width: 190 })
@@ -133,7 +133,7 @@ function openEdit(category) {
 
 async function saveCategory() {
   if (!categoryForm.value.type || !categoryForm.value.name.trim()) {
-    error.value = '请选择一级类型并填写类目名称'
+    error.value = '请选择一级分类并填写类目名称'
     return
   }
   saving.value = true
@@ -194,9 +194,9 @@ async function deleteCategory(category) {
     <ResourceCard class="system-resource-card">
       <div class="filter-bar">
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.keyword" placeholder="类目 ID / 名称" clearable @enter="loadCategories" /></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">一级类型</span><t-select v-model="filters.type" placeholder="全部" clearable>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">一级分类</span><BusinessSelect kind="category" filter v-model="filters.type">
           <t-option v-for="option in CATEGORY_TYPE_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
-        </t-select></label>
+        </BusinessSelect></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.enabled" placeholder="全部" clearable>
           <t-option :value="true" label="启用" />
           <t-option :value="false" label="停用" />
@@ -225,11 +225,11 @@ async function deleteCategory(category) {
     <t-dialog v-model:visible="dialogVisible" :header="editingCategory ? '编辑类目' : '新增类目'" :confirm-btn="{ loading: saving }" @confirm="saveCategory">
       <t-form>
         <t-form-item v-if="editingCategory" label="类目ID"><t-input :model-value="String(editingCategory.id)" disabled /></t-form-item>
-        <t-form-item label="一级类型"><BusinessSelect kind="category" v-model="categoryForm.type" :disabled="!!editingCategory">
+        <t-form-item label="一级分类"><BusinessSelect kind="category" v-model="categoryForm.type" placeholder="选择一级分类" :clearable="false" :disabled="!!editingCategory">
           <t-option v-for="option in CATEGORY_TYPE_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
         </BusinessSelect></t-form-item>
         <t-form-item label="类目名称"><t-input v-model="categoryForm.name" placeholder="例如：游戏.三角洲" /></t-form-item>
-        <t-form-item v-if="editingCategory" label="状态"><t-switch v-model="categoryForm.enabled" :label="['停用', '启用']" /></t-form-item>
+        <t-form-item v-if="editingCategory" label="状态"><t-switch v-model="categoryForm.enabled" :label="['启用', '停用']" /></t-form-item>
         <t-form-item label="备注"><t-textarea v-model="categoryForm.remark" /></t-form-item>
       </t-form>
     </t-dialog>

@@ -292,6 +292,7 @@ function defaultForm() {
 // 不可改，直接用行上的值；新建时管理员先选团队、所有人先选类目。
 async function loadOperatorOptions() {
   const sequence = ++operatorSequence
+  operatorOptions.value = []
   const teamID = isAdmin.value ? Number(form.value.team_id) || 0 : Number(currentUser.value?.team_id) || 0
   const categoryID = form.value.category_id
   operatorError.value = ''
@@ -749,12 +750,12 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 </t-form-item>
                 <template v-if="!editingID">
                   <t-form-item v-if="isAdmin" label="运营团队" required-mark>
-                    <BusinessSelect kind="team" v-model="form.team_id" clearable>
+                    <BusinessSelect kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''">
                       <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
                     </BusinessSelect>
                   </t-form-item>
                   <t-form-item label="业务分类" required-mark>
-                    <BusinessSelect kind="category" v-model="form.category_id" clearable>
+                    <BusinessSelect kind="category" v-model="form.category_id" clearable @change="form.operator_id = ''">
                       <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
                     </BusinessSelect>
                   </t-form-item>
@@ -767,7 +768,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 <!-- 负责人是策略的必填归属：任务与成片都从这里继承。候选跟着团队＋类目走。 -->
                 <t-form-item label="负责人" required-mark>
                   <div class="strategy-field">
-                    <BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="!form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
+                    <BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="operatorsLoading || !form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
                       <t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" />
                     </BusinessSelect>
                     <p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p>

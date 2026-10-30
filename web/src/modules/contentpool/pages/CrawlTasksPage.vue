@@ -135,6 +135,7 @@ useAutoRefresh(() => load({ quiet: true }), {
 })
 
 function resetFilters() {
+  teamFilter.value = ''
   filters.value = { search: '', status: '' }
   load()
 }
