@@ -35,3 +35,18 @@ for (const page of ['ComposeTasksPage', 'MyOutputsPage']) {
     })
   })
 }
+
+describe('ComposeStrategyPage member choices', () => {
+  it('removes old candidates immediately while loading a new team/category', async () => {
+    const source = readFileSync(new URL('./ComposeStrategyPage.vue', import.meta.url), 'utf8')
+    const command = source.slice(source.indexOf('async function loadOperatorOptions()'), source.indexOf('\nwatch(() => [visible.value, form.value.team_id'))
+    const form = { value: { team_id: 2, category_id: 'game-2', operator_id: '' } }
+    const operatorOptions = { value: [{ id: 1 }] }, operatorsLoading = { value: false }, pending = deferred()
+    const run = new Function('form', 'operatorOptions', 'operatorsLoading', 'operatorError', 'client', 'isAdmin', 'currentUser', `let operatorSequence = 0; ${command}; return loadOperatorOptions`)(form, operatorOptions, operatorsLoading, { value: '' }, { listComposeOperators: () => pending.promise }, { value: true }, { value: null })
+    const done = run()
+    expect(operatorOptions.value).toEqual([])
+    expect(operatorsLoading.value).toBe(true)
+    pending.resolve([{ id: 2 }]); await done
+    expect(operatorOptions.value).toEqual([{ id: 2 }])
+  })
+})
