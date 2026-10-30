@@ -33,7 +33,15 @@ const shownItems=computed(()=>(content.value?.items||[]).filter(i=>tab.value==='
 const title=computed(()=>screen.value==='input'?'批量接入账号':screen.value==='preview'?'确认接入内容':screen.value==='history'?'接入记录':busy.value?'正在接入账号':'批量接入结果')
 const progress=computed(()=>batch.value?Math.round((batch.value.counts.succeeded+batch.value.counts.failed+batch.value.counts.skipped)/batch.value.counts.total*100):0)
 const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value,content.value?.items))
-const resultCounts=computed(()=>Object.entries(countLabels).map(([key,label])=>({key,label,value:batch.value?.counts[key]||0,tone:key==='succeeded'?'success':key==='failed'?'danger':key==='uncertain'?'warning':key==='running'?'info':'neutral'})).filter(item=>['total','succeeded'].includes(item.key)||item.value>0))
+const resultCounts=computed(()=>{
+ const counts=batch.value?.counts||{}
+ if(!busy.value)return [
+  {key:'total',label:'总计',value:counts.total||0,tone:'neutral'},
+  {key:'succeeded',label:'成功',value:counts.succeeded||0,tone:'success'},
+  ...importHistoryCounts(counts).filter(item=>item.key!=='succeeded'),
+ ]
+ return Object.entries(countLabels).map(([key,label])=>({key,label,value:counts[key]||0,tone:key==='succeeded'?'success':key==='failed'?'danger':key==='uncertain'?'warning':key==='running'?'info':'neutral'})).filter(item=>['total','succeeded'].includes(item.key)||item.value>0)
+})
 async function readFile(event){const f=event.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){error.value='文件超过 2 MB，请拆分后再接入';return}raw.value=await f.text();event.target.value=''}
 const historyColumns=[{colKey:'created_at',title:'接入时间',width:174},{colKey:'batch',title:'接入批次',minWidth:190},{colKey:'result',title:'接入结果',minWidth:300},{colKey:'op',title:'操作',width:100,fixed:'right'}]
 const columns=computed(()=>[{colKey:'row_number',title:'原行号',width:68},{colKey:'account',title:'账号',width:150},{colKey:'window',title:'浏览器窗口',width:132},{colKey:'status',title:'接入状态',width:100},{colKey:'message',title:'结果说明',minWidth:180},{colKey:'op',title:'操作',width:Math.max(100,...shownItems.value.map(item=>opColumnWidth(itemActions(item).map(action=>action.label),{variant:'text',primary:itemActions(item).some(action=>action.primary)}))),fixed:'right'}])
