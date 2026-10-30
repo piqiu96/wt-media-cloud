@@ -472,6 +472,9 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	if updated.PlatformLoginStatus != PlatformLoginAccountMismatch || updated.IdentificationStatus != IdentificationDuplicate || updated.DuplicateOfAccountID != first.ID {
 		t.Fatalf("updated=%#v", updated)
 	}
+	if updated.LastCheckMessage != "识别出的账号已存在，请查看已有账号" {
+		t.Fatalf("duplicate must explain the outcome: %q", updated.LastCheckMessage)
+	}
 }
 
 func TestCheckPreservesIdentityOnMismatchAndRefreshesSameUID(t *testing.T) {

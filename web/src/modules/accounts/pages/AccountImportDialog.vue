@@ -1,6 +1,9 @@
 <script setup>
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
 import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
+import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
+import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
+import { importItemActions, importItemPresentation } from "./importItemPresentation.js"
 import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
 import OperationResultSummary from "../../../shared/ui/feedback/OperationResultSummary.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
@@ -17,10 +20,9 @@ import {importHistoryCounts,importResultSummary} from './importResultSummary.js'
 const props=defineProps({visible:Boolean,initialId:{type:String,default:''},historyOnly:Boolean,categories:{type:Array,default:()=>[]},getLocal:{type:Function,required:true}})
 const emit=defineEmits(['update:visible','changed','view-account'])
 const api=createMediaAccountImportClient(),profiles=createProfileBindingClient()
-const fileInput=ref(null),historyLoading=ref(false)
+const fileInput=ref(null),historyLoading=ref(false),openedFromHistory=ref(false)
 const screen=ref('input'),batch=ref(null),history=ref([]),groups=ref([]),preview=ref([]),raw=ref(''),platform=ref('bilibili'),groupId=ref(''),categoryType=ref(''),categoryIds=ref([]),tags=ref([]),remark=ref(''),error=ref(''),busy=ref(false),keepRunning=ref(false),requestKey=ref(''),tab=ref('all'),reuseItem=ref(null),candidateId=ref(''),candidates=ref([]),pauseClose=ref(false)
 let defaultGroupId = ''
-const labels={pending:'待处理',running:'执行中',succeeded:'已接入',failed:'未完成',skipped:'已跳过',uncertain:'待确认'}
 const countLabels={total:'总计',succeeded:'成功',failed:'未完成',skipped:'跳过',running:'执行中',pending:'待处理',uncertain:'待确认'}
 const rows=()=>raw.value.split(/\r?\n/).map((s,n)=>({row_number:n+1,input_cookie:s.trim()})).filter(i=>i.input_cookie)
 const validRows=computed(()=>preview.value.filter(i=>i.valid))
@@ -30,11 +32,11 @@ const continueCount=computed(()=>blocked.value?0:batch.value?.counts?.pending||0
 const shownItems=computed(()=>(content.value?.items||[]).filter(i=>tab.value==='all'||tab.value==='done'&&i.status==='succeeded'||tab.value==='attention'&&!['succeeded','skipped'].includes(i.status)))
 const title=computed(()=>screen.value==='input'?'批量接入账号':screen.value==='preview'?'确认接入内容':screen.value==='history'?'接入记录':busy.value?'正在接入账号':'批量接入结果')
 const progress=computed(()=>batch.value?Math.round((batch.value.counts.succeeded+batch.value.counts.failed+batch.value.counts.skipped)/batch.value.counts.total*100):0)
-const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value))
-const resultCounts=computed(()=>Object.entries(countLabels).map(([key,label])=>({key,label,value:batch.value?.counts[key]||0,tone:key==='succeeded'?'success':key==='failed'?'danger':key==='uncertain'?'warning':key==='running'?'info':'neutral'})))
+const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value,content.value?.items))
+const resultCounts=computed(()=>Object.entries(countLabels).map(([key,label])=>({key,label,value:batch.value?.counts[key]||0,tone:key==='succeeded'?'success':key==='failed'?'danger':key==='uncertain'?'warning':key==='running'?'info':'neutral'})).filter(item=>['total','succeeded'].includes(item.key)||item.value>0))
 async function readFile(event){const f=event.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){error.value='文件超过 2 MB，请拆分后再接入';return}raw.value=await f.text();event.target.value=''}
 const historyColumns=[{colKey:'created_at',title:'接入时间',width:174},{colKey:'batch',title:'接入批次',minWidth:190},{colKey:'result',title:'接入结果',minWidth:300},{colKey:'op',title:'操作',width:100,fixed:'right'}]
-const columns=[{colKey:'row_number',title:'原行号',width:68},{colKey:'account',title:'账号',width:150},{colKey:'window',title:'浏览器窗口',width:132},{colKey:'status',title:'接入状态',width:100},{colKey:'message',title:'结果说明',minWidth:180},{colKey:'op',title:'操作',width:225,fixed:'right'}]
+const columns=computed(()=>[{colKey:'row_number',title:'原行号',width:68},{colKey:'account',title:'账号',width:150},{colKey:'window',title:'浏览器窗口',width:132},{colKey:'status',title:'接入状态',width:100},{colKey:'message',title:'结果说明',minWidth:180},{colKey:'op',title:'操作',width:Math.max(100,...shownItems.value.map(item=>opColumnWidth(itemActions(item).map(action=>action.label),{variant:'text',primary:itemActions(item).some(action=>action.primary)}))),fixed:'right'}])
 function resetInput() {
  raw.value='';platform.value='bilibili';groupId.value='';defaultGroupId='';categoryType.value='';categoryIds.value=[];tags.value=[];remark.value='';preview.value=[];requestKey.value=''
 }
@@ -44,7 +46,7 @@ function inputHasChanges() {
 watch(()=>props.visible,async (open,_,onCleanup)=>{
  if(!open)return
  let active=true;onCleanup(()=>{active=false})
- resetInput();error.value='';batch.value=null;groups.value=[];history.value=[];reuseItem.value=null;candidateId.value='';candidates.value=[];pauseClose.value=false;keepRunning.value=false;tab.value='all';screen.value=props.historyOnly?'history':'input';historyLoading.value=true
+ resetInput();openedFromHistory.value=false;error.value='';batch.value=null;groups.value=[];history.value=[];reuseItem.value=null;candidateId.value='';candidates.value=[];pauseClose.value=false;keepRunning.value=false;tab.value='all';screen.value=props.historyOnly?'history':'input';historyLoading.value=true
  try {
   const recent=await api.list();if(!active)return;history.value=recent
   if(props.initialId){const saved=await api.get(props.initialId);if(active){update(saved);screen.value='results'};return}
@@ -54,10 +56,14 @@ watch(()=>props.visible,async (open,_,onCleanup)=>{
 })
 function publicBatch(v){const {execution,...safe}=v;return safe}
 function update(v){batch.value=publicBatch(v)}
-async function showHistory(){if(['input','preview'].includes(screen.value)&&inputHasChanges()&&!await feedback.confirmWarning({title:'放弃本次输入？',message:'尚未确认的接入内容不会保存。',confirmText:'放弃输入'}))return;try{history.value=await api.list();resetInput();error.value='';screen.value='history'}catch(e){fail(e)}}
-async function refresh(){try{if(batch.value)update(await api.get(batch.value.id));else history.value=await api.list();error.value=''}catch(e){fail(e)}}
-function fail(e){error.value=e.message||'本次操作未完成，请刷新后继续'}
-async function openBatch(id){if(busy.value)return;busy.value=true;error.value='';try{update(await api.get(id));screen.value='results';tab.value='all'}catch(e){fail(e)}finally{busy.value=false}}
+async function backToHistory(){
+ if(busy.value)return
+ error.value='';screen.value='history';historyLoading.value=true
+ try{history.value=await api.list()}catch(e){fail(e)}finally{historyLoading.value=false}
+}
+async function reloadBatch(){try{if(batch.value)update(await api.get(batch.value.id))}catch(e){fail(e)}}
+function fail(e){error.value=e.message||'本次操作未完成，请重试'}
+async function openBatch(id){if(busy.value)return;busy.value=true;error.value='';try{update(await api.get(id));screen.value='results';openedFromHistory.value=true;tab.value='all'}catch(e){fail(e)}finally{busy.value=false}}
 async function validate(){
  if(busy.value)return
  error.value='';if(!groupId.value){error.value='请选择浏览器窗口分组';return}busy.value=true
@@ -75,7 +81,7 @@ async function execute(row,reconcile=false){
 async function runPending(onlyRow=null){
  if(busy.value||blocked.value)return;busy.value=true;keepRunning.value=true;error.value=''
  try {while(keepRunning.value){const i=content.value.items.find(i=>i.status==='pending'&&(onlyRow===null||i.row_number===onlyRow));if(!i)break;await execute(i.row_number);if(blocked.value||onlyRow!==null)break}}
- catch(e){fail(e);await refresh()}
+ catch(e){fail(e);await reloadBatch()}
  finally{busy.value=false;keepRunning.value=false;emit('changed');if(pauseClose.value)emit('update:visible',false)}
 }
 async function action(i,action,extra={}){
@@ -83,8 +89,17 @@ async function action(i,action,extra={}){
  try {
  if(action==='reconcile')await execute(i.row_number,true)
  else update(await api.action(batch.value.id,i.row_number,{expected_revision:batch.value.revision,action,...extra}))
- }catch(e){fail(e);await refresh()}finally{busy.value=false;emit('changed')}
+ }catch(e){fail(e);await reloadBatch()}finally{busy.value=false;emit('changed')}
  if(action==='retry'&&content.value?.items.find(x=>x.row_number===i.row_number)?.status==='pending')await runPending(i.row_number)
+}
+function itemActions(item){return importItemActions(item,{busy:busy.value,blocked:blocked.value})}
+function itemPresentation(item){return importItemPresentation(item,busy.value)}
+async function onItemAction(item,key){
+ if(busy.value)return
+ if(key==='view')emit('view-account',item.existing_account_id||item.account_id)
+ else if(key==='open')await openWindow(item)
+ else if(key==='reuse')await chooseReuse(item)
+ else await action(item,key)
 }
 async function openWindow(i){try{await(await props.getLocal()).profileOpen(i.bit_profile_id)}catch(e){fail(e)}}
 async function chooseReuse(i){
@@ -134,38 +149,33 @@ async function close(){
    <template #created_at="{row}"><span class="history-time">{{ new Date(row.created_at).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) }}</span></template>
    <template #batch="{row}"><div class="history-batch"><strong>{{ platformLabel(row.platform) }} · {{ row.counts.total }} 个账号</strong><small v-if="row.content_json?.remark">{{ row.content_json.remark }}</small></div></template>
    <template #result="{row}"><div class="history-counts"><ResourceStatusBadge v-for="item in importHistoryCounts(row.counts)" :key="item.key" :tone="item.tone" :label="`${item.label} ${item.value}`" /></div></template>
-   <template #op="{row}"><t-button theme="primary" variant="text" size="small" :disabled="busy" @click="openBatch(row.id)">查看结果</t-button></template>
+   <template #op="{row}"><ResourceRowActions><t-button variant="text" size="small" :disabled="busy" @click="openBatch(row.id)">查看结果</t-button></ResourceRowActions></template>
   </t-table>
   <ResourceEmptyState v-else-if="!error" title="暂无接入记录" description="完成首次批量 CK 接入后，可在这里查看结果。" />
  </template>
  <template v-else-if="batch">
+  <t-button v-if="openedFromHistory" class="history-back" theme="primary" variant="text" :disabled="busy" @click="backToHistory">返回接入记录</t-button>
   <OperationResultSummary :title="resultPresentation.title" :tone="resultPresentation.tone" :running="busy" :description="resultPresentation.description" :counts="resultCounts"><span>{{ platformLabel(batch.platform) }} · {{ content.remark || '账号批量接入' }}</span></OperationResultSummary>
   <t-progress v-if="busy" :percentage="progress" :label="false" style="margin-bottom:16px"/>
   <t-tabs v-model="tab" class="result-tabs"><t-tab-panel value="all" label="全部"/><t-tab-panel value="attention" label="需要继续处理"/><t-tab-panel value="done" label="成功接入"/></t-tabs>
-  <t-table class="wt-resource-table" :data="shownItems" :columns="columns" row-key="row_number" :max-height="360" :scroll="{x:'855px'}" size="small">
+  <t-table class="wt-resource-table" :data="shownItems" :columns="columns" row-key="row_number" :max-height="360" :scroll="{x:'max-content'}" size="small">
    <template #account="{row}"><div>{{ row.name||'待识别账号' }}<small v-if="row.platform_account_id">UID：{{ row.platform_account_id }}</small></div></template>
    <template #window="{row}"><span>{{ row.window_name||(row.browser_profile_id?'窗口 #'+row.browser_profile_id:'待准备窗口') }}</span></template>
-   <template #status="{row}"><ResourceStatusBadge :tone="row.status==='succeeded'?'success':row.status==='failed'?'danger':row.status==='uncertain'?'warning':row.status==='running'?'info':'neutral'" :label="row.step==='manual'&&row.status==='failed'?'需人工登录':labels[row.status]" /></template>
-   <template #message="{row}"><span class="result-message" :class="{'error-text':row.status==='failed'}">{{ row.message||'等待接入' }}</span></template>
-   <template #op="{row}"><t-space size="small" break-line>
-    <t-button v-if="row.bit_profile_id&&row.status!=='succeeded'" size="small" variant="text" :disabled="busy" @click="openWindow(row)">打开窗口</t-button>
-    <t-button v-if="['running','uncertain'].includes(row.status)||row.step==='manual'&&row.status==='failed'" size="small" variant="text" :disabled="busy" @click="action(row,'reconcile')">{{ row.step==='manual'?'检查并同步':'核实结果' }}</t-button>
-    <t-button v-if="row.status==='failed'&&row.creation_unavailable" size="small" variant="text" :disabled="busy||blocked" @click="chooseReuse(row)">选择空闲窗口</t-button>
-    <t-button v-if="row.status==='failed'&&row.step!=='manual'&&!row.existing_account_id" size="small" variant="text" :disabled="busy||blocked" @click="action(row,'retry')">{{ row.step==='blocked'?'使用新窗口':'重试' }}</t-button>
-    <t-button v-if="row.existing_account_id||row.account_id" size="small" variant="text" :disabled="busy" @click="emit('view-account',row.existing_account_id||row.account_id)">{{ row.existing_account_id?'查看已有账号':'查看账号' }}</t-button>
-    <t-button v-if="['failed','pending'].includes(row.status)" size="small" variant="text" :disabled="busy" @click="action(row,'skip')">跳过</t-button>
-    <t-button v-if="row.status==='skipped'" size="small" variant="text" :disabled="busy" @click="action(row,'restore')">恢复</t-button>
-   </t-space></template>
+   <template #status="{row}"><ResourceStatusBadge :tone="itemPresentation(row).tone" :label="itemPresentation(row).label" /></template>
+   <template #message="{row}"><span class="result-message" :class="{'error-text':itemPresentation(row).tone==='danger'}">{{ itemPresentation(row).message }}</span></template>
+   <template #op="{row}"><ResourceRowActions>
+    <t-button v-for="itemAction in itemActions(row)" :key="itemAction.key" size="small" variant="text" :class="{'is-primary':itemAction.primary}" :disabled="itemAction.disabled" @click="onItemAction(row,itemAction.key)">{{ itemAction.label }}</t-button>
+   </ResourceRowActions></template>
+   <template #empty><ResourceEmptyState :title="tab==='attention'?'没有需要处理的账号':tab==='done'?'还没有成功接入的账号':'暂无接入明细'" /></template>
   </t-table>
  </template>
  </div>
  <template #footer>
  <div class="footer">
-  <t-button v-if="screen!=='history'" variant="outline" :disabled="busy" @click="showHistory">接入记录</t-button><span class="spacer"/>
-  <t-button variant="outline" :disabled="busy&&!keepRunning" @click="close">{{ busy&&pauseClose?'正在暂停…':busy&&keepRunning?'暂停并返回':['input','preview'].includes(screen)?'取消':screen==='results'?'完成':'关闭' }}</t-button>
+  <t-button variant="outline" :disabled="busy&&!keepRunning" @click="close">{{ busy&&pauseClose?'正在暂停…':busy&&keepRunning?'暂停并返回':['input','preview'].includes(screen)?'取消':'关闭' }}</t-button>
   <t-button v-if="screen==='input'" theme="primary" :loading="busy" @click="validate">校验并预览</t-button>
   <template v-if="screen==='preview'"><t-button variant="outline" :disabled="busy" @click="screen='input'">返回修改</t-button><t-button theme="primary" :loading="busy" :disabled="!validRows.length" @click="createBatch">确认接入 {{ validRows.length }} 个账号</t-button></template>
-  <template v-if="screen==='results'"><t-button variant="outline" :disabled="busy" @click="refresh">刷新结果</t-button><t-button v-if="continueCount" theme="primary" :disabled="busy" @click="runPending()">继续接入（{{ continueCount }}）</t-button></template>
+  <template v-if="screen==='results'"><t-button v-if="continueCount" theme="primary" :disabled="busy" @click="runPending()">继续接入（{{ continueCount }}）</t-button></template>
  </div>
  </template>
 </ResourceOverlay>
@@ -185,17 +195,17 @@ async function close(){
 .import-file { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 12px; font-size: 12px; color: var(--wt-text-tertiary); }
 .hint, small { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.7; }
 small { display: block; overflow-wrap: anywhere; }
-.footer { display: flex; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
-.spacer { flex: 1; }
+.footer { display: flex; align-items: center; justify-content:flex-end; gap: 8px; width: 100%; flex-wrap: wrap; }
 .preview-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 14px; }
 .preview-summary span { color: var(--wt-text-tertiary); font-size: 12px; }
 .result-message { white-space: normal; overflow-wrap: anywhere; line-height: 1.7; }
 .error-text { color: var(--wt-danger); }
+.history-back { margin:0 0 16px; }
 .result-tabs { margin: 16px 0; }
 .history-intro { margin:0 0 16px;color:var(--wt-text-tertiary);font-size:13px;line-height:1.7; }
 .history-time { white-space:nowrap;font-variant-numeric:tabular-nums; }
 .history-batch { overflow-wrap:anywhere;line-height:1.7; }
 .history-batch strong { font-weight:500;color:var(--wt-text-primary); }
 .history-counts { display:flex;flex-wrap:wrap;gap:6px 8px; }
-@media (max-width: 600px) { .form-grid { grid-template-columns: minmax(0,1fr); } .spacer { display: none; } }
+@media (max-width: 600px) { .form-grid { grid-template-columns: minmax(0,1fr); } }
 </style>

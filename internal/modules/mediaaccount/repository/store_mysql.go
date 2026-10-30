@@ -512,8 +512,8 @@ func accountConditions(query AccountFilter) (string, []any) {
 	}
 	if query.Search != "" {
 		like := "%" + query.Search + "%"
-		conditions = append(conditions, "(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.platform_name LIKE ? OR ma.remark LIKE ?)")
-		args = append(args, like, like, like, like)
+		conditions = append(conditions, `(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.platform_name LIKE ? OR ma.remark LIKE ? OR EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = ma.browser_profile_id AND bp.bit_name LIKE ?))`)
+		args = append(args, like, like, like, like, like)
 	}
 	if query.ProfileSearch != "" {
 		like := "%" + query.ProfileSearch + "%"
