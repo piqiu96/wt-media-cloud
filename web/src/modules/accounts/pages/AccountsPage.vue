@@ -1024,8 +1024,8 @@ const columns = computed(() => [
         </div>
       </template>
       <template #window_info="{ row }">
-        <div v-if="row.browser_profile_id" class="window-cell" @click="openWindowPopup(row)">
-          <t-button variant="text" size="small" class="window-name-link">{{ profileName(row.browser_profile_id) }}</t-button>
+        <div v-if="row.browser_profile_id" class="window-cell">
+          <t-button variant="text" size="small" class="window-name-link" @click="openWindowPopup(row)">{{ profileName(row.browser_profile_id) }}</t-button>
         </div>
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
@@ -1056,25 +1056,28 @@ const columns = computed(() => [
     </div>
     </ResourceCard>
 
-    <t-dialog :visible="windowPopup !== null" @close="windowPopup = null" header="浏览器窗口信息" :footer="false" width="480px">
-      <div v-if="windowPopup" class="info-popup">
-        <div class="info-name">{{ profileName(windowPopup.browser_profile_id) }}</div>
-        <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
+    <ResourceOverlay :visible="windowPopup !== null" @close="windowPopup = null" title="浏览器窗口详情" kind="drawer" :width="800" :footer="Boolean(windowPopup && canOperateBoundWindow(windowPopup))" :busy="Boolean(operatingProfileId)">
+      <template v-if="windowPopup">
+        <ResourceSection title="窗口信息">
+        <ResourceDescriptions>
           <t-descriptions-item label="窗口名称">{{ profileName(windowPopup.browser_profile_id) }}</t-descriptions-item>
-          <t-descriptions-item label="系统窗口ID">{{ profileForAccount(windowPopup)?.id || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="BitBrowser ID">
-            <span class="window-bit-id" :title="profileForAccount(windowPopup)?.bit_profile_id || ''">{{ profileForAccount(windowPopup)?.bit_profile_id || '--' }}</span>
-          </t-descriptions-item>
-          <t-descriptions-item label="浏览器窗口状态">{{ profileWindowStateText(windowPopup) }}</t-descriptions-item>
+          <t-descriptions-item label="系统窗口 ID">{{ profileForAccount(windowPopup)?.id || '—' }}</t-descriptions-item>
+          <t-descriptions-item label="比特窗口 ID" full>{{ profileForAccount(windowPopup)?.bit_profile_id || '—' }}</t-descriptions-item>
+          <t-descriptions-item label="最近同步">{{ profileForAccount(windowPopup)?.last_synced_at ? formatTime(profileForAccount(windowPopup).last_synced_at) : '—' }}</t-descriptions-item>
+        </ResourceDescriptions>
+        </ResourceSection>
+        <ResourceSection title="运行状态">
+        <ResourceDescriptions>
+          <t-descriptions-item label="窗口状态">{{ profileWindowStateText(windowPopup) }}</t-descriptions-item>
           <t-descriptions-item label="代理状态">{{ profileProxyModeText(windowPopup) }}</t-descriptions-item>
-          <t-descriptions-item label="当前运行状态">{{ profileIsOpen(windowPopup) ? '已打开' : '已关闭' }}</t-descriptions-item>
-          <t-descriptions-item label="最近同步">{{ profileForAccount(windowPopup)?.last_synced_at ? formatTime(profileForAccount(windowPopup).last_synced_at) : '--' }}</t-descriptions-item>
-        </t-descriptions>
-        <div style="margin-top:12px; text-align:right">
-          <t-button v-if="canOperateBoundWindow(windowPopup)" variant="outline" :disabled="!canOperateLocalAccount(windowPopup)" :title="localOperationHint(windowPopup)" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
-        </div>
-      </div>
-    </t-dialog>
+          <t-descriptions-item label="当前运行状态">{{ canOperateLocalAccount(windowPopup) ? (profileIsOpen(windowPopup) ? '已打开' : '已关闭') : '未读取成员电脑状态' }}</t-descriptions-item>
+        </ResourceDescriptions>
+        </ResourceSection>
+      </template>
+      <template #footer>
+        <t-button v-if="windowPopup && canOperateBoundWindow(windowPopup)" theme="primary" :disabled="!canOperateLocalAccount(windowPopup) || Boolean(operatingProfileId)" :title="localOperationHint(windowPopup)" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
+      </template>
+    </ResourceOverlay>
 
     <!-- 全部标签弹窗 -->
     <t-dialog :visible="allTagsPopup !== null" @close="allTagsPopup = null" header="全部标签" :footer="false" width="360px">
@@ -1245,11 +1248,9 @@ const columns = computed(() => [
 
 .account-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .tags-more { cursor: pointer; }
-.window-cell { cursor: pointer; }
 .window-unbound { color: var(--td-text-color-secondary, #666); }
 .window-binding-name { font-size: 13px; font-weight: 500; }
 .window-binding-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary, #666); margin-top: 4px; }
-.window-bit-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; display: inline-block; vertical-align: bottom; }
 .info-tip { color: var(--td-text-color-secondary, #666); font-size: 12px; }
 .form-tip {
   color: var(--td-text-color-placeholder);
