@@ -81,7 +81,9 @@ describe('compose task create drawer', () => {
   it('sorts the candidates by the field the operator picked, newest published by default', () => {
     expect(source).toContain('v-model="candidateSort"')
     expect(source).toContain(':options="CANDIDATE_SORTS"')
-    expect(source).toContain('aria-label="排序"')
+    for (const label of ['业务分类', '使用情况', '排序']) {
+      expect(source).toContain(`class="wt-filter-field__label">${label}</span>`)
+    }
     expect(source).toContain("const candidateSort = ref('published_desc')")
     expect(source).toContain('candidateRows(visibleCandidates.value, statesById.value, candidateUsage.value, candidateKeyword.value, candidateSort.value)')
     expect(source).toContain("candidateSort.value = 'published_desc'")
