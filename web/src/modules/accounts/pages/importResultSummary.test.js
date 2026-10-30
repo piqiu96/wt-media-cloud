@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { importResultSummary } from './importResultSummary.js'
+import { importHistoryCounts, importResultSummary } from './importResultSummary.js'
 
 describe('batch import result presentation', () => {
   const base = { total: 2, succeeded: 0, failed: 0, skipped: 0, running: 0, pending: 0, uncertain: 0 }
@@ -17,5 +17,26 @@ describe('batch import result presentation', () => {
   })
   it('shows running feedback while processing, rather than a premature success or failure', () => {
     expect(importResultSummary({ ...base, failed: 1, pending: 1 }, true)).toMatchObject({ tone: 'info', title: '正在接入账号' })
+  })
+})
+
+describe('import history counts', () => {
+  it('distinguishes failed and pending rows, and reconciles persisted running rows', () => {
+    const counts = { succeeded: 3, failed: 2, pending: 1, uncertain: 2, running: 1, skipped: 4 }
+    const result = importHistoryCounts(counts)
+    expect(result).toEqual([
+      { key: 'succeeded', label: '成功', tone: 'success', value: 3 },
+      { key: 'failed', label: '未完成', tone: 'danger', value: 2 },
+      { key: 'pending', label: '待处理', tone: 'neutral', value: 1 },
+      { key: 'uncertain', label: '待确认', tone: 'warning', value: 3 },
+      { key: 'skipped', label: '已跳过', tone: 'neutral', value: 4 },
+    ])
+    expect(result.reduce((total, item) => total + item.value, 0)).toBe(13)
+  })
+  it('omits empty statuses and tolerates missing counts', () => {
+    expect(importHistoryCounts()).toEqual([])
+    expect(importHistoryCounts({ succeeded: 2, failed: 0 })).toEqual([
+      { key: 'succeeded', label: '成功', tone: 'success', value: 2 },
+    ])
   })
 })

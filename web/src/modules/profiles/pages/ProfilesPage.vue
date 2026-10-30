@@ -1,4 +1,5 @@
 <script setup>
+import ResourceFilterToggle from "../../../shared/ui/resource/ResourceFilterToggle.vue"
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { onBeforeRouteLeave, useRouter } from "vue-router"
@@ -72,6 +73,8 @@ const appliedMember = ref("")
 const statusFilter = ref("")
 const filterDraft = ref(emptyFilters())
 const appliedFilters = ref(emptyFilters())
+const advancedFilters = ref(false)
+const advancedFilterCount = computed(() => [filterDraft.value.mode, filterDraft.value.enabled, isAdmin.value && draftTeam.value, isAdmin.value && draftMember.value, isSenior.value && memberFilter.value && String(memberFilter.value) !== String(selfId.value)].filter(Boolean).length)
 
 const runningStates = ref({})
 const runningLoading = ref(false)
@@ -2166,6 +2169,27 @@ function returnToSyncResult() {
             <span class="wt-filter-field__label">搜索</span>
             <t-input v-model="filterDraft.search" clearable placeholder="名称 / ID / 比特窗口ID / 备注" @enter="submitSearch" />
           </label>
+          <label class="wt-filter-field" title="依据最近一次成功同步；未找到不等于已删除">
+            <span class="wt-filter-field__label">窗口状态</span>
+            <t-select v-model="filterDraft.windowState" clearable placeholder="全部">
+              <t-option value="found" label="已找到" />
+              <t-option value="missing" label="未找到" />
+            </t-select>
+          </label>
+          <label v-if="isOwnDesktop" class="wt-filter-field">
+            <span class="wt-filter-field__label">运行状态</span>
+            <t-select v-model="filterDraft.running" clearable placeholder="全部">
+              <t-option value="open" label="已打开" />
+              <t-option value="closed" label="已关闭" />
+              <t-option value="unknown" label="未知" />
+            </t-select>
+          </label>
+          <div class="wt-filter-actions">
+            <t-button theme="primary" @click="submitSearch">查询</t-button>
+            <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+            <ResourceFilterToggle v-model="advancedFilters" :count="advancedFilterCount" controls="profile-advanced-filters" />
+          </div>
+          <div v-show="advancedFilters" id="profile-advanced-filters" class="wt-advanced-filters">
           <label v-if="isSenior" class="wt-filter-field">
             <span class="wt-filter-field__label">授权运营</span>
             <BusinessSelect kind="member" filter v-model="memberFilter" :options="memberOptions" :clearable="false" @change="onSeniorMemberChange" />
@@ -2194,24 +2218,6 @@ function returnToSyncResult() {
               <t-option value="disabled" label="停用" />
             </t-select>
           </label>
-          <label class="wt-filter-field" title="依据最近一次成功同步；未找到不等于已删除">
-            <span class="wt-filter-field__label">窗口状态</span>
-            <t-select v-model="filterDraft.windowState" clearable placeholder="全部">
-              <t-option value="found" label="已找到" />
-              <t-option value="missing" label="未找到" />
-            </t-select>
-          </label>
-          <label v-if="isOwnDesktop" class="wt-filter-field">
-            <span class="wt-filter-field__label">运行状态</span>
-            <t-select v-model="filterDraft.running" clearable placeholder="全部">
-              <t-option value="open" label="已打开" />
-              <t-option value="closed" label="已关闭" />
-              <t-option value="unknown" label="未知" />
-            </t-select>
-          </label>
-          <div class="wt-filter-actions">
-            <t-button theme="primary" @click="submitSearch">查询</t-button>
-            <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
           </div>
         </div>
 

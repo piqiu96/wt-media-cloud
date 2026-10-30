@@ -204,3 +204,17 @@
 .wt-resource-page.resource-visual-approved .filter-bar > .wt-filter-field { flex-basis: 180px; }
 .wt-resource-page.resource-visual-approved .filter-bar > .wt-filter-field--wide { flex-basis: 260px; }
 .wt-resource-page.resource-visual-approved .t-input { min-height: 36px; }
+
+/* Local resource lists share the same advanced-filter region after query/reset/toggle. */
+.wt-resource-page.resource-visual-approved .wt-advanced-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 20px 24px;
+  flex: 1 0 100%;
+  min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--wt-border);
+}
+.wt-resource-page.resource-visual-approved .wt-advanced-filters > .wt-filter-field { flex: 0 1 180px; }
+.wt-resource-page.resource-visual-approved .wt-advanced-filters > .wt-filter-field--wide { flex: 1 1 260px; max-width: 400px; }

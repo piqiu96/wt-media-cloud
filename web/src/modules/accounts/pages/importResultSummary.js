@@ -7,3 +7,14 @@ export function importResultSummary(counts = {}, running = false) {
   if (!counts.succeeded) return { title: '本轮未接入账号', tone: 'info', description: '没有成功接入的账号，可查看逐项结果。' }
   return { title: '本轮接入完成', tone: 'success', description: '成功项已保存，可查看账号详情。' }
 }
+
+// Persisted running rows need reconciliation; history cannot infer a live execution.
+export function importHistoryCounts(counts = {}) {
+  return [
+    { key: 'succeeded', label: '成功', tone: 'success', value: counts.succeeded || 0 },
+    { key: 'failed', label: '未完成', tone: 'danger', value: counts.failed || 0 },
+    { key: 'pending', label: '待处理', tone: 'neutral', value: counts.pending || 0 },
+    { key: 'uncertain', label: '待确认', tone: 'warning', value: (counts.uncertain || 0) + (counts.running || 0) },
+    { key: 'skipped', label: '已跳过', tone: 'neutral', value: counts.skipped || 0 },
+  ].filter(item => item.value > 0)
+}

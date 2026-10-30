@@ -1,4 +1,5 @@
 <script setup>
+import ResourceFilterToggle from "../../../shared/ui/resource/ResourceFilterToggle.vue"
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { onBeforeRouteLeave } from "vue-router"
@@ -48,6 +49,7 @@ const filterRegion = ref("")
 const filterCheck = ref("")
 const filterExpiry = ref("")
 const filterText = ref("")
+const advancedFilterCount = computed(() => [filterTeam.value, filterStatus.value, filterRegion.value.trim()].filter(Boolean).length)
 
 const isAdmin = computed(() => currentUser.value?.role === "admin")
 const isGovernor = computed(() => ["admin", "senior_operator"].includes(currentUser.value?.role))
@@ -972,16 +974,6 @@ function closeImport() {
       <ResourceCard class="proxy-resource-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
-          <label v-if="isAdmin" class="wt-filter-field">
-            <span class="wt-filter-field__label">运营团队</span>
-            <BusinessSelect v-model="filterTeam" kind="team" filter :options="teams.map(t => ({ value: String(t.id), label: t.name }))" />
-          </label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">资源启停</span>
-            <t-select v-model="filterStatus" clearable placeholder="全部" @change="submitSearch">
-              <t-option value="active" label="启用" />
-              <t-option value="paused" label="停用" />
-            </t-select>
-          </label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">检测结果</span>
             <t-select v-model="filterCheck" clearable placeholder="全部" @change="applyClientFilters">
               <t-option value="ok" label="正常" />
@@ -995,11 +987,23 @@ function closeImport() {
               <t-option value="expired" label="已到期" />
             </t-select>
           </label>
-          <label v-show="advancedFilters" class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
           <div class="wt-filter-actions">
-            <t-button theme="default" variant="text" :aria-expanded="advancedFilters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? "收起筛选" : "更多筛选" }}{{ !advancedFilters && filterRegion ? " · 已设置" : "" }}</t-button>
             <t-button theme="primary" @click="submitSearch">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+            <ResourceFilterToggle v-model="advancedFilters" :count="advancedFilterCount" controls="proxy-advanced-filters" />
+          </div>
+          <div v-show="advancedFilters" id="proxy-advanced-filters" class="wt-advanced-filters">
+          <label v-if="isAdmin" class="wt-filter-field">
+            <span class="wt-filter-field__label">运营团队</span>
+            <BusinessSelect v-model="filterTeam" kind="team" filter :options="teams.map(t => ({ value: String(t.id), label: t.name }))" />
+          </label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">资源启停</span>
+            <t-select v-model="filterStatus" clearable placeholder="全部" @change="submitSearch">
+              <t-option value="active" label="启用" />
+              <t-option value="paused" label="停用" />
+            </t-select>
+          </label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
           </div>
         </div>
 
