@@ -10,6 +10,7 @@ dist/
 web/dist/
 web/dist-cloud/
 web/dist-desktop/
+# npm tooling can also install dependencies at the repository root.
 node_modules/
 web/node_modules/
 *.log
