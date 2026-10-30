@@ -8,17 +8,15 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
-	cloudagentservice "github.com/wt-media/wt-media-cloud/internal/modules/cloudagent/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	accountservice "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
-	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 )
 
 type createAccountRequest struct {
 	UserID           identityservice.UserID       `json:"user_id"`
 	CategoryIDs      []identityservice.CategoryID `json:"category_ids"`
-	Name             string                       `json:"name"`
+	PlatformName     string                       `json:"platform_name"`
 	Platform         accountservice.Platform      `json:"platform"`
 	OriginalCookie   string                       `json:"original_cookie"`
 	BrowserProfileID string                       `json:"browser_profile_id"`
@@ -27,18 +25,18 @@ type createAccountRequest struct {
 }
 
 type updateAccountRequest struct {
-	BusinessStatus accountservice.BusinessStatus `json:"business_status"`
-	LoginStatus    accountservice.LoginStatus    `json:"login_status"`
-	Remark         *string                       `json:"remark"`
-	CategoryIDs    *[]identityservice.CategoryID `json:"category_ids"`
-	Name           *string                       `json:"name"`
+	Enabled             *bool                              `json:"enabled"`
+	PlatformLoginStatus accountservice.PlatformLoginStatus `json:"platform_login_status"`
+	Remark              *string                            `json:"remark"`
+	CategoryIDs         *[]identityservice.CategoryID      `json:"category_ids"`
+	PlatformName        *string                            `json:"platform_name"`
 }
 
 type identifyAccountRequest struct {
-	PlatformAccountID string                     `json:"platform_account_id"`
-	Name              string                     `json:"name"`
-	AvatarURL         string                     `json:"avatar_url"`
-	LoginStatus       accountservice.LoginStatus `json:"login_status"`
+	PlatformAccountID   string                             `json:"platform_account_id"`
+	PlatformName        string                             `json:"platform_name"`
+	PlatformAvatarURL   string                             `json:"platform_avatar_url"`
+	PlatformLoginStatus accountservice.PlatformLoginStatus `json:"platform_login_status"`
 }
 
 type tagsRequest struct {
@@ -51,18 +49,18 @@ type bindProfileRequest struct {
 }
 
 type accountCheckResultRequest struct {
-	TaskID            string                            `json:"task_id"`
-	PlatformAccountID string                            `json:"platform_account_id"`
-	Name              string                            `json:"name"`
-	AvatarURL         string                            `json:"avatar_url"`
-	LoginStatus       accountservice.LoginStatus        `json:"login_status"`
-	Message           string                            `json:"message"`
-	CheckItems        []accountservice.AccountCheckItem `json:"check_items"`
+	OperationID         string                             `json:"operation_id"`
+	PlatformAccountID   string                             `json:"platform_account_id"`
+	PlatformName        string                             `json:"platform_name"`
+	PlatformAvatarURL   string                             `json:"platform_avatar_url"`
+	PlatformLoginStatus accountservice.PlatformLoginStatus `json:"platform_login_status"`
+	Message             string                             `json:"message"`
+	LastCheckItems      []accountservice.AccountCheckItem  `json:"check_items"`
 }
 
 type cookieReadResultRequest struct {
-	TaskID  string           `json:"task_id"`
-	Cookies []map[string]any `json:"cookies"`
+	OperationID string           `json:"operation_id"`
+	Cookies     []map[string]any `json:"cookies"`
 }
 
 type createAccountGroupRequest struct {
@@ -86,7 +84,7 @@ func CreateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	categoryIDs := accountservice.NormalizeCategoryIDs(req.CategoryIDs)
 	account, err := accountservice.CreateAccount(actor, accountservice.CreateAccountInput{
-		UserID: req.UserID, CategoryIDs: categoryIDs, Name: req.Name, Platform: req.Platform,
+		UserID: req.UserID, CategoryIDs: categoryIDs, PlatformName: req.PlatformName, Platform: req.Platform,
 		OriginalCookie: req.OriginalCookie, BrowserProfileID: req.BrowserProfileID, Remark: req.Remark, Tags: req.Tags,
 	})
 	if err != nil {
@@ -110,17 +108,22 @@ func ListMediaAccounts(ctx context.Context, c *hertzapp.RequestContext) {
 		userID = identityservice.UserID(parsed)
 	}
 	categoryIDs := accountservice.NormalizeCategoryIDs(parseCategoryIDs(commaValues(c.Query("category_ids"))))
+	enabled, err := parseOptionalBool(c.Query("enabled"))
+	if err != nil {
+		writeMediaAccountError(c, accountservice.ErrInvalidInput)
+		return
+	}
 	accounts, err := accountservice.ListAccounts(actor, accountservice.AccountFilter{
-		UserID:         userID,
-		CategoryIDs:    categoryIDs,
-		Platform:       accountservice.Platform(c.Query("platform")),
-		BusinessStatus: accountservice.BusinessStatus(c.Query("business_status")),
-		LoginStatus:    accountservice.LoginStatus(c.Query("login_status")),
-		Search:         c.Query("search"),
-		ProfileSearch:  c.Query("profile_search"),
-		AnyTags:        commaValues(c.Query("any_tags")),
-		AllTags:        commaValues(c.Query("all_tags")),
-		ExcludeTags:    commaValues(c.Query("exclude_tags")),
+		UserID:              userID,
+		CategoryIDs:         categoryIDs,
+		Platform:            accountservice.Platform(c.Query("platform")),
+		Enabled:             enabled,
+		PlatformLoginStatus: accountservice.PlatformLoginStatus(c.Query("platform_login_status")),
+		Search:              c.Query("search"),
+		ProfileSearch:       c.Query("profile_search"),
+		AnyTags:             commaValues(c.Query("any_tags")),
+		AllTags:             commaValues(c.Query("all_tags")),
+		ExcludeTags:         commaValues(c.Query("exclude_tags")),
 	})
 	if err != nil {
 		writeMediaAccountError(c, err)
@@ -157,7 +160,7 @@ func UpdateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	categoryIDs := req.CategoryIDs
 	account, err := accountservice.UpdateAccount(actor, c.Param("account_id"), accountservice.UpdateAccountInput{
-		BusinessStatus: req.BusinessStatus, LoginStatus: req.LoginStatus, Remark: req.Remark, CategoryIDs: categoryIDs, Name: req.Name,
+		Enabled: req.Enabled, PlatformLoginStatus: req.PlatformLoginStatus, Remark: req.Remark, CategoryIDs: categoryIDs, PlatformName: req.PlatformName,
 	})
 	if err != nil {
 		writeMediaAccountError(c, err)
@@ -209,31 +212,6 @@ func ApplyMediaAccountCheckResult(ctx context.Context, c *hertzapp.RequestContex
 	}
 	api.Success(c, account)
 }
-func ReadMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	if !accountservice.CanStartLocalOperation(actor.Role) {
-		writeMediaAccountError(c, accountservice.ErrForbidden)
-		return
-	}
-	record, err := accountservice.GetOwnedAccountRecord(actor, c.Param("account_id"))
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	if record.BrowserProfileID == "" {
-		writeMediaAccountError(c, accountservice.ErrProfileUnavailable)
-		return
-	}
-	task, err := cloudagentservice.CreateTask(cloudagentservice.CreateTaskRequest{TaskType: cloudagentservice.TaskTypeCookieRead.String(), IdempotencyKey: "cookie-read:" + strconv.FormatInt(int64(actor.ID), 10) + ":" + record.ID + ":" + id.NewID("attempt"), Payload: map[string]any{"account_id": record.ID, "profile_id": record.BrowserProfileID, "platform": record.Platform}}, int64(actor.ID))
-	if err != nil {
-		api.InternalError(c, "任务创建失败")
-		return
-	}
-	api.Created(c, task)
-}
 func ReadMediaAccountCookiesSync(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -255,7 +233,7 @@ func ApplyMediaAccountCookieReadResult(ctx context.Context, c *hertzapp.RequestC
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	account, err := accountservice.ApplyCookieReadResult(actor, c.Param("account_id"), accountservice.CookieReadResultInput{TaskID: req.TaskID, Cookies: req.Cookies})
+	account, err := accountservice.ApplyCookieReadResult(actor, c.Param("account_id"), accountservice.CookieReadResultInput{OperationID: req.OperationID, Cookies: req.Cookies})
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
@@ -393,6 +371,18 @@ func changeTags(c *hertzapp.RequestContext, add bool) {
 		return
 	}
 	api.NoContent(c)
+}
+
+func parseOptionalBool(value string) (*bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func commaValues(value string) []string {

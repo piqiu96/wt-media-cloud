@@ -16,7 +16,10 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   profileOpen: "local_agent_profile_open",
   profileClose: "local_agent_profile_close",
   profileCreate: "local_agent_profile_create",
+  profileUpdate: "local_agent_profile_update",
   profileRestore: "local_agent_profile_restore",
+  profileProxyOperation: "local_agent_profile_proxy_operation",
+  proxyExtract: "local_agent_proxy_extract",
 });
 
 const DEFAULT_STATUS = Object.freeze({
@@ -120,20 +123,20 @@ export function createLocalAgentService({ invoke }) {
     async bitAccountBind({ rebind = false } = {}) {
       return invoke(LOCAL_AGENT_COMMANDS.bitAccountBind, { rebind });
     },
-    async accountCheck({ taskId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
+    async accountCheck({ operationId, bitProfileId, platform, expectedPlatformAccountId = "" }) {
       return invoke(LOCAL_AGENT_COMMANDS.accountCheck, {
         args: {
-          task_id: taskId,
+          operation_id: operationId,
           bit_profile_id: bitProfileId,
           platform,
           expected_platform_account_id: expectedPlatformAccountId,
         },
       });
     },
-    async cookieRead({ taskId, bitProfileId }) {
+    async cookieRead({ operationId, bitProfileId }) {
       return invoke(LOCAL_AGENT_COMMANDS.cookieRead, {
         args: {
-          task_id: taskId,
+          operation_id: operationId,
           bit_profile_id: bitProfileId,
         },
       });
@@ -160,8 +163,38 @@ export function createLocalAgentService({ invoke }) {
         },
       });
     },
+    async profileUpdate(profile) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileUpdate, {
+        args: {
+          bit_profile_id: profile.bit_profile_id,
+          name: profile.name,
+          group_id: profile.group_id,
+          group_name: profile.group_name || "",
+          remark: profile.remark || "",
+        },
+      });
+    },
     async profileRestore(profiles) {
       return invoke(LOCAL_AGENT_COMMANDS.profileRestore, { profiles });
+    },
+    async profileProxyOperation({ action, bitProfileId, proxyProtocol = "", host = "", port = null, username = "", password = "", verify = false }) {
+      return invoke(LOCAL_AGENT_COMMANDS.profileProxyOperation, {
+        args: {
+          action,
+          verify,
+          bit_profile_id: bitProfileId,
+          proxy_protocol: proxyProtocol,
+          host,
+          port,
+          username,
+          password,
+        },
+      });
+    },
+    async proxyExtract({ extractUrl, proxyProtocol = "http" }) {
+      return invoke(LOCAL_AGENT_COMMANDS.proxyExtract, {
+        args: { extract_url: extractUrl, proxy_protocol: proxyProtocol },
+      });
     },
   };
 }
@@ -235,6 +268,25 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
           }],
         },
       };
+    },
+    async profileUpdate(profile) {
+      const updated = {
+        bit_profile_id: profile.bit_profile_id,
+        main_user_id: "main-user-mock",
+        profile_user_id: "bit-user-mock",
+        ...profile,
+      };
+      return {
+        bit_profile_id: profile.bit_profile_id,
+        fields: ["name", "group_id", "group_name", "remark"].map((field) => ({ field, status: "verified" })),
+        snapshot: { main_user_id: "main-user-mock", profiles: [updated] },
+      };
+    },
+    async profileProxyOperation({ action, bitProfileId }) {
+      return { action, bit_profile_id: bitProfileId, readback: true };
+    },
+    async proxyExtract() {
+      throw new Error("动态代理提取需要在桌面端执行");
     },
     async profileRestore(profiles) {
       return {

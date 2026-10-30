@@ -96,8 +96,8 @@ func New(cfg Config, middlewares ...hertzclient.Middleware) (*Client, func() err
 	if err != nil {
 		return nil, nil, fmt.Errorf("build hertz client: %w", err)
 	}
-	raw.RetryIfFunc = func(_ *protocol.Request, _ *protocol.Response, err error) bool {
-		return err != nil
+	raw.RetryIfFunc = func(req *protocol.Request, _ *protocol.Response, err error) bool {
+		return err != nil && string(req.Header.Peek("X-WT-No-Retry")) != "1"
 	}
 	for _, middleware := range middlewares {
 		raw.Use(middleware)

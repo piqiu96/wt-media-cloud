@@ -2,6 +2,7 @@
 package service
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -15,25 +16,24 @@ import (
 // ProfileListFilter 只包含列表页筛选条件。窗口运行状态由 Desktop 实时提供，不属于
 // Cloud 行字段。
 type ProfileListFilter struct {
-	ID             string
-	Name           string
-	Group          string
-	BitProfileID   string
-	Remark         string
-	LocalStatus    string
-	BusinessStatus string
+	ID           string
+	BitName      string
+	BitGroup     string
+	BitProfileID string
+	Remark       string
+	LocalState   string
+	Enabled      *bool
 }
 
 type (
-	BitAccountStatus      = model.BitAccountStatus
-	ProfileLocalStatus    = model.ProfileLocalStatus
-	ProfileBusinessStatus = model.ProfileBusinessStatus
-	ScanStatus            = model.ScanStatus
-	DiffKind              = model.DiffKind
-	BitAccountBinding     = model.BitAccountBinding
-	BrowserProfile        = model.BrowserProfile
-	ProfileDiff           = model.ProfileDiff
-	ProfileScan           = model.ProfileScan
+	BitAccountStatus  = model.BitAccountStatus
+	ProfileLocalState = model.ProfileLocalState
+	ScanStatus        = model.ScanStatus
+	DiffKind          = model.DiffKind
+	BitAccountBinding = model.BitAccountBinding
+	BrowserProfile    = model.BrowserProfile
+	ProfileDiff       = model.ProfileDiff
+	ProfileScan       = model.ProfileScan
 
 	ProfileInput        = dto.ProfileInput
 	SnapshotInput       = dto.SnapshotInput
@@ -48,27 +48,26 @@ var (
 	ErrBitBrowserOffline          = model.ErrBitBrowserOffline
 	ErrBitMainUserMismatch        = model.ErrBitMainUserMismatch
 	ErrScanNotFound               = model.ErrScanNotFound
+	ErrProfileProxyPending        = model.ErrProfileProxyPending
 	ErrScanNotReady               = model.ErrScanNotReady
 	ErrScanExpired                = model.ErrScanExpired
 	ErrProfileNotFound            = model.ErrProfileNotFound
 	ErrProfileAssignedToOtherUser = model.ErrProfileAssignedToOtherUser
 	ErrProfileInactive            = model.ErrProfileInactive
 	ErrProfileReferenced          = model.ErrProfileReferenced
-	ErrProfileNotDisabled         = model.ErrProfileNotDisabled
+	ErrProfileNotMissing          = model.ErrProfileNotMissing
 )
 
 const (
-	BitAccountBound         = model.BitAccountBound
-	ProfileActive           = model.ProfileActive
-	ProfileLocalMissing     = model.ProfileLocalMissing
-	ProfileArchived         = model.ProfileArchived
-	ProfileBusinessEnabled  = model.ProfileBusinessEnabled
-	ProfileBusinessDisabled = model.ProfileBusinessDisabled
-	ScanReady               = model.ScanReady
-	ScanConfirmed           = model.ScanConfirmed
-	DiffAdded               = model.DiffAdded
-	DiffChanged             = model.DiffChanged
-	DiffMissing             = model.DiffMissing
+	BitAccountBound     = model.BitAccountBound
+	ProfileActive       = model.ProfileActive
+	ProfileLocalMissing = model.ProfileLocalMissing
+	ProfileArchived     = model.ProfileArchived
+	ScanReady           = model.ScanReady
+	ScanConfirmed       = model.ScanConfirmed
+	DiffAdded           = model.DiffAdded
+	DiffChanged         = model.DiffChanged
+	DiffMissing         = model.DiffMissing
 )
 
 type Store interface {
@@ -81,12 +80,16 @@ type Store interface {
 	GetProfileInScope(profileID string) (BrowserProfile, bool, error)
 	CreateScan(ProfileScan) error
 	FindScan(scanID string) (ProfileScan, bool, error)
-	ApplyScan(scan ProfileScan, at time.Time) error
-	DeleteProfile(id string) error
-	UpdateProfile(profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus, at time.Time) error
+	FindScanByUser(userID identityservice.UserID) (ProfileScan, bool, error)
+	DeleteScanByUser(userID identityservice.UserID) error
+	ApplyScan(scan ProfileScan, observedBitProfileIDs []string, at time.Time) error
+	DeleteProfile(id string, actorID identityservice.UserID, at time.Time) error
+	UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
 	ProfileHasDependencies(profileID string) (bool, error)
-	AssignProfileOwner(profileID string, userID identityservice.UserID, teamID *identityservice.TeamID, actorID identityservice.UserID, at time.Time) error
+	// ListProfileOwners 把 bit_profile_id 映射到同一比特主账号下已登记的运营，
+	// 让扫描能暴露归属冲突，而不是静默认领或改派他人的记录。
+	ListProfileOwners(mainUserID string) (map[string]identityservice.UserID, error)
 }
 
 type Service struct {
@@ -136,7 +139,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	if !validActor(actor) {
 		return ProfileScan{}, ErrForbidden
 	}
-	mainUserID := strings.TrimSpace(input.MainUserID)
+	mainUserID := strings.TrimSpace(input.BitMainUserID)
 	if mainUserID == "" || len(input.Profiles) == 0 {
 		return ProfileScan{}, ErrIdentityUnverifiable
 	}
@@ -150,7 +153,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	if !hasBinding {
 		return ProfileScan{}, ErrBitNotBound
 	}
-	if binding.MainUserID != mainUserID {
+	if binding.BitMainUserID != mainUserID {
 		return ProfileScan{}, ErrBitMainUserMismatch
 	}
 	existing, err := s.store.ListProfiles(actor.ID, ProfileListFilter{})
@@ -168,9 +171,9 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 	diff := make([]ProfileDiff, 0)
 	for _, item := range input.Profiles {
 		bitProfileID := strings.TrimSpace(item.BitProfileID)
-		itemMainUserID := strings.TrimSpace(item.MainUserID)
-		profileUserID := strings.TrimSpace(item.ProfileUserID)
-		if bitProfileID == "" || itemMainUserID == "" || profileUserID == "" || itemMainUserID != mainUserID {
+		itemBitMainUserID := strings.TrimSpace(item.BitMainUserID)
+		profileUserID := strings.TrimSpace(item.BitUserID)
+		if bitProfileID == "" || itemBitMainUserID == "" || profileUserID == "" || itemBitMainUserID != mainUserID {
 			return ProfileScan{}, ErrIdentityUnverifiable
 		}
 		if _, duplicate := seen[bitProfileID]; duplicate {
@@ -178,32 +181,32 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		}
 		seen[bitProfileID] = struct{}{}
 		candidate := BrowserProfile{
-			ID:            s.newID("browser_profile"),
-			UserID:        actor.ID,
-			TeamID:        actor.TeamID,
-			BitProfileID:  bitProfileID,
-			MainUserID:    mainUserID,
-			ProfileUserID: profileUserID,
-			Name:          strings.TrimSpace(item.Name),
-			Seq:           item.Seq,
-			GroupID:       strings.TrimSpace(item.GroupID),
-			GroupName:     strings.TrimSpace(item.GroupName),
-			BitStatus:     strings.TrimSpace(item.BitStatus),
-			BitUpdatedAt:  strings.TrimSpace(item.BitUpdatedAt),
-			ProxyType:     strings.TrimSpace(item.ProxyType),
-			ProxyHost:     strings.TrimSpace(item.ProxyHost),
-			ProxyPort:     item.ProxyPort,
-			Remark:        strings.TrimSpace(item.Remark),
-			LocalStatus:   ProfileActive,
-			LastSyncedAt:  now,
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			ID:               s.newID("browser_profile"),
+			UserID:           actor.ID,
+			TeamID:           actor.TeamID,
+			BitProfileID:     bitProfileID,
+			BitMainUserID:    mainUserID,
+			BitUserID:        profileUserID,
+			BitName:          strings.TrimSpace(item.BitName),
+			BitSeq:           item.BitSeq,
+			BitGroupID:       strings.TrimSpace(item.BitGroupID),
+			BitGroupName:     strings.TrimSpace(item.BitGroupName),
+			BitProfileStatus: strings.TrimSpace(item.BitProfileStatus),
+			BitUpdatedAt:     strings.TrimSpace(item.BitUpdatedAt),
+			BitProxyType:     strings.TrimSpace(item.BitProxyType),
+			BitProxyHost:     strings.TrimSpace(item.BitProxyHost),
+			BitProxyPort:     item.BitProxyPort,
+			BitRemark:        strings.TrimSpace(item.BitRemark),
+			LocalState:       ProfileActive,
+			LastSyncedAt:     now,
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		}
 		if current, ok := existingByBitID[bitProfileID]; ok {
 			candidate.ID = current.ID
 			candidate.CreatedAt = current.CreatedAt
 			fields := changedFields(current, candidate)
-			if len(fields) > 0 || current.LocalStatus != ProfileActive {
+			if len(fields) > 0 || current.LocalState != ProfileActive {
 				diff = append(diff, ProfileDiff{Kind: DiffChanged, BitProfileID: bitProfileID, ProfileID: current.ID, Fields: fields})
 			}
 		} else {
@@ -212,8 +215,8 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		candidates = append(candidates, candidate)
 	}
 	for _, current := range existing {
-		if _, ok := seen[current.BitProfileID]; !ok && current.LocalStatus != ProfileArchived {
-			diff = append(diff, ProfileDiff{Kind: DiffMissing, BitProfileID: current.BitProfileID, ProfileID: current.ID, Fields: []string{"local_status"}})
+		if _, ok := seen[current.BitProfileID]; !ok && current.LocalState != ProfileArchived && current.LocalState != ProfileLocalMissing {
+			diff = append(diff, ProfileDiff{Kind: DiffMissing, BitProfileID: current.BitProfileID, ProfileID: current.ID, Fields: []string{"local_state"}})
 		}
 	}
 	sort.Slice(diff, func(i, j int) bool {
@@ -222,8 +225,13 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		}
 		return diff[i].Kind < diff[j].Kind
 	})
+	owners, err := s.store.ListProfileOwners(mainUserID)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	annotateOwnership(candidates, owners, existingByBitID, actor.ID)
 	scan := ProfileScan{
-		ID: s.newID("profile_scan"), UserID: actor.ID, TeamID: actor.TeamID, MainUserID: mainUserID,
+		ID: s.newID("profile_scan"), UserID: actor.ID, TeamID: actor.TeamID, BitMainUserID: mainUserID,
 		Status: ScanReady, Profiles: candidates, Diff: diff, CreatedAt: now, ExpiresAt: now.Add(s.scanTTL),
 	}
 	if err := s.store.CreateScan(scan); err != nil {
@@ -243,7 +251,32 @@ func (s *Service) GetScan(actor identityservice.PublicUser, scanID string) (Prof
 	if !validActor(actor) || !actor.CanAccessOwnedResource(scan.UserID, scan.TeamID) {
 		return ProfileScan{}, ErrForbidden
 	}
+	if scan.UserID == actor.ID {
+		if owners, ownerErr := s.store.ListProfileOwners(scan.BitMainUserID); ownerErr != nil {
+			return ProfileScan{}, ownerErr
+		} else {
+			annotateOwnership(scan.Profiles, owners, nil, actor.ID)
+		}
+	}
 	return scan, nil
+}
+
+// annotateOwnership 标记同一比特主账号下已被其他运营登记的候选窗口。记录仍归
+// 原所有者，后扫描到的人只能看到，不能认领或转移。
+func annotateOwnership(profiles []BrowserProfile, owners map[string]identityservice.UserID, own map[string]BrowserProfile, actorID identityservice.UserID) {
+	for index := range profiles {
+		profile := &profiles[index]
+		if _, isOwn := own[profile.BitProfileID]; isOwn {
+			profile.OwnershipConflict = ""
+			continue
+		}
+		owner, exists := owners[profile.BitProfileID]
+		if !exists || owner == actorID {
+			profile.OwnershipConflict = ""
+			continue
+		}
+		profile.OwnershipConflict = "该窗口已登记在其他运营名下，不会自动登记或转移归属"
+	}
 }
 
 // BindBitAccount 记录 Local Agent 从正在运行的 BitBrowser 读到的主账号，是唯一
@@ -262,7 +295,7 @@ func (s *Service) BindBitAccount(userID identityservice.UserID, input BitAccount
 	if userID <= 0 {
 		return BitAccountBinding{}, ErrForbidden
 	}
-	mainUserID := strings.TrimSpace(input.MainUserID)
+	mainUserID := strings.TrimSpace(input.BitMainUserID)
 	if mainUserID == "" {
 		return BitAccountBinding{}, ErrIdentityUnverifiable
 	}
@@ -272,7 +305,9 @@ func (s *Service) BindBitAccount(userID identityservice.UserID, input BitAccount
 	return s.store.BindBitAccount(userID, mainUserID, input.Rebind, s.now())
 }
 
-func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (ProfileScan, error) {
+// ConfirmScan 只处理运营自己的窗口：预览中勾选的新窗口才会登记，属于他人的
+// 记录既不认领也不改派。
+func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, adoptBitProfileIDs []string) (ProfileScan, error) {
 	scan, err := s.GetScan(actor, scanID)
 	if err != nil {
 		return ProfileScan{}, err
@@ -280,11 +315,11 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (
 	if scan.UserID != actor.ID {
 		return ProfileScan{}, ErrForbidden
 	}
-	if scan.Status != ScanReady {
+	if scan.Status != ScanReady && scan.Status != ScanConfirmed {
 		return ProfileScan{}, ErrScanNotReady
 	}
 	now := s.now()
-	if now.After(scan.ExpiresAt) {
+	if scan.Status != ScanConfirmed && now.After(scan.ExpiresAt) {
 		return ProfileScan{}, ErrScanExpired
 	}
 	binding, found, err := s.store.FindBinding(actor.ID)
@@ -294,17 +329,92 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string) (
 	if !found {
 		return ProfileScan{}, ErrBitNotBound
 	}
-	if binding.MainUserID != scan.MainUserID {
+	if binding.BitMainUserID != scan.BitMainUserID {
 		return ProfileScan{}, ErrBitMainUserMismatch
+	}
+	if scan.Status == ScanConfirmed {
+		return scan, nil
+	}
+	owners, err := s.store.ListProfileOwners(scan.BitMainUserID)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	adopted := make(map[string]struct{}, len(adoptBitProfileIDs))
+	for _, bitID := range adoptBitProfileIDs {
+		adopted[strings.TrimSpace(bitID)] = struct{}{}
+	}
+	added := make(map[string]struct{})
+	for _, item := range scan.Diff {
+		if item.Kind == DiffAdded {
+			added[item.BitProfileID] = struct{}{}
+		}
+	}
+	observed := make([]string, 0, len(scan.Profiles))
+	applied := make([]BrowserProfile, 0, len(scan.Profiles))
+	for _, profile := range scan.Profiles {
+		observed = append(observed, profile.BitProfileID)
+		if _, isAdded := added[profile.BitProfileID]; isAdded {
+			if profile.OwnershipConflict != "" {
+				continue
+			}
+			if owner, exists := owners[profile.BitProfileID]; exists && owner != actor.ID {
+				continue
+			}
+			if _, selected := adopted[profile.BitProfileID]; !selected {
+				continue
+			}
+		}
+		applied = append(applied, profile)
 	}
 	scan.Status = ScanConfirmed
 	scan.ConfirmedAt = &now
+	scan.Profiles = applied
 	// 确认扫描只应用 Profile。绑定由 Local Agent 通过 /local-agent/bit-account/bind
 	// 观察写入，扫描不能顺带建立或更换主账号。
-	if err := s.store.ApplyScan(scan, now); err != nil {
+	if err := s.store.ApplyScan(scan, observed, now); err != nil {
+		// Another confirmation may have committed while this request waited.
+		if errors.Is(err, ErrScanNotReady) {
+			if saved, readErr := s.GetScan(actor, scan.ID); readErr == nil && saved.Status == ScanConfirmed {
+				return saved, nil
+			}
+		}
 		return ProfileScan{}, err
 	}
 	return scan, nil
+}
+
+func (s *Service) GetCurrentSync(actor identityservice.PublicUser) (ProfileScan, error) {
+	if !validActor(actor) {
+		return ProfileScan{}, ErrForbidden
+	}
+	scan, found, err := s.store.FindScanByUser(actor.ID)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	if !found {
+		return ProfileScan{}, ErrScanNotFound
+	}
+	return scan, nil
+}
+
+func (s *Service) ConfirmCurrentSync(actor identityservice.PublicUser, adoptBitProfileIDs []string) (ProfileScan, error) {
+	scan, err := s.GetCurrentSync(actor)
+	if err != nil {
+		return ProfileScan{}, err
+	}
+	return s.ConfirmScan(actor, scan.ID, adoptBitProfileIDs)
+}
+
+func (s *Service) RejectCurrentSync(actor identityservice.PublicUser) error {
+	if !validActor(actor) {
+		return ErrForbidden
+	}
+	if _, found, err := s.store.FindScanByUser(actor.ID); err != nil {
+		return err
+	} else if !found {
+		return ErrScanNotFound
+	}
+	return s.store.DeleteScanByUser(actor.ID)
 }
 
 // observationFresh 判断观察是否仍可用于决策。零值表示 Agent 没有说明观察时间，
@@ -396,22 +506,18 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	if actor.Role != identityservice.RoleAdmin && profile.UserID != actor.ID {
 		return ErrForbidden
 	}
-	// 同步删除只允许已停用的窗口：BitBrowser 中已不存在（扫描报告缺失）且业务已
-	// 停用，Cloud 镜像不再有价值。启用的窗口不允许删除。
-	if profile.BusinessStatus != ProfileBusinessDisabled {
-		return ErrProfileNotDisabled
+	if profile.ReservedProxyID != "" {
+		return ErrProfileProxyPending
 	}
-	referenced, err := s.store.ProfileHasDependencies(profile.ID)
-	if err != nil {
-		return err
+	// 删除只对已从比特扫描结果中缺失的 Cloud 记录开放。数据库事务中再次锁行
+	// 核对，防止同步恢复与清理并发时误删正常窗口。
+	if profile.LocalState != ProfileLocalMissing {
+		return ErrProfileNotMissing
 	}
-	if referenced {
-		return ErrProfileReferenced
-	}
-	return s.store.DeleteProfile(profileID)
+	return s.store.DeleteProfile(profile.ID, actor.ID, s.now())
 }
 
-func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID string, cloudRemark *string, businessStatus *ProfileBusinessStatus) (BrowserProfile, error) {
+func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID string, remark *string, enabled *bool) (BrowserProfile, error) {
 	if !validActor(actor) {
 		return BrowserProfile{}, ErrForbidden
 	}
@@ -422,13 +528,21 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 	if !found {
 		return BrowserProfile{}, ErrProfileNotFound
 	}
-	if actor.Role != identityservice.RoleAdmin && profile.UserID != actor.ID {
+	isOwner := actor.Role == identityservice.RoleAdmin || profile.UserID == actor.ID
+	// 高级运营可以维护可见成员的 Cloud 运营备注；业务启停仍归窗口所有者，
+	// 避免用隐藏或过期的运行状态去停用他人窗口。
+	isTeamSenior := actor.Role == identityservice.RoleSeniorOperator && actor.TeamID != nil &&
+		profile.TeamID != nil && *actor.TeamID == *profile.TeamID
+	if !isOwner && !(isTeamSenior && remark != nil) {
 		return BrowserProfile{}, ErrForbidden
 	}
-	if businessStatus != nil && *businessStatus != ProfileBusinessEnabled && *businessStatus != ProfileBusinessDisabled {
-		return BrowserProfile{}, ErrInvalidInput
+	if !isOwner && enabled != nil {
+		return BrowserProfile{}, ErrForbidden
 	}
-	if err := s.store.UpdateProfile(profileID, cloudRemark, businessStatus, s.now()); err != nil {
+	if enabled != nil && profile.ReservedProxyID != "" {
+		return BrowserProfile{}, ErrProfileProxyPending
+	}
+	if err := s.store.UpdateProfile(profileID, remark, enabled, s.now()); err != nil {
 		return BrowserProfile{}, err
 	}
 	updated, found, err := s.store.GetProfileInScope(profileID)
@@ -439,49 +553,6 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 		return BrowserProfile{}, ErrProfileNotFound
 	}
 	return updated, nil
-}
-
-func (s *Service) AssignProfileOwner(actor identityservice.PublicUser, profileID string, target identityservice.PublicUser) (BrowserProfile, error) {
-	if !validActor(actor) || actor.Role != identityservice.RoleAdmin {
-		return BrowserProfile{}, ErrForbidden
-	}
-	profile, found, err := s.store.GetProfile(strings.TrimSpace(profileID))
-	if err != nil {
-		return BrowserProfile{}, err
-	}
-	if !found {
-		return BrowserProfile{}, ErrProfileNotFound
-	}
-	if target.ID <= 0 || target.Status != identityservice.UserStatusEnabled || target.Role != identityservice.RoleOperator || target.TeamID == nil {
-		return BrowserProfile{}, ErrInvalidInput
-	}
-	// 归属只在同一主账号内成立：目标用户必须已绑定，且 Profile 属于该主账号。
-	// 跨主账号分配会把目标用户根本看不到的行悄悄转过去。
-	binding, bound, err := s.store.FindBinding(target.ID)
-	if err != nil {
-		return BrowserProfile{}, err
-	}
-	if !bound {
-		return BrowserProfile{}, ErrBitNotBound
-	}
-	if profile.MainUserID != binding.MainUserID {
-		return BrowserProfile{}, ErrBitMainUserMismatch
-	}
-	referenced, err := s.store.ProfileHasAccountReferences(profile.ID)
-	if err != nil {
-		return BrowserProfile{}, err
-	}
-	if referenced {
-		return BrowserProfile{}, ErrProfileReferenced
-	}
-	now := s.now()
-	if err := s.store.AssignProfileOwner(profile.ID, target.ID, target.TeamID, actor.ID, now); err != nil {
-		return BrowserProfile{}, err
-	}
-	profile.UserID = target.ID
-	profile.TeamID = cloneTeamID(target.TeamID)
-	profile.UpdatedAt = now
-	return profile, nil
 }
 
 func (s *Service) GetActiveProfile(actor identityservice.PublicUser, profileID string) (BrowserProfile, error) {
@@ -498,7 +569,7 @@ func (s *Service) GetActiveProfile(actor identityservice.PublicUser, profileID s
 	if profile.UserID != actor.ID {
 		return BrowserProfile{}, ErrForbidden
 	}
-	if profile.LocalStatus != ProfileActive {
+	if profile.LocalState != ProfileActive {
 		return BrowserProfile{}, ErrProfileInactive
 	}
 	return profile, nil
@@ -519,37 +590,37 @@ func validActor(actor identityservice.PublicUser) bool {
 
 func changedFields(current, candidate BrowserProfile) []string {
 	fields := make([]string, 0, 7)
-	if current.MainUserID != candidate.MainUserID {
-		fields = append(fields, "main_user_id")
+	if current.BitMainUserID != candidate.BitMainUserID {
+		fields = append(fields, "bit_main_user_id")
 	}
-	if current.ProfileUserID != candidate.ProfileUserID {
-		fields = append(fields, "profile_user_id")
+	if current.BitUserID != candidate.BitUserID {
+		fields = append(fields, "bit_user_id")
 	}
-	if current.Name != candidate.Name {
-		fields = append(fields, "name")
+	if current.BitName != candidate.BitName {
+		fields = append(fields, "bit_name")
 	}
-	if current.Seq != candidate.Seq {
-		fields = append(fields, "seq")
+	if current.BitSeq != candidate.BitSeq {
+		fields = append(fields, "bit_seq")
 	}
-	if current.GroupID != candidate.GroupID {
-		fields = append(fields, "group_id")
+	if current.BitGroupID != candidate.BitGroupID {
+		fields = append(fields, "bit_group_id")
 	}
-	if current.GroupName != candidate.GroupName {
-		fields = append(fields, "group_name")
+	if current.BitGroupName != candidate.BitGroupName {
+		fields = append(fields, "bit_group_name")
 	}
-	if current.Remark != candidate.Remark {
-		fields = append(fields, "remark")
+	if current.BitRemark != candidate.BitRemark {
+		fields = append(fields, "bit_remark")
 	}
 	// bit_status 是开关窗口的运行状态，bit_updated_at 是 BitBrowser 时间戳，二者
 	// 都会随开关变化，不属于窗口配置，不触发 changed 差异。
-	if current.ProxyType != candidate.ProxyType {
-		fields = append(fields, "proxy_type")
+	if current.BitProxyType != candidate.BitProxyType {
+		fields = append(fields, "bit_proxy_type")
 	}
-	if current.ProxyHost != candidate.ProxyHost {
-		fields = append(fields, "proxy_host")
+	if current.BitProxyHost != candidate.BitProxyHost {
+		fields = append(fields, "bit_proxy_host")
 	}
-	if current.ProxyPort != candidate.ProxyPort {
-		fields = append(fields, "proxy_port")
+	if current.BitProxyPort != candidate.BitProxyPort {
+		fields = append(fields, "bit_proxy_port")
 	}
 	return fields
 }

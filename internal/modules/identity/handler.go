@@ -277,7 +277,7 @@ func ListUsers(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	if actor.Role != identityservice.RoleAdmin {
+	if actor.Role != identityservice.RoleAdmin && actor.Role != identityservice.RoleSeniorOperator {
 		writeIdentityError(c, identityservice.ErrForbidden)
 		return
 	}
@@ -289,6 +289,23 @@ func ListUsers(ctx context.Context, c *hertzapp.RequestContext) {
 	filtered, err := filterUsers(users, c)
 	if err != nil {
 		writeIdentityError(c, err)
+		return
+	}
+	if actor.Role == identityservice.RoleSeniorOperator {
+		// 高级运营查看成员时要用同团队名单（默认只有自己）。响应限定在本人团队，
+		// 且不含停用成员和管理员，不能拿来枚举其他团队。
+		if actor.TeamID == nil {
+			writeIdentityError(c, identityservice.ErrForbidden)
+			return
+		}
+		team := filtered[:0]
+		for _, user := range filtered {
+			if user.TeamID != nil && *user.TeamID == *actor.TeamID &&
+				user.Status == identityservice.UserStatusEnabled && user.Role != identityservice.RoleAdmin {
+				team = append(team, user)
+			}
+		}
+		api.Success(c, team)
 		return
 	}
 	api.Success(c, filtered)

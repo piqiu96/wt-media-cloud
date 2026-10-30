@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 )
 
-func TestMaskMainUserIDKeepsOnlyTheEdges(t *testing.T) {
+func TestMaskBitMainUserIDKeepsOnlyTheEdges(t *testing.T) {
 	cases := map[string]string{
 		"":                     "****",
 		"short":                "****",
@@ -17,8 +17,8 @@ func TestMaskMainUserIDKeepsOnlyTheEdges(t *testing.T) {
 		"main-user-abcdef1234": "main****1234",
 	}
 	for input, want := range cases {
-		if got := maskMainUserID(input); got != want {
-			t.Fatalf("maskMainUserID(%q) = %q, want %q", input, got, want)
+		if got := maskBitMainUserID(input); got != want {
+			t.Fatalf("maskBitMainUserID(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

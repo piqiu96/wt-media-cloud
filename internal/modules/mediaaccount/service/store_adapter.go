@@ -8,7 +8,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/repository"
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
-	profileguardservice "github.com/wt-media/wt-media-cloud/internal/modules/profileguard/service"
 )
 
 type mysqlStore struct{}
@@ -28,16 +27,16 @@ func (mysqlStore) Update(record model.AccountRecord, replaceCategoryIDs *[]ident
 }
 func (mysqlStore) List(query dto.AccountFilter) ([]model.AccountRecord, error) {
 	return repository.List(repository.AccountFilter{
-		UserID:         query.UserID,
-		CategoryIDs:    query.CategoryIDs,
-		Platform:       query.Platform,
-		BusinessStatus: query.BusinessStatus,
-		LoginStatus:    query.LoginStatus,
-		Search:         query.Search,
-		ProfileSearch:  query.ProfileSearch,
-		AnyTags:        query.AnyTags,
-		AllTags:        query.AllTags,
-		ExcludeTags:    query.ExcludeTags,
+		UserID:              query.UserID,
+		CategoryIDs:         query.CategoryIDs,
+		Platform:            query.Platform,
+		Enabled:             query.Enabled,
+		PlatformLoginStatus: query.PlatformLoginStatus,
+		Search:              query.Search,
+		ProfileSearch:       query.ProfileSearch,
+		AnyTags:             query.AnyTags,
+		AllTags:             query.AllTags,
+		ExcludeTags:         query.ExcludeTags,
 	})
 }
 func (mysqlStore) AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error {
@@ -75,14 +74,8 @@ type productionProfileFactResolver struct{}
 func (productionProfileFactResolver) ResolveProfileForAccountCheck(profileID string) (string, identityservice.UserID, string, bool, bool, bool, error) {
 	return profilebindingservice.ResolveProfileForAccountCheck(profileID)
 }
-func (productionProfileFactResolver) ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
+func (productionProfileFactResolver) ResolveProxyForAccountCheck(profileID string) (string, bool, string, *time.Time, bool, error) {
 	return profilebindingservice.ResolveProxyForAccountCheck(profileID)
-}
-
-type productionSensitiveTaskCreator struct{}
-
-func (productionSensitiveTaskCreator) CreateAuthorizedTask(task profileguardservice.SensitiveTask) error {
-	return profileguardservice.CreateAuthorizedTask(task)
 }
 
 type productionUserResolver struct{}
@@ -102,7 +95,6 @@ func defaultAccountService() *accountService {
 		mysqlStore{},
 		withProfileResolver(productionProfileResolver{}),
 		withProfileFactResolver(productionProfileFactResolver{}),
-		withSensitiveTaskCreator(productionSensitiveTaskCreator{}),
 		withUserResolver(productionUserResolver{}),
 		withCategoryResolver(productionCategoryResolver{}),
 	)

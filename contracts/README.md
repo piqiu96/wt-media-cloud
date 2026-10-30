@@ -5,7 +5,6 @@ Cloud owns the following contract areas.
 - `cloud-api`
 - `cloud-agent-api`
 - `business-schemas`
-- `task-schemas`
 - `business-enums`
 - `cloud-error-codes`
 

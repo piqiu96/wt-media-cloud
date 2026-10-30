@@ -3,7 +3,7 @@ import { createPinia } from "pinia"
 import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
 import App from "./App.vue"
-import { canUseDesktop, canRunLocalAgent, canUseLocalAgent } from "../../utils.js"
+import { canUseAccountOpening, canUseDesktop, canRunLocalAgent, canUseLocalAgent } from "../../utils.js"
 import { canUseDesktopEnv, canViewSystemPath, isSystemManagementPath } from "../../shared/utils/roles.js"
 import { cloudBaseUrl, startDesktopLocalAgent, stopDesktopLocalAgent } from "./features/local-agent/init.js"
 import { setDesktopCloudOrigin } from "../../shared/api/http.js"
@@ -29,19 +29,21 @@ app.use(router)
 // 本机 Agent 在运营与高级运营登录时启动，管理员不启动。角色切换（含退出后换号）
 // 时重新同步一次，避免管理员或另一个角色继承上一段会话留下的 sidecar。
 let syncedAgentUser = ""
+let agentSyncPromise: Promise<unknown> = Promise.resolve()
 async function syncLocalAgentFor(user: { id?: number; role?: string }) {
   const key = `${user?.id ?? ""}:${user?.role ?? ""}`
-  if (key === syncedAgentUser) return
+  if (key === syncedAgentUser) return agentSyncPromise
   syncedAgentUser = key
   if (canRunLocalAgent(user)) {
-    await startDesktopLocalAgent({ tauri: true }).catch((error) => {
+    agentSyncPromise = startDesktopLocalAgent({ tauri: true }).catch((error) => {
       console.warn("Local Agent startup failed; use the environment page to retry.", error)
     })
-    return
+    return agentSyncPromise
   }
-  await stopDesktopLocalAgent({ tauri: true }).catch((error) => {
+  agentSyncPromise = stopDesktopLocalAgent({ tauri: true }).catch((error) => {
     console.warn("Local Agent stop failed.", error)
   })
+  return agentSyncPromise
 }
 
 // Auth guard
@@ -77,10 +79,16 @@ router.beforeEach(async (to, from, next) => {
       next("/login?desktop_role_forbidden=1")
       return
     }
-    void syncLocalAgentFor(user)
-    // M2 本机资源（开户、浏览器窗口、代理）只对普通运营开放；社媒账号三种角色都
-    // 能进，本地操作按账号归属在页面内判定。
+    const agentReady = syncLocalAgentFor(user)
+    // 本人窗口页挂载后会立即读一次运行状态，先等随包 Agent 启动完成。
+    if (to.path === "/browser-windows") await agentReady
+    // 浏览器窗口对运营与高级运营开放（D08）；开户仍是普通运营专属；社媒账号三种
+    // 角色都能进，本地操作按账号归属在页面内判定。
     if (to.meta?.localOnly && !canUseLocalAgent(user)) {
+      next("/content-pool")
+      return
+    }
+    if (to.meta?.operatorOnly && !canUseAccountOpening(user)) {
       next("/content-pool")
       return
     }

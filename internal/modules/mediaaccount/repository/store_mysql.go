@@ -18,14 +18,18 @@ import (
 
 // accountColumns is the INSERT column list; reads use accountReadColumns, which
 // qualifies every column and adds the owner name.
-const accountColumns = `id, user_id, team_id, platform, platform_account_id, name, avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, business_status, login_status, original_cookie, active_cookie, cookie_status, active_cookie_updated_at, last_checked_at, check_items, created_at, updated_at`
+const accountColumns = `id, user_id, team_id, platform, platform_account_id, platform_name, platform_avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, enabled, platform_login_status, original_cookie, active_cookie, cookie_status, cookie_updated_at, last_check_at, last_check_items, created_at, updated_at`
 
 // accountReadColumns must stay in the same order as scanAccount's destinations.
 // The owner name is resolved by the join rather than stored, so a renamed user
 // shows the new name and an account whose user row is gone shows an empty one.
-const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.name, ma.avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.business_status, ma.login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.active_cookie_updated_at, ma.last_checked_at, ma.check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, '')`
+const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, '')`
 
 const accountReadFrom = ` FROM media_accounts ma LEFT JOIN users u ON u.id = ma.user_id`
+
+// accountSummaryColumns deliberately excludes original_cookie and active_cookie.
+// List and summary endpoints have no use for those large secrets.
+const accountSummaryColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, '')`
 
 func queryRow(db *gorm.DB, query string, args ...any) *sql.Row {
 	return db.Raw(query, args...).Row()
@@ -60,10 +64,10 @@ func create(db *gorm.DB, record model.AccountRecord) (string, error) {
 	_, err := execSQL(tx,
 		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.UserID, record.TeamID, record.Platform,
-		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name), nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID),
-		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
+		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName), nullIfEmpty(record.PlatformAvatarURL), nullIfEmpty(record.BrowserProfileID),
+		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.Enabled, record.PlatformLoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
-		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.CreatedAt, record.UpdatedAt,
+		record.CookieUpdatedAt, record.LastCheckAt, marshalLastCheckItems(record.LastCheckItems), record.CreatedAt, record.UpdatedAt,
 	)
 	if duplicateKey(err) {
 		return "", model.ErrDuplicateAccount
@@ -142,12 +146,12 @@ func update(db *gorm.DB, record model.AccountRecord, replaceCategoryIDs *[]share
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	result, err := execSQL(tx,
-		`UPDATE media_accounts SET user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, name = ?, avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, business_status = ?, login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, active_cookie_updated_at = ?, last_checked_at = ?, check_items = ?, updated_at = ? WHERE id = ?`,
-		record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.Name),
-		nullIfEmpty(record.AvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
-		nullIfEmpty(record.DuplicateOfAccountID), record.BusinessStatus, record.LoginStatus,
+		`UPDATE media_accounts SET user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, platform_name = ?, platform_avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, enabled = ?, platform_login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, cookie_updated_at = ?, last_check_at = ?, last_check_items = ?, updated_at = ? WHERE id = ?`,
+		record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName),
+		nullIfEmpty(record.PlatformAvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
+		nullIfEmpty(record.DuplicateOfAccountID), record.Enabled, record.PlatformLoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
-		record.ActiveCookieUpdatedAt, record.LastCheckedAt, marshalCheckItems(record.CheckItems), record.UpdatedAt, record.ID,
+		record.CookieUpdatedAt, record.LastCheckAt, marshalLastCheckItems(record.LastCheckItems), record.UpdatedAt, record.ID,
 	)
 	if duplicateKey(err) {
 		return model.ErrDuplicateAccount
@@ -171,7 +175,7 @@ func List(query AccountFilter) ([]model.AccountRecord, error) {
 }
 
 func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
-	statement := `SELECT ` + accountReadColumns + accountReadFrom
+	statement := `SELECT ` + accountSummaryColumns + accountReadFrom
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 3)
 	if query.UserID > 0 {
@@ -188,22 +192,22 @@ func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
 		conditions = append(conditions, "ma.platform = ?")
 		args = append(args, query.Platform)
 	}
-	if query.BusinessStatus != "" {
-		conditions = append(conditions, "ma.business_status = ?")
-		args = append(args, query.BusinessStatus)
+	if query.Enabled != nil {
+		conditions = append(conditions, "ma.enabled = ?")
+		args = append(args, *query.Enabled)
 	}
-	if query.LoginStatus != "" {
-		conditions = append(conditions, "ma.login_status = ?")
-		args = append(args, query.LoginStatus)
+	if query.PlatformLoginStatus != "" {
+		conditions = append(conditions, "ma.platform_login_status = ?")
+		args = append(args, query.PlatformLoginStatus)
 	}
 	if query.Search != "" {
 		like := "%" + query.Search + "%"
-		conditions = append(conditions, "(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.name LIKE ? OR ma.remark LIKE ?)")
+		conditions = append(conditions, "(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.platform_name LIKE ? OR ma.remark LIKE ?)")
 		args = append(args, like, like, like, like)
 	}
 	if query.ProfileSearch != "" {
 		like := "%" + query.ProfileSearch + "%"
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = ma.browser_profile_id AND (bp.name LIKE ? OR bp.seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = ma.browser_profile_id AND (bp.bit_name LIKE ? OR bp.bit_seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
 		args = append(args, like, like, like, like)
 	}
 	if len(conditions) > 0 {
@@ -218,7 +222,7 @@ func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
 	defer rows.Close()
 	records := make([]model.AccountRecord, 0)
 	for rows.Next() {
-		record, err := scanAccount(rows)
+		record, err := scanAccountSummary(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -321,7 +325,7 @@ func addTags(db *gorm.DB, userID sharedidentity.UserID, accountIDs, tags []strin
 	for _, accountID := range accountIDs {
 		for _, tag := range tags {
 			if _, err := execSQL(tx,
-				`INSERT IGNORE INTO media_account_tags (id, user_id, media_account_id, tag_name, created_at) VALUES (?, ?, ?, ?, ?)`,
+				`INSERT IGNORE INTO media_account_tags (media_account_id, tag_name, created_at) VALUES (?, ?, ?)`,
 				id.NewID("media_account_tag"), userID, accountID, tag, createdAt,
 			); err != nil {
 				return err
@@ -405,6 +409,44 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+func scanAccountSummary(row scanner) (model.AccountRecord, error) {
+	var record model.AccountRecord
+	var platformAccountID, platformName, platformAvatarURL, browserProfileID, remark sql.NullString
+	var duplicateOfAccountID, cookieStatus, userName sql.NullString
+	var cookieUpdatedAt, lastCheckAt sql.NullTime
+	var lastCheckItemsJSON sql.NullString
+	err := row.Scan(
+		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
+		&platformAccountID, &platformName, &platformAvatarURL, &browserProfileID,
+		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
+		&cookieStatus, &cookieUpdatedAt, &lastCheckAt, &lastCheckItemsJSON,
+		&record.CreatedAt, &record.UpdatedAt, &userName,
+	)
+	if err != nil {
+		return model.AccountRecord{}, err
+	}
+	record.PlatformAccountID = platformAccountID.String
+	record.PlatformName = platformName.String
+	record.PlatformAvatarURL = platformAvatarURL.String
+	record.BrowserProfileID = browserProfileID.String
+	record.Remark = remark.String
+	record.DuplicateOfAccountID = duplicateOfAccountID.String
+	record.CookieStatus = cookieStatus.String
+	record.UserName = userName.String
+	if lastCheckItemsJSON.Valid && lastCheckItemsJSON.String != "" {
+		_ = json.Unmarshal([]byte(lastCheckItemsJSON.String), &record.LastCheckItems)
+	}
+	if cookieUpdatedAt.Valid {
+		value := cookieUpdatedAt.Time
+		record.CookieUpdatedAt = &value
+	}
+	if lastCheckAt.Valid {
+		value := lastCheckAt.Time
+		record.LastCheckAt = &value
+	}
+	return record, nil
+}
+
 func scanAccount(row scanner) (model.AccountRecord, error) {
 	var record model.AccountRecord
 	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
@@ -414,7 +456,7 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
-		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.BusinessStatus, &record.LoginStatus,
+		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
 		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt, &userName,
 	)
@@ -422,8 +464,8 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 		return model.AccountRecord{}, err
 	}
 	record.PlatformAccountID = platformAccountID.String
-	record.Name = name.String
-	record.AvatarURL = avatarURL.String
+	record.PlatformName = name.String
+	record.PlatformAvatarURL = avatarURL.String
 	record.BrowserProfileID = browserProfileID.String
 	record.Remark = remark.String
 	record.DuplicateOfAccountID = duplicateOfAccountID.String
@@ -432,15 +474,15 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	record.CookieStatus = cookieStatus.String
 	record.UserName = userName.String
 	if checkItemsJSON.Valid && checkItemsJSON.String != "" {
-		_ = json.Unmarshal([]byte(checkItemsJSON.String), &record.CheckItems)
+		_ = json.Unmarshal([]byte(checkItemsJSON.String), &record.LastCheckItems)
 	}
 	if activeCookieUpdatedAt.Valid {
 		value := activeCookieUpdatedAt.Time
-		record.ActiveCookieUpdatedAt = &value
+		record.CookieUpdatedAt = &value
 	}
 	if lastCheckedAt.Valid {
 		value := lastCheckedAt.Time
-		record.LastCheckedAt = &value
+		record.LastCheckAt = &value
 	}
 	return record, nil
 }
@@ -506,7 +548,7 @@ func createGroup(db *gorm.DB, group model.AccountGroup) (string, error) {
 		return "", err
 	}
 	_, err = execSQL(db,
-		`INSERT INTO account_groups (user_id, team_id, name, filters, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO media_account_groups (user_id, team_id, name, filters, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		group.UserID, group.TeamID, group.Name, string(filtersJSON), group.SortOrder, group.CreatedAt, group.UpdatedAt,
 	)
 	if err != nil {
@@ -524,7 +566,7 @@ func FindGroup(id string) (model.AccountGroup, bool, error) {
 }
 
 func findGroup(db *gorm.DB, id string) (model.AccountGroup, bool, error) {
-	group, err := scanAccountGroup(queryRow(db, `SELECT `+accountGroupColumns+` FROM account_groups WHERE id = ?`, id))
+	group, err := scanAccountGroup(queryRow(db, `SELECT `+accountGroupColumns+` FROM media_account_groups WHERE id = ?`, id))
 	if err != nil {
 		return model.AccountGroup{}, false, err
 	}
@@ -536,7 +578,7 @@ func ListGroups(userID sharedidentity.UserID) ([]model.AccountGroup, error) {
 }
 
 func listGroups(db *gorm.DB, userID sharedidentity.UserID) ([]model.AccountGroup, error) {
-	rows, err := queryRows(db, `SELECT `+accountGroupColumns+` FROM account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
+	rows, err := queryRows(db, `SELECT `+accountGroupColumns+` FROM media_account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -562,7 +604,7 @@ func updateGroup(db *gorm.DB, group model.AccountGroup) error {
 		return err
 	}
 	_, err = execSQL(db,
-		`UPDATE account_groups SET name = ?, filters = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE media_account_groups SET name = ?, filters = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
 		group.Name, string(filtersJSON), group.SortOrder, group.UpdatedAt, group.ID,
 	)
 	return err
@@ -573,7 +615,7 @@ func DeleteGroup(id string) error {
 }
 
 func deleteGroup(db *gorm.DB, id string) error {
-	_, err := execSQL(db, `DELETE FROM account_groups WHERE id = ?`, id)
+	_, err := execSQL(db, `DELETE FROM media_account_groups WHERE id = ?`, id)
 	return err
 }
 
@@ -591,7 +633,7 @@ func scanAccountGroup(row interface{ Scan(...any) error }) (model.AccountGroup, 
 	return group, nil
 }
 
-func marshalCheckItems(items []model.AccountCheckItem) any {
+func marshalLastCheckItems(items []model.AccountCheckItem) any {
 	if len(items) == 0 {
 		return nil
 	}

@@ -17,8 +17,8 @@ func GetScan(actor service.PublicUser, scanID string) (model.ProfileScan, error)
 	return newService(mysqlStore{}).GetScan(actor, scanID)
 }
 
-func ConfirmScan(actor service.PublicUser, scanID string) (model.ProfileScan, error) {
-	return newService(mysqlStore{}).ConfirmScan(actor, scanID)
+func ConfirmScan(actor service.PublicUser, scanID string, adoptBitProfileIDs []string) (model.ProfileScan, error) {
+	return newService(mysqlStore{}).ConfirmScan(actor, scanID, adoptBitProfileIDs)
 }
 
 func GetBitAccount(userID service.UserID) (model.BitAccountBinding, bool, error) {
@@ -41,12 +41,8 @@ func DeleteProfile(actor service.PublicUser, profileID string) error {
 	return newService(mysqlStore{}).DeleteProfile(actor, profileID)
 }
 
-func UpdateProfile(actor service.PublicUser, profileID string, cloudRemark *string, businessStatus *model.ProfileBusinessStatus) (model.BrowserProfile, error) {
-	return newService(mysqlStore{}).UpdateProfile(actor, profileID, cloudRemark, businessStatus)
-}
-
-func AssignProfileOwner(actor service.PublicUser, profileID string, target service.PublicUser) (model.BrowserProfile, error) {
-	return newService(mysqlStore{}).AssignProfileOwner(actor, profileID, target)
+func UpdateProfile(actor service.PublicUser, profileID string, remark *string, enabled *bool) (model.BrowserProfile, error) {
+	return newService(mysqlStore{}).UpdateProfile(actor, profileID, remark, enabled)
 }
 
 func GetActiveProfile(actor service.PublicUser, profileID string) (model.BrowserProfile, error) {
@@ -61,7 +57,7 @@ func ResolveProfileForAccountCheck(profileID string) (string, service.UserID, st
 	return repository.ResolveProfileForAccountCheck(profileID)
 }
 
-func ResolveProxyForAccountCheck(profileID string) (string, string, string, *time.Time, bool, error) {
+func ResolveProxyForAccountCheck(profileID string) (string, bool, string, *time.Time, bool, error) {
 	return repository.ResolveProxyForAccountCheck(profileID)
 }
 
@@ -73,10 +69,30 @@ func UnbindProxy(profileID, expectedProxyID string) (model.BrowserProfile, error
 	return repository.UnbindProxy(profileID, expectedProxyID)
 }
 
+func ReleaseProxy(profileID, expectedProxyID string) (model.BrowserProfile, error) {
+	return repository.ReleaseProxy(profileID, expectedProxyID)
+}
+
+func ClearObservedProxy(profileID string) (model.BrowserProfile, error) {
+	return repository.ClearObservedProxy(profileID)
+}
+
 func CountProfilesByProxyID(proxyID string) (int, error) {
 	return repository.CountProfilesByProxyID(proxyID)
 }
 
 func GetProfile(profileID string) (model.BrowserProfile, bool, error) {
 	return repository.GetProfile(profileID)
+}
+
+func GetCurrentSync(actor service.PublicUser) (model.ProfileScan, error) {
+	return newService(mysqlStore{}).GetCurrentSync(actor)
+}
+
+func ConfirmCurrentSync(actor service.PublicUser, adoptBitProfileIDs []string) (model.ProfileScan, error) {
+	return newService(mysqlStore{}).ConfirmCurrentSync(actor, adoptBitProfileIDs)
+}
+
+func RejectCurrentSync(actor service.PublicUser) error {
+	return newService(mysqlStore{}).RejectCurrentSync(actor)
 }

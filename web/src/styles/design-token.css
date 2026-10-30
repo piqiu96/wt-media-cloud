@@ -1,35 +1,111 @@
+/* 运营视觉Token：frontend架构与视觉规范 §3.6.1。Cloud/Desktop唯一运行时来源。 */
 :root {
-  --wt-feedback-error: #F56C6C;
-  --wt-feedback-warning: #E6A23C;
-  --wt-feedback-success: #67C23A;
-  --wt-feedback-info: #409EFF;
-  --wt-primary: #2563EB;
-  --wt-primary-hover: #1D4ED8;
+  /* Brand */
+  --wt-color-primary: #0052d9;
+  --wt-color-primary-hover: #266fe8;
+  --wt-color-primary-active: #003cab;
+  --wt-color-primary-light: #eaf1fc;
+  --wt-color-primary-border: #bbd3fb;
 
-  --wt-bg-page: #F8FAFC;
-  --wt-bg-card: #FFFFFF;
+  /* Semantic */
+  --wt-color-success: #00a870;
+  --wt-color-success-bg: #e8f8f2;
+  --wt-color-success-border: #a7e3cf;
+  --wt-color-success-text: #006d4f;
 
-  --wt-text-primary: #0F172A;
-  --wt-text-secondary: #334155;
-  --wt-text-tertiary: #64748B;
+  --wt-color-warning: #ed7b2f;
+  --wt-color-warning-bg: #fff3e8;
+  --wt-color-warning-border: #f7c797;
+  --wt-color-warning-text: #976124;
 
-  --wt-border: rgba(15, 23, 42, 0.06);
+  --wt-color-danger: #d54941;
+  --wt-color-danger-hover: #e34d59;
+  --wt-color-danger-bg: #fff0ed;
+  --wt-color-danger-border: #f5b7b1;
+  --wt-color-danger-text: #a83832;
 
-  --wt-success: #16A34A;
-  --wt-success-bg: #DCFCE7;
-  --wt-warning: #D97706;
-  --wt-warning-bg: #FEF3C7;
-  --wt-danger: #DC2626;
-  --wt-danger-bg: #FEE2E2;
-  --wt-info-bg: #DBEAFE;
+  --wt-color-info: var(--wt-color-primary);
+  --wt-color-info-bg: #eaf1fc;
+  --wt-color-info-border: #bbd3fb;
+  --wt-color-info-text: #003cab;
 
-  --wt-radius-sm: 8px;
-  --wt-radius-md: 12px;
-  --wt-radius-lg: 16px;
+  /* Text */
+  --wt-color-text-primary: #263449;
+  --wt-color-text-secondary: #657184;
+  --wt-color-text-assist: #8c97a5;
+  --wt-color-text-disabled: #c9cdd4;
+  --wt-color-text-inverse: #ffffff;
 
-  --wt-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  /* Background */
+  --wt-color-bg-page: #f4f6f9;
+  --wt-color-bg-container: #ffffff;
+  --wt-color-bg-subtle: #f6f8fb;
+  --wt-color-bg-hover: #f4f6f9;
+
+  /* Border */
+  --wt-color-border: #e7ebef;
+  --wt-color-border-strong: #c9cdd4;
+  --wt-color-border-control: #dce2e9;
+
+  /* Shadow */
+  --wt-shadow-fixed-column: -6px 0 12px rgb(0 0 0 / 6%);
+  --wt-shadow-popup: 0 16px 48px rgb(24 43 73 / 14%), 0 4px 12px rgb(24 43 73 / 6%);
+  --wt-color-overlay-mask: rgb(35 51 78 / 28%);
 }
 
+/* 兼容既有消费者；数值以frontend规范 §3.6.1为准。官网/登录品牌变量保持独立。 */
+:root {
+  --wt-primary: var(--wt-color-primary);
+  --wt-primary-hover: var(--wt-color-primary-hover);
+  --wt-bg-page: var(--wt-color-bg-page);
+  --wt-bg-card: var(--wt-color-bg-container);
+  --wt-text-primary: var(--wt-color-text-primary);
+  --wt-text-secondary: var(--wt-color-text-primary);
+  --wt-text-tertiary: var(--wt-color-text-secondary);
+  --wt-border: var(--wt-color-border);
+  --wt-success: var(--wt-color-success);
+  --wt-success-bg: var(--wt-color-success-bg);
+  --wt-warning: var(--wt-color-warning);
+  --wt-warning-bg: var(--wt-color-warning-bg);
+  --wt-danger: var(--wt-color-danger);
+  --wt-danger-bg: var(--wt-color-danger-bg);
+  --wt-info-bg: var(--wt-color-primary-light);
+  --wt-feedback-error: var(--wt-color-danger);
+  --wt-feedback-warning: var(--wt-color-warning);
+  --wt-feedback-success: var(--wt-color-success);
+  --wt-feedback-info: var(--wt-color-info);
+  --wt-radius-sm: 4px;
+  --wt-radius-md: 8px;
+  --wt-radius-lg: 12px;
+  --wt-shadow-card: none;
+  --td-brand-color: var(--wt-primary);
+  --td-brand-color-hover: var(--wt-primary-hover);
+  --td-brand-color-active: var(--wt-color-primary-active);
+  --td-brand-color-light: var(--wt-info-bg);
+  --td-brand-color-focus: var(--wt-info-bg);
+  --td-text-color-primary: var(--wt-text-primary);
+  --td-text-color-secondary: var(--wt-text-tertiary);
+  --td-text-color-placeholder: var(--wt-color-text-assist);
+  --td-text-color-disabled: var(--wt-color-text-disabled);
+  --td-border-level-1-color: var(--wt-color-border);
+  --td-border-level-2-color: var(--wt-color-border-control);
+  --td-bg-color-page: var(--wt-bg-page);
+  --td-bg-color-container: var(--wt-bg-card);
+  --td-bg-color-container-hover: var(--wt-color-bg-hover);
+  --td-success-color: var(--wt-success);
+  --td-success-color-1: var(--wt-success-bg);
+  --td-warning-color-1: var(--wt-warning-bg);
+  --td-error-color-1: var(--wt-danger-bg);
+  --td-brand-color-1: var(--wt-info-bg);
+  --td-success-color-light: var(--wt-success-bg);
+  --td-warning-color: var(--wt-warning);
+  --td-warning-color-light: var(--wt-warning-bg);
+  --td-error-color: var(--wt-danger);
+  --td-error-color-light: var(--wt-danger-bg);
+  --td-mask-active: var(--wt-color-overlay-mask);
+  --td-radius-default: 4px;
+  --td-radius-medium: 8px;
+}
 .t-message.t-is-error { --td-error-color: var(--wt-feedback-error); }
 .t-message.t-is-success { --td-success-color: var(--wt-feedback-success); }
 .t-message.t-is-info { --td-brand-color: var(--wt-feedback-info); }

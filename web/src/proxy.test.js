@@ -5,41 +5,31 @@ import { createProxyClient } from './shared/api/proxy.js'
 const response = (data) => ({ ok: true, json: async () => ({ errcode: 0, data }) })
 
 describe('proxy client', () => {
-  it('requests proxy recommendations before sending a batch bind confirmation', async () => {
-    const fetch = vi.fn(async () => response({ succeeded: [], failed: [] }))
+  it('starts each profile proxy operation and reports its outcome', async () => {
+    const fetch = vi.fn(async () => response({ agent_required: true, profile_id: 'profile-1', proxy_id: 42 }))
     const client = createProxyClient({ fetch })
 
     await client.recommend(['profile-1', 'profile-2'])
-    await client.assignBatch('proxy-1', ['profile-1', 'profile-2'])
+    await client.operate('profile-1', { action: 'apply', proxy_id: 42 })
+    await client.finishOperation('profile-1', { action: 'apply', proxy_id: 42, outcome: 'success', message: '' })
 
-    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/proxies/recommendations?profile_ids=profile-1%2Cprofile-2', expect.objectContaining({ method: 'GET', credentials: 'include' }))
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/proxies/proxy-1/assign-batch', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ profile_ids: ['profile-1', 'profile-2'] })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/proxies/recommendations?profile_ids=profile-1%2Cprofile-2')
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/browser-profiles/profile-1/proxy-operation')
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ action: 'apply', proxy_id: 42 })
+    expect(fetch.mock.calls[2][0]).toBe('/api/v1/browser-profiles/profile-1/proxy-operation/result')
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ action: 'apply', proxy_id: 42, outcome: 'success', message: '' })
   })
 
-  it('uses the Cloud local-scan preview and confirm endpoints without sending proxy secrets', async () => {
-    const fetch = vi.fn(async () => response({ scan_id: 'scan-1', changes: [] }))
-    const client = createProxyClient({ fetch })
-
-    await client.previewLocalScan('scan-1')
-    await client.confirmLocalScan('scan-1')
-
-    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/proxies/local-scan/preview', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ scan_id: 'scan-1' })
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/proxies/local-scan/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ scan_id: 'scan-1' })
-  })
-
-  it('uses Cloud-only parse, extraction preview, and binding-detail endpoints', async () => {
+  it('uses Cloud parsing, saved extraction config, and binding-detail endpoints', async () => {
     const fetch = vi.fn(async () => response({}))
     const client = createProxyClient({ fetch })
 
     await client.parseAddress('socks5://user:pass@203.0.113.9:1080')
-    await client.previewExtract({ extract_url: 'https://provider.example/extract', proxy_protocol: 'socks5' })
+    await client.extractionConfig('proxy-1')
     await client.listBindings('proxy-1')
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/proxies/parse', expect.objectContaining({ method: 'POST' }))
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/proxies/extract-preview', expect.objectContaining({ method: 'POST' }))
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/proxies/proxy-1/extraction-config', expect.objectContaining({ method: 'GET' }))
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/proxies/proxy-1/bindings', expect.objectContaining({ method: 'GET' }))
   })
 })

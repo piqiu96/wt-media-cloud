@@ -15,14 +15,14 @@ func (mysqlStore) FindBinding(userID identityservice.UserID) (model.BitAccountBi
 }
 func (mysqlStore) ListProfiles(userID identityservice.UserID, filter ProfileListFilter) ([]model.BrowserProfile, error) {
 	return repository.ListProfiles(repository.ProfileListFilter{
-		UserID:         userID,
-		ID:             filter.ID,
-		Name:           filter.Name,
-		Group:          filter.Group,
-		BitProfileID:   filter.BitProfileID,
-		Remark:         filter.Remark,
-		LocalStatus:    filter.LocalStatus,
-		BusinessStatus: filter.BusinessStatus,
+		UserID:       userID,
+		ID:           filter.ID,
+		BitName:      filter.BitName,
+		BitGroup:     filter.BitGroup,
+		BitProfileID: filter.BitProfileID,
+		Remark:       filter.Remark,
+		LocalState:   filter.LocalState,
+		Enabled:      filter.Enabled,
 	})
 }
 func (mysqlStore) BindBitAccount(userID identityservice.UserID, mainUserID string, rebind bool, at time.Time) (model.BitAccountBinding, error) {
@@ -38,12 +38,20 @@ func (mysqlStore) CreateScan(scan model.ProfileScan) error { return repository.C
 func (mysqlStore) FindScan(scanID string) (model.ProfileScan, bool, error) {
 	return repository.FindScan(scanID)
 }
-func (mysqlStore) ApplyScan(scan model.ProfileScan, at time.Time) error {
-	return repository.ApplyScan(scan, at)
+func (mysqlStore) FindScanByUser(userID identityservice.UserID) (model.ProfileScan, bool, error) {
+	return repository.FindScanByUser(userID)
 }
-func (mysqlStore) DeleteProfile(id string) error { return repository.DeleteProfile(id) }
-func (mysqlStore) UpdateProfile(profileID string, cloudRemark *string, businessStatus *model.ProfileBusinessStatus, at time.Time) error {
-	return repository.UpdateProfile(profileID, cloudRemark, businessStatus, at)
+func (mysqlStore) DeleteScanByUser(userID identityservice.UserID) error {
+	return repository.DeleteScanByUser(userID)
+}
+func (mysqlStore) ApplyScan(scan model.ProfileScan, observedBitProfileIDs []string, at time.Time) error {
+	return repository.ApplyScan(scan, observedBitProfileIDs, at)
+}
+func (mysqlStore) DeleteProfile(id string, actorID identityservice.UserID, at time.Time) error {
+	return repository.DeleteProfile(id, actorID, at)
+}
+func (mysqlStore) UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time) error {
+	return repository.UpdateProfile(profileID, remark, enabled, at)
 }
 func (mysqlStore) ProfileHasAccountReferences(profileID string) (bool, error) {
 	return repository.ProfileHasAccountReferences(profileID)
@@ -51,6 +59,6 @@ func (mysqlStore) ProfileHasAccountReferences(profileID string) (bool, error) {
 func (mysqlStore) ProfileHasDependencies(profileID string) (bool, error) {
 	return repository.ProfileHasDependencies(profileID)
 }
-func (mysqlStore) AssignProfileOwner(profileID string, userID identityservice.UserID, teamID *identityservice.TeamID, actorID identityservice.UserID, at time.Time) error {
-	return repository.AssignProfileOwner(profileID, userID, teamID, actorID, at)
+func (mysqlStore) ListProfileOwners(mainUserID string) (map[string]identityservice.UserID, error) {
+	return repository.ListProfileOwners(mainUserID)
 }

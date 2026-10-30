@@ -35,24 +35,17 @@ const (
 	IdentificationDuplicate  IdentificationStatus = "duplicate"
 )
 
-type BusinessStatus string
+type PlatformLoginStatus string
 
 const (
-	BusinessEnabled  BusinessStatus = "enabled"
-	BusinessDisabled BusinessStatus = "disabled"
-)
-
-type LoginStatus string
-
-const (
-	LoginUnknown            LoginStatus = "unknown"
-	LoginNormal             LoginStatus = "normal"
-	LoginNotLoggedIn        LoginStatus = "not_logged_in"
-	LoginVerificationNeeded LoginStatus = "verification_needed"
-	LoginExpired            LoginStatus = "expired"
-	LoginRestricted         LoginStatus = "restricted"
-	LoginAccountMismatch    LoginStatus = "account_mismatch"
-	LoginEnvironmentError   LoginStatus = "environment_error"
+	PlatformLoginUnknown            PlatformLoginStatus = "unknown"
+	PlatformLoginNormal             PlatformLoginStatus = "normal"
+	PlatformLoginNotLoggedIn        PlatformLoginStatus = "not_logged_in"
+	PlatformLoginVerificationNeeded PlatformLoginStatus = "verification_needed"
+	PlatformLoginExpired            PlatformLoginStatus = "expired"
+	PlatformLoginRestricted         PlatformLoginStatus = "restricted"
+	PlatformLoginAccountMismatch    PlatformLoginStatus = "account_mismatch"
+	PlatformLoginEnvironmentError   PlatformLoginStatus = "environment_error"
 )
 
 type AccountCheckItem struct {
@@ -67,26 +60,26 @@ type Account struct {
 	UserID sharedidentity.UserID `json:"user_id"`
 	// UserName is the account owner's display name (nickname, falling back to
 	// username), resolved by the read query. It is a projection, never written.
-	UserName              string                      `json:"user_name"`
-	TeamID                *sharedidentity.TeamID      `json:"team_id"`
-	CategoryIDs           []sharedidentity.CategoryID `json:"category_ids"`
-	Platform              Platform                    `json:"platform"`
-	PlatformAccountID     string                      `json:"platform_account_id,omitempty"`
-	Name                  string                      `json:"name,omitempty"`
-	AvatarURL             string                      `json:"avatar_url,omitempty"`
-	BrowserProfileID      string                      `json:"browser_profile_id,omitempty"`
-	Remark                string                      `json:"remark,omitempty"`
-	IdentificationStatus  IdentificationStatus        `json:"identification_status"`
-	DuplicateOfAccountID  string                      `json:"duplicate_of_account_id,omitempty"`
-	BusinessStatus        BusinessStatus              `json:"business_status"`
-	LoginStatus           LoginStatus                 `json:"login_status"`
-	CookieStatus          string                      `json:"cookie_status,omitempty"`
-	ActiveCookieUpdatedAt *time.Time                  `json:"active_cookie_updated_at,omitempty"`
-	LastCheckedAt         *time.Time                  `json:"last_checked_at,omitempty"`
-	CheckItems            []AccountCheckItem          `json:"check_items,omitempty"`
-	Tags                  []string                    `json:"tags"`
-	CreatedAt             time.Time                   `json:"created_at"`
-	UpdatedAt             time.Time                   `json:"updated_at"`
+	UserName             string                      `json:"user_name"`
+	TeamID               *sharedidentity.TeamID      `json:"team_id"`
+	CategoryIDs          []sharedidentity.CategoryID `json:"category_ids"`
+	Platform             Platform                    `json:"platform"`
+	PlatformAccountID    string                      `json:"platform_account_id,omitempty"`
+	PlatformName         string                      `json:"platform_name,omitempty"`
+	PlatformAvatarURL    string                      `json:"platform_avatar_url,omitempty"`
+	BrowserProfileID     string                      `json:"browser_profile_id,omitempty"`
+	Remark               string                      `json:"remark,omitempty"`
+	IdentificationStatus IdentificationStatus        `json:"identification_status"`
+	DuplicateOfAccountID string                      `json:"duplicate_of_account_id,omitempty"`
+	Enabled              bool                        `json:"enabled"`
+	PlatformLoginStatus  PlatformLoginStatus         `json:"platform_login_status"`
+	CookieStatus         string                      `json:"cookie_status,omitempty"`
+	CookieUpdatedAt      *time.Time                  `json:"cookie_updated_at,omitempty"`
+	LastCheckAt          *time.Time                  `json:"last_check_at,omitempty"`
+	LastCheckItems       []AccountCheckItem          `json:"last_check_items,omitempty"`
+	Tags                 []string                    `json:"tags"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
 }
 
 type AccountRecord struct {
@@ -96,14 +89,14 @@ type AccountRecord struct {
 }
 
 type AccountGroupFilters struct {
-	CategoryIDs    []sharedidentity.CategoryID `json:"category_ids,omitempty"`
-	Platform       Platform                    `json:"platform,omitempty"`
-	BusinessStatus BusinessStatus              `json:"business_status,omitempty"`
-	LoginStatus    LoginStatus                 `json:"login_status,omitempty"`
-	Search         string                      `json:"search,omitempty"`
-	AnyTags        []string                    `json:"any_tags,omitempty"`
-	AllTags        []string                    `json:"all_tags,omitempty"`
-	ExcludeTags    []string                    `json:"exclude_tags,omitempty"`
+	CategoryIDs         []sharedidentity.CategoryID `json:"category_ids,omitempty"`
+	Platform            Platform                    `json:"platform,omitempty"`
+	Enabled             *bool                       `json:"enabled,omitempty"`
+	PlatformLoginStatus PlatformLoginStatus         `json:"platform_login_status,omitempty"`
+	Search              string                      `json:"search,omitempty"`
+	AnyTags             []string                    `json:"any_tags,omitempty"`
+	AllTags             []string                    `json:"all_tags,omitempty"`
+	ExcludeTags         []string                    `json:"exclude_tags,omitempty"`
 }
 
 type AccountGroup struct {

@@ -7,68 +7,19 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     const { original_cookie: _originalCookie, active_cookie: _activeCookie, ...safe } = account
     return safe
   }
+  const listResult = (value) => Array.isArray(value) ? value.map(sanitize) : sanitize(value)
   return {
     list(params) {
-      const query = params ? { ...params } : undefined
-      if (query?.businessStatus !== undefined) {
-        query.business_status = query.businessStatus
-        delete query.businessStatus
-      }
-      if (query?.loginStatus !== undefined) {
-        query.login_status = query.loginStatus
-        delete query.loginStatus
-      }
-      if (query?.allTags !== undefined) {
-        query.all_tags = query.allTags
-        delete query.allTags
-      }
-      if (query?.anyTags !== undefined) {
-        query.any_tags = query.anyTags
-        delete query.anyTags
-      }
-      if (query?.excludeTags !== undefined) {
-        query.exclude_tags = query.excludeTags
-        delete query.excludeTags
-      }
-      if (query?.profile !== undefined) {
-        query.profile_search = query.profile
-        delete query.profile
-      }
-      if (query?.categoryIds !== undefined) {
-        query.category_ids = query.categoryIds
-        delete query.categoryIds
-      }
-      return api.get('/media-accounts', query).then((accounts) => Array.isArray(accounts) ? accounts.map(sanitize) : accounts)
+      return api.get('/media-accounts', params).then(listResult)
     },
-    create({ userId, categoryIds, name, platform, originalCookie, browserProfileId, remark, tags }) {
-      const body = {}
-      if (categoryIds !== undefined) body.category_ids = categoryIds
-      body.platform = platform
-      if (userId) body.user_id = userId
-      if (name) body.name = name
-      if (originalCookie) body.original_cookie = originalCookie
-      if (browserProfileId) body.browser_profile_id = browserProfileId
-      if (remark) body.remark = remark
-      if (tags?.length) body.tags = tags
-      return api.post('/media-accounts', body).then(sanitize)
+    create(input) {
+      return api.post('/media-accounts', input).then(sanitize)
     },
-    update(accountId, { businessStatus, loginStatus, remark, categoryIds, name }) {
-      const body = {
-        business_status: businessStatus,
-        login_status: loginStatus,
-        remark,
-        name,
-      }
-      if (categoryIds !== undefined) body.category_ids = categoryIds
-      return api.patch(`/media-accounts/${accountId}`, body).then(sanitize)
+    update(accountId, changes) {
+      return api.patch(`/media-accounts/${accountId}`, changes).then(sanitize)
     },
-    identify(accountId, { platformAccountId, name, avatarUrl, loginStatus }) {
-      return api.post(`/media-accounts/${accountId}/identify`, {
-        platform_account_id: platformAccountId,
-        name,
-        avatar_url: avatarUrl,
-        login_status: loginStatus,
-      }).then(sanitize)
+    identify(accountId, input) {
+      return api.post(`/media-accounts/${accountId}/identify`, input).then(sanitize)
     },
     bindProfile(accountId, browserProfileId) {
       return api.patch(`/media-accounts/${accountId}/profile`, { browser_profile_id: browserProfileId }).then(sanitize)
@@ -79,16 +30,8 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     check(accountId) {
       return api.post(`/media-accounts/${accountId}/check`, {})
     },
-    submitCheckResult(accountId, { taskId, platformAccountId, name, avatarUrl, loginStatus, message, checkItems = [] }) {
-      return api.post(`/media-accounts/${accountId}/check/result`, {
-        task_id: taskId,
-        platform_account_id: platformAccountId,
-        name,
-        avatar_url: avatarUrl,
-        login_status: loginStatus,
-        message,
-        check_items: checkItems,
-      }).then(sanitize)
+    submitCheckResult(accountId, input) {
+      return api.post(`/media-accounts/${accountId}/check/result`, { ...input, check_items: input.check_items ?? [] }).then(sanitize)
     },
     addTags(accountIds, tags) {
       return api.post('/media-accounts/tags/add', { account_ids: accountIds, tags })
@@ -102,14 +45,11 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     startCookieReadSync(accountId) {
       return api.post(`/media-accounts/${accountId}/cookies/read-sync`, {})
     },
-    submitCookieReadResult(accountId, { taskId, cookies }) {
-      return api.post(`/media-accounts/${accountId}/cookies/read-sync/result`, {
-        task_id: taskId,
-        cookies,
-      }).then(sanitize)
+    submitCookieReadResult(accountId, input) {
+      return api.post(`/media-accounts/${accountId}/cookies/read-sync/result`, input).then(sanitize)
     },
-    createAccountGroup({ name, filters }) {
-      return api.post('/account-groups', { name, filters }).then(sanitize)
+    createAccountGroup(input) {
+      return api.post('/account-groups', input).then(sanitize)
     },
     listAccountGroups() {
       return api.get('/account-groups')
@@ -117,8 +57,8 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     listAccountsByGroup(groupId) {
       return api.get(`/account-groups/${groupId}/accounts`)
     },
-    updateAccountGroup(groupId, { name, filters }) {
-      return api.patch(`/account-groups/${groupId}`, { name, filters }).then(sanitize)
+    updateAccountGroup(groupId, changes) {
+      return api.patch(`/account-groups/${groupId}`, changes).then(sanitize)
     },
     deleteAccountGroup(groupId) {
       return api.delete(`/account-groups/${groupId}`)

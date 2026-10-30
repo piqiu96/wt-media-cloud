@@ -251,12 +251,8 @@ func deleteUser(db *gorm.DB, userID model.UserID) error {
         (SELECT COUNT(*) FROM user_sessions WHERE user_id = ?) +
         (SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = ?) +
         (SELECT COUNT(*) FROM media_accounts WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID,
+        (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?)`,
+		userID, userID, userID, userID,
 	).Scan(&references)
 	if err != nil {
 		return err
@@ -287,12 +283,8 @@ func deleteUserWithAudit(db *gorm.DB, userID model.UserID, event model.AuditEven
         (SELECT COUNT(*) FROM user_sessions WHERE user_id = ?) +
         (SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = ?) +
         (SELECT COUNT(*) FROM media_accounts WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM media_account_tags WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM profile_sync_scans WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM sensitive_browser_tasks WHERE user_id = ?) +
-        (SELECT COUNT(*) FROM sensitive_profile_permits WHERE user_id = ?)`,
-		userID, userID, userID, userID, userID, userID, userID, userID,
+        (SELECT COUNT(*) FROM browser_profiles WHERE user_id = ?)`,
+		userID, userID, userID, userID,
 	).Scan(&references); err != nil {
 		return err
 	}
@@ -512,9 +504,8 @@ func teamHasReferences(db *gorm.DB, teamID model.TeamID) (bool, error) {
 	err := queryRow(db, `SELECT
         (SELECT COUNT(*) FROM users WHERE team_id = ?) +
         (SELECT COUNT(*) FROM media_accounts WHERE team_id = ?) +
-        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?) +
-        (SELECT COUNT(*) FROM profile_sync_scans WHERE team_id = ?)`,
-		teamID, teamID, teamID, teamID,
+        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?)`,
+		teamID, teamID, teamID,
 	).Scan(&count)
 	return count > 0, err
 }

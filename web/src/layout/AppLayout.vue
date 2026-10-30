@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { canRunLocalAgent, canUseLocalAgent, isDesktop } from '../utils.js'
+import { canRunLocalAgent, canUseAccountOpening, canUseLocalAgent, isDesktop } from '../utils.js'
 import { SYSTEM_MANAGEMENT_PATHS, canUseDesktopEnv, canViewSystemPath } from '../shared/utils/roles.js'
 import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
@@ -61,12 +61,13 @@ const desktopItems = [
   ] },
 ]
 
-// M2 本机资源（开户 / 浏览器窗口 / 代理）只属于普通运营；社媒账号三种角色都能看，
-// 本地操作按账号归属另行判定。
-const localOnlyPaths = new Set(['/account-opening', '/browser-windows', '/proxies'])
+// 浏览器窗口是运营/高级运营的桌面端本机资源；开户仍是普通运营专属。代理列表
+// 与网页版一致，不再受本机页面可见性限制。
+const localOnlyPaths = new Set(['/browser-windows'])
+const operatorOnlyPaths = new Set(['/account-opening'])
 const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))
 // 顶栏的本机执行状态给真正会拉起 sidecar 的角色（运营 + 高级运营），与本地专属
-// 页面的可见性不是同一件事：高级运营能跑本机检查，但进不了开户/窗口/代理。
+// 页面的可见性不是同一件事：高级运营能进窗口和代理，但进不了开户。
 const localAgentRunnable = computed(() => canRunLocalAgent(currentUser.value))
 const desktopEnvAllowed = computed(() => canUseDesktopEnv(currentUser.value))
 
@@ -88,6 +89,9 @@ const allItems = computed(() => {
   const hiddenPaths = new Set()
   if (isDesktop() && !localAgentAllowed.value) {
     for (const path of localOnlyPaths) hiddenPaths.add(path)
+  }
+  if (isDesktop() && !canUseAccountOpening(currentUser.value)) {
+    for (const path of operatorOnlyPaths) hiddenPaths.add(path)
   }
   // 系统管理：用户管理仅管理员；运营团队 / 类目管理 高级运营 + 管理员。
   // Cloud Web 与 Desktop 走同一条规则。
@@ -159,7 +163,10 @@ async function logout() {
     <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
       <div class="sidebar-header" :class="{ 'is-collapsed': collapsed }" @click="router.push('/')">
         <BrandLogo :compact="collapsed" />
-        <span v-if="!collapsed && appVersion" class="sidebar-version">v{{ appVersion }}</span>
+        <div v-if="!collapsed" class="sidebar-meta">
+          <span class="sidebar-env">{{ isDesktop() ? '桌面端' : '网页版' }}</span>
+          <span v-if="appVersion" class="sidebar-version">v{{ appVersion }}</span>
+        </div>
       </div>
       <t-menu
         :value="route.path"
@@ -256,7 +263,8 @@ async function logout() {
   cursor: pointer;
 }
 .sidebar-header.is-collapsed { justify-content: center; padding: 0; }
-.sidebar-version { margin: auto 0 3px; color: #9aa8bd; font-size: 11px; white-space: nowrap; }
+.sidebar-meta { margin: auto 0 3px; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.sidebar-env, .sidebar-version { color: #9aa8bd; font-size: 11px; line-height: 1.4; white-space: nowrap; }
 .profile-trigger { display: inline-flex; align-items: center; gap: 9px; min-height: 38px; padding: 2px 8px 2px 4px; border: 0; border-radius: 9px; color: #243957; background: transparent; cursor: pointer; font: inherit; }
 .profile-trigger:hover, .profile-trigger:focus-visible { background: #eff6ff; outline: none; }
 .profile-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

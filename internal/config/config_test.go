@@ -663,8 +663,6 @@ func validSchedulerTOML() string {
 		"compose_interval = \"30s\"\n" +
 		"worker_interval = \"5s\"\n" +
 		"worker_batch_size = 10\n" +
-		"task_recovery_interval = \"30s\"\n" +
-		"task_recovery_batch_size = 100\n" +
 		"session_cleanup_interval = \"1h\"\n" +
 		"session_cleanup_retention = \"168h\"\n" +
 		"session_cleanup_batch_size = 500\n"

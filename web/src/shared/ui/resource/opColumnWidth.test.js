@@ -15,6 +15,15 @@ describe('opColumnWidth', () => {
     expect(opColumnWidth(['下载', '详情'], { loading: true })).toBe(opColumnWidth(['下载', '详情']) + 18)
   })
 
+  it('fits five text actions without reserving five outlined-button frames', () => {
+    const labels = ['详情', '编辑', '检测', '设置配额', '删除']
+    expect(opColumnWidth(labels, { variant: 'text' })).toBe(244)
+    expect(opColumnWidth(labels, { variant: 'text', primary: true })).toBe(256)
+    expect(opColumnWidth(labels, { variant: 'text', loading: true })).toBe(262)
+    expect(opColumnWidth(labels, { variant: 'text', loading: true, primary: true })).toBe(274)
+    expect(opColumnWidth(labels)).toBe(272)
+  })
+
   it('never returns less width for more buttons, and bottoms out above the header text', () => {
     expect(opColumnWidth(['详情', '取消'])).toBeGreaterThan(opColumnWidth(['详情']))
     expect(opColumnWidth(['详情'])).toBe(80)

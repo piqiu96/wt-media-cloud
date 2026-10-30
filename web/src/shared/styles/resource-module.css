@@ -130,7 +130,7 @@
   padding-top: 16px;
 }
 
-.wt-resource-page .t-button--theme-primary {
+.wt-resource-page .t-button--theme-primary:not(.t-button--variant-text) {
   min-height: 36px;
   border-radius: var(--wt-radius-sm);
   background: var(--wt-primary);
@@ -138,7 +138,7 @@
   font-size: 14px;
 }
 
-.wt-resource-page .t-button--theme-primary:hover:not([disabled]) {
+.wt-resource-page .t-button--theme-primary:not(.t-button--variant-text):hover:not([disabled]) {
   background: var(--wt-primary-hover);
   border-color: var(--wt-primary-hover);
 }
@@ -194,3 +194,12 @@
   vertical-align: middle;
 }
 .wt-resource-page .wt-resource-table .t-table__body tr:hover > td { background: var(--wt-bg-page); }
+
+/* 已审批新筛选布局显式接入，旧模块横排标签保持兼容。 */
+.wt-resource-page.resource-visual-approved .filter-bar { align-items: flex-end; gap: 20px 24px; padding-bottom: 24px; margin-bottom: 20px; }
+.wt-resource-page.resource-visual-approved .wt-filter-field { flex-direction: column; align-items: stretch; gap: 8px; }
+.wt-resource-page.resource-visual-approved .wt-filter-field > .t-input__wrap,
+.wt-resource-page.resource-visual-approved .wt-filter-field > .t-select__wrap { flex: 0 0 auto; }
+.wt-resource-page.resource-visual-approved .filter-bar > .wt-filter-field { flex-basis: 180px; }
+.wt-resource-page.resource-visual-approved .filter-bar > .wt-filter-field--wide { flex-basis: 260px; }
+.wt-resource-page.resource-visual-approved .t-input { min-height: 36px; }

@@ -14,17 +14,6 @@ import (
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
 
-type ProxyCheckRequest struct {
-	ProxyID       string `json:"proxy_id,omitempty"`
-	ProxyProtocol string `json:"proxy_protocol"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-}
-
-type ProxyCheckResult struct {
-	Connectivity string `json:"connectivity"`
-}
-
 type ProxyExtractionRequest struct {
 	ExtractURL    string `json:"extract_url"`
 	ProxyProtocol string `json:"proxy_protocol"`
@@ -38,23 +27,13 @@ type ProxyExtractionResult struct {
 	Password      string `json:"password,omitempty"`
 }
 
-type ProxyMutationRequest struct {
-	Operation     string `json:"operation,omitempty"`
-	ProfileID     string `json:"profile_id"`
-	ProxyProtocol string `json:"proxy_protocol"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Username      string `json:"username,omitempty"`
-	Password      string `json:"password,omitempty"`
+type ResponseError struct {
+	Status int
+	Body   string
 }
 
-type ProxyMutationResult struct {
-	Operation     string `json:"operation,omitempty"`
-	ProfileID     string `json:"profile_id"`
-	ProxyProtocol string `json:"proxy_protocol"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Readback      bool   `json:"readback"`
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("agent response status %d: %s", e.Status, e.Body)
 }
 
 type Client struct {
@@ -118,24 +97,10 @@ func NewWithClient(origin string, credential config.AgentCredentialConfig, trans
 	}
 }
 
-// CheckProxy asks the local Agent to test a proxy address.
-func (c *Client) CheckProxy(ctx context.Context, request ProxyCheckRequest) (ProxyCheckResult, error) {
-	var result ProxyCheckResult
-	err := c.post(ctx, "/api/v1/proxy-check", request, &result)
-	return result, err
-}
-
 // ExtractProxy asks the local Agent to extract a proxy address.
 func (c *Client) ExtractProxy(ctx context.Context, request ProxyExtractionRequest) (ProxyExtractionResult, error) {
 	var result ProxyExtractionResult
 	err := c.post(ctx, "/api/v1/proxy-extract", request, &result)
-	return result, err
-}
-
-// MutateProxy asks the local Agent to bind or unbind a profile proxy.
-func (c *Client) MutateProxy(ctx context.Context, request ProxyMutationRequest) (ProxyMutationResult, error) {
-	var result ProxyMutationResult
-	err := c.post(ctx, "/api/v1/proxy-mutation", request, &result)
 	return result, err
 }
 
@@ -161,7 +126,7 @@ func (c *Client) post(ctx context.Context, path string, input, output any) error
 		return err
 	}
 	if response.StatusCode() < 200 || response.StatusCode() >= 300 {
-		return fmt.Errorf("agent response status %d: %s", response.StatusCode(), strings.TrimSpace(string(response.BodyBytes())))
+		return &ResponseError{Status: response.StatusCode(), Body: strings.TrimSpace(string(response.BodyBytes()))}
 	}
 
 	var envelope struct {

@@ -16,7 +16,7 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ platform: 'douyin', allTags: ['launch', 'vip'] })
+    await client.list({ platform: 'douyin', all_tags: ['launch', 'vip'] })
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?platform=douyin&all_tags=launch%2Cvip',
@@ -30,14 +30,14 @@ describe('media account client', () => {
 
     await client.list({
       search: '重点',
-      businessStatus: 'enabled',
-      loginStatus: 'unknown',
-      anyTags: ['launch'],
-      excludeTags: ['retired'],
+      enabled: true,
+      platform_login_status: 'unknown',
+      any_tags: ['launch'],
+      exclude_tags: ['retired'],
     })
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/v1/media-accounts?search=%E9%87%8D%E7%82%B9&business_status=enabled&login_status=unknown&any_tags=launch&exclude_tags=retired',
+      '/api/v1/media-accounts?search=%E9%87%8D%E7%82%B9&enabled=true&platform_login_status=unknown&any_tags=launch&exclude_tags=retired',
       expect.objectContaining({ credentials: 'include' }),
     )
   })
@@ -52,7 +52,7 @@ describe('media account client', () => {
     const storage = { setItem: vi.fn(), getItem: vi.fn() }
     const client = createMediaAccountClient({ fetch, storage })
 
-    const account = await client.create({ categoryIds: ['category-a'], platform: 'douyin', originalCookie: 'import-secret' })
+    const account = await client.create({ category_ids: ['category-a'], platform: 'douyin', original_cookie: 'import-secret' })
 
     expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts', expect.objectContaining({
       method: 'POST',
@@ -109,11 +109,11 @@ describe('media account client', () => {
       original_cookie: 'server-must-not-return-this',
     }))
     const updated = await client.submitCheckResult('account-1', {
-      taskId: 'task-1',
-      platformAccountId: '123',
-      name: '',
-      avatarUrl: '',
-      loginStatus: 'normal',
+      operation_id: 'task-1',
+      platform_account_id: '123',
+      platform_name: '',
+      platform_avatar_url: '',
+      platform_login_status: 'normal',
       message: 'ok',
     })
 
@@ -121,11 +121,11 @@ describe('media account client', () => {
       method: 'POST',
       credentials: 'include',
       body: JSON.stringify({
-        task_id: 'task-1',
+        operation_id: 'task-1',
         platform_account_id: '123',
-        name: '',
-        avatar_url: '',
-        login_status: 'normal',
+        platform_name: '',
+        platform_avatar_url: '',
+        platform_login_status: 'normal',
         message: 'ok',
         check_items: [],
       }),
@@ -153,14 +153,15 @@ describe('media account client', () => {
     expect(source).toContain('系统ID {{ profileForAccount')
     expect(source).toContain('不可执行：未绑定类目')
     expect(source).toContain('Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息')
-    expect(source).not.toContain('account.business_status === "draft"')
+    expect(source).not.toContain('business_status')
+    expect(source).not.toContain('active_cookie_updated_at')
   })
 
   it('passes window binding fuzzy search to backend', async () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ profile: '运营' })
+    await client.list({ profile_search: '运营' })
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?profile_search=%E8%BF%90%E8%90%A5',
@@ -172,18 +173,18 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response({ id: 'account-1' }))
     const client = createMediaAccountClient({ fetch })
 
-    await client.create({ categoryIds: ['category-a'], platform: 'bilibili', name: '测试昵称' })
+    await client.create({ category_ids: ['category-a'], platform: 'bilibili', platform_name: '测试昵称' })
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili', name: '测试昵称' }),
+      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili', platform_name: '测试昵称' }),
     }))
 
-    await client.update('account-1', { name: '新名' })
+    await client.update('account-1', { platform_name: '新名' })
 
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/account-1', expect.objectContaining({
       method: 'PATCH',
-      body: JSON.stringify({ name: '新名' }),
+      body: JSON.stringify({ platform_name: '新名' }),
     }))
   })
 
@@ -191,8 +192,8 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response({ id: '1', category_ids: ['category-a', 'category-b'] }))
     const client = createMediaAccountClient({ fetch })
 
-    await client.create({ categoryIds: ['category-b', 'category-a'], platform: 'bilibili' })
-    await client.update('1', { categoryIds: [] })
+    await client.create({ category_ids: ['category-b', 'category-a'], platform: 'bilibili' })
+    await client.update('1', { category_ids: [] })
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
       body: JSON.stringify({ category_ids: ['category-b', 'category-a'], platform: 'bilibili' }),
@@ -206,7 +207,7 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ categoryIds: ['category-a', 'category-b'] })
+    await client.list({ category_ids: ['category-a', 'category-b'] })
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?category_ids=category-a%2Ccategory-b',

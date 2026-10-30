@@ -8,6 +8,7 @@ import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
 import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
+import { loginStatusText } from "../../../shared/utils/mediaAccountLabels.js"
 import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
 import { categoryTypeLabel } from "../../../shared/utils/categories.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
@@ -39,7 +40,7 @@ const error = ref("")
 
 const searchText = ref("")
 const searchPlatform = ref("")
-const searchBizStatus = ref("")
+const searchEnabled = ref("")
 const searchLoginStatus = ref("")
 const searchTags = ref("")
 const searchCategoryIds = ref([])
@@ -132,11 +133,11 @@ async function loadAccounts() {
   const params = {}
   if (searchText.value) params.search = searchText.value
   if (searchPlatform.value) params.platform = searchPlatform.value
-  if (searchBizStatus.value) params.businessStatus = searchBizStatus.value
-  if (searchLoginStatus.value) params.loginStatus = searchLoginStatus.value
-  if (searchCategoryIds.value.length) params.categoryIds = searchCategoryIds.value
-  if (searchTags.value) params.anyTags = [searchTags.value]
-  if (searchProfile.value) params.profile = searchProfile.value
+  if (searchEnabled.value) params.enabled = searchEnabled.value === "enabled"
+  if (searchLoginStatus.value) params.platform_login_status = searchLoginStatus.value
+  if (searchCategoryIds.value.length) params.category_ids = searchCategoryIds.value
+  if (searchTags.value) params.any_tags = [searchTags.value]
+  if (searchProfile.value) params.profile_search = searchProfile.value
   try {
     accounts.value = await accountClient.list(params)
     pagination.value.current = 1
@@ -153,7 +154,7 @@ function onPageChange(pageInfo) {
 function resetFilters() {
   searchText.value = ""
   searchPlatform.value = ""
-  searchBizStatus.value = ""
+  searchEnabled.value = ""
   searchLoginStatus.value = ""
   searchTags.value = ""
   searchCategoryIds.value = []
@@ -165,13 +166,13 @@ function resetFilters() {
 function applyStatFilter(key) {
   searchText.value = ""
   searchPlatform.value = ""
-  searchBizStatus.value = ""
+  searchEnabled.value = ""
   searchLoginStatus.value = ""
   searchTags.value = ""
   searchCategoryIds.value = []
   searchProfile.value = ""
-  if (key === "enabled") searchBizStatus.value = "enabled"
-  else if (key === "disabled") searchBizStatus.value = "disabled"
+  if (key === "enabled") searchEnabled.value = "enabled"
+  else if (key === "disabled") searchEnabled.value = "disabled"
   else if (key === "normal") searchLoginStatus.value = "normal"
   else if (key === "abnormal") searchLoginStatus.value = "restricted"
   else if (key === "pending") searchLoginStatus.value = "unknown"
@@ -195,11 +196,11 @@ async function createAccount() {
   creating.value = true
   try {
     await accountClient.create({
-      userId: user.value?.role === "admin" ? Number(createForm.value.userId) || undefined : undefined,
-      categoryIds: createForm.value.categoryIds,
-      name: createForm.value.name || undefined,
+      user_id: user.value?.role === "admin" ? Number(createForm.value.userId) || undefined : undefined,
+      category_ids: createForm.value.categoryIds,
+      platform_name: createForm.value.name || undefined,
       platform: createForm.value.platform,
-      browserProfileId: isDesktop && !isAdmin.value ? createForm.value.browserProfileId : "",
+      browser_profile_id: isDesktop && !isAdmin.value ? createForm.value.browserProfileId : "",
       remark: createForm.value.remark,
       tags: createForm.value.tags || [],
     })
@@ -221,7 +222,7 @@ function openDetail(account) {
 
 function accountDisplayName(account) {
   if (!account) return "-"
-  if (account.name) return account.name
+  if (account.platform_name) return account.platform_name
   if (account.platform_account_id) return account.platform_account_id
   return account.identification_status !== "identified" ? "待识别账号" : "未识别"
 }
@@ -246,6 +247,22 @@ function showAllTags(account) {
 
 function openWindowPopup(account) {
   windowPopup.value = account
+}
+
+function profileWindowStateText(account) {
+  const profile = profileForAccount(account)
+  if (!profile) return "窗口未同步"
+  if (profile.local_state === "local_missing") return "窗口缺失"
+  if (profile.enabled === false) return "窗口已停用"
+  return "窗口可使用"
+}
+
+function profileProxyModeText(account) {
+  const profile = profileForAccount(account)
+  if (!profile) return "代理未知"
+  if (profile.proxy_id) return "系统托管代理"
+  if (profile.bit_proxy_host) return "比特自管代理"
+  return "直连"
 }
 
 function profileIsOpen(account) {
@@ -286,12 +303,12 @@ async function checkFromRow(account) {
     const updated = await runSingleAccountCheck(account, service)
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
-    feedback.toast.success(`检查完成：${loginStatusText(updated.login_status)}`)
+    feedback.toast.success(`检查完成：${loginStatusText(updated.platform_login_status)}`)
     await loadAccounts()
   } catch (e) {
     // 单账号检查失败：行状态置「检查失败」+ 打开详情展示失败原因（不使用页面级横幅）
     const idx = accounts.value.findIndex(a => a.id === account.id)
-    const failed = idx >= 0 ? { ...accounts.value[idx], login_status: "environment_error" } : account
+    const failed = idx >= 0 ? { ...accounts.value[idx], platform_login_status: "environment_error" } : account
     if (idx >= 0) accounts.value[idx] = failed
     openDetail(failed)
     checkFailure.value = `检查失败：${e.message || "环境不可用"}`
@@ -303,7 +320,7 @@ async function checkFromRow(account) {
 
 function openEdit(account) {
   editAccount.value = account
-  editName.value = account.name || ""
+  editName.value = account.platform_name || ""
   editRemark.value = account.remark || ""
   editCategoryIds.value = Array.isArray(account.category_ids) ? [...account.category_ids] : []
   editProfileId.value = account.browser_profile_id || ""
@@ -323,9 +340,9 @@ async function saveEdit() {
   error.value = ""
   try {
     let updated = await accountClient.update(editAccount.value.id, {
-      name: editName.value || undefined,
+      platform_name: editName.value || undefined,
       remark: editRemark.value,
-      categoryIds: editCategoryIds.value,
+      category_ids: editCategoryIds.value,
     })
     // 绑定窗口差异：只有本人账号才允许改绑定，管理员与他人账号保持原绑定。
     if (isDesktop && canOperateLocalAccount(editAccount.value) && editProfileId.value !== (editAccount.value.browser_profile_id || "")) {
@@ -351,10 +368,10 @@ async function saveEdit() {
   }
 }
 
-async function toggleBizStatus(account) {
-  const target = account.business_status === "enabled" ? "disabled" : "enabled"
+async function toggleEnabled(account) {
+  const target = !account.enabled
   try {
-    const updated = await accountClient.update(account.id, { businessStatus: target })
+    const updated = await accountClient.update(account.id, { enabled: target })
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
   } catch (e) {
@@ -395,7 +412,7 @@ function categoryNames(categoryIds) {
 function profileName(profileId) {
   const profile = profiles.value.find(item => item.id === profileId)
   if (!profile) return "未命名窗口"
-  return profile.name || "未命名窗口"
+  return profile.bit_name || "未命名窗口"
 }
 
 function profileForAccount(account) {
@@ -425,36 +442,20 @@ function localOperationHint(account) {
 function executableText(account) {
   const roleHint = isDesktop ? localOperationHint(account) : ""
   if (roleHint) return `不可执行：${roleHint}`
-  if (account.business_status !== "enabled") return "不可执行：账号已停用"
+  if (!account.enabled) return "不可执行：账号已停用"
   if (!(account.category_ids || []).length) return "不可执行：未绑定类目"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   const profile = profileForAccount(account)
-  if (profile && (profile.local_status !== "active" || profile.business_status === "disabled")) return "不可执行：绑定窗口已停用"
-  if (account.login_status !== "normal") return "待检查：需要真实账号检查"
+  if (profile && (profile.local_state !== "active" || !profile.enabled)) return "不可执行：绑定窗口已停用"
+  if (account.platform_login_status !== "normal") return "待检查：需要真实账号检查"
   return "可进入后续预检"
 }
 
-function loginStatusText(status) {
-  return {
-    unknown: "待检查",
-    normal: "登录正常",
-    not_logged_in: "未登录",
-    verification_needed: "需要验证码",
-    expired: "已失效",
-    restricted: "受限",
-    account_mismatch: "账号不一致",
-    environment_error: "环境异常",
-  }[status] || status || "-"
+function enabledText(enabled) {
+  return enabled ? "启用" : "停用"
 }
 
-function bizStatusText(status) {
-  return {
-    enabled: "启用",
-    disabled: "停用",
-  }[status] || status || "-"
-}
-
-// 账号状态：真实平台状态，由 login_status + identification_status 派生（与业务状态独立）
+// 账号状态：真实平台状态，由 platform_login_status + identification_status 派生（与业务状态独立）
 // 颜色语义遵循视觉规范 6.2（正常=绿、未检查=灰、待处理=橙、错误/冲突/失效/受限=红）
 const ACCOUNT_STATUS_MAP = {
   pending: { label: "待上号", color: "gray" },
@@ -469,7 +470,7 @@ const ACCOUNT_STATUS_MAP = {
 function accountStatusKey(account) {
   if (!account) return "pending"
   const idStatus = account.identification_status || ""
-  const login = account.login_status || ""
+  const login = account.platform_login_status || ""
   if (login === "normal") return "normal"
   switch (login) {
     case "not_logged_in": return "not_logged_in"
@@ -516,9 +517,9 @@ function relativeTime(ts) {
 
 function profileOptionLabel(profile) {
   if (!profile) return ""
-  const name = profile.name || "未命名窗口"
+  const name = profile.bit_name || "未命名窗口"
   const parts = []
-  if (profile.seq) parts.push(String(profile.seq))
+  if (profile.bit_seq) parts.push(String(profile.bit_seq))
   parts.push(name)
   if (profile.id) parts.push(String(profile.id))
   return parts.join(" - ")
@@ -534,12 +535,12 @@ function checkItemStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  return isDesktop && canOperateLocalAccount(account) && account?.business_status === "enabled" && (account.category_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
+  return isDesktop && canOperateLocalAccount(account) && account?.enabled === true && (account.category_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
 }
 
 function canOperateBoundWindow(account) {
   const profile = profileForAccount(account)
-  return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_status === "active" && profile.business_status !== "disabled"
+  return isDesktop && account?.browser_profile_id && profile?.bit_profile_id && profile.local_state === "active" && profile.enabled !== false
 }
 
 // 他人账号也要露出窗口按钮（禁用 + 提示），否则高级运营／管理员看不到「为什么不能操作」。
@@ -558,19 +559,19 @@ async function desktopLocalAgentService() {
 async function runSingleAccountCheck(account, service) {
   const start = await accountClient.check(account.id)
   const localResult = await service.accountCheck({
-    taskId: start.task_id,
+    operationId: start.operation_id,
     bitProfileId: start.bit_profile_id,
     platform: start.platform,
     expectedPlatformAccountId: start.expected_platform_account_id || "",
   })
   return accountClient.submitCheckResult(account.id, {
-    taskId: start.task_id,
-    platformAccountId: localResult.platform_account_id,
-    name: localResult.name,
-    avatarUrl: localResult.avatar_url,
-    loginStatus: localResult.login_status,
+    operation_id: start.operation_id,
+    platform_account_id: localResult.platform_account_id,
+    platform_name: localResult.name,
+    platform_avatar_url: localResult.avatar_url,
+    platform_login_status: localResult.login_status,
     message: localResult.message,
-    checkItems: localResult.check_items || [],
+    check_items: localResult.check_items || [],
   })
 }
 
@@ -591,12 +592,12 @@ async function readProfileCookieFor(account) {
     const service = await desktopLocalAgentService()
     const start = await accountClient.startCookieReadSync(target.id)
     const localResult = await service.cookieRead({
-      taskId: start.task_id,
+      operationId: start.operation_id,
       bitProfileId: start.bit_profile_id,
     })
     const cookies = localResult.cookies || []
     const updated = await accountClient.submitCookieReadResult(target.id, {
-      taskId: start.task_id,
+      operation_id: start.operation_id,
       cookies,
     })
     const idx = accounts.value.findIndex(a => a.id === target.id)
@@ -642,7 +643,7 @@ async function copyCookie(field) {
 }
 
 function accountLabel(account) {
-  return account?.name || account?.platform_account_id || account?.id || "未知账号"
+  return account?.platform_name || account?.platform_account_id || account?.id || "未知账号"
 }
 
 function selectedAccounts() {
@@ -695,7 +696,7 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
       try {
         const updated = await runSingleAccountCheck(item.account, service)
         item.status = "success"
-        item.message = `检查完成：${loginStatusText(updated.login_status)}`
+        item.message = `检查完成：${loginStatusText(updated.platform_login_status)}`
         item.account = { ...item.account, ...updated }
       } catch (e) {
         item.status = "failed"
@@ -729,7 +730,7 @@ async function openAccountProfile(account) {
   try {
     const service = await desktopLocalAgentService()
     const result = await service.profileOpen(bitProfileId)
-    feedback.toast.success(`已打开绑定窗口：${profile.name || result.bit_profile_id}`)
+    feedback.toast.success(`已打开绑定窗口：${profile.bit_name || result.bit_profile_id}`)
   } catch (e) {
     feedback.toast.error(executionErrorMessage(e))
   } finally {
@@ -749,7 +750,7 @@ async function closeAccountProfile(account) {
   try {
     const service = await desktopLocalAgentService()
     const result = await service.profileClose(bitProfileId)
-    feedback.toast.success(`已关闭绑定窗口：${profile.name || result.bit_profile_id}`)
+    feedback.toast.success(`已关闭绑定窗口：${profile.bit_name || result.bit_profile_id}`)
   } catch (e) {
     feedback.toast.error(executionErrorMessage(e))
   } finally {
@@ -762,7 +763,7 @@ function formatTime(t) {
   return new Date(t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
-const activeProfiles = computed(() => profiles.value.filter(profile => profile.local_status === "active" && profile.business_status !== "disabled"))
+const activeProfiles = computed(() => profiles.value.filter(profile => profile.local_state === "active" && profile.enabled !== false))
 
 const availableTags = computed(() => {
   const set = new Set()
@@ -815,8 +816,8 @@ const ownerFilteredAccounts = computed(() => {
 
 const stats = computed(() => ({
   total: ownerFilteredAccounts.value.length,
-  enabled: ownerFilteredAccounts.value.filter(a => a.business_status === "enabled").length,
-  disabled: ownerFilteredAccounts.value.filter(a => a.business_status === "disabled").length,
+  enabled: ownerFilteredAccounts.value.filter(a => a.enabled === true).length,
+  disabled: ownerFilteredAccounts.value.filter(a => a.enabled === false).length,
   normal: ownerFilteredAccounts.value.filter(a => accountStatusKey(a) === "normal").length,
   abnormal: ownerFilteredAccounts.value.filter(a => ["restricted", "account_mismatch", "check_failed"].includes(accountStatusKey(a))).length,
   pending: ownerFilteredAccounts.value.filter(a => ["pending", "not_logged_in", "expired"].includes(accountStatusKey(a))).length,
@@ -848,9 +849,9 @@ const columns = [
   { colKey: "category_ids", title: "类目", width: 160 },
   { colKey: "tags", title: "标签", width: 140 },
   { colKey: "window_info", title: "浏览器窗口", width: 180 },
-  { colKey: "business_status", title: "业务状态", width: 80, minWidth: 80 },
+  { colKey: "enabled", title: "业务状态", width: 80, minWidth: 80 },
   { colKey: "account_status", title: "账号状态", width: 90, minWidth: 90 },
-  { colKey: "last_checked_at", title: "最近检查", width: 110, minWidth: 110 },
+  { colKey: "last_check_at", title: "最近检查", width: 110, minWidth: 110 },
   { colKey: "op", title: "操作", width: 400, fixed: "right" },
 ]
 </script>
@@ -888,7 +889,7 @@ const columns = [
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchBizStatus" placeholder="全部" clearable>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchEnabled" placeholder="全部" clearable>
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
         </t-select></label>
@@ -956,20 +957,20 @@ const columns = [
       </template>
       <template #window_info="{ row }">
         <div v-if="row.browser_profile_id" class="window-cell" @click="openWindowPopup(row)">
-          <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 代理正常</div>
-          <div class="window-proxy"><span class="proxy-dot proxy-ok">●</span> 窗口正常</div>
+          <div class="window-proxy"><span class="proxy-dot">●</span> {{ profileProxyModeText(row) }}</div>
+          <div class="window-proxy"><span class="proxy-dot">●</span> {{ profileWindowStateText(row) }}</div>
           <div class="window-name window-name-link">{{ profileName(row.browser_profile_id) }}</div>
         </div>
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
-      <template #business_status="{ row }">
-        <ResourceStatusBadge :tone="row.business_status === 'enabled' ? 'success' : 'neutral'" :label="bizStatusText(row.business_status)" />
+      <template #enabled="{ row }">
+        <ResourceStatusBadge :tone="row.enabled ? 'success' : 'neutral'" :label="enabledText(row.enabled)" />
       </template>
       <template #account_status="{ row }">
         <ResourceStatusBadge :tone="accountStatusTheme(row) === 'success' ? 'success' : accountStatusTheme(row) === 'danger' ? 'danger' : accountStatusTheme(row) === 'warning' ? 'warning' : 'neutral'" :label="accountStatusText(row)" />
       </template>
-      <template #last_checked_at="{ row }">
-        <span :title="row.last_checked_at ? formatTime(row.last_checked_at) : ''">{{ relativeTime(row.last_checked_at) }}</span>
+      <template #last_check_at="{ row }">
+        <span :title="row.last_check_at ? formatTime(row.last_check_at) : ''">{{ relativeTime(row.last_check_at) }}</span>
       </template>
       <template #op="{ row }">
         <t-space size="small" class="op-cell">
@@ -978,7 +979,7 @@ const columns = [
           <t-button v-if="showWindowToggle(row)" size="small" class="wt-secondary-button" variant="outline" :disabled="!canOperateLocalAccount(row) || !canOperateBoundWindow(row) || Boolean(operatingProfileId)" :title="localOperationHint(row)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
           <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCookieDialog(row)">查看 Cookie</t-button>
           <t-button size="small" class="wt-secondary-button" variant="outline" @click="openEdit(row)">编辑</t-button>
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="toggleBizStatus(row)">{{ row.business_status === 'enabled' ? '停用' : '启用' }}</t-button>
+          <t-button size="small" class="wt-secondary-button" variant="outline" @click="toggleEnabled(row)">{{ row.enabled ? '停用' : '启用' }}</t-button>
         </t-space>
       </template>
     </t-table>
@@ -992,23 +993,23 @@ const columns = [
     <t-dialog :visible="accountInfoPopup !== null" @close="accountInfoPopup = null" header="账号信息" :footer="false" width="480px">
       <div v-if="accountInfoPopup" class="info-popup">
         <div class="info-head">
-          <t-avatar v-if="accountInfoPopup.avatar_url" :image="accountInfoPopup.avatar_url" size="medium" />
+          <t-avatar v-if="accountInfoPopup.platform_avatar_url" :image="accountInfoPopup.platform_avatar_url" size="medium" />
           <div>
-            <div class="info-name">{{ accountInfoPopup.name || '待识别账号' }}</div>
+            <div class="info-name">{{ accountInfoPopup.platform_name || '待识别账号' }}</div>
             <div class="info-sub">{{ platformLabel(accountInfoPopup.platform) }}</div>
           </div>
         </div>
         <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
           <t-descriptions-item label="系统账号ID">{{ accountInfoPopup.id }}</t-descriptions-item>
           <t-descriptions-item label="平台UID">{{ accountInfoPopup.platform_account_id || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="平台昵称">{{ accountInfoPopup.name || '--' }}</t-descriptions-item>
+          <t-descriptions-item label="平台昵称">{{ accountInfoPopup.platform_name || '--' }}</t-descriptions-item>
           <t-descriptions-item label="使用人">{{ accountInfoPopup.user_name || '--' }}</t-descriptions-item>
           <t-descriptions-item label="所属类目">{{ categoryNames(accountInfoPopup.category_ids) }}</t-descriptions-item>
           <t-descriptions-item label="标签">{{ (accountInfoPopup.tags || []).join('、') || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="业务状态">{{ bizStatusText(accountInfoPopup.business_status) }}</t-descriptions-item>
+          <t-descriptions-item label="业务状态">{{ enabledText(accountInfoPopup.enabled) }}</t-descriptions-item>
           <t-descriptions-item label="账号状态">{{ accountStatusText(accountInfoPopup) }}</t-descriptions-item>
-          <t-descriptions-item label="最近检查">{{ accountInfoPopup.last_checked_at ? formatTime(accountInfoPopup.last_checked_at) : '从未检查' }}</t-descriptions-item>
-          <t-descriptions-item label="最近同步资料">{{ accountInfoPopup.last_checked_at ? formatTime(accountInfoPopup.last_checked_at) : '--' }}</t-descriptions-item>
+          <t-descriptions-item label="最近检查">{{ accountInfoPopup.last_check_at ? formatTime(accountInfoPopup.last_check_at) : '从未检查' }}</t-descriptions-item>
+          <t-descriptions-item label="最近同步资料">{{ accountInfoPopup.last_check_at ? formatTime(accountInfoPopup.last_check_at) : '--' }}</t-descriptions-item>
           <t-descriptions-item label="备注">{{ accountInfoPopup.remark || '--' }}</t-descriptions-item>
         </t-descriptions>
       </div>
@@ -1024,10 +1025,10 @@ const columns = [
           <t-descriptions-item label="BitBrowser ID">
             <span class="window-bit-id" :title="profileForAccount(windowPopup)?.bit_profile_id || ''">{{ profileForAccount(windowPopup)?.bit_profile_id || '--' }}</span>
           </t-descriptions-item>
-          <t-descriptions-item label="浏览器窗口状态"><span class="status-green">● 正常</span> <span class="info-tip">窗口存在，可以正常连接</span></t-descriptions-item>
-          <t-descriptions-item label="代理状态"><span class="info-tip">代理管理未接入（M2-C）</span></t-descriptions-item>
+          <t-descriptions-item label="浏览器窗口状态">{{ profileWindowStateText(windowPopup) }}</t-descriptions-item>
+          <t-descriptions-item label="代理状态">{{ profileProxyModeText(windowPopup) }}</t-descriptions-item>
           <t-descriptions-item label="当前运行状态">{{ profileIsOpen(windowPopup) ? '已打开' : '已关闭' }}</t-descriptions-item>
-          <t-descriptions-item label="最近同步">{{ windowPopup.last_checked_at ? formatTime(windowPopup.last_checked_at) : '--' }}</t-descriptions-item>
+          <t-descriptions-item label="最近同步">{{ profileForAccount(windowPopup)?.last_synced_at ? formatTime(profileForAccount(windowPopup).last_synced_at) : '--' }}</t-descriptions-item>
         </t-descriptions>
         <div style="margin-top:12px; text-align:right">
           <t-button v-if="canOperateBoundWindow(windowPopup)" variant="outline" :disabled="!canOperateLocalAccount(windowPopup)" :title="localOperationHint(windowPopup)" :loading="operatingProfileId.startsWith('open:') || operatingProfileId.startsWith('close:')" @click="toggleWindow(windowPopup)">{{ profileIsOpen(windowPopup) ? '关闭窗口' : '打开窗口' }}</t-button>
@@ -1160,7 +1161,7 @@ const columns = [
         <t-descriptions-item label="使用人">{{ detailAccount.user_name || '--' }}</t-descriptions-item>
         <t-descriptions-item label="类目">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
         <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
-        <t-descriptions-item label="账号名称">{{ detailAccount.name || '未回填' }}</t-descriptions-item>
+        <t-descriptions-item label="账号名称">{{ detailAccount.platform_name || '未回填' }}</t-descriptions-item>
       </t-descriptions>
       <div class="form-section">关联资源</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
@@ -1177,13 +1178,13 @@ const columns = [
       </t-descriptions>
       <div class="form-section">状态与检查</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
-        <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.login_status) }}</t-descriptions-item>
+        <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
         <t-descriptions-item label="可执行结论">{{ executableText(detailAccount) }}</t-descriptions-item>
-        <t-descriptions-item label="最近检查">{{ detailAccount.last_checked_at ? formatTime(detailAccount.last_checked_at) : '尚未检查' }}</t-descriptions-item>
+        <t-descriptions-item label="最近检查">{{ detailAccount.last_check_at ? formatTime(detailAccount.last_check_at) : '尚未检查' }}</t-descriptions-item>
       </t-descriptions>
-      <div v-if="detailAccount?.check_items?.length" class="check-items-box" style="margin-top:12px">
+      <div v-if="detailAccount?.last_check_items?.length" class="check-items-box" style="margin-top:12px">
         <div class="check-items-title">检查明细（8 项）</div>
-        <div v-for="item in detailAccount.check_items" :key="item.key" class="check-item">
+        <div v-for="item in detailAccount.last_check_items" :key="item.key" class="check-item">
           <span class="check-item-status" :class="'status-' + (item.status || 'na')">{{ checkItemStatusText(item.status) }}</span>
           <span class="check-item-label">{{ item.label }}</span>
           <span v-if="item.message" class="check-item-msg">{{ item.message }}</span>

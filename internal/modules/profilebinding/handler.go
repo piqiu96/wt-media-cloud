@@ -16,15 +16,11 @@ import (
 )
 
 type updateProfileRequest struct {
-	CloudRemark    *string                               `json:"cloud_remark"`
-	BusinessStatus *profileservice.ProfileBusinessStatus `json:"business_status"`
+	Remark  *string `json:"remark"`
+	Enabled *bool   `json:"enabled"`
 }
 
-type assignProfileOwnerRequest struct {
-	UserID identityservice.UserID `json:"user_id"`
-}
-
-func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
+func SubmitProfileSync(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
@@ -40,24 +36,39 @@ func SubmitProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Created(c, scan)
 }
-func GetProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
+
+func GetProfileSync(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	scan, err := profileservice.GetScan(actor, c.Param("scan_id"))
+	scan, err := profileservice.GetCurrentSync(actor)
 	if err != nil {
 		writeProfileError(c, err)
 		return
 	}
 	api.Success(c, scan)
 }
-func ConfirmProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
+
+func ConfirmProfileSync(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	scan, err := profileservice.ConfirmScan(actor, c.Param("scan_id"))
+	var req struct {
+		SyncID             string   `json:"sync_id"`
+		AdoptBitProfileIDs []string `json:"adopt_bit_profile_ids"`
+	}
+	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {
+		return
+	}
+	var scan profileservice.ProfileScan
+	var err error
+	if req.SyncID != "" {
+		scan, err = profileservice.ConfirmScan(actor, req.SyncID, req.AdoptBitProfileIDs)
+	} else {
+		scan, err = profileservice.ConfirmCurrentSync(actor, req.AdoptBitProfileIDs)
+	}
 	if err != nil {
 		writeProfileError(c, err)
 		return
@@ -88,10 +99,10 @@ func BindBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
 // GetBitAccount 让页面看到当前账号绑定的是哪个 BitBrowser 主账号。
 // 只回掩码：完整主账号留在 Agent 与 Cloud 之间使用。
 type bitAccountView struct {
-	Bound            bool       `json:"bound"`
-	MainUserIDMasked string     `json:"main_user_id_masked,omitempty"`
-	BoundAt          *time.Time `json:"bound_at,omitempty"`
-	LastVerifiedAt   *time.Time `json:"last_verified_at,omitempty"`
+	Bound               bool       `json:"bound"`
+	BitMainUserIDMasked string     `json:"main_user_id_masked,omitempty"`
+	BoundAt             *time.Time `json:"bound_at,omitempty"`
+	LastVerifiedAt      *time.Time `json:"last_verified_at,omitempty"`
 }
 
 func GetBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
@@ -106,31 +117,32 @@ func GetBitAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	}
 	view := bitAccountView{Bound: found}
 	if found {
-		view.MainUserIDMasked = maskMainUserID(binding.MainUserID)
+		view.BitMainUserIDMasked = maskBitMainUserID(binding.BitMainUserID)
 		view.BoundAt = binding.BoundAt
 		view.LastVerifiedAt = binding.LastVerifiedAt
 	}
 	api.Success(c, view)
 }
 
-func maskMainUserID(value string) string {
+func maskBitMainUserID(value string) string {
 	if len(value) <= 8 {
 		return "****"
 	}
 	return value[:4] + "****" + value[len(value)-4:]
 }
 
-func RejectProfileScan(ctx context.Context, c *hertzapp.RequestContext) {
+func RejectProfileSync(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
-	if err := profileservice.RejectScan(actor, c.Param("scan_id")); err != nil {
+	if err := profileservice.RejectCurrentSync(actor); err != nil {
 		writeProfileError(c, err)
 		return
 	}
 	api.NoContent(c)
 }
+
 func ListBrowserProfiles(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
@@ -145,25 +157,24 @@ func ListBrowserProfiles(ctx context.Context, c *hertzapp.RequestContext) {
 		}
 		userID = identityservice.UserID(parsed)
 	}
-	filter := profileservice.ProfileListFilter{
-		ID:             strings.TrimSpace(c.Query("id")),
-		Name:           strings.TrimSpace(c.Query("name")),
-		Group:          strings.TrimSpace(c.Query("group")),
-		BitProfileID:   strings.TrimSpace(c.Query("bit_profile_id")),
-		Remark:         strings.TrimSpace(c.Query("remark")),
-		LocalStatus:    strings.TrimSpace(c.Query("local_status")),
-		BusinessStatus: strings.TrimSpace(c.Query("business_status")),
+	enabled, err := parseOptionalBool(c.Query("enabled"))
+	if err != nil {
+		writeProfileError(c, profileservice.ErrInvalidInput)
+		return
 	}
-	switch filter.LocalStatus {
+	filter := profileservice.ProfileListFilter{
+		ID:           strings.TrimSpace(c.Query("id")),
+		BitName:      strings.TrimSpace(c.Query("bit_name")),
+		BitGroup:     strings.TrimSpace(c.Query("bit_group")),
+		BitProfileID: strings.TrimSpace(c.Query("bit_profile_id")),
+		Remark:       strings.TrimSpace(c.Query("remark")),
+		LocalState:   strings.TrimSpace(c.Query("local_state")),
+		Enabled:      enabled,
+	}
+	switch filter.LocalState {
 	case "", string(profileservice.ProfileActive), string(profileservice.ProfileLocalMissing), string(profileservice.ProfileArchived):
 	default:
 		api.BadRequest(c, 10001, "窗口状态筛选无效")
-		return
-	}
-	switch filter.BusinessStatus {
-	case "", string(profileservice.ProfileBusinessEnabled), string(profileservice.ProfileBusinessDisabled):
-	default:
-		api.BadRequest(c, 10001, "业务状态筛选无效")
 		return
 	}
 	profiles, err := profileservice.ListProfiles(actor, userID, filter)
@@ -172,24 +183,6 @@ func ListBrowserProfiles(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	api.Success(c, profiles)
-}
-func CreateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	if _, ok := middleware.AuthenticateRequest(c); !ok {
-		return
-	}
-	writeDesktopOnlyProfileOperation(c)
-}
-func OpenBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	if _, ok := middleware.AuthenticateRequest(c); !ok {
-		return
-	}
-	writeDesktopOnlyProfileOperation(c)
-}
-func CloseBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
-	if _, ok := middleware.AuthenticateRequest(c); !ok {
-		return
-	}
-	writeDesktopOnlyProfileOperation(c)
 }
 func UpdateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
@@ -200,33 +193,7 @@ func UpdateBrowserProfile(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	profile, err := profileservice.UpdateProfile(actor, c.Param("id"), req.CloudRemark, req.BusinessStatus)
-	if err != nil {
-		writeProfileError(c, err)
-		return
-	}
-	api.Success(c, profile)
-}
-func AssignBrowserProfileOwner(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req assignProfileOwnerRequest
-	if !api.DecodeJSON(c, &req) || req.UserID <= 0 {
-		writeProfileError(c, profileservice.ErrInvalidInput)
-		return
-	}
-	target, found, err := identityservice.ResolveUser(req.UserID)
-	if err != nil {
-		writeProfileError(c, err)
-		return
-	}
-	if !found {
-		writeProfileError(c, profileservice.ErrInvalidInput)
-		return
-	}
-	profile, err := profileservice.AssignProfileOwner(actor, c.Param("id"), target)
+	profile, err := profileservice.UpdateProfile(actor, c.Param("id"), req.Remark, req.Enabled)
 	if err != nil {
 		writeProfileError(c, err)
 		return
@@ -250,6 +217,18 @@ func writeDesktopOnlyProfileOperation(c *hertzapp.RequestContext) {
 	api.Conflict(c, 23004, "浏览器窗口本机操作只能在Desktop执行；Cloud Web只展示已保存的窗口信息")
 }
 
+func parseOptionalBool(value string) (*bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 func writeProfileError(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, profileservice.ErrInvalidInput):
@@ -268,12 +247,14 @@ func writeProfileError(c *hertzapp.RequestContext, err error) {
 		api.NotFound(c, 20004, "Profile 扫描或 Profile 不存在")
 	case errors.Is(err, profileservice.ErrScanExpired):
 		api.Failure(c, 410, 20004, "Profile 扫描已过期", nil)
+	case errors.Is(err, profileservice.ErrProfileProxyPending):
+		api.FailureCode(c, 409, 20009, "窗口有代理结果待核实，请先在管理代理中核实后再接受变化", "PROFILE_PROXY_PENDING", nil, false, "verify_proxy")
 	case errors.Is(err, profileservice.ErrScanNotReady):
 		api.Conflict(c, 20009, "Profile 扫描未就绪")
 	case errors.Is(err, profileservice.ErrProfileReferenced):
 		api.Conflict(c, 20003, "浏览器窗口已被媒体账号引用，不能直接分配给其他用户")
-	case errors.Is(err, profileservice.ErrProfileNotDisabled):
-		api.Conflict(c, 20011, "仅已停用的浏览器窗口可同步删除；请先停用该窗口")
+	case errors.Is(err, profileservice.ErrProfileNotMissing):
+		api.Conflict(c, 20011, "仅最近一次同步中已缺失的窗口可删除；请先核实比特中的窗口")
 	default:
 		api.InternalError(c, "Profile 服务内部错误")
 	}

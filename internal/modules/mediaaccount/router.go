@@ -16,7 +16,6 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/media-accounts/:account_id/identify", IdentifyMediaAccount)
 	h.POST("/api/v1/media-accounts/:account_id/check", StartMediaAccountCheck)
 	h.POST("/api/v1/media-accounts/:account_id/check/result", ApplyMediaAccountCheckResult)
-	h.POST("/api/v1/media-accounts/:account_id/cookies/read", ReadMediaAccountCookies)
 	h.POST("/api/v1/media-accounts/:account_id/cookies/read-sync", ReadMediaAccountCookiesSync)
 	h.POST("/api/v1/media-accounts/:account_id/cookies/read-sync/result", ApplyMediaAccountCookieReadResult)
 	h.GET("/api/v1/media-accounts/:account_id/cookies", GetMediaAccountCookies)
