@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.10.30.3
+  version: 2026.10.30.4
 paths:
   /api/v1/media-accounts:
     get:
@@ -331,6 +331,95 @@ paths:
             schema:
               $ref: '#/components/schemas/CookieUpdateResult'
 
+  /api/v1/media-account-imports/preview:
+    post:
+      operationId: previewMediaAccountImport
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportPreviewInput'}
+      description: Side-effect-free validation; <=100 original lines, <=2 MiB total, <=1 MiB per input. Returns original row_number, valid and message; never echoes Cookie.
+      responses:
+        '200':
+          description: Preview rows
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportPreviewResponse'}
+  /api/v1/media-account-imports:
+    post:
+      operationId: createMediaAccountImport
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportCreateInput'}
+      description: Owner Desktop only; request_key, platform, group_id, category_ids, tags, remark and confirmed items [{row_number,input_cookie}]. Unique owner+request_key; canonical digest rejects changed content with 23004.
+      responses:
+        '201':
+          description: Current batch projection
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportResponse'}
+    get:
+      operationId: listMediaAccountImports
+      security: [{sessionCookie: []}]
+      description: Latest 20 owner batches; no credentials. Six exclusive statuses plus total, aggregated from items.
+      responses:
+        '200':
+          description: Batch summaries
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportListResponse'}
+  /api/v1/media-account-imports/{batch_id}:
+    get:
+      operationId: getMediaAccountImport
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: batch_id, required: true, schema: {type: string}}]
+      responses:
+        '200':
+          description: Batch properties, stable original row numbers, revision, counts; no Cookie
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportResponse'}
+  /api/v1/media-account-imports/{batch_id}/items/{row_number}/start:
+    post:
+      operationId: startMediaAccountImportItem
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportStartInput'}
+      description: expected_revision; fresh grant increments attempt, operation_id import:batch:row:attempt. Serial batch; repeated grant has allow_execute=false. Shared window mutex with single-account updates.
+      parameters: [{in: path, name: batch_id, required: true, schema: {type: string}}, {in: path, name: row_number, required: true, schema: {type: integer, minimum: 1}}]
+      responses: {'200': {description: Batch projection plus owner execution item; grant flags only on fresh transition, content: {application/json: {schema: {$ref: '#/components/schemas/ImportResponse'}}}}, '409': {description: 23004 import_conflict; refresh before continuing}}
+  /api/v1/media-account-imports/{batch_id}/items/{row_number}/result:
+    put:
+      operationId: settleMediaAccountImportItem
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportResultInput'}
+      description: expected_revision/attempt/step; created(browser_profile_id), creation_failed(definite capacity only), creation_unknown, preparation_failed, prepared(before_cookie,fingerprint,login_status,platform_account_id), completed(Cookie result), uncertain. Persist prepared before granting can_apply. Success atomically creates account and transfers credentials. Duplicate UID locates existing account without overwriting it.
+      parameters: [{in: path, name: batch_id, required: true, schema: {type: string}}, {in: path, name: row_number, required: true, schema: {type: integer, minimum: 1}}]
+      responses: {'200': {description: Updated projection; duplicate result never grants execution, content: {application/json: {schema: {$ref: '#/components/schemas/ImportResponse'}}}}, '409': {description: 23004 import_conflict}}
+  /api/v1/media-account-imports/{batch_id}/items/{row_number}/actions:
+    post:
+      operationId: actMediaAccountImportItem
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ImportActionInput'}
+      description: expected_revision/action skip|restore|retry|reconcile|reuse. Reuse requires definite creation failure, explicit confirmed=true, candidate_profile_id and no account binding; actual platform empty checked before write. Unknown only reconcile; never increments attempt or replays create/write. Reconcile grants read-only execution input. Manual login continues same window and uses live readback plus real identity.
+      parameters: [{in: path, name: batch_id, required: true, schema: {type: string}}, {in: path, name: row_number, required: true, schema: {type: integer, minimum: 1}}]
+      responses: {'200': {description: Updated projection/execution input for read-only reconcile, content: {application/json: {schema: {$ref: '#/components/schemas/ImportResponse'}}}}, '409': {description: 23004 import_conflict}}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
@@ -548,3 +637,147 @@ components:
           nullable: true
         current_update:
           $ref: '#/components/schemas/CookieUpdate'
+
+    ImportPreviewInput:
+      type: object
+      required: [platform, items]
+      properties:
+        platform: {$ref: '#/components/schemas/Platform'}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [row_number, input_cookie]
+            properties:
+              row_number: {type: integer, minimum: 1, maximum: 100}
+              input_cookie: {type: string, minLength: 1, maxLength: 1048576, writeOnly: true}
+    ImportCreateInput:
+      allOf:
+        - {$ref: '#/components/schemas/ImportPreviewInput'}
+        - type: object
+          required: [request_key, group_id]
+          properties:
+            request_key: {type: string, minLength: 1, maxLength: 64}
+            group_id: {type: string, minLength: 1, maxLength: 128}
+            category_ids: {type: array, items: {type: integer, minimum: 1}}
+            tags: {type: array, items: {type: string, maxLength: 64}}
+            remark: {type: string, maxLength: 500}
+    ImportStartInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 0}
+    ImportResultInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, attempt, step]
+      properties:
+        expected_revision: {type: integer, minimum: 0}
+        attempt: {type: integer, minimum: 1}
+        step: {type: string, enum: [created, creation_failed, creation_unknown, preparation_failed, prepared, completed, uncertain]}
+        browser_profile_id: {type: string}
+        fingerprint: {type: string}
+        before_cookie: {type: array, items: {type: object}, writeOnly: true}
+        status: {type: string, enum: [applied, failed, uncertain]}
+        applied: {type: boolean}
+        verified: {type: boolean, description: Read-only inspect obtained a definite platform result; manual login completion may transfer verified live cookies.}
+        cookies: {type: array, items: {type: object}, writeOnly: true}
+        platform_account_id: {type: string}
+        name: {type: string}
+        avatar_url: {type: string}
+        login_status: {type: string}
+        input_matches: {type: boolean}
+        message: {type: string}
+    ImportActionInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, action]
+      properties:
+        expected_revision: {type: integer, minimum: 0}
+        action: {type: string, enum: [skip, restore, retry, reconcile, reuse]}
+        candidate_profile_id: {type: string}
+        confirmed: {type: boolean}
+    ImportItem:
+      type: object
+      required: [row_number, status, step, attempt, message]
+      properties:
+        row_number: {type: integer, minimum: 1}
+        status: {type: string, enum: [pending, running, succeeded, failed, skipped, uncertain]}
+        step: {type: string, enum: [waiting, creating, preparing, applying, blocked, manual, completed]}
+        attempt: {type: integer, minimum: 0}
+        operation_id: {type: string}
+        browser_profile_id: {type: string}
+        bit_profile_id: {type: string}
+        window_name: {type: string}
+        account_id: {type: string}
+        existing_account_id: {type: string}
+        name: {type: string}
+        platform_account_id: {type: string}
+        creation_unavailable: {type: boolean}
+        message: {type: string}
+    ImportView:
+      type: object
+      required: [id, user_id, request_key, platform, content_json, revision, counts, allow_execute, can_apply, can_inspect]
+      properties:
+        id: {type: string}
+        user_id: {type: integer, format: int64}
+        request_key: {type: string}
+        platform: {$ref: '#/components/schemas/Platform'}
+        content_json:
+          type: object
+          properties:
+            category_ids: {type: array, items: {type: integer}}
+            tags: {type: array, items: {type: string}}
+            remark: {type: string}
+            group_id: {type: string}
+            items: {type: array, items: {$ref: '#/components/schemas/ImportItem'}}
+        revision: {type: integer, minimum: 0}
+        counts: {type: object, required: [total, pending, running, succeeded, failed, skipped, uncertain], additionalProperties: {type: integer, minimum: 0}}
+        execution:
+          allOf:
+            - {$ref: '#/components/schemas/ImportItem'}
+            - type: object
+              description: Only explicit owner execution/reconcile; never in ordinary batch detail/list. No grants on repeated or stale requests.
+              properties:
+                input_cookie: {type: string}
+                fingerprint: {type: string}
+                before_cookie: {type: array, items: {type: object}}
+        allow_execute: {type: boolean}
+        can_apply: {type: boolean}
+        can_inspect: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ImportResponse:
+      type: object
+      properties:
+        errcode: {type: integer}
+        message: {type: string}
+        logid: {type: string}
+        data: {$ref: '#/components/schemas/ImportView'}
+    ImportListResponse:
+      type: object
+      properties:
+        errcode: {type: integer}
+        message: {type: string}
+        logid: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/ImportView'}}
+    ImportPreviewResponse:
+      type: object
+      properties:
+        errcode: {type: integer}
+        message: {type: string}
+        logid: {type: string}
+        data:
+          type: array
+          items:
+            type: object
+            required: [row_number, valid, message]
+            properties:
+              row_number: {type: integer, minimum: 1}
+              valid: {type: boolean}
+              message: {type: string}

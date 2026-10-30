@@ -7,6 +7,13 @@ import (
 
 // RegisterRoutes installs the module's root handlers.
 func RegisterRoutes(h *server.Hertz) {
+	h.POST("/api/v1/media-account-imports/preview", PreviewMediaAccountImport)
+	h.POST("/api/v1/media-account-imports", CreateMediaAccountImport)
+	h.GET("/api/v1/media-account-imports", ListMediaAccountImports)
+	h.GET("/api/v1/media-account-imports/:batch_id", GetMediaAccountImport)
+	h.POST("/api/v1/media-account-imports/:batch_id/items/:row_number/start", StartMediaAccountImportItem)
+	h.PUT("/api/v1/media-account-imports/:batch_id/items/:row_number/result", SettleMediaAccountImportItem)
+	h.POST("/api/v1/media-account-imports/:batch_id/items/:row_number/actions", ActMediaAccountImportItem)
 	h.POST("/api/v1/media-accounts", CreateMediaAccount)
 	h.GET("/api/v1/media-accounts", ListMediaAccounts)
 	h.GET("/api/v1/media-accounts/:account_id", GetMediaAccount)

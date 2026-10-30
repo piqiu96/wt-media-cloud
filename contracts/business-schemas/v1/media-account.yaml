@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.30.3"
+revision: "2026.10.30.4"
 schemas:
   MediaAccount:
     type: object
@@ -38,5 +38,50 @@ schemas:
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
     forbidden_properties: [original_cookie, active_cookie, before_cookie, cookie_update]
+  MediaAccountImportBatch:
+    type: object
+    required: [id, user_id, request_key, platform, content_json, revision, created_at, updated_at, counts]
+    properties:
+      id: {type: string}
+      user_id: {type: integer, format: int64}
+      request_key: {type: string, maxLength: 64}
+      platform: {type: string, enum: [bilibili, baidu, douyin]}
+      revision: {type: integer, minimum: 0}
+      content_json:
+        type: object
+        required: [category_ids, tags, remark, group_id, items]
+        properties:
+          category_ids: {type: array, items: {type: integer}}
+          tags: {type: array, items: {type: string}}
+          remark: {type: string}
+          group_id: {type: string}
+          items:
+            type: array
+            maxItems: 100
+            items:
+              type: object
+              required: [row_number, status, step, attempt, message]
+              properties:
+                row_number: {type: integer, minimum: 1, description: Fixed original input line; never array index or UUID.}
+                status: {type: string, enum: [pending, running, succeeded, failed, skipped, uncertain]}
+                step: {type: string, enum: [waiting, creating, preparing, applying, blocked, manual, completed]}
+                attempt: {type: integer, minimum: 0}
+                operation_id: {type: string, description: 'import:batch:row:attempt'}
+                account_id: {type: string}
+                existing_account_id: {type: string}
+                browser_profile_id: {type: string}
+                bit_profile_id: {type: string}
+                name: {type: string}
+                platform_account_id: {type: string}
+                message: {type: string}
+                creation_unavailable: {type: boolean}
+              forbidden_properties: [input_cookie, before_cookie, fingerprint, last_result_digest]
+      counts:
+        type: object
+        required: [total, succeeded, failed, skipped, running, pending, uncertain]
+        additionalProperties: {type: integer, minimum: 0}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
+    description: One table, content_json contains batch metadata and items array. Only explicit fresh owner execution grants or read-only reconcile include an execution item with required private input. Success transfers secrets to account in the same transaction and removes the batch copies.
 identity_key: {scope: user, fields: [user_id, platform, platform_account_id]}
 assignment: {owner_field: user_id, category_cardinality: many, owner_handoff_supported: false}

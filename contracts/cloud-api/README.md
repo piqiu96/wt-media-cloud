@@ -5,7 +5,7 @@ Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 ## Active Contracts
 
 - `v1/identity.openapi.yaml`: M2-C1 login, current user, user administration, password, and session endpoints.
-- `v1/media-accounts.openapi.yaml`: Media-account maintenance, read-only checks, credentials and single Cookie updates; old read-sync endpoints are removed.
+- `v1/media-accounts.openapi.yaml`: Media-account maintenance, read-only checks, credentials and Cookie updates; one-table batch imports with preview, serial grants, row recovery and shared window occupancy. Old read-sync endpoints are removed.
 - `v1/browser-profiles.openapi.yaml`: M2-C3 staged BitBrowser scan, confirmation, and Profile list endpoints.
 - `v1/proxies.openapi.yaml`: proxy ledger, unified capacity, acknowledged Profile assignment and read-back-based direct unbind.
 - `v1/content-production.openapi.yaml`: M4-A material library, the user's material usages, and a material download command.

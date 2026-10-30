@@ -1,4 +1,7 @@
 <script setup>
+import AccountImportDialog from './AccountImportDialog.vue'
+import {createMediaAccountImportClient} from '../../../shared/api/mediaAccountImports.js'
+
 import { executeCookieUpdate, reconcileCookieUpdate } from "./cookieUpdates.js"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -25,6 +28,12 @@ import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge
 import { invoke } from "@tauri-apps/api/core"
 import { useRouter } from "vue-router"
 
+const importClient=createMediaAccountImportClient()
+const importVisible=ref(false),importId=ref(''),importHistoryOnly=ref(false),recentImport=ref(null)
+async function loadRecentImport(){if(!isDesktop||isAdmin.value)return;try{recentImport.value=(await importClient.list()).find(b=>b.counts.pending+b.counts.failed+b.counts.uncertain+b.counts.running>0)||null}catch{}}
+function openImports(id='',historyOnly=false){importId.value=id;importHistoryOnly.value=historyOnly;importVisible.value=true}
+async function importsChanged(){await Promise.all([loadAccounts(),loadAuxiliaryData(),loadRecentImport()])}
+async function viewImportedAccount(id){try{detailAccount.value=await accountClient.get(id);detailVisible.value=true;importVisible.value=false}catch(e){feedback.toast.error(e.message||'读取账号失败')}}
 const accountClient = createMediaAccountClient()
 const profileClient = createProfileBindingClient()
 const sessionClient = createSessionClient()
@@ -114,7 +123,7 @@ onMounted(async () => {
   try {
     user.value = await sessionClient.me()
     searchOwner.value = defaultOwnerFilter()
-    await Promise.all([loadAuxiliaryData(), loadAccounts()])
+    await Promise.all([loadAuxiliaryData(), loadAccounts(),loadRecentImport()])
   } catch (e) {
     error.value = e.message || "加载账号数据失败"
   } finally {
@@ -919,10 +928,13 @@ const columns = [
     <ResourcePageHeader title="社媒账号" description="管理账号资产、浏览器环境关联和账号检查状态">
       <template #actions>
         <t-button v-if="!isAdmin" theme="primary" @click="openCreate">新增账号</t-button>
+        <t-button v-if="isDesktop && !isAdmin" variant="outline" @click="openImports()">批量接入</t-button>
+        <t-button v-if="isDesktop && !isAdmin" variant="text" @click="openImports('',true)">接入记录</t-button>
         <t-button v-if="isDesktop && !isAdmin" variant="outline" class="wt-secondary-button" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </template>
     </ResourcePageHeader>
+    <div v-if="recentImport" class="import-resume"><span>最近一次接入还有 {{ recentImport.counts.pending+recentImport.counts.failed+recentImport.counts.uncertain+recentImport.counts.running }} 项需要处理</span><t-button variant="text" @click="openImports(recentImport.id)">继续处理</t-button></div>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <FeedbackAlert
       v-if="!isDesktop"
@@ -1106,6 +1118,7 @@ const columns = [
       </div>
     </t-dialog>
 
+    <AccountImportDialog v-model:visible="importVisible" :initial-id="importId" :history-only="importHistoryOnly" :categories="categories" :get-local="desktopLocalAgentService" @changed="importsChanged" @view-account="viewImportedAccount" />
     <t-dialog v-model:visible="showCreate" header="新增账号" width="640px" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
       <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
       <t-form @submit.prevent="createAccount">
@@ -1287,6 +1300,7 @@ const columns = [
 </template>
 
 <style scoped>
+.import-resume{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;margin-bottom:16px;border:1px solid var(--td-component-border);border-radius:6px;background:var(--td-bg-color-container);font-size:13px}
 .account-object{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}.account-object span{font-size:12px;color:var(--td-text-color-secondary)}.credential-section{position:relative;margin-bottom:20px}.credential-section h4{font-size:14px;margin:0 0 10px}.credential-actions{display:flex;justify-content:flex-end;gap:4px}.field-label{display:block;margin-bottom:8px}.dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .account-detail-heading { display:flex;gap:16px;align-items:center;margin-bottom:24px; }
 .account-detail-heading h2 { margin:0;font-size:20px; }

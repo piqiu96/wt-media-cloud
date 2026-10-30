@@ -86,3 +86,16 @@ func defaultAccountService() *accountService {
 func (mysqlStore) MutateCookie(id string, userID identityservice.UserID, mutate func(*model.AccountRecord, *string) error) (model.AccountRecord, error) {
 	return repository.MutateCookie(id, userID, mutate)
 }
+
+func (mysqlStore) CreateImport(b model.ImportBatch) (model.ImportBatch, error) {
+	return repository.CreateImport(b)
+}
+func (mysqlStore) GetImport(id string, u identityservice.UserID) (model.ImportBatch, error) {
+	return repository.GetImport(id, u)
+}
+func (mysqlStore) ListImports(u identityservice.UserID) ([]model.ImportBatch, error) {
+	return repository.ListImports(u)
+}
+func (mysqlStore) MutateImport(id string, u identityservice.UserID, fn func(*model.ImportBatch, model.ImportResources) error) (model.ImportBatch, error) {
+	return repository.MutateImport(id, u, fn)
+}

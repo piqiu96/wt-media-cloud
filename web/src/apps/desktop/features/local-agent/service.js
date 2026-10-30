@@ -133,8 +133,8 @@ export function createLocalAgentService({ invoke }) {
         },
       });
     },
-    async accountCookie({stage,operationId,bitProfileId,platform,expectedPlatformAccountId="",inputCookie="",fingerprint=""}) {
-      return invoke(LOCAL_AGENT_COMMANDS.accountCookie,{args:{stage,operation_id:operationId,bit_profile_id:bitProfileId,platform,expected_platform_account_id:expectedPlatformAccountId,input_cookie:inputCookie,fingerprint}})
+    async accountCookie({stage,operationId,bitProfileId,platform,expectedPlatformAccountId="",inputCookie="",fingerprint="",manualLogin=false}) {
+      return invoke(LOCAL_AGENT_COMMANDS.accountCookie,{args:{stage,operation_id:operationId,bit_profile_id:bitProfileId,platform,expected_platform_account_id:expectedPlatformAccountId,input_cookie:inputCookie,fingerprint,manual_login:manualLogin}})
     },
     async profileScan() {
       return invoke(LOCAL_AGENT_COMMANDS.profileScan);
@@ -151,6 +151,7 @@ export function createLocalAgentService({ invoke }) {
     async profileCreate(profile) {
       return invoke(LOCAL_AGENT_COMMANDS.profileCreate, {
         args: {
+          ...(profile.creation_marker ? {creation_marker:profile.creation_marker,inspect_only:profile.inspect_only===true}:{}),
           name: profile.name,
           group_id: profile.group_id,
           group_name: profile.group_name || "",
