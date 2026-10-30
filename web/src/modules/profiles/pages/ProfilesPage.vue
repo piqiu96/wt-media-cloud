@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { onBeforeRouteLeave, useRouter } from "vue-router"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
@@ -2168,16 +2169,16 @@ function returnToSyncResult() {
           </label>
           <label v-if="isSenior" class="wt-filter-field">
             <span class="wt-filter-field__label">授权运营</span>
-            <t-select v-model="memberFilter" :options="memberOptions" placeholder="全部" :clearable="false" @change="onSeniorMemberChange" />
+            <BusinessSelect kind="member" filter v-model="memberFilter" :options="memberOptions" :clearable="false" @change="onSeniorMemberChange" />
           </label>
           <template v-if="isAdmin">
             <label class="wt-filter-field">
               <span class="wt-filter-field__label">运营团队</span>
-              <t-input v-model="draftTeam" clearable placeholder="输入团队名称或 ID" @change="onAdminTeamChange" @enter="submitSearch" />
+              <BusinessSelect v-model="draftTeam" kind="team" filter :options="teams.map(t => ({ value: String(t.id), label: t.name }))" @change="onAdminTeamChange" />
             </label>
             <label class="wt-filter-field">
               <span class="wt-filter-field__label">授权运营</span>
-              <t-select v-model="draftMember" :options="adminMemberOptions" clearable placeholder="全部" filterable @change="onAdminMemberChange" />
+              <BusinessSelect kind="member" filter v-model="draftMember" :options="adminMemberOptions" clearable filterable @change="onAdminMemberChange" />
             </label>
           </template>
           <label class="wt-filter-field">

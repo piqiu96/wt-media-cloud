@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { onBeforeRouteLeave } from "vue-router"
 import { createProxyClient } from "../../../shared/api/proxy.js"
@@ -973,8 +974,8 @@ function closeImport() {
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
           <label v-if="isAdmin" class="wt-filter-field">
-            <span class="wt-filter-field__label">团队</span>
-            <t-input v-model="filterTeam" clearable placeholder="输入团队名称或 ID" @enter="submitSearch" />
+            <span class="wt-filter-field__label">运营团队</span>
+            <BusinessSelect v-model="filterTeam" kind="team" filter :options="teams.map(t => ({ value: String(t.id), label: t.name }))" />
           </label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">资源启停</span>
             <t-select v-model="filterStatus" clearable placeholder="全部" @change="submitSearch">
@@ -1096,7 +1097,7 @@ function closeImport() {
           <ResourceForm class="resource-form-grid">
             <t-form-item label="代理名称" required-mark class="resource-form-full"><t-input v-model="form.name" placeholder="便于识别的资源名称" /></t-form-item>
             <t-form-item v-if="isAdmin && formMode === 'create'" label="运营团队" required-mark>
-              <t-select v-model="form.team_id" :options="teamOptions" placeholder="请选择目标团队" filterable />
+              <BusinessSelect kind="team" v-model="form.team_id" :options="teamOptions" filterable />
             </t-form-item>
             <t-form-item v-else label="运营团队"><span class="resource-form-value">{{ formMode === 'create' ? ownTeamLabel : (editingProxy?.team_name || ownTeamLabel) }}</span></t-form-item>
             <t-form-item v-if="formMode === 'create' || isGovernor" label="资源来源" class="resource-form-full">
@@ -1167,7 +1168,7 @@ function closeImport() {
             <ResourceSection title="资源信息"><ResourceDescriptions size="small">
               <t-descriptions-item label="代理ID">{{ detailProxy.id }}</t-descriptions-item>
               <t-descriptions-item label="名称">{{ detailProxy.name || "-" }}</t-descriptions-item>
-              <t-descriptions-item label="所属团队">{{ detailProxy.team_name || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="运营团队">{{ detailProxy.team_name || "-" }}</t-descriptions-item>
               <t-descriptions-item label="来源">{{ sourceLabel(detailProxy.source) }}<span v-if="detailProxy.extract_url_configured" class="proxy-sub">（已配置提取地址）</span></t-descriptions-item>
               <t-descriptions-item label="协议 / 地址">{{ detailProxy.protocol }}://{{ detailProxy.host || "-" }}:{{ detailProxy.port || "-" }}</t-descriptions-item>
               </ResourceDescriptions></ResourceSection>
@@ -1249,7 +1250,7 @@ function closeImport() {
           <FeedbackAlert v-if="importError" :message="importError" theme="error" style="margin-bottom:12px" />
           <div class="import-team">
             <span>目标团队：</span>
-            <t-select v-if="isAdmin" v-model="importTeam" :options="teamOptions" placeholder="请选择目标团队" style="width:220px" />
+            <BusinessSelect kind="team" v-if="isAdmin" v-model="importTeam" :options="teamOptions" style="width:220px" />
             <strong v-else>{{ ownTeamLabel }}</strong>
           </div>
           <ResourceNotice details="支持 host:port、host:port:user:pass、protocol://user:pass@host:port。Excel/CSV 请使用下载模板。">每行一个代理，仅新增，不覆盖已有资源。</ResourceNotice>

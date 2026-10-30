@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { computed, ref, watch } from 'vue'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
@@ -322,12 +323,12 @@ async function submit() {
           <p v-if="!strategyId" class="compose-create__hint">先在上一步选择合成策略：素材是否已经用过，是按策略算的。</p>
           <template v-else>
             <div class="compose-create__picker-row">
-              <t-select
+              <BusinessSelect kind="category" filter
                 v-model="categoryFilter"
                 class="compose-create__category"
                 :options="categoryOptions"
                 clearable
-                placeholder="全部类目"
+
               />
               <t-select
                 v-model="candidateUsage"

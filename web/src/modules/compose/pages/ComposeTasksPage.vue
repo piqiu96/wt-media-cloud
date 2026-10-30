@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
@@ -499,7 +500,7 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page compose-tasks-page">
+    <div class="wt-resource-page resource-visual-approved compose-tasks-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="合成任务" description="从我的素材创建的合成任务，在这里查看任务状态和生产结果">
         <template #actions>
@@ -509,11 +510,11 @@ onMounted(() => {
       <ResourceCard class="compose-tasks-card">
         <div class="filter-bar">
           <!-- 顺序按运营找任务时的顺序：先认团队/策略，再认负责人，然后才是触发方式、状态与时间。 -->
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="filters.team_id" clearable placeholder="全部" @change="onTeamFilterChange">
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.team_id" clearable @change="onTeamFilterChange">
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-          </t-select></label>
+          </BusinessSelect></label>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
-          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>

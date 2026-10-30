@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -674,7 +675,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page strategy-page">
+    <div class="wt-resource-page resource-visual-approved strategy-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="合成策略" :description="canManage ? '维护合成模板的业务参数，普通运营据此创建合成任务' : '选择可用策略，在创建合成任务时使用'">
         <template #actions>
@@ -686,9 +687,9 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="load" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="filters.category_id" clearable placeholder="全部">
+          <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
             <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
-          </t-select></label>
+          </BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
             <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
           </t-select></label>
@@ -747,28 +748,28 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                   </div>
                 </t-form-item>
                 <template v-if="!editingID">
-                  <t-form-item v-if="isAdmin" label="所属团队" required-mark>
-                    <t-select v-model="form.team_id" clearable placeholder="选择团队">
+                  <t-form-item v-if="isAdmin" label="运营团队" required-mark>
+                    <BusinessSelect kind="team" v-model="form.team_id" clearable>
                       <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-                    </t-select>
+                    </BusinessSelect>
                   </t-form-item>
-                  <t-form-item label="所属类目" required-mark>
-                    <t-select v-model="form.category_id" clearable placeholder="选择类目">
+                  <t-form-item label="业务分类" required-mark>
+                    <BusinessSelect kind="category" v-model="form.category_id" clearable>
                       <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
-                    </t-select>
+                    </BusinessSelect>
                   </t-form-item>
                 </template>
                 <!-- 编辑时归属不可改（服务端 Update 不动 team/category），但要展示出来让人知道策略挂在哪。 -->
                 <template v-else>
-                  <t-form-item label="所属团队"><strong class="strategy-readonly">{{ teamName(form.team_id) }}</strong></t-form-item>
-                  <t-form-item label="所属类目"><strong class="strategy-readonly">{{ categoryName(form.category_id) }}</strong></t-form-item>
+                  <t-form-item label="运营团队"><strong class="strategy-readonly">{{ teamName(form.team_id) }}</strong></t-form-item>
+                  <t-form-item label="业务分类"><strong class="strategy-readonly">{{ categoryName(form.category_id) }}</strong></t-form-item>
                 </template>
                 <!-- 负责人是策略的必填归属：任务与成片都从这里继承。候选跟着团队＋类目走。 -->
                 <t-form-item label="负责人" required-mark>
                   <div class="strategy-field">
-                    <t-select v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="!form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
+                    <BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="!form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
                       <t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" />
-                    </t-select>
+                    </BusinessSelect>
                     <p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p>
                     <p v-else-if="form.category_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与类目下没有可指派的运营</p>
                   </div>

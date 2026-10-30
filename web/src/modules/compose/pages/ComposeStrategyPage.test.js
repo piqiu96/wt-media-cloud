@@ -42,8 +42,8 @@ describe('compose strategy page', () => {
   it('puts the name search first in the wide slot and keeps the actions last', () => {
     const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
     expect(bar).not.toContain('<t-space')
-    expect(bar.indexOf('策略名称')).toBeLessThan(bar.indexOf('类目'))
-    expect(bar.indexOf('类目')).toBeLessThan(bar.indexOf('合成模板'))
+    expect(bar.indexOf('策略名称')).toBeLessThan(bar.indexOf('业务分类'))
+    expect(bar.indexOf('业务分类')).toBeLessThan(bar.indexOf('合成模板'))
     expect(bar.indexOf('合成模板')).toBeLessThan(bar.indexOf('状态'))
     expect(bar).toContain('wt-filter-field--wide')
     const widePos = bar.indexOf('wt-filter-field--wide')

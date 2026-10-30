@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, h, onMounted, ref } from 'vue'
@@ -281,17 +282,17 @@ onMounted(async () => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page material-library-page">
+    <div class="wt-resource-page resource-visual-approved material-library-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="素材库" description="团队公共素材池：加入「我的素材」后可下载到本机并用于合成" />
       <ResourceCard class="material-table-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="teamFilter" clearable placeholder="全部"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="categoryFilters" multiple clearable placeholder="全部"><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></t-select></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><BusinessSelect kind="team" filter v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable /></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </div>
         <div class="table-scroll-wrap">

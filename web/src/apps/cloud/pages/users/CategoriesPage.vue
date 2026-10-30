@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../../shared/ui/fields/BusinessSelect.vue"
 import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
@@ -183,7 +184,7 @@ async function deleteCategory(category) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <div class="wt-resource-page">
+    <div class="wt-resource-page resource-visual-approved">
     <ResourcePageHeader title="类目管理" description="维护类目分类与关联范围">
       <template #actions>
         <t-button v-if="canManage" theme="primary" @click="openCreate">新增类目</t-button>
@@ -224,9 +225,9 @@ async function deleteCategory(category) {
     <t-dialog v-model:visible="dialogVisible" :header="editingCategory ? '编辑类目' : '新增类目'" :confirm-btn="{ loading: saving }" @confirm="saveCategory">
       <t-form>
         <t-form-item v-if="editingCategory" label="类目ID"><t-input :model-value="String(editingCategory.id)" disabled /></t-form-item>
-        <t-form-item label="一级类型"><t-select v-model="categoryForm.type" :disabled="!!editingCategory" placeholder="请选择一级类型">
+        <t-form-item label="一级类型"><BusinessSelect kind="category" v-model="categoryForm.type" :disabled="!!editingCategory">
           <t-option v-for="option in CATEGORY_TYPE_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
-        </t-select></t-form-item>
+        </BusinessSelect></t-form-item>
         <t-form-item label="类目名称"><t-input v-model="categoryForm.name" placeholder="例如：游戏.三角洲" /></t-form-item>
         <t-form-item v-if="editingCategory" label="状态"><t-switch v-model="categoryForm.enabled" :label="['停用', '启用']" /></t-form-item>
         <t-form-item label="备注"><t-textarea v-model="categoryForm.remark" /></t-form-item>

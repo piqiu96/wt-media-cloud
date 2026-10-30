@@ -143,7 +143,7 @@ describe('discovery strategy and task pages', () => {
     }
     const strategies = read('DiscoveryStrategiesPage.vue')
     expect(strategies).toContain('teamId: teamFilter.value || undefined')
-    expect(strategies).toContain('v-if="isAdmin && !editingID" label="目标团队" required-mark')
+    expect(strategies).toContain('v-if="isAdmin && !editingID" label="运营团队" required-mark')
     expect(strategies).toContain('if (!payload.team_id || editingID.value) delete payload.team_id')
     const tasks = read('CrawlTasksPage.vue')
     expect(tasks).toContain('team_id: teamFilter.value || undefined')

@@ -21,7 +21,7 @@ const emit = defineEmits(['select'])
 
 <style scoped>
 .resource-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.resource-stat-card { min-height: 88px; padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-card); box-shadow: var(--wt-shadow-card); text-align: left; cursor: pointer; transition: border-color 0.2s ease, transform 0.2s ease; }
+.resource-stat-card { box-sizing: border-box; min-height: 80px; padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-card); box-shadow: var(--wt-shadow-card); text-align: left; cursor: pointer; transition: border-color 0.2s ease, transform 0.2s ease; }
 .resource-stat-card:not(.is-static):hover { border-color: var(--wt-color-primary-border); transform: translateY(-1px); }
 .resource-stat-card.is-static { cursor: default; }
 .resource-stat-card.is-active { border-color: var(--td-brand-color); box-shadow: 0 0 0 1px var(--td-brand-color) inset; }

@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../../shared/ui/fields/BusinessSelect.vue"
 import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
 import { computed, onMounted, ref } from 'vue'
@@ -223,7 +224,7 @@ function categoryScopeText(categoryIds) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <div class="wt-resource-page">
+    <div class="wt-resource-page resource-visual-approved">
     <ResourcePageHeader title="用户管理" description="管理用户权限、运营团队与类目范围">
       <template #actions>
         <t-button theme="primary" @click="openCreateUser">新增用户</t-button>
@@ -239,12 +240,12 @@ function categoryScopeText(categoryIds) {
           <t-option value="senior_operator" label="高级运营" />
           <t-option value="operator" label="普通运营" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="filters.teamId" placeholder="全部" clearable>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.teamId" clearable>
           <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-        </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="filters.categoryId" placeholder="全部" clearable>
+        </BusinessSelect></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="filters.categoryId" clearable>
           <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="`${category.name}（${category.id}）`" />
-        </t-select></label>
+        </BusinessSelect></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" placeholder="全部" clearable>
           <t-option value="enabled" label="启用" />
           <t-option value="disabled" label="停用" />
@@ -283,12 +284,12 @@ function categoryScopeText(categoryIds) {
           </t-select>
         </t-form-item>
         <t-form-item v-if="requiresScope" label="运营团队">
-          <t-select v-model="userForm.teamId"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select>
+          <BusinessSelect kind="team" v-model="userForm.teamId"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect>
         </t-form-item>
         <t-form-item v-if="requiresScope" label="类目范围">
-          <t-select v-model="userForm.categoryIds" multiple filterable placeholder="请选择已启用类目">
+          <BusinessSelect kind="category" v-model="userForm.categoryIds" multiple filterable>
             <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="`${category.name}（${category.id}）`" />
-          </t-select>
+          </BusinessSelect>
         </t-form-item>
       </t-form>
     </t-dialog>
