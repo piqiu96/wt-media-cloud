@@ -585,6 +585,9 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 		return Account{}, err
 	}
 	platformAccountID := strings.TrimSpace(input.PlatformAccountID)
+	if input.PlatformLoginStatus == PlatformLoginNormal && platformAccountID != "" && record.PlatformAccountID != "" && platformAccountID != record.PlatformAccountID {
+		input.PlatformLoginStatus = PlatformLoginAccountMismatch
+	}
 	if input.PlatformLoginStatus == PlatformLoginNormal {
 		if platformAccountID == "" {
 			return Account{}, ErrInvalidInput
@@ -611,9 +614,7 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 			return record.Account, nil
 		}
 		record.PlatformAccountID = platformAccountID
-		if record.PlatformName == "" {
-			record.PlatformName = strings.TrimSpace(input.PlatformName)
-		}
+		record.PlatformName = strings.TrimSpace(input.PlatformName)
 		record.PlatformAvatarURL = strings.TrimSpace(input.PlatformAvatarURL)
 		record.IdentificationStatus = IdentificationIdentified
 		record.DuplicateOfAccountID = ""

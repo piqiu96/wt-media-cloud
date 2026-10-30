@@ -383,6 +383,17 @@ func TestServiceStartsLocalAccountCheckWithoutPersistentAuthorization(t *testing
 	}
 }
 
+func TestCheckAllowsUnclassifiedOwnedAccount(t *testing.T) {
+	store := newMemoryStore()
+	actor := mediaActor(1, 10, identityservice.RoleOperator)
+	store.records["unclassified"] = AccountRecord{Account: Account{ID: "unclassified", UserID: actor.ID, TeamID: actor.TeamID, Platform: PlatformBilibili, BrowserProfileID: "profile-1", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown}}
+	facts := &fakeProfileFacts{profiles: map[string]fakeProfileFact{"profile-1": {id: "profile-1", userID: actor.ID, bitProfileID: "bit-profile-1", active: true}}}
+	service := newTestServiceForAccountCheck(store, facts)
+	if _, err := service.StartLocalAccountCheck(actor, "unclassified", AccountCheckStartInput{}); err != nil {
+		t.Fatalf("unclassified account check: %v", err)
+	}
+}
+
 // 2026-10-27：本地敏感操作按账号归属，而不只看角色。高级运营可以操作自己创建的
 // 账号；同团队他人的账号看得见但不能本地执行；管理员即使拥有账号也不执行本地操作。
 func TestLocalOperationsFollowAccountOwnership(t *testing.T) {
@@ -467,6 +478,29 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	}
 	if updated.PlatformLoginStatus != PlatformLoginAccountMismatch || updated.IdentificationStatus != IdentificationDuplicate || updated.DuplicateOfAccountID != first.ID {
 		t.Fatalf("updated=%#v", updated)
+	}
+}
+
+func TestCheckPreservesIdentityOnMismatchAndRefreshesSameUID(t *testing.T) {
+	for _, tc := range []struct {
+		name, observed, wantUID, wantName string
+		wantStatus                        PlatformLoginStatus
+	}{
+		{"same UID", "uid-1", "uid-1", "new name", PlatformLoginNormal},
+		{"different UID", "uid-2", "uid-1", "old name", PlatformLoginAccountMismatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMemoryStore()
+			actor := mediaActor(1, 10, identityservice.RoleOperator)
+			store.records["1"] = AccountRecord{Account: Account{ID: "1", UserID: actor.ID, TeamID: actor.TeamID, Platform: PlatformBilibili, PlatformAccountID: "uid-1", PlatformName: "old name", Enabled: true, PlatformLoginStatus: PlatformLoginNormal}}
+			updated, err := newTestService(store).ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{OperationID: "check-1", PlatformAccountID: tc.observed, PlatformName: "new name", PlatformLoginStatus: PlatformLoginNormal})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.PlatformAccountID != tc.wantUID || updated.PlatformName != tc.wantName || updated.PlatformLoginStatus != tc.wantStatus {
+				t.Fatalf("unexpected result: %#v", updated)
+			}
+		})
 	}
 }
 
@@ -612,7 +646,7 @@ func TestNonAdminCannotUseCategoryOutsideAssignedScope(t *testing.T) {
 	}
 }
 
-func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
+func TestServiceApplyCheckResultUpdatesObservedName(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
@@ -629,7 +663,7 @@ func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
 		t.Fatalf("backfilled name = %q, want %q", updated.PlatformName, "回填昵称")
 	}
 
-	// 已有 name 不被覆盖
+	// 同一 UID 的昵称随平台信息更新
 	store.records[account.ID] = AccountRecord{Account: Account{
 		ID: account.ID, UserID: actor.ID, TeamID: actor.TeamID, CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili,
 		PlatformAccountID: "uid-1", PlatformName: "已有名", IdentificationStatus: IdentificationIdentified,
@@ -641,8 +675,8 @@ func TestServiceApplyCheckResultBackfillsNameOnlyWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyLocalAccountCheckResult(keep) error = %v", err)
 	}
-	if kept.PlatformName != "已有名" {
-		t.Fatalf("existing name overwritten = %q", kept.PlatformName)
+	if kept.PlatformName != "新名" {
+		t.Fatalf("updated name = %q", kept.PlatformName)
 	}
 }
 
