@@ -10,6 +10,7 @@ import { createLocalAgentService } from "../../../apps/desktop/features/local-ag
 import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
 import { loginStatusText } from "../../../shared/utils/mediaAccountLabels.js"
 import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
+import { canCheckAccount as checkAvailability } from "./checkAvailability.js"
 import { categoryTypeLabel } from "../../../shared/utils/categories.js"
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
@@ -535,7 +536,7 @@ function checkItemStatusText(status) {
 }
 
 function canCheckAccount(account) {
-  return isDesktop && canOperateLocalAccount(account) && account?.enabled === true && (account.category_ids || []).length > 0 && !!account.browser_profile_id && canOperateBoundWindow(account)
+  return checkAvailability({ isDesktop, isOwner: canOperateLocalAccount(account), account, windowAvailable: canOperateBoundWindow(account) })
 }
 
 function canOperateBoundWindow(account) {
@@ -1054,7 +1055,7 @@ const columns = [
           <t-input-number v-model="createForm.userId" :min="1" placeholder="留空则归当前用户" />
         </t-form-item>
         <t-form-item label="类目">
-          <t-select v-model="createForm.categoryIds" multiple clearable placeholder="可先不绑定；启用执行前必须绑定类目">
+          <t-select v-model="createForm.categoryIds" multiple clearable placeholder="可先不选择分类">
             <t-option v-for="category in categories" :key="category.id" :value="category.id" :label="`${categoryTypeLabel(category.type)} / ${category.name}`" :disabled="categoryOptionDisabled(category, createForm.categoryIds)" />
           </t-select>
         </t-form-item>
