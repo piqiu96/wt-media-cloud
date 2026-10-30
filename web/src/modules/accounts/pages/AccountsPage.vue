@@ -18,7 +18,7 @@ import { executeCookieUpdate, reconcileCookieUpdate } from "./cookieUpdates.js"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from "vue"
-import { ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next"
+import ResourceFilterToggle from "../../../shared/ui/resource/ResourceFilterToggle.vue"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
@@ -133,7 +133,7 @@ const allTagsPopup = ref(null)
 const selectedAccountIds = ref([])
 const selectedAccountCache = new Map()
 const searchProfile = ref("")
-const advancedFilterCount = computed(() => [searchEnabled.value, searchTags.value.length, searchProfile.value.trim()].filter(Boolean).length)
+const advancedFilterCount = computed(() => [searchEnabled.value, searchTags.value.length, searchProfile.value.trim(), searchCategoryType.value || searchCategoryIds.value.length, searchTeam.value, searchOwner.value && searchOwner.value !== defaultOwnerFilter()].filter(Boolean).length)
 // 使用人筛选：高级运营默认看自己，管理员默认看全部成员；普通运营由服务端强制
 // 只看自己，因此不展示这个筛选项。
 const searchOwner = ref("")
@@ -966,12 +966,6 @@ const columns = computed(() => [
     <div v-if="searchView" style="margin-bottom:12px"><t-tag closable @close="searchView='';loadAccounts({resetPage:true})">{{ {normal:"正常账号",attention:"待处理账号",unbound:"未绑定窗口"}[searchView] }}</t-tag></div>
     <div class="filter-bar">
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable /></label>
-        <label v-if="canFilterByOwner" class="wt-filter-field"><span class="wt-filter-field__label">使用人</span><BusinessSelect kind="member" filter v-model="searchOwner">
-            <t-option value="all" label="全部" />
-            <t-option v-for="option in ownerOptions" :key="option.value" :value="option.value" :label="option.label" />
-          </BusinessSelect></label>
-        <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="searchTeam" clearable><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></BusinessSelect></label>
-        <CategoryFields v-model="searchCategoryIds" v-model:type="searchCategoryType" :categories="categories" filter class="account-category-filter" />
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
@@ -986,12 +980,15 @@ const columns = computed(() => [
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadAccounts({ resetPage: true })">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-          <t-button variant="text" :aria-expanded="showAdvancedFilters" aria-controls="account-advanced-filters" @click="showAdvancedFilters = !showAdvancedFilters">
-            {{ showAdvancedFilters ? "收起筛选" : "更多筛选" }}<span v-if="advancedFilterCount">（{{ advancedFilterCount }}）</span>
-            <template #suffix><ChevronUpIcon v-if="showAdvancedFilters" /><ChevronDownIcon v-else /></template>
-          </t-button>
+          <ResourceFilterToggle v-model="showAdvancedFilters" :count="advancedFilterCount" controls="account-advanced-filters" />
         </div>
-        <div v-show="showAdvancedFilters" id="account-advanced-filters" class="account-advanced-filters">
+        <div v-show="showAdvancedFilters" id="account-advanced-filters" class="wt-advanced-filters">
+        <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="searchTeam" clearable><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></BusinessSelect></label>
+        <label v-if="canFilterByOwner" class="wt-filter-field"><span class="wt-filter-field__label">使用人</span><BusinessSelect kind="member" filter v-model="searchOwner">
+            <t-option value="all" label="全部" />
+            <t-option v-for="option in ownerOptions" :key="option.value" :value="option.value" :label="option.label" />
+          </BusinessSelect></label>
+        <CategoryFields v-model="searchCategoryIds" v-model:type="searchCategoryType" :categories="categories" filter class="account-category-filter" />
         <label class="wt-filter-field"><span class="wt-filter-field__label">启用状态</span><t-select v-model="searchEnabled" placeholder="全部" clearable>
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
@@ -1238,9 +1235,6 @@ const columns = computed(() => [
 .account-attention { color: var(--wt-warning); }
 
 .account-category-filter { flex: 0 1 384px; }
-.account-advanced-filters { display:flex;flex-wrap:wrap;align-items:flex-end;gap:20px 24px;flex:1 0 100%;min-width:0;padding-top:20px;border-top:1px solid var(--wt-border); }
-.account-advanced-filters > .wt-filter-field { flex:0 1 180px; }
-.account-advanced-filters > .wt-filter-field--wide { flex:1 1 260px;max-width:400px; }
 .account-page :deep(.resource-row-actions .t-button) { min-height: 32px; height: 32px; font-size: 13px; }
 .account-page :deep(.wt-filter-actions) { align-self: flex-end; }
 .account-name { color: var(--wt-text-primary); }

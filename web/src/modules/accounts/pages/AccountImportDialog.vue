@@ -134,7 +134,7 @@ async function close(){
    <template #created_at="{row}"><span class="history-time">{{ new Date(row.created_at).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) }}</span></template>
    <template #batch="{row}"><div class="history-batch"><strong>{{ platformLabel(row.platform) }} · {{ row.counts.total }} 个账号</strong><small v-if="row.content_json?.remark">{{ row.content_json.remark }}</small></div></template>
    <template #result="{row}"><div class="history-counts"><ResourceStatusBadge v-for="item in importHistoryCounts(row.counts)" :key="item.key" :tone="item.tone" :label="`${item.label} ${item.value}`" /></div></template>
-   <template #op="{row}"><t-button variant="text" size="small" :disabled="busy" @click="openBatch(row.id)">查看结果</t-button></template>
+   <template #op="{row}"><t-button theme="primary" variant="text" size="small" :disabled="busy" @click="openBatch(row.id)">查看结果</t-button></template>
   </t-table>
   <ResourceEmptyState v-else-if="!error" title="暂无接入记录" description="完成首次批量 CK 接入后，可在这里查看结果。" />
  </template>
