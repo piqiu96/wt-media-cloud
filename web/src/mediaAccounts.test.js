@@ -52,12 +52,12 @@ describe('media account client', () => {
     const storage = { setItem: vi.fn(), getItem: vi.fn() }
     const client = createMediaAccountClient({ fetch, storage })
 
-    const account = await client.create({ gameIds: ['game-a'], platform: 'douyin', originalCookie: 'import-secret' })
+    const account = await client.create({ categoryIds: ['category-a'], platform: 'douyin', originalCookie: 'import-secret' })
 
     expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts', expect.objectContaining({
       method: 'POST',
       credentials: 'include',
-      body: JSON.stringify({ game_ids: ['game-a'], platform: 'douyin', original_cookie: 'import-secret' }),
+      body: JSON.stringify({ category_ids: ['category-a'], platform: 'douyin', original_cookie: 'import-secret' }),
     }))
     expect(account.original_cookie).toBeUndefined()
     expect(account.active_cookie).toBeUndefined()
@@ -151,7 +151,7 @@ describe('media account client', () => {
     expect(source).toContain('关闭窗口')
     expect(source).toContain('window-bit-id')
     expect(source).toContain('系统ID {{ profileForAccount')
-    expect(source).toContain('不可执行：未绑定游戏')
+    expect(source).toContain('不可执行：未绑定类目')
     expect(source).toContain('Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息')
     expect(source).not.toContain('account.business_status === "draft"')
   })
@@ -172,11 +172,11 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response({ id: 'account-1' }))
     const client = createMediaAccountClient({ fetch })
 
-    await client.create({ gameIds: ['game-a'], platform: 'bilibili', name: '测试昵称' })
+    await client.create({ categoryIds: ['category-a'], platform: 'bilibili', name: '测试昵称' })
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ game_ids: ['game-a'], platform: 'bilibili', name: '测试昵称' }),
+      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili', name: '测试昵称' }),
     }))
 
     await client.update('account-1', { name: '新名' })
@@ -187,29 +187,29 @@ describe('media account client', () => {
     }))
   })
 
-  it('sends full gameIds sets for create and update', async () => {
-    const fetch = vi.fn(async () => response({ id: '1', game_ids: ['game-a', 'game-b'] }))
+  it('sends full categoryIds sets for create and update', async () => {
+    const fetch = vi.fn(async () => response({ id: '1', category_ids: ['category-a', 'category-b'] }))
     const client = createMediaAccountClient({ fetch })
 
-    await client.create({ gameIds: ['game-b', 'game-a'], platform: 'bilibili' })
-    await client.update('1', { gameIds: [] })
+    await client.create({ categoryIds: ['category-b', 'category-a'], platform: 'bilibili' })
+    await client.update('1', { categoryIds: [] })
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
-      body: JSON.stringify({ game_ids: ['game-b', 'game-a'], platform: 'bilibili' }),
+      body: JSON.stringify({ category_ids: ['category-b', 'category-a'], platform: 'bilibili' }),
     }))
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/1', expect.objectContaining({
-      body: JSON.stringify({ game_ids: [] }),
+      body: JSON.stringify({ category_ids: [] }),
     }))
   })
 
-  it('maps multiple selected games to the canonical list query', async () => {
+  it('maps multiple selected categories to the canonical list query', async () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ gameIds: ['game-a', 'game-b'] })
+    await client.list({ categoryIds: ['category-a', 'category-b'] })
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/v1/media-accounts?game_ids=game-a%2Cgame-b',
+      '/api/v1/media-accounts?category_ids=category-a%2Ccategory-b',
       expect.objectContaining({ credentials: 'include' }),
     )
   })

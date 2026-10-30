@@ -17,7 +17,7 @@ const PAGES = [
   ['成片管理', 'src/modules/compose/pages/MyOutputsPage.vue', 'load', 'if (resetPage) pagination.value.current = 1'],
   ['用户管理', 'src/apps/cloud/pages/users/UsersPage.vue', 'loadAll'],
   ['运营团队', 'src/apps/cloud/pages/users/TeamsPage.vue', 'loadAll'],
-  ['游戏管理', 'src/apps/cloud/pages/users/GamesPage.vue', 'loadGames'],
+  ['类目管理', 'src/apps/cloud/pages/users/CategoriesPage.vue', 'loadCategories'],
 ]
 
 function read(path) {

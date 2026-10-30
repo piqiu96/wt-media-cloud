@@ -14,6 +14,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
+	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
 // Response bodies must match the Cloud-owned business schema consumed by both frontends.
@@ -79,7 +80,7 @@ func schemaPropertyNames[T any](properties map[string]T) []string {
 // but the struct cannot produce shows up as a missing key rather than being hidden by
 // a zero value's `omitempty`.
 func readyMaterial() model.Material {
-	game := "other"
+	category := sharedidentity.CategoryID(4)
 	author := "作者"
 	published := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	added := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
@@ -88,7 +89,7 @@ func readyMaterial() model.Material {
 	return model.Material{
 		ID:              7,
 		TeamID:          3,
-		GameID:          &game,
+		CategoryID:      &category,
 		SourceContentID: 42,
 		Title:           "一条素材",
 		SourceURL:       "https://example.invalid/video/42",

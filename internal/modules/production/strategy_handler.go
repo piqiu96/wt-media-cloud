@@ -48,10 +48,15 @@ func ListComposeStrategies(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
+	categoryID, err := parseOptionalCategoryID(c.Query("category_id"))
+	if err != nil {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "类目 ID 无效", "compose_strategy_invalid")
+		return
+	}
 	query := productionservice.ComposeStrategyListQuery{
-		Search: strings.TrimSpace(c.Query("search")),
-		GameID: strings.TrimSpace(c.Query("game_id")),
-		Status: strings.TrimSpace(c.Query("status")),
+		Search:     strings.TrimSpace(c.Query("search")),
+		CategoryID: categoryID,
+		Status:     strings.TrimSpace(c.Query("status")),
 	}
 	if raw := strings.TrimSpace(c.Query("template_id")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)

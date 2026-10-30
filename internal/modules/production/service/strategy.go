@@ -24,7 +24,7 @@ var (
 
 type CreateStrategyInput struct {
 	TeamID          int64                       `json:"team_id"`
-	GameID          string                      `json:"game_id"`
+	CategoryID      identity.CategoryID         `json:"category_id"`
 	OperatorID      int64                       `json:"operator_id"`
 	Name            string                      `json:"name"`
 	TemplateID      int64                       `json:"compose_template_id"`
@@ -57,18 +57,18 @@ type StrategyRepository interface {
 }
 
 type StrategyService struct {
-	store       StrategyRepository
-	resolveGame func(string) (identity.OperationGame, bool, error)
-	operators   func() ([]identity.PublicUser, error)
-	now         func() time.Time
+	store           StrategyRepository
+	resolveCategory func(identity.CategoryID) (identity.Category, bool, error)
+	operators       func() ([]identity.PublicUser, error)
+	now             func() time.Time
 }
 
-func NewStrategyService(store StrategyRepository, resolveGame func(string) (identity.OperationGame, bool, error)) *StrategyService {
-	return &StrategyService{store: store, resolveGame: resolveGame, now: time.Now}
+func NewStrategyService(store StrategyRepository, resolveCategory func(identity.CategoryID) (identity.Category, bool, error)) *StrategyService {
+	return &StrategyService{store: store, resolveCategory: resolveCategory, now: time.Now}
 }
 
 func wiredStrategyService() *StrategyService {
-	service := NewStrategyService(repository.StrategyStore{}, identity.ResolveGame)
+	service := NewStrategyService(repository.StrategyStore{}, identity.ResolveCategory)
 	service.operators = identity.ListUsers
 	return service
 }
@@ -77,7 +77,7 @@ func wiredStrategyService() *StrategyService {
 // client-side; the repository caps the result at 200 rows.
 type ComposeStrategyListQuery struct {
 	Search     string
-	GameID     string
+	CategoryID identity.CategoryID
 	TemplateID int64
 	Status     string
 }
@@ -111,7 +111,7 @@ func (s *StrategyService) List(actor identity.PublicUser, query ComposeStrategyL
 	filter := repository.StrategyFilter{
 		ActiveOnly: actor.Role == identity.RoleOperator,
 		Search:     strings.TrimSpace(query.Search),
-		GameID:     strings.TrimSpace(query.GameID),
+		CategoryID: query.CategoryID,
 		TemplateID: query.TemplateID,
 		Status:     query.Status,
 	}
@@ -123,13 +123,13 @@ func (s *StrategyService) List(actor identity.PublicUser, query ComposeStrategyL
 			return []model.ComposeStrategy{}, nil
 		}
 		filter.TeamID = int64(*actor.TeamID)
-		// A senior operator manages every game of the team; an ordinary
-		// operator stays inside the games assigned to them.
+		// A senior operator manages every category of the team; an ordinary
+		// operator stays inside the categories assigned to them.
 		if actor.Role == identity.RoleOperator {
-			if len(actor.GameIDs) == 0 {
+			if len(actor.CategoryIDs) == 0 {
 				return []model.ComposeStrategy{}, nil
 			}
-			filter.GameIDs = actor.GameIDs
+			filter.CategoryIDs = actor.CategoryIDs
 		}
 	}
 	if actor.Role == identity.RoleOperator {
@@ -175,26 +175,26 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 	if teamID <= 0 {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: team_id is required", ErrStrategyInvalid)
 	}
-	if !inGameScope(actor, teamID, input.GameID) {
+	if !inCategoryScope(actor, teamID, input.CategoryID) {
 		return model.ComposeStrategy{}, ErrStrategyForbidden
 	}
 	if err := validateStrategyFields(input.Name); err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	game, found, err := s.resolveGame(input.GameID)
+	category, found, err := s.resolveCategory(input.CategoryID)
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	if !found || game.Status != identity.GameStatusEnabled {
-		return model.ComposeStrategy{}, fmt.Errorf("%w: game is unavailable", ErrStrategyInvalid)
+	if !found || !category.Enabled {
+		return model.ComposeStrategy{}, fmt.Errorf("%w: category is unavailable", ErrStrategyInvalid)
 	}
 	if input.OperatorID <= 0 {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: operator_id is required", ErrStrategyInvalid)
 	}
-	if _, ok, err := resolveComposeOperator(s.operators, teamID, input.GameID, input.OperatorID); err != nil {
+	if _, ok, err := resolveComposeOperator(s.operators, teamID, input.CategoryID, input.OperatorID); err != nil {
 		return model.ComposeStrategy{}, err
 	} else if !ok {
-		return model.ComposeStrategy{}, fmt.Errorf("%w: operator must be an enabled team operator responsible for the game", ErrStrategyInvalid)
+		return model.ComposeStrategy{}, fmt.Errorf("%w: operator must be an enabled team operator responsible for the category", ErrStrategyInvalid)
 	}
 	if err := s.validateConfig(input.TemplateID, input.TemplateVersion, input.Config, true); err != nil {
 		return model.ComposeStrategy{}, err
@@ -210,7 +210,7 @@ func (s *StrategyService) Create(actor identity.PublicUser, input CreateStrategy
 		return model.ComposeStrategy{}, fmt.Errorf("%w: priority_rules are invalid", ErrStrategyInvalid)
 	}
 	operatorID := input.OperatorID
-	item := model.ComposeStrategy{TeamID: teamID, GameID: input.GameID, OperatorID: &operatorID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), ExecutionMode: input.ExecutionMode, Schedule: input.Schedule, PriorityRules: input.PriorityRules, RulesJSON: rulesJSON, SingleLimit: input.SingleLimit, DailyLimit: input.DailyLimit, Status: model.ComposeStrategyEnabled, CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}
+	item := model.ComposeStrategy{TeamID: teamID, CategoryID: input.CategoryID, OperatorID: &operatorID, TemplateID: input.TemplateID, TemplateVersion: input.TemplateVersion, Name: strings.TrimSpace(input.Name), Config: append(json.RawMessage(nil), input.Config...), ExecutionMode: input.ExecutionMode, Schedule: input.Schedule, PriorityRules: input.PriorityRules, RulesJSON: rulesJSON, SingleLimit: input.SingleLimit, DailyLimit: input.DailyLimit, Status: model.ComposeStrategyEnabled, CreatedBy: int64(actor.ID), UpdatedBy: int64(actor.ID)}
 	item.NextRunAt, err = nextRunForStrategy(item, s.now())
 	if err != nil {
 		return model.ComposeStrategy{}, err
@@ -240,10 +240,10 @@ func (s *StrategyService) Update(actor identity.PublicUser, id int64, input Upda
 	// An enabled strategy must stay runnable: an edit that leaves it enabled
 	// with no valid assignee would be a strategy that can never execute.
 	if item.Status == model.ComposeStrategyEnabled {
-		if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.GameID, operatorID); err != nil {
+		if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.CategoryID, operatorID); err != nil {
 			return model.ComposeStrategy{}, err
 		} else if !ok {
-			return model.ComposeStrategy{}, fmt.Errorf("%w: operator must be an enabled team operator responsible for the game", ErrStrategyInvalid)
+			return model.ComposeStrategy{}, fmt.Errorf("%w: operator must be an enabled team operator responsible for the category", ErrStrategyInvalid)
 		}
 	}
 	if err := s.validateConfig(item.TemplateID, item.TemplateVersion, input.Config, false); err != nil {
@@ -288,7 +288,7 @@ func (s *StrategyService) Copy(actor identity.PublicUser, id int64, name string)
 	if item.OperatorID == nil {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: assign an operator before copying", ErrStrategyInvalid)
 	}
-	if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.GameID, *item.OperatorID); err != nil {
+	if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.CategoryID, *item.OperatorID); err != nil {
 		return model.ComposeStrategy{}, err
 	} else if !ok {
 		return model.ComposeStrategy{}, fmt.Errorf("%w: the strategy's operator is no longer available", ErrStrategyInvalid)
@@ -324,7 +324,7 @@ func (s *StrategyService) SetStatus(actor identity.PublicUser, id int64, status 
 		if item.OperatorID != nil {
 			operatorID = *item.OperatorID
 		}
-		if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.GameID, operatorID); err != nil {
+		if _, ok, err := resolveComposeOperator(s.operators, item.TeamID, item.CategoryID, operatorID); err != nil {
 			return model.ComposeStrategy{}, err
 		} else if !ok {
 			return model.ComposeStrategy{}, fmt.Errorf("%w: assign an available operator before enabling", ErrStrategyInvalid)
@@ -350,7 +350,7 @@ func (s *StrategyService) managed(actor identity.PublicUser, id int64) (model.Co
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
-	if !found || !inGameScope(actor, item.TeamID, item.GameID) {
+	if !found || !inCategoryScope(actor, item.TeamID, item.CategoryID) {
 		return model.ComposeStrategy{}, ErrStrategyNotFound
 	}
 	return item, nil
@@ -360,7 +360,7 @@ func canManageStrategies(actor identity.PublicUser) bool {
 	return actor.Status == identity.UserStatusEnabled && (actor.Role == identity.RoleSeniorOperator || actor.Role == identity.RoleAdmin)
 }
 
-func inGameScope(actor identity.PublicUser, teamID int64, gameID string) bool {
+func inCategoryScope(actor identity.PublicUser, teamID int64, categoryID identity.CategoryID) bool {
 	if actor.Status != identity.UserStatusEnabled {
 		return false
 	}
@@ -370,13 +370,13 @@ func inGameScope(actor identity.PublicUser, teamID int64, gameID string) bool {
 	if actor.TeamID == nil || int64(*actor.TeamID) != teamID {
 		return false
 	}
-	// Senior operators manage every game of their team; the game only binds
+	// Senior operators manage every category of their team; the category only binds
 	// the strategy's operator, not the person who manages the strategy.
 	if actor.Role == identity.RoleSeniorOperator {
 		return true
 	}
-	for _, id := range actor.GameIDs {
-		if id == gameID {
+	for _, id := range actor.CategoryIDs {
+		if id == categoryID {
 			return true
 		}
 	}
@@ -384,7 +384,7 @@ func inGameScope(actor identity.PublicUser, teamID int64, gameID string) bool {
 }
 
 func canReadStrategy(actor identity.PublicUser, item model.ComposeStrategy) bool {
-	if !inGameScope(actor, item.TeamID, item.GameID) {
+	if !inCategoryScope(actor, item.TeamID, item.CategoryID) {
 		return false
 	}
 	if actor.Role == identity.RoleOperator {

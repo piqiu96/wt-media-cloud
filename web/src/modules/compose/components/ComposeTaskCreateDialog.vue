@@ -6,7 +6,7 @@ import { schemaFields } from '../schemaFields.js'
 import { CANDIDATE_SORTS, addAction, cappedRows, candidateRows, materialStatesById, usageCounts } from '../materialStates.js'
 import { buildOverridePayload, prefillOverrides, validateOverrides } from '../taskOverrides.js'
 import { feedback } from '../../../shared/ui/feedback/index.js'
-import { enabledGames } from '../../../shared/utils/games.js'
+import { enabledCategories } from '../../../shared/utils/categories.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import FormError from '../../../shared/ui/feedback/FormError.vue'
 import MaterialCover from '../../materials/components/MaterialCover.vue'
@@ -37,14 +37,14 @@ const candidates = ref([])
 const selectedIds = ref([])
 const strategies = ref([])
 const templates = ref([])
-const games = ref([])
+const categories = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const candidatesError = ref('')
 const strategyError = ref('')
 const strategyId = ref(null)
-const gameFilter = ref(null)
+const categoryFilter = ref(null)
 const candidateUsage = ref('unused')
 const candidateKeyword = ref('')
 const candidateSort = ref('published_desc')
@@ -62,27 +62,27 @@ const prefilledFor = ref(null)
 
 const selected = computed(() => candidates.value.filter((item) => selectedIds.value.includes(item.id)))
 
-// 只列候选里真的出现过的游戏：列一个点下去没有任何素材的选项，与「筛了但服务端没筛」
-// 是同一种误导（素材库的游戏筛选同此口径）。停用游戏同样不列 —— 它已经不能再建策略。
-// 名字从游戏表来，查不到就退回编号。候选本身不缩小，这里只决定筛选项。
-const gameOptions = computed(() => {
-  const enabledIds = new Set(enabledGames(games.value).map((game) => game.id))
-  const used = [...new Set(candidates.value.map((item) => item.game_id).filter(Boolean))]
+// 只列候选里真的出现过的类目：列一个点下去没有任何素材的选项，与「筛了但服务端没筛」
+// 是同一种误导（素材库的类目筛选同此口径）。停用类目同样不列 —— 它已经不能再建策略。
+// 名字从类目表来，查不到就退回编号。候选本身不缩小，这里只决定筛选项。
+const categoryOptions = computed(() => {
+  const enabledIds = new Set(enabledCategories(categories.value).map((category) => category.id))
+  const used = [...new Set(candidates.value.map((item) => item.category_id).filter(Boolean))]
   return used
     .filter((id) => enabledIds.has(id))
-    .map((id) => ({ value: id, label: games.value.find((game) => game.id === id)?.name || id }))
+    .map((id) => ({ value: id, label: categories.value.find((category) => category.id === id)?.name || id }))
 })
 
-// 游戏筛选只缩候选、不动已选：selected 直接取自全量候选，切游戏不会把选好的素材弄丢。
-const visibleCandidates = computed(() => (gameFilter.value
-  ? candidates.value.filter((item) => item.game_id === gameFilter.value)
+// 类目筛选只缩候选、不动已选：selected 直接取自全量候选，切类目不会把选好的素材弄丢。
+const visibleCandidates = computed(() => (categoryFilter.value
+  ? candidates.value.filter((item) => item.category_id === categoryFilter.value)
   : candidates.value))
 
 const statesById = computed(() => materialStatesById(states.value))
-// 两组各自的条数：分母是游戏筛选之后的这批候选，不跟着搜索框抖 —— 会抖的数字不算信息。
+// 两组各自的条数：分母是类目筛选之后的这批候选，不跟着搜索框抖 —— 会抖的数字不算信息。
 const counts = computed(() => usageCounts(visibleCandidates.value, statesById.value))
 
-// 使用情况是**一个字段**（两个取值），不是两个页签：它和「游戏」并排，一起回答「给我看哪些」。
+// 使用情况是**一个字段**（两个取值），不是两个页签：它和「类目」并排，一起回答「给我看哪些」。
 const usageOptions = computed(() => [
   { value: 'unused', label: statesReady.value ? `未使用过（${counts.value.unused}）` : '未使用过' },
   { value: 'used', label: statesReady.value ? `已使用过（${counts.value.used}）` : '已使用过' },
@@ -103,7 +103,7 @@ function countLabel(value) { return Number(value || 0).toLocaleString() }
 
 const strategyOptions = computed(() => strategies.value
   .filter((item) => item.status === 'enabled')
-  .map((item) => ({ value: item.id, label: `${item.name} · ${item.game_id}` })))
+  .map((item) => ({ value: item.id, label: `${item.name} · ${item.category_id}` })))
 
 const selectedStrategy = computed(() => strategies.value.find((item) => item.id === strategyId.value) || null)
 const strategyName = computed(() => selectedStrategy.value?.name || '尚未选择')
@@ -157,7 +157,7 @@ watch(() => props.visible, (visible) => {
   error.value = ''
   strategyError.value = ''
   strategyId.value = null
-  gameFilter.value = null
+  categoryFilter.value = null
   candidateUsage.value = 'unused'
   candidateKeyword.value = ''
   candidateSort.value = 'published_desc'
@@ -181,12 +181,12 @@ async function load() {
 
 async function loadStrategies() {
   try {
-    const [strategyRows, templateRows, gameRows] = await Promise.all([
-      client.listStrategies(), client.listTemplates(), client.listGames().catch(() => []),
+    const [strategyRows, templateRows, categoryRows] = await Promise.all([
+      client.listStrategies(), client.listTemplates(), client.listCategories().catch(() => []),
     ])
     strategies.value = Array.isArray(strategyRows) ? strategyRows : []
     templates.value = Array.isArray(templateRows) ? templateRows : []
-    games.value = Array.isArray(gameRows) ? gameRows : []
+    categories.value = Array.isArray(categoryRows) ? categoryRows : []
   } catch (e) {
     error.value = e?.message || '读取合成策略失败'
   }
@@ -204,7 +204,7 @@ async function loadCandidates() {
         id: usage.material.id,
         title: usage.material.title,
         cover_url: usage.material.cover_url,
-        game_id: usage.material.game_id,
+        category_id: usage.material.category_id,
         published_at: usage.material.published_at,
         like_count: usage.material.like_count,
         favorite_count: usage.material.favorite_count,
@@ -323,11 +323,11 @@ async function submit() {
           <template v-else>
             <div class="compose-create__picker-row">
               <t-select
-                v-model="gameFilter"
-                class="compose-create__game"
-                :options="gameOptions"
+                v-model="categoryFilter"
+                class="compose-create__category"
+                :options="categoryOptions"
                 clearable
-                placeholder="全部游戏"
+                placeholder="全部类目"
               />
               <t-select
                 v-model="candidateUsage"
@@ -379,7 +379,7 @@ async function submit() {
           </template>
           <p v-if="candidates.length === 0" class="compose-create__hint">「我的素材」里还没有使用中的素材：先在素材库把它加入我的素材，再回来创建任务。</p>
           <template v-else-if="strategyId">
-            <p class="compose-create__hint">只列出「我的素材」里使用中的素材；按游戏筛选只缩小候选，不会取消已选中的素材。每条素材独立生成一条合成任务，任务名称按「素材标题摘要 · 策略名称」各自生成。</p>
+            <p class="compose-create__hint">只列出「我的素材」里使用中的素材；按类目筛选只缩小候选，不会取消已选中的素材。每条素材独立生成一条合成任务，任务名称按「素材标题摘要 · 策略名称」各自生成。</p>
             <p class="compose-create__hint">这条策略下已有任务记录的素材是只读的：一条素材在一条策略下只跑一次，要重跑请到合成任务页对那条任务点「重试」。</p>
           </template>
           <div v-if="selected.length > 0" class="compose-create__selected">
@@ -462,7 +462,7 @@ async function submit() {
 .compose-create__hint { margin: 8px 0 0; font-size: 12px; color: var(--wt-text-tertiary); }
 .compose-create__picker-row { display: flex; gap: 8px; margin-top: 10px; }
 .compose-create__picker { flex: 1; min-width: 0; }
-.compose-create__game { flex: none; width: 160px; }
+.compose-create__category { flex: none; width: 160px; }
 .compose-create__usage { flex: 1; min-width: 0; }
 .compose-create__sort { flex: none; width: 150px; }
 .compose-create__search { margin-top: 8px; }

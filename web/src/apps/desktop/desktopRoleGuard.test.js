@@ -79,7 +79,7 @@ describe('desktop role guard', () => {
     expect(desktopMain).toContain('if (!canUseDesktopEnv(user))')
   })
 
-  // 2026-10-27：系统管理进桌面端。用户管理仅管理员；运营团队 / 游戏管理 高级运营只读。
+  // 2026-10-27：系统管理进桌面端。用户管理仅管理员；运营团队 / 类目管理 高级运营只读。
   // 两端共用同一张路径表，守卫各写一次解析同一个判据。
   it('routes system management by role on both ends', () => {
     expect(layout).toContain('SYSTEM_MANAGEMENT_PATHS')

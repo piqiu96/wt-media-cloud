@@ -42,8 +42,8 @@ describe('compose strategy page', () => {
   it('puts the name search first in the wide slot and keeps the actions last', () => {
     const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
     expect(bar).not.toContain('<t-space')
-    expect(bar.indexOf('策略名称')).toBeLessThan(bar.indexOf('游戏'))
-    expect(bar.indexOf('游戏')).toBeLessThan(bar.indexOf('合成模板'))
+    expect(bar.indexOf('策略名称')).toBeLessThan(bar.indexOf('类目'))
+    expect(bar.indexOf('类目')).toBeLessThan(bar.indexOf('合成模板'))
     expect(bar.indexOf('合成模板')).toBeLessThan(bar.indexOf('状态'))
     expect(bar).toContain('wt-filter-field--wide')
     const widePos = bar.indexOf('wt-filter-field--wide')
@@ -61,20 +61,20 @@ describe('compose strategy page', () => {
     expect(source).not.toMatch(/<t-option v-for="operator in conditionOperators/)
   })
 
-  // 停用游戏不能再建策略（服务端也拒），列表筛选与新建表单都不该出现它；
+  // 停用类目不能再建策略（服务端也拒），列表筛选与新建表单都不该出现它；
   // 名称解析仍读全量目录，历史策略不会退化成裸 ID。
-  it('offers only enabled games in the list filter and the create form', () => {
-    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
-    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
-    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
-    expect(source).not.toContain('v-for="game in games"')
-    expect(source).toContain('return games.value.find((game) => game.id === id)?.name || id')
+  it('offers only enabled categories in the list filter and the create form', () => {
+    expect(source).toContain("import { enabledCategories } from '../../../shared/utils/categories.js'")
+    expect(source).toContain('const enabledCategoryOptions = computed(() => enabledCategories(categories.value))')
+    expect(source.match(/v-for="category in enabledCategoryOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="category in categories"')
+    expect(source).toContain('return categories.value.find((category) => category.id === id)?.name || id')
   })
 
-  // 负责人是策略的必填归属（M4-I）：候选由团队＋游戏决定，创建和更新都必须提交；
+  // 负责人是策略的必填归属（M4-I）：候选由团队＋类目决定，创建和更新都必须提交；
   // 历史行没有可靠来源，列表与详情都显示“未记录”，不拿创建人冒充。
   it('binds a required operator and renders unrecorded history honestly', () => {
-    expect(source).toContain('client.listComposeOperators({ team_id: teamID, game_id: gameID })')
+    expect(source).toContain('client.listComposeOperators({ team_id: teamID, category_id: categoryID })')
     expect(source).toContain("if (!form.value.operator_id) {")
     expect(source).toContain('operator_id: Number(form.value.operator_id)')
     expect(source).toContain('colKey: \'operator\'')

@@ -15,10 +15,10 @@ import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
 const session = createSessionClient()
 const bitAccounts = createBitAccountClient()
-// 团队/游戏范围只做展示，取与素材库页同一个 games 端点把游戏 ID 映射成名称；
+// 团队/类目范围只做展示，取与素材库页同一个 categories 端点把类目 ID 映射成名称；
 // 拉不到时退化为显示 ID，不阻塞整页加载。
 const usersClient = createUsersClient()
-const games = ref([])
+const categories = ref([])
 const user = ref(null)
 const nickname = ref('')
 const avatarId = ref('sky')
@@ -33,12 +33,12 @@ const confirmRebind = ref(false)
 const error = ref('')
 const inDesktop = typeof window !== 'undefined' && window.__TAURI_INTERNALS__ !== undefined
 const localAgentAllowed = computed(() => canRunLocalAgent(user.value))
-// 管理员不受团队/游戏限制；运营展示自己被授权的游戏名称（找不到名称时退化为 ID）。
-const gameScopeLabel = computed(() => {
-  if (user.value?.role === 'admin') return '全部游戏'
-  const ids = user.value?.game_ids || []
+// 管理员不受团队/类目限制；运营展示自己被授权的类目名称（找不到名称时退化为 ID）。
+const categoryScopeLabel = computed(() => {
+  if (user.value?.role === 'admin') return '全部类目'
+  const ids = user.value?.category_ids || []
   if (!ids.length) return '—'
-  return ids.map((id) => games.value.find((game) => game.id === id)?.name || id).join('、')
+  return ids.map((id) => categories.value.find((category) => category.id === id)?.name || id).join('、')
 })
 // 本机账号与绑定账号一致时没有可绑定的东西，入口不出现；不一致才是
 // 「客户端换过账号、系统待确认」。判定与顶栏胶囊同源（work-env-status），
@@ -71,11 +71,11 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [currentUser, gameRows] = await Promise.all([session.me(), usersClient.listGames({ status: 'enabled' }).catch(() => [])])
+    const [currentUser, categoryRows] = await Promise.all([session.me(), usersClient.listCategories({ enabled: true }).catch(() => [])])
     user.value = currentUser
     nickname.value = currentUser.nickname || currentUser.username
     avatarId.value = currentUser.avatar_id || 'sky'
-    games.value = Array.isArray(gameRows) ? gameRows : []
+    categories.value = Array.isArray(categoryRows) ? categoryRows : []
     // 本机 Agent 与比特账号绑定给运营与高级运营；管理员不读取这类本机信息。
     if (!canRunLocalAgent(currentUser)) return
     binding.value = await bitAccounts.get()
@@ -145,7 +145,7 @@ async function bindAccount({ rebind = false } = {}) {
         <section class="profile-card">
           <h2>基本信息</h2>
           <div class="identity-summary"><SystemAvatar :avatar-id="avatarId" :size="64" /><div><strong>{{ user?.nickname || user?.username }}</strong><span>用户 UID {{ user?.id || '—' }}</span></div></div>
-          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong><span>所属团队</span><strong>{{ user?.team_name || '—' }}</strong><span>游戏范围</span><strong>{{ gameScopeLabel }}</strong></div>
+          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong><span>所属团队</span><strong>{{ user?.team_name || '—' }}</strong><span>类目范围</span><strong>{{ categoryScopeLabel }}</strong></div>
           <label class="form-label" for="profile-nickname">昵称</label>
           <t-input id="profile-nickname" v-model="nickname" maxlength="64" placeholder="请输入昵称" />
           <p class="field-help">默认与用户名一致，可随时修改。</p>

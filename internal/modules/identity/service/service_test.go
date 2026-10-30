@@ -150,11 +150,11 @@ func TestDisabledUserCannotAuthenticate(t *testing.T) {
 	}
 	team := mustCreateTeam(t, service, admin.ID, "停用测试组")
 	user, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "operator",
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "operator",
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
@@ -168,7 +168,7 @@ func TestDisabledUserCannotAuthenticate(t *testing.T) {
 	}
 }
 
-func TestOnlyAdminCanCreateUsersAndAssignGameScopes(t *testing.T) {
+func TestOnlyAdminCanCreateUsersAndAssignCategoryScopes(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	admin, err := service.BootstrapAdmin("admin", "a-long-initial-password")
 	if err != nil {
@@ -176,30 +176,30 @@ func TestOnlyAdminCanCreateUsersAndAssignGameScopes(t *testing.T) {
 	}
 	team := mustCreateTeam(t, service, admin.ID, "权限测试组")
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "operator",
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "operator",
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 
 	if _, err := service.CreateUser(operator.ID, CreateUserInput{
-		Username: "forbidden",
-		Password: "a-long-forbidden-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "forbidden",
+		Password:    "a-long-forbidden-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("CreateUser(operator) error = %v, want ErrForbidden", err)
 	}
-	if !service.CanAccessGame(operator.ID, "game-a") || service.CanAccessGame(operator.ID, "game-b") {
-		t.Fatalf("operator game scope is not enforced")
+	if !service.CanAccessCategory(operator.ID, 1) || service.CanAccessCategory(operator.ID, 2) {
+		t.Fatalf("operator category scope is not enforced")
 	}
-	if !service.CanAccessGame(admin.ID, "any-game") {
-		t.Fatalf("admin must have global game access")
+	if !service.CanAccessCategory(admin.ID, 999) {
+		t.Fatalf("admin must have global category access")
 	}
 }
 
@@ -211,11 +211,11 @@ func TestUserCanChangeOwnPasswordAndAdminCanResetIt(t *testing.T) {
 	}
 	team := mustCreateTeam(t, service, admin.ID, "密码测试组")
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "operator",
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "operator",
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
@@ -239,7 +239,7 @@ func TestUserCanChangeOwnPasswordAndAdminCanResetIt(t *testing.T) {
 	}
 }
 
-func TestAdminCanUpdateRoleAndGameScopes(t *testing.T) {
+func TestAdminCanUpdateRoleAndCategoryScopes(t *testing.T) {
 	service := NewService(NewMemoryStore())
 	admin, err := service.BootstrapAdmin("admin", "a-long-initial-password")
 	if err != nil {
@@ -250,25 +250,25 @@ func TestAdminCanUpdateRoleAndGameScopes(t *testing.T) {
 		t.Fatalf("CreateTeam() error = %v", err)
 	}
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "operator",
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "operator",
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 
-	updated, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &team.ID, []string{"game-b"})
+	updated, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &team.ID, []CategoryID{2})
 	if err != nil {
 		t.Fatalf("UpdateUserAccess() error = %v", err)
 	}
-	if updated.Role != RoleSeniorOperator || len(updated.GameIDs) != 1 || updated.GameIDs[0] != "game-b" {
+	if updated.Role != RoleSeniorOperator || len(updated.CategoryIDs) != 1 || updated.CategoryIDs[0] != 2 {
 		t.Fatalf("updated user = %+v", updated)
 	}
-	if service.CanAccessGame(operator.ID, "game-a") || !service.CanAccessGame(operator.ID, "game-b") {
-		t.Fatalf("updated game scope is not enforced")
+	if service.CanAccessCategory(operator.ID, 1) || !service.CanAccessCategory(operator.ID, 2) {
+		t.Fatalf("updated category scope is not enforced")
 	}
 }
 
@@ -281,11 +281,11 @@ func TestAuditEventsNeverContainPasswordOrSessionMaterial(t *testing.T) {
 	}
 	team := mustCreateTeam(t, service, admin.ID, "审计测试组")
 	if _, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "operator",
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "operator",
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	}); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
@@ -321,7 +321,7 @@ func TestAdminCreatesTeamsAndTeamScopedUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BootstrapAdmin() error = %v", err)
 	}
-	if admin.ID <= 0 || admin.Role != RoleAdmin || admin.TeamID != nil || len(admin.GameIDs) != 0 {
+	if admin.ID <= 0 || admin.Role != RoleAdmin || admin.TeamID != nil || len(admin.CategoryIDs) != 0 {
 		t.Fatalf("admin = %+v", admin)
 	}
 
@@ -330,11 +330,11 @@ func TestAdminCreatesTeamsAndTeamScopedUsers(t *testing.T) {
 		t.Fatalf("CreateTeam() error = %v", err)
 	}
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "operator-a",
-		Password: "a-long-operator-password",
-		Role:     RoleOperator,
-		TeamID:   &team.ID,
-		GameIDs:  []string{"game-a"},
+		Username:    "operator-a",
+		Password:    "a-long-operator-password",
+		Role:        RoleOperator,
+		TeamID:      &team.ID,
+		CategoryIDs: []CategoryID{1},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
@@ -344,10 +344,10 @@ func TestAdminCreatesTeamsAndTeamScopedUsers(t *testing.T) {
 	}
 
 	if _, err := service.CreateUser(admin.ID, CreateUserInput{
-		Username: "missing-team",
-		Password: "a-long-operator-password",
-		Role:     RoleSeniorOperator,
-		GameIDs:  []string{"game-a"},
+		Username:    "missing-team",
+		Password:    "a-long-operator-password",
+		Role:        RoleSeniorOperator,
+		CategoryIDs: []CategoryID{1},
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("CreateUser(missing team) error = %v, want ErrInvalidInput", err)
 	}
@@ -367,7 +367,7 @@ func TestOnlyAdminManagesTeamsAndReferencedTeamCannotBeDeleted(t *testing.T) {
 	team, _ := service.CreateTeam(admin.ID, "火影组")
 	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{"game-a"},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{1},
 	})
 
 	teams, err := service.ListTeams(operator.ID, "")
@@ -396,173 +396,173 @@ func TestOnlyAdminManagesTeamsAndReferencedTeamCannotBeDeleted(t *testing.T) {
 	}
 }
 
-func TestReferencedGameCannotBeDisabledOrDeleted(t *testing.T) {
-	store := newGameMemoryStore()
+func TestReferencedCategoryCannotBeDisabledOrDeleted(t *testing.T) {
+	store := newCategoryMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
 	team, _ := service.CreateTeam(admin.ID, "火影组")
-	game, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	category, err := service.CreateCategory(admin.ID, CategoryTypeGame, "火影忍者", "")
 	if err != nil {
-		t.Fatalf("CreateGame() error = %v", err)
+		t.Fatalf("CreateCategory() error = %v", err)
 	}
 	if _, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{game.ID},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{category.ID},
 	}); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 
-	if _, err := service.UpdateGame(admin.ID, game.ID, game.Name, GameStatusDisabled, ""); !errors.Is(err, ErrGameInUse) {
-		t.Fatalf("UpdateGame(disable referenced) error = %v, want ErrGameInUse", err)
+	if _, err := service.UpdateCategory(admin.ID, category.ID, category.Name, false, ""); !errors.Is(err, ErrCategoryInUse) {
+		t.Fatalf("UpdateCategory(disable referenced) error = %v, want ErrCategoryInUse", err)
 	}
-	if err := service.DeleteGame(admin.ID, game.ID); !errors.Is(err, ErrGameInUse) {
-		t.Fatalf("DeleteGame(referenced) error = %v, want ErrGameInUse", err)
+	if err := service.DeleteCategory(admin.ID, category.ID); !errors.Is(err, ErrCategoryInUse) {
+		t.Fatalf("DeleteCategory(referenced) error = %v, want ErrCategoryInUse", err)
 	}
 
-	empty, err := service.CreateGame(admin.ID, "delta", "三角洲", "")
+	empty, err := service.CreateCategory(admin.ID, CategoryTypeGame, "三角洲", "")
 	if err != nil {
-		t.Fatalf("CreateGame(empty) error = %v", err)
+		t.Fatalf("CreateCategory(empty) error = %v", err)
 	}
-	if _, err := service.UpdateGame(admin.ID, empty.ID, empty.Name, GameStatusDisabled, ""); err != nil {
-		t.Fatalf("UpdateGame(disable empty) error = %v", err)
+	if _, err := service.UpdateCategory(admin.ID, empty.ID, empty.Name, false, ""); err != nil {
+		t.Fatalf("UpdateCategory(disable empty) error = %v", err)
 	}
-	if err := service.DeleteGame(admin.ID, empty.ID); err != nil {
-		t.Fatalf("DeleteGame(empty) error = %v", err)
+	if err := service.DeleteCategory(admin.ID, empty.ID); err != nil {
+		t.Fatalf("DeleteCategory(empty) error = %v", err)
 	}
 }
 
-func TestAdminGameListIncludesReferenceSummaryAndDetails(t *testing.T) {
-	store := newGameMemoryStore()
+func TestAdminCategoryListIncludesReferenceSummaryAndDetails(t *testing.T) {
+	store := newCategoryMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
 	team := mustCreateTeam(t, service, admin.ID, "火影组")
-	game, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	category, err := service.CreateCategory(admin.ID, CategoryTypeGame, "火影忍者", "")
 	if err != nil {
-		t.Fatalf("CreateGame() error = %v", err)
+		t.Fatalf("CreateCategory() error = %v", err)
 	}
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{game.ID},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{category.ID},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
-	store.accountReferences[game.ID] = []GameReferenceAccount{{AccountID: "8", Name: "B站账号", Platform: "bilibili", UserID: operator.ID, Username: operator.Username}}
+	store.accountReferences[category.ID] = []CategoryReferenceAccount{{AccountID: "8", Name: "B站账号", Platform: "bilibili", UserID: operator.ID, Username: operator.Username}}
 
-	games, err := service.ListGames(admin.ID)
+	categories, err := service.ListCategories(admin.ID)
 	if err != nil {
-		t.Fatalf("ListGames() error = %v", err)
+		t.Fatalf("ListCategories() error = %v", err)
 	}
-	if len(games) != 1 || games[0].ReferenceSummary == nil || games[0].ReferenceSummary.UserScopeCount != 1 || games[0].ReferenceSummary.MediaAccountCount != 1 || games[0].ReferenceSummary.TotalCount != 2 {
-		t.Fatalf("ListGames() = %#v, want user=1 account=1 total=2", games)
+	if len(categories) != 1 || categories[0].ReferenceSummary == nil || categories[0].ReferenceSummary.UserScopeCount != 1 || categories[0].ReferenceSummary.MediaAccountCount != 1 || categories[0].ReferenceSummary.TotalCount != 2 {
+		t.Fatalf("ListCategories() = %#v, want user=1 account=1 total=2", categories)
 	}
-	references, err := service.GameReferences(admin.ID, game.ID)
+	references, err := service.CategoryReferences(admin.ID, category.ID)
 	if err != nil {
-		t.Fatalf("GameReferences() error = %v", err)
+		t.Fatalf("CategoryReferences() error = %v", err)
 	}
 	if len(references.Users) != 1 || references.Users[0].Username != "operator-a" || len(references.MediaAccounts) != 1 || references.MediaAccounts[0].AccountID != "8" {
-		t.Fatalf("GameReferences() = %#v", references)
+		t.Fatalf("CategoryReferences() = %#v", references)
 	}
-	if _, err := service.GameReferences(operator.ID, game.ID); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("GameReferences(operator) error = %v, want ErrForbidden", err)
+	if _, err := service.CategoryReferences(operator.ID, category.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("CategoryReferences(operator) error = %v, want ErrForbidden", err)
 	}
 }
 
-func TestListAllGamesReturnsEnabledCatalogForOperators(t *testing.T) {
-	store := newGameMemoryStore()
+func TestListAllCategoriesReturnsEnabledCatalogForOperators(t *testing.T) {
+	store := newCategoryMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
 	team := mustCreateTeam(t, service, admin.ID, "火影组")
-	naruto, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	naruto, err := service.CreateCategory(admin.ID, CategoryTypeGame, "火影忍者", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreateGame(admin.ID, "delta", "三角洲", ""); err != nil {
+	if _, err := service.CreateCategory(admin.ID, CategoryTypeGame, "三角洲", ""); err != nil {
 		t.Fatal(err)
 	}
-	retired, err := service.CreateGame(admin.ID, "retired", "停用游戏", "")
+	retired, err := service.CreateCategory(admin.ID, CategoryTypeGame, "停用类目", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateGame(admin.ID, retired.ID, retired.Name, GameStatusDisabled, ""); err != nil {
+	if _, err := service.UpdateCategory(admin.ID, retired.ID, retired.Name, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-catalog", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{naruto.ID},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{naruto.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assigned, err := service.ListGames(operator.ID)
+	assigned, err := service.ListCategories(operator.ID)
 	if err != nil || len(assigned) != 1 || assigned[0].ID != naruto.ID {
-		t.Fatalf("assigned games = %#v, err=%v", assigned, err)
+		t.Fatalf("assigned categories = %#v, err=%v", assigned, err)
 	}
-	catalog, err := service.ListAllGames(operator.ID)
+	catalog, err := service.ListAllCategories(operator.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(catalog) != 2 {
-		t.Fatalf("catalog = %#v, want two enabled games", catalog)
+		t.Fatalf("catalog = %#v, want two enabled categories", catalog)
 	}
-	for _, game := range catalog {
-		if game.ID == retired.ID || game.Status != GameStatusEnabled {
-			t.Fatalf("catalog leaked a disabled game: %#v", game)
+	for _, category := range catalog {
+		if category.ID == retired.ID || !category.Enabled {
+			t.Fatalf("catalog leaked a disabled category: %#v", category)
 		}
 	}
-	adminCatalog, err := service.ListAllGames(admin.ID)
+	adminCatalog, err := service.ListAllCategories(admin.ID)
 	if err != nil || len(adminCatalog) != 3 {
-		t.Fatalf("admin catalog = %#v, err=%v, want all three games", adminCatalog, err)
+		t.Fatalf("admin catalog = %#v, err=%v, want all three categories", adminCatalog, err)
 	}
 }
 
-func TestListManagementGamesShowsEveryStatusWithoutReferenceSummaries(t *testing.T) {
-	store := newGameMemoryStore()
+func TestListManagementCategoriesShowsEveryStatusWithoutReferenceSummaries(t *testing.T) {
+	store := newCategoryMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
 	team := mustCreateTeam(t, service, admin.ID, "火影组")
-	naruto, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	naruto, err := service.CreateCategory(admin.ID, CategoryTypeGame, "火影忍者", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	retired, err := service.CreateGame(admin.ID, "retired", "停用游戏", "")
+	retired, err := service.CreateCategory(admin.ID, CategoryTypeGame, "停用类目", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateGame(admin.ID, retired.ID, retired.Name, GameStatusDisabled, ""); err != nil {
+	if _, err := service.UpdateCategory(admin.ID, retired.ID, retired.Name, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-mgmt", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{naruto.ID},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{naruto.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	senior, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "senior-mgmt", Password: "a-long-operator-password", Role: RoleSeniorOperator,
-		TeamID: &team.ID, GameIDs: []string{naruto.ID},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{naruto.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The admin list carries summaries; the management list must not, or a
 	// senior would read counts for a reference drawer they cannot open.
-	games, err := service.ListManagementGames(senior.ID)
+	categories, err := service.ListManagementCategories(senior.ID)
 	if err != nil {
-		t.Fatalf("ListManagementGames(senior) error = %v", err)
+		t.Fatalf("ListManagementCategories(senior) error = %v", err)
 	}
-	if len(games) != 2 {
-		t.Fatalf("management games = %#v, want both enabled and disabled", games)
+	if len(categories) != 2 {
+		t.Fatalf("management categories = %#v, want both enabled and disabled", categories)
 	}
-	for _, game := range games {
-		if game.ReferenceSummary != nil {
-			t.Fatalf("management games leaked a reference summary: %#v", game)
+	for _, category := range categories {
+		if category.ReferenceSummary != nil {
+			t.Fatalf("management categories leaked a reference summary: %#v", category)
 		}
 	}
-	if _, err := service.ListManagementGames(operator.ID); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("ListManagementGames(operator) error = %v, want ErrForbidden", err)
+	if _, err := service.ListManagementCategories(operator.ID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListManagementCategories(operator) error = %v, want ErrForbidden", err)
 	}
 }
 
@@ -572,9 +572,9 @@ func TestListTeamsReportsMembershipCount(t *testing.T) {
 	alpha := mustCreateTeam(t, service, admin.ID, "甲组")
 	beta := mustCreateTeam(t, service, admin.ID, "乙组")
 	for _, input := range []CreateUserInput{
-		{Username: "alpha-a", Password: "a-long-operator-password", Role: RoleOperator, TeamID: &alpha.ID, GameIDs: []string{"game-a"}},
-		{Username: "alpha-b", Password: "a-long-operator-password", Role: RoleSeniorOperator, TeamID: &alpha.ID, GameIDs: []string{"game-a"}},
-		{Username: "beta-a", Password: "a-long-operator-password", Role: RoleOperator, TeamID: &beta.ID, GameIDs: []string{"game-a"}},
+		{Username: "alpha-a", Password: "a-long-operator-password", Role: RoleOperator, TeamID: &alpha.ID, CategoryIDs: []CategoryID{1}},
+		{Username: "alpha-b", Password: "a-long-operator-password", Role: RoleSeniorOperator, TeamID: &alpha.ID, CategoryIDs: []CategoryID{1}},
+		{Username: "beta-a", Password: "a-long-operator-password", Role: RoleOperator, TeamID: &beta.ID, CategoryIDs: []CategoryID{1}},
 	} {
 		if _, err := service.CreateUser(admin.ID, input); err != nil {
 			t.Fatal(err)
@@ -596,39 +596,39 @@ func TestListTeamsReportsMembershipCount(t *testing.T) {
 	}
 }
 
-func TestUserGameScopeCannotDropReferencedAccountGame(t *testing.T) {
-	store := newGameMemoryStore()
+func TestUserCategoryScopeCannotDropReferencedAccountCategory(t *testing.T) {
+	store := newCategoryMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
 	team := mustCreateTeam(t, service, admin.ID, "火影组")
-	naruto, _ := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
-	delta, _ := service.CreateGame(admin.ID, "delta", "三角洲", "")
+	naruto, _ := service.CreateCategory(admin.ID, CategoryTypeGame, "火影忍者", "")
+	delta, _ := service.CreateCategory(admin.ID, CategoryTypeGame, "三角洲", "")
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{naruto.ID, delta.ID},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{naruto.ID, delta.ID},
 	})
 	if err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
-	store.accountReferences[naruto.ID] = []GameReferenceAccount{{AccountID: "8", UserID: operator.ID}}
+	store.accountReferences[naruto.ID] = []CategoryReferenceAccount{{AccountID: "8", UserID: operator.ID}}
 
-	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleOperator, &team.ID, []string{delta.ID}); !errors.Is(err, ErrUserGameScopeInUse) {
-		t.Fatalf("UpdateUserAccess(drop referenced game) error = %v, want ErrUserGameScopeInUse", err)
+	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleOperator, &team.ID, []CategoryID{delta.ID}); !errors.Is(err, ErrUserCategoryScopeInUse) {
+		t.Fatalf("UpdateUserAccess(drop referenced category) error = %v, want ErrUserCategoryScopeInUse", err)
 	}
 }
 
-func TestServiceResolveGameReturnsStoredGameWithoutActorScope(t *testing.T) {
-	store := newGameMemoryStore()
+func TestServiceResolveCategoryReturnsStoredCategoryWithoutActorScope(t *testing.T) {
+	store := newCategoryMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
-	game, err := service.CreateGame(admin.ID, "naruto", "火影忍者", "")
+	category, err := service.CreateCategory(admin.ID, CategoryTypeGame, "火影忍者", "")
 	if err != nil {
-		t.Fatalf("CreateGame() error = %v", err)
+		t.Fatalf("CreateCategory() error = %v", err)
 	}
 
-	resolved, found, err := service.ResolveGame(game.ID)
-	if err != nil || !found || resolved.ID != game.ID || resolved.Status != GameStatusEnabled {
-		t.Fatalf("ResolveGame() = %#v, found=%v, err=%v", resolved, found, err)
+	resolved, found, err := service.ResolveCategory(category.ID)
+	if err != nil || !found || resolved.ID != category.ID || !resolved.Enabled {
+		t.Fatalf("ResolveCategory() = %#v, found=%v, err=%v", resolved, found, err)
 	}
 }
 
@@ -639,14 +639,14 @@ func TestUpdateUserAccessTransfersCurrentTeamAndInvalidatesSession(t *testing.T)
 	newTeam, _ := service.CreateTeam(admin.ID, "新组")
 	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+		TeamID: &oldTeam.ID, CategoryIDs: []CategoryID{1},
 	})
 	login, err := service.Login("operator-a", "a-long-operator-password")
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
 
-	updated, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"})
+	updated, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []CategoryID{2})
 	if err != nil {
 		t.Fatalf("UpdateUserAccess() error = %v", err)
 	}
@@ -665,14 +665,14 @@ func TestUpdateUserRejectsInvalidStatusWithoutChangingAccess(t *testing.T) {
 	newTeam, _ := service.CreateTeam(admin.ID, "新组")
 	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+		TeamID: &oldTeam.ID, CategoryIDs: []CategoryID{1},
 	})
 
-	if _, err := service.UpdateUser(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"}, UserStatus("invalid")); !errors.Is(err, ErrInvalidInput) {
+	if _, err := service.UpdateUser(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []CategoryID{2}, UserStatus("invalid")); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("UpdateUser() error = %v, want ErrInvalidInput", err)
 	}
 	stored, _, _ := service.store.FindUser(operator.ID)
-	if stored.Role != RoleOperator || stored.Status != UserStatusEnabled || stored.TeamID == nil || *stored.TeamID != oldTeam.ID || len(stored.GameIDs) != 1 || stored.GameIDs[0] != "game-a" {
+	if stored.Role != RoleOperator || stored.Status != UserStatusEnabled || stored.TeamID == nil || *stored.TeamID != oldTeam.ID || len(stored.CategoryIDs) != 1 || stored.CategoryIDs[0] != 1 {
 		t.Fatalf("invalid combined update changed persisted user: %+v", stored)
 	}
 }
@@ -684,11 +684,11 @@ func TestUpdateUserCommitsAccessAndStatusTogetherAndInvalidatesSession(t *testin
 	newTeam, _ := service.CreateTeam(admin.ID, "新组")
 	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+		TeamID: &oldTeam.ID, CategoryIDs: []CategoryID{1},
 	})
 	login, _ := service.Login("operator-a", "a-long-operator-password")
 
-	updated, err := service.UpdateUser(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"}, UserStatusDisabled)
+	updated, err := service.UpdateUser(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []CategoryID{2}, UserStatusDisabled)
 	if err != nil {
 		t.Fatalf("UpdateUser() error = %v", err)
 	}
@@ -700,29 +700,29 @@ func TestUpdateUserCommitsAccessAndStatusTogetherAndInvalidatesSession(t *testin
 	}
 }
 
-func TestPublicUserCanAccessUsesRoleTeamAndGameIntersection(t *testing.T) {
+func TestPublicUserCanAccessUsesRoleTeamAndCategoryIntersection(t *testing.T) {
 	teamA := TeamID(10)
 	teamB := TeamID(20)
 	tests := []struct {
-		name    string
-		actor   PublicUser
-		ownerID UserID
-		teamID  *TeamID
-		gameID  string
-		want    bool
+		name       string
+		actor      PublicUser
+		ownerID    UserID
+		teamID     *TeamID
+		categoryID CategoryID
+		want       bool
 	}{
-		{name: "admin all", actor: PublicUser{ID: 1, Role: RoleAdmin, Status: UserStatusEnabled}, ownerID: 99, teamID: &teamB, gameID: "game-z", want: true},
-		{name: "senior same team and game", actor: PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA, GameIDs: []string{"game-a"}}, ownerID: 99, teamID: &teamA, gameID: "game-a", want: true},
-		{name: "senior cross team", actor: PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA, GameIDs: []string{"game-a"}}, ownerID: 99, teamID: &teamB, gameID: "game-a", want: false},
-		{name: "senior cross game", actor: PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA, GameIDs: []string{"game-a"}}, ownerID: 99, teamID: &teamA, gameID: "game-b", want: false},
-		{name: "operator self and game", actor: PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA, GameIDs: []string{"game-a"}}, ownerID: 3, teamID: &teamA, gameID: "game-a", want: true},
-		{name: "operator other user", actor: PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA, GameIDs: []string{"game-a"}}, ownerID: 4, teamID: &teamA, gameID: "game-a", want: false},
-		{name: "operator cross game", actor: PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA, GameIDs: []string{"game-a"}}, ownerID: 3, teamID: &teamA, gameID: "game-b", want: false},
+		{name: "admin all", actor: PublicUser{ID: 1, Role: RoleAdmin, Status: UserStatusEnabled}, ownerID: 99, teamID: &teamB, categoryID: 99, want: true},
+		{name: "senior same team and category", actor: PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA, CategoryIDs: []CategoryID{1}}, ownerID: 99, teamID: &teamA, categoryID: 1, want: true},
+		{name: "senior cross team", actor: PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA, CategoryIDs: []CategoryID{1}}, ownerID: 99, teamID: &teamB, categoryID: 1, want: false},
+		{name: "senior cross category", actor: PublicUser{ID: 2, Role: RoleSeniorOperator, Status: UserStatusEnabled, TeamID: &teamA, CategoryIDs: []CategoryID{1}}, ownerID: 99, teamID: &teamA, categoryID: 2, want: false},
+		{name: "operator self and category", actor: PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA, CategoryIDs: []CategoryID{1}}, ownerID: 3, teamID: &teamA, categoryID: 1, want: true},
+		{name: "operator other user", actor: PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA, CategoryIDs: []CategoryID{1}}, ownerID: 4, teamID: &teamA, categoryID: 1, want: false},
+		{name: "operator cross category", actor: PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA, CategoryIDs: []CategoryID{1}}, ownerID: 3, teamID: &teamA, categoryID: 2, want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.actor.CanAccess(tt.ownerID, tt.teamID, tt.gameID); got != tt.want {
+			if got := tt.actor.CanAccess(tt.ownerID, tt.teamID, tt.categoryID); got != tt.want {
 				t.Fatalf("CanAccess() = %v, want %v", got, tt.want)
 			}
 		})
@@ -737,17 +737,17 @@ func TestPublicUserCanAccessOwnedResourceUsesRoleAndTeamOnly(t *testing.T) {
 	operator := PublicUser{ID: 3, Role: RoleOperator, Status: UserStatusEnabled, TeamID: &teamA}
 
 	if !admin.CanAccessOwnedResource(99, &teamB) {
-		t.Fatal("admin cannot access non-game resource")
+		t.Fatal("admin cannot access non-category resource")
 	}
 	if !senior.CanAccessOwnedResource(99, &teamA) || senior.CanAccessOwnedResource(99, &teamB) {
-		t.Fatal("senior non-game resource scope is not limited to own team")
+		t.Fatal("senior non-category resource scope is not limited to own team")
 	}
 	if !operator.CanAccessOwnedResource(operator.ID, &teamA) || operator.CanAccessOwnedResource(99, &teamA) {
-		t.Fatal("operator non-game resource scope is not limited to self")
+		t.Fatal("operator non-category resource scope is not limited to self")
 	}
 }
 
-func TestAccessUpdatesAuditTeamAndGames(t *testing.T) {
+func TestAccessUpdatesAuditTeamAndCategories(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewService(store)
 	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
@@ -755,12 +755,12 @@ func TestAccessUpdatesAuditTeamAndGames(t *testing.T) {
 	teamB, _ := service.CreateTeam(admin.ID, "新组")
 	operator, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &teamA.ID, GameIDs: []string{"game-a", "game-b"},
+		TeamID: &teamA.ID, CategoryIDs: []CategoryID{1, 2},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &teamB.ID, []string{"game-c", "game-b"}); err != nil {
+	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &teamB.ID, []CategoryID{3, 2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -774,8 +774,8 @@ func TestAccessUpdatesAuditTeamAndGames(t *testing.T) {
 		}
 	}
 	for name, summary := range map[string]map[string]string{"create": createSummary, "update": updateSummary} {
-		if summary["team_id"] == "" || summary["game_ids"] == "" {
-			t.Fatalf("%s audit does not trace team and game scope: %#v", name, summary)
+		if summary["team_id"] == "" || summary["category_ids"] == "" {
+			t.Fatalf("%s audit does not trace team and category scope: %#v", name, summary)
 		}
 	}
 }
@@ -786,71 +786,71 @@ type failingIdentityStore struct {
 	failInvalidate bool
 }
 
-type gameMemoryStore struct {
+type categoryMemoryStore struct {
 	*memoryStore
-	games             map[string]OperationGame
-	accountReferences map[string][]GameReferenceAccount
+	categories        map[CategoryID]Category
+	accountReferences map[CategoryID][]CategoryReferenceAccount
+	nextCategoryID    CategoryID
 }
 
-func newGameMemoryStore() *gameMemoryStore {
-	return &gameMemoryStore{memoryStore: NewMemoryStore(), games: make(map[string]OperationGame), accountReferences: make(map[string][]GameReferenceAccount)}
+func newCategoryMemoryStore() *categoryMemoryStore {
+	return &categoryMemoryStore{memoryStore: NewMemoryStore(), categories: make(map[CategoryID]Category), accountReferences: make(map[CategoryID][]CategoryReferenceAccount)}
 }
 
-func (s *gameMemoryStore) CreateGameWithAudit(game OperationGame, event AuditEvent) error {
-	if _, exists := s.games[game.ID]; exists {
-		return ErrGameIDTaken
-	}
-	for _, existing := range s.games {
-		if existing.Name == game.Name {
-			return ErrGameNameTaken
+func (s *categoryMemoryStore) CreateCategoryWithAudit(category Category, event AuditEvent) (CategoryID, error) {
+	for _, existing := range s.categories {
+		if existing.Name == category.Name {
+			return 0, ErrCategoryNameTaken
 		}
 	}
-	s.games[game.ID] = game
-	return s.AppendAudit(event)
+	s.nextCategoryID++
+	category.ID = s.nextCategoryID
+	s.categories[category.ID] = category
+	return category.ID, s.AppendAudit(event)
 }
 
-func (s *gameMemoryStore) FindGame(id string) (OperationGame, bool, error) {
-	game, ok := s.games[id]
-	return game, ok, nil
+func (s *categoryMemoryStore) FindCategory(id CategoryID) (Category, bool, error) {
+	category, ok := s.categories[id]
+	return category, ok, nil
 }
 
-func (s *gameMemoryStore) ListGames() ([]OperationGame, error) {
-	result := make([]OperationGame, 0, len(s.games))
-	for _, game := range s.games {
-		result = append(result, game)
+func (s *categoryMemoryStore) ListCategories() ([]Category, error) {
+	result := make([]Category, 0, len(s.categories))
+	for _, category := range s.categories {
+		result = append(result, category)
 	}
 	return result, nil
 }
 
-func (s *gameMemoryStore) UpdateGameWithAudit(game OperationGame, event AuditEvent) error {
-	if _, exists := s.games[game.ID]; !exists {
+func (s *categoryMemoryStore) UpdateCategoryWithAudit(category Category, event AuditEvent) error {
+	if _, exists := s.categories[category.ID]; !exists {
 		return ErrInvalidInput
 	}
-	for _, existing := range s.games {
-		if existing.ID != game.ID && existing.Name == game.Name {
-			return ErrGameNameTaken
+	for _, existing := range s.categories {
+		if existing.ID != category.ID && existing.Name == category.Name {
+			return ErrCategoryNameTaken
 		}
 	}
-	s.games[game.ID] = game
+	s.categories[category.ID] = category
 	return s.AppendAudit(event)
 }
 
-func (s *gameMemoryStore) DeleteGameWithAudit(id string, event AuditEvent) error {
-	if _, exists := s.games[id]; !exists {
+func (s *categoryMemoryStore) DeleteCategoryWithAudit(id CategoryID, event AuditEvent) error {
+	if _, exists := s.categories[id]; !exists {
 		return ErrInvalidInput
 	}
-	delete(s.games, id)
+	delete(s.categories, id)
 	return s.AppendAudit(event)
 }
 
-func (s *gameMemoryStore) GameHasReferences(id string) (bool, error) {
+func (s *categoryMemoryStore) CategoryHasReferences(id CategoryID) (bool, error) {
 	users, err := s.ListUsers()
 	if err != nil {
 		return false, err
 	}
 	for _, user := range users {
-		for _, gameID := range user.GameIDs {
-			if gameID == id {
+		for _, categoryID := range user.CategoryIDs {
+			if categoryID == id {
 				return true, nil
 			}
 		}
@@ -858,42 +858,42 @@ func (s *gameMemoryStore) GameHasReferences(id string) (bool, error) {
 	return len(s.accountReferences[id]) > 0, nil
 }
 
-func (s *gameMemoryStore) ListGameReferenceSummaries() (map[string]GameReferenceSummary, error) {
-	summaries := make(map[string]GameReferenceSummary, len(s.games))
-	for gameID := range s.games {
-		summaries[gameID] = GameReferenceSummary{MediaAccountCount: len(s.accountReferences[gameID])}
+func (s *categoryMemoryStore) ListCategoryReferenceSummaries() (map[CategoryID]CategoryReferenceSummary, error) {
+	summaries := make(map[CategoryID]CategoryReferenceSummary, len(s.categories))
+	for categoryID := range s.categories {
+		summaries[categoryID] = CategoryReferenceSummary{MediaAccountCount: len(s.accountReferences[categoryID])}
 	}
 	users, err := s.ListUsers()
 	if err != nil {
 		return nil, err
 	}
 	for _, user := range users {
-		for _, gameID := range user.GameIDs {
-			summary := summaries[gameID]
+		for _, categoryID := range user.CategoryIDs {
+			summary := summaries[categoryID]
 			summary.UserScopeCount++
-			summaries[gameID] = summary
+			summaries[categoryID] = summary
 		}
 	}
 	return summaries, nil
 }
 
-func (s *gameMemoryStore) GameReferences(gameID string) (model.GameReferences, error) {
-	references := model.GameReferences{GameID: gameID, Users: []model.GameReferenceUser{}, MediaAccounts: append([]model.GameReferenceAccount(nil), s.accountReferences[gameID]...)}
+func (s *categoryMemoryStore) CategoryReferences(categoryID CategoryID) (model.CategoryReferences, error) {
+	references := model.CategoryReferences{CategoryID: categoryID, Users: []model.CategoryReferenceUser{}, MediaAccounts: append([]model.CategoryReferenceAccount(nil), s.accountReferences[categoryID]...)}
 	users, err := s.ListUsers()
 	if err != nil {
-		return model.GameReferences{}, err
+		return model.CategoryReferences{}, err
 	}
 	for _, user := range users {
-		if containsGame(user.GameIDs, gameID) {
-			references.Users = append(references.Users, GameReferenceUser{UserID: user.ID, Username: user.Username, Role: user.Role, TeamID: user.TeamID, TeamName: user.TeamName})
+		if containsCategory(user.CategoryIDs, categoryID) {
+			references.Users = append(references.Users, CategoryReferenceUser{UserID: user.ID, Username: user.Username, Role: user.Role, TeamID: user.TeamID, TeamName: user.TeamName})
 		}
 	}
 	return references, nil
 }
 
-func (s *gameMemoryStore) UserHasGameReferencesOutsideScope(userID UserID, gameIDs []string) (bool, error) {
-	for gameID, references := range s.accountReferences {
-		if containsGame(gameIDs, gameID) {
+func (s *categoryMemoryStore) UserHasCategoryReferencesOutsideScope(userID UserID, categoryIDs []CategoryID) (bool, error) {
+	for categoryID, references := range s.accountReferences {
+		if containsCategory(categoryIDs, categoryID) {
 			continue
 		}
 		for _, reference := range references {
@@ -973,16 +973,16 @@ func TestUpdateUserAccessFailureDoesNotLeaveChangedAccessWithLiveSession(t *test
 	newTeam, _ := service.CreateTeam(admin.ID, "新组")
 	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &oldTeam.ID, GameIDs: []string{"game-a"},
+		TeamID: &oldTeam.ID, CategoryIDs: []CategoryID{1},
 	})
 	login, _ := service.Login("operator-a", "a-long-operator-password")
 	store.failAudit = true
 
-	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []string{"game-b"}); err == nil {
+	if _, err := service.UpdateUserAccess(admin.ID, operator.ID, RoleSeniorOperator, &newTeam.ID, []CategoryID{2}); err == nil {
 		t.Fatal("UpdateUserAccess() error = nil")
 	}
 	stored, _, _ := base.FindUser(operator.ID)
-	if stored.Role != RoleOperator || stored.TeamID == nil || *stored.TeamID != oldTeam.ID || len(stored.GameIDs) != 1 || stored.GameIDs[0] != "game-a" {
+	if stored.Role != RoleOperator || stored.TeamID == nil || *stored.TeamID != oldTeam.ID || len(stored.CategoryIDs) != 1 || stored.CategoryIDs[0] != 1 {
 		t.Fatalf("failed access update changed persisted scope: %+v", stored)
 	}
 	if _, err := service.Authenticate(login.Token); err != nil {
@@ -1000,7 +1000,7 @@ func TestCreateUserAuditFailureDoesNotPersistUser(t *testing.T) {
 
 	if _, err := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{"game-a"},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{1},
 	}); err == nil {
 		t.Fatal("CreateUser() error = nil")
 	}
@@ -1053,7 +1053,7 @@ func TestResetPasswordFailureDoesNotLeaveNewPasswordWithLiveOldSession(t *testin
 	team, _ := service.CreateTeam(admin.ID, "密码组")
 	operator, _ := service.CreateUser(admin.ID, CreateUserInput{
 		Username: "operator-a", Password: "a-long-operator-password", Role: RoleOperator,
-		TeamID: &team.ID, GameIDs: []string{"game-a"},
+		TeamID: &team.ID, CategoryIDs: []CategoryID{1},
 	})
 	login, _ := service.Login("operator-a", "a-long-operator-password")
 	store.failInvalidate = true

@@ -16,21 +16,21 @@ import (
 )
 
 type createAccountRequest struct {
-	UserID           identityservice.UserID  `json:"user_id"`
-	GameIDs          []string                `json:"game_ids"`
-	Name             string                  `json:"name"`
-	Platform         accountservice.Platform `json:"platform"`
-	OriginalCookie   string                  `json:"original_cookie"`
-	BrowserProfileID string                  `json:"browser_profile_id"`
-	Remark           string                  `json:"remark"`
-	Tags             []string                `json:"tags"`
+	UserID           identityservice.UserID       `json:"user_id"`
+	CategoryIDs      []identityservice.CategoryID `json:"category_ids"`
+	Name             string                       `json:"name"`
+	Platform         accountservice.Platform      `json:"platform"`
+	OriginalCookie   string                       `json:"original_cookie"`
+	BrowserProfileID string                       `json:"browser_profile_id"`
+	Remark           string                       `json:"remark"`
+	Tags             []string                     `json:"tags"`
 }
 
 type updateAccountRequest struct {
 	BusinessStatus accountservice.BusinessStatus `json:"business_status"`
 	LoginStatus    accountservice.LoginStatus    `json:"login_status"`
 	Remark         *string                       `json:"remark"`
-	GameIDs        *[]string                     `json:"game_ids"`
+	CategoryIDs    *[]identityservice.CategoryID `json:"category_ids"`
 	Name           *string                       `json:"name"`
 }
 
@@ -84,9 +84,9 @@ func CreateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	gameIDs := accountservice.NormalizeGameIDs(req.GameIDs)
+	categoryIDs := accountservice.NormalizeCategoryIDs(req.CategoryIDs)
 	account, err := accountservice.CreateAccount(actor, accountservice.CreateAccountInput{
-		UserID: req.UserID, GameIDs: gameIDs, Name: req.Name, Platform: req.Platform,
+		UserID: req.UserID, CategoryIDs: categoryIDs, Name: req.Name, Platform: req.Platform,
 		OriginalCookie: req.OriginalCookie, BrowserProfileID: req.BrowserProfileID, Remark: req.Remark, Tags: req.Tags,
 	})
 	if err != nil {
@@ -109,10 +109,10 @@ func ListMediaAccounts(ctx context.Context, c *hertzapp.RequestContext) {
 		}
 		userID = identityservice.UserID(parsed)
 	}
-	gameIDs := accountservice.NormalizeGameIDs(commaValues(c.Query("game_ids")))
+	categoryIDs := accountservice.NormalizeCategoryIDs(parseCategoryIDs(commaValues(c.Query("category_ids"))))
 	accounts, err := accountservice.ListAccounts(actor, accountservice.AccountFilter{
 		UserID:         userID,
-		GameIDs:        gameIDs,
+		CategoryIDs:    categoryIDs,
 		Platform:       accountservice.Platform(c.Query("platform")),
 		BusinessStatus: accountservice.BusinessStatus(c.Query("business_status")),
 		LoginStatus:    accountservice.LoginStatus(c.Query("login_status")),
@@ -155,9 +155,9 @@ func UpdateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	if !api.DecodeJSON(c, &req) {
 		return
 	}
-	gameIDs := req.GameIDs
+	categoryIDs := req.CategoryIDs
 	account, err := accountservice.UpdateAccount(actor, c.Param("account_id"), accountservice.UpdateAccountInput{
-		BusinessStatus: req.BusinessStatus, LoginStatus: req.LoginStatus, Remark: req.Remark, GameIDs: gameIDs, Name: req.Name,
+		BusinessStatus: req.BusinessStatus, LoginStatus: req.LoginStatus, Remark: req.Remark, CategoryIDs: categoryIDs, Name: req.Name,
 	})
 	if err != nil {
 		writeMediaAccountError(c, err)
@@ -400,6 +400,17 @@ func commaValues(value string) []string {
 		return nil
 	}
 	return strings.Split(value, ",")
+}
+
+func parseCategoryIDs(values []string) []identityservice.CategoryID {
+	result := make([]identityservice.CategoryID, 0, len(values))
+	for _, value := range values {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err == nil && parsed > 0 {
+			result = append(result, identityservice.CategoryID(parsed))
+		}
+	}
+	return result
 }
 
 func writeMediaAccountError(c *hertzapp.RequestContext, err error) {

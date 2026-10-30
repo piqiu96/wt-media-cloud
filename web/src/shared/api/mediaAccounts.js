@@ -34,15 +34,15 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
         query.profile_search = query.profile
         delete query.profile
       }
-      if (query?.gameIds !== undefined) {
-        query.game_ids = query.gameIds
-        delete query.gameIds
+      if (query?.categoryIds !== undefined) {
+        query.category_ids = query.categoryIds
+        delete query.categoryIds
       }
       return api.get('/media-accounts', query).then((accounts) => Array.isArray(accounts) ? accounts.map(sanitize) : accounts)
     },
-    create({ userId, gameIds, name, platform, originalCookie, browserProfileId, remark, tags }) {
+    create({ userId, categoryIds, name, platform, originalCookie, browserProfileId, remark, tags }) {
       const body = {}
-      if (gameIds !== undefined) body.game_ids = gameIds
+      if (categoryIds !== undefined) body.category_ids = categoryIds
       body.platform = platform
       if (userId) body.user_id = userId
       if (name) body.name = name
@@ -52,14 +52,14 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
       if (tags?.length) body.tags = tags
       return api.post('/media-accounts', body).then(sanitize)
     },
-    update(accountId, { businessStatus, loginStatus, remark, gameIds, name }) {
+    update(accountId, { businessStatus, loginStatus, remark, categoryIds, name }) {
       const body = {
         business_status: businessStatus,
         login_status: loginStatus,
         remark,
         name,
       }
-      if (gameIds !== undefined) body.game_ids = gameIds
+      if (categoryIds !== undefined) body.category_ids = categoryIds
       return api.patch(`/media-accounts/${accountId}`, body).then(sanitize)
     },
     identify(accountId, { platformAccountId, name, avatarUrl, loginStatus }) {

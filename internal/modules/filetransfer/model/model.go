@@ -56,7 +56,7 @@ type Task struct {
 	AssetType         AssetType       `json:"asset_type"`
 	AssetID           int64           `json:"asset_id"`
 	AssetTitle        string          `json:"asset_title,omitempty"`
-	GameName          string          `json:"game_name,omitempty"`
+	CategoryName          string          `json:"category_name,omitempty"`
 	PublishedAt       *time.Time      `json:"published_at,omitempty"`
 	SourceObjectKey   string          `json:"-"`
 	Purpose           Purpose         `json:"purpose"`

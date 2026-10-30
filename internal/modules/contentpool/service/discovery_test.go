@@ -167,7 +167,7 @@ func TestDiscoveryRunQueuesThenWorkerExecutesCloudCrawler(t *testing.T) {
 	content := NewService(newMemoryStore())
 	service := NewDiscoveryService(store, content)
 	team := identityservice.TeamID(7)
-	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled})
+	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "王者荣耀"}, Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestDeleteStrategyScopesByTeamAndReportsMissing(t *testing.T) {
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
-	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "待删", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "待删", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestDeleteStrategyScopesByTeamAndReportsMissing(t *testing.T) {
 		t.Fatalf("missing strategy err=%v, want ErrStrategyNotFound", err)
 	}
 	other := identityservice.TeamID(8)
-	if _, err := service.CreateStrategy(identityservice.PublicUser{ID: 3, Role: identityservice.RoleSeniorOperator, TeamID: &other}, DiscoveryStrategy{TeamID: other, Name: "越权", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "x"}}); err != nil {
+	if _, err := service.CreateStrategy(identityservice.PublicUser{ID: 3, Role: identityservice.RoleSeniorOperator, TeamID: &other}, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: other, Name: "越权", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "x"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, v := range store.strategies {
@@ -226,7 +226,7 @@ func TestManualRunPersistsOperationForResultProjection(t *testing.T) {
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
 	service.SetCrawler(fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
-	task, err := service.CreateManualRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
+	task, err := service.CreateManualRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo", "category_id": testCategoryID()})
 	if err != nil || task.Snapshot["operation"] != "url" || task.Status != CrawlPending {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
@@ -240,7 +240,7 @@ func TestDiscoveryResultDeduplicatesIntoContentPool(t *testing.T) {
 		return CrawlerResult{Items: []map[string]any{{"platform_content_id": "a1", "title": "demo"}, {"platform_content_id": "a1", "title": "demo"}}}, nil
 	}))
 	team := identityservice.TeamID(7)
-	task, err := service.CreateManualRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
+	task, err := service.CreateManualRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo", "category_id": testCategoryID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestHistoricalManualTaskConfirmationStillWorks(t *testing.T) {
 	}))
 	store := service.store.(*discoveryMemory)
 	team := identityservice.TeamID(7)
-	task, err := service.CreateManualRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, "douyin", "keyword", map[string]any{"keyword": "demo"})
+	task, err := service.CreateManualRun(identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}, "douyin", "keyword", map[string]any{"keyword": "demo", "category_id": testCategoryID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestRunDueUsesStrategyTimezone(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
-	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, DiscoveryStrategy{TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled})
+	strategy, err := service.CreateStrategy(identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestWorkerClaimsPendingTaskOnlyOnce(t *testing.T) {
 	}))
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
-	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "one", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
+	strategy, err := service.CreateStrategy(actor, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "one", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,11 +356,11 @@ func TestUpdateStrategyPreservesTeamAndAllowsEdit(t *testing.T) {
 	service := NewDiscoveryService(store, NewService(newMemoryStore()), fixedCrawler(func(_ context.Context, _ CrawlerRequest) (CrawlerResult, error) { return CrawlerResult{}, nil }))
 	team := identityservice.TeamID(9)
 	actor := identityservice.PublicUser{ID: 3, Role: identityservice.RoleSeniorOperator, TeamID: &team}
-	created, err := service.CreateStrategy(actor, DiscoveryStrategy{TeamID: team, Name: "old", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"one"}}})
+	created, err := service.CreateStrategy(actor, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "old", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"one"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.UpdateStrategy(actor, created.ID, DiscoveryStrategy{Name: "new", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"two"}}, Status: StrategyEnabled})
+	updated, err := service.UpdateStrategy(actor, created.ID, DiscoveryStrategy{CategoryID: testCategoryID(), Name: "new", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keywords": []any{"two"}}, Status: StrategyEnabled})
 	if err != nil || updated.Name != "new" || updated.TeamID != team || updated.Status != StrategyEnabled {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
@@ -374,17 +374,17 @@ func TestOrdinaryOperatorCannotManageDiscoveryWrites(t *testing.T) {
 	team := identityservice.TeamID(7)
 	senior := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	operator := identityservice.PublicUser{ID: 3, Role: identityservice.RoleOperator, TeamID: &team}
-	strategy, err := service.CreateStrategy(senior, DiscoveryStrategy{TeamID: team, Name: "managed", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
+	strategy, err := service.CreateStrategy(senior, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "managed", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Status: StrategyEnabled})
 	if err != nil {
 		t.Fatal(err)
 	}
 	writes := map[string]func() error{
 		"create": func() error {
-			_, err := service.CreateStrategy(operator, DiscoveryStrategy{TeamID: team, Name: "forged", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+			_, err := service.CreateStrategy(operator, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "forged", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
 			return err
 		},
 		"update": func() error {
-			_, err := service.UpdateStrategy(operator, strategy.ID, DiscoveryStrategy{Name: "forged", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+			_, err := service.UpdateStrategy(operator, strategy.ID, DiscoveryStrategy{CategoryID: testCategoryID(), Name: "forged", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
 			return err
 		},
 		"status": func() error {
@@ -434,7 +434,7 @@ func TestDiscoveryListsHonorRequestedTeamAndRole(t *testing.T) {
 	}{
 		{seniorA, teamA, "a"}, {seniorB, teamB, "b"},
 	} {
-		if _, err := service.CreateStrategy(input.actor, DiscoveryStrategy{TeamID: input.team, Name: input.name, StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); err != nil {
+		if _, err := service.CreateStrategy(input.actor, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: input.team, Name: input.name, StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -479,43 +479,37 @@ func TestAdminStrategyCreationRequiresExplicitTeam(t *testing.T) {
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
 	admin := identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}
-	if _, err := service.CreateStrategy(admin, DiscoveryStrategy{Name: "no-team", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); !errors.Is(err, ErrTeamRequired) {
+	if _, err := service.CreateStrategy(admin, DiscoveryStrategy{CategoryID: testCategoryID(), Name: "no-team", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); !errors.Is(err, ErrTeamRequired) {
 		t.Fatalf("admin without team err=%v, want ErrTeamRequired", err)
 	}
-	created, err := service.CreateStrategy(admin, DiscoveryStrategy{TeamID: team, Name: "with-team", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	created, err := service.CreateStrategy(admin, DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "with-team", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
 	if err != nil || created.TeamID != team {
 		t.Fatalf("admin with team created=%+v err=%v", created, err)
 	}
 }
 
-func TestStrategyDefaultsGameToOther(t *testing.T) {
+func TestStrategyRequiresCategory(t *testing.T) {
 	service := NewDiscoveryService(newDiscoveryMemory(), NewService(newMemoryStore()))
 	team := identityservice.TeamID(7)
 	senior := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
-	created, err := service.CreateStrategy(senior, DiscoveryStrategy{TeamID: team, Name: "no-game", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
-	if err != nil {
-		t.Fatalf("create strategy: %v", err)
+	if _, err := service.CreateStrategy(senior, DiscoveryStrategy{TeamID: team, Name: "no-category", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}}); !errors.Is(err, ErrDiscoveryInvalid) {
+		t.Fatalf("create strategy without category error = %v, want ErrDiscoveryInvalid", err)
 	}
-	if created.GameID == nil || *created.GameID != "other" {
-		t.Fatalf("strategy game_id = %v, want other", created.GameID)
-	}
-	updated, err := service.UpdateStrategy(senior, created.ID, DiscoveryStrategy{Name: "still-no-game", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
-	if err != nil {
-		t.Fatalf("update strategy: %v", err)
-	}
-	if updated.GameID == nil || *updated.GameID != "other" {
-		t.Fatalf("updated strategy game_id = %v, want other", updated.GameID)
+	categoryID := identityservice.CategoryID(1)
+	created, err := service.CreateStrategy(senior, DiscoveryStrategy{TeamID: team, CategoryID: &categoryID, Name: "with-category", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}})
+	if err != nil || created.CategoryID == nil || *created.CategoryID != categoryID {
+		t.Fatalf("create strategy with category = %+v, err=%v", created, err)
 	}
 }
 
 func TestAdminManualRunUsesExplicitTeamScope(t *testing.T) {
 	store := newDiscoveryMemory()
 	service := NewDiscoveryService(store, NewService(newMemoryStore()))
-	if _, err := service.CreateManualRunWithTeam(identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}, nil, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"}); !errors.Is(err, ErrDiscoveryInvalid) {
+	if _, err := service.CreateManualRunWithTeam(identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}, nil, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo", "category_id": testCategoryID()}); !errors.Is(err, ErrDiscoveryInvalid) {
 		t.Fatalf("admin without team err=%v", err)
 	}
 	team := identityservice.TeamID(7)
-	task, err := service.CreateManualRunWithTeam(identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}, &team, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo"})
+	task, err := service.CreateManualRunWithTeam(identityservice.PublicUser{ID: 1, Role: identityservice.RoleAdmin}, &team, "douyin", "url", map[string]any{"url": "https://v.douyin.com/demo", "category_id": testCategoryID()})
 	if err != nil || task.TeamID != team {
 		t.Fatalf("task=%+v err=%v", task, err)
 	}
@@ -529,7 +523,7 @@ func TestStrategyMaterialRulesValidationAndSnapshot(t *testing.T) {
 	team := identityservice.TeamID(7)
 	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team}
 	base := func() DiscoveryStrategy {
-		return DiscoveryStrategy{TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Status: StrategyEnabled}
+		return DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "热点", StrategyType: "keyword", Platform: "douyin", Status: StrategyEnabled}
 	}
 	condition := func(field, operator string, value any) map[string]any {
 		return map[string]any{"field": field, "operator": operator, "value": value}
@@ -619,7 +613,7 @@ func TestRunDueNeverCrawls(t *testing.T) {
 	team := identityservice.TeamID(7)
 	strategy, err := svc.CreateStrategy(
 		identityservice.PublicUser{ID: 2, Role: identityservice.RoleSeniorOperator, TeamID: &team},
-		DiscoveryStrategy{TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled},
+		DiscoveryStrategy{CategoryID: testCategoryID(), TeamID: team, Name: "定时热点", StrategyType: "keyword", Platform: "douyin", Config: map[string]any{"keyword": "demo"}, Schedule: "daily 09:00", Timezone: "Asia/Shanghai", Status: StrategyEnabled},
 	)
 	if err != nil {
 		t.Fatal(err)

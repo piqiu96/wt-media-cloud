@@ -10,15 +10,15 @@ describe('UsersPage product surface', () => {
     }
   })
 
-  // 表单与筛选共用同一个启用游戏口径：停用游戏不能分配，也不该能被筛出来。
-  it('uses configured enabled-game options instead of free text game IDs', () => {
-    expect(source).toContain('请选择已启用游戏')
-    expect(source).toContain("import { enabledGames } from '../../../../shared/utils/games.js'")
-    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
-    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
-    expect(source).not.toContain('v-for="game in games"')
-    expect(source).toContain('Array.isArray(gameIds) ? gameIds : []')
-    expect(source).not.toContain('输入游戏 ID 后回车')
+  // 表单与筛选共用同一个启用类目口径：停用类目不能分配，也不该能被筛出来。
+  it('uses configured enabled-category options instead of free text category IDs', () => {
+    expect(source).toContain('请选择已启用类目')
+    expect(source).toContain("import { enabledCategories } from '../../../../shared/utils/categories.js'")
+    expect(source).toContain('const enabledCategoryOptions = computed(() => enabledCategories(categories.value))')
+    expect(source.match(/v-for="category in enabledCategoryOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="category in categories"')
+    expect(source).toContain('Array.isArray(categoryIds) ? categoryIds : []')
+    expect(source).not.toContain('输入类目 ID 后回车')
   })
 
   it('uses admin and no longer exposes the retired technician role', () => {

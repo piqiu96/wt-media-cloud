@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.10.27.6
+  version: 2026.10.29.1
 paths:
   /api/v1/media-accounts:
     get:
@@ -9,7 +9,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: user_id, schema: {type: integer, format: int64}}
-        - {in: query, name: game_id, schema: {type: string}}
+        - {in: query, name: category_ids, schema: {type: string}, description: Comma-separated numeric category IDs; an account matches any selected category.}
         - {in: query, name: platform, schema: {$ref: '#/components/schemas/Platform'}}
         - {in: query, name: any_tags, schema: {type: string}, description: Comma-separated tags; at least one must match.}
         - {in: query, name: all_tags, schema: {type: string}, description: Comma-separated tags; every tag must match.}
@@ -206,7 +206,7 @@ components:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   responses:
     AuthenticationRequired: {description: Missing, invalid, or superseded session.}
-    Forbidden: {description: User ownership, role, or game scope forbids the operation.}
+    Forbidden: {description: User ownership, role, or category scope forbids the operation.}
     InvalidRequest: {description: Invalid media account request.}
     NotFound: {description: Media account not found.}
   schemas:
@@ -216,17 +216,24 @@ components:
     IdentificationStatus: {type: string, enum: [pending_identification, identified, duplicate]}
     CreateMediaAccountRequest:
       type: object
-      required: [game_id, platform]
+      required: [platform]
       properties:
         user_id: {type: integer, format: int64, description: Admin-only target; otherwise omitted or current user.}
-        game_id: {type: string, maxLength: 128}
+        category_ids: {type: array, items: {type: integer, format: int64, minimum: 1}, description: Omit or pass an empty array when the account is not classified yet. Selected categories must share one type.}
+        name: {type: string, maxLength: 255}
         platform: {$ref: '#/components/schemas/Platform'}
+        browser_profile_id: {type: string}
+        remark: {type: string, maxLength: 500}
+        tags: {type: array, items: {type: string, maxLength: 64}}
         original_cookie: {type: string, format: password, writeOnly: true}
     UpdateMediaAccountRequest:
       type: object
       properties:
         business_status: {$ref: '#/components/schemas/BusinessStatus'}
         login_status: {$ref: '#/components/schemas/LoginStatus'}
+        category_ids: {type: array, items: {type: integer, format: int64, minimum: 1}, description: Present with an empty array to clear all categories. Selected categories must share one type.}
+        name: {type: string, maxLength: 255}
+        remark: {type: string, maxLength: 500}
       minProperties: 1
     IdentifyMediaAccountRequest:
       type: object
@@ -244,18 +251,19 @@ components:
         tags: {type: array, minItems: 1, items: {type: string, maxLength: 64}}
     MediaAccount:
       type: object
-      required: [id, user_id, user_name, team_id, game_id, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
+      required: [id, user_id, user_name, team_id, category_ids, platform, identification_status, business_status, login_status, tags, created_at, updated_at]
       properties:
         id: {type: string}
         user_id: {type: integer, format: int64}
         user_name: {type: string, description: 'Owner display name (nickname, falling back to username) resolved by the read query; empty when the user row is missing. Read-only projection, never written.'}
         team_id: {type: integer, format: int64, nullable: true}
-        game_id: {type: string}
+        category_ids: {type: array, items: {type: integer, format: int64, minimum: 1}, description: May be empty when the account is not classified yet.}
         platform: {$ref: '#/components/schemas/Platform'}
         platform_account_id: {type: string}
         name: {type: string}
         avatar_url: {type: string}
-        browser_profile_id: {type: string, description: Nullable C3 reference; C2 does not bind it.}
+        browser_profile_id: {type: string, description: Nullable browser-profile reference.}
+        remark: {type: string}
         identification_status: {$ref: '#/components/schemas/IdentificationStatus'}
         duplicate_of_account_id: {type: string}
         business_status: {$ref: '#/components/schemas/BusinessStatus'}

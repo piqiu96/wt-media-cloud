@@ -14,7 +14,7 @@ func TestIdentityServiceExposesPackageLevelOperations(t *testing.T) {
 		{name: "CreateUser", got: CreateUser},
 		{name: "Login", got: Login},
 		{name: "Authenticate", got: Authenticate},
-		{name: "GameReferences", got: GameReferences},
+		{name: "CategoryReferences", got: CategoryReferences},
 	}
 	for _, test := range tests {
 		if reflect.TypeOf(test.got).Kind() != reflect.Func {

@@ -36,9 +36,9 @@ describe('content pool page', () => {
     expect(source).toContain('discovery.importResults')
     expect(source).toContain('loadManualContext')
     expect(source).toContain('team_id: selectedTeamID()')
-    expect(source).toContain('所属游戏')
-    expect(source).toContain('game_id')
-    expect(source).toContain('gameName')
+    expect(source).toContain('所属类目')
+    expect(source).toContain('category_id')
+    expect(source).toContain('categoryName')
     expect(source).not.toContain('导入链接')
     expect(source).not.toContain('进入审核模式')
   })
@@ -92,33 +92,33 @@ describe('content pool page', () => {
     expect(source).toContain('team.name')
   })
 
-  // 目录仍按 scope=all 取（名称解析与人工导入要看全团队），但选项只列启用游戏：
-  // 停用游戏已不能新建策略，勾进筛选就成了一个看不见的裸条件。默认负责游戏与启用集合
-  // 取交集；交集为空时不传 game_ids（按既有裁定，负责游戏只是默认筛选，不是可见边界）。
-  it('offers only enabled games as options while still mapping names from the full catalog', () => {
-    expect(source).toContain('const gameFilter = ref([])')
+  // 目录仍按 scope=all 取（名称解析与人工导入要看全团队），但选项只列启用类目：
+  // 停用类目已不能新建策略，勾进筛选就成了一个看不见的裸条件。默认负责类目与启用集合
+  // 取交集；交集为空时不传 category_ids（按既有裁定，负责类目只是默认筛选，不是可见边界）。
+  it('offers only enabled categories as options while still mapping names from the full catalog', () => {
+    expect(source).toContain('const categoryFilter = ref([])')
     expect(source).toContain('const isAdmin = computed')
-    expect(source).toContain('function defaultGameIDs()')
-    expect(source).toContain('gameFilter.value = defaultGameIDs()')
-    expect(source).toContain("users.listGames({ scope: 'all' })")
-    expect(source).toContain("import { enabledGames } from '../../../shared/utils/games.js'")
-    expect(source).toContain('const enabledGameOptions = computed(() => enabledGames(games.value))')
-    expect(source).toContain('const enabledIds = new Set(enabledGameOptions.value.map((game) => game.id))')
+    expect(source).toContain('function defaultCategoryIDs()')
+    expect(source).toContain('categoryFilter.value = defaultCategoryIDs()')
+    expect(source).toContain("users.listCategories({ scope: 'all' })")
+    expect(source).toContain("import { enabledCategories } from '../../../shared/utils/categories.js'")
+    expect(source).toContain('const enabledCategoryOptions = computed(() => enabledCategories(categories.value))')
+    expect(source).toContain('const enabledIds = new Set(enabledCategoryOptions.value.map((category) => category.id))')
     expect(source).toContain('return ids.filter((id) => enabledIds.has(id))')
-    expect(source.match(/v-for="game in enabledGameOptions"/g)).toHaveLength(2)
-    expect(source).not.toContain('v-for="game in games"')
-    expect(source).toContain('const enabled = enabledGameOptions.value')
+    expect(source.match(/v-for="category in enabledCategoryOptions"/g)).toHaveLength(2)
+    expect(source).not.toContain('v-for="category in categories"')
+    expect(source).toContain('const enabled = enabledCategoryOptions.value')
     expect(source).toContain("enabled.find((g) => g.id === 'other') || enabled[0]")
-    expect(source).toContain('game_ids: gameFilter.value.length ? gameFilter.value : undefined')
+    expect(source).toContain('category_ids: categoryFilter.value.length ? categoryFilter.value : undefined')
     expect(source).toContain('team_id: teamFilter.value || undefined')
     expect(source).toContain('function changeTeamFilter()')
-    expect(source).toContain('gameFilter.value = []')
-    expect(source).toContain('v-model="gameFilter"')
-    expect(source).toContain('v-model="manualGameId"')
+    expect(source).toContain('categoryFilter.value = []')
+    expect(source).toContain('v-model="categoryFilter"')
+    expect(source).toContain('v-model="manualCategoryId"')
     expect(source).toContain('v-model="teamFilter"')
     expect(source).toContain('v-if="isAdmin"')
-    // 名称解析仍读全量目录，停用游戏的历史行不会显示成裸 ID。
-    expect(source).toContain('const game = games.value.find((item) => item.id === id)')
+    // 名称解析仍读全量目录，停用类目的历史行不会显示成裸 ID。
+    expect(source).toContain('const category = categories.value.find((item) => item.id === id)')
   })
 
   it('imports only the results selected by the user', () => {

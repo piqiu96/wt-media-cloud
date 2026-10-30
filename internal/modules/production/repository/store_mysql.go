@@ -26,10 +26,10 @@ type CreateUsageInput struct {
 
 type MaterialFilter struct {
 	TeamID      *identity.TeamID
-	GameIDs     []string
+	CategoryIDs []identity.CategoryID
 	Search      string
 	Limit       int
-	GameID      string
+	CategoryID  identity.CategoryID
 	VideoStatus string
 	SortBy      string
 	SortOrder   string
@@ -62,10 +62,10 @@ type MaterialUsageRelation struct {
 	CreatedAt  time.Time
 }
 
-const materialProjectionColumns = `m.id, m.team_id, s.game_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at, m.created_by`
+const materialProjectionColumns = `m.id, m.team_id, s.category_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at, m.created_by`
 
 // FindMaterial returns the material readiness projection only within the
-// caller's team boundary. Game-range filtering is applied by the Service.
+// caller's team boundary. Category-range filtering is applied by the Service.
 func FindMaterial(id int64, teamID identity.TeamID) (model.Material, bool, error) {
 	return findMaterial(database.DB(), id, teamID)
 }
@@ -83,7 +83,7 @@ func findMaterial(db *gorm.DB, id int64, teamID identity.TeamID) (model.Material
 }
 
 // FindMaterialUnscoped is for the production Service, which applies the
-// actor's team and game scope before returning the material to a caller.
+// actor's team and category scope before returning the material to a caller.
 func FindMaterialUnscoped(id int64) (model.Material, bool, error) {
 	return findMaterialUnscoped(database.DB(), id)
 }
@@ -106,23 +106,22 @@ func ListMaterials(filter MaterialFilter) ([]model.Material, error) {
 
 func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error) {
 	conditions := make([]string, 0, 3)
-	args := make([]any, 0, len(filter.GameIDs)+4)
+	args := make([]any, 0, len(filter.CategoryIDs)+4)
 	if filter.TeamID != nil {
 		conditions = append(conditions, "m.team_id = ?")
 		args = append(args, *filter.TeamID)
 	}
-	if len(filter.GameIDs) > 0 {
-		placeholders := make([]string, 0, len(filter.GameIDs))
-		for _, gameID := range filter.GameIDs {
-			gameID = strings.TrimSpace(gameID)
-			if gameID == "" {
+	if len(filter.CategoryIDs) > 0 {
+		placeholders := make([]string, 0, len(filter.CategoryIDs))
+		for _, categoryID := range filter.CategoryIDs {
+			if categoryID <= 0 {
 				continue
 			}
 			placeholders = append(placeholders, "?")
-			args = append(args, gameID)
+			args = append(args, categoryID)
 		}
 		if len(placeholders) > 0 {
-			conditions = append(conditions, "s.game_id IN ("+strings.Join(placeholders, ",")+")")
+			conditions = append(conditions, "s.category_id IN ("+strings.Join(placeholders, ",")+")")
 		}
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
@@ -130,15 +129,15 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 		conditions = append(conditions, "(CAST(m.id AS CHAR) = ? OR m.title LIKE ? OR s.platform_content_id LIKE ? OR s.author_name LIKE ?)")
 		args = append(args, search, like, like, like)
 	}
-	if filter.GameID != "" {
-		conditions = append(conditions, "s.game_id = ?")
-		args = append(args, filter.GameID)
+	if filter.CategoryID > 0 {
+		conditions = append(conditions, "s.category_id = ?")
+		args = append(args, filter.CategoryID)
 	}
 	if filter.VideoStatus != "" {
 		conditions = append(conditions, "m.video_status = ?")
 		args = append(args, filter.VideoStatus)
 	}
-	// The three usage dimensions are independent of each other and of the game
+	// The three usage dimensions are independent of each other and of the category
 	// filter, so each is its own EXISTS and they combine with AND. None of them
 	// rewrites material state: a given-up relation still counts as not joined,
 	// while its successful outputs remain history.
@@ -729,7 +728,8 @@ func scanUsage(row rowScanner, usage *model.MaterialUsage) error {
 
 func scanMaterial(row rowScanner, material *model.Material) error {
 	var teamID int64
-	var gameID, sourceURL, authorName, coverURL, authorHomeURL, objectKey, sha256, videoError sql.NullString
+	var categoryID sql.NullInt64
+	var sourceURL, authorName, coverURL, authorHomeURL, objectKey, sha256, videoError sql.NullString
 	var platformContentID sql.NullString
 	var publishedAt, preparedAt sql.NullTime
 	var size sql.NullInt64
@@ -738,7 +738,7 @@ func scanMaterial(row rowScanner, material *model.Material) error {
 	var materialStatus string
 	var mediaJSON []byte
 	var createdBy int64
-	if err := row.Scan(&material.ID, &teamID, &gameID, &material.SourceContentID, &platformContentID, &material.Title, &sourceURL, &material.Platform, &authorName, &coverURL, &authorHomeURL, &material.ViewCount, &material.LikeCount, &material.FavoriteCount, &material.CommentCount, &material.ShareCount, &publishedAt, &status, &materialStatus, &objectKey, &size, &sha256, &mediaJSON, &videoError, &preparedAt, &material.CreatedAt, &material.UpdatedAt, &createdBy); err != nil {
+	if err := row.Scan(&material.ID, &teamID, &categoryID, &material.SourceContentID, &platformContentID, &material.Title, &sourceURL, &material.Platform, &authorName, &coverURL, &authorHomeURL, &material.ViewCount, &material.LikeCount, &material.FavoriteCount, &material.CommentCount, &material.ShareCount, &publishedAt, &status, &materialStatus, &objectKey, &size, &sha256, &mediaJSON, &videoError, &preparedAt, &material.CreatedAt, &material.UpdatedAt, &createdBy); err != nil {
 		return err
 	}
 	material.CreatedBy = identity.UserID(createdBy)
@@ -753,9 +753,9 @@ func scanMaterial(row rowScanner, material *model.Material) error {
 	material.SourceObjectKey = objectKey.String
 	material.VideoSHA256 = sha256.String
 	material.VideoError = videoError.String
-	if gameID.Valid {
-		value := gameID.String
-		material.GameID = &value
+	if categoryID.Valid {
+		value := identity.CategoryID(categoryID.Int64)
+		material.CategoryID = &value
 	}
 	if publishedAt.Valid {
 		material.PublishedAt = &publishedAt.Time

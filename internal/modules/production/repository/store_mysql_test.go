@@ -133,13 +133,13 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM materials m JOIN source_contents s ON s.id = m.source_content_id WHERE m.id = ? AND m.team_id = ?")).
 		WithArgs(int64(42), int64(7)).
-		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), "game-1", int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", int64(12000), int64(72313), int64(882), int64(4028), int64(8323), now, "ready", "available", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now, int64(9)))
+		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), int64(1), int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", int64(12000), int64(72313), int64(882), int64(4028), int64(8323), now, "ready", "available", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now, int64(9)))
 
 	material, found, err := findMaterial(db, 42, identity.TeamID(7))
 	if err != nil {
 		t.Fatalf("findMaterial() error = %v", err)
 	}
-	if !found || material.VideoStatus != model.VideoReady || material.SourceObjectKey != "materials/42.mp4" || material.GameID == nil || *material.GameID != "game-1" {
+	if !found || material.VideoStatus != model.VideoReady || material.SourceObjectKey != "materials/42.mp4" || material.CategoryID == nil || *material.CategoryID != 1 {
 		t.Fatalf("material = %+v found=%v", material, found)
 	}
 	// The provider's id and the local row id are separate columns and both have
@@ -906,20 +906,20 @@ func TestListMaterialsAppliesTheUsageDimensionsAsIndependentPredicates(t *testin
 	mock.ExpectQuery(fragment(
 		"FROM materials m JOIN source_contents s ON s.id = m.source_content_id",
 		"m.team_id = ?",
-		"s.game_id IN (?,?)",
+		"s.category_id IN (?,?)",
 		"EXISTS (SELECT 1 FROM material_usages u WHERE u.material_id = m.id AND u.user_id = ? AND u.status = 'active')",
 		"EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id = ?)",
 		"NOT EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id IS NOT NULL)",
-	)).WithArgs(int64(7), "game-a", "game-b", int64(9), int64(9)).
+	)).WithArgs(int64(7), 6, 7, int64(9), int64(9)).
 		WillReturnRows(sqlmock.NewRows(materialColumns()))
 
 	if _, err := listMaterials(db, MaterialFilter{
-		TeamID:    &team,
-		GameIDs:   []string{"game-a", "game-b"},
-		Joined:    "joined",
-		MyUsage:   "used",
-		TeamUsage: "unused",
-		UserID:    identity.UserID(9),
+		TeamID:      &team,
+		CategoryIDs: []identity.CategoryID{6, 7},
+		Joined:      "joined",
+		MyUsage:     "used",
+		TeamUsage:   "unused",
+		UserID:      identity.UserID(9),
 	}); err != nil {
 		t.Fatalf("listMaterials() error = %v", err)
 	}
@@ -1022,5 +1022,5 @@ func usageColumns() []string {
 }
 
 func materialColumns() []string {
-	return []string{"id", "team_id", "game_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "view_count", "like_count", "favorite_count", "comment_count", "share_count", "published_at", "video_status", "status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at", "created_by"}
+	return []string{"id", "team_id", "category_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "view_count", "like_count", "favorite_count", "comment_count", "share_count", "published_at", "video_status", "status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at", "created_by"}
 }

@@ -20,7 +20,7 @@ func CreateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) 
 }
 func createStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	config, _ := json.Marshal(v.Config)
-	result := db.Exec(`INSERT INTO discovery_strategies (team_id,game_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, nullableStringPtr(v.GameID), v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.CreatedBy, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
+	result := db.Exec(`INSERT INTO discovery_strategies (team_id,category_id,name,strategy_type,platform,config_json,schedule,timezone,status,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.TeamID, nullableCategoryIDPtr(v.CategoryID), v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, v.CreatedBy, v.CreatedBy, v.CreatedAt, v.UpdatedAt)
 	if result.Error != nil {
 		var mysqlError *mysql.MySQLError
 		if errors.As(result.Error, &mysqlError) && mysqlError.Number == 1062 {
@@ -47,7 +47,7 @@ func ListStrategiesFiltered(team *sharedidentity.TeamID, filter DiscoveryStrateg
 	return listStrategies(database.DB(), team, filter)
 }
 func listStrategies(db *gorm.DB, team *sharedidentity.TeamID, filter DiscoveryStrategyFilter) ([]model.DiscoveryStrategy, error) {
-	query := `SELECT s.id,s.team_id,s.game_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by`
+	query := `SELECT s.id,s.team_id,s.category_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by`
 	conditions := []string{}
 	args := []any{}
 	if team != nil {
@@ -89,7 +89,7 @@ func FindStrategy(id int64) (model.DiscoveryStrategy, bool, error) {
 	return findStrategy(database.DB(), id)
 }
 func findStrategy(db *gorm.DB, id int64) (model.DiscoveryStrategy, bool, error) {
-	item, err := scanStrategy(db.Raw(`SELECT s.id,s.team_id,s.game_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by WHERE s.id = ?`, id).Row())
+	item, err := scanStrategy(db.Raw(`SELECT s.id,s.team_id,s.category_id,s.name,s.strategy_type,s.platform,s.config_json,s.schedule,s.timezone,s.status,s.created_by,s.updated_by,s.created_at,s.updated_at,COALESCE(cu.nickname,cu.username,'') AS created_by_name,COALESCE(uu.nickname,uu.username,'') AS updated_by_name FROM discovery_strategies s LEFT JOIN users cu ON cu.id=s.created_by LEFT JOIN users uu ON uu.id=s.updated_by WHERE s.id = ?`, id).Row())
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.DiscoveryStrategy{}, false, nil
 	}
@@ -100,7 +100,7 @@ func UpdateStrategy(v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) 
 }
 func updateStrategy(db *gorm.DB, v model.DiscoveryStrategy) (model.DiscoveryStrategy, error) {
 	config, _ := json.Marshal(v.Config)
-	result := db.Exec(`UPDATE discovery_strategies SET name=?,strategy_type=?,platform=?,config_json=?,schedule=?,timezone=?,status=?,game_id=?,updated_by=?,updated_at=? WHERE id=?`, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, nullableStringPtr(v.GameID), nullableUserID(v.UpdatedBy), v.UpdatedAt, v.ID)
+	result := db.Exec(`UPDATE discovery_strategies SET name=?,strategy_type=?,platform=?,config_json=?,schedule=?,timezone=?,status=?,category_id=?,updated_by=?,updated_at=? WHERE id=?`, v.Name, v.StrategyType, v.Platform, config, v.Schedule, v.Timezone, v.Status, nullableCategoryIDPtr(v.CategoryID), nullableUserID(v.UpdatedBy), v.UpdatedAt, v.ID)
 	if result.Error != nil {
 		return model.DiscoveryStrategy{}, result.Error
 	}
@@ -253,10 +253,11 @@ func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 	var item model.DiscoveryStrategy
 	var team, creator int64
 	var updatedBy sql.NullInt64
-	var gameID, createdByName, updatedByName sql.NullString
+	var createdByName, updatedByName sql.NullString
+	var categoryID sql.NullInt64
 	var status string
 	var raw []byte
-	err := row.Scan(&item.ID, &team, &gameID, &item.Name, &item.StrategyType, &item.Platform, &raw, &item.Schedule, &item.Timezone, &status, &creator, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &createdByName, &updatedByName)
+	err := row.Scan(&item.ID, &team, &categoryID, &item.Name, &item.StrategyType, &item.Platform, &raw, &item.Schedule, &item.Timezone, &status, &creator, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &createdByName, &updatedByName)
 	if err != nil {
 		return item, err
 	}
@@ -268,9 +269,9 @@ func scanStrategy(row scannable) (model.DiscoveryStrategy, error) {
 		value := sharedidentity.UserID(updatedBy.Int64)
 		item.UpdatedBy = &value
 	}
-	if gameID.Valid {
-		value := gameID.String
-		item.GameID = &value
+	if categoryID.Valid {
+		value := sharedidentity.CategoryID(categoryID.Int64)
+		item.CategoryID = &value
 	}
 	_ = json.Unmarshal(raw, &item.Config)
 	if item.Config == nil {

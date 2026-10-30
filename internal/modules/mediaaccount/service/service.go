@@ -76,7 +76,7 @@ type Store interface {
 	Find(id string) (AccountRecord, bool, error)
 	FindByIdentity(userID identityservice.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
-	Update(AccountRecord, *[]string) error
+	Update(AccountRecord, *[]identityservice.CategoryID) error
 	List(AccountQuery) ([]AccountRecord, error)
 	AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error
 	RemoveTags(userID identityservice.UserID, accountIDs, tags []string) error
@@ -95,7 +95,7 @@ type accountService struct {
 	profileFacts   profileFactResolver
 	sensitiveTasks sensitiveTaskCreator
 	users          userResolver
-	games          gameResolver
+	categories     categoryResolver
 	now            func() time.Time
 	newID          func(string) string
 }
@@ -125,10 +125,10 @@ type userResolver interface {
 	ResolveUser(userID identityservice.UserID) (identityservice.PublicUser, bool, error)
 }
 
-// gameResolver exposes enabled-game facts to the media-account module without
-// copying the identity store or applying user game-scope permissions.
-type gameResolver interface {
-	ResolveGame(gameID string) (identityservice.OperationGame, bool, error)
+// categoryResolver exposes enabled-category facts to the media-account module without
+// copying the identity store or applying user category-scope permissions.
+type categoryResolver interface {
+	ResolveCategory(categoryID identityservice.CategoryID) (identityservice.Category, bool, error)
 }
 
 type option func(*accountService)
@@ -157,8 +157,8 @@ func withUserResolver(resolver userResolver) option {
 	return func(service *accountService) { service.users = resolver }
 }
 
-func withGameResolver(resolver gameResolver) option {
-	return func(service *accountService) { service.games = resolver }
+func withCategoryResolver(resolver categoryResolver) option {
+	return func(service *accountService) { service.categories = resolver }
 }
 
 func newAccountService(store Store, options ...option) *accountService {
@@ -174,7 +174,7 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 	if userID <= 0 {
 		userID = actor.ID
 	}
-	gameIDs, err := s.resolveCreateGameIDs(input.GameIDs)
+	categoryIDs, err := s.resolveCreateCategoryIDs(input.CategoryIDs)
 	if err != nil {
 		return Account{}, err
 	}
@@ -202,15 +202,16 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 		}
 		teamID = target.TeamID
 	}
-	if err := validateGameScope(target, gameIDs); err != nil {
+	if err := validateCategoryScope(target, categoryIDs); err != nil {
 		return Account{}, err
 	}
 	now := s.now()
 	record := AccountRecord{
 		Account: Account{
 			UserID:               userID,
+			UserName:             displayName(target),
 			TeamID:               teamID,
-			GameIDs:              gameIDs,
+			CategoryIDs:          categoryIDs,
 			Platform:             platform,
 			Name:                 name,
 			Remark:               remark,
@@ -242,7 +243,7 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 		}
 	}
 	if err := s.audit(actor.ID, "media_account.create", record.ID, map[string]string{
-		"user_id": strconv.FormatInt(int64(userID), 10), "game_ids": strings.Join(gameIDs, ","), "platform": string(platform),
+		"user_id": strconv.FormatInt(int64(userID), 10), "category_ids": formatCategoryIDs(categoryIDs), "platform": string(platform),
 	}); err != nil {
 		return Account{}, err
 	}
@@ -291,11 +292,11 @@ func (s *accountService) ListAccounts(actor identityservice.PublicUser, filter A
 	if !validActor(actor) {
 		return nil, ErrForbidden
 	}
-	filter.GameIDs = normalizeGameIDs(filter.GameIDs)
-	if err := s.validateGameIDs(filter.GameIDs); err != nil {
+	filter.CategoryIDs = normalizeCategoryIDs(filter.CategoryIDs)
+	if err := s.validateCategoryIDs(filter.CategoryIDs); err != nil {
 		return nil, err
 	}
-	if err := validateGameScope(actor, filter.GameIDs); err != nil {
+	if err := validateCategoryScope(actor, filter.CategoryIDs); err != nil {
 		return nil, err
 	}
 	if actor.Role == identityservice.RoleOperator {
@@ -371,12 +372,12 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 		}
 		record.Remark = remark
 	}
-	replaceGameIDs, err := s.resolveUpdateGameIDs(input.GameIDs)
+	replaceCategoryIDs, err := s.resolveUpdateCategoryIDs(input.CategoryIDs)
 	if err != nil {
 		return Account{}, err
 	}
-	if replaceGameIDs != nil {
-		record.GameIDs = *replaceGameIDs
+	if replaceCategoryIDs != nil {
+		record.CategoryIDs = *replaceCategoryIDs
 	}
 	owner := actor
 	if record.UserID != actor.ID {
@@ -392,7 +393,7 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 		}
 		owner = resolved
 	}
-	if err := validateGameScope(owner, record.GameIDs); err != nil {
+	if err := validateCategoryScope(owner, record.CategoryIDs); err != nil {
 		return Account{}, err
 	}
 	if input.Name != nil {
@@ -402,11 +403,11 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 		}
 		record.Name = name
 	}
-	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.GameIDs == nil && input.Name == nil {
+	if input.BusinessStatus == "" && input.LoginStatus == "" && input.Remark == nil && input.CategoryIDs == nil && input.Name == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record, replaceGameIDs); err != nil {
+	if err := s.store.Update(record, replaceCategoryIDs); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.status.update", record.ID, map[string]string{
@@ -489,7 +490,7 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 	if record.BusinessStatus != BusinessEnabled {
 		return AccountCheckStart{}, ErrInvalidInput
 	}
-	if err := validateGameScope(actor, record.GameIDs); err != nil {
+	if err := validateCategoryScope(actor, record.CategoryIDs); err != nil {
 		return AccountCheckStart{}, err
 	}
 	if strings.TrimSpace(record.BrowserProfileID) == "" {
@@ -894,7 +895,7 @@ func (s *accountService) ListAccountsByGroup(actor identityservice.PublicUser, g
 		return nil, ErrForbidden
 	}
 	filter := AccountFilter{UserID: actor.ID}
-	filter.GameIDs = append([]string(nil), group.Filters.GameIDs...)
+	filter.CategoryIDs = append([]identityservice.CategoryID(nil), group.Filters.CategoryIDs...)
 	if group.Filters.Platform != "" {
 		filter.Platform = group.Filters.Platform
 	}
@@ -1016,59 +1017,61 @@ func (s *accountService) normalizeGroupFilters(filters AccountGroupFilters) (Acc
 	if !validGroupFilters(filters) {
 		return AccountGroupFilters{}, ErrInvalidInput
 	}
-	filters.GameIDs = normalizeGameIDs(filters.GameIDs)
-	if err := s.validateGameIDs(filters.GameIDs); err != nil {
+	filters.CategoryIDs = normalizeCategoryIDs(filters.CategoryIDs)
+	if err := s.validateCategoryIDs(filters.CategoryIDs); err != nil {
 		return AccountGroupFilters{}, err
 	}
 	return filters, nil
 }
 
-func (s *accountService) resolveCreateGameIDs(gameIDs []string) ([]string, error) {
-	gameIDs = normalizeGameIDs(gameIDs)
-	if err := s.validateGameIDs(gameIDs); err != nil {
+func (s *accountService) resolveCreateCategoryIDs(categoryIDs []identityservice.CategoryID) ([]identityservice.CategoryID, error) {
+	categoryIDs = normalizeCategoryIDs(categoryIDs)
+	if err := s.validateCategoryIDs(categoryIDs); err != nil {
 		return nil, err
 	}
-	return gameIDs, nil
+	return categoryIDs, nil
 }
 
-func (s *accountService) resolveUpdateGameIDs(gameIDs *[]string) (*[]string, error) {
-	if gameIDs == nil {
+func (s *accountService) resolveUpdateCategoryIDs(categoryIDs *[]identityservice.CategoryID) (*[]identityservice.CategoryID, error) {
+	if categoryIDs == nil {
 		return nil, nil
 	}
-	resolved, err := s.resolveCreateGameIDs(*gameIDs)
+	resolved, err := s.resolveCreateCategoryIDs(*categoryIDs)
 	if err != nil {
 		return nil, err
 	}
 	return &resolved, nil
 }
 
-func (s *accountService) validateGameIDs(gameIDs []string) error {
-	if s.games == nil && len(gameIDs) > 0 {
+func (s *accountService) validateCategoryIDs(categoryIDs []identityservice.CategoryID) error {
+	if s.categories == nil && len(categoryIDs) > 0 {
 		return ErrInvalidInput
 	}
-	for _, gameID := range gameIDs {
-		if len(gameID) > 32 {
-			return ErrInvalidInput
-		}
-		game, found, err := s.games.ResolveGame(gameID)
+	var selectedType identityservice.CategoryType
+	for _, categoryID := range categoryIDs {
+		category, found, err := s.categories.ResolveCategory(categoryID)
 		if err != nil {
 			return err
 		}
-		if !found || game.Status != identityservice.GameStatusEnabled {
+		if !found || !category.Enabled {
 			return ErrInvalidInput
 		}
+		if selectedType != "" && category.Type != selectedType {
+			return ErrInvalidInput
+		}
+		selectedType = category.Type
 	}
 	return nil
 }
 
-func validateGameScope(user identityservice.PublicUser, gameIDs []string) error {
+func validateCategoryScope(user identityservice.PublicUser, categoryIDs []identityservice.CategoryID) error {
 	if user.Role == identityservice.RoleAdmin {
 		return nil
 	}
-	for _, gameID := range gameIDs {
+	for _, categoryID := range categoryIDs {
 		found := false
-		for _, allowedID := range user.GameIDs {
-			if allowedID == gameID {
+		for _, allowedID := range user.CategoryIDs {
+			if allowedID == categoryID {
 				found = true
 				break
 			}
@@ -1080,12 +1083,35 @@ func validateGameScope(user identityservice.PublicUser, gameIDs []string) error 
 	return nil
 }
 
-func normalizeGameIDs(gameIDs []string) []string {
-	return normalizeStrings(gameIDs)
+func normalizeCategoryIDs(categoryIDs []identityservice.CategoryID) []identityservice.CategoryID {
+	seen := make(map[identityservice.CategoryID]struct{}, len(categoryIDs))
+	result := make([]identityservice.CategoryID, 0, len(categoryIDs))
+	for _, categoryID := range categoryIDs {
+		if categoryID <= 0 {
+			continue
+		}
+		if _, duplicate := seen[categoryID]; duplicate {
+			continue
+		}
+		seen[categoryID] = struct{}{}
+		result = append(result, categoryID)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
-// NormalizeGameIDs canonicalizes game identifiers at HTTP and persistence boundaries.
-func NormalizeGameIDs(gameIDs []string) []string { return normalizeGameIDs(gameIDs) }
+func formatCategoryIDs(categoryIDs []identityservice.CategoryID) string {
+	parts := make([]string, 0, len(categoryIDs))
+	for _, categoryID := range categoryIDs {
+		parts = append(parts, strconv.FormatInt(int64(categoryID), 10))
+	}
+	return strings.Join(parts, ",")
+}
+
+// NormalizeCategoryIDs canonicalizes category identifiers at HTTP and persistence boundaries.
+func NormalizeCategoryIDs(categoryIDs []identityservice.CategoryID) []identityservice.CategoryID {
+	return normalizeCategoryIDs(categoryIDs)
+}
 
 func (s *accountService) authorizedRecord(actor identityservice.PublicUser, accountID string) (AccountRecord, error) {
 	if !validActor(actor) || strings.TrimSpace(accountID) == "" {
@@ -1130,6 +1156,13 @@ func (s *accountService) audit(actorID identityservice.UserID, action, accountID
 		ID: s.newID("audit"), ActorUserID: actorID, Action: action,
 		TargetType: "media_account", TargetID: accountID, Summary: summary, CreatedAt: s.now(),
 	})
+}
+
+func displayName(user identityservice.PublicUser) string {
+	if strings.TrimSpace(user.Nickname) != "" {
+		return strings.TrimSpace(user.Nickname)
+	}
+	return strings.TrimSpace(user.Username)
 }
 
 func validActor(actor identityservice.PublicUser) bool {
@@ -1184,7 +1217,7 @@ func normalizeStrings(values []string) []string {
 	return result
 }
 
-func contains(values []string, target string) bool {
+func contains[T comparable](values []T, target T) bool {
 	for _, value := range values {
 		if value == target {
 			return true

@@ -37,7 +37,7 @@ const route = useRoute()
 const rows = ref([])
 const strategies = ref([])
 const templates = ref([])
-const games = ref([])
+const categories = ref([])
 const teams = ref([])
 const operatorOptions = ref([])
 const operatorsLoading = ref(false)
@@ -187,13 +187,13 @@ async function loadTemplates() {
   try { templates.value = await client.listTemplates() || [] } catch { templates.value = [] }
 }
 
-// 关联抽屉要用的两张表：游戏名与团队名。读不到只影响那两行的说法，不拦页面。
+// 关联抽屉要用的两张表：类目名与团队名。读不到只影响那两行的说法，不拦页面。
 async function loadLookups() {
-  const [gameRows, teamRows] = await Promise.all([client.listGames().catch(() => []), client.listTeams().catch(() => [])])
-  games.value = Array.isArray(gameRows) ? gameRows : []
+  const [categoryRows, teamRows] = await Promise.all([client.listCategories().catch(() => []), client.listTeams().catch(() => [])])
+  categories.value = Array.isArray(categoryRows) ? categoryRows : []
   teams.value = Array.isArray(teamRows) ? teamRows : []
 }
-function gameLabel(id) { return games.value.find((game) => game.id === id)?.name || String(id ?? '—') }
+function categoryLabel(id) { return categories.value.find((category) => category.id === id)?.name || String(id ?? '—') }
 function teamLabel(id) { return teams.value.find((team) => team.id === id)?.name || (id === undefined || id === null ? '—' : `团队 ${id}`) }
 
 // 负责人候选目录：高级运营固定本团队，管理员按所选团队取；普通运营没有这个筛选。
@@ -696,7 +696,7 @@ onMounted(() => {
         :visible="materialDrawer.visible"
         :material="materialDrawer.row"
         :loading="materialDrawer.loading"
-        :games="games"
+        :categories="categories"
         mode="readonly"
         @update:visible="materialDrawer.visible = $event"
         @go-page="goMaterialPage(detail?.material_id)"
@@ -708,7 +708,7 @@ onMounted(() => {
             v-if="strategyDrawer.row"
             :strategy="strategyDrawer.row"
             :team="teamLabel(strategyDrawer.row.team_id)"
-            :game="gameLabel(strategyDrawer.row.game_id)"
+            :category="categoryLabel(strategyDrawer.row.category_id)"
             :templates="templates"
           />
         </t-loading>

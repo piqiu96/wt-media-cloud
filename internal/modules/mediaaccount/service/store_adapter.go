@@ -23,13 +23,13 @@ func (mysqlStore) FindByIdentity(userID identityservice.UserID, platform model.P
 func (mysqlStore) FindByProfilePlatform(profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
 	return repository.FindByProfilePlatform(profileID, platform)
 }
-func (mysqlStore) Update(record model.AccountRecord, replaceGameIDs *[]string) error {
-	return repository.Update(record, replaceGameIDs)
+func (mysqlStore) Update(record model.AccountRecord, replaceCategoryIDs *[]identityservice.CategoryID) error {
+	return repository.Update(record, replaceCategoryIDs)
 }
 func (mysqlStore) List(query dto.AccountFilter) ([]model.AccountRecord, error) {
 	return repository.List(repository.AccountFilter{
 		UserID:         query.UserID,
-		GameIDs:        query.GameIDs,
+		CategoryIDs:    query.CategoryIDs,
 		Platform:       query.Platform,
 		BusinessStatus: query.BusinessStatus,
 		LoginStatus:    query.LoginStatus,
@@ -91,10 +91,10 @@ func (productionUserResolver) ResolveUser(userID identityservice.UserID) (identi
 	return identityservice.ResolveUser(userID)
 }
 
-type productionGameResolver struct{}
+type productionCategoryResolver struct{}
 
-func (productionGameResolver) ResolveGame(gameID string) (identityservice.OperationGame, bool, error) {
-	return identityservice.ResolveGame(gameID)
+func (productionCategoryResolver) ResolveCategory(categoryID identityservice.CategoryID) (identityservice.Category, bool, error) {
+	return identityservice.ResolveCategory(categoryID)
 }
 
 func defaultAccountService() *accountService {
@@ -104,6 +104,6 @@ func defaultAccountService() *accountService {
 		withProfileFactResolver(productionProfileFactResolver{}),
 		withSensitiveTaskCreator(productionSensitiveTaskCreator{}),
 		withUserResolver(productionUserResolver{}),
-		withGameResolver(productionGameResolver{}),
+		withCategoryResolver(productionCategoryResolver{}),
 	)
 }

@@ -37,18 +37,18 @@ describe('material library page', () => {
     expect(source).toContain('await client.get(Number(raw))')
     // 单条接口，而不是在行里找：深链必须能打开分页外或筛选外的那一条。
     expect(source).toContain('async function openFromQuery()')
-    // 挂载时会话要先到（默认游戏筛选依赖它），深链的打开跟着走。
+    // 挂载时会话要先到（默认类目筛选依赖它），深链的打开跟着走。
     expect(source).toMatch(/onMounted\(async \(\) => \{[\s\S]*openFromQuery\(\)/)
   })
 
   // 所有筛选都由服务端读 query；页面不再对返回行做二次过滤。
   // 团队范围由服务端按角色决定：普通运营/高级运营固定本团队，只有管理员的 `team_id`
-  // 才是「目标团队」。页面必须把团队与游戏都交上去，游戏只是筛选而不是可见边界。
+  // 才是「目标团队」。页面必须把团队与类目都交上去，类目只是筛选而不是可见边界。
   it('sends every list filter to the server exactly once', () => {
     expect(source).toMatch(/client\.list\(\{[\s\S]*?search: search\.value/)
     for (const param of [
       'team_id: teamFilter.value',
-      'game_ids: gameFilters.value',
+      'category_ids: categoryFilters.value',
       'joined: joinedFilter.value',
       'my_usage: myUsageFilter.value',
       'team_usage: teamUsageFilter.value',
@@ -59,28 +59,28 @@ describe('material library page', () => {
     }
     expect(source.match(/client\.list\(/g)).toHaveLength(1)
     expect(source).not.toContain('filteredRows')
-    expect(source).not.toContain('row.game_id === gameFilters.value')
+    expect(source).not.toContain('row.category_id === categoryFilters.value')
   })
 
-  // 普通运营与高级运营进页面时，游戏多选默认本人负责的游戏；管理员默认不筛（读所选团队）。
-  // 选项是游戏管理里已启用的全量游戏：本人负责只决定默认勾选，不限制能筛到哪些游戏。
-  it('offers every enabled game and defaults to the responsible ones', () => {
-    expect(source).toContain('function responsibleGames()')
+  // 普通运营与高级运营进页面时，类目多选默认本人负责的类目；管理员默认不筛（读所选团队）。
+  // 选项是类目管理里已启用的全量类目：本人负责只决定默认勾选，不限制能筛到哪些类目。
+  it('offers every enabled category and defaults to the responsible ones', () => {
+    expect(source).toContain('function responsibleCategories()')
     expect(source).toContain("currentUser.value?.role === 'admin'")
-    expect(source).toContain('return Array.isArray(currentUser.value?.game_ids) ? [...currentUser.value.game_ids] : []')
-    expect(source).toContain('function defaultGameFilters()')
-    expect(source).toContain('const enabled = new Set(games.value.map((game) => game.id))')
-    expect(source).toContain('return responsibleGames().filter((id) => enabled.has(id))')
-    expect(source).toContain('gameFilters.value = defaultGameFilters()')
-    expect(source).toContain("users.listGames({ scope: 'all', status: 'enabled' })")
-    expect(source).toContain('const gameOptions = computed')
-    expect(source).toContain('games.value.map((game) => ({ id: game.id, name: game.name }))')
-    // 列表要等会话与游戏字典一起到齐再取：默认项不能引用还没加载的选项。
-    expect(source).toContain('await Promise.all([loadSession(), loadGames()])')
-    expect(source.indexOf('await Promise.all([loadSession(), loadGames()])')).toBeLessThan(source.indexOf('load()\n  loadTeams()'))
+    expect(source).toContain('return Array.isArray(currentUser.value?.category_ids) ? [...currentUser.value.category_ids] : []')
+    expect(source).toContain('function defaultCategoryFilters()')
+    expect(source).toContain('const enabled = new Set(categories.value.map((category) => category.id))')
+    expect(source).toContain('return responsibleCategories().filter((id) => enabled.has(id))')
+    expect(source).toContain('categoryFilters.value = defaultCategoryFilters()')
+    expect(source).toContain("users.listCategories({ scope: 'all', enabled: true })")
+    expect(source).toContain('const categoryOptions = computed')
+    expect(source).toContain('categories.value.map((category) => ({ id: category.id, name: category.name }))')
+    // 列表要等会话与类目字典一起到齐再取：默认项不能引用还没加载的选项。
+    expect(source).toContain('await Promise.all([loadSession(), loadCategories()])')
+    expect(source.indexOf('await Promise.all([loadSession(), loadCategories()])')).toBeLessThan(source.indexOf('load()\n  loadTeams()'))
     // 选项不再从已加载的行里补。
     expect(source).not.toContain('for (const row of rows.value)')
-    expect(source).not.toContain('gameName(games.value, id)')
+    expect(source).not.toContain('categoryName(categories.value, id)')
   })
 
   // 团队筛选只在管理员手里出现，其余角色连入口都没有：团队是服务端给的边界，
@@ -149,7 +149,7 @@ describe('material library page', () => {
     // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
-    // 副行只带来源平台；游戏有自己的一列，同一格里再说一遍就是重复。
+    // 副行只带来源平台；类目有自己的一列，同一格里再说一遍就是重复。
     expect(source).not.toContain('· {{ row.author_name')
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })
@@ -226,11 +226,11 @@ describe('material library page', () => {
 
   // 走查五轮（2026-09-30 用户走查 + 设计图）：列表要给出「素材状态」——这条素材还提供给
   // 运营选用吗。文件状态已从列表撤掉（2026-10-27 用户裁定），业务状态仍在列表上。
-  it('keeps the material status column right after the game column', () => {
-    const gameAt = source.indexOf("{ colKey: 'game'")
+  it('keeps the material status column right after the category column', () => {
+    const categoryAt = source.indexOf("{ colKey: 'category'")
     const statusAt = source.indexOf("{ colKey: 'material_status'")
     expect(source).toContain("{ colKey: 'material_status', title: '素材状态'")
-    expect(statusAt).toBeGreaterThan(gameAt)
+    expect(statusAt).toBeGreaterThan(categoryAt)
     expect(statusAt).toBeLessThan(source.indexOf("{ colKey: 'joined'"))
     expect(source).toContain('materialStatusLabel(row.status)')
     expect(source).toContain('materialStatusTone(row.status)')

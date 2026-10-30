@@ -49,11 +49,11 @@ describe('output management page', () => {
     expect(source).toContain("!filters.value.download || downloadFor(row).key === filters.value.download")
   })
 
-  it('shows asset, source, game, strategy, operator, generation and real download facts in the list', () => {
-    for (const key of ['output', 'material_id', 'game', 'strategy', 'operator', 'trigger', 'download_status', 'created_at']) {
+  it('shows asset, source, category, strategy, operator, generation and real download facts in the list', () => {
+    for (const key of ['output', 'material_id', 'category', 'strategy', 'operator', 'trigger', 'download_status', 'created_at']) {
       expect(source).toContain(`<template #${key}=`)
     }
-    expect(source).toContain('gameName(row.game_id)')
+    expect(source).toContain('categoryName(row.category_id)')
     expect(source).toContain("row.operator_name || '未记录'")
     expect(source).toContain('titleFor(row)')
     expect(source).toContain('triggerLabel(triggerFor(row))')
@@ -62,22 +62,22 @@ describe('output management page', () => {
     expect(source).not.toContain('const triggerOptions')
     expect(source).toContain('downloadFor(row).label')
     expect(source).toContain('filteredRows.length')
-    // 游戏列紧跟来源素材，早于策略；筛选与列说的是同一个字段。
-    expect(source.indexOf("{ colKey: 'game'")).toBeGreaterThan(source.indexOf("{ colKey: 'material_id'"))
-    expect(source.indexOf("{ colKey: 'game'")).toBeLessThan(source.indexOf("{ colKey: 'strategy'"))
+    // 类目列紧跟来源素材，早于策略；筛选与列说的是同一个字段。
+    expect(source.indexOf("{ colKey: 'category'")).toBeGreaterThan(source.indexOf("{ colKey: 'material_id'"))
+    expect(source.indexOf("{ colKey: 'category'")).toBeLessThan(source.indexOf("{ colKey: 'strategy'"))
   })
 
-  // 游戏筛选只列游戏管理启用项；普通运营再与本人负责游戏取交集（他不负责的游戏
-  // 本来就没有成片可读）。名称字典另取全量，停用游戏的历史成片仍显示名字。
-  it('filters by an enabled game and sends game_id to the server', () => {
-    expect(source).toContain('v-model="filters.game_id"')
-    expect(source).toContain(':options="gameFilterOptions"')
-    expect(source).toContain('if (filters.value.game_id) params.game_id = filters.value.game_id')
-    expect(source).toContain("game_id: ''")
-    expect(source).toContain('const gameFilterOptions = computed')
-    expect(source).toContain('isAdmin.value || isSenior.value || own.has(game.id)')
-    expect(source).toContain("client.listGames({ scope: 'all' })")
-    expect(source).toContain("client.listGames({ scope: 'all', status: 'enabled' })")
+  // 类目筛选只列类目管理启用项；普通运营再与本人负责类目取交集（他不负责的类目
+  // 本来就没有成片可读）。名称字典另取全量，停用类目的历史成片仍显示名字。
+  it('filters by an enabled category and sends category_id to the server', () => {
+    expect(source).toContain('v-model="filters.category_id"')
+    expect(source).toContain(':options="categoryFilterOptions"')
+    expect(source).toContain('if (filters.value.category_id) params.category_id = filters.value.category_id')
+    expect(source).toContain("category_id: ''")
+    expect(source).toContain('const categoryFilterOptions = computed')
+    expect(source).toContain('isAdmin.value || isSenior.value || own.has(category.id)')
+    expect(source).toContain("client.listCategories({ scope: 'all' })")
+    expect(source).toContain("client.listCategories({ scope: 'all', enabled: true })")
   })
 
   it('uses the existing outlined row actions and keeps local opening inside file information', () => {

@@ -24,7 +24,7 @@ var ErrNotFound = errors.New("file transfer task not found")
 // visible at all, which is the point: with a list per query, a column reaches
 // the callers that remembered it and is silently missing from the ones that did
 // not.
-const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, claimed_by, attempt_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
+const taskColumnList = `id, team_id, asset_type, asset_id, asset_title, category_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, claimed_by, attempt_id, dependency_task_id, total_bytes, transferred_bytes, speed_bytes_per_sec, eta_seconds, attempt_count, max_attempts, lease_expires_at, heartbeat_at, started_at, finished_at, cancel_requested_at, expected_sha256, file_name, error_code, error_message, integrity_sha256, integrity_bytes, created_at, updated_at`
 
 type CreateTaskInput struct {
 	ID               string
@@ -32,7 +32,7 @@ type CreateTaskInput struct {
 	AssetType        model.AssetType
 	AssetID          int64
 	AssetTitle       string
-	GameName         string
+	CategoryName         string
 	PublishedAt      *time.Time
 	SourceObjectKey  string
 	Purpose          model.Purpose
@@ -105,9 +105,9 @@ type CreateUserDownloadInput struct {
 	// about composite outputs must keep meaning what it always meant.
 	AssetType  model.AssetType
 	AssetTitle string
-	GameName   string
+	CategoryName   string
 	// PublishedAt is when the material was published, copied onto the task like
-	// GameName so the lease can carry it to the executor for naming. A material
+	// CategoryName so the lease can carry it to the executor for naming. A material
 	// without a publish time leaves it nil and the executor omits that segment.
 	PublishedAt     *time.Time
 	SourceObjectKey string
@@ -204,7 +204,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			AssetType:        assetType,
 			AssetID:          input.AssetID,
 			AssetTitle:       input.AssetTitle,
-			GameName:         input.GameName,
+			CategoryName:         input.CategoryName,
 			PublishedAt:      input.PublishedAt,
 			SourceObjectKey:  input.SourceObjectKey,
 			Purpose:          model.PurposeUserDownload,
@@ -472,13 +472,13 @@ func failDependentsOfTerminalTasks(db *gorm.DB, now time.Time) (int64, error) {
 // createTaskStatement is shared with its test because sqlmock matches the
 // statement text without parsing it: a stray placeholder would pass the mock
 // and only fail against MySQL.
-const createTaskStatement = `INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, game_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id = id`
+const createTaskStatement = `INSERT INTO file_transfer_tasks (id, team_id, asset_type, asset_id, asset_title, category_name, published_at, source_object_key, purpose, execution_scope, status, requested_by, dependency_task_id, dedupe_key, total_bytes, expected_sha256, max_attempts, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id = id`
 
 func createTask(db *gorm.DB, input CreateTaskInput, now time.Time) (model.Task, error) {
 	if err := validateCreateInput(input); err != nil {
 		return model.Task{}, err
 	}
-	if err := db.Exec(createTaskStatement, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.GameName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
+	if err := db.Exec(createTaskStatement, input.ID, input.TeamID, input.AssetType, input.AssetID, nullIfEmpty(input.AssetTitle), nullIfEmpty(input.CategoryName), input.PublishedAt, nullIfEmpty(input.SourceObjectKey), input.Purpose, input.ExecutionScope, input.RequestedBy, nullIfEmpty(input.DependencyTaskID), input.DedupeKey, input.TotalBytes, nullIfEmpty(input.ExpectedSHA256), input.MaxAttempts, now, now).Error; err != nil {
 		return model.Task{}, err
 	}
 	return selectTask(db, "dedupe_key = ?", input.DedupeKey)
@@ -1061,16 +1061,16 @@ type rowScanner interface{ Scan(...any) error }
 func scanTask(row rowScanner, task *model.Task) error {
 	var teamID, requestedBy int64
 	var assetType, purpose, scope, status string
-	var assetTitle, gameName, objectKey, fileName, claimedBy, attemptID, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
+	var assetTitle, categoryName, objectKey, fileName, claimedBy, attemptID, dependency, errorCode, errorMessage, sha256, expectedSHA256 sql.NullString
 	var eta, integrityBytes sql.NullInt64
 	var lease, heartbeat, started, finished, cancelRequested, publishedAt sql.NullTime
-	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &gameName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &claimedBy, &attemptID, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
+	if err := row.Scan(&task.ID, &teamID, &assetType, &task.AssetID, &assetTitle, &categoryName, &publishedAt, &objectKey, &purpose, &scope, &status, &requestedBy, &claimedBy, &attemptID, &dependency, &task.TotalBytes, &task.TransferredBytes, &task.SpeedBytesPerSec, &eta, &task.AttemptCount, &task.MaxAttempts, &lease, &heartbeat, &started, &finished, &cancelRequested, &expectedSHA256, &fileName, &errorCode, &errorMessage, &sha256, &integrityBytes, &task.CreatedAt, &task.UpdatedAt); err != nil {
 		return err
 	}
 	task.TeamID = identity.TeamID(teamID)
 	task.AssetType = model.AssetType(assetType)
 	task.AssetTitle = assetTitle.String
-	task.GameName = gameName.String
+	task.CategoryName = categoryName.String
 	task.SourceObjectKey = objectKey.String
 	if publishedAt.Valid {
 		task.PublishedAt = &publishedAt.Time
