@@ -195,7 +195,7 @@ func TestImportSuccessTransferAndDuplicateDoesNotOverwrite(t *testing.T) {
 	}
 	v = prepImport(t, s, a, done, 3)
 	second, e := s.MutateImportItem(a, b.ID, 3, "result", successImportInput(v))
-	if e != nil || second.Counts["failed"] != 1 || second.Content.Items[1].ExistingAccountID != r.ID || len(m.records) != 1 {
+	if e != nil || second.Counts["failed"] != 1 || second.Content.Items[1].ExistingAccountID != r.ID || second.Content.Items[1].PlatformAccountID != "real" || second.Content.Items[1].Name != "Real" || len(m.records) != 1 {
 		t.Fatal(second, e)
 	}
 }

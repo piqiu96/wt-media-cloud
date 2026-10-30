@@ -460,6 +460,8 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 					return ErrImportConflict
 				}
 				if in.Status == "applied" && in.LoginStatus == "normal" && in.PlatformAccountID != "" && in.Applied && len(in.Cookies) > 0 && i.BeforeCookie != nil && (in.InputMatches || (i.Step == "manual" && in.Verified)) {
+					i.Name = in.Name
+					i.PlatformAccountID = in.PlatformAccountID
 					existing, e := res.FindIdentity(b.Platform, in.PlatformAccountID)
 					if e != nil {
 						return e
