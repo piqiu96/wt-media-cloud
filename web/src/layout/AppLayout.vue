@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { canRunLocalAgent, canUseAccountOpening, canUseLocalAgent, isDesktop } from '../utils.js'
+import { canRunLocalAgent, canUseLocalAgent, isDesktop } from '../utils.js'
 import { SYSTEM_MANAGEMENT_PATHS, canUseDesktopEnv, canViewSystemPath } from '../shared/utils/roles.js'
 import { resolveAppVersion } from '../shared/utils/appVersion.js'
 import { createSessionClient } from '../shared/api/session.js'
@@ -64,7 +64,6 @@ const desktopItems = [
 // 浏览器窗口是运营/高级运营的桌面端本机资源；开户仍是普通运营专属。代理列表
 // 与网页版一致，不再受本机页面可见性限制。
 const localOnlyPaths = new Set(['/browser-windows'])
-const operatorOnlyPaths = new Set(['/account-opening'])
 const localAgentAllowed = computed(() => canUseLocalAgent(currentUser.value))
 // 顶栏的本机执行状态给真正会拉起 sidecar 的角色（运营 + 高级运营），与本地专属
 // 页面的可见性不是同一件事：高级运营能进窗口和代理，但进不了开户。
@@ -89,9 +88,6 @@ const allItems = computed(() => {
   const hiddenPaths = new Set()
   if (isDesktop() && !localAgentAllowed.value) {
     for (const path of localOnlyPaths) hiddenPaths.add(path)
-  }
-  if (isDesktop() && !canUseAccountOpening(currentUser.value)) {
-    for (const path of operatorOnlyPaths) hiddenPaths.add(path)
   }
   // 系统管理：用户管理仅管理员；运营团队 / 类目管理 高级运营 + 管理员。
   // Cloud Web 与 Desktop 走同一条规则。

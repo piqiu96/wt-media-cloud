@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.29.2"
+revision: "2026.10.30.2"
 schemas:
   MediaAccount:
     type: object
@@ -29,6 +29,9 @@ schemas:
       platform_login_status: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
       cookie_status: {type: string, nullable: true}
       cookie_updated_at: {type: string, format: date-time, nullable: true}
+      last_check_status: {type: string, enum: [never, running, completed, failed]}
+      last_check_message: {type: string}
+      last_check_identity: {type: object, nullable: true}
       last_check_at: {type: string, format: date-time, nullable: true}
       last_check_items: {type: array, items: {type: object}}
       tags: {type: array, items: {type: string}}

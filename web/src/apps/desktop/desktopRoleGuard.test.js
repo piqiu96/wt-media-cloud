@@ -45,7 +45,6 @@ describe('desktop role guard', () => {
     // 分母：本地专属路由只有窗口这一条，代理与账号页面不再标 localOnly。
     expect(children.filter((child) => child.meta?.localOnly)).toHaveLength(1)
     expect(children.find((child) => child.path === 'proxies')?.meta?.localOnly).toBeUndefined()
-    expect(children.find((child) => child.path === 'account-opening')?.meta?.operatorOnly).toBe(true)
 
     expect(desktopMain).toContain('to.meta?.localOnly')
     expect(desktopMain).toContain('next("/content-pool")')

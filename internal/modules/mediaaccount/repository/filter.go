@@ -7,6 +7,11 @@ import (
 
 // AccountFilter is the persistence projection of media-account query criteria.
 type AccountFilter struct {
+	View                string
+	TeamID              identity.TeamID
+	CategoryType        string
+	Offset              int
+	Limit               int
 	UserID              identity.UserID
 	CategoryIDs         []identity.CategoryID
 	Platform            model.Platform

@@ -12,6 +12,20 @@ import (
 
 type mysqlStore struct{}
 
+func (mysqlStore) ListPage(query dto.AccountFilter) ([]model.AccountRecord, model.AccountCounts, error) {
+	return repository.ListPage(repository.AccountFilter(query))
+}
+
+func (mysqlStore) UpdateMetadata(record model.AccountRecord, input dto.UpdateAccountInput) error {
+	return repository.UpdateMetadata(record, input)
+}
+func (mysqlStore) SetProfile(record model.AccountRecord) error { return repository.SetProfile(record) }
+
+func (mysqlStore) StartCheck(record model.AccountRecord) error { return repository.StartCheck(record) }
+func (mysqlStore) CompleteCheck(record model.AccountRecord) error {
+	return repository.CompleteCheck(record)
+}
+
 func (mysqlStore) Create(record model.AccountRecord) (string, error) {
 	return repository.Create(record)
 }
@@ -26,24 +40,7 @@ func (mysqlStore) Update(record model.AccountRecord, replaceCategoryIDs *[]ident
 	return repository.Update(record, replaceCategoryIDs)
 }
 func (mysqlStore) List(query dto.AccountFilter) ([]model.AccountRecord, error) {
-	return repository.List(repository.AccountFilter{
-		UserID:              query.UserID,
-		CategoryIDs:         query.CategoryIDs,
-		Platform:            query.Platform,
-		Enabled:             query.Enabled,
-		PlatformLoginStatus: query.PlatformLoginStatus,
-		Search:              query.Search,
-		ProfileSearch:       query.ProfileSearch,
-		AnyTags:             query.AnyTags,
-		AllTags:             query.AllTags,
-		ExcludeTags:         query.ExcludeTags,
-	})
-}
-func (mysqlStore) AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error {
-	return repository.AddTags(userID, accountIDs, tags, createdAt)
-}
-func (mysqlStore) RemoveTags(userID identityservice.UserID, accountIDs, tags []string) error {
-	return repository.RemoveTags(userID, accountIDs, tags)
+	return repository.List(repository.AccountFilter(query))
 }
 func (mysqlStore) ListTags(accountIDs []string) (map[string][]string, error) {
 	return repository.ListTags(accountIDs)
@@ -51,17 +48,6 @@ func (mysqlStore) ListTags(accountIDs []string) (map[string][]string, error) {
 func (mysqlStore) AppendAudit(event identityservice.AuditEvent) error {
 	return repository.AppendAudit(event)
 }
-func (mysqlStore) CreateGroup(group model.AccountGroup) (string, error) {
-	return repository.CreateGroup(group)
-}
-func (mysqlStore) FindGroup(id string) (model.AccountGroup, bool, error) {
-	return repository.FindGroup(id)
-}
-func (mysqlStore) ListGroups(userID identityservice.UserID) ([]model.AccountGroup, error) {
-	return repository.ListGroups(userID)
-}
-func (mysqlStore) UpdateGroup(group model.AccountGroup) error { return repository.UpdateGroup(group) }
-func (mysqlStore) DeleteGroup(id string) error                { return repository.DeleteGroup(id) }
 
 type productionProfileResolver struct{}
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
 )
 
 func TestServiceCreatesPendingAccountWithinActorScope(t *testing.T) {
@@ -199,7 +200,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identified, err := service.IdentifyAccount(actor, first.ID, IdentifyAccountInput{PlatformAccountID: "platform-42", PlatformName: "main", PlatformAvatarURL: "https://example.invalid/a.png", PlatformLoginStatus: PlatformLoginNormal})
+	identified, err := completeTestIdentity(service, store, actor, first.ID, AccountCheckResultInput{PlatformAccountID: "platform-42", PlatformName: "main", PlatformAvatarURL: "https://example.invalid/a.png", PlatformLoginStatus: PlatformLoginNormal})
 	if err != nil {
 		t.Fatalf("IdentifyAccount() error = %v", err)
 	}
@@ -211,8 +212,8 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate, err := service.IdentifyAccount(actor, candidate.ID, IdentifyAccountInput{PlatformAccountID: "platform-42", PlatformName: "duplicate", PlatformLoginStatus: PlatformLoginNormal})
-	if !errors.Is(err, ErrDuplicateAccount) {
+	duplicate, err := completeTestIdentity(service, store, actor, candidate.ID, AccountCheckResultInput{PlatformAccountID: "platform-42", PlatformName: "duplicate", PlatformLoginStatus: PlatformLoginNormal})
+	if err != nil {
 		t.Fatalf("duplicate error = %v", err)
 	}
 	if duplicate.IdentificationStatus != IdentificationDuplicate || duplicate.DuplicateOfAccountID != first.ID {
@@ -235,7 +236,7 @@ func TestServiceIdentityUniquenessIsPerUser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := service.IdentifyAccount(admin, account.ID, IdentifyAccountInput{PlatformAccountID: "same-platform-id", PlatformLoginStatus: PlatformLoginNormal}); err != nil {
+		if _, err := completeTestIdentity(service, store, mediaActor(userID, 10, identityservice.RoleOperator), account.ID, AccountCheckResultInput{PlatformAccountID: "same-platform-id", PlatformLoginStatus: PlatformLoginNormal}); err != nil {
 			t.Fatalf("user %d identify error = %v", userID, err)
 		}
 	}
@@ -247,30 +248,30 @@ func TestServiceValidatesBusinessAndPlatformLoginStatusesIndependently(t *testin
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformDouyin})
 
-	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Enabled: boolPtr(false), PlatformLoginStatus: PlatformLoginVerificationNeeded})
+	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Enabled: boolPtr(false)})
 	if err != nil {
 		t.Fatalf("UpdateAccount() error = %v", err)
 	}
-	if updated.Enabled || updated.PlatformLoginStatus != PlatformLoginVerificationNeeded {
+	if updated.Enabled || updated.PlatformLoginStatus != PlatformLoginUnknown {
 		t.Fatalf("updated = %#v", updated)
 	}
-	_, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{PlatformLoginStatus: PlatformLoginStatus("bad")})
+	_, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("invalid status error = %v", err)
 	}
 }
 
-func TestServiceBulkTagsAndFilters(t *testing.T) {
+func TestServiceTagsAndFilters(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 	first, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformDouyin})
 	second, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili})
 
-	if err := service.AddTags(actor, []string{first.ID, second.ID}, []string{" launch ", "vip", "vip"}); err != nil {
+	if err := setTestTags(service, actor, []string{first.ID, second.ID}, []string{" launch ", "vip", "vip"}); err != nil {
 		t.Fatalf("AddTags() error = %v", err)
 	}
-	if err := service.AddTags(actor, []string{first.ID}, []string{"douyin"}); err != nil {
+	if err := setTestTags(service, actor, []string{first.ID}, []string{"douyin"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,7 +279,7 @@ func TestServiceBulkTagsAndFilters(t *testing.T) {
 	assertAccountIDs(t, service, actor, AccountFilter{AllTags: []string{"launch", "vip"}}, first.ID, second.ID)
 	assertAccountIDs(t, service, actor, AccountFilter{ExcludeTags: []string{"douyin"}}, second.ID)
 
-	if err := service.RemoveTags(actor, []string{second.ID}, []string{"vip"}); err != nil {
+	if err := removeTestTags(service, actor, []string{second.ID}, []string{"vip"}); err != nil {
 		t.Fatalf("RemoveTags() error = %v", err)
 	}
 	assertAccountIDs(t, service, actor, AccountFilter{AllTags: []string{"launch", "vip"}}, first.ID)
@@ -291,7 +292,7 @@ func TestServiceRejectsTaggingAnotherUsersAccount(t *testing.T) {
 	account, _ := service.CreateAccount(admin, CreateAccountInput{UserID: identityservice.UserID(2), CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformDouyin})
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
 
-	err := service.AddTags(actor, []string{account.ID}, []string{"forbidden"})
+	err := setTestTags(service, actor, []string{account.ID}, []string{"forbidden"})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("AddTags() error = %v, want ErrForbidden", err)
 	}
@@ -470,7 +471,9 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 		BrowserProfileID: "profile-2", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 	}}
 
-	updated, err := service.ApplyLocalAccountCheckResult(actor, second.ID, AccountCheckResultInput{
+	prepareCheckResult(store, second.ID, "task-1")
+
+	updated, err := service.ApplyLocalAccountCheckResult(actor, second.ID, AccountCheckResultInput{ExecutionStatus: "completed",
 		OperationID: "task-1", PlatformAccountID: "uid-1", PlatformLoginStatus: PlatformLoginNormal,
 	})
 	if err != nil {
@@ -493,7 +496,8 @@ func TestCheckPreservesIdentityOnMismatchAndRefreshesSameUID(t *testing.T) {
 			store := newMemoryStore()
 			actor := mediaActor(1, 10, identityservice.RoleOperator)
 			store.records["1"] = AccountRecord{Account: Account{ID: "1", UserID: actor.ID, TeamID: actor.TeamID, Platform: PlatformBilibili, PlatformAccountID: "uid-1", PlatformName: "old name", Enabled: true, PlatformLoginStatus: PlatformLoginNormal}}
-			updated, err := newTestService(store).ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{OperationID: "check-1", PlatformAccountID: tc.observed, PlatformName: "new name", PlatformLoginStatus: PlatformLoginNormal})
+			prepareCheckResult(store, "1", "check-1")
+			updated, err := newTestService(store).ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{ExecutionStatus: "completed", OperationID: "check-1", PlatformAccountID: tc.observed, PlatformName: "new name", PlatformLoginStatus: PlatformLoginNormal})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -566,7 +570,9 @@ func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
 				BrowserProfileID: "profile-1", Enabled: true, PlatformLoginStatus: PlatformLoginUnknown,
 			}}
 
-			updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
+			prepareCheckResult(store, account.ID, "task-1")
+
+			updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{ExecutionStatus: "completed",
 				OperationID: "task-1", PlatformAccountID: "platform-account-1", PlatformLoginStatus: PlatformLoginNormal,
 			})
 			if err != nil {
@@ -579,49 +585,6 @@ func TestServiceAccountCheckReportsBoundProxyFacts(t *testing.T) {
 				t.Fatalf("proxy_expired=%q, want %q; checks=%#v", got, tc.wantExpiration, updated.LastCheckItems)
 			}
 		})
-	}
-}
-
-func TestServiceCreateAccountStoresName(t *testing.T) {
-	store := newMemoryStore()
-	service := newTestService(store)
-	actor := mediaActor(1, 10, identityservice.RoleOperator)
-
-	account, err := service.CreateAccount(actor, CreateAccountInput{
-		CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, PlatformName: "  测试昵称  ",
-	})
-	if err != nil {
-		t.Fatalf("CreateAccount() error = %v", err)
-	}
-	if account.PlatformName != "测试昵称" {
-		t.Fatalf("account.PlatformName = %q, want %q", account.PlatformName, "测试昵称")
-	}
-	stored, _, _ := store.Find(account.ID)
-	if stored.PlatformName != "测试昵称" {
-		t.Fatalf("stored.PlatformName = %q, want %q", stored.PlatformName, "测试昵称")
-	}
-}
-
-func TestServiceUpdateAccountName(t *testing.T) {
-	store := newMemoryStore()
-	service := newTestService(store)
-	actor := mediaActor(1, 10, identityservice.RoleOperator)
-	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili, PlatformName: "原名"})
-
-	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{PlatformName: strPtr("  新名  ")})
-	if err != nil {
-		t.Fatalf("UpdateAccount() error = %v", err)
-	}
-	if updated.PlatformName != "新名" {
-		t.Fatalf("updated.PlatformName = %q, want %q", updated.PlatformName, "新名")
-	}
-
-	cleared, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{PlatformName: strPtr("")})
-	if err != nil {
-		t.Fatalf("UpdateAccount(clear) error = %v", err)
-	}
-	if cleared.PlatformName != "" {
-		t.Fatalf("cleared.PlatformName = %q, want empty", cleared.PlatformName)
 	}
 }
 
@@ -653,7 +616,8 @@ func TestServiceApplyCheckResultUpdatesObservedName(t *testing.T) {
 	account, _ := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili})
 
 	// name 为空时回填
-	updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
+	prepareCheckResult(store, account.ID, "task-1")
+	updated, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{ExecutionStatus: "completed",
 		OperationID: "task-1", PlatformAccountID: "uid-1", PlatformName: "回填昵称", PlatformLoginStatus: PlatformLoginNormal,
 	})
 	if err != nil {
@@ -669,7 +633,8 @@ func TestServiceApplyCheckResultUpdatesObservedName(t *testing.T) {
 		PlatformAccountID: "uid-1", PlatformName: "已有名", IdentificationStatus: IdentificationIdentified,
 		Enabled: true, PlatformLoginStatus: PlatformLoginNormal,
 	}}
-	kept, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{
+	prepareCheckResult(store, account.ID, "task-2")
+	kept, err := service.ApplyLocalAccountCheckResult(actor, account.ID, AccountCheckResultInput{ExecutionStatus: "completed",
 		OperationID: "task-2", PlatformAccountID: "uid-1", PlatformName: "新名", PlatformLoginStatus: PlatformLoginNormal,
 	})
 	if err != nil {
@@ -717,68 +682,6 @@ func assertAccountIDs(t *testing.T, service *accountService, actor identityservi
 		if got[i] != want[i] {
 			t.Fatalf("account IDs = %v, want %v", got, want)
 		}
-	}
-}
-
-func TestServiceAccountGroupCRUD(t *testing.T) {
-	store := newMemoryStore()
-	service := newTestService(store)
-	actor := mediaActor(1, 10, identityservice.RoleOperator)
-
-	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{
-		Name: "重点账号", Filters: AccountGroupFilters{Platform: PlatformBilibili, Enabled: boolPtr(true)},
-	})
-	if err != nil {
-		t.Fatalf("create group: %v", err)
-	}
-	if group.ID == "" || group.Name != "重点账号" {
-		t.Fatalf("group = %#v", group)
-	}
-	groups, err := service.ListAccountGroups(actor)
-	if err != nil || len(groups) != 1 {
-		t.Fatalf("list groups = %#v err=%v", groups, err)
-	}
-
-	other := mediaActor(2, 10, identityservice.RoleOperator)
-	if _, err := service.UpdateAccountGroup(other, group.ID, UpdateAccountGroupInput{Name: strPtr("抢改")}); err == nil {
-		t.Fatal("other user should not update group")
-	}
-	updated, err := service.UpdateAccountGroup(actor, group.ID, UpdateAccountGroupInput{Name: strPtr("改名")})
-	if err != nil || updated.Name != "改名" {
-		t.Fatalf("update = %#v err=%v", updated, err)
-	}
-	if err := service.DeleteAccountGroup(other, group.ID); err == nil {
-		t.Fatal("other user should not delete group")
-	}
-	if err := service.DeleteAccountGroup(actor, group.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-}
-
-func TestServiceAccountGroupApplyFilters(t *testing.T) {
-	store := newMemoryStore()
-	service := newTestService(store)
-	actor := mediaActor(1, 10, identityservice.RoleOperator)
-
-	if _, err := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBilibili}); err != nil {
-		t.Fatalf("create bilibili: %v", err)
-	}
-	if _, err := service.CreateAccount(actor, CreateAccountInput{CategoryIDs: []identityservice.CategoryID{1}, Platform: PlatformBaidu}); err != nil {
-		t.Fatalf("create baidu: %v", err)
-	}
-	group, err := service.CreateAccountGroup(actor, CreateAccountGroupInput{Name: "仅B站", Filters: AccountGroupFilters{Platform: PlatformBilibili}})
-	if err != nil {
-		t.Fatalf("create group: %v", err)
-	}
-	accounts, err := service.ListAccountsByGroup(actor, group.ID)
-	if err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	if len(accounts) != 1 || accounts[0].Platform != PlatformBilibili {
-		t.Fatalf("apply accounts = %#v", accounts)
-	}
-	if _, err := service.ListAccountsByGroup(mediaActor(2, 10, identityservice.RoleOperator), group.ID); err == nil {
-		t.Fatal("other user should not apply group")
 	}
 }
 
@@ -850,13 +753,11 @@ type memoryStore struct {
 	categoryIDs map[string][]identityservice.CategoryID
 	tags        map[string]map[string]struct{}
 	audits      []identityservice.AuditEvent
-	groups      map[string]AccountGroup
-	groupSeq    int64
 	accountSeq  int64
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{records: map[string]AccountRecord{}, categoryIDs: map[string][]identityservice.CategoryID{}, tags: map[string]map[string]struct{}{}, groups: map[string]AccountGroup{}}
+	return &memoryStore{records: map[string]AccountRecord{}, categoryIDs: map[string][]identityservice.CategoryID{}, tags: map[string]map[string]struct{}{}}
 }
 
 func (s *memoryStore) Create(record AccountRecord) (string, error) {
@@ -865,6 +766,10 @@ func (s *memoryStore) Create(record AccountRecord) (string, error) {
 	s.categoryIDs[record.ID] = append([]identityservice.CategoryID(nil), record.CategoryIDs...)
 	record.CategoryIDs = nil
 	s.records[record.ID] = record
+	s.tags[record.ID] = map[string]struct{}{}
+	for _, tag := range record.Tags {
+		s.tags[record.ID][tag] = struct{}{}
+	}
 	return record.ID, nil
 }
 
@@ -955,27 +860,6 @@ func recordMatchesSearch(record AccountRecord, search string) bool {
 	return false
 }
 
-func (s *memoryStore) AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error {
-	for _, accountID := range accountIDs {
-		if s.tags[accountID] == nil {
-			s.tags[accountID] = map[string]struct{}{}
-		}
-		for _, tag := range tags {
-			s.tags[accountID][tag] = struct{}{}
-		}
-	}
-	return nil
-}
-
-func (s *memoryStore) RemoveTags(userID identityservice.UserID, accountIDs, tags []string) error {
-	for _, accountID := range accountIDs {
-		for _, tag := range tags {
-			delete(s.tags[accountID], tag)
-		}
-	}
-	return nil
-}
-
 func (s *memoryStore) ListTags(accountIDs []string) (map[string][]string, error) {
 	result := make(map[string][]string, len(accountIDs))
 	for _, accountID := range accountIDs {
@@ -989,38 +873,6 @@ func (s *memoryStore) ListTags(accountIDs []string) (map[string][]string, error)
 
 func (s *memoryStore) AppendAudit(event identityservice.AuditEvent) error {
 	s.audits = append(s.audits, event)
-	return nil
-}
-
-func (s *memoryStore) CreateGroup(group AccountGroup) (string, error) {
-	s.groupSeq++
-	group.ID = strconv.FormatInt(s.groupSeq, 10)
-	s.groups[group.ID] = group
-	return group.ID, nil
-}
-
-func (s *memoryStore) FindGroup(id string) (AccountGroup, bool, error) {
-	group, found := s.groups[id]
-	return group, found, nil
-}
-
-func (s *memoryStore) ListGroups(userID identityservice.UserID) ([]AccountGroup, error) {
-	groups := []AccountGroup{}
-	for _, group := range s.groups {
-		if group.UserID == userID {
-			groups = append(groups, group)
-		}
-	}
-	return groups, nil
-}
-
-func (s *memoryStore) UpdateGroup(group AccountGroup) error {
-	s.groups[group.ID] = group
-	return nil
-}
-
-func (s *memoryStore) DeleteGroup(id string) error {
-	delete(s.groups, id)
 	return nil
 }
 
@@ -1143,3 +995,158 @@ func mediaActor(userID identityservice.UserID, teamID identityservice.TeamID, ro
 }
 
 func boolPtr(value bool) *bool { return &value }
+
+func (s *memoryStore) StartCheck(r AccountRecord) error {
+	current, ok := s.records[r.ID]
+	if !ok || current.BrowserProfileID != r.CheckProfileID {
+		return ErrInvalidInput
+	}
+	current.CheckOperationID = r.CheckOperationID
+	current.CheckProfileID = r.CheckProfileID
+	current.CheckStartedAt = r.CheckStartedAt
+	current.LastCheckStatus = "running"
+	current.LastCheckMessage = ""
+	s.records[r.ID] = current
+	return nil
+}
+func (s *memoryStore) CompleteCheck(r AccountRecord) error {
+	current, ok := s.records[r.ID]
+	if !ok || current.CheckOperationID != r.CheckOperationID || current.BrowserProfileID != r.CheckProfileID || current.LastCheckStatus != "running" {
+		return ErrStaleCheck
+	}
+	r.Remark = current.Remark
+	r.Enabled = current.Enabled
+	r.OriginalCookie = current.OriginalCookie
+	r.ActiveCookie = current.ActiveCookie
+	s.records[r.ID] = r
+	return nil
+}
+func prepareCheckResult(store *memoryStore, id, operation string) {
+	r := store.records[id]
+	r.CheckOperationID = operation
+	r.CheckProfileID = r.BrowserProfileID
+	r.LastCheckStatus = "running"
+	store.records[id] = r
+}
+
+func TestCheckFailureAndStaleResultsPreserveConclusion(t *testing.T) {
+	store := newMemoryStore()
+	actor := mediaActor(1, 10, identityservice.RoleOperator)
+	store.records["1"] = AccountRecord{Account: Account{ID: "1", UserID: actor.ID, Platform: PlatformBilibili, PlatformAccountID: "uid", PlatformName: "confirmed", PlatformLoginStatus: PlatformLoginNormal, BrowserProfileID: "p", Enabled: true}}
+	prepareCheckResult(store, "1", "current")
+	svc := newTestService(store)
+	if _, err := svc.ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{OperationID: "old", ExecutionStatus: "completed", PlatformLoginStatus: PlatformLoginNotLoggedIn}); !errors.Is(err, ErrStaleCheck) {
+		t.Fatalf("stale error=%v", err)
+	}
+	got, err := svc.ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{OperationID: "current", ExecutionStatus: "failed", Message: "CDP unavailable"})
+	if err != nil || got.LastCheckStatus != "failed" || got.PlatformLoginStatus != PlatformLoginNormal || got.PlatformName != "confirmed" || got.LastCheckAt != nil {
+		t.Fatalf("result=%#v err=%v", got, err)
+	}
+	duplicate, err := svc.ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{OperationID: "current", ExecutionStatus: "completed", PlatformLoginStatus: PlatformLoginNotLoggedIn})
+	if err != nil || duplicate.LastCheckStatus != "failed" {
+		t.Fatalf("duplicate=%#v err=%v", duplicate, err)
+	}
+	prepareCheckResult(store, "1", "next")
+	r := store.records["1"]
+	r.BrowserProfileID = "changed"
+	store.records["1"] = r
+	if _, err := svc.ApplyLocalAccountCheckResult(actor, "1", AccountCheckResultInput{OperationID: "next", ExecutionStatus: "completed", PlatformLoginStatus: PlatformLoginNormal, PlatformAccountID: "uid"}); !errors.Is(err, ErrStaleCheck) {
+		t.Fatalf("changed window err=%v", err)
+	}
+}
+
+func completeTestIdentity(service *accountService, store *memoryStore, actor identityservice.PublicUser, id string, input AccountCheckResultInput) (Account, error) {
+	prepareCheckResult(store, id, "test-identity")
+	input.OperationID = "test-identity"
+	input.ExecutionStatus = "completed"
+	return service.ApplyLocalAccountCheckResult(actor, id, input)
+}
+func (s *memoryStore) UpdateMetadata(record AccountRecord, input UpdateAccountInput) error {
+	current := s.records[record.ID]
+	if input.Enabled != nil {
+		current.Enabled = *input.Enabled
+	}
+	if input.Remark != nil {
+		current.Remark = record.Remark
+	}
+	if input.CategoryIDs != nil {
+		current.CategoryIDs = record.CategoryIDs
+		s.categoryIDs[record.ID] = record.CategoryIDs
+	}
+	if input.Tags != nil {
+		s.tags[record.ID] = map[string]struct{}{}
+		for _, t := range record.Tags {
+			s.tags[record.ID][t] = struct{}{}
+		}
+		current.Tags = record.Tags
+	}
+	current.UpdatedAt = record.UpdatedAt
+	s.records[record.ID] = current
+	return nil
+}
+func (s *memoryStore) SetProfile(record AccountRecord) error {
+	current := s.records[record.ID]
+	current.BrowserProfileID = record.BrowserProfileID
+	current.CheckOperationID = ""
+	current.LastCheckStatus = "never"
+	current.UpdatedAt = record.UpdatedAt
+	s.records[record.ID] = current
+	return nil
+}
+func TestMetadataPatchIsAtomicAndEnableIsSeparate(t *testing.T) {
+	store := newMemoryStore()
+	service := newTestService(store)
+	actor := mediaActor(1, 10, identityservice.RoleOperator)
+	account, _ := service.CreateAccount(actor, CreateAccountInput{Platform: PlatformBilibili})
+	tags := []string{" 矩阵 ", "矩阵", "重点"}
+	updated, err := service.UpdateAccount(actor, account.ID, UpdateAccountInput{Tags: &tags, Remark: strPtr("  运营备注  "), CategoryIDs: categoryIDsPtr([]identityservice.CategoryID{})})
+	if err != nil || updated.Remark != "运营备注" || len(updated.Tags) != 2 {
+		t.Fatalf("patch=%#v err=%v", updated, err)
+	}
+	if _, err = service.UpdateAccount(actor, account.ID, UpdateAccountInput{Enabled: boolPtr(false), Tags: &tags}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("combined enable patch: %v", err)
+	}
+}
+
+func (s *memoryStore) ListPage(query AccountQuery) ([]AccountRecord, model.AccountCounts, error) {
+	records, err := s.List(query)
+	counts := model.AccountCounts{Total: len(records)}
+	if err != nil {
+		return nil, counts, err
+	}
+	start := min(query.Offset, counts.Total)
+	end := min(start+query.Limit, counts.Total)
+	return records[start:end], counts, nil
+}
+
+func setTestTags(service *accountService, actor identityservice.PublicUser, ids, tags []string) error {
+	for _, id := range ids {
+		current, err := service.GetAccount(actor, id)
+		if err != nil {
+			return err
+		}
+		next := append(current.Tags, tags...)
+		if _, err = service.UpdateAccount(actor, id, UpdateAccountInput{Tags: &next}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func removeTestTags(service *accountService, actor identityservice.PublicUser, ids, tags []string) error {
+	for _, id := range ids {
+		current, err := service.GetAccount(actor, id)
+		if err != nil {
+			return err
+		}
+		next := []string{}
+		for _, tag := range current.Tags {
+			if !contains(tags, tag) {
+				next = append(next, tag)
+			}
+		}
+		if _, err = service.UpdateAccount(actor, id, UpdateAccountInput{Tags: &next}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

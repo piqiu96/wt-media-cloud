@@ -1,13 +1,20 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.10.29.2
+  version: 2026.10.30.2
 paths:
   /api/v1/media-accounts:
     get:
       operationId: listMediaAccounts
       security: [{sessionCookie: []}]
       parameters:
+        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {in: query, name: team_id, schema: {type: integer, format: int64}}
+        - {in: query, name: view, schema: {type: string, enum: [normal, attention, unbound]}}
+        - {in: query, name: category_type, schema: {type: string, enum: [game, ai, anime]}}
+        - {in: query, name: tags, schema: {type: string}, description: Comma-separated tags.}
+        - {in: query, name: tag_match, schema: {type: string, enum: [any, all, exclude], default: any}}
         - {in: query, name: user_id, schema: {type: integer, format: int64}}
         - {in: query, name: category_ids, schema: {type: string}, description: Comma-separated numeric category IDs; an account matches any selected category.}
         - {in: query, name: platform, schema: {$ref: '#/components/schemas/Platform'}}
@@ -69,7 +76,7 @@ paths:
             schema: {$ref: '#/components/schemas/UpdateMediaAccountRequest'}
       responses:
         '200':
-          description: Business and/or login status updated.
+          description: Account metadata or enabled state updated.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MediaAccountResponse'}
@@ -77,31 +84,6 @@ paths:
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
-  /api/v1/media-accounts/{account_id}/identify:
-    post:
-      operationId: identifyMediaAccount
-      security: [{sessionCookie: []}]
-      parameters:
-        - in: path
-          name: account_id
-          required: true
-          schema: {type: string}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/IdentifyMediaAccountRequest'}
-      responses:
-        '200':
-          description: Account identity backfilled.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/MediaAccountResponse'}
-        '400': {$ref: '#/components/responses/InvalidRequest'}
-        '401': {$ref: '#/components/responses/AuthenticationRequired'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-        '409': {description: Duplicate identity exists for this user and platform; candidate is marked duplicate.}
   /api/v1/media-accounts/{account_id}/check:
     post:
       operationId: startMediaAccountCheck
@@ -140,6 +122,7 @@ paths:
               schema: {$ref: '#/components/schemas/MediaAccountResponse'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: stale_account_check; operation or target changed.}
   /api/v1/media-accounts/{account_id}/cookies/read-sync:
     post:
       operationId: readMediaAccountCookiesSync
@@ -174,34 +157,6 @@ paths:
         '200': {description: Cookie read result persisted and returned without secrets.}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '403': {$ref: '#/components/responses/Forbidden'}
-  /api/v1/media-accounts/tags/add:
-    post:
-      operationId: addMediaAccountTags
-      security: [{sessionCookie: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/TagsRequest'}
-      responses:
-        '200': {description: Tags added idempotently.}
-        '400': {$ref: '#/components/responses/InvalidRequest'}
-        '401': {$ref: '#/components/responses/AuthenticationRequired'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-  /api/v1/media-accounts/tags/remove:
-    post:
-      operationId: removeMediaAccountTags
-      security: [{sessionCookie: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/TagsRequest'}
-      responses:
-        '200': {description: Tags removed idempotently.}
-        '400': {$ref: '#/components/responses/InvalidRequest'}
-        '401': {$ref: '#/components/responses/AuthenticationRequired'}
-        '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/media-accounts/{account_id}/profile:
     patch:
       operationId: bindMediaAccountProfile
@@ -219,6 +174,15 @@ paths:
         '200': {description: Same-user active Profile bound to the account.}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: Profile unavailable or already used by this platform.}
+    delete:
+      operationId: unbindMediaAccountProfile
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Window relation removed without modifying browser Cookies.}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
@@ -234,39 +198,22 @@ components:
     CreateMediaAccountRequest:
       type: object
       required: [platform]
+      additionalProperties: false
       properties:
-        user_id: {type: integer, format: int64, description: Admin-only target; otherwise omitted or current user.}
         category_ids: {type: array, items: {type: integer, format: int64, minimum: 1}, description: Omit or pass an empty array when the account is not classified yet. Selected categories must share one type.}
-        platform_name: {type: string, maxLength: 255}
-        platform_avatar_url: {type: string, maxLength: 2048}
         platform: {$ref: '#/components/schemas/Platform'}
-        browser_profile_id: {type: string}
         remark: {type: string, maxLength: 500}
         tags: {type: array, items: {type: string, maxLength: 64}}
-        original_cookie: {type: string, format: password, writeOnly: true}
     UpdateMediaAccountRequest:
       type: object
       properties:
         enabled: {type: boolean}
-        platform_login_status: {$ref: '#/components/schemas/PlatformLoginStatus'}
         category_ids: {type: array, items: {type: integer, format: int64, minimum: 1}, description: Present with an empty array to clear all categories. Selected categories must share one type.}
-        platform_name: {type: string, maxLength: 255}
         remark: {type: string, maxLength: 500}
+        tags: {type: array, items: {type: string, maxLength: 64}}
+      additionalProperties: false
+      description: Metadata patch, or enabled alone. Identity and login verdict are written only by checking.
       minProperties: 1
-    IdentifyMediaAccountRequest:
-      type: object
-      required: [platform_account_id, platform_login_status]
-      properties:
-        platform_account_id: {type: string, maxLength: 255}
-        platform_name: {type: string, maxLength: 255}
-        platform_avatar_url: {type: string, maxLength: 2048}
-        platform_login_status: {$ref: '#/components/schemas/PlatformLoginStatus'}
-    TagsRequest:
-      type: object
-      required: [account_ids, tags]
-      properties:
-        account_ids: {type: array, minItems: 1, items: {type: string}}
-        tags: {type: array, minItems: 1, items: {type: string, maxLength: 64}}
     MediaAccount:
       type: object
       required: [id, user_id, user_name, team_id, category_ids, platform, identification_status, enabled, platform_login_status, tags, created_at, updated_at]
@@ -288,6 +235,9 @@ components:
         platform_login_status: {$ref: '#/components/schemas/PlatformLoginStatus'}
         cookie_status: {type: string}
         cookie_updated_at: {type: string, format: date-time}
+        last_check_status: {type: string, enum: [never, running, completed, failed]}
+        last_check_message: {type: string}
+        last_check_identity: {type: object, nullable: true, properties: {platform_account_id: {type: string}, platform_name: {type: string}, platform_avatar_url: {type: string}}}
         last_check_at: {type: string, format: date-time}
         last_check_items: {type: array, items: {type: object}}
         tags: {type: array, items: {type: string}}
@@ -300,7 +250,7 @@ components:
     MediaAccountListResponse:
       type: object
       required: [data]
-      properties: {data: {type: array, items: {$ref: '#/components/schemas/MediaAccount'}}}
+      properties: {data: {type: object, required: [items, total, page, page_size, stats], properties: {items: {type: array, items: {$ref: '#/components/schemas/MediaAccount'}}, total: {type: integer}, page: {type: integer}, page_size: {type: integer}, stats: {type: object, properties: {total: {type: integer}, normal: {type: integer}, abnormal: {type: integer}, unbound: {type: integer}}}}}}
     MediaAccountCheckStart:
       type: object
       required: [operation_id, account_id, browser_profile_id, bit_profile_id, platform, platform_login_status]
@@ -331,8 +281,9 @@ components:
       properties: {data: {$ref: '#/components/schemas/MediaAccountCookieReadStart'}}
     MediaAccountCheckResultRequest:
       type: object
-      required: [operation_id, platform_account_id, platform_login_status]
+      required: [operation_id, execution_status]
       properties:
+        execution_status: {type: string, enum: [completed, failed]}
         operation_id: {type: string}
         platform_account_id: {type: string, maxLength: 255}
         platform_name: {type: string, maxLength: 255}

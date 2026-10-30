@@ -9,6 +9,7 @@ import (
 )
 
 var (
+	ErrStaleCheck                 = errors.New("media account check is stale")
 	ErrForbidden                  = errors.New("media account operation is forbidden")
 	ErrInvalidInput               = errors.New("media account input is invalid")
 	ErrNotFound                   = errors.New("media account was not found")
@@ -55,6 +56,12 @@ type AccountCheckItem struct {
 	Message string `json:"message,omitempty"`
 }
 
+type CheckIdentity struct {
+	PlatformAccountID string `json:"platform_account_id"`
+	PlatformName      string `json:"platform_name"`
+	PlatformAvatarURL string `json:"platform_avatar_url"`
+}
+
 type Account struct {
 	ID     string                `json:"id"`
 	UserID sharedidentity.UserID `json:"user_id"`
@@ -75,6 +82,12 @@ type Account struct {
 	PlatformLoginStatus  PlatformLoginStatus         `json:"platform_login_status"`
 	CookieStatus         string                      `json:"cookie_status,omitempty"`
 	CookieUpdatedAt      *time.Time                  `json:"cookie_updated_at,omitempty"`
+	LastCheckStatus      string                      `json:"last_check_status"`
+	LastCheckMessage     string                      `json:"last_check_message"`
+	LastCheckIdentity    *CheckIdentity              `json:"last_check_identity,omitempty"`
+	CheckOperationID     string                      `json:"-"`
+	CheckProfileID       string                      `json:"-"`
+	CheckStartedAt       *time.Time                  `json:"-"`
 	LastCheckAt          *time.Time                  `json:"last_check_at,omitempty"`
 	LastCheckItems       []AccountCheckItem          `json:"last_check_items,omitempty"`
 	Tags                 []string                    `json:"tags"`
@@ -88,24 +101,9 @@ type AccountRecord struct {
 	ActiveCookie   string
 }
 
-type AccountGroupFilters struct {
-	CategoryIDs         []sharedidentity.CategoryID `json:"category_ids,omitempty"`
-	Platform            Platform                    `json:"platform,omitempty"`
-	Enabled             *bool                       `json:"enabled,omitempty"`
-	PlatformLoginStatus PlatformLoginStatus         `json:"platform_login_status,omitempty"`
-	Search              string                      `json:"search,omitempty"`
-	AnyTags             []string                    `json:"any_tags,omitempty"`
-	AllTags             []string                    `json:"all_tags,omitempty"`
-	ExcludeTags         []string                    `json:"exclude_tags,omitempty"`
-}
-
-type AccountGroup struct {
-	ID        string                 `json:"id"`
-	UserID    sharedidentity.UserID  `json:"user_id"`
-	TeamID    *sharedidentity.TeamID `json:"team_id,omitempty"`
-	Name      string                 `json:"name"`
-	Filters   AccountGroupFilters    `json:"filters"`
-	SortOrder int                    `json:"sort_order"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+type AccountCounts struct {
+	Total    int `json:"total"`
+	Normal   int `json:"normal"`
+	Abnormal int `json:"abnormal"`
+	Unbound  int `json:"unbound"`
 }

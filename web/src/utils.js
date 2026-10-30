@@ -16,11 +16,6 @@ export function canUseLocalAgent(user) {
   return user?.role === 'operator' || user?.role === 'senior_operator'
 }
 
-// 开户不在本轮范围，仍是普通运营的本机执行面。
-export function canUseAccountOpening(user) {
-  return user?.role === 'operator'
-}
-
 // 本机 Agent（sidecar）由运营与高级运营拉起；管理员不承担本机操作。
 // 高级运营能对哪些账号执行本地动作由页面按账号归属再判一层。
 export function canRunLocalAgent(user) {

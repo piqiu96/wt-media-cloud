@@ -31,7 +31,6 @@ export const desktopRoutes = [
       // 运营和高级运营开放（D08），开户仍是普通运营的本机执行面；其余角色由
       // main.ts 拦回内容池。
       { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue") },
-      { path: "account-opening", name: "AccountOpening", component: () => import("../../modules/accounts/pages/AccountOpeningPage.vue"), meta: { operatorOnly: true } },
       { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue"), meta: { localOnly: true } },
       { path: "proxies", name: "Proxies", component: () => import("../../modules/proxy/pages/ProxyPage.vue") },
       // 系统管理复用 Cloud 的同一批组件文件，而不是在 Desktop 再写一套。

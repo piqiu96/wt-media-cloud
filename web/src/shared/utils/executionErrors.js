@@ -3,6 +3,9 @@
 // 按 `code` 分支而不是解析文案：同一条消息可能来自 Cloud、Tauri 或 Agent，
 // 文案会变，码不会。未收录的码退回原始消息，至少保留排查线索。
 const EXECUTION_ERROR_TEXT = Object.freeze({
+  account_check_live_read_failed: '浏览器实时会话读取失败，请重新打开窗口后检查。',
+  account_check_platform_unavailable: '平台当前未返回有效身份，请稍后重试检查。',
+  stale_account_check: '检查目标已变化或结果已过期，请刷新后重新检查。',
   BIT_NOT_BOUND: '尚未绑定比特浏览器账号，请到「个人信息」页完成绑定。',
   BIT_MAIN_USER_MISMATCH: '比特浏览器登录账号与系统绑定账号不一致，请到「个人信息」页确认换绑。',
   BIT_BROWSER_OFFLINE: '比特浏览器未运行或不可达，请先启动比特浏览器后重试。',
