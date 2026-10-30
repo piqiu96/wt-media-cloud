@@ -526,6 +526,7 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 		}
 		if found && existing.ID != record.ID {
 			record.IdentificationStatus = IdentificationDuplicate
+			record.LastCheckMessage = "识别出的账号已存在，请查看已有账号"
 			record.DuplicateOfAccountID = existing.ID
 			record.PlatformLoginStatus = PlatformLoginAccountMismatch
 			record.LastCheckItems = mergeLastCheckItems(input.LastCheckItems, proxyFact, now)

@@ -63,7 +63,6 @@ const accountMembers = ref([])
 const accountTeams = ref([])
 const searchTeam = ref("")
 const searchCategoryType = ref("")
-const searchTagMatch = ref("any")
 const profiles = ref([])
 let bindingRequest = 0
 let accountRequest = 0
@@ -132,8 +131,7 @@ const allTagsPopup = ref(null)
 
 const selectedAccountIds = ref([])
 const selectedAccountCache = new Map()
-const searchProfile = ref("")
-const advancedFilterCount = computed(() => [searchEnabled.value, searchTags.value.length, searchProfile.value.trim(), searchCategoryType.value || searchCategoryIds.value.length, searchTeam.value, searchOwner.value && searchOwner.value !== defaultOwnerFilter()].filter(Boolean).length)
+const advancedFilterCount = computed(() => [searchEnabled.value, searchTags.value.length, searchCategoryType.value || searchCategoryIds.value.length, searchTeam.value, searchOwner.value && searchOwner.value !== defaultOwnerFilter()].filter(Boolean).length)
 // 使用人筛选：高级运营默认看自己，管理员默认看全部成员；普通运营由服务端强制
 // 只看自己，因此不展示这个筛选项。
 const searchOwner = ref("")
@@ -197,14 +195,13 @@ async function loadAccounts({ resetPage = false } = {}) {
   if (searchEnabled.value) params.enabled = searchEnabled.value === "enabled"
   if (searchLoginStatus.value) params.platform_login_status = searchLoginStatus.value
   if (searchCategoryIds.value.length) params.category_ids = searchCategoryIds.value
-  if (searchTags.value.length) { params.tags = searchTags.value; params.tag_match = searchTagMatch.value }
+  if (searchTags.value.length) params.tags = searchTags.value
   if (searchOwner.value && searchOwner.value !== "all") params.user_id = Number(searchOwner.value)
   if (searchTeam.value) params.team_id = Number(searchTeam.value)
   if (searchCategoryType.value) params.category_type = searchCategoryType.value
   if (resetPage) { pagination.value.current = 1; selectedAccountIds.value = [] }
   params.page = pagination.value.current
   params.page_size = pagination.value.pageSize
-  if (searchProfile.value) params.profile_search = searchProfile.value
   try {
     const result = await accountClient.listPage(params)
     if (request !== accountRequest) return
@@ -232,14 +229,12 @@ function resetFilters(reload = true) {
   pagination.value.current = 1
   searchTeam.value = ""
   searchCategoryType.value = ""
-  searchTagMatch.value = "any"
   searchText.value = ""
   searchPlatform.value = ""
   searchEnabled.value = ""
   searchLoginStatus.value = ""
   searchTags.value = []
   searchCategoryIds.value = []
-  searchProfile.value = ""
   searchOwner.value = defaultOwnerFilter()
   if (reload) loadAccounts()
 }
@@ -461,7 +456,7 @@ function rowMoreOptions(account) {
  return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"账号凭证",value:"credentials"}] : [])]
 }
 function usesRowMore(account) {
- const base = 2 + (canOperateLocalAccount(account) ? 1 : 0) + (canOperateLocalAccount(account) && showWindowToggle(account) ? 1 : 0)
+ const base = 2 + (account.identification_status === "duplicate" && account.duplicate_of_account_id ? 1 : canOperateLocalAccount(account) ? 1 : 0) + (canOperateLocalAccount(account) && showWindowToggle(account) ? 1 : 0)
  return base + rowMoreOptions(account).length > 5
 }
 function onRowMore(option, account) { if (option.value === "bind") openBind(account); else if (option.value === "credentials") openCookieDialog(account) }
@@ -519,6 +514,7 @@ function localOperationHint(account) {
 }
 
 function executableText(account) {
+  if (account.identification_status === "duplicate" && account.duplicate_of_account_id) return `账号已存在，请查看账号 ${account.duplicate_of_account_id}`
   if (!account.enabled) return "不可执行：账号已停用"
   if (!(account.category_ids || []).length) return "不可执行：未绑定类目"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
@@ -538,6 +534,7 @@ function enabledText(enabled) {
 const ACCOUNT_STATUS_MAP = {
   pending: { label: "待上号", color: "gray" },
   normal: { label: "正常", color: "green" },
+  duplicate: { label: "账号已存在", color: "orange" },
   not_logged_in: { label: "未登录", color: "orange" },
   expired: { label: "登录失效", color: "red" },
   account_mismatch: { label: "账号不匹配", color: "red" },
@@ -550,6 +547,7 @@ function accountStatusKey(account) {
   if (account.last_check_status === "failed") return "check_failed"
   const idStatus = account.identification_status || ""
   const login = account.platform_login_status || ""
+  if (idStatus === "duplicate" && account.duplicate_of_account_id) return "duplicate"
   if (login === "normal") return "normal"
   switch (login) {
     case "not_logged_in": return "not_logged_in"
@@ -921,6 +919,19 @@ const resourceAccountStats = computed(() => [
 
 const pagedAccounts = computed(() => accounts.value)
 
+const widestAccountActions = computed(() => {
+  const defaults = !isDesktop || isAdmin.value ? ["详情", "编辑"] : ["检查", "详情", "打开窗口", "编辑", "更多"]
+  return accounts.value.reduce((widest, account) => {
+    const local = canOperateLocalAccount(account)
+    const labels = [
+      ...(account.identification_status === 'duplicate' && account.duplicate_of_account_id ? ['查看已有账号'] : local ? ['检查'] : []),
+      '详情', ...(local && showWindowToggle(account) ? [profileIsOpen(account) ? '关闭窗口' : '打开窗口'] : []), '编辑',
+      ...(usesRowMore(account) ? ['更多'] : rowMoreOptions(account).map(action => action.content)),
+    ]
+    return opColumnWidth(labels, {variant:'text', primary:true, loading:true}) > opColumnWidth(widest, {variant:'text', primary:true, loading:true}) ? labels : widest
+  }, defaults)
+})
+
 const columns = computed(() => [
   ...(isDesktop && !isAdmin.value ? [{ colKey: "row-select", type: "multiple", width: 40, fixed: "left" }] : []),
   { colKey: "id", title: "ID", width: 60 },
@@ -936,7 +947,7 @@ const columns = computed(() => [
   { colKey: "remark", title: "运营备注", width: 160, ellipsis: true },
   { colKey: "enabled", title: "启用", width: 80, minWidth: 80 },
   { colKey: "last_check_at", title: "最近检查", width: 110, minWidth: 110 },
-  { colKey: "op", title: "操作", width: opColumnWidth(!isDesktop || isAdmin.value ? ["详情", "编辑"] : ["检查", "详情", "打开窗口", "编辑", "更多"], {variant:"text", primary:true, loading:true}), fixed: "right" },
+  { colKey: "op", title: "操作", width: opColumnWidth(widestAccountActions.value, {variant:"text", primary:true, loading:true}), fixed: "right" },
 ])
 </script>
 
@@ -965,7 +976,7 @@ const columns = computed(() => [
     <ResourceCard class="account-resource-card">
     <div v-if="searchView" style="margin-bottom:12px"><t-tag closable @close="searchView='';loadAccounts({resetPage:true})">{{ {normal:"正常账号",attention:"待处理账号",unbound:"未绑定窗口"}[searchView] }}</t-tag></div>
     <div class="filter-bar">
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable /></label>
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="账号 / UID / 备注 / 窗口名" clearable @enter="loadAccounts({ resetPage: true })" /></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
@@ -996,8 +1007,6 @@ const columns = computed(() => [
         <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" multiple filterable placeholder="全部" clearable>
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">标签匹配</span><t-select v-model="searchTagMatch" placeholder="全部" :disabled="!searchTags.length"><t-option value="any" label="任一标签" /><t-option value="all" label="全部标签" /><t-option value="exclude" label="排除标签" /></t-select></label>
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable /></label>
         </div>
     </div>
 
@@ -1055,7 +1064,8 @@ const columns = computed(() => [
       </template>
       <template #op="{ row }">
         <ResourceRowActions>
-          <t-button v-if="canOperateLocalAccount(row)" size="small" variant="text" class="is-primary" :loading="currentCheckingId === row.id" :disabled="batchChecking || Boolean(currentCheckingId) || (isDesktop && !canOperateLocalAccount(row))" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
+          <t-button v-if="row.identification_status === 'duplicate' && row.duplicate_of_account_id" size="small" variant="text" class="is-primary" @click="viewImportedAccount(row.duplicate_of_account_id)">查看已有账号</t-button>
+          <t-button v-else-if="canOperateLocalAccount(row)" size="small" variant="text" class="is-primary" :loading="currentCheckingId === row.id" :disabled="batchChecking || Boolean(currentCheckingId) || (isDesktop && !canOperateLocalAccount(row))" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
           <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
           <t-button v-if="canOperateLocalAccount(row) && showWindowToggle(row)" size="small" variant="text" :disabled="!canOperateLocalAccount(row) || !canOperateBoundWindow(row) || Boolean(operatingProfileId)" :title="localOperationHint(row)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
           <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
@@ -1186,12 +1196,13 @@ const columns = computed(() => [
       </ResourceDescriptions>
       </ResourceSection><ResourceSection title="账号检查">
       <ResourceDescriptions v-if="detailAccount">
-        <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
+        <t-descriptions-item label="登录状态">{{ detailAccount.identification_status === "duplicate" && detailAccount.duplicate_of_account_id ? "账号已存在" : loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
         <t-descriptions-item label="可执行性">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_check_at ? formatTime(detailAccount.last_check_at) : '尚未检查' }}</t-descriptions-item>
-        <t-descriptions-item label="账号资料">{{ detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
+        <t-descriptions-item label="账号资料">{{ detailAccount.identification_status === 'duplicate' && detailAccount.duplicate_of_account_id ? '已识别为已有账号' : detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
       </ResourceDescriptions>
-      <div v-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
+      <FeedbackAlert v-if="detailAccount?.identification_status === 'duplicate' && detailAccount?.duplicate_of_account_id" theme="warning" style="margin-top:16px" :message="`窗口识别出的账号「${detailAccount.last_check_identity?.platform_name || '未取得昵称'}」（UID ${detailAccount.last_check_identity?.platform_account_id || '—'}）已保存在账号 ${detailAccount.duplicate_of_account_id} 中，无需重复建账。`"><template #operation><t-button theme="primary" variant="text" size="small" @click="viewImportedAccount(detailAccount.duplicate_of_account_id)">查看已有账号</t-button></template></FeedbackAlert>
+      <div v-else-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
         <div><strong>已记录账号</strong><p>{{ detailAccount.platform_name || '待识别' }}</p><p>UID {{ detailAccount.platform_account_id || '—' }}</p></div>
         <div><strong>窗口当前账号</strong><p>{{ detailAccount.last_check_identity.platform_name || '未取得昵称' }}</p><p>UID {{ detailAccount.last_check_identity.platform_account_id || '—' }}</p></div>
       </div>

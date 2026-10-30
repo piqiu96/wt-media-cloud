@@ -49,6 +49,12 @@ func TestMySQLCheckAndMetadataSettlement(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := db.Exec("CREATE TEMPORARY TABLE browser_profiles (id BIGINT PRIMARY KEY, bit_name VARCHAR(255), cookie_operation_id VARCHAR(128))").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO browser_profiles (id,bit_name) VALUES (27,'矩阵专用窗口')").Error; err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().Truncate(time.Microsecond)
 	record := model.AccountRecord{Account: model.Account{UserID: 3, Platform: model.PlatformBilibili, BrowserProfileID: "27", Enabled: true, IdentificationStatus: model.IdentificationPending, PlatformLoginStatus: model.PlatformLoginUnknown, Tags: []string{"初始"}, CreatedAt: now, UpdatedAt: now}, OriginalCookie: "test-original"}
 	accountID, err := create(db, record)
@@ -90,7 +96,7 @@ func TestMySQLCheckAndMetadataSettlement(t *testing.T) {
 	for _, scenario := range []struct {
 		query AccountFilter
 		total int
-	}{{AccountFilter{UserID: 3, AllTags: []string{"矩阵"}, Limit: 1}, 1}, {AccountFilter{UserID: 3, ExcludeTags: []string{"矩阵"}, Limit: 1}, 0}, {AccountFilter{UserID: 3, AnyTags: []string{"不存在"}, Limit: 1}, 0}, {AccountFilter{UserID: 3, View: "unbound", Limit: 1}, 0}, {AccountFilter{UserID: 3, View: "normal", Limit: 1}, 1}} {
+	}{{AccountFilter{UserID: 3, Search: "矩阵专用窗口", Limit: 1}, 1}, {AccountFilter{UserID: 3, Search: "专用窗", Limit: 1}, 1}, {AccountFilter{UserID: 3, Search: "不存在的窗口", Limit: 1}, 0}, {AccountFilter{UserID: 4, Search: "矩阵专用窗口", Limit: 1}, 0}, {AccountFilter{UserID: 3, Search: "实时昵称", Limit: 1}, 1}, {AccountFilter{UserID: 3, AllTags: []string{"矩阵"}, Limit: 1}, 1}, {AccountFilter{UserID: 3, ExcludeTags: []string{"矩阵"}, Limit: 1}, 0}, {AccountFilter{UserID: 3, AnyTags: []string{"不存在"}, Limit: 1}, 0}, {AccountFilter{UserID: 3, View: "unbound", Limit: 1}, 0}, {AccountFilter{UserID: 3, View: "normal", Limit: 1}, 1}} {
 		rows, counts, err := listPage(db, scenario.query)
 		if err != nil {
 			t.Fatal(err)

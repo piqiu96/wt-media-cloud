@@ -254,3 +254,38 @@ func TestImportOccupiedSnapshotAndRollback(t *testing.T) {
 		t.Fatal("failed tx changed progress")
 	}
 }
+
+func TestImportRestorePreservesFailureContext(t *testing.T) {
+	for _, tc := range []struct{ name, message, existing string }{
+		{"specific failure", "读取登录信息超时，请稍后重试", ""},
+		{"existing account", "此账号已存在，请查看已有账号", "42"},
+		{"legacy skipped duplicate", "已跳过", "42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, m, a, b := importFixture(t)
+			stored := m.batches[b.ID]
+			stored.Content.Items[0].Status = "failed"
+			stored.Content.Items[0].Message = tc.message
+			stored.Content.Items[0].ExistingAccountID = tc.existing
+			m.batches[b.ID] = stored
+			skipped, err := s.MutateImportItem(a, b.ID, 1, "actions", ImportMutation{ExpectedRevision: b.Revision, Action: "skip"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored, err := s.MutateImportItem(a, b.ID, 1, "actions", ImportMutation{ExpectedRevision: skipped.Revision, Action: "restore"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := restored.Content.Items[0]
+			if item.Status != "failed" || item.Message == "已恢复" || item.Message == "已跳过" {
+				t.Fatalf("lost actionable failure: %+v", item)
+			}
+			if tc.message != "已跳过" && item.Message != tc.message {
+				t.Fatalf("lost original failure: %q", item.Message)
+			}
+			if item.ExistingAccountID != tc.existing || len(m.records) != 0 || len(m.locks) != 0 {
+				t.Fatal("restore must not create or reserve resources")
+			}
+		})
+	}
+}

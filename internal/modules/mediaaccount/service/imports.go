@@ -330,7 +330,6 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 				}
 				i.PreviousStatus = i.Status
 				i.Status = "skipped"
-				i.Message = "已跳过"
 				return release()
 			case "restore":
 				if i.Status != "skipped" {
@@ -340,7 +339,22 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 				if i.Status != "failed" {
 					i.Status = "pending"
 				}
-				i.Message = "已恢复"
+				if i.Status == "pending" {
+					i.Message = "等待接入"
+				} else if i.Message == "已跳过" || i.Message == "已恢复" || i.Message == "" {
+					switch {
+					case i.ExistingAccountID != "":
+						i.Message = "此账号已存在，请查看已有账号"
+					case i.Step == "manual":
+						i.Message = "请打开窗口完成人工登录，再检查并同步"
+					case i.CreationUnavailable:
+						i.Message = "无法新建窗口，请选择空闲窗口或稍后重试"
+					case i.Step == "blocked":
+						i.Message = "窗口已有平台登录信息或无法确认，请使用新窗口"
+					default:
+						i.Message = "上次接入未完成，请重试"
+					}
+				}
 			case "retry":
 				if i.Status != "failed" || i.Step == "manual" || i.ExistingAccountID != "" {
 					return ErrImportConflict
