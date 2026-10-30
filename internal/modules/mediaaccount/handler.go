@@ -1,8 +1,11 @@
 package mediaaccount
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 
@@ -14,34 +17,17 @@ import (
 )
 
 type createAccountRequest struct {
-	UserID           identityservice.UserID       `json:"user_id"`
-	CategoryIDs      []identityservice.CategoryID `json:"category_ids"`
-	PlatformName     string                       `json:"platform_name"`
-	Platform         accountservice.Platform      `json:"platform"`
-	OriginalCookie   string                       `json:"original_cookie"`
-	BrowserProfileID string                       `json:"browser_profile_id"`
-	Remark           string                       `json:"remark"`
-	Tags             []string                     `json:"tags"`
+	CategoryIDs []identityservice.CategoryID `json:"category_ids"`
+	Platform    accountservice.Platform      `json:"platform"`
+	Remark      string                       `json:"remark"`
+	Tags        []string                     `json:"tags"`
 }
 
 type updateAccountRequest struct {
-	Enabled             *bool                              `json:"enabled"`
-	PlatformLoginStatus accountservice.PlatformLoginStatus `json:"platform_login_status"`
-	Remark              *string                            `json:"remark"`
-	CategoryIDs         *[]identityservice.CategoryID      `json:"category_ids"`
-	PlatformName        *string                            `json:"platform_name"`
-}
-
-type identifyAccountRequest struct {
-	PlatformAccountID   string                             `json:"platform_account_id"`
-	PlatformName        string                             `json:"platform_name"`
-	PlatformAvatarURL   string                             `json:"platform_avatar_url"`
-	PlatformLoginStatus accountservice.PlatformLoginStatus `json:"platform_login_status"`
-}
-
-type tagsRequest struct {
-	AccountIDs []string `json:"account_ids"`
-	Tags       []string `json:"tags"`
+	Enabled     *bool                         `json:"enabled"`
+	Tags        *[]string                     `json:"tags"`
+	Remark      *string                       `json:"remark"`
+	CategoryIDs *[]identityservice.CategoryID `json:"category_ids"`
 }
 
 type bindProfileRequest struct {
@@ -49,6 +35,7 @@ type bindProfileRequest struct {
 }
 
 type accountCheckResultRequest struct {
+	ExecutionStatus     string                             `json:"execution_status"`
 	OperationID         string                             `json:"operation_id"`
 	PlatformAccountID   string                             `json:"platform_account_id"`
 	PlatformName        string                             `json:"platform_name"`
@@ -63,29 +50,22 @@ type cookieReadResultRequest struct {
 	Cookies     []map[string]any `json:"cookies"`
 }
 
-type createAccountGroupRequest struct {
-	Name    string                             `json:"name"`
-	Filters accountservice.AccountGroupFilters `json:"filters"`
-}
-
-type updateAccountGroupRequest struct {
-	Name    *string                             `json:"name"`
-	Filters *accountservice.AccountGroupFilters `json:"filters"`
-}
-
 func CreateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
 	}
+	if !accountservice.CanStartLocalOperation(actor.Role) {
+		api.Forbidden(c, 11003, "管理员只管理已有账号")
+		return
+	}
 	var req createAccountRequest
-	if !api.DecodeJSON(c, &req) {
+	if !decodeAccountJSON(c, &req) {
 		return
 	}
 	categoryIDs := accountservice.NormalizeCategoryIDs(req.CategoryIDs)
 	account, err := accountservice.CreateAccount(actor, accountservice.CreateAccountInput{
-		UserID: req.UserID, CategoryIDs: categoryIDs, PlatformName: req.PlatformName, Platform: req.Platform,
-		OriginalCookie: req.OriginalCookie, BrowserProfileID: req.BrowserProfileID, Remark: req.Remark, Tags: req.Tags,
+		CategoryIDs: categoryIDs, Platform: req.Platform, Remark: req.Remark, Tags: req.Tags,
 	})
 	if err != nil {
 		writeMediaAccountError(c, err)
@@ -113,7 +93,33 @@ func ListMediaAccounts(ctx context.Context, c *hertzapp.RequestContext) {
 		writeMediaAccountError(c, accountservice.ErrInvalidInput)
 		return
 	}
-	accounts, err := accountservice.ListAccounts(actor, accountservice.AccountFilter{
+	page, size := 1, 20
+	if raw := c.Query("page"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			api.BadRequest(c, 10001, "分页参数无效")
+			return
+		}
+		page = v
+	}
+	if raw := c.Query("page_size"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			api.BadRequest(c, 10001, "分页参数无效")
+			return
+		}
+		size = v
+	}
+	var teamID identityservice.TeamID
+	if raw := c.Query("team_id"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v <= 0 {
+			api.BadRequest(c, 10001, "团队参数无效")
+			return
+		}
+		teamID = identityservice.TeamID(v)
+	}
+	filter := accountservice.AccountFilter{TeamID: teamID, CategoryType: c.Query("category_type"), View: c.Query("view"),
 		UserID:              userID,
 		CategoryIDs:         categoryIDs,
 		Platform:            accountservice.Platform(c.Query("platform")),
@@ -124,18 +130,26 @@ func ListMediaAccounts(ctx context.Context, c *hertzapp.RequestContext) {
 		AnyTags:             commaValues(c.Query("any_tags")),
 		AllTags:             commaValues(c.Query("all_tags")),
 		ExcludeTags:         commaValues(c.Query("exclude_tags")),
-	})
+	}
+	if tags := commaValues(c.Query("tags")); len(tags) > 0 {
+		switch c.Query("tag_match") {
+		case "", "any":
+			filter.AnyTags = tags
+		case "all":
+			filter.AllTags = tags
+		case "exclude":
+			filter.ExcludeTags = tags
+		default:
+			api.BadRequest(c, 10001, "标签匹配方式无效")
+			return
+		}
+	}
+	accounts, err := accountservice.ListAccountPage(actor, filter, page, size)
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
 	}
 	api.Success(c, accounts)
-}
-func AddMediaAccountTags(ctx context.Context, c *hertzapp.RequestContext) {
-	changeTags(c, true)
-}
-func RemoveMediaAccountTags(ctx context.Context, c *hertzapp.RequestContext) {
-	changeTags(c, false)
 }
 func GetMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
@@ -155,29 +169,13 @@ func UpdateMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	var req updateAccountRequest
-	if !api.DecodeJSON(c, &req) {
+	if !decodeAccountJSON(c, &req) {
 		return
 	}
 	categoryIDs := req.CategoryIDs
 	account, err := accountservice.UpdateAccount(actor, c.Param("account_id"), accountservice.UpdateAccountInput{
-		Enabled: req.Enabled, PlatformLoginStatus: req.PlatformLoginStatus, Remark: req.Remark, CategoryIDs: categoryIDs, PlatformName: req.PlatformName,
+		Enabled: req.Enabled, Tags: req.Tags, Remark: req.Remark, CategoryIDs: categoryIDs,
 	})
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Success(c, account)
-}
-func IdentifyMediaAccount(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req identifyAccountRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	account, err := accountservice.IdentifyAccount(actor, c.Param("account_id"), accountservice.IdentifyAccountInput(req))
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
@@ -245,7 +243,11 @@ func GetMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	account, err := accountservice.GetAccountRecord(actor, c.Param("account_id"))
+	if !accountservice.CanStartLocalOperation(actor.Role) {
+		api.Forbidden(c, 11003, "仅本人运营账号可查看凭证")
+		return
+	}
+	account, err := accountservice.GetOwnedAccountRecord(actor, c.Param("account_id"))
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return
@@ -283,96 +285,6 @@ func UnbindMediaAccountProfile(ctx context.Context, c *hertzapp.RequestContext) 
 	}
 	api.Success(c, account)
 }
-func CreateAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req createAccountGroupRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	group, err := accountservice.CreateAccountGroup(actor, accountservice.CreateAccountGroupInput{Name: req.Name, Filters: req.Filters})
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Created(c, group)
-}
-func ListAccountGroups(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	groups, err := accountservice.ListAccountGroups(actor)
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Success(c, groups)
-}
-func ListAccountsByGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	accounts, err := accountservice.ListAccountsByGroup(actor, c.Param("group_id"))
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Success(c, accounts)
-}
-func UpdateAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req updateAccountGroupRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	group, err := accountservice.UpdateAccountGroup(actor, c.Param("group_id"), accountservice.UpdateAccountGroupInput{Name: req.Name, Filters: req.Filters})
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Success(c, group)
-}
-func DeleteAccountGroup(ctx context.Context, c *hertzapp.RequestContext) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	if err := accountservice.DeleteAccountGroup(actor, c.Param("group_id")); err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.Success(c, nil)
-}
-
-func changeTags(c *hertzapp.RequestContext, add bool) {
-	actor, ok := middleware.AuthenticateRequest(c)
-	if !ok {
-		return
-	}
-	var req tagsRequest
-	if !api.DecodeJSON(c, &req) {
-		return
-	}
-	var err error
-	if add {
-		err = accountservice.AddTags(actor, req.AccountIDs, req.Tags)
-	} else {
-		err = accountservice.RemoveTags(actor, req.AccountIDs, req.Tags)
-	}
-	if err != nil {
-		writeMediaAccountError(c, err)
-		return
-	}
-	api.NoContent(c)
-}
-
 func parseOptionalBool(value string) (*bool, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -405,6 +317,8 @@ func parseCategoryIDs(values []string) []identityservice.CategoryID {
 
 func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, accountservice.ErrStaleCheck):
+		api.FailureCode(c, 409, 23002, "检查目标已变化或结果已过期，请刷新后重新检查", "stale_account_check", nil, false, "refresh")
 	case errors.Is(err, accountservice.ErrForbidden):
 		api.Forbidden(c, 11003, "没有权限访问此媒体账号")
 	case errors.Is(err, accountservice.ErrNotFound):
@@ -424,4 +338,18 @@ func writeMediaAccountError(c *hertzapp.RequestContext, err error) {
 	default:
 		api.InternalError(c, "媒体账号服务内部错误")
 	}
+}
+
+func decodeAccountJSON(c *hertzapp.RequestContext, dst any) bool {
+	decoder := json.NewDecoder(bytes.NewReader(c.Request.Body()))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		api.BadRequest(c, 10001, "账号资料包含不支持的字段或格式错误")
+		return false
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		api.BadRequest(c, 10001, "账号资料格式错误")
+		return false
+	}
+	return true
 }

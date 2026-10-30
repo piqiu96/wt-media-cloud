@@ -9,11 +9,8 @@ import (
 func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/media-accounts", CreateMediaAccount)
 	h.GET("/api/v1/media-accounts", ListMediaAccounts)
-	h.POST("/api/v1/media-accounts/tags/add", AddMediaAccountTags)
-	h.POST("/api/v1/media-accounts/tags/remove", RemoveMediaAccountTags)
 	h.GET("/api/v1/media-accounts/:account_id", GetMediaAccount)
 	h.PATCH("/api/v1/media-accounts/:account_id", UpdateMediaAccount)
-	h.POST("/api/v1/media-accounts/:account_id/identify", IdentifyMediaAccount)
 	h.POST("/api/v1/media-accounts/:account_id/check", StartMediaAccountCheck)
 	h.POST("/api/v1/media-accounts/:account_id/check/result", ApplyMediaAccountCheckResult)
 	h.POST("/api/v1/media-accounts/:account_id/cookies/read-sync", ReadMediaAccountCookiesSync)
@@ -21,9 +18,4 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/media-accounts/:account_id/cookies", GetMediaAccountCookies)
 	h.PATCH("/api/v1/media-accounts/:account_id/profile", BindMediaAccountProfile)
 	h.DELETE("/api/v1/media-accounts/:account_id/profile", UnbindMediaAccountProfile)
-	h.POST("/api/v1/account-groups", CreateAccountGroup)
-	h.GET("/api/v1/account-groups", ListAccountGroups)
-	h.GET("/api/v1/account-groups/:group_id/accounts", ListAccountsByGroup)
-	h.PATCH("/api/v1/account-groups/:group_id", UpdateAccountGroup)
-	h.DELETE("/api/v1/account-groups/:group_id", DeleteAccountGroup)
 }

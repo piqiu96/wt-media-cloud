@@ -6,12 +6,10 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
-	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
@@ -23,13 +21,13 @@ const accountColumns = `id, user_id, team_id, platform, platform_account_id, pla
 // accountReadColumns must stay in the same order as scanAccount's destinations.
 // The owner name is resolved by the join rather than stored, so a renamed user
 // shows the new name and an account whose user row is gone shows an empty one.
-const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, '')`
+const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at`
 
 const accountReadFrom = ` FROM media_accounts ma LEFT JOIN users u ON u.id = ma.user_id`
 
 // accountSummaryColumns deliberately excludes original_cookie and active_cookie.
 // List and summary endpoints have no use for those large secrets.
-const accountSummaryColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, '')`
+const accountSummaryColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at`
 
 func queryRow(db *gorm.DB, query string, args ...any) *sql.Row {
 	return db.Raw(query, args...).Row()
@@ -82,6 +80,11 @@ func create(db *gorm.DB, record model.AccountRecord) (string, error) {
 	accountID := strconv.FormatInt(id, 10)
 	if err := replaceAccountCategoryIDs(tx, accountID, record.CategoryIDs); err != nil {
 		return "", err
+	}
+	if len(record.Tags) > 0 {
+		if err := replaceAccountTags(tx, accountID, record.Tags, record.CreatedAt); err != nil {
+			return "", err
+		}
 	}
 	if err := tx.Commit().Error; err != nil {
 		return "", err
@@ -146,8 +149,8 @@ func update(db *gorm.DB, record model.AccountRecord, replaceCategoryIDs *[]share
 	tx := db.Begin()
 	defer rollbackTx(tx)
 	result, err := execSQL(tx,
-		`UPDATE media_accounts SET user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, platform_name = ?, platform_avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, enabled = ?, platform_login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, cookie_updated_at = ?, last_check_at = ?, last_check_items = ?, updated_at = ? WHERE id = ?`,
-		record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName),
+		`UPDATE media_accounts SET check_operation_id = IF(browser_profile_id <=> ?, check_operation_id, NULL), user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, platform_name = ?, platform_avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, enabled = ?, platform_login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, cookie_updated_at = ?, last_check_at = ?, last_check_items = ?, updated_at = ? WHERE id = ?`,
+		nullIfEmpty(record.BrowserProfileID), record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName),
 		nullIfEmpty(record.PlatformAvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
 		nullIfEmpty(record.DuplicateOfAccountID), record.Enabled, record.PlatformLoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
@@ -175,46 +178,12 @@ func List(query AccountFilter) ([]model.AccountRecord, error) {
 }
 
 func list(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, error) {
-	statement := `SELECT ` + accountSummaryColumns + accountReadFrom
-	conditions := make([]string, 0, 3)
-	args := make([]any, 0, 3)
-	if query.UserID > 0 {
-		conditions = append(conditions, "ma.user_id = ?")
-		args = append(args, query.UserID)
+	where, args := accountConditions(query)
+	statement := `SELECT ` + accountSummaryColumns + accountReadFrom + where + " ORDER BY ma.created_at DESC, ma.id DESC"
+	if query.Limit > 0 {
+		statement += " LIMIT ? OFFSET ?"
+		args = append(args, query.Limit, query.Offset)
 	}
-	if len(query.CategoryIDs) > 0 {
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_categories mag WHERE mag.media_account_id = ma.id AND mag.category_id IN (`+placeholders(len(query.CategoryIDs))+`))`)
-		for _, categoryID := range query.CategoryIDs {
-			args = append(args, categoryID)
-		}
-	}
-	if query.Platform != "" {
-		conditions = append(conditions, "ma.platform = ?")
-		args = append(args, query.Platform)
-	}
-	if query.Enabled != nil {
-		conditions = append(conditions, "ma.enabled = ?")
-		args = append(args, *query.Enabled)
-	}
-	if query.PlatformLoginStatus != "" {
-		conditions = append(conditions, "ma.platform_login_status = ?")
-		args = append(args, query.PlatformLoginStatus)
-	}
-	if query.Search != "" {
-		like := "%" + query.Search + "%"
-		conditions = append(conditions, "(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.platform_name LIKE ? OR ma.remark LIKE ?)")
-		args = append(args, like, like, like, like)
-	}
-	if query.ProfileSearch != "" {
-		like := "%" + query.ProfileSearch + "%"
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = ma.browser_profile_id AND (bp.bit_name LIKE ? OR bp.bit_seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
-		args = append(args, like, like, like, like)
-	}
-	if len(conditions) > 0 {
-		statement += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	statement += " ORDER BY ma.created_at, ma.id"
-
 	rows, err := queryRows(db, statement, args...)
 	if err != nil {
 		return nil, err
@@ -315,49 +284,6 @@ func delete(db *gorm.DB, id string) error {
 	return db.Exec(`DELETE FROM media_accounts WHERE id = ?`, id).Error
 }
 
-func AddTags(userID sharedidentity.UserID, accountIDs, tags []string, createdAt time.Time) error {
-	return addTags(database.DB(), userID, accountIDs, tags, createdAt)
-}
-
-func addTags(db *gorm.DB, userID sharedidentity.UserID, accountIDs, tags []string, createdAt time.Time) error {
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	for _, accountID := range accountIDs {
-		for _, tag := range tags {
-			if _, err := execSQL(tx,
-				`INSERT IGNORE INTO media_account_tags (media_account_id, tag_name, created_at) VALUES (?, ?, ?)`,
-				id.NewID("media_account_tag"), userID, accountID, tag, createdAt,
-			); err != nil {
-				return err
-			}
-		}
-	}
-	return tx.Commit().Error
-}
-
-func RemoveTags(userID sharedidentity.UserID, accountIDs, tags []string) error {
-	return removeTags(database.DB(), userID, accountIDs, tags)
-}
-
-func removeTags(db *gorm.DB, userID sharedidentity.UserID, accountIDs, tags []string) error {
-	if len(accountIDs) == 0 || len(tags) == 0 {
-		return nil
-	}
-	args := make([]any, 0, 1+len(accountIDs)+len(tags))
-	args = append(args, userID)
-	for _, accountID := range accountIDs {
-		args = append(args, accountID)
-	}
-	for _, tag := range tags {
-		args = append(args, tag)
-	}
-	_, err := execSQL(db,
-		`DELETE FROM media_account_tags WHERE user_id = ? AND media_account_id IN (`+placeholders(len(accountIDs))+`) AND tag_name IN (`+placeholders(len(tags))+`)`,
-		args...,
-	)
-	return err
-}
-
 func ListTags(accountIDs []string) (map[string][]string, error) {
 	return listTags(database.DB(), accountIDs)
 }
@@ -415,12 +341,15 @@ func scanAccountSummary(row scanner) (model.AccountRecord, error) {
 	var duplicateOfAccountID, cookieStatus, userName sql.NullString
 	var cookieUpdatedAt, lastCheckAt sql.NullTime
 	var lastCheckItemsJSON sql.NullString
+	var checkMessage, checkIdentity, checkOperation, checkProfile sql.NullString
+	var checkStarted sql.NullTime
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &platformName, &platformAvatarURL, &browserProfileID,
 		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
 		&cookieStatus, &cookieUpdatedAt, &lastCheckAt, &lastCheckItemsJSON,
 		&record.CreatedAt, &record.UpdatedAt, &userName,
+		&record.LastCheckStatus, &checkMessage, &checkIdentity, &checkOperation, &checkProfile, &checkStarted,
 	)
 	if err != nil {
 		return model.AccountRecord{}, err
@@ -433,6 +362,18 @@ func scanAccountSummary(row scanner) (model.AccountRecord, error) {
 	record.DuplicateOfAccountID = duplicateOfAccountID.String
 	record.CookieStatus = cookieStatus.String
 	record.UserName = userName.String
+	record.LastCheckMessage = checkMessage.String
+	record.CheckOperationID = checkOperation.String
+	record.CheckProfileID = checkProfile.String
+	if checkIdentity.Valid {
+		if err := json.Unmarshal([]byte(checkIdentity.String), &record.LastCheckIdentity); err != nil {
+			return model.AccountRecord{}, err
+		}
+	}
+	if checkStarted.Valid {
+		value := checkStarted.Time
+		record.CheckStartedAt = &value
+	}
 	if lastCheckItemsJSON.Valid && lastCheckItemsJSON.String != "" {
 		_ = json.Unmarshal([]byte(lastCheckItemsJSON.String), &record.LastCheckItems)
 	}
@@ -453,12 +394,15 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
 	var checkItemsJSON, userName sql.NullString
+	var checkMessage, checkIdentity, checkOperation, checkProfile sql.NullString
+	var checkStarted sql.NullTime
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
 		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
 		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt, &userName,
+		&record.LastCheckStatus, &checkMessage, &checkIdentity, &checkOperation, &checkProfile, &checkStarted,
 	)
 	if err != nil {
 		return model.AccountRecord{}, err
@@ -473,6 +417,18 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	record.ActiveCookie = activeCookie.String
 	record.CookieStatus = cookieStatus.String
 	record.UserName = userName.String
+	record.LastCheckMessage = checkMessage.String
+	record.CheckOperationID = checkOperation.String
+	record.CheckProfileID = checkProfile.String
+	if checkIdentity.Valid {
+		if err := json.Unmarshal([]byte(checkIdentity.String), &record.LastCheckIdentity); err != nil {
+			return model.AccountRecord{}, err
+		}
+	}
+	if checkStarted.Valid {
+		value := checkStarted.Time
+		record.CheckStartedAt = &value
+	}
 	if checkItemsJSON.Valid && checkItemsJSON.String != "" {
 		_ = json.Unmarshal([]byte(checkItemsJSON.String), &record.LastCheckItems)
 	}
@@ -535,104 +491,6 @@ func recordMatchesTags(tags, anyTags, allTags, excludeTags []string) bool {
 	}
 	return true
 }
-
-const accountGroupColumns = `id, user_id, team_id, name, filters, sort_order, created_at, updated_at`
-
-func CreateGroup(group model.AccountGroup) (string, error) {
-	return createGroup(database.DB(), group)
-}
-
-func createGroup(db *gorm.DB, group model.AccountGroup) (string, error) {
-	filtersJSON, err := json.Marshal(group.Filters)
-	if err != nil {
-		return "", err
-	}
-	_, err = execSQL(db,
-		`INSERT INTO media_account_groups (user_id, team_id, name, filters, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		group.UserID, group.TeamID, group.Name, string(filtersJSON), group.SortOrder, group.CreatedAt, group.UpdatedAt,
-	)
-	if err != nil {
-		return "", err
-	}
-	id, err := lastInsertID(db)
-	if err != nil {
-		return "", err
-	}
-	return strconv.FormatInt(id, 10), nil
-}
-
-func FindGroup(id string) (model.AccountGroup, bool, error) {
-	return findGroup(database.DB(), id)
-}
-
-func findGroup(db *gorm.DB, id string) (model.AccountGroup, bool, error) {
-	group, err := scanAccountGroup(queryRow(db, `SELECT `+accountGroupColumns+` FROM media_account_groups WHERE id = ?`, id))
-	if err != nil {
-		return model.AccountGroup{}, false, err
-	}
-	return group, group.ID != "", nil
-}
-
-func ListGroups(userID sharedidentity.UserID) ([]model.AccountGroup, error) {
-	return listGroups(database.DB(), userID)
-}
-
-func listGroups(db *gorm.DB, userID sharedidentity.UserID) ([]model.AccountGroup, error) {
-	rows, err := queryRows(db, `SELECT `+accountGroupColumns+` FROM media_account_groups WHERE user_id = ? ORDER BY sort_order ASC, name ASC`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	groups := []model.AccountGroup{}
-	for rows.Next() {
-		group, err := scanAccountGroup(rows)
-		if err != nil {
-			return nil, err
-		}
-		groups = append(groups, group)
-	}
-	return groups, rows.Err()
-}
-
-func UpdateGroup(group model.AccountGroup) error {
-	return updateGroup(database.DB(), group)
-}
-
-func updateGroup(db *gorm.DB, group model.AccountGroup) error {
-	filtersJSON, err := json.Marshal(group.Filters)
-	if err != nil {
-		return err
-	}
-	_, err = execSQL(db,
-		`UPDATE media_account_groups SET name = ?, filters = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
-		group.Name, string(filtersJSON), group.SortOrder, group.UpdatedAt, group.ID,
-	)
-	return err
-}
-
-func DeleteGroup(id string) error {
-	return deleteGroup(database.DB(), id)
-}
-
-func deleteGroup(db *gorm.DB, id string) error {
-	_, err := execSQL(db, `DELETE FROM media_account_groups WHERE id = ?`, id)
-	return err
-}
-
-func scanAccountGroup(row interface{ Scan(...any) error }) (model.AccountGroup, error) {
-	var group model.AccountGroup
-	var filtersJSON []byte
-	if err := row.Scan(&group.ID, &group.UserID, &group.TeamID, &group.Name, &filtersJSON, &group.SortOrder, &group.CreatedAt, &group.UpdatedAt); err != nil {
-		return model.AccountGroup{}, err
-	}
-	if len(filtersJSON) > 0 {
-		if err := json.Unmarshal(filtersJSON, &group.Filters); err != nil {
-			return model.AccountGroup{}, err
-		}
-	}
-	return group, nil
-}
-
 func marshalLastCheckItems(items []model.AccountCheckItem) any {
 	if len(items) == 0 {
 		return nil
@@ -642,4 +500,95 @@ func marshalLastCheckItems(items []model.AccountCheckItem) any {
 		return nil
 	}
 	return string(raw)
+}
+
+func accountConditions(query AccountFilter) (string, []any) {
+	conditions := make([]string, 0, 3)
+	args := make([]any, 0, 3)
+	if query.UserID > 0 {
+		conditions = append(conditions, "ma.user_id = ?")
+		args = append(args, query.UserID)
+	}
+	if len(query.CategoryIDs) > 0 {
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_categories mag WHERE mag.media_account_id = ma.id AND mag.category_id IN (`+placeholders(len(query.CategoryIDs))+`))`)
+		for _, categoryID := range query.CategoryIDs {
+			args = append(args, categoryID)
+		}
+	}
+	if query.Platform != "" {
+		conditions = append(conditions, "ma.platform = ?")
+		args = append(args, query.Platform)
+	}
+	if query.Enabled != nil {
+		conditions = append(conditions, "ma.enabled = ?")
+		args = append(args, *query.Enabled)
+	}
+	if query.PlatformLoginStatus != "" {
+		conditions = append(conditions, "ma.platform_login_status = ?")
+		args = append(args, query.PlatformLoginStatus)
+	}
+	if query.Search != "" {
+		like := "%" + query.Search + "%"
+		conditions = append(conditions, "(ma.id LIKE ? OR ma.platform_account_id LIKE ? OR ma.platform_name LIKE ? OR ma.remark LIKE ?)")
+		args = append(args, like, like, like, like)
+	}
+	if query.ProfileSearch != "" {
+		like := "%" + query.ProfileSearch + "%"
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM browser_profiles bp WHERE bp.id = ma.browser_profile_id AND (bp.bit_name LIKE ? OR bp.bit_seq LIKE ? OR bp.bit_profile_id LIKE ? OR bp.id LIKE ?))`)
+		args = append(args, like, like, like, like)
+	}
+	if query.TeamID > 0 {
+		conditions = append(conditions, "ma.team_id = ?")
+		args = append(args, query.TeamID)
+	}
+	if query.CategoryType != "" {
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_categories rel JOIN categories c ON c.id=rel.category_id WHERE rel.media_account_id=ma.id AND c.type=?)`)
+		args = append(args, query.CategoryType)
+	}
+	for _, set := range []struct {
+		tags    []string
+		exclude bool
+	}{{query.AnyTags, false}, {query.ExcludeTags, true}} {
+		if len(set.tags) > 0 {
+			clause := `EXISTS (SELECT 1 FROM media_account_tags tag WHERE tag.media_account_id=ma.id AND tag.tag_name IN (` + placeholders(len(set.tags)) + `))`
+			if set.exclude {
+				clause = "NOT " + clause
+			}
+			conditions = append(conditions, clause)
+			for _, tag := range set.tags {
+				args = append(args, tag)
+			}
+		}
+	}
+	for _, tag := range query.AllTags {
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM media_account_tags tag WHERE tag.media_account_id=ma.id AND tag.tag_name=?)`)
+		args = append(args, tag)
+	}
+	switch query.View {
+	case "normal":
+		conditions = append(conditions, "ma.platform_login_status='normal' AND ma.last_check_status<>'failed'")
+	case "attention":
+		conditions = append(conditions, "(ma.last_check_status='failed' OR ma.platform_login_status IN ('not_logged_in','verification_needed','expired','restricted','account_mismatch','environment_error'))")
+	case "unbound":
+		conditions = append(conditions, "ma.browser_profile_id IS NULL")
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
+	}
+	return where, args
+}
+
+func ListPage(query AccountFilter) ([]model.AccountRecord, model.AccountCounts, error) {
+	return listPage(database.DB(), query)
+}
+func listPage(db *gorm.DB, query AccountFilter) ([]model.AccountRecord, model.AccountCounts, error) {
+	where, args := accountConditions(query)
+	var counts model.AccountCounts
+	aggregate := `SELECT COUNT(*), COALESCE(SUM(ma.platform_login_status='normal' AND ma.last_check_status<>'failed'),0), COALESCE(SUM(ma.last_check_status='failed' OR ma.platform_login_status IN ('not_logged_in','verification_needed','expired','restricted','account_mismatch','environment_error')),0), COALESCE(SUM(ma.browser_profile_id IS NULL),0)`
+	if err := queryRow(db, aggregate+accountReadFrom+where, args...).Scan(&counts.Total, &counts.Normal, &counts.Abnormal, &counts.Unbound); err != nil {
+		return nil, counts, err
+	}
+	records, err := list(db, query)
+	return records, counts, err
 }

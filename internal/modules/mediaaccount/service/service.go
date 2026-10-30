@@ -21,10 +21,8 @@ type (
 	Account              = model.Account
 	AccountRecord        = model.AccountRecord
 	AccountCheckItem     = model.AccountCheckItem
-	AccountGroup         = model.AccountGroup
 
 	CreateAccountInput      = dto.CreateAccountInput
-	IdentifyAccountInput    = dto.IdentifyAccountInput
 	AccountCheckStartInput  = dto.AccountCheckStartInput
 	AccountCheckStart       = dto.AccountCheckStart
 	AccountCheckResultInput = dto.AccountCheckResultInput
@@ -34,9 +32,6 @@ type (
 	UpdateAccountInput      = dto.UpdateAccountInput
 	AccountFilter           = dto.AccountFilter
 	AccountQuery            = dto.AccountFilter
-	AccountGroupFilters     = dto.AccountGroupFilters
-	CreateAccountGroupInput = dto.CreateAccountGroupInput
-	UpdateAccountGroupInput = dto.UpdateAccountGroupInput
 )
 
 const (
@@ -57,6 +52,7 @@ const (
 )
 
 var (
+	ErrStaleCheck                 = model.ErrStaleCheck
 	ErrForbidden                  = model.ErrForbidden
 	ErrInvalidInput               = model.ErrInvalidInput
 	ErrNotFound                   = model.ErrNotFound
@@ -68,21 +64,19 @@ var (
 )
 
 type Store interface {
+	ListPage(AccountQuery) ([]AccountRecord, model.AccountCounts, error)
+	StartCheck(AccountRecord) error
+	CompleteCheck(AccountRecord) error
 	Create(record AccountRecord) (string, error)
 	Find(id string) (AccountRecord, bool, error)
 	FindByIdentity(userID identityservice.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
+	UpdateMetadata(AccountRecord, UpdateAccountInput) error
+	SetProfile(AccountRecord) error
 	Update(AccountRecord, *[]identityservice.CategoryID) error
 	List(AccountQuery) ([]AccountRecord, error)
-	AddTags(userID identityservice.UserID, accountIDs, tags []string, createdAt time.Time) error
-	RemoveTags(userID identityservice.UserID, accountIDs, tags []string) error
 	ListTags(accountIDs []string) (map[string][]string, error)
 	AppendAudit(identityservice.AuditEvent) error
-	CreateGroup(group AccountGroup) (string, error)
-	FindGroup(id string) (AccountGroup, bool, error)
-	ListGroups(userID identityservice.UserID) ([]AccountGroup, error)
-	UpdateGroup(AccountGroup) error
-	DeleteGroup(id string) error
 }
 
 type accountService struct {
@@ -192,6 +186,10 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 	if err := validateCategoryScope(target, categoryIDs); err != nil {
 		return Account{}, err
 	}
+	tags, err := normalizeTags(input.Tags)
+	if err != nil {
+		return Account{}, err
+	}
 	now := s.now()
 	record := AccountRecord{
 		Account: Account{
@@ -205,7 +203,8 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 			IdentificationStatus: IdentificationPending,
 			Enabled:              true,
 			PlatformLoginStatus:  PlatformLoginUnknown,
-			Tags:                 []string{},
+			Tags:                 tags,
+			LastCheckStatus:      "never",
 			CreatedAt:            now,
 			UpdatedAt:            now,
 		},
@@ -223,11 +222,6 @@ func (s *accountService) CreateAccount(actor identityservice.PublicUser, input C
 			return Account{}, err
 		}
 		record.Account = account
-	}
-	if len(input.Tags) > 0 {
-		if err := s.AddTags(actor, []string{record.ID}, input.Tags); err != nil {
-			return Account{}, err
-		}
 	}
 	if err := s.audit(actor.ID, "media_account.create", record.ID, map[string]string{
 		"user_id": strconv.FormatInt(int64(userID), 10), "category_ids": formatCategoryIDs(categoryIDs), "platform": string(platform),
@@ -275,48 +269,68 @@ func (s *accountService) GetAccount(actor identityservice.PublicUser, accountID 
 	return accounts[0], nil
 }
 
-func (s *accountService) ListAccounts(actor identityservice.PublicUser, filter AccountFilter) ([]Account, error) {
+func (s *accountService) scopedAccountFilter(actor identityservice.PublicUser, filter AccountFilter) (AccountFilter, error) {
 	if !validActor(actor) {
-		return nil, ErrForbidden
+		return AccountFilter{}, ErrForbidden
 	}
 	filter.CategoryIDs = normalizeCategoryIDs(filter.CategoryIDs)
 	if err := s.validateCategoryIDs(filter.CategoryIDs); err != nil {
-		return nil, err
+		return AccountFilter{}, err
 	}
 	if err := validateCategoryScope(actor, filter.CategoryIDs); err != nil {
-		return nil, err
+		return AccountFilter{}, err
 	}
 	if actor.Role == identityservice.RoleOperator {
 		if filter.UserID > 0 && filter.UserID != actor.ID {
-			return nil, ErrForbidden
+			return AccountFilter{}, ErrForbidden
 		}
 		filter.UserID = actor.ID
 	}
 	if filter.Platform != "" {
 		filter.Platform = Platform(strings.ToLower(strings.TrimSpace(string(filter.Platform))))
 		if !validPlatform(filter.Platform) {
-			return nil, ErrInvalidInput
+			return AccountFilter{}, ErrInvalidInput
 		}
 	}
 	if filter.PlatformLoginStatus != "" && !validPlatformLoginStatus(filter.PlatformLoginStatus) {
-		return nil, ErrInvalidInput
+		return AccountFilter{}, ErrInvalidInput
 	}
 	filter.Search = strings.TrimSpace(filter.Search)
 	if len(filter.Search) > 128 {
-		return nil, ErrInvalidInput
+		return AccountFilter{}, ErrInvalidInput
 	}
 	filter.ProfileSearch = strings.TrimSpace(filter.ProfileSearch)
 	if len(filter.ProfileSearch) > 128 {
-		return nil, ErrInvalidInput
+		return AccountFilter{}, ErrInvalidInput
 	}
 	var err error
 	if filter.AnyTags, err = normalizeTags(filter.AnyTags); err != nil {
-		return nil, err
+		return AccountFilter{}, err
 	}
 	if filter.AllTags, err = normalizeTags(filter.AllTags); err != nil {
-		return nil, err
+		return AccountFilter{}, err
 	}
 	if filter.ExcludeTags, err = normalizeTags(filter.ExcludeTags); err != nil {
+		return AccountFilter{}, err
+	}
+	if filter.View != "" && filter.View != "normal" && filter.View != "attention" && filter.View != "unbound" {
+		return AccountFilter{}, ErrInvalidInput
+	}
+	if filter.CategoryType != "" && filter.CategoryType != "game" && filter.CategoryType != "ai" && filter.CategoryType != "anime" {
+		return AccountFilter{}, ErrInvalidInput
+	}
+	if actor.Role == identityservice.RoleSeniorOperator {
+		if actor.TeamID != nil {
+			filter.TeamID = *actor.TeamID
+		} else {
+			return AccountFilter{}, ErrForbidden
+		}
+	}
+	return filter, nil
+}
+func (s *accountService) ListAccounts(actor identityservice.PublicUser, filter AccountFilter) ([]Account, error) {
+	filter, err := s.scopedAccountFilter(actor, filter)
+	if err != nil {
 		return nil, err
 	}
 	records, err := s.store.List(AccountQuery(filter))
@@ -340,11 +354,16 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 	if input.Enabled != nil {
 		record.Enabled = *input.Enabled
 	}
-	if input.PlatformLoginStatus != "" {
-		if !validPlatformLoginStatus(input.PlatformLoginStatus) {
-			return Account{}, ErrInvalidInput
+	if input.Enabled != nil && (input.Tags != nil || input.Remark != nil || input.CategoryIDs != nil) {
+		return Account{}, ErrInvalidInput
+	}
+	if input.Tags != nil {
+		tags, err := normalizeTags(*input.Tags)
+		if err != nil {
+			return Account{}, err
 		}
-		record.PlatformLoginStatus = input.PlatformLoginStatus
+		record.Tags = tags
+		input.Tags = &tags
 	}
 	if input.Remark != nil {
 		remark := strings.TrimSpace(*input.Remark)
@@ -377,18 +396,11 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 	if err := validateCategoryScope(owner, record.CategoryIDs); err != nil {
 		return Account{}, err
 	}
-	if input.PlatformName != nil {
-		name := strings.TrimSpace(*input.PlatformName)
-		if len(name) > 128 {
-			return Account{}, ErrInvalidInput
-		}
-		record.PlatformName = name
-	}
-	if input.Enabled == nil && input.PlatformLoginStatus == "" && input.Remark == nil && input.CategoryIDs == nil && input.PlatformName == nil {
+	if input.Enabled == nil && input.Tags == nil && input.Remark == nil && input.CategoryIDs == nil {
 		return Account{}, ErrInvalidInput
 	}
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record, replaceCategoryIDs); err != nil {
+	if err := s.store.UpdateMetadata(record, input); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.status.update", record.ID, map[string]string{
@@ -396,57 +408,9 @@ func (s *accountService) UpdateAccount(actor identityservice.PublicUser, account
 	}); err != nil {
 		return Account{}, err
 	}
-	return record.Account, nil
+	return s.GetAccount(actor, record.ID)
 }
 
-func (s *accountService) IdentifyAccount(actor identityservice.PublicUser, accountID string, input IdentifyAccountInput) (Account, error) {
-	record, err := s.authorizedRecord(actor, accountID)
-	if err != nil {
-		return Account{}, err
-	}
-	platformAccountID := strings.TrimSpace(input.PlatformAccountID)
-	if platformAccountID == "" || len(platformAccountID) > 255 || !validPlatformLoginStatus(input.PlatformLoginStatus) {
-		return Account{}, ErrInvalidInput
-	}
-	existing, found, err := s.store.FindByIdentity(record.UserID, record.Platform, platformAccountID)
-	if err != nil {
-		return Account{}, err
-	}
-	if found && existing.ID != record.ID {
-		record.IdentificationStatus = IdentificationDuplicate
-		record.DuplicateOfAccountID = existing.ID
-		record.UpdatedAt = s.now()
-		if err := s.store.Update(record, nil); err != nil {
-			return Account{}, err
-		}
-		if err := s.audit(actor.ID, "media_account.identify.duplicate", record.ID, map[string]string{"duplicate_of": existing.ID}); err != nil {
-			return Account{}, err
-		}
-		return record.Account, ErrDuplicateAccount
-	}
-	record.PlatformAccountID = platformAccountID
-	record.PlatformName = strings.TrimSpace(input.PlatformName)
-	record.PlatformAvatarURL = strings.TrimSpace(input.PlatformAvatarURL)
-	record.PlatformLoginStatus = input.PlatformLoginStatus
-	record.IdentificationStatus = IdentificationIdentified
-	record.DuplicateOfAccountID = ""
-	record.UpdatedAt = s.now()
-	checkedAt := record.UpdatedAt
-	record.LastCheckAt = &checkedAt
-	if err := s.store.Update(record, nil); err != nil {
-		return Account{}, err
-	}
-	if err := s.audit(actor.ID, "media_account.identify", record.ID, map[string]string{
-		"platform": string(record.Platform), "platform_account_id": record.PlatformAccountID,
-	}); err != nil {
-		return Account{}, err
-	}
-	return record.Account, nil
-}
-
-// canStartLocalOperation is the role half of the local-operation gate. The
-// account half is GetOwnedAccountRecord: operators and senior operators may
-// work only on the accounts they created, and admins never run local work.
 func canStartLocalOperation(role identityservice.Role) bool {
 	return role == identityservice.RoleOperator || role == identityservice.RoleSeniorOperator
 }
@@ -491,6 +455,13 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 		return AccountCheckStart{}, ErrProfileUnavailable
 	}
 	operationID := s.newID("account-check")
+	record.CheckOperationID = operationID
+	record.CheckProfileID = record.BrowserProfileID
+	now := s.now()
+	record.CheckStartedAt = &now
+	if err := s.store.StartCheck(record); err != nil {
+		return AccountCheckStart{}, err
+	}
 	if err := s.audit(actor.ID, "media_account.check.start", record.ID, map[string]string{
 		"operation_id": operationID, "browser_profile_id": record.BrowserProfileID, "bit_profile_id": bitProfileID,
 	}); err != nil {
@@ -576,15 +547,46 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 	if err != nil {
 		return Account{}, err
 	}
-	if strings.TrimSpace(input.OperationID) == "" || !validPlatformLoginStatus(input.PlatformLoginStatus) {
+	if input.OperationID == "" || input.OperationID != record.CheckOperationID || record.CheckProfileID != record.BrowserProfileID {
+		return Account{}, ErrStaleCheck
+	}
+	if record.LastCheckStatus == "completed" || record.LastCheckStatus == "failed" {
+		return s.GetAccount(actor, record.ID)
+	}
+	if record.LastCheckStatus != "running" {
+		return Account{}, ErrStaleCheck
+	}
+	if len(input.Message) > 500 || len(input.PlatformAccountID) > 255 || len(input.PlatformName) > 128 || len(input.PlatformAvatarURL) > 2048 {
 		return Account{}, ErrInvalidInput
 	}
+	if input.ExecutionStatus != "completed" && input.ExecutionStatus != "failed" {
+		return Account{}, ErrInvalidInput
+	}
+	if input.ExecutionStatus == "failed" {
+		record.LastCheckStatus = "failed"
+		record.LastCheckMessage = strings.TrimSpace(input.Message)
+		record.UpdatedAt = s.now()
+		if err := s.store.CompleteCheck(record); err != nil {
+			return s.settledCheck(actor, record, err)
+		}
+		return s.GetAccount(actor, record.ID)
+	}
+	if !validPlatformLoginStatus(input.PlatformLoginStatus) || input.PlatformLoginStatus == PlatformLoginEnvironmentError {
+		return Account{}, ErrInvalidInput
+	}
+	record.LastCheckStatus = "completed"
+	record.LastCheckMessage = strings.TrimSpace(input.Message)
+	record.LastCheckIdentity = &model.CheckIdentity{PlatformAccountID: strings.TrimSpace(input.PlatformAccountID), PlatformName: strings.TrimSpace(input.PlatformName), PlatformAvatarURL: strings.TrimSpace(input.PlatformAvatarURL)}
 	now := s.now()
 	proxyFact, err := s.resolveAccountCheckProxyFact(record.BrowserProfileID)
 	if err != nil {
 		return Account{}, err
 	}
 	platformAccountID := strings.TrimSpace(input.PlatformAccountID)
+	if input.PlatformLoginStatus == PlatformLoginNormal && platformAccountID != "" && record.PlatformAccountID != "" && platformAccountID != record.PlatformAccountID {
+		input.PlatformLoginStatus = PlatformLoginAccountMismatch
+	}
+	record.PlatformLoginStatus = input.PlatformLoginStatus
 	if input.PlatformLoginStatus == PlatformLoginNormal {
 		if platformAccountID == "" {
 			return Account{}, ErrInvalidInput
@@ -600,20 +602,18 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 			record.LastCheckItems = mergeLastCheckItems(input.LastCheckItems, proxyFact, now)
 			record.UpdatedAt = now
 			record.LastCheckAt = &now
-			if err := s.store.Update(record, nil); err != nil {
-				return Account{}, err
+			if err := s.store.CompleteCheck(record); err != nil {
+				return s.settledCheck(actor, record, err)
 			}
 			if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
 				"operation_id": strings.TrimSpace(input.OperationID), "login_status": string(record.PlatformLoginStatus), "message": "duplicate:" + existing.ID,
 			}); err != nil {
 				return Account{}, err
 			}
-			return record.Account, nil
+			return s.GetAccount(actor, record.ID)
 		}
 		record.PlatformAccountID = platformAccountID
-		if record.PlatformName == "" {
-			record.PlatformName = strings.TrimSpace(input.PlatformName)
-		}
+		record.PlatformName = strings.TrimSpace(input.PlatformName)
 		record.PlatformAvatarURL = strings.TrimSpace(input.PlatformAvatarURL)
 		record.IdentificationStatus = IdentificationIdentified
 		record.DuplicateOfAccountID = ""
@@ -622,35 +622,27 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 	} else {
 		record.PlatformLoginStatus = input.PlatformLoginStatus
 	}
-	if record.PlatformLoginStatus != PlatformLoginAccountMismatch {
-		record.PlatformLoginStatus = input.PlatformLoginStatus
-	}
 	// 合成 8 项检查明细：1/2 来自本检查前置（能执行到此处说明前置通过）；
 	// 3/4 由已读回的 Profile—代理正式关系派生；5-8 来自 Agent 返回。
 	record.LastCheckItems = mergeLastCheckItems(input.LastCheckItems, proxyFact, now)
 	record.UpdatedAt = now
 	record.LastCheckAt = &now
-	if err := s.store.Update(record, nil); err != nil {
-		return Account{}, err
+	if err := s.store.CompleteCheck(record); err != nil {
+		return s.settledCheck(actor, record, err)
 	}
 	if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
 		"operation_id": strings.TrimSpace(input.OperationID), "login_status": string(record.PlatformLoginStatus), "message": strings.TrimSpace(input.Message),
 	}); err != nil {
 		return Account{}, err
 	}
-	return record.Account, nil
-}
-
-func (s *accountService) AddTags(actor identityservice.PublicUser, accountIDs, tags []string) error {
-	return s.changeTags(actor, accountIDs, tags, true)
-}
-
-func (s *accountService) RemoveTags(actor identityservice.PublicUser, accountIDs, tags []string) error {
-	return s.changeTags(actor, accountIDs, tags, false)
+	return s.GetAccount(actor, record.ID)
 }
 
 func (s *accountService) BindProfile(actor identityservice.PublicUser, accountID, profileID string) (Account, error) {
-	record, err := s.authorizedRecord(actor, accountID)
+	if !canStartLocalOperation(actor.Role) {
+		return Account{}, ErrForbidden
+	}
+	record, err := s.GetOwnedAccountRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
 	}
@@ -685,20 +677,23 @@ func (s *accountService) BindProfile(actor identityservice.PublicUser, accountID
 		return Account{}, ErrProfilePlatformTaken
 	}
 	record.BrowserProfileID = profileID
-	record.PlatformLoginStatus = PlatformLoginUnknown
-	record.LastCheckAt = nil
+	record.CheckOperationID = ""
+	record.LastCheckStatus = "never"
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record, nil); err != nil {
+	if err := s.store.SetProfile(record); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.profile.bind", record.ID, map[string]string{"browser_profile_id": profileID}); err != nil {
 		return Account{}, err
 	}
-	return record.Account, nil
+	return s.GetAccount(actor, record.ID)
 }
 
 func (s *accountService) UnbindProfile(actor identityservice.PublicUser, accountID string) (Account, error) {
-	record, err := s.authorizedRecord(actor, accountID)
+	if !canStartLocalOperation(actor.Role) {
+		return Account{}, ErrForbidden
+	}
+	record, err := s.GetOwnedAccountRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
 	}
@@ -709,170 +704,16 @@ func (s *accountService) UnbindProfile(actor identityservice.PublicUser, account
 		return record.Account, nil
 	}
 	record.BrowserProfileID = ""
-	record.PlatformLoginStatus = PlatformLoginUnknown
-	record.LastCheckAt = nil
+	record.CheckOperationID = ""
+	record.LastCheckStatus = "never"
 	record.UpdatedAt = s.now()
-	if err := s.store.Update(record, nil); err != nil {
+	if err := s.store.SetProfile(record); err != nil {
 		return Account{}, err
 	}
 	if err := s.audit(actor.ID, "media_account.profile.unbind", record.ID, map[string]string{}); err != nil {
 		return Account{}, err
 	}
-	return record.Account, nil
-}
-
-func (s *accountService) changeTags(actor identityservice.PublicUser, accountIDs, tags []string, add bool) error {
-	accountIDs = normalizeStrings(accountIDs)
-	normalizedTags, err := normalizeTags(tags)
-	if err != nil || len(accountIDs) == 0 || len(normalizedTags) == 0 {
-		return ErrInvalidInput
-	}
-	byUser := map[identityservice.UserID][]string{}
-	for _, accountID := range accountIDs {
-		record, err := s.authorizedRecord(actor, accountID)
-		if err != nil {
-			return err
-		}
-		byUser[record.UserID] = append(byUser[record.UserID], record.ID)
-	}
-	for userID, ids := range byUser {
-		if add {
-			err = s.store.AddTags(userID, ids, normalizedTags, s.now())
-		} else {
-			err = s.store.RemoveTags(userID, ids, normalizedTags)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	action := "media_account.tags.remove"
-	if add {
-		action = "media_account.tags.add"
-	}
-	for _, accountID := range accountIDs {
-		if err := s.audit(actor.ID, action, accountID, map[string]string{"tags": strings.Join(normalizedTags, ",")}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *accountService) CreateAccountGroup(actor identityservice.PublicUser, input CreateAccountGroupInput) (AccountGroup, error) {
-	if !validActor(actor) {
-		return AccountGroup{}, ErrForbidden
-	}
-	name := strings.TrimSpace(input.Name)
-	if name == "" || len(name) > 128 {
-		return AccountGroup{}, ErrInvalidInput
-	}
-	filters, err := s.normalizeGroupFilters(input.Filters)
-	if err != nil {
-		return AccountGroup{}, ErrInvalidInput
-	}
-	// 主键一律自增，由 DB 分配；CreateGroup 返回新 id
-	userID := actor.ID
-	now := s.now()
-	group := AccountGroup{
-		UserID: userID, TeamID: actor.TeamID,
-		Name: name, Filters: filters, CreatedAt: now, UpdatedAt: now,
-	}
-	newID, err := s.store.CreateGroup(group)
-	if err != nil {
-		return AccountGroup{}, err
-	}
-	group.ID = newID
-	return group, nil
-}
-
-func (s *accountService) ListAccountGroups(actor identityservice.PublicUser) ([]AccountGroup, error) {
-	if !validActor(actor) {
-		return nil, ErrForbidden
-	}
-	return s.store.ListGroups(actor.ID)
-}
-
-func (s *accountService) UpdateAccountGroup(actor identityservice.PublicUser, groupID string, input UpdateAccountGroupInput) (AccountGroup, error) {
-	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
-		return AccountGroup{}, ErrForbidden
-	}
-	group, found, err := s.store.FindGroup(groupID)
-	if err != nil {
-		return AccountGroup{}, err
-	}
-	if !found {
-		return AccountGroup{}, ErrNotFound
-	}
-	if group.UserID != actor.ID && actor.Role != identityservice.RoleAdmin {
-		return AccountGroup{}, ErrForbidden
-	}
-	if input.Name != nil {
-		name := strings.TrimSpace(*input.Name)
-		if name == "" || len(name) > 128 {
-			return AccountGroup{}, ErrInvalidInput
-		}
-		group.Name = name
-	}
-	if input.Filters != nil {
-		filters, err := s.normalizeGroupFilters(*input.Filters)
-		if err != nil {
-			return AccountGroup{}, ErrInvalidInput
-		}
-		group.Filters = filters
-	}
-	group.UpdatedAt = s.now()
-	if err := s.store.UpdateGroup(group); err != nil {
-		return AccountGroup{}, err
-	}
-	return group, nil
-}
-
-func (s *accountService) DeleteAccountGroup(actor identityservice.PublicUser, groupID string) error {
-	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
-		return ErrForbidden
-	}
-	group, found, err := s.store.FindGroup(groupID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return ErrNotFound
-	}
-	if group.UserID != actor.ID && actor.Role != identityservice.RoleAdmin {
-		return ErrForbidden
-	}
-	return s.store.DeleteGroup(groupID)
-}
-
-func (s *accountService) ListAccountsByGroup(actor identityservice.PublicUser, groupID string) ([]Account, error) {
-	if !validActor(actor) || strings.TrimSpace(groupID) == "" {
-		return nil, ErrForbidden
-	}
-	group, found, err := s.store.FindGroup(groupID)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, ErrNotFound
-	}
-	if group.UserID != actor.ID && actor.Role != identityservice.RoleAdmin {
-		return nil, ErrForbidden
-	}
-	filter := AccountFilter{UserID: actor.ID}
-	filter.CategoryIDs = append([]identityservice.CategoryID(nil), group.Filters.CategoryIDs...)
-	if group.Filters.Platform != "" {
-		filter.Platform = group.Filters.Platform
-	}
-	if group.Filters.Enabled != nil {
-		filter.Enabled = group.Filters.Enabled
-	}
-	if group.Filters.PlatformLoginStatus != "" {
-		filter.PlatformLoginStatus = group.Filters.PlatformLoginStatus
-	}
-	filter.Search = group.Filters.Search
-	filter.AnyTags = group.Filters.AnyTags
-	filter.AllTags = group.Filters.AllTags
-	filter.ExcludeTags = group.Filters.ExcludeTags
-	return s.ListAccounts(actor, filter)
+	return s.GetAccount(actor, record.ID)
 }
 
 func (s *accountService) resolveAccountCheckProxyFact(profileID string) (accountCheckProxyFact, error) {
@@ -961,27 +802,6 @@ func proxyExpiryCheckItem(proxyFact accountCheckProxyFact, now time.Time) Accoun
 	}
 	item.Status = "pass"
 	return item
-}
-
-func validGroupFilters(filters AccountGroupFilters) bool {
-	if filters.Platform != "" && !validPlatform(filters.Platform) {
-		return false
-	}
-	if filters.PlatformLoginStatus != "" && !validPlatformLoginStatus(filters.PlatformLoginStatus) {
-		return false
-	}
-	return true
-}
-
-func (s *accountService) normalizeGroupFilters(filters AccountGroupFilters) (AccountGroupFilters, error) {
-	if !validGroupFilters(filters) {
-		return AccountGroupFilters{}, ErrInvalidInput
-	}
-	filters.CategoryIDs = normalizeCategoryIDs(filters.CategoryIDs)
-	if err := s.validateCategoryIDs(filters.CategoryIDs); err != nil {
-		return AccountGroupFilters{}, err
-	}
-	return filters, nil
 }
 
 func (s *accountService) resolveCreateCategoryIDs(categoryIDs []identityservice.CategoryID) ([]identityservice.CategoryID, error) {
@@ -1119,6 +939,9 @@ func (s *accountService) audit(actorID identityservice.UserID, action, accountID
 }
 
 func normalizedAccount(account Account) Account {
+	if account.LastCheckStatus == "" {
+		account.LastCheckStatus = "never"
+	}
 	if account.CategoryIDs == nil {
 		account.CategoryIDs = []identityservice.CategoryID{}
 	}
@@ -1193,4 +1016,33 @@ func contains[T comparable](values []T, target T) bool {
 		}
 	}
 	return false
+}
+
+func (s *accountService) settledCheck(actor identityservice.PublicUser, record AccountRecord, cause error) (Account, error) {
+	current, err := s.GetOwnedAccountRecord(actor, record.ID)
+	if err != nil {
+		return Account{}, err
+	}
+	if current.CheckOperationID == record.CheckOperationID && current.CheckProfileID == current.BrowserProfileID && (current.LastCheckStatus == "completed" || current.LastCheckStatus == "failed") {
+		return s.GetAccount(actor, current.ID)
+	}
+	return Account{}, cause
+}
+
+func (s *accountService) ListAccountPage(actor identityservice.PublicUser, filter AccountFilter, page, size int) (dto.AccountPage, error) {
+	if page < 1 || size < 1 || size > 100 {
+		return dto.AccountPage{}, ErrInvalidInput
+	}
+	filter, err := s.scopedAccountFilter(actor, filter)
+	if err != nil {
+		return dto.AccountPage{}, err
+	}
+	filter.Limit = size
+	filter.Offset = (page - 1) * size
+	records, total, err := s.store.ListPage(filter)
+	if err != nil {
+		return dto.AccountPage{}, err
+	}
+	accounts, err := s.attachTags(records)
+	return dto.AccountPage{Items: accounts, Total: total.Total, Stats: total, Page: page, PageSize: size}, err
 }

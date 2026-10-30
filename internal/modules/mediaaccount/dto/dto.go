@@ -17,13 +17,6 @@ type CreateAccountInput struct {
 	Tags             []string
 }
 
-type IdentifyAccountInput struct {
-	PlatformAccountID   string
-	PlatformName        string
-	PlatformAvatarURL   string
-	PlatformLoginStatus model.PlatformLoginStatus
-}
-
 type AccountCheckStartInput struct{}
 
 type AccountCheckStart struct {
@@ -37,6 +30,7 @@ type AccountCheckStart struct {
 }
 
 type AccountCheckResultInput struct {
+	ExecutionStatus     string `json:"execution_status"`
 	OperationID         string
 	PlatformAccountID   string
 	PlatformName        string
@@ -62,14 +56,18 @@ type CookieReadResultInput struct {
 }
 
 type UpdateAccountInput struct {
-	PlatformLoginStatus model.PlatformLoginStatus
-	Enabled             *bool
-	Remark              *string
-	CategoryIDs         *[]sharedidentity.CategoryID
-	PlatformName        *string
+	Tags        *[]string
+	Enabled     *bool
+	Remark      *string
+	CategoryIDs *[]sharedidentity.CategoryID
 }
 
 type AccountFilter struct {
+	View                string
+	TeamID              sharedidentity.TeamID
+	CategoryType        string
+	Offset              int
+	Limit               int
 	UserID              sharedidentity.UserID
 	CategoryIDs         []sharedidentity.CategoryID
 	Platform            model.Platform
@@ -82,14 +80,10 @@ type AccountFilter struct {
 	ExcludeTags         []string
 }
 
-type AccountGroupFilters = model.AccountGroupFilters
-
-type CreateAccountGroupInput struct {
-	Name    string              `json:"name"`
-	Filters AccountGroupFilters `json:"filters"`
-}
-
-type UpdateAccountGroupInput struct {
-	Name    *string              `json:"name"`
-	Filters *AccountGroupFilters `json:"filters"`
+type AccountPage struct {
+	Stats    model.AccountCounts `json:"stats"`
+	Items    []model.Account     `json:"items"`
+	Total    int                 `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
 }

@@ -12,7 +12,6 @@ func TestMediaAccountModelTypesAreDeclaredInModelPackage(t *testing.T) {
 	}{
 		{name: "Account", got: reflect.TypeFor[Account]()},
 		{name: "AccountRecord", got: reflect.TypeFor[AccountRecord]()},
-		{name: "AccountGroup", got: reflect.TypeFor[AccountGroup]()},
 		{name: "AccountCheckItem", got: reflect.TypeFor[AccountCheckItem]()},
 		{name: "Platform", got: reflect.TypeFor[Platform]()},
 	} {

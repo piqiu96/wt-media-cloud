@@ -8,6 +8,7 @@ import { createMediaAccountClient } from './shared/api/mediaAccounts.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 function response(data) {
+  if (Array.isArray(data)) data={items:data,total:data.length,page:1,page_size:20,stats:{total:data.length,normal:0,abnormal:0,unbound:0}}
   return { ok: true, json: async () => ({ errcode: 0, data }) }
 }
 
@@ -16,7 +17,7 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ platform: 'douyin', all_tags: ['launch', 'vip'] })
+    await client.listPage({ platform: 'douyin', all_tags: ['launch', 'vip'] })
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?platform=douyin&all_tags=launch%2Cvip',
@@ -28,7 +29,7 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({
+    await client.listPage({
       search: '重点',
       enabled: true,
       platform_login_status: 'unknown',
@@ -52,12 +53,12 @@ describe('media account client', () => {
     const storage = { setItem: vi.fn(), getItem: vi.fn() }
     const client = createMediaAccountClient({ fetch, storage })
 
-    const account = await client.create({ category_ids: ['category-a'], platform: 'douyin', original_cookie: 'import-secret' })
+    const account = await client.create({ category_ids: ['category-a'], platform: 'bilibili' })
 
     expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts', expect.objectContaining({
       method: 'POST',
       credentials: 'include',
-      body: JSON.stringify({ category_ids: ['category-a'], platform: 'douyin', original_cookie: 'import-secret' }),
+      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili' }),
     }))
     expect(account.original_cookie).toBeUndefined()
     expect(account.active_cookie).toBeUndefined()
@@ -65,15 +66,11 @@ describe('media account client', () => {
     expect(storage.getItem).not.toHaveBeenCalled()
   })
 
-  it('adds and removes tags in bulk', async () => {
-    const fetch = vi.fn(async () => response({ status: 'updated' }))
+  it('saves tags together with the account metadata', async () => {
+    const fetch = vi.fn(async () => response({id:'account-1',tags:['矩阵']}))
     const client = createMediaAccountClient({ fetch })
-
-    await client.addTags(['account-1'], ['launch'])
-    await client.removeTags(['account-1'], ['launch'])
-
-    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts/tags/add', expect.objectContaining({ credentials: 'include' }))
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/tags/remove', expect.objectContaining({ credentials: 'include' }))
+    await client.update('account-1', {tags:['矩阵'],remark:'重点'})
+    expect(fetch).toHaveBeenCalledWith('/api/v1/media-accounts/account-1', expect.objectContaining({method:'PATCH',body:JSON.stringify({tags:['矩阵'],remark:'重点'})}))
   })
 
   it('binds and unbinds a confirmed browser profile', async () => {
@@ -109,6 +106,7 @@ describe('media account client', () => {
       original_cookie: 'server-must-not-return-this',
     }))
     const updated = await client.submitCheckResult('account-1', {
+      execution_status: 'completed',
       operation_id: 'task-1',
       platform_account_id: '123',
       platform_name: '',
@@ -121,7 +119,8 @@ describe('media account client', () => {
       method: 'POST',
       credentials: 'include',
       body: JSON.stringify({
-        operation_id: 'task-1',
+        execution_status: 'completed',
+      operation_id: 'task-1',
         platform_account_id: '123',
         platform_name: '',
         platform_avatar_url: '',
@@ -141,7 +140,7 @@ describe('media account client', () => {
     expect(source).toContain('>检查</t-button>')
     expect(source).toContain('从 Profile 读真实 Cookie')
     expect(source).toContain('>批量检查</t-button>')
-    expect(source).toContain('v-if="isDesktop" variant="outline"')
+    expect(source).toContain('v-if="isDesktop && !isAdmin" variant="outline"')
     expect(source).toContain('请先勾选要检查的账号')
     expect(source).toContain('前往个人中心检查设备')
     expect(source).toContain('v-model="searchProfile"')
@@ -149,8 +148,6 @@ describe('media account client', () => {
     expect(source).toContain('retryFailedOnly')
     expect(source).toContain('打开窗口')
     expect(source).toContain('关闭窗口')
-    expect(source).toContain('window-bit-id')
-    expect(source).toContain('系统ID {{ profileForAccount')
     expect(source).toContain('不可执行：未绑定类目')
     expect(source).toContain('Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息')
     expect(source).not.toContain('business_status')
@@ -161,31 +158,12 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ profile_search: '运营' })
+    await client.listPage({ profile_search: '运营' })
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?profile_search=%E8%BF%90%E8%90%A5',
       expect.objectContaining({ credentials: 'include' }),
     )
-  })
-
-  it('sends account name on create and update', async () => {
-    const fetch = vi.fn(async () => response({ id: 'account-1' }))
-    const client = createMediaAccountClient({ fetch })
-
-    await client.create({ category_ids: ['category-a'], platform: 'bilibili', platform_name: '测试昵称' })
-
-    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/media-accounts', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ category_ids: ['category-a'], platform: 'bilibili', platform_name: '测试昵称' }),
-    }))
-
-    await client.update('account-1', { platform_name: '新名' })
-
-    expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/media-accounts/account-1', expect.objectContaining({
-      method: 'PATCH',
-      body: JSON.stringify({ platform_name: '新名' }),
-    }))
   })
 
   it('sends full categoryIds sets for create and update', async () => {
@@ -207,7 +185,7 @@ describe('media account client', () => {
     const fetch = vi.fn(async () => response([]))
     const client = createMediaAccountClient({ fetch })
 
-    await client.list({ category_ids: ['category-a', 'category-b'] })
+    await client.listPage({ category_ids: ['category-a', 'category-b'] })
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/v1/media-accounts?category_ids=category-a%2Ccategory-b',
