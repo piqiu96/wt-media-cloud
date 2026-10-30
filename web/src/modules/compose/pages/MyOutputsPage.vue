@@ -56,6 +56,7 @@ const error = ref('')
 const currentUser = ref(null)
 const operatorOptions = ref([])
 const operatorsLoading = ref(false)
+let operatorRequest = 0
 const filters = ref({ search: '', trigger: '', download: '', created_range: [], team_id: '', category_id: '', operator: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 const selectedRowKeys = ref([])
@@ -121,6 +122,9 @@ function strategyName(row) {
 
 // 负责人候选目录与任务页同一套：高级运营固定本团队，管理员按所选团队取。
 async function loadOperators() {
+  const request = ++operatorRequest
+  operatorOptions.value = []
+  operatorsLoading.value = false
   if (!canFilterOperators.value) return
   if (isAdmin.value && !filters.value.team_id) {
     operatorOptions.value = []
@@ -130,12 +134,13 @@ async function loadOperators() {
   operatorsLoading.value = true
   try {
     const data = await client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })
+    if (request !== operatorRequest) return
     operatorOptions.value = Array.isArray(data) ? data : []
     if (missingOperatorOption(filters.value.operator, operatorFilterOptions.value)) filters.value.operator = ''
   } catch {
-    operatorOptions.value = []
+    if (request === operatorRequest) operatorOptions.value = []
   } finally {
-    operatorsLoading.value = false
+    if (request === operatorRequest) operatorsLoading.value = false
   }
 }
 
@@ -432,7 +437,7 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
           </BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="filters.category_id" :options="categoryFilterOptions" clearable /></label>
-          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="operatorsLoading || (isAdmin && !filters.team_id)" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">生成方式</span><t-select v-model="filters.trigger" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">下载状态</span><t-select v-model="filters.download" :options="downloadOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
