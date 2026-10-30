@@ -16,18 +16,18 @@ import (
 
 // accountColumns is the INSERT column list; reads use accountReadColumns, which
 // qualifies every column and adds the owner name.
-const accountColumns = `id, user_id, team_id, platform, platform_account_id, platform_name, platform_avatar_url, browser_profile_id, remark, identification_status, duplicate_of_account_id, enabled, platform_login_status, original_cookie, active_cookie, cookie_status, cookie_updated_at, last_check_at, last_check_items, created_at, updated_at`
+const accountColumns = `id, user_id, team_id, platform, platform_account_id, platform_name, platform_avatar_url, browser_profile_id, remark, identification_status, enabled, platform_login_status, original_cookie, active_cookie, cookie_status, cookie_updated_at, last_check_at, last_check_items, created_at, updated_at`
 
 // accountReadColumns must stay in the same order as scanAccount's destinations.
 // The owner name is resolved by the join rather than stored, so a renamed user
 // shows the new name and an account whose user row is gone shows an empty one.
-const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at, ma.before_cookie, ma.cookie_update`
+const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, NULL AS same_identity_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at, ma.before_cookie, ma.cookie_update`
 
 const accountReadFrom = ` FROM media_accounts ma LEFT JOIN users u ON u.id = ma.user_id`
 
 // accountSummaryColumns deliberately excludes original_cookie and active_cookie.
 // List and summary endpoints have no use for those large secrets.
-const accountSummaryColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at`
+const accountSummaryColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, NULL AS same_identity_account_id, ma.enabled, ma.platform_login_status, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at`
 
 func queryRow(db *gorm.DB, query string, args ...any) *sql.Row {
 	return db.Raw(query, args...).Row()
@@ -71,15 +71,15 @@ func create(db *gorm.DB, record model.AccountRecord) (string, error) {
 
 func createInTx(tx *gorm.DB, record model.AccountRecord) (string, error) {
 	_, err := execSQL(tx,
-		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO media_accounts (`+accountColumns+`) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.UserID, record.TeamID, record.Platform,
 		nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName), nullIfEmpty(record.PlatformAvatarURL), nullIfEmpty(record.BrowserProfileID),
-		nullIfEmpty(record.Remark), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.Enabled, record.PlatformLoginStatus,
+		nullIfEmpty(record.Remark), record.IdentificationStatus, record.Enabled, record.PlatformLoginStatus,
 		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
 		record.CookieUpdatedAt, record.LastCheckAt, marshalLastCheckItems(record.LastCheckItems), record.CreatedAt, record.UpdatedAt,
 	)
 	if duplicateKey(err) {
-		return "", model.ErrDuplicateAccount
+		return "", model.ErrProfilePlatformTaken
 	}
 	if err != nil {
 		return "", err
@@ -112,17 +112,6 @@ func findByID(db *gorm.DB, id string) (model.AccountRecord, bool, error) {
 	return findByQuery(db, `SELECT `+accountReadColumns+accountReadFrom+` WHERE ma.id = ?`, id)
 }
 
-func FindByIdentity(userID sharedidentity.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
-	return findByIdentity(database.DB(), userID, platform, platformAccountID)
-}
-
-func findByIdentity(db *gorm.DB, userID sharedidentity.UserID, platform model.Platform, platformAccountID string) (model.AccountRecord, bool, error) {
-	return findByQuery(db,
-		`SELECT `+accountReadColumns+accountReadFrom+` WHERE ma.user_id = ? AND ma.platform = ? AND ma.platform_account_id = ?`,
-		userID, platform, platformAccountID,
-	)
-}
-
 func FindByProfilePlatform(profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
 	return findByProfilePlatform(database.DB(), profileID, platform)
 }
@@ -145,6 +134,15 @@ func findByQuery(db *gorm.DB, query string, args ...any) (model.AccountRecord, b
 	records := []model.AccountRecord{record}
 	if err := loadCategoryIDs(db, records); err != nil {
 		return model.AccountRecord{}, false, err
+	}
+	// Advisory lookup is detail-only and owner-scoped. It never changes login or execution state.
+	if record.PlatformAccountID != "" && record.BrowserProfileID != "" {
+		var otherID string
+		err := queryRow(db, `SELECT id FROM media_accounts WHERE user_id=? AND platform=? AND platform_account_id=? AND id<>? AND browser_profile_id IS NOT NULL AND NOT (browser_profile_id <=> ?) ORDER BY id LIMIT 1`, record.UserID, record.Platform, record.PlatformAccountID, record.ID, record.BrowserProfileID).Scan(&otherID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return model.AccountRecord{}, false, err
+		}
+		records[0].SameIdentityAccountID = otherID
 	}
 	return records[0], true, nil
 }
@@ -314,7 +312,7 @@ type scanner interface {
 func scanAccountSummary(row scanner) (model.AccountRecord, error) {
 	var record model.AccountRecord
 	var platformAccountID, platformName, platformAvatarURL, browserProfileID, remark sql.NullString
-	var duplicateOfAccountID, cookieStatus, userName sql.NullString
+	var sameIdentityAccountID, cookieStatus, userName sql.NullString
 	var cookieUpdatedAt, lastCheckAt sql.NullTime
 	var lastCheckItemsJSON sql.NullString
 	var checkMessage, checkIdentity, checkOperation, checkProfile sql.NullString
@@ -322,7 +320,7 @@ func scanAccountSummary(row scanner) (model.AccountRecord, error) {
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &platformName, &platformAvatarURL, &browserProfileID,
-		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
+		&remark, &record.IdentificationStatus, &sameIdentityAccountID, &record.Enabled, &record.PlatformLoginStatus,
 		&cookieStatus, &cookieUpdatedAt, &lastCheckAt, &lastCheckItemsJSON,
 		&record.CreatedAt, &record.UpdatedAt, &userName,
 		&record.LastCheckStatus, &checkMessage, &checkIdentity, &checkOperation, &checkProfile, &checkStarted,
@@ -335,7 +333,7 @@ func scanAccountSummary(row scanner) (model.AccountRecord, error) {
 	record.PlatformAvatarURL = platformAvatarURL.String
 	record.BrowserProfileID = browserProfileID.String
 	record.Remark = remark.String
-	record.DuplicateOfAccountID = duplicateOfAccountID.String
+	record.SameIdentityAccountID = sameIdentityAccountID.String
 	record.CookieStatus = cookieStatus.String
 	record.UserName = userName.String
 	record.LastCheckMessage = checkMessage.String
@@ -368,7 +366,7 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	var record model.AccountRecord
 	var beforeCookie, cookieUpdate sql.NullString
 	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
-	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
+	var sameIdentityAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
 	var checkItemsJSON, userName sql.NullString
 	var checkMessage, checkIdentity, checkOperation, checkProfile sql.NullString
@@ -376,7 +374,7 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	err := row.Scan(
 		&record.ID, &record.UserID, &record.TeamID, &record.Platform,
 		&platformAccountID, &name, &avatarURL, &browserProfileID,
-		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
+		&remark, &record.IdentificationStatus, &sameIdentityAccountID, &record.Enabled, &record.PlatformLoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
 		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt, &userName,
 		&record.LastCheckStatus, &checkMessage, &checkIdentity, &checkOperation, &checkProfile, &checkStarted, &beforeCookie, &cookieUpdate,
@@ -389,7 +387,7 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	record.PlatformAvatarURL = avatarURL.String
 	record.BrowserProfileID = browserProfileID.String
 	record.Remark = remark.String
-	record.DuplicateOfAccountID = duplicateOfAccountID.String
+	record.SameIdentityAccountID = sameIdentityAccountID.String
 	record.OriginalCookie = originalCookie.String
 	record.ActiveCookie = activeCookie.String
 	record.BeforeCookie = beforeCookie.String

@@ -4,12 +4,13 @@ import { importResultSummary } from './importResultSummary.js'
 
 const keys = (item, options) => importItemActions(item, options).map(action => action.key)
 describe('import result operations', () => {
-  it('directs duplicate identities to existing accounts without retrying or opening the redundant window', () => {
-    const item = { status: 'failed', existing_account_id: '42', bit_profile_id: 'redundant', message: '已恢复' }
-    expect(keys(item)).toEqual(['view', 'skip'])
-    expect(importItemPresentation(item)).toMatchObject({ label: '已存在', tone: 'warning' })
-    expect(importItemPresentation(item).message).toContain('无需重复接入')
-    expect(importResultSummary({ total: 1, failed: 1 }, false, [item])).toMatchObject({ title: '本批账号已存在', tone: 'warning' })
+  it('completes same-UID new-window rows with an informational result and the current record action', () => {
+    const item = { status: 'succeeded', account_id: 'new-window-record', same_identity_account_id: '42' }
+    expect(keys(item)).toEqual(['view'])
+    expect(importItemActions(item)[0].label).toBe('查看账号')
+    expect(importItemPresentation(item)).toMatchObject({ label: '已存在', tone: 'success' })
+    expect(importItemPresentation(item).message).toContain('本窗口已接入')
+    expect(importResultSummary({ total: 1, succeeded: 1, failed: 0 })).toMatchObject({ title: '本轮接入完成', tone: 'success' })
   })
   it('guides manual login through open and inspection instead of replaying the Cookie', () => {
     const item = { status: 'failed', step: 'manual', bit_profile_id: 'profile' }

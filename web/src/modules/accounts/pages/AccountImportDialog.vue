@@ -104,7 +104,7 @@ function itemActions(item){return importItemActions(item,{busy:busy.value,blocke
 function itemPresentation(item){return importItemPresentation(item,busy.value)}
 async function onItemAction(item,key){
  if(busy.value)return
- if(key==='view')emit('view-account',item.existing_account_id||item.account_id)
+ if(key==='view')emit('view-account',item.account_id)
  else if(key==='open')await openWindow(item)
  else if(key==='reuse')await chooseReuse(item)
  else await action(item,key)

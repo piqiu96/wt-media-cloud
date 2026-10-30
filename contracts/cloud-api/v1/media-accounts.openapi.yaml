@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.10.30.4
+  version: 2026.10.31.1
 paths:
   /api/v1/media-accounts:
     get:
@@ -405,9 +405,9 @@ paths:
         content:
           application/json:
             schema: {$ref: '#/components/schemas/ImportResultInput'}
-      description: expected_revision/attempt/step; created(browser_profile_id), creation_failed(definite capacity only), creation_unknown, preparation_failed, prepared(before_cookie,fingerprint,login_status,platform_account_id), completed(Cookie result), uncertain. Persist prepared before granting can_apply. Success atomically creates account and transfers credentials. Duplicate UID locates existing account without overwriting it.
+      description: expected_revision/attempt/step; created(browser_profile_id), creation_failed(definite capacity only), creation_unknown, preparation_failed, prepared(before_cookie,fingerprint,login_status,platform_account_id), completed(Cookie result), uncertain. Persist prepared before granting can_apply. Success atomically creates account and transfers credentials. Same UID in another window settles this window normally with an advisory hint; it never overwrites the other record or asks the user to skip.
       parameters: [{in: path, name: batch_id, required: true, schema: {type: string}}, {in: path, name: row_number, required: true, schema: {type: integer, minimum: 1}}]
-      responses: {'200': {description: Updated projection; duplicate result never grants execution, content: {application/json: {schema: {$ref: '#/components/schemas/ImportResponse'}}}}, '409': {description: 23004 import_conflict}}
+      responses: {'200': {description: Updated projection; repeated result never grants another execution, content: {application/json: {schema: {$ref: '#/components/schemas/ImportResponse'}}}}, '409': {description: 23004 import_conflict}}
   /api/v1/media-account-imports/{batch_id}/items/{row_number}/actions:
     post:
       operationId: actMediaAccountImportItem
@@ -431,7 +431,7 @@ components:
   schemas:
     Platform: {type: string, enum: [douyin, bilibili, baidu]}
     PlatformLoginStatus: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
-    IdentificationStatus: {type: string, enum: [pending_identification, identified, duplicate]}
+    IdentificationStatus: {type: string, enum: [pending_identification, identified]}
     CreateMediaAccountRequest:
       type: object
       required: [platform]
@@ -467,7 +467,7 @@ components:
         browser_profile_id: {type: string, description: Nullable browser-profile reference.}
         remark: {type: string}
         identification_status: {$ref: '#/components/schemas/IdentificationStatus'}
-        duplicate_of_account_id: {type: string}
+        same_identity_account_id: {type: string, description: Optional other-window same-UID record for a detail hint only. Not a conflict or execution restriction.}
         enabled: {type: boolean}
         platform_login_status: {$ref: '#/components/schemas/PlatformLoginStatus'}
         cookie_status: {type: string}
@@ -597,7 +597,6 @@ components:
       - bit_profile_id
       - platform
       properties:
-        existing_account_id: {type: string, description: Duplicate identity points to the existing account without changing its window or credentials.}
         operation_id:
           type: string
         request_key:
@@ -714,7 +713,7 @@ components:
         bit_profile_id: {type: string}
         window_name: {type: string}
         account_id: {type: string}
-        existing_account_id: {type: string}
+        same_identity_account_id: {type: string, description: Optional other-window same-UID record for a detail hint only. Not a conflict or execution restriction.}
         name: {type: string}
         platform_account_id: {type: string}
         creation_unavailable: {type: boolean}

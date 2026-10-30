@@ -1,6 +1,6 @@
 export function importItemPresentation(item, running = false) {
   if (item.status === 'skipped') return { label: '已跳过', tone: 'neutral', message: '本行暂不接入，可恢复处理。' }
-  if (item.status === 'failed' && item.existing_account_id) return { label: '已存在', tone: 'warning', message: '此账号已在台账中，无需重复接入。' }
+  if (item.status === 'succeeded' && item.same_identity_account_id) return { label: '已存在', tone: 'success', message: '账号已存在，本窗口已接入。' }
   if (item.status === 'failed' && item.step === 'manual') return { label: '待人工登录', tone: 'warning', message: '请打开窗口完成人工登录，再检查并同步。' }
   if (item.status === 'uncertain' || item.status === 'running' && !running) return { label: '待确认', tone: 'warning', message: '请先核实本行结果，再继续接入。' }
   const labels = { pending: '待处理', running: '执行中', succeeded: '已接入', failed: '未完成' }
@@ -17,9 +17,7 @@ export function importItemActions(item, { busy = false, blocked = false } = {}) 
     if (item.account_id) add('view', '查看账号')
   } else if (item.status === 'skipped') {
     add('restore', '恢复处理')
-  } else if (item.status === 'failed' && item.existing_account_id) {
-    add('view', '查看已有账号')
-    add('skip', '跳过此行')
+
   } else {
     const manual = item.status === 'failed' && item.step === 'manual'
     if (manual && item.bit_profile_id) add('open', '打开窗口')

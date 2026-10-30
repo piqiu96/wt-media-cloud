@@ -336,15 +336,13 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 					return ErrImportConflict
 				}
 				i.Status = i.PreviousStatus
-				if i.Status != "failed" {
+				if i.Status != "failed" && i.Status != "uncertain" {
 					i.Status = "pending"
 				}
 				if i.Status == "pending" {
 					i.Message = "等待接入"
 				} else if i.Message == "已跳过" || i.Message == "已恢复" || i.Message == "" {
 					switch {
-					case i.ExistingAccountID != "":
-						i.Message = "此账号已存在，请查看已有账号"
 					case i.Step == "manual":
 						i.Message = "请打开窗口完成人工登录，再检查并同步"
 					case i.CreationUnavailable:
@@ -356,7 +354,7 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 					}
 				}
 			case "retry":
-				if i.Status != "failed" || i.Step == "manual" || i.ExistingAccountID != "" {
+				if i.Status != "failed" || i.Step == "manual" {
 					return ErrImportConflict
 				}
 				i.Status = "pending"
@@ -480,15 +478,7 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 					if e != nil {
 						return e
 					}
-					if existing != "" {
-						i.Status = "failed"
-						i.ExistingAccountID = existing
-						i.Message = "此账号已存在，请查看已有账号"
-						if e = release(); e != nil {
-							return e
-						}
-						break
-					}
+					i.SameIdentityAccountID = existing
 					if _, e = res.ReserveProfile(i.BrowserProfileID, i.OperationID, b.Platform, ""); e != nil {
 						return e
 					}
@@ -507,6 +497,9 @@ func (s *accountService) MutateImportItem(actor identityservice.PublicUser, id s
 					i.Status = "succeeded"
 					i.Step = "completed"
 					i.Message = "接入成功"
+					if existing != "" {
+						i.Message = "账号已存在，本窗口已接入"
+					}
 					i.InputCookie = ""
 					i.BeforeCookie = nil
 					i.Fingerprint = ""

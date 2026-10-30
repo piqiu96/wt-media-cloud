@@ -1,6 +1,6 @@
 schema_version: 1
-revision: "2026.10.29.2"
+revision: "2026.10.31.1"
 platforms: [douyin, bilibili, baidu]
-identification_statuses: [pending_identification, identified, duplicate]
+identification_statuses: [pending_identification, identified]
 platform_login_statuses: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]
 enabled_values: [true, false]

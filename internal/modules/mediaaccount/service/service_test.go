@@ -191,7 +191,7 @@ func TestFullCookieRecordRejectsSeniorForAnotherUsersAccount(t *testing.T) {
 	}
 }
 
-func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
+func TestServiceIdentifiesSameAccountInDifferentWindows(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
@@ -216,7 +216,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("duplicate error = %v", err)
 	}
-	if duplicate.IdentificationStatus != IdentificationDuplicate || duplicate.DuplicateOfAccountID != first.ID {
+	if duplicate.IdentificationStatus != IdentificationIdentified || duplicate.PlatformAccountID != "platform-42" || duplicate.PlatformLoginStatus != PlatformLoginNormal {
 		t.Fatalf("duplicate = %#v", duplicate)
 	}
 	storedFirst, _, _ := store.Find(first.ID)
@@ -226,7 +226,7 @@ func TestServiceIdentifiesAccountAndMarksUserScopedDuplicate(t *testing.T) {
 	}
 }
 
-func TestServiceIdentityUniquenessIsPerUser(t *testing.T) {
+func TestServiceIdentityUseIsIndependentAcrossUsers(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	admin := identityservice.PublicUser{ID: identityservice.UserID(99), Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
@@ -446,7 +446,7 @@ func TestCanStartLocalOperationExcludesAdmins(t *testing.T) {
 	}
 }
 
-func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
+func TestServiceAppliesSameUIDOtherWindowAsNormalResult(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := mediaActor(1, 10, identityservice.RoleOperator)
@@ -469,12 +469,10 @@ func TestServiceAppliesLocalAccountCheckMismatchAsBusinessResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyLocalAccountCheckResult() error=%v", err)
 	}
-	if updated.PlatformLoginStatus != PlatformLoginAccountMismatch || updated.IdentificationStatus != IdentificationDuplicate || updated.DuplicateOfAccountID != first.ID {
+	if updated.PlatformLoginStatus != PlatformLoginNormal || updated.IdentificationStatus != IdentificationIdentified || updated.PlatformAccountID != "uid-1" {
 		t.Fatalf("updated=%#v", updated)
 	}
-	if updated.LastCheckMessage != "识别出的账号已存在，请查看已有账号" {
-		t.Fatalf("duplicate must explain the outcome: %q", updated.LastCheckMessage)
-	}
+
 }
 
 func TestCheckPreservesIdentityOnMismatchAndRefreshesSameUID(t *testing.T) {
@@ -770,15 +768,6 @@ func (s *memoryStore) Create(record AccountRecord) (string, error) {
 func (s *memoryStore) Find(id string) (AccountRecord, bool, error) {
 	record, ok := s.records[id]
 	return s.withCategoryIDs(record), ok, nil
-}
-
-func (s *memoryStore) FindByIdentity(userID identityservice.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error) {
-	for _, record := range s.records {
-		if record.UserID == userID && record.Platform == platform && record.PlatformAccountID == platformAccountID && record.IdentificationStatus == IdentificationIdentified {
-			return record, true, nil
-		}
-	}
-	return AccountRecord{}, false, nil
 }
 
 func (s *memoryStore) FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error) {

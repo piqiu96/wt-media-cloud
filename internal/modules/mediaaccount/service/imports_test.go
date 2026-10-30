@@ -195,7 +195,7 @@ func TestImportSuccessTransferAndDuplicateDoesNotOverwrite(t *testing.T) {
 	}
 	v = prepImport(t, s, a, done, 3)
 	second, e := s.MutateImportItem(a, b.ID, 3, "result", successImportInput(v))
-	if e != nil || second.Counts["failed"] != 1 || second.Content.Items[1].ExistingAccountID != r.ID || second.Content.Items[1].PlatformAccountID != "real" || second.Content.Items[1].Name != "Real" || len(m.records) != 1 {
+	if e != nil || second.Counts["succeeded"] != 2 || second.Content.Items[1].SameIdentityAccountID != r.ID || second.Content.Items[1].PlatformAccountID != "real" || second.Content.Items[1].Name != "Real" || len(m.records) != 2 {
 		t.Fatal(second, e)
 	}
 }
@@ -266,7 +266,7 @@ func TestImportRestorePreservesFailureContext(t *testing.T) {
 			stored := m.batches[b.ID]
 			stored.Content.Items[0].Status = "failed"
 			stored.Content.Items[0].Message = tc.message
-			stored.Content.Items[0].ExistingAccountID = tc.existing
+			stored.Content.Items[0].SameIdentityAccountID = tc.existing
 			m.batches[b.ID] = stored
 			skipped, err := s.MutateImportItem(a, b.ID, 1, "actions", ImportMutation{ExpectedRevision: b.Revision, Action: "skip"})
 			if err != nil {
@@ -283,9 +283,55 @@ func TestImportRestorePreservesFailureContext(t *testing.T) {
 			if tc.message != "已跳过" && item.Message != tc.message {
 				t.Fatalf("lost original failure: %q", item.Message)
 			}
-			if item.ExistingAccountID != tc.existing || len(m.records) != 0 || len(m.locks) != 0 {
+			if item.SameIdentityAccountID != tc.existing || len(m.records) != 0 || len(m.locks) != 0 {
 				t.Fatal("restore must not create or reserve resources")
 			}
 		})
+	}
+}
+
+func TestImportSameUIDInDifferentWindowsCompletesAndContinues(t *testing.T) {
+	s, m, a, b := importFixture(t)
+	first := prepImport(t, s, a, b, 1)
+	first, e := s.MutateImportItem(a, b.ID, 1, "result", successImportInput(first))
+	if e != nil {
+		t.Fatal(e)
+	}
+	firstID := first.Content.Items[0].AccountID
+	original := m.records[firstID]
+	second := prepImport(t, s, a, first, 3)
+	input := successImportInput(second)
+	second, e = s.MutateImportItem(a, b.ID, 3, "result", input)
+	if e != nil || second.Counts["succeeded"] != 2 || second.Counts["failed"] != 0 {
+		t.Fatalf("same UID should complete in both windows: counts=%+v error=%v", second.Counts, e)
+	}
+	secondID := second.Content.Items[1].AccountID
+	if firstID == secondID || secondID == "" || m.records[secondID].BrowserProfileID == original.BrowserProfileID || m.records[secondID].PlatformAccountID != original.PlatformAccountID {
+		t.Fatal("window records were merged or not identified")
+	}
+	if m.records[firstID].ActiveCookie != original.ActiveCookie || m.records[firstID].BrowserProfileID != original.BrowserProfileID {
+		t.Fatal("other window changed")
+	}
+	repeated, e := s.MutateImportItem(a, b.ID, 3, "result", input)
+	if e != nil || repeated.Counts["succeeded"] != 2 || len(m.records) != 2 {
+		t.Fatalf("replayed result created another record: %v", e)
+	}
+}
+
+func TestLegacySkippedDuplicateRestoresToInspectionInsteadOfReplay(t *testing.T) {
+	s, m, a, b := importFixture(t)
+	stored := m.batches[b.ID]
+	stored.Content.Items[0].Status = "skipped"
+	stored.Content.Items[0].PreviousStatus = "uncertain"
+	stored.Content.Items[0].Step = "applying"
+	stored.Content.Items[0].SameIdentityAccountID = "old-other-window"
+	m.batches[b.ID] = stored
+	restored, e := s.MutateImportItem(a, b.ID, 1, "actions", ImportMutation{ExpectedRevision: b.Revision, Action: "restore"})
+	if e != nil || restored.Content.Items[0].Status != "uncertain" || restored.AllowExecute {
+		t.Fatalf("restore must inspect, not replay: %v", e)
+	}
+	receipt, e := s.MutateImportItem(a, b.ID, 1, "start", ImportMutation{ExpectedRevision: restored.Revision})
+	if e != nil || receipt.AllowExecute || receipt.Execution != nil || receipt.Content.Items[0].Status != "uncertain" || receipt.Content.Items[0].Attempt != restored.Content.Items[0].Attempt {
+		t.Fatal("legacy unknown result must return a receipt without a new execution grant")
 	}
 }

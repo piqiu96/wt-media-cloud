@@ -36,7 +36,6 @@ const (
 	PlatformBaidu                   = model.PlatformBaidu
 	IdentificationPending           = model.IdentificationPending
 	IdentificationIdentified        = model.IdentificationIdentified
-	IdentificationDuplicate         = model.IdentificationDuplicate
 	PlatformLoginUnknown            = model.PlatformLoginUnknown
 	PlatformLoginNormal             = model.PlatformLoginNormal
 	PlatformLoginNotLoggedIn        = model.PlatformLoginNotLoggedIn
@@ -52,7 +51,6 @@ var (
 	ErrForbidden                  = model.ErrForbidden
 	ErrInvalidInput               = model.ErrInvalidInput
 	ErrNotFound                   = model.ErrNotFound
-	ErrDuplicateAccount           = model.ErrDuplicateAccount
 	ErrProfileUnavailable         = model.ErrProfileUnavailable
 	ErrProfileNotFound            = model.ErrProfileNotFound
 	ErrProfileAssignedToOtherUser = model.ErrProfileAssignedToOtherUser
@@ -65,7 +63,6 @@ type Store interface {
 	CompleteCheck(AccountRecord) error
 	Create(record AccountRecord) (string, error)
 	Find(id string) (AccountRecord, bool, error)
-	FindByIdentity(userID identityservice.UserID, platform Platform, platformAccountID string) (AccountRecord, bool, error)
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
 	UpdateMetadata(AccountRecord, UpdateAccountInput) error
 	SetProfile(AccountRecord) error
@@ -520,33 +517,10 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 		if platformAccountID == "" {
 			return Account{}, ErrInvalidInput
 		}
-		existing, found, err := s.store.FindByIdentity(record.UserID, record.Platform, platformAccountID)
-		if err != nil {
-			return Account{}, err
-		}
-		if found && existing.ID != record.ID {
-			record.IdentificationStatus = IdentificationDuplicate
-			record.LastCheckMessage = "识别出的账号已存在，请查看已有账号"
-			record.DuplicateOfAccountID = existing.ID
-			record.PlatformLoginStatus = PlatformLoginAccountMismatch
-			record.LastCheckItems = mergeLastCheckItems(input.LastCheckItems, proxyFact, now)
-			record.UpdatedAt = now
-			record.LastCheckAt = &now
-			if err := s.store.CompleteCheck(record); err != nil {
-				return s.settledCheck(actor, record, err)
-			}
-			if err := s.audit(actor.ID, "media_account.check.result", record.ID, map[string]string{
-				"operation_id": strings.TrimSpace(input.OperationID), "login_status": string(record.PlatformLoginStatus), "message": "duplicate:" + existing.ID,
-			}); err != nil {
-				return Account{}, err
-			}
-			return s.GetAccount(actor, record.ID)
-		}
 		record.PlatformAccountID = platformAccountID
 		record.PlatformName = strings.TrimSpace(input.PlatformName)
 		record.PlatformAvatarURL = strings.TrimSpace(input.PlatformAvatarURL)
 		record.IdentificationStatus = IdentificationIdentified
-		record.DuplicateOfAccountID = ""
 	} else if platformAccountID != "" && record.PlatformAccountID != "" && platformAccountID != record.PlatformAccountID {
 		record.PlatformLoginStatus = PlatformLoginAccountMismatch
 	} else {

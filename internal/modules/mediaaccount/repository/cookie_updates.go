@@ -56,9 +56,9 @@ func mutateCookie(db *gorm.DB, id string, userID sharedidentity.UserID, mutate f
 		if e != nil {
 			return e
 		}
-		_, e = execSQL(tx, `UPDATE media_accounts SET before_cookie=?,cookie_update=?,original_cookie=?,active_cookie=?,cookie_status=?,cookie_updated_at=?,platform_account_id=?,platform_name=?,platform_avatar_url=?,identification_status=?,duplicate_of_account_id=?,platform_login_status=?,last_check_status=?,last_check_message=?,last_check_at=?,last_check_identity=?,check_operation_id=?,updated_at=? WHERE id=? AND user_id=?`, nullIfEmpty(record.BeforeCookie), string(encoded), nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus), record.CookieUpdatedAt, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName), nullIfEmpty(record.PlatformAvatarURL), record.IdentificationStatus, nullIfEmpty(record.DuplicateOfAccountID), record.PlatformLoginStatus, record.LastCheckStatus, nullIfEmpty(record.LastCheckMessage), record.LastCheckAt, marshalIdentity(record.LastCheckIdentity), nullIfEmpty(record.CheckOperationID), record.UpdatedAt, id, userID)
+		_, e = execSQL(tx, `UPDATE media_accounts SET before_cookie=?,cookie_update=?,original_cookie=?,active_cookie=?,cookie_status=?,cookie_updated_at=?,platform_account_id=?,platform_name=?,platform_avatar_url=?,identification_status=?,platform_login_status=?,last_check_status=?,last_check_message=?,last_check_at=?,last_check_identity=?,check_operation_id=?,updated_at=? WHERE id=? AND user_id=?`, nullIfEmpty(record.BeforeCookie), string(encoded), nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus), record.CookieUpdatedAt, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName), nullIfEmpty(record.PlatformAvatarURL), record.IdentificationStatus, record.PlatformLoginStatus, record.LastCheckStatus, nullIfEmpty(record.LastCheckMessage), record.LastCheckAt, marshalIdentity(record.LastCheckIdentity), nullIfEmpty(record.CheckOperationID), record.UpdatedAt, id, userID)
 		if duplicateKey(e) {
-			return model.ErrDuplicateAccount
+			return model.ErrProfilePlatformTaken
 		}
 		if e != nil {
 			return e

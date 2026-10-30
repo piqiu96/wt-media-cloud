@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.30.4"
+revision: "2026.10.31.1"
 schemas:
   MediaAccount:
     type: object
@@ -23,8 +23,8 @@ schemas:
           Kept as a plain reference. When the referenced Profile is outside the caller's
           `user_id + main_user_id` scope the Web shows "未找到对应的浏览器环境" and execution
           answers PROFILE_NOT_FOUND; it becomes reachable again if the user switches back.
-      identification_status: {type: string, enum: [pending_identification, identified, duplicate]}
-      duplicate_of_account_id: {type: string, nullable: true}
+      identification_status: {type: string, enum: [pending_identification, identified]}
+      same_identity_account_id: {type: string, nullable: true}
       enabled: {type: boolean}
       platform_login_status: {type: string, enum: [unknown, normal, not_logged_in, verification_needed, expired, restricted, account_mismatch, environment_error]}
       cookie_status: {type: string, nullable: true}
@@ -68,7 +68,7 @@ schemas:
                 attempt: {type: integer, minimum: 0}
                 operation_id: {type: string, description: 'import:batch:row:attempt'}
                 account_id: {type: string}
-                existing_account_id: {type: string}
+                same_identity_account_id: {type: string}
                 browser_profile_id: {type: string}
                 bit_profile_id: {type: string}
                 name: {type: string}

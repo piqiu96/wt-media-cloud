@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
 	"strings"
@@ -36,7 +35,6 @@ type CookieResultInput struct {
 	Message           string           `json:"message"`
 }
 type CookieUpdateView struct {
-	ExistingAccountID         string   `json:"existing_account_id,omitempty"`
 	OperationID               string   `json:"operation_id"`
 	RequestKey                string   `json:"request_key"`
 	BrowserProfileID          string   `json:"browser_profile_id"`
@@ -56,7 +54,7 @@ func cookieView(u *model.CookieUpdate) CookieUpdateView {
 	if u == nil {
 		return CookieUpdateView{}
 	}
-	return CookieUpdateView{ExistingAccountID: u.ExistingAccountID, OperationID: u.OperationID, RequestKey: u.RequestKey, BrowserProfileID: u.BrowserProfileID, BitProfileID: u.BitProfileID, Platform: u.Platform, ExpectedPlatformAccountID: u.ExpectedPlatformAccountID, InputCookie: u.InputCookie, Fingerprint: u.Fingerprint, Status: u.Status, Step: u.Step, Message: u.Message}
+	return CookieUpdateView{OperationID: u.OperationID, RequestKey: u.RequestKey, BrowserProfileID: u.BrowserProfileID, BitProfileID: u.BitProfileID, Platform: u.Platform, ExpectedPlatformAccountID: u.ExpectedPlatformAccountID, InputCookie: u.InputCookie, Fingerprint: u.Fingerprint, Status: u.Status, Step: u.Step, Message: u.Message}
 }
 
 type cookieStore interface {
@@ -185,18 +183,6 @@ func (s *accountService) SettleCookieUpdate(actor identityservice.PublicUser, id
 	if input.Status != "applied" && input.Status != "failed" && input.Status != "uncertain" {
 		return CookieUpdateView{}, ErrInvalidInput
 	}
-	existingID := ""
-	if input.Status == "applied" && input.PlatformAccountID != "" {
-		current, e := s.cookieAccess(actor, id)
-		if e != nil {
-			return CookieUpdateView{}, e
-		}
-		if other, found, e := s.store.FindByIdentity(actor.ID, current.Platform, input.PlatformAccountID); e != nil {
-			return CookieUpdateView{}, e
-		} else if found && other.ID != id {
-			existingID = other.ID
-		}
-	}
 	out, e := s.cookieMutation(actor, id, func(r *model.AccountRecord, lock *string) error {
 		u := r.CookieUpdate
 		if u == nil || u.OperationID != op || u.BrowserProfileID != r.BrowserProfileID {
@@ -213,17 +199,6 @@ func (s *accountService) SettleCookieUpdate(actor identityservice.PublicUser, id
 				return ErrInvalidInput
 			}
 
-			if existingID != "" {
-				u.Status = "failed"
-				u.Step = "completed"
-				u.Message = "该账号已在列表中，请查看已有账号"
-				u.ExistingAccountID = existingID
-				u.InputCookie = ""
-				*lock = ""
-				r.UpdatedAt = s.now()
-				return nil
-			}
-
 			raw, _ := json.Marshal(input.Cookies)
 			r.ActiveCookie = string(raw)
 			if r.OriginalCookie == "" {
@@ -236,7 +211,6 @@ func (s *accountService) SettleCookieUpdate(actor identityservice.PublicUser, id
 			r.PlatformName = input.Name
 			r.PlatformAvatarURL = input.AvatarURL
 			r.IdentificationStatus = IdentificationIdentified
-			r.DuplicateOfAccountID = ""
 			r.PlatformLoginStatus = PlatformLoginNormal
 			r.LastCheckStatus = "completed"
 			r.LastCheckMessage = "Cookie 已更新并确认登录"
@@ -265,9 +239,6 @@ func (s *accountService) SettleCookieUpdate(actor identityservice.PublicUser, id
 		r.UpdatedAt = s.now()
 		return nil
 	})
-	if errors.Is(e, ErrDuplicateAccount) {
-		return s.SettleCookieUpdate(actor, id, op, input)
-	}
 
 	if e != nil {
 		return CookieUpdateView{}, e
