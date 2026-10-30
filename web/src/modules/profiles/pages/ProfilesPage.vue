@@ -2196,7 +2196,7 @@ function returnToSyncResult() {
           </label>
           <label class="wt-filter-field" title="依据最近一次成功同步；未找到不等于已删除">
             <span class="wt-filter-field__label">窗口状态</span>
-            <t-select v-model="filterDraft.windowState" clearable placeholder="全部窗口">
+            <t-select v-model="filterDraft.windowState" clearable placeholder="全部">
               <t-option value="found" label="已找到" />
               <t-option value="missing" label="未找到" />
             </t-select>
