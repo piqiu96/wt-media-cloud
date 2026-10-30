@@ -16,7 +16,7 @@ function changeType(value) { type.value = value || ''; ids.value = [] }
     <label class="category-fields__parent"><span>一级分类</span>
       <BusinessSelect kind="category" :filter="filter" :model-value="type" :options="CATEGORY_TYPE_OPTIONS" :placeholder="filter ? '全部' : '选择一级分类'" @change="changeType" />
     </label>
-    <div class="category-fields__children">
+    <component :is="filter ? 'label' : 'div'" class="category-fields__children">
       <span>二级分类<span v-if="!filter && type" class="category-fields__optional"> · 可多选</span></span>
       <BusinessSelect v-if="filter" v-model="ids" kind="category" filter multiple :disabled="!type" :placeholder="type ? '全部' : '先选择一级分类'">
         <TOption v-for="c in options" :key="c.id" :value="c.id" :label="c.name" />
@@ -28,7 +28,7 @@ function changeType(value) { type.value = value || ''; ids.value = [] }
         <div v-else class="category-fields__empty">{{ type ? '该分类下暂无可选类目' : '请先选择一级分类' }}</div>
       </template>
       <div v-if="unavailable.length" class="category-fields__unavailable">原分类已不可用，请重新选择：<TTag v-for="id in unavailable" :key="id" closable @close="ids = ids.filter(value => value !== id)">分类 {{ id }}</TTag></div>
-    </div>
+    </component>
   </div>
 </template>
 

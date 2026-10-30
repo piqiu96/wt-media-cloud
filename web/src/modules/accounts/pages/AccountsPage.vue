@@ -1134,7 +1134,7 @@ const columns = computed(() => [
     <ResourceOverlay :visible="editVisible" title="编辑账号" :width="640" :busy="savingEdit" @close="closeAccountForm('edit')">
       <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
       <ResourceForm>
-        <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount.platform) }}）</t-form-item>
+        <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount?.platform) }}）</t-form-item>
         <t-form-item label="业务分类"><CategoryFields v-model="editCategoryIds" v-model:type="editCategoryType" :categories="categories" /></t-form-item>
         <t-form-item label="标签"><TagInput v-model="editTags" /></t-form-item>
         <t-form-item label="运营备注">

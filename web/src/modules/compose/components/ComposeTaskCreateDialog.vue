@@ -323,26 +323,26 @@ async function submit() {
           <p v-if="!strategyId" class="compose-create__hint">先在上一步选择合成策略：素材是否已经用过，是按策略算的。</p>
           <template v-else>
             <div class="compose-create__picker-row">
+              <label class="wt-filter-field compose-create__category"><span class="wt-filter-field__label">业务分类</span>
               <BusinessSelect kind="category" filter
                 v-model="categoryFilter"
-                class="compose-create__category"
                 :options="categoryOptions"
                 clearable
-
               />
+              </label>
+              <label class="wt-filter-field compose-create__usage"><span class="wt-filter-field__label">使用情况</span>
               <t-select
                 v-model="candidateUsage"
-                class="compose-create__usage"
                 :options="usageOptions"
                 :disabled="!statesReady"
-                aria-label="使用情况"
               />
+              </label>
+              <label class="wt-filter-field compose-create__sort"><span class="wt-filter-field__label">排序</span>
               <t-select
                 v-model="candidateSort"
-                class="compose-create__sort"
                 :options="CANDIDATE_SORTS"
-                aria-label="排序"
               />
+              </label>
             </div>
             <t-input
               v-model="candidateKeyword"
