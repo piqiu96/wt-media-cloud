@@ -243,7 +243,11 @@ func GetMediaAccountCookies(ctx context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	account, err := accountservice.GetAccountRecord(actor, c.Param("account_id"))
+	if !accountservice.CanStartLocalOperation(actor.Role) {
+		api.Forbidden(c, 11003, "仅本人运营账号可查看凭证")
+		return
+	}
+	account, err := accountservice.GetOwnedAccountRecord(actor, c.Param("account_id"))
 	if err != nil {
 		writeMediaAccountError(c, err)
 		return

@@ -551,7 +551,7 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 		return Account{}, ErrStaleCheck
 	}
 	if record.LastCheckStatus == "completed" || record.LastCheckStatus == "failed" {
-		return record.Account, nil
+		return s.GetAccount(actor, record.ID)
 	}
 	if record.LastCheckStatus != "running" {
 		return Account{}, ErrStaleCheck
@@ -569,7 +569,7 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 		if err := s.store.CompleteCheck(record); err != nil {
 			return s.settledCheck(actor, record, err)
 		}
-		return record.Account, nil
+		return s.GetAccount(actor, record.ID)
 	}
 	if !validPlatformLoginStatus(input.PlatformLoginStatus) || input.PlatformLoginStatus == PlatformLoginEnvironmentError {
 		return Account{}, ErrInvalidInput
@@ -609,7 +609,7 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 			}); err != nil {
 				return Account{}, err
 			}
-			return record.Account, nil
+			return s.GetAccount(actor, record.ID)
 		}
 		record.PlatformAccountID = platformAccountID
 		record.PlatformName = strings.TrimSpace(input.PlatformName)
@@ -637,10 +637,13 @@ func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.Publ
 	}); err != nil {
 		return Account{}, err
 	}
-	return record.Account, nil
+	return s.GetAccount(actor, record.ID)
 }
 
 func (s *accountService) BindProfile(actor identityservice.PublicUser, accountID, profileID string) (Account, error) {
+	if !canStartLocalOperation(actor.Role) {
+		return Account{}, ErrForbidden
+	}
 	record, err := s.GetOwnedAccountRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -689,6 +692,9 @@ func (s *accountService) BindProfile(actor identityservice.PublicUser, accountID
 }
 
 func (s *accountService) UnbindProfile(actor identityservice.PublicUser, accountID string) (Account, error) {
+	if !canStartLocalOperation(actor.Role) {
+		return Account{}, ErrForbidden
+	}
 	record, err := s.GetOwnedAccountRecord(actor, accountID)
 	if err != nil {
 		return Account{}, err
@@ -1020,7 +1026,7 @@ func (s *accountService) settledCheck(actor identityservice.PublicUser, record A
 		return Account{}, err
 	}
 	if current.CheckOperationID == record.CheckOperationID && current.CheckProfileID == current.BrowserProfileID && (current.LastCheckStatus == "completed" || current.LastCheckStatus == "failed") {
-		return current.Account, nil
+		return s.GetAccount(actor, current.ID)
 	}
 	return Account{}, cause
 }
