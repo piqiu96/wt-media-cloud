@@ -21,6 +21,7 @@ function confirmWarning({ title, message, confirmText = '继续', danger = false
     const dialog = DialogPlugin.confirm({
       theme: 'warning',
       header: title,
+      width: 'min(calc(100vw - 32px), 480px)',
       body: message,
       confirmBtn: { content: confirmText, theme: danger ? 'danger' : 'primary' },
       cancelBtn: { content: '取消' },
@@ -45,6 +46,7 @@ function notice({ title, message, confirmText = '知道了' }) {
     }
     const dialog = DialogPlugin.alert({
       header: title,
+      width: 'min(calc(100vw - 32px), 480px)',
       body: message,
       confirmBtn: { content: confirmText, theme: 'primary' },
       closeOnOverlayClick: false,

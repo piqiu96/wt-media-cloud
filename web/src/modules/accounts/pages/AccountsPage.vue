@@ -4,6 +4,7 @@ import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelect
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
 import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue"
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
 import CategoryFields from "../../../shared/ui/fields/CategoryFields.vue"
@@ -28,6 +29,7 @@ import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/p
 import { canCheckAccount as checkAvailability } from "./checkAvailability.js"
 import { CATEGORY_TYPE_LABELS } from "../../../shared/utils/categories.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
+import OperationResultSummary from "../../../shared/ui/feedback/OperationResultSummary.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
@@ -661,6 +663,11 @@ async function openCookieDialog(account) {
 function openCookieUpdate() {
   cookieInput.value="";cookieError.value="";cookieRequestKey.value="";showCookieDialog.value=false;cookieUpdateVisible.value=true
 }
+async function closeCookieUpdate() {
+  if (updatingCookie.value) return
+  if (cookieInput.value.trim() && !cookieUnresolved.value && !await feedback.confirmWarning({ title: '放弃未保存的修改？', message: '新的 Cookie 尚未提交。', confirmText: '放弃修改' })) return
+  cookieUpdateVisible.value = false
+}
 const cookieUnresolved = computed(()=>['running','uncertain'].includes(cookieOperation.value?.status))
 async function finishCookieFeedback(receipt) {
   cookieOperation.value=receipt
@@ -669,9 +676,9 @@ async function finishCookieFeedback(receipt) {
     feedback.toast.success("登录 Cookie 已更新，账号检查完成")
     await loadAccounts()
   } else if(receipt.status==='failed') {
-    cookieError.value=receipt.message || "本次更新失败，请重试";cookieRequestKey.value="";feedback.toast.error(cookieError.value)
+    cookieError.value=receipt.message || "本次更新失败，请重试";cookieRequestKey.value=""
   } else {
-    cookieError.value=receipt.message || "更新结果待确认，请核实当前登录状态";feedback.toast.info(cookieError.value)
+    cookieError.value=receipt.message || "更新结果待确认，请核实当前登录状态"
   }
 }
 async function submitCookieUpdate(reconcile=false) {
@@ -691,7 +698,6 @@ async function submitCookieUpdate(reconcile=false) {
     cookieError.value=e.message || "本次操作未完成，请核实后继续"
     // A lost response may already have persisted the operation. Reopen reads its receipt.
     try { const data=await accountClient.credentials(target.id);cookieOperation.value=data.current_update?.operation_id?data.current_update:cookieOperation.value } catch {}
-    feedback.toast.error(cookieError.value)
   } finally {updatingCookie.value=false}
 }
 async function viewExistingCookieAccount() {
@@ -848,6 +854,13 @@ function bindingUnavailableReason(profile) {
 
 const bindingCandidates = computed(() => activeProfiles.value.filter(profile =>
   [profile.bit_name, profile.bit_seq, profile.bit_group_name].join(" ").toLowerCase().includes(bindSearch.value.trim().toLowerCase())))
+async function refreshBindingCandidates() {
+  bindingLoading.value = true
+  bindingError.value = ""
+  try { profiles.value = await profileClient.listProfiles(); await loadBindingUsage(bindAccount.value.platform) }
+  catch (e) { bindingError.value = e.message || "读取窗口失败，请重试" }
+  finally { bindingLoading.value = false }
+}
 function openBind(account) {
   if (!canOperateLocalAccount(account)) return
   createdGuide.value = null
@@ -1080,14 +1093,14 @@ const columns = computed(() => [
     </ResourceOverlay>
 
     <!-- 全部标签弹窗 -->
-    <t-dialog :visible="allTagsPopup !== null" @close="allTagsPopup = null" header="全部标签" :footer="false" width="360px">
+    <ResourceOverlay :visible="allTagsPopup !== null" @close="allTagsPopup = null" title="全部标签" :footer="false" :width="560">
       <div v-if="allTagsPopup">
-        <t-space wrap>
+        <t-space break-line class="account-detail-tags">
           <t-tag v-for="tag in (allTagsPopup.tags || [])" :key="tag" size="medium" variant="light">{{ tag }}</t-tag>
           <span v-if="!(allTagsPopup.tags || []).length" class="info-tip">暂无标签</span>
         </t-space>
       </div>
-    </t-dialog>
+    </ResourceOverlay>
 
     <AccountImportDialog v-model:visible="importVisible" :initial-id="importId" :history-only="importHistoryOnly" :categories="categories" :get-local="desktopLocalAgentService" @changed="importsChanged" @view-account="viewImportedAccount" />
     <ResourceOverlay :visible="showCreate" title="新增账号" :width="640" :busy="creating" @close="closeAccountForm('create')">
@@ -1107,31 +1120,34 @@ const columns = computed(() => [
     <template #footer><t-button variant="outline" :disabled="creating" @click="closeAccountForm('create')">取消</t-button><t-button theme="primary" :loading="creating" @click="createAccount">保存</t-button></template>
     </ResourceOverlay>
 
-    <t-dialog :visible="createdGuide !== null" @close="createdGuide = null" header="账号已保存" width="560px" :footer="false">
-      <p>可以继续绑定浏览器窗口，也可以稍后从账号列表继续。</p>
-      <t-space style="display:flex;justify-content:flex-end;margin-top:24px">
+    <ResourceOverlay :visible="createdGuide !== null" @close="createdGuide = null" title="新增账号" :width="560">
+      <OperationResultSummary title="账号已保存" description="可以继续绑定浏览器窗口，也可以稍后从账号列表继续。" />
+      <ResourceDescriptions v-if="createdGuide"><t-descriptions-item label="平台">{{ platformLabel(createdGuide.platform) }}</t-descriptions-item><t-descriptions-item label="账号">{{ accountDisplayName(createdGuide) }}</t-descriptions-item></ResourceDescriptions>
+      <template #footer>
         <t-button variant="outline" @click="createdGuide = null">稍后处理</t-button>
         <t-button v-if="canOperateLocalAccount(createdGuide)" theme="primary" @click="openBind(createdGuide)">绑定窗口</t-button>
-      </t-space>
-    </t-dialog>
-    <ResourceOverlay v-model:visible="bindVisible" :title="bindAccount?.browser_profile_id ? '更换浏览器窗口' : '绑定浏览器窗口'" :width="960" :busy="bindingSaving">
+      </template>
+    </ResourceOverlay>
+    <ResourceOverlay v-model:visible="bindVisible" :title="bindAccount?.browser_profile_id ? '更换浏览器窗口' : '绑定浏览器窗口'" :width="bindingLoading || activeProfiles.length ? 960 : 560" :busy="bindingSaving">
       <p>{{ accountDisplayName(bindAccount) }} · {{ platformLabel(bindAccount?.platform) }}</p>
       <p class="form-tip">关联已有窗口不会修改窗口内的登录信息。绑定后检查并识别当前账号。</p>
       <FeedbackAlert v-if="bindingError" :message="bindingError" theme="error" />
-      <t-input v-model="bindSearch" clearable placeholder="搜索窗口名称 / 序号 / 分组" style="margin:16px 0" />
-      <t-table :data="bindingCandidates" row-key="id" size="small" :loading="bindingLoading" :max-height="360" :pagination="null" :columns="[{colKey:'select',title:'',width:48},{colKey:'bit_name',title:'窗口名称'},{colKey:'bit_seq',title:'序号',width:80},{colKey:'bit_group_name',title:'分组'},{colKey:'usage',title:'使用情况',width:180}]">
+      <label v-if="bindingLoading || activeProfiles.length" class="binding-search">搜索窗口<t-input v-model="bindSearch" clearable placeholder="搜索窗口名称 / 序号 / 分组" /></label>
+      <ResourceEmptyState v-if="!bindingLoading && !activeProfiles.length" title="暂无可关联窗口"><t-button variant="outline" @click="refreshBindingCandidates">刷新窗口</t-button></ResourceEmptyState>
+      <t-table v-else class="wt-resource-table" :data="bindingCandidates" row-key="id" size="small" :loading="bindingLoading" :scroll="{x:'864px'}" :max-height="360" :pagination="null" :columns="[{colKey:'select',title:'',width:48},{colKey:'bit_name',title:'窗口名称',width:240},{colKey:'bit_seq',title:'序号',width:80},{colKey:'bit_group_name',title:'分组',width:160},{colKey:'usage',title:'使用情况',width:180}]">
         <template #select="{row}"><t-radio :checked="bindProfileId === row.id" :disabled="Boolean(bindingUnavailableReason(row))" :aria-label="'选择' + row.bit_name" @change="bindProfileId = row.id" /></template>
         <template #usage="{row}"><span :style="{color:bindingUnavailableReason(row) ? 'var(--td-text-color-secondary)' : 'var(--td-success-color)'}">{{ bindingUnavailableReason(row) || (row.id === bindAccount?.browser_profile_id ? '当前账号已绑定' : '可关联') }}</span></template>
       </t-table>
-    <template #footer><t-button variant="outline" :disabled="bindingSaving" @click="bindVisible = false">取消</t-button><t-button theme="primary" :loading="bindingSaving" @click="saveBinding">绑定</t-button></template></ResourceOverlay>
-    <t-dialog :visible="boundGuide !== null" @close="boundGuide = null" header="窗口已绑定" width="560px" :footer="false">
-      <p>可以打开窗口完成登录，也可以直接检查已登录的账号。</p>
-      <t-space style="display:flex;justify-content:flex-end;margin-top:24px">
+    <template #footer><t-button variant="outline" :disabled="bindingSaving" @click="bindVisible = false">取消</t-button><t-button v-if="bindingLoading || activeProfiles.length" theme="primary" :loading="bindingSaving" :disabled="!bindProfileId || bindingLoading || Boolean(bindingError)" @click="saveBinding">绑定</t-button></template></ResourceOverlay>
+    <ResourceOverlay :visible="boundGuide !== null" @close="boundGuide = null" title="绑定浏览器窗口" :width="560">
+      <OperationResultSummary title="窗口已绑定" description="可以打开窗口完成登录，也可以直接检查已登录的账号。" />
+      <ResourceDescriptions v-if="boundGuide"><t-descriptions-item label="浏览器窗口">{{ profileName(boundGuide.browser_profile_id) }}</t-descriptions-item></ResourceDescriptions>
+      <template #footer>
         <t-button variant="outline" @click="boundGuide = null">稍后处理</t-button>
-        <t-button @click="checkFromRow(boundGuide); boundGuide = null">检查账号</t-button>
+        <t-button variant="outline" @click="checkFromRow(boundGuide); boundGuide = null">检查并同步</t-button>
         <t-button theme="primary" @click="!profileIsOpen(boundGuide) && toggleWindow(boundGuide); boundGuide = null">打开窗口</t-button>
-      </t-space>
-    </t-dialog>
+      </template>
+    </ResourceOverlay>
 
     <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
     <ResourceOverlay :visible="editVisible" title="编辑账号" :width="640" :busy="savingEdit" @close="closeAccountForm('edit')">
@@ -1152,13 +1168,13 @@ const columns = computed(() => [
       <div v-if="detailAccount" class="account-detail-heading">
         <t-avatar size="56px" :image="detailAccount.platform_avatar_url || undefined">{{ accountDisplayName(detailAccount).slice(0,1) }}</t-avatar>
         <div><h2>{{ accountDisplayName(detailAccount) }}</h2><p>{{ platformLabel(detailAccount.platform) }} · ID {{ detailAccount.id }} · UID {{ detailAccount.platform_account_id || '尚未识别' }}</p>
-          <t-space size="small"><ResourceStatusBadge :tone="detailAccount.enabled ? 'success' : 'neutral'" :label="enabledText(detailAccount.enabled)" /><ResourceStatusBadge :tone="accountStatusTheme(detailAccount) === 'success' ? 'success' : accountStatusTheme(detailAccount) === 'danger' ? 'danger' : 'warning'" :label="accountStatusText(detailAccount)" /></t-space>
+          <t-space size="small" wrap><ResourceStatusBadge :tone="detailAccount.enabled ? 'success' : 'neutral'" :label="enabledText(detailAccount.enabled)" /><ResourceStatusBadge :tone="accountStatusTheme(detailAccount) === 'success' ? 'success' : accountStatusTheme(detailAccount) === 'danger' ? 'danger' : accountStatusTheme(detailAccount) === 'warning' ? 'warning' : 'neutral'" :label="accountStatusText(detailAccount)" /></t-space>
         </div>
       </div>
       <ResourceSection title="业务信息">
       <ResourceDescriptions v-if="detailAccount">
         <t-descriptions-item label="业务分类">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
-        <t-descriptions-item label="业务标签"><t-space size="small" wrap><t-tag v-for="tag in detailAccount.tags" :key="tag" size="small" variant="light">{{ tag }}</t-tag><span v-if="!detailAccount.tags?.length">—</span></t-space></t-descriptions-item>
+        <t-descriptions-item label="业务标签"><t-space size="small" break-line class="account-detail-tags"><t-tag v-for="tag in detailAccount.tags" :key="tag" size="small" variant="light">{{ tag }}</t-tag><span v-if="!detailAccount.tags?.length">—</span></t-space></t-descriptions-item>
         <t-descriptions-item label="运营备注">{{ detailAccount.remark || '—' }}</t-descriptions-item>
         <t-descriptions-item v-if="canFilterByOwner" label="使用人">{{ detailAccount.user_name || '—' }}</t-descriptions-item>
       </ResourceDescriptions>
@@ -1174,13 +1190,11 @@ const columns = computed(() => [
         <t-descriptions-item label="最近检查">{{ detailAccount.last_check_at ? formatTime(detailAccount.last_check_at) : '尚未检查' }}</t-descriptions-item>
         <t-descriptions-item label="账号资料">{{ detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
       </ResourceDescriptions>
-      <FeedbackAlert v-if="detailAccount?.last_check_status === 'failed'" theme="error" :message="detailAccount.last_check_message || '本次检查失败，保留上次登录结论'" style="margin-top:12px" />
       <div v-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
         <div><strong>已记录账号</strong><p>{{ detailAccount.platform_name || '待识别' }}</p><p>UID {{ detailAccount.platform_account_id || '—' }}</p></div>
         <div><strong>窗口当前账号</strong><p>{{ detailAccount.last_check_identity.platform_name || '未取得昵称' }}</p><p>UID {{ detailAccount.last_check_identity.platform_account_id || '—' }}</p></div>
       </div>
-      <FeedbackAlert v-if="checkFailure" theme="error" style="margin-top:12px">
-        <template #message>{{ checkFailure }}</template>
+      <FeedbackAlert v-if="checkFailure || detailAccount?.last_check_status === 'failed'" theme="error" style="margin-top:12px" :message="checkFailure || detailAccount.last_check_message || '本次检查失败，保留上次登录结论'">
         <template #operation>
           <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/personal-info')">前往个人中心检查设备</t-button>
         </template>
@@ -1198,12 +1212,12 @@ const columns = computed(() => [
       </section>
       <template #footer><t-button theme="primary" :disabled="!isDesktop || !canOperateBoundWindow(cookieDialog?.account)" @click="openCookieUpdate">{{ cookieUnresolved ? '核实更新结果' : '更新登录 Cookie' }}</t-button></template>
     </ResourceOverlay>
-    <ResourceOverlay v-model:visible="cookieUpdateVisible" title="更新登录 Cookie" :width="640" :busy="updatingCookie">
+    <ResourceOverlay :visible="cookieUpdateVisible" @close="closeCookieUpdate" title="更新登录 Cookie" :width="640" :busy="updatingCookie">
       <div class="account-object"><strong>{{ accountDisplayName(cookieDialog?.account) }}</strong><span>{{ platformLabel(cookieDialog?.account?.platform) }} · UID {{ cookieDialog?.account?.platform_account_id || '待识别' }}</span></div>
       <p class="form-tip">目标窗口：{{ profileForAccount(cookieDialog?.account)?.bit_name || '未绑定' }}</p>
-      <template v-if="!cookieUnresolved"><label class="field-label">新的 Cookie</label><t-textarea v-model="cookieInput" :autosize="{minRows:7,maxRows:10}" placeholder="粘贴此账号的新 Cookie" :disabled="updatingCookie" /><p class="form-tip">更新当前平台的登录信息，完成后检查账号身份。首次导入的 Cookie 保留。</p></template>
+      <ResourceForm v-if="!cookieUnresolved"><t-form-item label="新的 Cookie"><t-textarea v-model="cookieInput" :autosize="{minRows:7,maxRows:10}" placeholder="粘贴此账号的新 Cookie" :disabled="updatingCookie" /></t-form-item><p class="form-tip">更新当前平台的登录信息，完成后检查账号身份。首次导入的 Cookie 保留。</p></ResourceForm>
       <FeedbackAlert v-if="cookieError || cookieUnresolved" :theme="cookieUnresolved?'warning':'error'" :message="cookieError || cookieOperation?.message || '更新结果待确认，请核实当前登录状态'" />
-      <template #footer><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button v-if="cookieOperation?.existing_account_id" variant="outline" @click="viewExistingCookieAccount">查看已有账号</t-button><t-button variant="outline" :disabled="updatingCookie" @click="cookieUpdateVisible=false">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></template>
+      <template #footer><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button v-if="cookieOperation?.existing_account_id" variant="outline" @click="viewExistingCookieAccount">查看已有账号</t-button><t-button variant="outline" :disabled="updatingCookie" @click="closeCookieUpdate">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></template>
     </ResourceOverlay>
   </div>
   </t-loading>
@@ -1223,14 +1237,16 @@ const columns = computed(() => [
 .account-page :deep(.resource-row-actions .t-button) { min-height: 32px; height: 32px; font-size: 13px; }
 .account-page :deep(.wt-filter-actions) { align-self: flex-end; }
 .account-name { color: var(--wt-text-primary); }
-.identity-comparison { display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px; }
+.identity-comparison { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;overflow-wrap:anywhere; }
 .identity-comparison > div { padding:16px;border:1px solid var(--wt-border);border-radius:6px; }
 
 .import-resume{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;margin-bottom:16px;border:1px solid var(--td-component-border);border-radius:6px;background:var(--td-bg-color-container);font-size:13px}
-.account-object{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}.account-object span{font-size:12px;color:var(--td-text-color-secondary)}.credential-section{position:relative;margin-bottom:20px}.credential-section h4{font-size:14px;margin:0 0 10px}.credential-actions{display:flex;justify-content:flex-end;gap:4px}.field-label{display:block;margin-bottom:8px}.dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
+.account-object{display:flex;flex-direction:column;gap:6px;margin-bottom:20px;overflow-wrap:anywhere}.account-object span{font-size:12px;color:var(--td-text-color-secondary)}.credential-section{position:relative;margin-bottom:20px}.credential-section h4{font-size:14px;margin:0 0 10px}.credential-actions{display:flex;justify-content:flex-end;gap:4px}
 .account-detail-heading { display:flex;gap:16px;align-items:center;margin-bottom:24px; }
+.account-detail-heading > div { min-width:0;overflow-wrap:anywhere; }
 .account-detail-heading h2 { margin:0;font-size:20px; }
 .account-detail-heading p { margin:6px 0 10px;font-size:12px;color:var(--td-text-color-secondary); }
+.binding-search { display:flex;flex-direction:column;gap:8px;margin:16px 0;font-size:14px;color:var(--wt-text-secondary); }
 .account-resource-card { padding: 18px 20px; }
 .cookie-box {
   max-height: 160px;
@@ -1238,9 +1254,11 @@ const columns = computed(() => [
   background: var(--td-bg-color-container-hover, #f5f5f5);
   padding: 8px;
   border-radius: 4px;
-  font-size: 12px;
   word-break: break-all;
   white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.7;
+  border: 1px solid var(--wt-border);
 }
 .account-id { color: var(--wt-text-tertiary); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 
@@ -1258,4 +1276,8 @@ const columns = computed(() => [
 }
 .account-name { font-weight: 500; }
 .account-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.account-detail-tags { max-width:100%; }
+.account-detail-tags :deep(.t-space-item) { flex:0 0 auto;min-width:0;max-width:100%; }
+.account-detail-tags :deep(.t-tag) { max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere; }
+@media (max-width: 600px) { .identity-comparison { grid-template-columns: minmax(0,1fr); } }
 </style>
