@@ -211,6 +211,7 @@ function applyStatFilter(key) {
 
 
 function openCreate() {
+  tagSearch.value = ""
   createForm.value = defaultCreateForm()
   createCategoryType.value = ""
   createError.value = ""
@@ -349,6 +350,7 @@ async function checkFromRow(account) {
 }
 
 function openEdit(account) {
+  tagSearch.value = ""
   editAccount.value = account
   editCategoryType.value = selectedCategoryType(account.category_ids)
   editRemark.value = account.remark || ""
@@ -1144,8 +1146,9 @@ const columns = [
               filterable
               :options="tagOptions"
               placeholder="输入搜索已有标签，或输入新标签后回车创建"
-              @search="onTagSearch"
-              @enter="onTagEnter(createForm.tags)"
+              v-model:input-value="tagSearch"
+              @input-change="onTagSearch"
+              @enter="ctx => onTagEnter(createForm.tags, ctx)"
               clearable
             >
               <template #panelBottomContent>
@@ -1214,8 +1217,9 @@ const columns = [
               filterable
               :options="tagOptions"
               placeholder="输入搜索已有标签，或输入新标签后回车创建"
-              @search="onTagSearch"
-              @enter="onTagEnter(editTags)"
+              v-model:input-value="tagSearch"
+              @input-change="onTagSearch"
+              @enter="ctx => onTagEnter(editTags, ctx)"
               clearable
             >
               <template #panelBottomContent>
