@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref } from 'vue'
@@ -544,7 +545,7 @@ function openImageViewer(url) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page content-pool-page">
+    <div class="wt-resource-page resource-visual-approved content-pool-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader :title="isLibrary ? '素材库' : '内容池'" :description="isLibrary ? '查看已从内容池沉淀的素材及其来源关系' : '统一管理人工发现与自动挖掘进入系统的外部内容'">
         <template #actions>
@@ -571,8 +572,8 @@ function openImageViewer(url) {
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></label>
-            <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
-            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">类目</span><t-select v-model="categoryFilter" multiple clearable placeholder="全部"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></t-select></label>
+            <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
+            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="categoryFilter" multiple clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
@@ -729,8 +730,8 @@ function openImageViewer(url) {
           <div class="discover-section">
             <div class="discover-section__title"><span class="discover-no">①</span>基础信息<small>选择平台和归属类目，用于内容分类和数据统计</small></div>
             <t-form label-width="80px">
-              <t-form-item label="运营团队"><t-select v-model="manualTeamId" :disabled="manualTeamLocked" placeholder="选择内容归属团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-              <t-form-item label="所属类目"><t-select v-model="manualCategoryId" clearable placeholder="选择类目分类"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></t-select></t-form-item>
+              <t-form-item label="运营团队"><BusinessSelect kind="team" v-model="manualTeamId" :disabled="manualTeamLocked"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></t-form-item>
+              <t-form-item label="业务分类"><BusinessSelect kind="category" v-model="manualCategoryId" clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></t-form-item>
               <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
             </t-form>
           </div>

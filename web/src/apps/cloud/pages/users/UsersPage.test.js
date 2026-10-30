@@ -12,7 +12,7 @@ describe('UsersPage product surface', () => {
 
   // 表单与筛选共用同一个启用类目口径：停用类目不能分配，也不该能被筛出来。
   it('uses configured enabled-category options instead of free text category IDs', () => {
-    expect(source).toContain('请选择已启用类目')
+    expect(source).toContain('<BusinessSelect kind="category"')
     expect(source).toContain("import { enabledCategories } from '../../../../shared/utils/categories.js'")
     expect(source).toContain('const enabledCategoryOptions = computed(() => enabledCategories(categories.value))')
     expect(source.match(/v-for="category in enabledCategoryOptions"/g)).toHaveLength(2)

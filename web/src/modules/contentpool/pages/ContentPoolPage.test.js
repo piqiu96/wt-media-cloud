@@ -36,7 +36,7 @@ describe('content pool page', () => {
     expect(source).toContain('discovery.importResults')
     expect(source).toContain('loadManualContext')
     expect(source).toContain('team_id: selectedTeamID()')
-    expect(source).toContain('所属类目')
+    expect(source).toContain('业务分类')
     expect(source).toContain('category_id')
     expect(source).toContain('categoryName')
     expect(source).not.toContain('导入链接')

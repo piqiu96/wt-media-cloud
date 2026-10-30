@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { onBeforeRouteLeave, useRouter } from "vue-router"
 import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
@@ -207,7 +208,7 @@ const memberOptions = computed(() => {
 
 const adminMemberOptions = computed(() => roster.value
   .filter((user) => user.role !== "admin")
-  .filter((user) => !draftTeam.value || teamMatches(user.team_id, user.team_name, draftTeam.value))
+  .filter((user) => !draftTeam.value || teamMatches(user.team_id, draftTeam.value))
   .map((user) => ({
     label: `${user.nickname || user.username || `用户 ${user.id}`}${user.status === "disabled" ? "（已停用）" : ""}`,
     value: String(user.id),
@@ -233,7 +234,7 @@ const accountsByProfile = computed(() => {
 const scopedProfiles = computed(() => {
   if (!isAdmin.value) return profiles.value
   return profiles.value.filter((profile) => {
-    if (appliedTeam.value && !teamMatches(profile.team_id, teamName(profile), appliedTeam.value)) return false
+    if (appliedTeam.value && !teamMatches(profile.team_id, appliedTeam.value)) return false
     if (appliedMember.value && String(profile.user_id ?? "") !== appliedMember.value) return false
     return true
   })
@@ -794,9 +795,8 @@ function teamName(profile) {
   return profileTeamName(profile, currentUser.value, roster.value, selfId.value, teams.value)
 }
 
-function teamMatches(teamId, teamLabel, query) {
-  const needle = String(query || '').trim().toLocaleLowerCase()
-  return !needle || String(teamId ?? '').includes(needle) || String(teamLabel || '').toLocaleLowerCase().includes(needle)
+function teamMatches(teamId, selectedId) {
+  return !selectedId || String(teamId ?? '') === String(selectedId)
 }
 
 function groupOwnerText(profile) {
@@ -2168,16 +2168,16 @@ function returnToSyncResult() {
           </label>
           <label v-if="isSenior" class="wt-filter-field">
             <span class="wt-filter-field__label">授权运营</span>
-            <t-select v-model="memberFilter" :options="memberOptions" placeholder="全部" :clearable="false" @change="onSeniorMemberChange" />
+            <BusinessSelect kind="member" filter v-model="memberFilter" :options="memberOptions" :clearable="false" @change="onSeniorMemberChange" />
           </label>
           <template v-if="isAdmin">
             <label class="wt-filter-field">
               <span class="wt-filter-field__label">运营团队</span>
-              <t-input v-model="draftTeam" clearable placeholder="输入团队名称或 ID" @change="onAdminTeamChange" @enter="submitSearch" />
+              <BusinessSelect v-model="draftTeam" kind="team" filter :options="teams.map(t => ({ value: String(t.id), label: t.name }))" @change="onAdminTeamChange" />
             </label>
             <label class="wt-filter-field">
               <span class="wt-filter-field__label">授权运营</span>
-              <t-select v-model="draftMember" :options="adminMemberOptions" clearable placeholder="全部" filterable @change="onAdminMemberChange" />
+              <BusinessSelect kind="member" filter v-model="draftMember" :options="adminMemberOptions" clearable filterable @change="onAdminMemberChange" />
             </label>
           </template>
           <label class="wt-filter-field">

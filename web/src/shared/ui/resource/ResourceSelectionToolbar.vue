@@ -15,7 +15,7 @@ const emit = defineEmits(['clear'])
 </template>
 
 <style scoped>
-.resource-selection-toolbar { margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); background: var(--wt-bg-page); }
+.resource-selection-toolbar { margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--wt-color-primary-border); border-radius: var(--wt-radius-sm); background: var(--wt-info-bg); }
 .resource-selection-toolbar__main { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
 .resource-selection-toolbar__count { color: var(--wt-text-secondary); font-size: 13px; white-space: nowrap; }
 .resource-selection-toolbar__count strong { color: var(--wt-primary); font-variant-numeric: tabular-nums; }

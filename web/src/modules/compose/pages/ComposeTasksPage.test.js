@@ -167,7 +167,7 @@ describe('compose tasks page', () => {
     const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
     expect(bar).not.toContain('<t-space')
     const labels = [...bar.matchAll(/wt-filter-field__label">([^<]+)</g)].map((match) => match[1])
-    expect(labels).toEqual(['团队', '合成策略', '负责人', '触发方式', '状态', '创建时间'])
+    expect(labels).toEqual(['运营团队', '合成策略', '负责人', '触发方式', '状态', '创建时间'])
     const fields = bar.match(/wt-filter-field[^"]*"/g) || []
     expect(fields.filter((entry) => entry.includes('wt-filter-field--wide'))).toHaveLength(1)
     // 宽位只归策略（团队、负责人都是窄字段）：宽类之后先出现策略标题，再出现负责人标题。

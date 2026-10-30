@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -470,7 +471,7 @@ function latestStats(row) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page strategy-page">
+    <div class="wt-resource-page resource-visual-approved strategy-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘策略" description="配置内容发现规则，让系统自动帮你找到优质内容">
         <template #actions>
@@ -483,7 +484,7 @@ function latestStats(row) {
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索策略 ID / 策略名称" @enter="load" /></label>
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">策略类型</span><t-select v-model="filters.type" clearable placeholder="全部">
             <t-option value="keyword" label="关键词" />
             <t-option value="author" label="作者" />
@@ -537,8 +538,8 @@ function latestStats(row) {
               <div class="strategy-section__title"><span class="strategy-no">①</span>基础信息<small>配置策略基本属性和内容归属，用于管理和数据统计</small></div>
               <t-form label-width="88px">
                 <t-form-item label="策略名称" required-mark><t-input v-model="form.name" placeholder="例如：王者荣耀热点" /></t-form-item>
-                <t-form-item v-if="isAdmin && !editingID" label="目标团队" required-mark><t-select v-model="form.team_id" placeholder="选择运营团队"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></t-form-item>
-                <t-form-item label="所属类目" required-mark><t-select v-model="form.category_id" clearable placeholder="选择类目分类"><t-option v-for="category in formCategoryOptions" :key="category.id" :value="category.id" :label="category.label" :disabled="category.disabled" /></t-select></t-form-item>
+                <t-form-item v-if="isAdmin && !editingID" label="运营团队" required-mark><BusinessSelect kind="team" v-model="form.team_id"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></t-form-item>
+                <t-form-item label="业务分类" required-mark><BusinessSelect kind="category" v-model="form.category_id" clearable><t-option v-for="category in formCategoryOptions" :key="category.id" :value="category.id" :label="category.label" :disabled="category.disabled" /></BusinessSelect></t-form-item>
                 <t-form-item label="平台" required-mark><t-select v-model="form.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
                 <t-form-item label="策略类型"><t-radio-group v-model="form.strategy_type"><t-radio value="keyword">关键词</t-radio><t-radio value="author" disabled>作者（维护中）</t-radio></t-radio-group></t-form-item>
               </t-form>
@@ -649,7 +650,7 @@ function latestStats(row) {
       <t-drawer :close-btn="true" v-model:visible="detailVisible" header="策略详情" size="min(92vw, 560px)" :footer="false">
         <div v-if="detailRow" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ detailRow.name || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>类目</span><strong>{{ categoryName(detailRow.category_id) }}</strong></div>
+          <div class="strategy-drawer__field"><span>业务分类</span><strong>{{ categoryName(detailRow.category_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(detailRow.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ typeLabel(detailRow.strategy_type) }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (detailRow.config?.keywords || []).join('、') || detailRow.config?.author || '-' }}</strong></div>

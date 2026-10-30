@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -344,14 +345,14 @@ function hasFailed(task) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page task-page">
+    <div class="wt-resource-page resource-visual-approved task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题" />
 
       <ResourceCard class="task-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索任务 ID / 任务名称 / 来源策略" @enter="load" /></label>
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><t-select v-model="teamFilter" clearable placeholder="全部" @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></t-select></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="success" label="成功" />
             <t-option value="partial_success" label="部分成功" />
@@ -396,7 +397,7 @@ function hasFailed(task) {
           </div>
           <div class="detail-meta">
             <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="task-source-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
-            <div><span>类目</span><strong>{{ categoryName(detail.snapshot?.category_id) }}</strong></div>
+            <div><span>业务分类</span><strong>{{ categoryName(detail.snapshot?.category_id) }}</strong></div>
             <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
             <div><span>创建时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
             <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
@@ -469,7 +470,7 @@ function hasFailed(task) {
       <t-drawer :close-btn="true" v-model:visible="strategyDrawerVisible" header="策略详情" size="min(92vw, 560px)" :footer="Boolean(strategyDrawer)">
         <div v-if="strategyDrawer" class="strategy-drawer">
           <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>类目</span><strong>{{ categoryName(strategyDrawer.category_id) }}</strong></div>
+          <div class="strategy-drawer__field"><span>业务分类</span><strong>{{ categoryName(strategyDrawer.category_id) }}</strong></div>
           <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(strategyDrawer.platform) }}</strong></div>
           <div class="strategy-drawer__field"><span>类型</span><strong>{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</strong></div>
           <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>

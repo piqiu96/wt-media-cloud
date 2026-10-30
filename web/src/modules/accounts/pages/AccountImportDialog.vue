@@ -1,4 +1,8 @@
 <script setup>
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
+import CategoryFields from "../../../shared/ui/fields/CategoryFields.vue"
+import TagInput from "../../../shared/ui/fields/TagInput.vue"
 import {computed,ref,watch} from 'vue'
 import {createMediaAccountImportClient} from '../../../shared/api/mediaAccountImports.js'
 import {createProfileBindingClient} from '../../../shared/api/profileBindings.js'
@@ -10,7 +14,7 @@ const props=defineProps({visible:Boolean,initialId:{type:String,default:''},hist
 const emit=defineEmits(['update:visible','changed','view-account'])
 const api=createMediaAccountImportClient(),profiles=createProfileBindingClient()
 const fileInput=ref(null)
-const screen=ref('input'),batch=ref(null),history=ref([]),groups=ref([]),preview=ref([]),raw=ref(''),platform=ref('bilibili'),groupId=ref(''),categoryType=ref(''),categoryIds=ref([]),tags=ref([]),tagText=ref(''),remark=ref(''),error=ref(''),busy=ref(false),keepRunning=ref(false),requestKey=ref(''),tab=ref('all'),reuseItem=ref(null),candidateId=ref(''),candidates=ref([]),pauseClose=ref(false)
+const screen=ref('input'),batch=ref(null),history=ref([]),groups=ref([]),preview=ref([]),raw=ref(''),platform=ref('bilibili'),groupId=ref(''),categoryType=ref(''),categoryIds=ref([]),tags=ref([]),remark=ref(''),error=ref(''),busy=ref(false),keepRunning=ref(false),requestKey=ref(''),tab=ref('all'),reuseItem=ref(null),candidateId=ref(''),candidates=ref([]),pauseClose=ref(false)
 const labels={pending:'待处理',running:'执行中',succeeded:'已接入',failed:'未完成',skipped:'已跳过',uncertain:'待确认'}
 const countLabels={total:'总计',succeeded:'成功',failed:'未完成',skipped:'跳过',running:'执行中',pending:'待处理',uncertain:'待确认'}
 const rows=()=>raw.value.split(/\r?\n/).map((s,n)=>({row_number:n+1,input_cookie:s.trim()})).filter(i=>i.input_cookie)
@@ -30,7 +34,6 @@ watch(()=>props.visible,async open=>{
  try {history.value=await api.list();if(props.initialId){await openBatch(props.initialId);return}if(!props.historyOnly){const local=await props.getLocal();const result=await local.profileGroups();groups.value=result?.data?.groups||result?.groups||[];groupId.value=groups.value[0]?.id||''}}
  catch(e){error.value=e.message||'读取接入信息失败，请重试'}
 })
-function addTag(){const v=tagText.value.trim();if(v&&!tags.value.includes(v))tags.value.push(v);tagText.value=''}
 function publicBatch(v){const {execution,...safe}=v;return safe}
 function update(v){batch.value=publicBatch(v)}
 async function showHistory(){if(raw.value.trim()&&!await feedback.confirmWarning({title:'放弃本次输入？',message:'尚未确认的接入内容不会保存。',confirmText:'放弃输入'}))return;raw.value='';try{history.value=await api.list();screen.value='history'}catch(e){fail(e)}}
@@ -81,25 +84,25 @@ async function close(){
 }
 </script>
 <template>
-<component :is="screen==='input'?'t-drawer':'t-dialog'" :visible="visible" :header="title" width="960px" top="32px" :close-btn="!busy" :close-on-overlay-click="false" :close-on-esc-keydown="false" @close="close">
+<ResourceOverlay :kind="screen === 'input' ? 'drawer' : 'dialog'" :visible="visible" :title="title" :width="960" :busy="busy" :esc-closable="false" @close="close">
  <div class="import-body">
  <ol v-if="screen==='input'||screen==='preview'" class="import-steps"><li :class="{active:screen==='input'}">1　输入资料</li><li :class="{active:screen==='preview'}">2　确认接入</li><li>3　结果处理</li></ol>
  <FeedbackAlert v-if="error" :message="error" theme="error" />
  <template v-if="screen==='input'">
   <p class="intro">每行一个 Cookie，先校验内容，再逐个接入。已有账号不会被重复创建。</p>
-  <t-form label-align="top">
+  <ResourceForm>
    <div class="form-grid">
     <t-form-item label="平台"><t-select v-model="platform"><t-option value="bilibili" label="B站"/><t-option value="baidu" label="百度"/></t-select></t-form-item>
     <t-form-item label="新窗口分组"><t-select v-model="groupId" placeholder="选择已有浏览器分组"><t-option v-for="g in groups" :key="g.id" :value="g.id" :label="g.name"/></t-select></t-form-item>
-    <t-form-item label="一级分类"><t-select v-model="categoryType" clearable placeholder="选择一级分类" @change="categoryIds=[]"><t-option value="game" label="游戏"/><t-option value="ai" label="AI"/><t-option value="anime" label="二次元"/></t-select></t-form-item>
-    <t-form-item label="二级分类"><t-select v-model="categoryIds" multiple clearable :disabled="!categoryType" placeholder="选择二级分类（可多选）"><t-option v-for="c in categories.filter(c=>c.type===categoryType)" :key="c.id" :value="c.id" :label="c.name"/></t-select></t-form-item>
+
    </div>
-   <t-form-item label="标签"><div class="tag-input"><t-tag v-for="t in tags" :key="t" closable @close="tags=tags.filter(x=>x!==t)">{{ t }}</t-tag><t-input v-model="tagText" placeholder="输入标签，回车添加" @enter="addTag"/></div></t-form-item>
+   <t-form-item label="业务分类"><CategoryFields v-model="categoryIds" v-model:type="categoryType" :categories="categories" /></t-form-item>
+   <t-form-item label="标签"><TagInput v-model="tags" /></t-form-item>
    <t-form-item label="备注"><t-input v-model="remark" :maxlength="500" placeholder="本批账号的运营备注（选填）"/></t-form-item>
    <div class="import-file"><span>每行一个账号，同一批次使用同一平台。</span><t-button variant="outline" size="small" @click="fileInput.click()">选择 TXT 文件</t-button><input ref="fileInput" type="file" accept=".txt,text/plain" hidden @change="readFile"/></div>
    <t-form-item label="Cookie 列表"><t-textarea v-model="raw" :autosize="{minRows:7,maxRows:12}" placeholder="每行粘贴一个 Cookie；支持 Cookie 请求头或单行 JSON 数组"/></t-form-item>
    <p class="hint">每批最多 100 行、合计 2 MB。优先创建新窗口，无法新建时可按行选择空闲窗口。</p>
-  </t-form>
+  </ResourceForm>
  </template>
  <template v-else-if="screen==='preview'">
   <div class="preview-summary"><strong>{{ platformLabel(platform) }} · {{ validRows.length }} 行可接入</strong><span>{{ preview.length-validRows.length }} 行无效，不会接入</span></div>
@@ -142,12 +145,12 @@ async function close(){
   <template v-if="screen==='results'"><t-button variant="outline" :disabled="busy" @click="refresh">刷新结果</t-button><t-button theme="primary" :disabled="busy||!continueCount" @click="runPending()">继续接入（{{ continueCount }}）</t-button></template>
  </div>
  </template>
-</component>
+</ResourceOverlay>
 <t-dialog :visible="!!reuseItem" header="选择空闲窗口" width="560px" confirm-btn="使用并检查" @close="reuseItem=null" @confirm="confirmReuse">
  <p class="intro">当前无法新建窗口。请选择本人已有窗口，系统会先检查占用和登录情况。</p>
  <t-select v-model="candidateId" filterable placeholder="选择一个已有窗口"><t-option v-for="p in candidates.filter(p=>p.enabled!==false&&p.local_state==='active')" :key="p.id" :value="String(p.id)" :label="p.bit_name||'窗口 #'+p.id"/></t-select>
 </t-dialog>
 </template>
 <style scoped>
-.import-steps{display:flex;list-style:none;padding:0 0 20px;gap:30px;color:var(--td-text-color-placeholder);font-size:13px}.import-steps .active{color:var(--td-brand-color);font-weight:500}.import-file{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px;font-size:12px;color:var(--td-text-color-secondary)}.result-title{flex-direction:column;gap:8px;text-align:center;padding:8px 0}.result-title h2{font-size:20px;font-weight:600;margin:0}.result-title p{margin:0;font-size:13px;color:var(--td-text-color-secondary)}.result-title .t-icon{color:var(--td-success-color)}.result-title .attention{color:var(--td-warning-color)}:deep(.t-table td){font-size:13px}.import-body{max-height:calc(100vh - 250px);overflow:auto;padding:0 2px}.intro{margin:0 0 20px;color:var(--td-text-color-secondary);line-height:1.7}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}.hint,small{color:var(--td-text-color-secondary);font-size:12px;line-height:1.7}small{display:block}.tag-input{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%}.tag-input .t-input__wrap{min-width:220px;flex:1}.footer{display:flex;align-items:center;gap:8px;border-top:1px solid var(--td-component-border);padding-top:20px;margin-top:20px}.spacer{flex:1}.preview-summary,.result-title{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}.result-title span,.preview-summary span{color:var(--td-text-color-secondary);font-size:12px}.counts{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:20px 0;background:var(--td-bg-color-secondarycontainer);border-radius:6px;padding:16px 10px}.counts>div{display:flex;flex-direction:column;gap:8px;padding:0 10px}.counts span{font-size:12px;color:var(--td-text-color-secondary)}.counts strong{font-size:22px}.succeeded strong{color:var(--td-success-color)}.failed strong,.error-text{color:var(--td-error-color)}.uncertain strong{color:var(--td-warning-color)}.result-tabs{margin:16px 0}.history-row{display:flex;justify-content:space-between;align-items:center;width:100%;padding:18px 10px;border:0;border-bottom:1px solid var(--td-component-border);background:transparent;text-align:left;color:var(--td-text-color-primary);cursor:pointer}.history-row:hover{background:var(--td-bg-color-container-hover)}
+.import-steps{display:flex;list-style:none;padding:0 0 20px;gap:30px;color:var(--td-text-color-placeholder);font-size:13px}.import-steps .active{color:var(--td-brand-color);font-weight:500}.import-file{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px;font-size:12px;color:var(--td-text-color-secondary)}.result-title{flex-direction:column;gap:8px;text-align:center;padding:8px 0}.result-title h2{font-size:20px;font-weight:600;margin:0}.result-title p{margin:0;font-size:13px;color:var(--td-text-color-secondary)}.result-title .t-icon{color:var(--td-success-color)}.result-title .attention{color:var(--td-warning-color)}:deep(.t-table td){font-size:13px}.import-body{min-width:0}.intro{margin:0 0 20px;color:var(--td-text-color-secondary);line-height:1.7}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}.hint,small{color:var(--td-text-color-secondary);font-size:12px;line-height:1.7}small{display:block}.footer{display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap}.spacer{flex:1}.preview-summary,.result-title{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}.result-title span,.preview-summary span{color:var(--td-text-color-secondary);font-size:12px}.counts{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:20px 0;background:var(--td-bg-color-secondarycontainer);border-radius:6px;padding:16px 10px}.counts>div{display:flex;flex-direction:column;gap:8px;padding:0 10px}.counts span{font-size:12px;color:var(--td-text-color-secondary)}.counts strong{font-size:22px}.succeeded strong{color:var(--td-success-color)}.failed strong,.error-text{color:var(--td-error-color)}.uncertain strong{color:var(--td-warning-color)}.result-tabs{margin:16px 0}.history-row{display:flex;justify-content:space-between;align-items:center;width:100%;padding:18px 10px;border:0;border-bottom:1px solid var(--td-component-border);background:transparent;text-align:left;color:var(--td-text-color-primary);cursor:pointer}.history-row:hover{background:var(--td-bg-color-container-hover)}
 </style>

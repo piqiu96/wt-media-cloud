@@ -1,4 +1,5 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -421,17 +422,17 @@ onUnmounted(() => { if (downloadPoller) clearInterval(downloadPoller) })
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page my-outputs-page">
+    <div class="wt-resource-page resource-visual-approved my-outputs-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="成片管理" description="管理已生成的视频成片，查看来源、预览并下载文件" />
       <ResourceCard class="my-outputs-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" :maxlength="100" clearable placeholder="成片 ID/标题、素材 ID/名称" /></label>
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="filters.team_id" clearable placeholder="全部" @change="onTeamFilterChange">
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.team_id" clearable @change="onTeamFilterChange">
             <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-          </t-select></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="filters.category_id" :options="categoryFilterOptions" clearable placeholder="全部" /></label>
-          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><t-select v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" placeholder="全部" /></label>
+          </BusinessSelect></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="filters.category_id" :options="categoryFilterOptions" clearable /></label>
+          <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="isAdmin && !filters.team_id" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">生成方式</span><t-select v-model="filters.trigger" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">下载状态</span><t-select v-model="filters.download" :options="downloadOptions" clearable placeholder="全部" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>

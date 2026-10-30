@@ -1,4 +1,15 @@
 <script setup>
+import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
+import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
+import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue"
+import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
+import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue"
+import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue"
+import CategoryFields from "../../../shared/ui/fields/CategoryFields.vue"
+import TagInput from "../../../shared/ui/fields/TagInput.vue"
+import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
+
 import AccountImportDialog from './AccountImportDialog.vue'
 import {createMediaAccountImportClient} from '../../../shared/api/mediaAccountImports.js'
 
@@ -15,8 +26,8 @@ import { executionErrorMessage } from "../../../shared/utils/executionErrors.js"
 import { loginStatusText } from "../../../shared/utils/mediaAccountLabels.js"
 import { ACCOUNT_PLATFORM_OPTIONS, platformLabel } from "../../../shared/utils/platforms.js"
 import { canCheckAccount as checkAvailability } from "./checkAvailability.js"
-import { categoryTypeLabel } from "../../../shared/utils/categories.js"
-import BusinessStatus from "../../../shared/ui/BusinessStatus.vue"
+import { CATEGORY_TYPE_LABELS } from "../../../shared/utils/categories.js"
+import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
@@ -103,12 +114,15 @@ const boundGuide = ref(null)
 const editTags = ref([])
 const savingEdit = ref(false)
 const editError = ref("")
+const enabledConfirming = ref(new Set())
+const enabledPending = ref(new Set())
+const showAdvancedFilters = ref(false)
+const batchCheckVisible = ref(false)
 const batchChecking = ref(false)
 const batchResults = ref([])
 const operatingProfileId = ref("")
 const currentCheckingId = ref("")
 const profileOpenMap = ref({})
-const accountInfoPopup = ref(null)
 const windowPopup = ref(null)
 const allTagsPopup = ref(null)
 
@@ -139,6 +153,10 @@ function defaultOwnerFilter() {
   if (user.value?.role === "senior_operator") return String(user.value?.id ?? "")
   return ""
 }
+
+watch(searchTeam, () => {
+  if (searchOwner.value !== "all" && !ownerOptions.value.some(o => o.value === searchOwner.value)) searchOwner.value = "all"
+})
 
 watch(searchOwner, () => {
   pagination.value.current = 1
@@ -185,6 +203,7 @@ async function loadAccounts({ resetPage = false } = {}) {
   try {
     const result = await accountClient.listPage(params)
     if (request !== accountRequest) return
+    selectedAccountIds.value = selectedAccountIds.value.filter(id => result.items.some(row => row.id === id))
     accounts.value = result.items
     result.items.forEach(account => selectedAccountCache.set(account.id,account))
     pagination.value.total = result.total
@@ -197,6 +216,7 @@ async function loadAccounts({ resetPage = false } = {}) {
 }
 
 function onPageChange(pageInfo) {
+  selectedAccountIds.value = []
   pagination.value.current = pageInfo.current
   pagination.value.pageSize = pageInfo.pageSize
   loadAccounts()
@@ -227,7 +247,6 @@ function applyStatFilter(key) {
 
 
 function openCreate() {
-  tagSearch.value = ""
   createForm.value = defaultCreateForm()
   createCategoryType.value = ""
   createError.value = ""
@@ -273,19 +292,7 @@ function accountDisplayName(account) {
   return account.identification_status !== "identified" ? "待识别账号" : "未识别"
 }
 
-async function copyAccountId(account) {
-  if (!account?.id) return
-  try {
-    await navigator.clipboard.writeText(account.id)
-    feedback.toast.success("已复制系统账号 ID")
-  } catch (e) {
-    feedback.toast.error("复制失败，请手动选择")
-  }
-}
 
-function openAccountInfoPopup(account) {
-  accountInfoPopup.value = account
-}
 
 function showAllTags(account) {
   allTagsPopup.value = account
@@ -366,7 +373,6 @@ async function checkFromRow(account) {
 }
 
 function openEdit(account) {
-  tagSearch.value = ""
   editAccount.value = account
   editCategoryType.value = selectedCategoryType(account.category_ids)
   editRemark.value = account.remark || ""
@@ -403,25 +409,32 @@ async function saveEdit() {
   }
 }
 
-async function toggleEnabled(account) {
-  const target = !account.enabled
-  if (!await feedback.confirmWarning({ title: target ? "启用账号" : "停用账号", message: `${target ? "启用" : "停用"}「${accountDisplayName(account)}」？${target ? "" : "停用后将不参与后续任务。"}`, confirmText: target ? "启用" : "停用", danger: !target })) return
+async function toggleEnabled(account, target) {
+  account = accounts.value.find(row => row.id === account.id)
+  if (!account || typeof target !== "boolean" || target === account.enabled) return
+  if (enabledPending.value.has(account.id) || enabledConfirming.value.has(account.id)) return
+  enabledConfirming.value.add(account.id)
   try {
+    if (!await feedback.confirmWarning({ title: target ? "启用账号" : "停用账号", message: `${target ? "启用" : "停用"}「${accountDisplayName(account)}」？${target ? "" : "停用后将不参与后续任务。"}`, confirmText: target ? "启用" : "停用", danger: false })) return
+    enabledConfirming.value.delete(account.id)
+    enabledPending.value.add(account.id)
     const updated = await accountClient.update(account.id, { enabled: target })
     const idx = accounts.value.findIndex(a => a.id === account.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
+    feedback.toast.success(target ? "账号已启用" : "账号已停用")
   } catch (e) {
     feedback.toast.error(e.message || "状态切换失败")
-  }
+  } finally { enabledPending.value.delete(account.id); enabledConfirming.value.delete(account.id) }
 }
 
 function rowMoreOptions(account) {
- return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"账号凭证",value:"credentials"}] : []),{content:account.enabled ? "停用" : "启用",value:"enabled"}]
+ return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"账号凭证",value:"credentials"}] : [])]
 }
-function onRowMore(option, account) { if (option.value === "bind") openBind(account); else if (option.value === "credentials") openCookieDialog(account); else if (option.value === "enabled") toggleEnabled(account) }
-function splitTags(value) {
-  return String(value || "").split(",").map(t => t.trim()).filter(Boolean)
+function usesRowMore(account) {
+ const base = 2 + (canOperateLocalAccount(account) ? 1 : 0) + (canOperateLocalAccount(account) && showWindowToggle(account) ? 1 : 0)
+ return base + rowMoreOptions(account).length > 5
 }
+function onRowMore(option, account) { if (option.value === "bind") openBind(account); else if (option.value === "credentials") openCookieDialog(account) }
 
 
 function selectedCategoryType(categoryIds) {
@@ -429,10 +442,6 @@ function selectedCategoryType(categoryIds) {
   return categories.value.find((category) => values.includes(category.id))?.type || ""
 }
 
-function categoryOptionDisabled(category, categoryIds) {
-  const selectedType = selectedCategoryType(categoryIds)
-  return Boolean(selectedType && category.type !== selectedType && !(categoryIds || []).includes(category.id))
-}
 
 function validateCategorySelection(categoryIds) {
   const selected = new Set(categoryIds || [])
@@ -442,7 +451,7 @@ function validateCategorySelection(categoryIds) {
 
 function categoryNames(categoryIds) {
   const values = Array.isArray(categoryIds) ? categoryIds : []
-  if (!values.length) return "未绑定类目"
+  if (!values.length) return "未选择"
   return values.map(categoryId => {
     const category = categories.value.find(item => item.id === categoryId)
     return category ? category.name : `${categoryId}（超出用户类目范围）`
@@ -480,13 +489,12 @@ function localOperationHint(account) {
 }
 
 function executableText(account) {
-  const roleHint = isDesktop ? localOperationHint(account) : ""
-  if (roleHint) return `不可执行：${roleHint}`
   if (!account.enabled) return "不可执行：账号已停用"
   if (!(account.category_ids || []).length) return "不可执行：未绑定类目"
   if (!account.browser_profile_id) return "不可执行：未绑定窗口"
   const profile = profileForAccount(account)
   if (profile && (profile.local_state !== "active" || !profile.enabled)) return "不可执行：绑定窗口已停用"
+  if (account.last_check_status === "failed") return "最近检查未完成"
   if (account.platform_login_status !== "normal") return "待检查：需要真实账号检查"
   return "可用于运营任务"
 }
@@ -556,15 +564,6 @@ function relativeTime(ts) {
   return `${day}天前 · 建议检查`
 }
 
-function profileOptionLabel(profile) {
-  if (!profile) return ""
-  const name = profile.bit_name || "未命名窗口"
-  const parts = []
-  if (profile.bit_seq) parts.push(String(profile.bit_seq))
-  parts.push(name)
-  if (profile.id) parts.push(String(profile.id))
-  return parts.join(" - ")
-}
 
 
 function canCheckAccount(account) {
@@ -705,6 +704,7 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     feedback.toast.error("请先勾选要检查的账号")
     return
   }
+  batchCheckVisible.value = true
   batchChecking.value = true
   const nonOwnedCount = candidates.filter(account => !canOperateLocalAccount(account)).length
   const skippedOwnershipText = nonOwnedCount
@@ -714,7 +714,7 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     : ""
   const initialResults = candidates.map(account => {
     if (!canCheckAccount(account)) {
-      return { account, status: "skipped", message: executableText(account) }
+      return { account, status: "skipped", message: localOperationHint(account) || executableText(account) }
     }
     return { account, status: "pending", message: "等待检查" }
   })
@@ -728,6 +728,8 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     const service = await desktopLocalAgentService()
     for (const item of batchResults.value) {
       if (!candidates.some(account => account.id === item.account.id) || item.status !== "pending") continue
+      item.status = "processing"
+      item.message = "正在检查账号"
       try {
         const updated = await runSingleAccountCheck(item.account, service)
         item.status = "success"
@@ -741,7 +743,7 @@ async function runBatchCheck({ retryFailedOnly = false } = {}) {
     const stats = batchStats()
     const summary = `批量检查完成：成功 ${stats.success}，失败 ${stats.failed}，跳过 ${stats.skipped}${skippedOwnershipText}`
     if (stats.failed > 0 || stats.success === 0) {
-      feedback.toast.info(summary)
+      feedback.toast.error(summary)
     } else {
       feedback.toast.success(summary)
     }
@@ -852,27 +854,6 @@ const availableTags = computed(() => {
   return [...set].sort()
 })
 
-const tagOptions = computed(() => availableTags.value.map(t => ({ label: t, value: t })))
-const tagSearch = ref("")
-const tagCreateCandidate = computed(() => {
-  const v = tagSearch.value.trim()
-  if (!v) return ""
-  return availableTags.value.includes(v) ? "" : v
-})
-function onTagSearch(ctx) {
-  tagSearch.value = typeof ctx === "string" ? ctx : (ctx?.value ?? "")
-}
-function commitNewTag(list, value) {
-  const v = String(value ?? "").trim()
-  if (!v || list.includes(v)) return
-  list.push(v)
-  tagSearch.value = ""
-}
-function onTagEnter(list, ctx) {
-  const v = String(ctx?.inputValue ?? ctx?.value ?? tagSearch.value ?? "").trim()
-  if (v) commitNewTag(list, v)
-}
-
 // 使用人选项来自已加载的账号目录，不额外请求；高级运营自己即使还没有账号也要能选回自己。
 const ownerOptions = computed(() => {
   const options = new Map()
@@ -880,7 +861,7 @@ const ownerOptions = computed(() => {
   if (selfId && user.value?.role === "senior_operator") {
     options.set(selfId, user.value?.nickname || user.value?.username || "本人")
   }
-  for (const account of accountMembers.value) {
+  for (const account of accountMembers.value.filter(member => !searchTeam.value || String(member.team_id) === String(searchTeam.value))) {
     const value = String(account.id ?? "")
     if (!value || options.has(value)) continue
     options.set(value, account.nickname || account.username || `用户 ${value}`)
@@ -888,53 +869,47 @@ const ownerOptions = computed(() => {
   return [...options].map(([value, label]) => ({ value, label }))
 })
 
-// 服务端已按角色划定可见范围（普通运营强制自己、高级运营/管理员为团队范围），
-// 这里只在已加载数据上再按使用人收窄，不扩大可见边界。
-const ownerFilteredAccounts = computed(() => {
-  if (!canFilterByOwner.value || !searchOwner.value || searchOwner.value === "all") return accounts.value
-  return accounts.value.filter(account => String(account.user_id ?? "") === searchOwner.value)
-})
 
 const resourceAccountStats = computed(() => [
   { key: "total", label: "账号总数", value: accountStats.value.total, tone: "info" },
   { key: "normal", label: "正常账号", value: accountStats.value.normal, tone: "success" },
   { key: "abnormal", label: "异常账号", value: accountStats.value.abnormal, tone: "danger" },
-  { key: "unbound", label: "未绑定环境", value: accountStats.value.unbound, tone: "warning" },
+  { key: "unbound", label: "未绑定窗口", value: accountStats.value.unbound, tone: "warning" },
 ])
 
-const currentBatchStats = computed(batchStats)
-const hasBatchFailures = computed(() => batchResults.value.some(item => item.status === "failed"))
 const pagedAccounts = computed(() => accounts.value)
 
-const columns = [
-  { colKey: "row-select", type: "multiple", width: 40 },
+const columns = computed(() => [
+  ...(isDesktop && !isAdmin.value ? [{ colKey: "row-select", type: "multiple", width: 40, fixed: "left" }] : []),
   { colKey: "id", title: "ID", width: 60 },
   { colKey: "platform", title: "平台", width: 70 },
-  { colKey: "account_info", title: "账号信息", width: 190 },
-  { colKey: "user_name", title: "使用人", width: 100 },
-  { colKey: "category_ids", title: "类目", width: 160 },
-  { colKey: "tags", title: "标签", width: 140 },
+  { colKey: "account_info", title: "账号信息", width: 220 },
+  ...(isAdmin.value ? [{ colKey: "team_name", title: "运营团队", width: 120 }] : []),
+  ...(canFilterByOwner.value ? [{ colKey: "user_name", title: "使用人", width: 100 }] : []),
   { colKey: "window_info", title: "浏览器窗口", width: 180 },
-  { colKey: "enabled", title: "业务状态", width: 80, minWidth: 80 },
-  { colKey: "account_status", title: "账号状态", width: 90, minWidth: 90 },
+  { colKey: "category_ids", title: "业务分类", width: 160 },
+  { colKey: "tags", title: "标签", width: 140 },
+  { colKey: "account_status", title: "登录状态", width: 90, minWidth: 90 },
+  { colKey: "executable", title: "可执行性", width: 130 },
+  { colKey: "remark", title: "运营备注", width: 160, ellipsis: true },
+  { colKey: "enabled", title: "启用", width: 80, minWidth: 80 },
   { colKey: "last_check_at", title: "最近检查", width: 110, minWidth: 110 },
-  { colKey: "op", title: "操作", width: 340, fixed: "right" },
-]
+  { colKey: "op", title: "操作", width: opColumnWidth(!isDesktop || isAdmin.value ? ["详情", "编辑"] : ["检查", "详情", "打开窗口", "编辑", "更多"], {variant:"text", primary:true, loading:true}), fixed: "right" },
+])
 </script>
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-  <div class="wt-resource-page">
-    <ResourcePageHeader title="社媒账号" description="管理账号资产、浏览器环境关联和账号检查状态">
+  <div class="wt-resource-page resource-visual-approved account-page">
+    <ResourcePageHeader title="社媒账号">
       <template #actions>
         <t-button v-if="!isAdmin" theme="primary" @click="openCreate">新增账号</t-button>
-        <t-button v-if="isDesktop && !isAdmin" variant="outline" @click="openImports()">批量接入</t-button>
+        <t-button v-if="isDesktop && !isAdmin" variant="outline" @click="openImports()">批量CK接入</t-button>
         <t-button v-if="isDesktop && !isAdmin" variant="text" @click="openImports('',true)">接入记录</t-button>
-        <t-button v-if="isDesktop && !isAdmin" variant="outline" class="wt-secondary-button" :loading="batchChecking" @click="runBatchCheck()">批量检查</t-button>
         <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </template>
     </ResourcePageHeader>
-    <div v-if="recentImport" class="import-resume"><span>最近一次接入还有 {{ recentImport.counts.pending+recentImport.counts.failed+recentImport.counts.uncertain+recentImport.counts.running }} 项需要处理</span><t-button variant="text" @click="openImports(recentImport.id)">继续处理</t-button></div>
+
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <FeedbackAlert
       v-if="!isDesktop"
@@ -943,29 +918,27 @@ const columns = [
       style="margin-bottom:16px"
     />
 
-    <ResourceStatGrid :items="resourceAccountStats" interactive @select="applyStatFilter" />
+    <ResourceStatGrid :items="resourceAccountStats" :active-key="({normal: 'normal', attention: 'abnormal', unbound: 'unbound'})[searchView] || 'total'" interactive @select="applyStatFilter" />
+    <div v-if="recentImport" class="import-resume"><span>最近一次接入还有 {{ recentImport.counts.pending+recentImport.counts.failed+recentImport.counts.uncertain+recentImport.counts.running }} 项需要处理</span><t-button variant="text" @click="openImports(recentImport.id)">继续处理</t-button></div>
 
     <ResourceCard class="account-resource-card">
     <div v-if="searchView" style="margin-bottom:12px"><t-tag closable @close="searchView='';loadAccounts({resetPage:true})">{{ {normal:"正常账号",attention:"待处理账号",unbound:"未绑定窗口"}[searchView] }}</t-tag></div>
     <div class="filter-bar">
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable /></label>
-        <label v-if="canFilterByOwner" class="wt-filter-field"><span class="wt-filter-field__label">使用人</span><t-select v-model="searchOwner" placeholder="全部">
-            <t-option value="all" label="全部成员" />
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="搜索账号、UID、备注" clearable /></label>
+        <label v-if="canFilterByOwner" class="wt-filter-field"><span class="wt-filter-field__label">使用人</span><BusinessSelect kind="member" filter v-model="searchOwner">
+            <t-option value="all" label="全部" />
             <t-option v-for="option in ownerOptions" :key="option.value" :value="option.value" :label="option.label" />
-          </t-select></label>
-        <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">团队</span><t-select v-model="searchTeam" clearable placeholder="全部"><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">一级分类</span><t-select v-model="searchCategoryType" clearable placeholder="全部" @change="searchCategoryIds=[]"><t-option value="game" label="游戏" /><t-option value="ai" label="AI" /><t-option value="anime" label="二次元" /></t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><t-select v-model="searchCategoryIds" multiple clearable placeholder="全部">
-            <t-option v-for="category in categories.filter(c => !searchCategoryType || c.type === searchCategoryType)" :key="category.id" :value="category.id" :label="category.name" />
-        </t-select></label>
+          </BusinessSelect></label>
+        <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="searchTeam" clearable><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></BusinessSelect></label>
+        <CategoryFields v-model="searchCategoryIds" v-model:type="searchCategoryType" :categories="categories" filter class="account-category-filter" />
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">业务状态</span><t-select v-model="searchEnabled" placeholder="全部" clearable>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">启用状态</span><t-select v-model="searchEnabled" placeholder="全部" clearable>
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">账号状态</span><t-select v-model="searchLoginStatus" @change="searchView=''" placeholder="全部" clearable>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">登录状态</span><t-select v-model="searchLoginStatus" @change="searchView=''" placeholder="全部" clearable>
             <t-option value="normal" label="正常" />
             <t-option value="not_logged_in" label="未登录" />
             <t-option value="expired" label="登录失效" />
@@ -973,33 +946,26 @@ const columns = [
             <t-option value="restricted" label="账号受限" />
             <t-option value="environment_error" label="检查失败" />
         </t-select></label>
+        <template v-if="showAdvancedFilters">
         <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" multiple filterable placeholder="全部" clearable>
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
         </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">标签匹配</span><t-select v-model="searchTagMatch" placeholder="全部"><t-option value="any" label="任一标签" /><t-option value="all" label="全部标签" /><t-option value="exclude" label="排除标签" /></t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable /></label>
+        </template>
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadAccounts({ resetPage: true })">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+          <t-button variant="text" @click="showAdvancedFilters = !showAdvancedFilters">{{ showAdvancedFilters ? "收起筛选" : "更多筛选" }}</t-button>
         </div>
     </div>
 
-    <t-card v-if="batchResults.length" title="批量检查结果" :bordered="true" class="batch-result-card">
-      <div class="batch-summary">
-        共 {{ currentBatchStats.total }} 项，成功 {{ currentBatchStats.success }}，失败 {{ currentBatchStats.failed }}，跳过 {{ currentBatchStats.skipped }}，等待 {{ currentBatchStats.pending }}
-        <t-button v-if="hasBatchFailures" size="small" variant="outline" :loading="batchChecking" @click="runBatchCheck({ retryFailedOnly: true })">重试失败项</t-button>
-      </div>
-      <div class="batch-result-list">
-        <div v-for="item in batchResults" :key="item.account.id" class="batch-result-item">
-          <span class="batch-account">{{ accountLabel(item.account) }}</span>
-          <BusinessStatus
-            :status="item.status === 'success' ? 'normal' : item.status === 'pending' ? 'pending_review' : item.status === 'skipped' ? 'paused' : 'warning'"
-            :label="{ success: '成功', failed: '失败', skipped: '跳过', pending: '等待' }[item.status]"
-          />
-          <span class="batch-message">{{ item.message }}</span>
-        </div>
-      </div>
-    </t-card>
+    <ResourceSelectionToolbar v-if="isDesktop && !isAdmin" :count="selectedAccountIds.length" unit="个账号" @clear="selectedAccountIds = []">
+      <t-button theme="default" variant="outline" :loading="batchChecking" :disabled="Boolean(currentCheckingId)" @click="runBatchCheck()">批量检查</t-button>
+    </ResourceSelectionToolbar>
+    <OperationProgressDialog :visible="batchCheckVisible" title="批量检查账号" retry-label="重试失败项" :phase="batchChecking ? 'running' : 'result'" running-label="正在检查账号"
+      :items="batchResults.map(item => ({key: item.account.id, label: accountLabel(item.account), status: item.status, reason: item.message}))"
+      @retry="runBatchCheck({retryFailedOnly:true})" @done="batchCheckVisible = false" />
 
     <div class="table-scroll-wrap">
     <t-table class="wt-resource-table"
@@ -1012,16 +978,18 @@ const columns = [
       :scroll="{ x: 'max-content' }"
       empty="暂无媒体账号"
     >
-      <template #id="{ row }"><span class="account-id" :title="`系统账号ID：${row.id}（点击复制）`" @click="copyAccountId(row)">{{ row.id }}</span></template>
+      <template #id="{ row }"><span class="account-id">{{ row.id }}</span></template>
       <template #platform="{ row }"><span>{{ platformLabel(row.platform) }}</span></template>
       <template #account_info="{ row }">
-        <div>
-          <a class="account-name-link" @click="openAccountInfoPopup(row)">{{ accountDisplayName(row) }}</a>
-          <div class="account-sub">UID：{{ row.platform_account_id || '--' }}</div>
+        <div class="account-identity">
+          <t-avatar size="32px" :image="row.platform_avatar_url || undefined">{{ accountDisplayName(row).slice(0,1) }}</t-avatar>
+          <div class="account-identity__text"><strong class="account-name" :title="accountDisplayName(row)">{{ accountDisplayName(row) }}</strong>
+          <div class="account-sub" :title="`UID ${row.platform_account_id || '—'}`">UID {{ row.platform_account_id || '—' }}</div></div>
         </div>
       </template>
+      <template #team_name="{ row }">{{ accountTeams.find(t => String(t.id) === String(row.team_id))?.name || accountMembers.find(m => String(m.id) === String(row.user_id))?.team_name || "—" }}</template>
       <template #user_name="{ row }">{{ row.user_name || '--' }}</template>
-      <template #category_ids="{ row }">{{ categoryNames(row.category_ids) }}</template>
+      <template #category_ids="{ row }"><div class="account-category"><small>{{ CATEGORY_TYPE_LABELS[selectedCategoryType(row.category_ids)] || "—" }}</small><span>{{ categoryNames(row.category_ids) }}</span></div></template>
       <template #tags="{ row }">
         <div class="account-tags">
           <t-tag v-for="tag in (row.tags || []).slice(0, 2)" :key="tag" size="small" variant="light">{{ tag }}</t-tag>
@@ -1030,14 +998,13 @@ const columns = [
       </template>
       <template #window_info="{ row }">
         <div v-if="row.browser_profile_id" class="window-cell" @click="openWindowPopup(row)">
-          <div class="window-proxy"><span class="proxy-dot">●</span> {{ profileProxyModeText(row) }}</div>
-          <div class="window-proxy"><span class="proxy-dot">●</span> {{ profileWindowStateText(row) }}</div>
-          <div class="window-name window-name-link">{{ profileName(row.browser_profile_id) }}</div>
+          <t-button variant="text" size="small" class="window-name-link">{{ profileName(row.browser_profile_id) }}</t-button>
         </div>
         <div v-else class="window-cell"><span class="window-unbound">未绑定窗口</span></div>
       </template>
+      <template #executable="{ row }"><span :class="{'account-attention': executableText(row) !== '可用于运营任务'}">{{ executableText(row).replace(/^不可执行：|^待检查：/, "") }}</span></template>
       <template #enabled="{ row }">
-        <ResourceStatusBadge :tone="row.enabled ? 'success' : 'neutral'" :label="enabledText(row.enabled)" />
+        <t-switch :value="row.enabled" :loading="enabledPending.has(row.id)" :disabled="enabledPending.has(row.id) || enabledConfirming.has(row.id)" :aria-label="`${accountDisplayName(row)}${row.enabled ? '停用' : '启用'}`" @change="value => toggleEnabled(row, value)" />
       </template>
       <template #account_status="{ row }">
         <ResourceStatusBadge :tone="accountStatusTheme(row) === 'success' ? 'success' : accountStatusTheme(row) === 'danger' ? 'danger' : accountStatusTheme(row) === 'warning' ? 'warning' : 'neutral'" :label="accountStatusText(row)" />
@@ -1046,13 +1013,14 @@ const columns = [
         <span :title="row.last_check_at ? formatTime(row.last_check_at) : ''">{{ relativeTime(row.last_check_at) }}</span>
       </template>
       <template #op="{ row }">
-        <t-space size="small" class="op-cell">
-          <t-button v-if="canOperateLocalAccount(row)" size="small" theme="primary" :loading="currentCheckingId === row.id" :disabled="batchChecking || Boolean(currentCheckingId) || (isDesktop && !canOperateLocalAccount(row))" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">查看</t-button>
-          <t-button v-if="canOperateLocalAccount(row) && showWindowToggle(row)" size="small" class="wt-secondary-button" variant="outline" :disabled="!canOperateLocalAccount(row) || !canOperateBoundWindow(row) || Boolean(operatingProfileId)" :title="localOperationHint(row)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="openEdit(row)">编辑</t-button>
-          <t-dropdown :options="rowMoreOptions(row)" @click="(option) => onRowMore(option, row)"><t-button size="small" variant="text">更多</t-button></t-dropdown>
-        </t-space>
+        <ResourceRowActions>
+          <t-button v-if="canOperateLocalAccount(row)" size="small" variant="text" class="is-primary" :loading="currentCheckingId === row.id" :disabled="batchChecking || Boolean(currentCheckingId) || (isDesktop && !canOperateLocalAccount(row))" :title="isDesktop ? localOperationHint(row) : ''" @click="checkFromRow(row)">检查</t-button>
+          <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
+          <t-button v-if="canOperateLocalAccount(row) && showWindowToggle(row)" size="small" variant="text" :disabled="!canOperateLocalAccount(row) || !canOperateBoundWindow(row) || Boolean(operatingProfileId)" :title="localOperationHint(row)" @click="toggleWindow(row)">{{ profileIsOpen(row) ? '关闭窗口' : '打开窗口' }}</t-button>
+          <t-button size="small" variant="text" @click="openEdit(row)">编辑</t-button>
+          <template v-if="!usesRowMore(row)"><t-button v-for="action in rowMoreOptions(row)" :key="action.value" size="small" variant="text" @click="onRowMore(action, row)">{{ action.content }}</t-button></template>
+          <t-dropdown v-else :options="rowMoreOptions(row)" @click="(option) => onRowMore(option, row)"><t-button size="small" variant="text">更多</t-button></t-dropdown>
+        </ResourceRowActions>
       </template>
     </t-table>
     </div>
@@ -1061,33 +1029,6 @@ const columns = [
     </div>
     </ResourceCard>
 
-    <!-- 账号信息弹窗（点击昵称） -->
-    <t-dialog :visible="accountInfoPopup !== null" @close="accountInfoPopup = null" header="账号信息" :footer="false" width="480px">
-      <div v-if="accountInfoPopup" class="info-popup">
-        <div class="info-head">
-          <t-avatar v-if="accountInfoPopup.platform_avatar_url" :image="accountInfoPopup.platform_avatar_url" size="medium" />
-          <div>
-            <div class="info-name">{{ accountInfoPopup.platform_name || '待识别账号' }}</div>
-            <div class="info-sub">{{ platformLabel(accountInfoPopup.platform) }}</div>
-          </div>
-        </div>
-        <t-descriptions :column="1" bordered size="small" style="margin-top:12px">
-          <t-descriptions-item label="系统账号ID">{{ accountInfoPopup.id }}</t-descriptions-item>
-          <t-descriptions-item label="平台UID">{{ accountInfoPopup.platform_account_id || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="平台昵称">{{ accountInfoPopup.platform_name || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="使用人">{{ accountInfoPopup.user_name || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="所属类目">{{ categoryNames(accountInfoPopup.category_ids) }}</t-descriptions-item>
-          <t-descriptions-item label="标签">{{ (accountInfoPopup.tags || []).join('、') || '--' }}</t-descriptions-item>
-          <t-descriptions-item label="业务状态">{{ enabledText(accountInfoPopup.enabled) }}</t-descriptions-item>
-          <t-descriptions-item label="账号状态">{{ accountStatusText(accountInfoPopup) }}</t-descriptions-item>
-          <t-descriptions-item label="最近检查">{{ accountInfoPopup.last_check_at ? formatTime(accountInfoPopup.last_check_at) : '从未检查' }}</t-descriptions-item>
-          <t-descriptions-item label="最近同步资料">{{ accountInfoPopup.last_check_at ? formatTime(accountInfoPopup.last_check_at) : '--' }}</t-descriptions-item>
-          <t-descriptions-item label="备注">{{ accountInfoPopup.remark || '--' }}</t-descriptions-item>
-        </t-descriptions>
-      </div>
-    </t-dialog>
-
-    <!-- 浏览器窗口弹窗（点击窗口名） -->
     <t-dialog :visible="windowPopup !== null" @close="windowPopup = null" header="浏览器窗口信息" :footer="false" width="480px">
       <div v-if="windowPopup" class="info-popup">
         <div class="info-name">{{ profileName(windowPopup.browser_profile_id) }}</div>
@@ -1119,53 +1060,22 @@ const columns = [
     </t-dialog>
 
     <AccountImportDialog v-model:visible="importVisible" :initial-id="importId" :history-only="importHistoryOnly" :categories="categories" :get-local="desktopLocalAgentService" @changed="importsChanged" @view-account="viewImportedAccount" />
-    <t-dialog v-model:visible="showCreate" header="新增账号" width="640px" @confirm="createAccount" :confirm-btn="{ loading: creating, theme: 'primary' }">
+    <ResourceOverlay v-model:visible="showCreate" title="新增账号" :width="640" :busy="creating">
       <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
-      <t-form @submit.prevent="createAccount">
-        <div class="form-section">基本信息</div>
-        <t-form-item label="分类">
-          <t-space direction="vertical" style="width:100%">
-            <t-select v-model="createCategoryType" clearable placeholder="选择一级分类" @change="createForm.categoryIds = []">
-              <t-option value="game" label="游戏" /><t-option value="ai" label="AI" /><t-option value="anime" label="二次元" />
-            </t-select>
-            <t-select v-model="createForm.categoryIds" multiple clearable :disabled="!createCategoryType" placeholder="选择二级分类（可多选）">
-              <t-option v-for="category in categories.filter(c => c.type === createCategoryType)" :key="category.id" :value="category.id" :label="category.name" />
-            </t-select>
-          </t-space>
-        </t-form-item>
+      <ResourceForm>
+        <t-form-item label="业务分类"><CategoryFields v-model="createForm.categoryIds" v-model:type="createCategoryType" :categories="categories" /></t-form-item>
         <t-form-item label="平台">
           <t-select v-model="createForm.platform">
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
           </t-select>
         </t-form-item>
-        <div class="form-section">业务分类</div>
-        <t-form-item label="标签">
-          <div class="tag-editor">
-            <t-select
-              v-model="createForm.tags"
-              multiple
-              filterable
-              :options="tagOptions"
-              placeholder="输入搜索已有标签，或输入新标签后回车创建"
-              v-model:input-value="tagSearch"
-              @input-change="onTagSearch"
-              @enter="ctx => onTagEnter(createForm.tags, ctx)"
-              clearable
-            >
-              <template #panelBottomContent>
-                <div v-if="tagCreateCandidate" class="tag-create-option" @mousedown.prevent="commitNewTag(createForm.tags, tagCreateCandidate)">
-                  <t-icon name="add" /> 创建标签「{{ tagCreateCandidate }}」
-                </div>
-              </template>
-            </t-select>
-          </div>
-        </t-form-item>
-        <div class="form-section">备注</div>
+        <t-form-item label="标签"><TagInput v-model="createForm.tags" /></t-form-item>
         <t-form-item label="备注">
           <t-textarea v-model="createForm.remark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
-      </t-form>
-    </t-dialog>
+      </ResourceForm>
+    <template #footer><t-button variant="outline" :disabled="creating" @click="showCreate = false">取消</t-button><t-button theme="primary" :loading="creating" @click="createAccount">新增</t-button></template>
+    </ResourceOverlay>
 
     <t-dialog :visible="createdGuide !== null" @close="createdGuide = null" header="账号已保存" width="560px" :footer="false">
       <p>可以继续绑定浏览器窗口，也可以稍后从账号列表继续。</p>
@@ -1174,7 +1084,7 @@ const columns = [
         <t-button v-if="canOperateLocalAccount(createdGuide)" theme="primary" @click="openBind(createdGuide)">绑定窗口</t-button>
       </t-space>
     </t-dialog>
-    <t-dialog v-model:visible="bindVisible" :header="bindAccount?.browser_profile_id ? '更换浏览器窗口' : '绑定浏览器窗口'" width="960px" :confirm-btn="{content:bindAccount?.browser_profile_id ? '确认更换' : '绑定',loading:bindingSaving}" @confirm="saveBinding">
+    <ResourceOverlay v-model:visible="bindVisible" :title="bindAccount?.browser_profile_id ? '更换浏览器窗口' : '绑定浏览器窗口'" :width="960" :busy="bindingSaving">
       <p>{{ accountDisplayName(bindAccount) }} · {{ platformLabel(bindAccount?.platform) }}</p>
       <p class="form-tip">关联已有窗口不会修改窗口内的登录信息。绑定后检查并识别当前账号。</p>
       <FeedbackAlert v-if="bindingError" :message="bindingError" theme="error" />
@@ -1183,7 +1093,7 @@ const columns = [
         <template #select="{row}"><t-radio :checked="bindProfileId === row.id" :disabled="Boolean(bindingUnavailableReason(row))" :aria-label="'选择' + row.bit_name" @change="bindProfileId = row.id" /></template>
         <template #usage="{row}"><span :style="{color:bindingUnavailableReason(row) ? 'var(--td-text-color-secondary)' : 'var(--td-success-color)'}">{{ bindingUnavailableReason(row) || (row.id === bindAccount?.browser_profile_id ? '当前账号已绑定' : '可关联') }}</span></template>
       </t-table>
-    </t-dialog>
+    <template #footer><t-button variant="outline" :disabled="bindingSaving" @click="bindVisible = false">取消</t-button><t-button theme="primary" :loading="bindingSaving" @click="saveBinding">绑定</t-button></template></ResourceOverlay>
     <t-dialog :visible="boundGuide !== null" @close="boundGuide = null" header="窗口已绑定" width="560px" :footer="false">
       <p>可以打开窗口完成登录，也可以直接检查已登录的账号。</p>
       <t-space style="display:flex;justify-content:flex-end;margin-top:24px">
@@ -1194,77 +1104,46 @@ const columns = [
     </t-dialog>
 
     <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
-    <t-dialog v-model:visible="editVisible" header="编辑资料" width="640px" :confirm-btn="{ content: '保存', loading: savingEdit, theme: 'primary' }" @confirm="saveEdit">
+    <ResourceOverlay v-model:visible="editVisible" title="编辑资料" :width="640" :busy="savingEdit">
       <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
-      <t-form v-if="editAccount" label-width="90px">
-        <div class="form-section">基本信息</div>
+      <ResourceForm>
         <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount.platform) }}）</t-form-item>
-        <t-form-item label="分类">
-          <t-space direction="vertical" style="width:100%">
-            <t-select v-model="editCategoryType" clearable placeholder="选择一级分类" @change="editCategoryIds = []">
-              <t-option value="game" label="游戏" /><t-option value="ai" label="AI" /><t-option value="anime" label="二次元" />
-            </t-select>
-            <t-select v-model="editCategoryIds" multiple clearable :disabled="!editCategoryType" placeholder="选择二级分类（可多选）">
-              <t-option v-for="category in categories.filter(c => c.type === editCategoryType)" :key="category.id" :value="category.id" :label="category.name" />
-            </t-select>
-          </t-space>
-        </t-form-item>
-        <div class="form-section">业务分类</div>
-        <t-form-item label="标签">
-          <div class="tag-editor">
-            <t-select
-              v-model="editTags"
-              multiple
-              filterable
-              :options="tagOptions"
-              placeholder="输入搜索已有标签，或输入新标签后回车创建"
-              v-model:input-value="tagSearch"
-              @input-change="onTagSearch"
-              @enter="ctx => onTagEnter(editTags, ctx)"
-              clearable
-            >
-              <template #panelBottomContent>
-                <div v-if="tagCreateCandidate" class="tag-create-option" @mousedown.prevent="commitNewTag(editTags, tagCreateCandidate)">
-                  <t-icon name="add" /> 创建标签「{{ tagCreateCandidate }}」
-                </div>
-              </template>
-            </t-select>
-          </div>
-        </t-form-item>
-        <div class="form-section">备注</div>
+        <t-form-item label="业务分类"><CategoryFields v-model="editCategoryIds" v-model:type="editCategoryType" :categories="categories" /></t-form-item>
+        <t-form-item label="标签"><TagInput v-model="editTags" /></t-form-item>
         <t-form-item label="备注">
           <t-textarea v-model="editRemark" :rows="3" placeholder="账号备注" />
         </t-form-item>
-        <div class="form-tip">平台 UID/头像/账号状态由检查回填，不在此编辑。</div>
-      </t-form>
-    </t-dialog>
 
-    <t-drawer :close-btn="true" v-model:visible="detailVisible" header="账号详情" :size="'800px'" destroy-on-close :footer="false">
+      </ResourceForm>
+    <template #footer><t-button variant="outline" :disabled="savingEdit" @click="editVisible = false">取消</t-button><t-button theme="primary" :loading="savingEdit" @click="saveEdit">保存</t-button></template>
+    </ResourceOverlay>
+
+    <ResourceOverlay v-model:visible="detailVisible" title="账号详情" kind="drawer" :width="800" :footer="false">
       <div v-if="detailAccount" class="account-detail-heading">
         <t-avatar size="56px" :image="detailAccount.platform_avatar_url || undefined">{{ accountDisplayName(detailAccount).slice(0,1) }}</t-avatar>
         <div><h2>{{ accountDisplayName(detailAccount) }}</h2><p>{{ platformLabel(detailAccount.platform) }} · ID {{ detailAccount.id }} · UID {{ detailAccount.platform_account_id || '尚未识别' }}</p>
           <t-space size="small"><ResourceStatusBadge :tone="detailAccount.enabled ? 'success' : 'neutral'" :label="enabledText(detailAccount.enabled)" /><ResourceStatusBadge :tone="accountStatusTheme(detailAccount) === 'success' ? 'success' : accountStatusTheme(detailAccount) === 'danger' ? 'danger' : 'warning'" :label="accountStatusText(detailAccount)" /></t-space>
         </div>
       </div>
-      <div class="form-section">业务信息</div>
-      <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
+      <ResourceSection title="业务信息">
+      <ResourceDescriptions v-if="detailAccount">
         <t-descriptions-item label="业务分类">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
         <t-descriptions-item label="业务标签"><t-space size="small" wrap><t-tag v-for="tag in detailAccount.tags" :key="tag" size="small" variant="light">{{ tag }}</t-tag><span v-if="!detailAccount.tags?.length">—</span></t-space></t-descriptions-item>
         <t-descriptions-item label="运营备注">{{ detailAccount.remark || '—' }}</t-descriptions-item>
         <t-descriptions-item v-if="canFilterByOwner" label="使用人">{{ detailAccount.user_name || '—' }}</t-descriptions-item>
-      </t-descriptions>
-      <div class="form-section">关联窗口</div>
-      <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
+      </ResourceDescriptions>
+      </ResourceSection><ResourceSection title="关联窗口">
+      <ResourceDescriptions v-if="detailAccount">
         <t-descriptions-item label="浏览器窗口">{{ detailAccount.browser_profile_id ? profileName(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
         <t-descriptions-item label="窗口分组">{{ profileForAccount(detailAccount)?.bit_group_name || '—' }}</t-descriptions-item>
-      </t-descriptions>
-      <div class="form-section">账号检查</div>
-      <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
+      </ResourceDescriptions>
+      </ResourceSection><ResourceSection title="账号检查">
+      <ResourceDescriptions v-if="detailAccount">
         <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
         <t-descriptions-item label="可执行性">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_check_at ? formatTime(detailAccount.last_check_at) : '尚未检查' }}</t-descriptions-item>
         <t-descriptions-item label="账号资料">{{ detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
-      </t-descriptions>
+      </ResourceDescriptions>
       <FeedbackAlert v-if="detailAccount?.last_check_status === 'failed'" theme="error" :message="detailAccount.last_check_message || '本次检查失败，保留上次登录结论'" style="margin-top:12px" />
       <div v-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
         <div><strong>已记录账号</strong><p>{{ detailAccount.platform_name || '待识别' }}</p><p>UID {{ detailAccount.platform_account_id || '—' }}</p></div>
@@ -1276,9 +1155,10 @@ const columns = [
           <t-button v-if="checkFailureEnv" size="small" variant="outline" @click="router.push('/personal-info')">前往个人中心检查设备</t-button>
         </template>
       </FeedbackAlert>
-    </t-drawer>
+    </ResourceSection>
+</ResourceOverlay>
 
-    <t-dialog v-model:visible="showCookieDialog" width="640px" header="账号凭证" :footer="false">
+    <ResourceOverlay v-model:visible="showCookieDialog" title="账号凭证" :width="640">
       <div class="account-object"><strong>{{ accountDisplayName(cookieDialog?.account) }}</strong><span>{{ platformLabel(cookieDialog?.account?.platform) }} · UID {{ cookieDialog?.account?.platform_account_id || '待识别' }}</span></div>
       <section v-for="field in ['active_cookie','original_cookie']" :key="field" class="credential-section">
         <h4>{{ field==='active_cookie' ? '当前登录 Cookie' : '首次导入 Cookie' }}</h4>
@@ -1286,35 +1166,42 @@ const columns = [
         <div class="credential-actions"><t-button variant="text" size="small" :disabled="!cookieDialog?.[field]" @click="cookieShown[field]=!cookieShown[field]">{{ cookieShown[field]?'隐藏':'显示' }}</t-button><t-button variant="text" size="small" :disabled="!cookieDialog?.[field]" @click="copyCookie(field)">复制</t-button></div>
         <div v-if="field==='active_cookie'" class="form-tip">最近同步：{{ cookieDialog?.cookie_updated_at ? new Date(cookieDialog.cookie_updated_at).toLocaleString() : '尚未同步' }}</div>
       </section>
-      <div class="dialog-footer"><t-button theme="primary" :disabled="!isDesktop || !canOperateBoundWindow(cookieDialog?.account)" @click="openCookieUpdate">{{ cookieUnresolved ? '核实更新结果' : '更新登录 Cookie' }}</t-button></div>
-    </t-dialog>
-    <t-dialog v-model:visible="cookieUpdateVisible" width="640px" header="更新登录 Cookie" :footer="false" :close-btn="!updatingCookie" :close-on-overlay-click="false" :close-on-esc-keydown="!updatingCookie">
+      <template #footer><t-button theme="primary" :disabled="!isDesktop || !canOperateBoundWindow(cookieDialog?.account)" @click="openCookieUpdate">{{ cookieUnresolved ? '核实更新结果' : '更新登录 Cookie' }}</t-button></template>
+    </ResourceOverlay>
+    <ResourceOverlay v-model:visible="cookieUpdateVisible" title="更新登录 Cookie" :width="640" :busy="updatingCookie">
       <div class="account-object"><strong>{{ accountDisplayName(cookieDialog?.account) }}</strong><span>{{ platformLabel(cookieDialog?.account?.platform) }} · UID {{ cookieDialog?.account?.platform_account_id || '待识别' }}</span></div>
       <p class="form-tip">目标窗口：{{ profileForAccount(cookieDialog?.account)?.bit_name || '未绑定' }}</p>
       <template v-if="!cookieUnresolved"><label class="field-label">新的 Cookie</label><t-textarea v-model="cookieInput" :autosize="{minRows:7,maxRows:10}" placeholder="粘贴此账号的新 Cookie" :disabled="updatingCookie" /><p class="form-tip">更新当前平台的登录信息，完成后检查账号身份。首次导入的 Cookie 保留。</p></template>
       <FeedbackAlert v-if="cookieError || cookieUnresolved" :theme="cookieUnresolved?'warning':'error'" :message="cookieError || cookieOperation?.message || '更新结果待确认，请核实当前登录状态'" />
-      <div class="dialog-footer"><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button v-if="cookieOperation?.existing_account_id" variant="outline" @click="viewExistingCookieAccount">查看已有账号</t-button><t-button variant="outline" :disabled="updatingCookie" @click="cookieUpdateVisible=false">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></div>
-    </t-dialog>
+      <template #footer><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button v-if="cookieOperation?.existing_account_id" variant="outline" @click="viewExistingCookieAccount">查看已有账号</t-button><t-button variant="outline" :disabled="updatingCookie" @click="cookieUpdateVisible=false">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></template>
+    </ResourceOverlay>
   </div>
   </t-loading>
 </template>
 
 <style scoped>
+.account-sub { color:var(--wt-text-tertiary);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.account-identity { display:flex;align-items:center;gap:10px; }
+.account-identity__text { min-width:0; }
+.account-name { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.account-category { display:flex;flex-direction:column;gap:4px; }
+.account-category small { color:var(--wt-text-tertiary);font-size:12px; }
+
+.account-attention { color: var(--wt-warning); }
+
+.account-category-filter { flex: 0 1 384px; }
+.account-page :deep(.resource-row-actions .t-button) { min-height: 32px; height: 32px; font-size: 13px; }
+.account-page :deep(.wt-filter-actions) { align-self: flex-end; }
+.account-name { color: var(--wt-text-primary); }
+.identity-comparison { display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px; }
+.identity-comparison > div { padding:16px;border:1px solid var(--wt-border);border-radius:6px; }
+
 .import-resume{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;margin-bottom:16px;border:1px solid var(--td-component-border);border-radius:6px;background:var(--td-bg-color-container);font-size:13px}
 .account-object{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}.account-object span{font-size:12px;color:var(--td-text-color-secondary)}.credential-section{position:relative;margin-bottom:20px}.credential-section h4{font-size:14px;margin:0 0 10px}.credential-actions{display:flex;justify-content:flex-end;gap:4px}.field-label{display:block;margin-bottom:8px}.dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .account-detail-heading { display:flex;gap:16px;align-items:center;margin-bottom:24px; }
 .account-detail-heading h2 { margin:0;font-size:20px; }
 .account-detail-heading p { margin:6px 0 10px;font-size:12px;color:var(--td-text-color-secondary); }
 .account-resource-card { padding: 18px 20px; }
-.form-section { font-weight: 600; font-size: 13px; color: var(--td-text-color-secondary); margin: 12px 0 6px; }
-.form-section:first-child { margin-top: 0; }
-.stats-row { display: flex; align-items: stretch; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
-.stats-group { display: flex; align-items: center; color: var(--td-text-color-secondary, #666); font-size: 12px; padding: 0 4px; white-space: nowrap; }
-.stat-card { flex: 1 1 118px; cursor: pointer; min-width: 118px; min-height: 72px; max-height: 80px; }
-.stat-card :deep(.t-card__body) { padding: 12px 16px; }
-.stat-label { font-size: 12px; color: var(--td-text-color-secondary, #666); }
-.stat-num { font-size: 20px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
-.batch-result-card { margin-bottom: 16px; }
 .cookie-box {
   max-height: 160px;
   overflow: auto;
@@ -1325,63 +1212,22 @@ const columns = [
   word-break: break-all;
   white-space: pre-wrap;
 }
-.account-id { cursor: pointer; color: var(--td-brand-color, #0052d9); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
-.account-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); font-weight: 500; }
+.account-id { color: var(--wt-text-tertiary); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+
 .window-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); }
-.account-sub { color: var(--td-text-color-secondary, #666); font-size: 12px; }
-.account-remark { color: var(--td-text-color-secondary, #666); font-size: 12px; }
+
 .account-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .tags-more { cursor: pointer; }
-.tag-editor { width: 100%; }
-.tag-editor :deep(.t-select) { width: 100%; }
-.tag-create-option { display: flex; align-items: center; gap: 4px; padding: 8px 12px; cursor: pointer; color: var(--td-brand-color, #0052d9); font-size: 14px; }
-.tag-create-option:hover { background: var(--td-bg-color-container-hover, #f3f3f3); }
 .window-cell { cursor: pointer; }
-.window-proxy { font-size: 12px; }
-.proxy-dot { margin-right: 2px; }
-.proxy-dot.proxy-ok { color: var(--td-success-color, #2ba471); }
-.window-name { font-size: 13px; }
 .window-unbound { color: var(--td-text-color-secondary, #666); }
 .window-binding-name { font-size: 13px; font-weight: 500; }
 .window-binding-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary, #666); margin-top: 4px; }
 .window-bit-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; display: inline-block; vertical-align: bottom; }
-.op-cell { white-space: nowrap; }
-.info-popup .info-head { display: flex; gap: 10px; align-items: center; }
-.info-popup .info-name { font-size: 16px; font-weight: 600; }
-.info-popup .info-sub { color: var(--td-text-color-secondary, #666); font-size: 13px; }
 .info-tip { color: var(--td-text-color-secondary, #666); font-size: 12px; }
-.status-green { color: var(--td-success-color, #2ba471); }
-.tag-manage-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
-.tag-count { color: var(--td-text-color-secondary, #666); font-size: 12px; flex: 1; }
-.batch-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.batch-result-list { display: grid; gap: 6px; }
-.batch-result-item {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) 80px minmax(200px, 2fr);
-  align-items: center;
-  gap: 8px;
-}
-.batch-account { font-weight: 500; }
-.batch-message { color: var(--td-text-color-secondary); }
-.action-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.account-sub,
 .form-tip {
   color: var(--td-text-color-placeholder);
   font-size: 13px;
 }
 .account-name { font-weight: 500; }
 .account-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
-.detail-form { margin-top: 16px; }
 </style>

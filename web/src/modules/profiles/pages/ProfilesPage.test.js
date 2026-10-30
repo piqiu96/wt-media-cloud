@@ -167,3 +167,16 @@ describe('browser window resource page', () => {
     expect(source).toContain('@done="closeProgress"')
   })
 })
+
+
+describe('team selection identity', () => {
+  it('matches selected team IDs exactly so team 1 never includes team 11 or 17', () => {
+    const body = source.slice(source.indexOf('function teamMatches('), source.indexOf('\nfunction groupOwnerText('))
+    const matches = new Function(`${body}; return teamMatches`)()
+    expect(matches(1, '1')).toBe(true)
+    expect(matches(11, '1')).toBe(false)
+    expect(matches(17, '1')).toBe(false)
+    expect(matches(11, '')).toBe(true)
+    expect(matches(11, undefined)).toBe(true)
+  })
+})
