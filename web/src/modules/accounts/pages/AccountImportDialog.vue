@@ -15,6 +15,7 @@ const emit=defineEmits(['update:visible','changed','view-account'])
 const api=createMediaAccountImportClient(),profiles=createProfileBindingClient()
 const fileInput=ref(null)
 const screen=ref('input'),batch=ref(null),history=ref([]),groups=ref([]),preview=ref([]),raw=ref(''),platform=ref('bilibili'),groupId=ref(''),categoryType=ref(''),categoryIds=ref([]),tags=ref([]),remark=ref(''),error=ref(''),busy=ref(false),keepRunning=ref(false),requestKey=ref(''),tab=ref('all'),reuseItem=ref(null),candidateId=ref(''),candidates=ref([]),pauseClose=ref(false)
+let defaultGroupId = ''
 const labels={pending:'待处理',running:'执行中',succeeded:'已接入',failed:'未完成',skipped:'已跳过',uncertain:'待确认'}
 const countLabels={total:'总计',succeeded:'成功',failed:'未完成',skipped:'跳过',running:'执行中',pending:'待处理',uncertain:'待确认'}
 const rows=()=>raw.value.split(/\r?\n/).map((s,n)=>({row_number:n+1,input_cookie:s.trim()})).filter(i=>i.input_cookie)
@@ -28,19 +29,30 @@ const progress=computed(()=>batch.value?Math.round((batch.value.counts.succeeded
 const resultTitle=computed(()=>busy.value?'正在接入账号':blocked.value||batch.value?.counts.pending?'本轮接入已暂停':batch.value?.counts.failed?'接入完成，部分账号需处理':'本轮接入完成')
 async function readFile(event){const f=event.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){error.value='文件超过 2 MB，请拆分后再接入';return}raw.value=await f.text();event.target.value=''}
 const columns=[{colKey:'row_number',title:'原行号',width:68},{colKey:'account',title:'账号',width:150},{colKey:'window',title:'浏览器窗口',width:132},{colKey:'status',title:'接入状态',width:100},{colKey:'message',title:'结果说明',minWidth:180},{colKey:'op',title:'操作',width:225,fixed:'right'}]
-watch(()=>props.visible,async open=>{
+function resetInput() {
+ raw.value='';platform.value='bilibili';groupId.value='';defaultGroupId='';categoryType.value='';categoryIds.value=[];tags.value=[];remark.value='';preview.value=[];requestKey.value=''
+}
+function inputHasChanges() {
+ return Boolean(raw.value.trim()||platform.value!=='bilibili'||groupId.value!==defaultGroupId||categoryType.value||categoryIds.value.length||tags.value.length||remark.value.trim())
+}
+watch(()=>props.visible,async (open,_,onCleanup)=>{
  if(!open)return
- error.value='';raw.value='';preview.value=[];requestKey.value='';batch.value=null;pauseClose.value=false;keepRunning.value=false;screen.value=props.historyOnly?'history':'input'
- try {history.value=await api.list();if(props.initialId){await openBatch(props.initialId);return}if(!props.historyOnly){const local=await props.getLocal();const result=await local.profileGroups();groups.value=result?.data?.groups||result?.groups||[];groupId.value=groups.value[0]?.id||''}}
- catch(e){error.value=e.message||'读取接入信息失败，请重试'}
+ let active=true;onCleanup(()=>{active=false})
+ resetInput();error.value='';batch.value=null;groups.value=[];history.value=[];reuseItem.value=null;candidateId.value='';candidates.value=[];pauseClose.value=false;keepRunning.value=false;tab.value='all';screen.value=props.historyOnly?'history':'input'
+ try {
+  const recent=await api.list();if(!active)return;history.value=recent
+  if(props.initialId){const saved=await api.get(props.initialId);if(active){update(saved);screen.value='results'};return}
+  if(!props.historyOnly){const local=await props.getLocal();if(!active)return;const result=await local.profileGroups();if(!active)return;groups.value=result?.data?.groups||result?.groups||[];groupId.value=groups.value[0]?.id||'';defaultGroupId=groupId.value}
+ } catch(e){if(active)error.value=e.message||'读取接入信息失败，请重试'}
 })
 function publicBatch(v){const {execution,...safe}=v;return safe}
 function update(v){batch.value=publicBatch(v)}
-async function showHistory(){if(raw.value.trim()&&!await feedback.confirmWarning({title:'放弃本次输入？',message:'尚未确认的接入内容不会保存。',confirmText:'放弃输入'}))return;raw.value='';try{history.value=await api.list();screen.value='history'}catch(e){fail(e)}}
+async function showHistory(){if(['input','preview'].includes(screen.value)&&inputHasChanges()&&!await feedback.confirmWarning({title:'放弃本次输入？',message:'尚未确认的接入内容不会保存。',confirmText:'放弃输入'}))return;try{history.value=await api.list();resetInput();error.value='';screen.value='history'}catch(e){fail(e)}}
 async function refresh(){try{if(batch.value)update(await api.get(batch.value.id));else history.value=await api.list();error.value=''}catch(e){fail(e)}}
-function fail(e){error.value=e.message||'本次操作未完成，请刷新后继续';feedback.toast.error(error.value)}
-async function openBatch(id){error.value='';update(await api.get(id));screen.value='results';tab.value='all'}
+function fail(e){error.value=e.message||'本次操作未完成，请刷新后继续'}
+async function openBatch(id){if(busy.value)return;busy.value=true;error.value='';try{update(await api.get(id));screen.value='results';tab.value='all'}catch(e){fail(e)}finally{busy.value=false}}
 async function validate(){
+ if(busy.value)return
  error.value='';if(!groupId.value){error.value='请选择浏览器窗口分组';return}busy.value=true
  try {preview.value=await api.preview({platform:platform.value,items:rows()});screen.value='preview';requestKey.value=crypto.randomUUID()}catch(e){fail(e)}finally{busy.value=false}
 }
@@ -78,8 +90,8 @@ async function confirmReuse(){
  const i=reuseItem.value;reuseItem.value=null;await action(i,'reuse',{candidate_profile_id:candidateId.value,confirmed:true});await runPending(i.row_number)
 }
 async function close(){
- if(busy.value){keepRunning.value=false;pauseClose.value=true;return}
- if(raw.value.trim()&&screen.value!=='results'&&!await feedback.confirmWarning({title:'放弃本次输入？',message:'尚未确认的接入内容不会保存。',confirmText:'放弃输入'}))return
+ if(busy.value){if(keepRunning.value&&screen.value==='results'){keepRunning.value=false;pauseClose.value=true};return}
+ if(['input','preview'].includes(screen.value)&&inputHasChanges()&&!await feedback.confirmWarning({title:'放弃本次输入？',message:'尚未确认的接入内容不会保存。',confirmText:'放弃输入'}))return
  emit('update:visible',false)
 }
 </script>
@@ -98,7 +110,7 @@ async function close(){
    </div>
    <t-form-item label="业务分类"><CategoryFields v-model="categoryIds" v-model:type="categoryType" :categories="categories" /></t-form-item>
    <t-form-item label="标签"><TagInput v-model="tags" /></t-form-item>
-   <t-form-item label="备注"><t-input v-model="remark" :maxlength="500" placeholder="本批账号的运营备注（选填）"/></t-form-item>
+   <t-form-item label="运营备注"><t-input v-model="remark" :maxlength="500" placeholder="账号来源、用途或注意事项（应用于本批账号）"/></t-form-item>
    <div class="import-file"><span>每行一个账号，同一批次使用同一平台。</span><t-button variant="outline" size="small" @click="fileInput.click()">选择 TXT 文件</t-button><input ref="fileInput" type="file" accept=".txt,text/plain" hidden @change="readFile"/></div>
    <t-form-item label="Cookie 列表"><t-textarea v-model="raw" :autosize="{minRows:7,maxRows:12}" placeholder="每行粘贴一个 Cookie；支持 Cookie 请求头或单行 JSON 数组"/></t-form-item>
    <p class="hint">每批最多 100 行、合计 2 MB。优先创建新窗口，无法新建时可按行选择空闲窗口。</p>
@@ -138,11 +150,11 @@ async function close(){
  </div>
  <template #footer>
  <div class="footer">
-  <t-button variant="outline" :disabled="busy" @click="showHistory">接入记录</t-button><span class="spacer"/>
-  <t-button variant="outline" @click="close">{{ busy?'暂停并返回':'关闭' }}</t-button>
+  <t-button v-if="screen!=='history'" variant="outline" :disabled="busy" @click="showHistory">接入记录</t-button><span class="spacer"/>
+  <t-button variant="outline" :disabled="busy&&!keepRunning" @click="close">{{ busy&&pauseClose?'正在暂停…':busy&&keepRunning?'暂停并返回':['input','preview'].includes(screen)?'取消':screen==='results'?'完成':'关闭' }}</t-button>
   <t-button v-if="screen==='input'" theme="primary" :loading="busy" @click="validate">校验并预览</t-button>
   <template v-if="screen==='preview'"><t-button variant="outline" :disabled="busy" @click="screen='input'">返回修改</t-button><t-button theme="primary" :loading="busy" :disabled="!validRows.length" @click="createBatch">确认接入 {{ validRows.length }} 个账号</t-button></template>
-  <template v-if="screen==='results'"><t-button variant="outline" :disabled="busy" @click="refresh">刷新结果</t-button><t-button theme="primary" :disabled="busy||!continueCount" @click="runPending()">继续接入（{{ continueCount }}）</t-button></template>
+  <template v-if="screen==='results'"><t-button variant="outline" :disabled="busy" @click="refresh">刷新结果</t-button><t-button v-if="continueCount" theme="primary" :disabled="busy" @click="runPending()">继续接入（{{ continueCount }}）</t-button></template>
  </div>
  </template>
 </ResourceOverlay>

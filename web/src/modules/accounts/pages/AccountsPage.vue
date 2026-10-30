@@ -84,6 +84,7 @@ const showCreate = ref(false)
 const createForm = ref(defaultCreateForm())
 const creating = ref(false)
 const createError = ref("")
+let createSnapshot = "", editSnapshot = "", closingAccountForm = false
 
 const detailVisible = ref(false)
 const detailAccount = ref(null)
@@ -250,10 +251,32 @@ function openCreate() {
   createForm.value = defaultCreateForm()
   createCategoryType.value = ""
   createError.value = ""
+  createSnapshot = accountFormSnapshot('create')
   showCreate.value = true
 }
 
+function accountFormSnapshot(kind) {
+  return JSON.stringify(kind === 'create'
+    ? { ...createForm.value, categoryType: createCategoryType.value }
+    : { categoryType: editCategoryType.value, categoryIds: editCategoryIds.value, tags: editTags.value, remark: editRemark.value })
+}
+
+async function closeAccountForm(kind) {
+  if (creating.value || savingEdit.value || closingAccountForm) return
+  closingAccountForm = true
+  try {
+    const initial = kind === 'create' ? createSnapshot : editSnapshot
+    if (accountFormSnapshot(kind) !== initial && !await feedback.confirmWarning({ title: '放弃未保存的修改？', message: '本次输入尚未保存。', confirmText: '放弃修改' })) return
+    if (kind === 'create') showCreate.value = false
+    else editVisible.value = false
+  } finally {
+    closingAccountForm = false
+  }
+}
+
 async function createAccount() {
+  if (creating.value) return
+  createError.value = ""
   error.value = ""
   const categoryError = validateCategorySelection(createForm.value.categoryIds)
   if (categoryError) {
@@ -379,11 +402,13 @@ function openEdit(account) {
   editCategoryIds.value = Array.isArray(account.category_ids) ? [...account.category_ids] : []
   editTags.value = [...(account.tags || [])]
   editError.value = ""
+  editSnapshot = accountFormSnapshot('edit')
   editVisible.value = true
 }
 
 async function saveEdit() {
-  if (!editAccount.value) return
+  if (!editAccount.value || savingEdit.value) return
+  editError.value = ""
   const categoryError = validateCategorySelection(editCategoryIds.value)
   if (categoryError) {
     editError.value = categoryError
@@ -401,6 +426,7 @@ async function saveEdit() {
     const idx = accounts.value.findIndex(a => a.id === editAccount.value.id)
     if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated, tags: newTags }
     editVisible.value = false
+    feedback.toast.success("账号已保存")
     await loadAccounts()
   } catch (e) {
     editError.value = e.message || "保存失败"
@@ -1060,21 +1086,21 @@ const columns = computed(() => [
     </t-dialog>
 
     <AccountImportDialog v-model:visible="importVisible" :initial-id="importId" :history-only="importHistoryOnly" :categories="categories" :get-local="desktopLocalAgentService" @changed="importsChanged" @view-account="viewImportedAccount" />
-    <ResourceOverlay v-model:visible="showCreate" title="新增账号" :width="640" :busy="creating">
+    <ResourceOverlay :visible="showCreate" title="新增账号" :width="640" :busy="creating" @close="closeAccountForm('create')">
       <FeedbackAlert v-if="createError" :message="createError" theme="error" style="margin-bottom:12px" />
       <ResourceForm>
-        <t-form-item label="业务分类"><CategoryFields v-model="createForm.categoryIds" v-model:type="createCategoryType" :categories="categories" /></t-form-item>
         <t-form-item label="平台">
           <t-select v-model="createForm.platform">
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
           </t-select>
         </t-form-item>
+        <t-form-item label="业务分类"><CategoryFields v-model="createForm.categoryIds" v-model:type="createCategoryType" :categories="categories" /></t-form-item>
         <t-form-item label="标签"><TagInput v-model="createForm.tags" /></t-form-item>
-        <t-form-item label="备注">
+        <t-form-item label="运营备注">
           <t-textarea v-model="createForm.remark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
       </ResourceForm>
-    <template #footer><t-button variant="outline" :disabled="creating" @click="showCreate = false">取消</t-button><t-button theme="primary" :loading="creating" @click="createAccount">新增</t-button></template>
+    <template #footer><t-button variant="outline" :disabled="creating" @click="closeAccountForm('create')">取消</t-button><t-button theme="primary" :loading="creating" @click="createAccount">保存</t-button></template>
     </ResourceOverlay>
 
     <t-dialog :visible="createdGuide !== null" @close="createdGuide = null" header="账号已保存" width="560px" :footer="false">
@@ -1104,18 +1130,18 @@ const columns = computed(() => [
     </t-dialog>
 
     <!-- 编辑账号（纯资料，不含打开关闭/检查/Cookie） -->
-    <ResourceOverlay v-model:visible="editVisible" title="编辑资料" :width="640" :busy="savingEdit">
+    <ResourceOverlay :visible="editVisible" title="编辑账号" :width="640" :busy="savingEdit" @close="closeAccountForm('edit')">
       <FeedbackAlert v-if="editError" :message="editError" theme="error" style="margin-bottom:12px" />
       <ResourceForm>
         <t-form-item label="账号">{{ accountDisplayName(editAccount) }}（{{ platformLabel(editAccount.platform) }}）</t-form-item>
         <t-form-item label="业务分类"><CategoryFields v-model="editCategoryIds" v-model:type="editCategoryType" :categories="categories" /></t-form-item>
         <t-form-item label="标签"><TagInput v-model="editTags" /></t-form-item>
-        <t-form-item label="备注">
-          <t-textarea v-model="editRemark" :rows="3" placeholder="账号备注" />
+        <t-form-item label="运营备注">
+          <t-textarea v-model="editRemark" :rows="3" placeholder="账号来源、用途或注意事项" />
         </t-form-item>
 
       </ResourceForm>
-    <template #footer><t-button variant="outline" :disabled="savingEdit" @click="editVisible = false">取消</t-button><t-button theme="primary" :loading="savingEdit" @click="saveEdit">保存</t-button></template>
+    <template #footer><t-button variant="outline" :disabled="savingEdit" @click="closeAccountForm('edit')">取消</t-button><t-button theme="primary" :loading="savingEdit" @click="saveEdit">保存</t-button></template>
     </ResourceOverlay>
 
     <ResourceOverlay v-model:visible="detailVisible" title="账号详情" kind="drawer" :width="800" :footer="false">
