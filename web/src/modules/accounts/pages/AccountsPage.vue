@@ -409,12 +409,13 @@ async function saveEdit() {
   }
 }
 
-async function toggleEnabled(account) {
+async function toggleEnabled(account, target) {
+  account = accounts.value.find(row => row.id === account.id)
+  if (!account || typeof target !== "boolean" || target === account.enabled) return
   if (enabledPending.value.has(account.id) || enabledConfirming.value.has(account.id)) return
   enabledConfirming.value.add(account.id)
-  const target = !account.enabled
   try {
-  if (!await feedback.confirmWarning({ title: target ? "启用账号" : "停用账号", message: `${target ? "启用" : "停用"}「${accountDisplayName(account)}」？${target ? "" : "停用后将不参与后续任务。"}`, confirmText: target ? "启用" : "停用", danger: false })) return
+    if (!await feedback.confirmWarning({ title: target ? "启用账号" : "停用账号", message: `${target ? "启用" : "停用"}「${accountDisplayName(account)}」？${target ? "" : "停用后将不参与后续任务。"}`, confirmText: target ? "启用" : "停用", danger: false })) return
     enabledConfirming.value.delete(account.id)
     enabledPending.value.add(account.id)
     const updated = await accountClient.update(account.id, { enabled: target })
@@ -1003,7 +1004,7 @@ const columns = computed(() => [
       </template>
       <template #executable="{ row }"><span :class="{'account-attention': executableText(row) !== '可用于运营任务'}">{{ executableText(row).replace(/^不可执行：|^待检查：/, "") }}</span></template>
       <template #enabled="{ row }">
-        <t-switch :value="row.enabled" :loading="enabledPending.has(row.id)" :disabled="enabledPending.has(row.id) || enabledConfirming.has(row.id)" :aria-label="`${accountDisplayName(row)}${row.enabled ? '停用' : '启用'}`" @change="toggleEnabled(row)" />
+        <t-switch :value="row.enabled" :loading="enabledPending.has(row.id)" :disabled="enabledPending.has(row.id) || enabledConfirming.has(row.id)" :aria-label="`${accountDisplayName(row)}${row.enabled ? '停用' : '启用'}`" @change="value => toggleEnabled(row, value)" />
       </template>
       <template #account_status="{ row }">
         <ResourceStatusBadge :tone="accountStatusTheme(row) === 'success' ? 'success' : accountStatusTheme(row) === 'danger' ? 'danger' : accountStatusTheme(row) === 'warning' ? 'warning' : 'neutral'" :label="accountStatusText(row)" />
