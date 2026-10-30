@@ -13,11 +13,11 @@ import {feedback} from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import {platformLabel} from '../../../shared/utils/platforms.js'
 import {runImportItem} from './accountImports.js'
-import {importResultSummary} from './importResultSummary.js'
+import {importHistoryCounts,importResultSummary} from './importResultSummary.js'
 const props=defineProps({visible:Boolean,initialId:{type:String,default:''},historyOnly:Boolean,categories:{type:Array,default:()=>[]},getLocal:{type:Function,required:true}})
 const emit=defineEmits(['update:visible','changed','view-account'])
 const api=createMediaAccountImportClient(),profiles=createProfileBindingClient()
-const fileInput=ref(null)
+const fileInput=ref(null),historyLoading=ref(false)
 const screen=ref('input'),batch=ref(null),history=ref([]),groups=ref([]),preview=ref([]),raw=ref(''),platform=ref('bilibili'),groupId=ref(''),categoryType=ref(''),categoryIds=ref([]),tags=ref([]),remark=ref(''),error=ref(''),busy=ref(false),keepRunning=ref(false),requestKey=ref(''),tab=ref('all'),reuseItem=ref(null),candidateId=ref(''),candidates=ref([]),pauseClose=ref(false)
 let defaultGroupId = ''
 const labels={pending:'待处理',running:'执行中',succeeded:'已接入',failed:'未完成',skipped:'已跳过',uncertain:'待确认'}
@@ -33,6 +33,7 @@ const progress=computed(()=>batch.value?Math.round((batch.value.counts.succeeded
 const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value))
 const resultCounts=computed(()=>Object.entries(countLabels).map(([key,label])=>({key,label,value:batch.value?.counts[key]||0,tone:key==='succeeded'?'success':key==='failed'?'danger':key==='uncertain'?'warning':key==='running'?'info':'neutral'})))
 async function readFile(event){const f=event.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){error.value='文件超过 2 MB，请拆分后再接入';return}raw.value=await f.text();event.target.value=''}
+const historyColumns=[{colKey:'created_at',title:'接入时间',width:174},{colKey:'batch',title:'接入批次',minWidth:190},{colKey:'result',title:'接入结果',minWidth:300},{colKey:'op',title:'操作',width:100,fixed:'right'}]
 const columns=[{colKey:'row_number',title:'原行号',width:68},{colKey:'account',title:'账号',width:150},{colKey:'window',title:'浏览器窗口',width:132},{colKey:'status',title:'接入状态',width:100},{colKey:'message',title:'结果说明',minWidth:180},{colKey:'op',title:'操作',width:225,fixed:'right'}]
 function resetInput() {
  raw.value='';platform.value='bilibili';groupId.value='';defaultGroupId='';categoryType.value='';categoryIds.value=[];tags.value=[];remark.value='';preview.value=[];requestKey.value=''
@@ -43,12 +44,13 @@ function inputHasChanges() {
 watch(()=>props.visible,async (open,_,onCleanup)=>{
  if(!open)return
  let active=true;onCleanup(()=>{active=false})
- resetInput();error.value='';batch.value=null;groups.value=[];history.value=[];reuseItem.value=null;candidateId.value='';candidates.value=[];pauseClose.value=false;keepRunning.value=false;tab.value='all';screen.value=props.historyOnly?'history':'input'
+ resetInput();error.value='';batch.value=null;groups.value=[];history.value=[];reuseItem.value=null;candidateId.value='';candidates.value=[];pauseClose.value=false;keepRunning.value=false;tab.value='all';screen.value=props.historyOnly?'history':'input';historyLoading.value=true
  try {
   const recent=await api.list();if(!active)return;history.value=recent
   if(props.initialId){const saved=await api.get(props.initialId);if(active){update(saved);screen.value='results'};return}
   if(!props.historyOnly){const local=await props.getLocal();if(!active)return;const result=await local.profileGroups();if(!active)return;groups.value=result?.data?.groups||result?.groups||[];groupId.value=groups.value[0]?.id||'';defaultGroupId=groupId.value}
  } catch(e){if(active)error.value=e.message||'读取接入信息失败，请重试'}
+ finally{if(active)historyLoading.value=false}
 })
 function publicBatch(v){const {execution,...safe}=v;return safe}
 function update(v){batch.value=publicBatch(v)}
@@ -127,8 +129,14 @@ async function close(){
   <t-table class="wt-resource-table" :data="preview" row-key="row_number" :columns="[{colKey:'row_number',title:'原行号',width:90},{colKey:'account',title:'待接入资料',width:180},{colKey:'plan',title:'窗口安排',width:190},{colKey:'message',title:'校验结果',minWidth:240}]" :scroll="{x:'700px'}" :max-height="330" size="small"><template #account="{row}">输入第 {{ row.row_number }} 行</template><template #plan="{row}">{{ row.valid?'优先新建独立窗口':'不接入' }}</template><template #message="{row}"><span class="result-message" :class="{'error-text':!row.valid}">{{ row.message }}</span></template></t-table>
  </template>
  <template v-else-if="screen==='history'">
-  <p class="hint">最近 20 次接入，可随时查看和继续处理。</p><ResourceEmptyState v-if="!history.length" title="暂无接入记录"/>
-  <button v-for="h in history" :key="h.id" class="history-row" @click="openBatch(h.id)"><span>{{ platformLabel(h.platform) }} · 接入 {{ h.counts.total }} 个账号<small>{{ new Date(h.created_at).toLocaleString() }}</small></span><span>成功 {{ h.counts.succeeded }} / 待处理 {{ h.counts.pending+h.counts.failed+h.counts.uncertain+h.counts.running }}　查看结果 →</span></button>
+  <p class="history-intro">最近 20 次接入。查看逐项结果，继续处理未完成的账号。</p>
+  <t-table v-if="historyLoading||history.length" class="wt-resource-table" :data="history" :columns="historyColumns" row-key="id" :loading="historyLoading" :max-height="420" :scroll="{x:'764px'}" size="small" hover>
+   <template #created_at="{row}"><span class="history-time">{{ new Date(row.created_at).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) }}</span></template>
+   <template #batch="{row}"><div class="history-batch"><strong>{{ platformLabel(row.platform) }} · {{ row.counts.total }} 个账号</strong><small v-if="row.content_json?.remark">{{ row.content_json.remark }}</small></div></template>
+   <template #result="{row}"><div class="history-counts"><ResourceStatusBadge v-for="item in importHistoryCounts(row.counts)" :key="item.key" :tone="item.tone" :label="`${item.label} ${item.value}`" /></div></template>
+   <template #op="{row}"><t-button variant="text" size="small" :disabled="busy" @click="openBatch(row.id)">查看结果</t-button></template>
+  </t-table>
+  <ResourceEmptyState v-else-if="!error" title="暂无接入记录" description="完成首次批量 CK 接入后，可在这里查看结果。" />
  </template>
  <template v-else-if="batch">
   <OperationResultSummary :title="resultPresentation.title" :tone="resultPresentation.tone" :running="busy" :description="resultPresentation.description" :counts="resultCounts"><span>{{ platformLabel(batch.platform) }} · {{ content.remark || '账号批量接入' }}</span></OperationResultSummary>
@@ -184,8 +192,10 @@ small { display: block; overflow-wrap: anywhere; }
 .result-message { white-space: normal; overflow-wrap: anywhere; line-height: 1.7; }
 .error-text { color: var(--wt-danger); }
 .result-tabs { margin: 16px 0; }
-.history-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 18px 10px; border: 0; border-bottom: 1px solid var(--wt-border); background: transparent; text-align: left; color: var(--wt-text-primary); cursor: pointer; overflow-wrap: anywhere; }
-.history-row > span { min-width: 0; }
-.history-row:hover { background: var(--td-bg-color-container-hover); }
+.history-intro { margin:0 0 16px;color:var(--wt-text-tertiary);font-size:13px;line-height:1.7; }
+.history-time { white-space:nowrap;font-variant-numeric:tabular-nums; }
+.history-batch { overflow-wrap:anywhere;line-height:1.7; }
+.history-batch strong { font-weight:500;color:var(--wt-text-primary); }
+.history-counts { display:flex;flex-wrap:wrap;gap:6px 8px; }
 @media (max-width: 600px) { .form-grid { grid-template-columns: minmax(0,1fr); } .spacer { display: none; } }
 </style>

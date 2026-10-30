@@ -18,6 +18,7 @@ import { executeCookieUpdate, reconcileCookieUpdate } from "./cookieUpdates.js"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from "vue"
+import { ChevronDownIcon, ChevronUpIcon } from "tdesign-icons-vue-next"
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js"
 import { createProfileBindingClient } from "../../../shared/api/profileBindings.js"
 import { createSessionClient } from "../../../shared/api/session.js"
@@ -132,6 +133,7 @@ const allTagsPopup = ref(null)
 const selectedAccountIds = ref([])
 const selectedAccountCache = new Map()
 const searchProfile = ref("")
+const advancedFilterCount = computed(() => [searchEnabled.value, searchTags.value.length, searchProfile.value.trim()].filter(Boolean).length)
 // 使用人筛选：高级运营默认看自己，管理员默认看全部成员；普通运营由服务端强制
 // 只看自己，因此不展示这个筛选项。
 const searchOwner = ref("")
@@ -945,8 +947,7 @@ const columns = computed(() => [
       <template #actions>
         <t-button v-if="!isAdmin" theme="primary" @click="openCreate">新增账号</t-button>
         <t-button v-if="isDesktop && !isAdmin" variant="outline" @click="openImports()">批量CK接入</t-button>
-        <t-button v-if="isDesktop && !isAdmin" variant="text" @click="openImports('',true)">接入记录</t-button>
-        <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
+        <t-button v-if="isDesktop && !isAdmin" variant="outline" @click="openImports('',true)">接入记录</t-button>
       </template>
     </ResourcePageHeader>
 
@@ -974,10 +975,6 @@ const columns = computed(() => [
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
         </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">启用状态</span><t-select v-model="searchEnabled" placeholder="全部" clearable>
-            <t-option value="enabled" label="启用" />
-            <t-option value="disabled" label="停用" />
-        </t-select></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">登录状态</span><t-select v-model="searchLoginStatus" @change="searchView=''" placeholder="全部" clearable>
             <t-option value="normal" label="正常" />
             <t-option value="not_logged_in" label="未登录" />
@@ -986,17 +983,24 @@ const columns = computed(() => [
             <t-option value="restricted" label="账号受限" />
             <t-option value="environment_error" label="检查失败" />
         </t-select></label>
-        <template v-if="showAdvancedFilters">
-        <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" multiple filterable placeholder="全部" clearable>
-            <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
-        </t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">标签匹配</span><t-select v-model="searchTagMatch" placeholder="全部"><t-option value="any" label="任一标签" /><t-option value="all" label="全部标签" /><t-option value="exclude" label="排除标签" /></t-select></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable /></label>
-        </template>
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadAccounts({ resetPage: true })">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-          <t-button variant="text" @click="showAdvancedFilters = !showAdvancedFilters">{{ showAdvancedFilters ? "收起筛选" : "更多筛选" }}</t-button>
+          <t-button variant="text" :aria-expanded="showAdvancedFilters" aria-controls="account-advanced-filters" @click="showAdvancedFilters = !showAdvancedFilters">
+            {{ showAdvancedFilters ? "收起筛选" : "更多筛选" }}<span v-if="advancedFilterCount">（{{ advancedFilterCount }}）</span>
+            <template #suffix><ChevronUpIcon v-if="showAdvancedFilters" /><ChevronDownIcon v-else /></template>
+          </t-button>
+        </div>
+        <div v-show="showAdvancedFilters" id="account-advanced-filters" class="account-advanced-filters">
+        <label class="wt-filter-field"><span class="wt-filter-field__label">启用状态</span><t-select v-model="searchEnabled" placeholder="全部" clearable>
+            <t-option value="enabled" label="启用" />
+            <t-option value="disabled" label="停用" />
+        </t-select></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">标签</span><t-select v-model="searchTags" multiple filterable placeholder="全部" clearable>
+            <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
+        </t-select></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">标签匹配</span><t-select v-model="searchTagMatch" placeholder="全部" :disabled="!searchTags.length"><t-option value="any" label="任一标签" /><t-option value="all" label="全部标签" /><t-option value="exclude" label="排除标签" /></t-select></label>
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">窗口</span><t-input v-model="searchProfile" placeholder="窗口名 / 序号 / BitID / ID" clearable /></label>
         </div>
     </div>
 
@@ -1234,6 +1238,9 @@ const columns = computed(() => [
 .account-attention { color: var(--wt-warning); }
 
 .account-category-filter { flex: 0 1 384px; }
+.account-advanced-filters { display:flex;flex-wrap:wrap;align-items:flex-end;gap:20px 24px;flex:1 0 100%;min-width:0;padding-top:20px;border-top:1px solid var(--wt-border); }
+.account-advanced-filters > .wt-filter-field { flex:0 1 180px; }
+.account-advanced-filters > .wt-filter-field--wide { flex:1 1 260px;max-width:400px; }
 .account-page :deep(.resource-row-actions .t-button) { min-height: 32px; height: 32px; font-size: 13px; }
 .account-page :deep(.wt-filter-actions) { align-self: flex-end; }
 .account-name { color: var(--wt-text-primary); }

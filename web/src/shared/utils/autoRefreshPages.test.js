@@ -38,9 +38,9 @@ describe('list pages auto refresh', () => {
     expect(source).not.toContain('>刷新<')
   })
 
-  // 阳性对照：同一匹配式在仍是本机执行面的账号页上必须命中，证明「0 命中」不是
-  // 模式写错了的空转。
-  it('the button matcher still finds a refresh button where one is intended', () => {
-    expect(read('src/modules/accounts/pages/AccountsPage.vue')).toContain('>刷新<')
+  // 账号属于本机执行面：移除独立刷新入口，仍由查询和操作完成后读取最新结果，
+  // 不把内容列表的定时刷新约束强加给本机执行页。
+  it('accounts has no standalone refresh button', () => {
+    expect(read('src/modules/accounts/pages/AccountsPage.vue')).not.toContain('>刷新<')
   })
 })
