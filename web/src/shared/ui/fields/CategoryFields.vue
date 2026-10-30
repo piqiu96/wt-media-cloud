@@ -33,10 +33,11 @@ function changeType(value) { type.value = value || ''; ids.value = [] }
 </template>
 
 <style scoped>
-.category-fields { width: 100%; min-width: 0; display: grid; gap: 16px; }
+.category-fields { width: 100%; min-width: 0; display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 20px; }
 .category-fields__parent, .category-fields__children { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; color: var(--wt-text-tertiary); }
 .category-fields__optional { color: var(--wt-text-tertiary); font-size: 12px; }
 .category-fields__options { display: flex; flex-wrap: wrap; gap: 12px 20px; }
-.category-fields__empty { border: 1px dashed var(--wt-border); padding: 12px; border-radius: var(--wt-radius-sm); font-size: 12px; }
+.category-fields__empty { box-sizing: border-box; min-height: 36px; display: flex; align-items: center; background: var(--wt-bg-page); padding: 8px 12px; border-radius: var(--wt-radius-sm); font-size: 12px; }
 .category-fields--filter { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 520px) { .category-fields { grid-template-columns: 1fr; } }
 </style>

@@ -22,7 +22,7 @@ function close() {
 </script>
 
 <template>
-  <t-dialog v-if="kind === 'dialog'" :visible="visible" :header="title" :width="size" placement="center"
+  <t-dialog class="resource-overlay-context" v-if="kind === 'dialog'" :visible="visible" :header="title" :width="size" placement="center"
     dialog-class-name="resource-overlay-dialog" :close-btn="!busy" :close-on-esc-keydown="!busy && escClosable"
     :close-on-overlay-click="false" :footer="showFooter" destroy-on-close @close="close">
     <div class="resource-overlay__body"><slot /></div>
@@ -41,6 +41,7 @@ function close() {
 .resource-overlay__footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; }
 .resource-overlay__body :deep(.t-descriptions__label) { color: var(--wt-text-tertiary); }
 .resource-overlay__body :deep(.t-descriptions__content) { overflow-wrap: anywhere; }
+:global(.resource-overlay-context .t-dialog__position) { padding: 16px; height: 100%; }
 :global(.resource-overlay-dialog) { padding: 0; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; border-radius: 8px; box-shadow: var(--wt-shadow-popup); }
 :global(.resource-overlay-dialog .t-dialog__header) { flex-shrink: 0; margin: 0; height: 64px; min-height: 64px; box-sizing: border-box; padding: 0 24px; display: flex; align-items: center; border-bottom: 1px solid var(--wt-border); font-size: 18px; font-weight: 600; }
 :global(.resource-overlay-dialog .t-dialog__body) { padding: 24px; overflow: auto; min-height: 0; }

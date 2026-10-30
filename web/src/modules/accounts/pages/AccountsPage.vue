@@ -873,7 +873,7 @@ const resourceAccountStats = computed(() => [
   { key: "total", label: "账号总数", value: accountStats.value.total, tone: "info" },
   { key: "normal", label: "正常账号", value: accountStats.value.normal, tone: "success" },
   { key: "abnormal", label: "异常账号", value: accountStats.value.abnormal, tone: "danger" },
-  { key: "unbound", label: "未绑定环境", value: accountStats.value.unbound, tone: "warning" },
+  { key: "unbound", label: "未绑定窗口", value: accountStats.value.unbound, tone: "warning" },
 ])
 
 const pagedAccounts = computed(() => accounts.value)
@@ -882,7 +882,7 @@ const columns = computed(() => [
   ...(isDesktop && !isAdmin.value ? [{ colKey: "row-select", type: "multiple", width: 40, fixed: "left" }] : []),
   { colKey: "id", title: "ID", width: 60 },
   { colKey: "platform", title: "平台", width: 70 },
-  { colKey: "account_info", title: "账号信息", width: 190 },
+  { colKey: "account_info", title: "账号信息", width: 220 },
   ...(isAdmin.value ? [{ colKey: "team_name", title: "运营团队", width: 120 }] : []),
   ...(canFilterByOwner.value ? [{ colKey: "user_name", title: "使用人", width: 100 }] : []),
   { colKey: "window_info", title: "浏览器窗口", width: 180 },
@@ -900,7 +900,7 @@ const columns = computed(() => [
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
   <div class="wt-resource-page resource-visual-approved account-page">
-    <ResourcePageHeader title="社媒账号" description="管理账号资产、浏览器环境关联和账号检查状态">
+    <ResourcePageHeader title="社媒账号">
       <template #actions>
         <t-button v-if="!isAdmin" theme="primary" @click="openCreate">新增账号</t-button>
         <t-button v-if="isDesktop && !isAdmin" variant="outline" @click="openImports()">批量CK接入</t-button>
@@ -908,7 +908,7 @@ const columns = computed(() => [
         <t-button class="wt-secondary-button" variant="outline" @click="() => { loadAuxiliaryData(); loadAccounts() }">刷新</t-button>
       </template>
     </ResourcePageHeader>
-    <div v-if="recentImport" class="import-resume"><span>最近一次接入还有 {{ recentImport.counts.pending+recentImport.counts.failed+recentImport.counts.uncertain+recentImport.counts.running }} 项需要处理</span><t-button variant="text" @click="openImports(recentImport.id)">继续处理</t-button></div>
+
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
     <FeedbackAlert
       v-if="!isDesktop"
@@ -918,6 +918,7 @@ const columns = computed(() => [
     />
 
     <ResourceStatGrid :items="resourceAccountStats" :active-key="({normal: 'normal', attention: 'abnormal', unbound: 'unbound'})[searchView] || 'total'" interactive @select="applyStatFilter" />
+    <div v-if="recentImport" class="import-resume"><span>最近一次接入还有 {{ recentImport.counts.pending+recentImport.counts.failed+recentImport.counts.uncertain+recentImport.counts.running }} 项需要处理</span><t-button variant="text" @click="openImports(recentImport.id)">继续处理</t-button></div>
 
     <ResourceCard class="account-resource-card">
     <div v-if="searchView" style="margin-bottom:12px"><t-tag closable @close="searchView='';loadAccounts({resetPage:true})">{{ {normal:"正常账号",attention:"待处理账号",unbound:"未绑定窗口"}[searchView] }}</t-tag></div>
@@ -982,7 +983,7 @@ const columns = computed(() => [
         <div class="account-identity">
           <t-avatar size="32px" :image="row.platform_avatar_url || undefined">{{ accountDisplayName(row).slice(0,1) }}</t-avatar>
           <div class="account-identity__text"><strong class="account-name" :title="accountDisplayName(row)">{{ accountDisplayName(row) }}</strong>
-          <div class="account-sub">UID {{ row.platform_account_id || '—' }}</div></div>
+          <div class="account-sub" :title="`UID ${row.platform_account_id || '—'}`">UID {{ row.platform_account_id || '—' }}</div></div>
         </div>
       </template>
       <template #team_name="{ row }">{{ accountTeams.find(t => String(t.id) === String(row.team_id))?.name || accountMembers.find(m => String(m.id) === String(row.user_id))?.team_name || "—" }}</template>
@@ -1178,6 +1179,7 @@ const columns = computed(() => [
 </template>
 
 <style scoped>
+.account-sub { color:var(--wt-text-tertiary);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .account-identity { display:flex;align-items:center;gap:10px; }
 .account-identity__text { min-width:0; }
 .account-name { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
@@ -1199,9 +1201,6 @@ const columns = computed(() => [
 .account-detail-heading h2 { margin:0;font-size:20px; }
 .account-detail-heading p { margin:6px 0 10px;font-size:12px;color:var(--td-text-color-secondary); }
 .account-resource-card { padding: 18px 20px; }
-.form-section { font-weight: 600; font-size: 13px; color: var(--td-text-color-secondary); margin: 12px 0 6px; }
-.form-section:first-child { margin-top: 0; }
-.batch-result-card { margin-bottom: 16px; }
 .cookie-box {
   max-height: 160px;
   overflow: auto;
@@ -1215,36 +1214,15 @@ const columns = computed(() => [
 .account-id { color: var(--wt-text-tertiary); max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
 
 .window-name-link { cursor: pointer; color: var(--td-brand-color, #0052d9); }
-.account-sub { color: var(--td-text-color-secondary, #666); font-size: 12px; }
+
 .account-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .tags-more { cursor: pointer; }
 .window-cell { cursor: pointer; }
-.window-proxy { font-size: 12px; }
-.proxy-dot { margin-right: 2px; }
-.proxy-dot.proxy-ok { color: var(--td-success-color, #2ba471); }
-.window-name { font-size: 13px; }
 .window-unbound { color: var(--td-text-color-secondary, #666); }
 .window-binding-name { font-size: 13px; font-weight: 500; }
 .window-binding-meta { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary, #666); margin-top: 4px; }
 .window-bit-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; display: inline-block; vertical-align: bottom; }
 .info-tip { color: var(--td-text-color-secondary, #666); font-size: 12px; }
-.status-green { color: var(--td-success-color, #2ba471); }
-.batch-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.batch-result-list { display: grid; gap: 6px; }
-.batch-result-item {
-  display: grid;
-  grid-template-columns: minmax(140px, 1fr) 80px minmax(200px, 2fr);
-  align-items: center;
-  gap: 8px;
-}
-.batch-account { font-weight: 500; }
-.batch-message { color: var(--td-text-color-secondary); }
-.account-sub,
 .form-tip {
   color: var(--td-text-color-placeholder);
   font-size: 13px;
