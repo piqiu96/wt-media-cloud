@@ -36,15 +36,51 @@ func TestFindByIDUsesGORM(t *testing.T) {
 	}
 }
 
+func TestCreateUsesDatabaseGeneratedNumericID(t *testing.T) {
+	db, mock, closeDB := newProxyMockGORM(t)
+	defer closeDB()
+	now := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
+	proxy := model.Proxy{TeamID: 7, Name: "新代理", Source: model.ProxySourceStatic, Protocol: model.ProtocolHTTP,
+		Host: "127.0.0.1", Port: 8080, Enabled: true, MaxProfiles: 3, CreatedAt: now, UpdatedAt: now}
+	mock.ExpectExec("INSERT INTO proxies \\(team_id, name, source").
+		WillReturnResult(sqlmock.NewResult(42, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT LAST_INSERT_ID()")).
+		WillReturnRows(sqlmock.NewRows([]string{"LAST_INSERT_ID()"}).AddRow(42))
+	if err := create(db, &proxy); err != nil {
+		t.Fatal(err)
+	}
+	if proxy.ID != "42" {
+		t.Fatalf("generated ID = %q, want 42", proxy.ID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListFiltersAdminTeamTextAndNumericIDOnServer(t *testing.T) {
+	db, mock, closeDB := newProxyMockGORM(t)
+	defer closeDB()
+	mock.ExpectQuery("SELECT .* FROM proxies WHERE EXISTS ").
+		WithArgs("%运!_营%", "%运!_营%", "%42%", "%42%", "%42%", "%42%", "%42%", 200, 0).
+		WillReturnRows(sqlmock.NewRows(proxyColumnNames()))
+	items, err := list(db, ProxyFilter{TeamSearch: "运_营", Search: "42", Limit: 200})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRecordCheckResultOnlyAppliesToTheMeasuredConnection(t *testing.T) {
 	db, mock, closeDB := newProxyMockGORM(t)
 	defer closeDB()
 	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE proxies SET last_check_at = ?, last_check_result = ?, last_check_message = ?, updated_at = ? WHERE id = ? AND protocol = ? AND host = ? AND port = ?")).
-		WithArgs(now, "ok", "ok", now, "proxy-1", "socks5", "10.0.0.1", 1080).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE proxies SET last_check_at = ?, last_check_result = ?, last_check_message = ?, updated_at = ? WHERE id = ? AND protocol = ? AND host = ? AND port = ? AND BINARY COALESCE(username, '') = BINARY ? AND BINARY COALESCE(password, '') = BINARY ?")).
+		WithArgs(now, "ok", "", now, "proxy-1", "socks5", "10.0.0.1", 1080, "user", "Secret").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	applied, err := recordCheckResult(db, "proxy-1", "socks5", "10.0.0.1", 1080, "ok", "ok", now)
+	applied, err := recordCheckResult(db, "proxy-1", "socks5", "10.0.0.1", 1080, "user", "Secret", "ok", "", now)
 	if err != nil {
 		t.Fatalf("recordCheckResult() error = %v", err)
 	}

@@ -216,7 +216,7 @@ func resolveProxyForAccountCheck(db *gorm.DB, profileID string) (string, bool, s
 		FROM browser_profiles bp
 		JOIN users u ON u.id = bp.user_id
 		JOIN proxies pc ON pc.id = bp.proxy_id
-		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.proxy_id <> '' AND bp.bit_main_user_id = u.bit_main_user_id`, profileID).
+		WHERE bp.id = ? AND bp.proxy_id IS NOT NULL AND bp.bit_main_user_id = u.bit_main_user_id`, profileID).
 		Scan(&proxyID, &enabled, &lastCheckResult, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, "", nil, false, nil
@@ -270,8 +270,10 @@ func getProfileInScope(db *gorm.DB, profileID string) (model.BrowserProfile, boo
 }
 
 type profileSyncSnapshot struct {
-	Profiles []model.BrowserProfile `json:"profiles"`
-	Diff     []model.ProfileDiff    `json:"diff"`
+	Profiles    []model.BrowserProfile `json:"profiles"`
+	Diff        []model.ProfileDiff    `json:"diff"`
+	Status      model.ScanStatus       `json:"status,omitempty"`
+	ConfirmedAt *time.Time             `json:"confirmed_at,omitempty"`
 }
 
 func CreateScan(scan model.ProfileScan) error {
@@ -286,7 +288,7 @@ func createScan(db *gorm.DB, scan model.ProfileScan) error {
 	_, err = execSQL(db,
 		`INSERT INTO browser_profile_syncs (id, user_id, bit_main_user_id, snapshot, observed_at, expires_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON DUPLICATE KEY UPDATE bit_main_user_id = VALUES(bit_main_user_id), snapshot = VALUES(snapshot), observed_at = VALUES(observed_at), expires_at = VALUES(expires_at), created_at = VALUES(created_at)`,
+		 ON DUPLICATE KEY UPDATE id = VALUES(id), bit_main_user_id = VALUES(bit_main_user_id), snapshot = VALUES(snapshot), observed_at = VALUES(observed_at), expires_at = VALUES(expires_at), created_at = VALUES(created_at)`,
 		scan.ID, scan.UserID, scan.BitMainUserID, string(snapshot), scan.CreatedAt, scan.ExpiresAt, scan.CreatedAt,
 	)
 	return err
@@ -312,7 +314,11 @@ func findScan(db *gorm.DB, scanID string) (model.ProfileScan, bool, error) {
 	if err := json.Unmarshal(snapshot, &payload); err != nil {
 		return model.ProfileScan{}, false, err
 	}
-	scan.Status = model.ScanReady
+	scan.Status = payload.Status
+	if scan.Status == "" {
+		scan.Status = model.ScanReady
+	}
+	scan.ConfirmedAt = payload.ConfirmedAt
 	scan.Profiles = payload.Profiles
 	scan.Diff = payload.Diff
 	return scan, true, nil
@@ -435,6 +441,46 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, observedBitProfileIDs []stri
 	if boundMain.String != scan.BitMainUserID {
 		return model.ErrBitMainUserMismatch
 	}
+	// Serialize confirmations and reject an obsolete preview before any mirror write.
+	var storedSnapshot []byte
+	err = queryRow(tx, `SELECT snapshot FROM browser_profile_syncs WHERE id = ? AND user_id = ? FOR UPDATE`, scan.ID, scan.UserID).Scan(&storedSnapshot)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.ErrScanNotReady
+	}
+	if err != nil {
+		return err
+	}
+	var stored profileSyncSnapshot
+	if err := json.Unmarshal(storedSnapshot, &stored); err != nil {
+		return err
+	}
+	if stored.Status == model.ScanConfirmed {
+		return model.ErrScanNotReady
+	}
+	// Lock the owner's mirrors before applying snapshots, so a concurrent local
+	// proxy write cannot be overwritten or have its quota released by sync.
+	rows, err := tx.Raw(`SELECT id, reserved_proxy_id FROM browser_profiles WHERE user_id = ? AND bit_main_user_id = ? FOR UPDATE`, scan.UserID, scan.BitMainUserID).Rows()
+	if err != nil {
+		return err
+	}
+	pending := false
+	for rows.Next() {
+		var profileID string
+		var reserved sql.NullString
+		if err := rows.Scan(&profileID, &reserved); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = pending || reserved.String != ""
+	}
+	rowErr := rows.Err()
+	rows.Close()
+	if rowErr != nil {
+		return rowErr
+	}
+	if pending {
+		return model.ErrProfileProxyPending
+	}
 	for _, profile := range scan.Profiles {
 		if _, err := execSQL(tx,
 			`INSERT INTO browser_profiles (
@@ -463,27 +509,36 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, observedBitProfileIDs []stri
 	for _, bitID := range observedBitProfileIDs {
 		bitIDs = append(bitIDs, bitID)
 	}
-	if len(bitIDs) > 0 {
+	{
 		markArgs := []any{model.ProfileLocalMissing, at, at, scan.UserID, scan.BitMainUserID}
+		missingCondition := ""
+		if len(bitIDs) > 0 {
+			missingCondition = " AND bit_profile_id NOT IN (" + placeholders(len(bitIDs)) + ")"
+		}
 		for _, bitID := range bitIDs {
 			markArgs = append(markArgs, bitID)
 		}
-		markArgs = append(markArgs, model.ProfileArchived)
+		markArgs = append(markArgs, model.ProfileArchived, model.ProfileLocalMissing)
 		if _, err := execSQL(tx,
 			`UPDATE browser_profiles SET local_state = ?, last_synced_at = ?, updated_at = ?
-			 WHERE user_id = ? AND bit_main_user_id = ? AND bit_profile_id NOT IN (`+placeholders(len(bitIDs))+`) AND local_state <> ?`,
+			 WHERE user_id = ? AND bit_main_user_id = ?`+missingCondition+` AND local_state NOT IN (?, ?)`,
 			markArgs...,
 		); err != nil {
 			return err
 		}
 	}
-	result, err := execSQL(tx, `DELETE FROM browser_profile_syncs WHERE id = ? AND user_id = ?`, scan.ID, scan.UserID)
+	receipt, err := json.Marshal(profileSyncSnapshot{Profiles: scan.Profiles, Diff: scan.Diff, Status: model.ScanConfirmed, ConfirmedAt: &at})
+	if err != nil {
+		return err
+	}
+	result, err := execSQL(tx, `UPDATE browser_profile_syncs SET snapshot = ? WHERE id = ? AND user_id = ?`, string(receipt), scan.ID, scan.UserID)
 	if err != nil {
 		return err
 	}
 	if result == 0 {
 		return model.ErrScanNotReady
 	}
+
 	summary, _ := json.Marshal(map[string]any{"bit_main_user_id": scan.BitMainUserID, "profile_count": len(scan.Profiles)})
 	if _, err := execSQL(tx,
 		`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -516,8 +571,8 @@ func scanProfile(row scanner) (model.BrowserProfile, error) {
 	profile.BitUpdatedAt = bitUpdatedAt.String
 	profile.BitProxyType = proxyType.String
 	profile.BitProxyHost = proxyHost.String
-	profile.ProxyID = proxyID.String
-	profile.ReservedProxyID = reservedProxyID.String
+	profile.ProxyID = sharedidentity.ProxyID(proxyID.String)
+	profile.ReservedProxyID = sharedidentity.ProxyID(reservedProxyID.String)
 	profile.BitRemark = bitRemark.String
 	profile.Remark = remark.String
 	if proxyPort.Valid {
@@ -541,9 +596,61 @@ func placeholders(count int) string {
 	return strings.TrimRight(strings.Repeat("?, ", count), ", ")
 }
 
-func DeleteProfile(id string) error {
-	_, err := execSQL(database.DB(), `DELETE FROM browser_profiles WHERE id = ?`, id)
-	return err
+func DeleteProfile(profileID string, actorID sharedidentity.UserID, at time.Time) error {
+	return deleteProfile(database.DB(), profileID, actorID, at)
+}
+
+// deleteProfile keeps account detachment, proxy quota release, physical deletion,
+// and the credential-free audit in one transaction. The locked state is checked
+// again because a scan or proxy operation may have changed it after the service
+// read the row.
+func deleteProfile(db *gorm.DB, profileID string, actorID sharedidentity.UserID, at time.Time) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var localState string
+		var reservedProxyID, proxyID sql.NullInt64
+		var bitProfileID string
+		var ownerID sharedidentity.UserID
+		err := queryRow(tx, `SELECT local_state, reserved_proxy_id, proxy_id, bit_profile_id, user_id FROM browser_profiles WHERE id = ? FOR UPDATE`, profileID).
+			Scan(&localState, &reservedProxyID, &proxyID, &bitProfileID, &ownerID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.ErrProfileNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if localState != string(model.ProfileLocalMissing) {
+			return model.ErrProfileNotMissing
+		}
+		if reservedProxyID.Valid {
+			return model.ErrProfileProxyPending
+		}
+		var accountCount int
+		if err := queryRow(tx, `SELECT COUNT(*) FROM media_accounts WHERE browser_profile_id = ?`, profileID).Scan(&accountCount); err != nil {
+			return err
+		}
+		if _, err := execSQL(tx, `UPDATE media_accounts SET browser_profile_id = NULL, platform_login_status = 'unknown', last_check_at = NULL, last_check_items = NULL, updated_at = ? WHERE browser_profile_id = ?`, at, profileID); err != nil {
+			return err
+		}
+		rows, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ? AND local_state = 'local_missing' AND reserved_proxy_id IS NULL`, profileID)
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return model.ErrProfileNotMissing
+		}
+		summary, err := json.Marshal(map[string]any{
+			"bit_profile_id": bitProfileID, "owner_user_id": ownerID,
+			"unlinked_account_count": accountCount, "released_proxy_id": proxyID.Int64,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = execSQL(tx,
+			`INSERT INTO audit_logs (id, actor_user_id, action, target_type, target_id, summary_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			id.NewID("audit"), actorID, "bitbrowser.profile_missing.delete", "browser_profile", profileID, summary, at,
+		)
+		return err
+	})
 }
 
 func ProfileHasDependencies(profileID string) (bool, error) {
@@ -575,7 +682,14 @@ func updateProfile(db *gorm.DB, profileID string, remark *string, enabled *bool,
 	sets = append(sets, "updated_at = ?")
 	args = append(args, at)
 	args = append(args, profileID)
-	_, err := execSQL(db, `UPDATE browser_profiles SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+	where := " WHERE id = ?"
+	if enabled != nil {
+		where += " AND reserved_proxy_id IS NULL"
+	}
+	rows, err := execSQL(db, `UPDATE browser_profiles SET `+strings.Join(sets, ", ")+where, args...)
+	if err == nil && rows == 0 && enabled != nil {
+		return model.ErrProfileProxyPending
+	}
 	return err
 }
 
@@ -585,7 +699,7 @@ func CountProfilesByProxyID(proxyID string) (int, error) {
 
 func countProfilesByProxyID(db *gorm.DB, proxyID string) (int, error) {
 	var count int
-	if err := queryRow(db, `SELECT COUNT(*) FROM browser_profiles WHERE proxy_id = ? AND local_state = ?`, proxyID, model.ProfileActive).Scan(&count); err != nil {
+	if err := queryRow(db, `SELECT COUNT(*) FROM browser_profiles WHERE proxy_id = ? AND local_state IN (?, ?)`, proxyID, model.ProfileActive, model.ProfileLocalMissing).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -671,7 +785,7 @@ func ClearObservedProxy(profileID string) (model.BrowserProfile, error) {
 
 func clearObservedProxy(db *gorm.DB, profileID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
-		`UPDATE browser_profiles SET bit_proxy_type = NULL, bit_proxy_host = NULL, bit_proxy_port = 0, updated_at = ? WHERE id = ? AND COALESCE(proxy_id, '') = ''`,
+		`UPDATE browser_profiles SET bit_proxy_type = NULL, bit_proxy_host = NULL, bit_proxy_port = 0, updated_at = ? WHERE id = ? AND proxy_id IS NULL`,
 		time.Now(), profileID,
 	)
 	if err != nil {

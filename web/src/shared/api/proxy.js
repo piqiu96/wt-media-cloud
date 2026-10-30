@@ -3,8 +3,22 @@ import { createApiClient } from './http.js'
 export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    list(params) {
-      return api.get('/proxies', params)
+    async list(params = {}) {
+      const size = 200
+      const result = []
+      const seen = new Set()
+      for (let offset = 0; offset <= 10000; offset += size) {
+        const page = await api.get('/proxies', { ...params, limit: size, offset })
+        const rows = Array.isArray(page) ? page : page?.list
+        if (!Array.isArray(rows)) throw new Error('代理列表返回格式错误')
+        for (const row of rows) {
+          if (seen.has(row.id)) throw new Error('代理分页返回了重复记录，请更新服务后重试')
+          seen.add(row.id)
+          result.push(row)
+        }
+        if (rows.length < size) return result
+      }
+      throw new Error('代理列表超过 10000 条，请缩小筛选范围')
     },
     get(id) {
       return api.get(`/proxies/${id}`)
@@ -27,14 +41,14 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
     parseAddress(proxyAddress) {
       return api.post('/proxies/parse', { proxy_address: proxyAddress })
     },
-    previewExtract(data) {
-      return api.post('/proxies/extract-preview', data)
+    extractionConfig(id) {
+      return api.get(`/proxies/${id}/extraction-config`)
     },
     listBindings(id) {
       return api.get(`/proxies/${id}/bindings`)
     },
-    refreshDynamic(id) {
-      return api.post(`/proxies/${id}/refresh`)
+    refreshDynamic(id, data) {
+      return api.post(`/proxies/${id}/refresh`, data)
     },
     check(id) {
       return api.post(`/proxies/${id}/check`)
@@ -48,8 +62,9 @@ export function createProxyClient({ base = '/api/v1', fetch = globalThis.fetch }
     operate(profileId, { action, proxy_id }) {
       return api.post(`/browser-profiles/${profileId}/proxy-operation`, { action, proxy_id })
     },
-    finishOperation(profileId, { action, proxy_id, outcome, message }) {
-      return api.post(`/browser-profiles/${profileId}/proxy-operation/result`, { action, proxy_id, outcome, message })
+    currentOperation(profileId) { return api.get(`/browser-profiles/${profileId}/proxy-operation`) },
+    finishOperation(profileId, { operation_id, action, proxy_id, outcome, message }) {
+      return api.post(`/browser-profiles/${profileId}/proxy-operation/result`, { operation_id, action, proxy_id, outcome, message })
     },
   }
 }

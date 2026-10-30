@@ -11,7 +11,6 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
-	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
@@ -48,12 +47,13 @@ const (
 )
 
 var (
-	ErrInvalidInput     = errors.New("proxy input is invalid")
-	ErrNotFound         = errors.New("proxy was not found")
-	ErrNotAssignable    = errors.New("proxy is not assignable")
-	ErrTeamRequired     = errors.New("proxy team is required")
-	ErrQuotaBelowUsage  = errors.New("proxy quota is below current usage")
-	ErrAssignmentLocked = errors.New("proxy assignment is busy")
+	ErrInvalidInput            = errors.New("proxy input is invalid")
+	ErrNotFound                = errors.New("proxy was not found")
+	ErrNotAssignable           = errors.New("proxy is not assignable")
+	ErrTeamRequired            = errors.New("proxy team is required")
+	ErrQuotaBelowUsage         = errors.New("proxy quota is below current usage")
+	ErrAssignmentLocked        = errors.New("proxy assignment is busy")
+	ErrExtractionSourceChanged = errors.New("proxy extraction source changed")
 )
 
 // StoredConnectionKey 映射一条已保存的代理连接，让导入预览与提交对
@@ -66,27 +66,26 @@ type StoredConnectionKey struct {
 }
 
 type Store interface {
-	Create(Proxy) error
+	Create(*Proxy) error
 	FindByID(id string) (Proxy, bool, error)
 	List(ProxyFilter) ([]Proxy, error)
 	Update(Proxy) error
+	UpdateExtractedConnection(id, expectedURL string, expectedUpdatedAt time.Time, connection Proxy, now time.Time) (bool, error)
 	Delete(id string) error
 	ListConnectionKeys(teamID sharedidentity.TeamID) ([]StoredConnectionKey, error)
 	SetMaxProfiles(id string, maxProfileCount int, now time.Time) (bool, error)
-	RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error)
+	RecordCheckResult(id, protocol, host string, port int, username, password, result, message string, checkedAt time.Time) (bool, error)
 	WithAssignmentLock(proxyID string, fn func() error) error
 }
 
 type proxyService struct {
 	store Store
-	newID func(string) string
 	now   func() time.Time
 }
 
 func newProxyService(store Store) *proxyService {
 	return &proxyService{
 		store: store,
-		newID: id.NewID,
 		now:   time.Now,
 	}
 }
@@ -166,6 +165,11 @@ func (s *proxyService) Import(rows []ImportRowInput, teamID sharedidentity.TeamI
 			item.Status, item.Reason = dto.ImportStatusSkipped, err.Error()
 			result.Skipped++
 		} else {
+			parsed.Name = strings.TrimSpace(row.Name)
+			parsed.Region = strings.TrimSpace(row.Region)
+			parsed.Supplier = strings.TrimSpace(row.Supplier)
+			parsed.MaxProfiles = row.MaxProfiles
+			parsed.Remark = strings.TrimSpace(row.Remark)
 			key := connectionKey(string(parsed.Protocol), parsed.Host, parsed.Port)
 			if existingID, duplicate := existing[key]; duplicate {
 				item.Status, item.Reason = dto.ImportStatusSkipped, fmt.Sprintf("已存在代理 #%s", existingID)
@@ -180,7 +184,7 @@ func (s *proxyService) Import(rows []ImportRowInput, teamID sharedidentity.TeamI
 					item.Status, item.Reason = dto.ImportStatusFailed, createErr.Error()
 					result.Failed++
 				} else {
-					item.Status, item.ProxyID = dto.ImportStatusImported, created.ID
+					item.Status, item.ProxyID = dto.ImportStatusImported, sharedidentity.ProxyID(created.ID)
 					existing[key] = created.ID
 					result.Imported++
 				}
@@ -233,7 +237,6 @@ func (s *proxyService) create(input CreateProxyInput, teamID sharedidentity.Team
 	}
 	now := s.now()
 	p := Proxy{
-		ID:          s.newID("proxy"),
 		TeamID:      teamID,
 		Name:        normalized.Name,
 		Source:      normalized.Source,
@@ -253,7 +256,7 @@ func (s *proxyService) create(input CreateProxyInput, teamID sharedidentity.Team
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := s.store.Create(p); err != nil {
+	if err := s.store.Create(&p); err != nil {
 		return Proxy{}, err
 	}
 	return p, nil
@@ -268,7 +271,6 @@ func (s *proxyService) CreateDiscovered(input CreateProxyInput, teamID sharedide
 	}
 	now := s.now()
 	p := Proxy{
-		ID:          s.newID("proxy"),
 		TeamID:      teamID,
 		Name:        fmt.Sprintf("%s:%d", input.Host, input.Port),
 		Source:      ProxySourceStatic,
@@ -281,7 +283,7 @@ func (s *proxyService) CreateDiscovered(input CreateProxyInput, teamID sharedide
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := s.store.Create(p); err != nil {
+	if err := s.store.Create(&p); err != nil {
 		return Proxy{}, err
 	}
 	return p, nil
@@ -330,6 +332,10 @@ func (s *proxyService) Update(id string, input CreateProxyInput, govern bool) (P
 	if password == "" {
 		password = p.Password
 	}
+	if input.ReplaceCredentials {
+		username = normalized.Username
+		password = normalized.Password
+	}
 	extractURL := normalized.ExtractURL
 	if extractURL == "" {
 		extractURL = p.ExtractURL
@@ -366,6 +372,34 @@ func (s *proxyService) Update(id string, input CreateProxyInput, govern bool) (P
 		return Proxy{}, err
 	}
 	return p, nil
+}
+
+// RefreshExtractedConnection 只写本次提取的连接字段；名称、配额、启停和备注
+// 可能在本机请求期间被其他人编辑，不能用读取时的旧值覆盖。
+func (s *proxyService) RefreshExtractedConnection(id, expectedURL string, expectedUpdatedAt time.Time, input CreateProxyInput) (Proxy, error) {
+	if strings.TrimSpace(expectedURL) == "" || expectedUpdatedAt.IsZero() || strings.TrimSpace(input.Host) == "" || input.Port < 1 || input.Port > 65535 {
+		return Proxy{}, ErrInvalidInput
+	}
+	switch input.Protocol {
+	case ProtocolHTTP, ProtocolHTTPS, ProtocolSOCKS5:
+	default:
+		return Proxy{}, ErrInvalidInput
+	}
+	connection := Proxy{
+		Protocol: input.Protocol,
+		Host:     strings.TrimSpace(input.Host),
+		Port:     input.Port,
+		Username: strings.TrimSpace(input.Username),
+		Password: input.Password,
+	}
+	applied, err := s.store.UpdateExtractedConnection(id, expectedURL, expectedUpdatedAt, connection, s.now())
+	if err != nil {
+		return Proxy{}, err
+	}
+	if !applied {
+		return Proxy{}, ErrExtractionSourceChanged
+	}
+	return s.Get(id)
 }
 
 // normalizeCreateInput 校验创建与更新共用的写入结构。creating 保留仅创建时
@@ -596,7 +630,7 @@ func NormalizedMaxProfiles(value int) int {
 // RecordCheckResult 仅在探测时的连接版本仍是当前版本时保存结果。针对已改连接
 // 的迟到结果会被丢弃，不覆盖新版本状态。
 func (s *proxyService) RecordCheckResult(id string, checked dto.ProxyCheckInput, result, message string) (Proxy, bool, error) {
-	applied, err := s.store.RecordCheckResult(id, string(checked.Protocol), checked.Host, checked.Port, result, message, s.now())
+	applied, err := s.store.RecordCheckResult(id, string(checked.Protocol), checked.Host, checked.Port, checked.Username, checked.Password, result, message, s.now())
 	if err != nil {
 		return Proxy{}, false, err
 	}

@@ -46,6 +46,7 @@ func TestSubmitScanRejectsUnverifiableIdentity(t *testing.T) {
 	}
 	cases := []SnapshotInput{
 		{BitMainUserID: "main-user-1", ObservedAt: testNow},
+		{BitMainUserID: "main-user-1", ObservedAt: testNow, Profiles: []ProfileInput{}},
 		{BitMainUserID: "", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "p1", BitUserID: "bit-user-1", BitMainUserID: ""}}},
 		{BitMainUserID: "main-user-1", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "p1", BitUserID: "bit-user-1", BitMainUserID: "main-user-2"}}},
 		{BitMainUserID: "main-user-1", ObservedAt: testNow, Profiles: []ProfileInput{{BitProfileID: "p1", BitUserID: "", BitMainUserID: "main-user-1"}}},
@@ -295,7 +296,7 @@ func TestDefaultProfileListAppliesRoleVisibility(t *testing.T) {
 	}
 }
 
-func TestProfileOwnerAndAdminCanSyncDeleteDisabledProfile(t *testing.T) {
+func TestProfileOwnerAndAdminCanDeleteMissingProfile(t *testing.T) {
 	for name, actor := range map[string]identityservice.PublicUser{
 		"owner": profileActor("user-2"),
 		"admin": {ID: 99, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled},
@@ -304,25 +305,29 @@ func TestProfileOwnerAndAdminCanSyncDeleteDisabledProfile(t *testing.T) {
 			store := newMemoryStore()
 			teamID := identityservice.TeamID(2)
 			bindMain(store, 2, "main-user-2")
-			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BitMainUserID: "main-user-2", Enabled: false, LocalState: ProfileLocalMissing}
+			store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BitMainUserID: "main-user-2", Enabled: true, LocalState: ProfileLocalMissing}
+			store.profileAccountRefs["profile"] = true
 			if err := newTestService(store).DeleteProfile(actor, "profile"); err != nil {
 				t.Fatalf("DeleteProfile() error=%v", err)
 			}
 			if _, ok := store.profiles["profile"]; ok {
-				t.Fatal("disabled profile not removed by sync-delete")
+				t.Fatal("missing profile was not deleted")
+			}
+			if store.profileAccountRefs["profile"] {
+				t.Fatal("linked account was not detached")
 			}
 		})
 	}
 }
 
-func TestProfileSyncDeleteRejectsEnabledProfile(t *testing.T) {
+func TestProfileDeleteRejectsActiveProfile(t *testing.T) {
 	store := newMemoryStore()
 	teamID := identityservice.TeamID(2)
 	bindMain(store, 2, "main-user-2")
 	store.profiles["profile"] = BrowserProfile{ID: "profile", UserID: 2, TeamID: &teamID, BitMainUserID: "main-user-2", Enabled: true, LocalState: ProfileActive}
 	err := newTestService(store).DeleteProfile(profileActor("user-2"), "profile")
-	if !errors.Is(err, ErrProfileNotDisabled) {
-		t.Fatalf("DeleteProfile() error=%v, want ErrProfileNotDisabled", err)
+	if !errors.Is(err, ErrProfileNotMissing) {
+		t.Fatalf("DeleteProfile() error=%v, want ErrProfileNotMissing", err)
 	}
 	if _, ok := store.profiles["profile"]; !ok {
 		t.Fatal("enabled profile was removed despite rejection")
@@ -491,7 +496,7 @@ func TestConfirmScanRejectsScanFromPreviousMainAccount(t *testing.T) {
 	}
 }
 
-func TestConfirmScanRejectsUnboundExpiredAndRepeated(t *testing.T) {
+func TestConfirmScanRejectsExpiredAndReturnsConfirmedReceipt(t *testing.T) {
 	store := newMemoryStore()
 	service := newTestService(store)
 	actor := profileActor("user-1")
@@ -522,8 +527,8 @@ func TestConfirmScanRejectsUnboundExpiredAndRepeated(t *testing.T) {
 	if _, err := service.ConfirmScan(actor, scan.ID, []string{"p1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmScan(actor, scan.ID, nil); !errors.Is(err, ErrScanNotReady) {
-		t.Fatalf("repeated confirm error = %v", err)
+	if receipt, err := service.ConfirmScan(actor, scan.ID, nil); err != nil || receipt.Status != ScanConfirmed || len(receipt.Profiles) != 1 {
+		t.Fatalf("repeated confirm must return saved receipt: %#v, %v", receipt, err)
 	}
 }
 
@@ -581,6 +586,24 @@ func TestScanDiffAndConfirmationUpdateAndMarkMissing(t *testing.T) {
 	}
 	if byBitID["p9"].LocalState != ProfileActive {
 		t.Fatalf("scan touched a profile from another main account: %#v", byBitID["p9"])
+	}
+	// A previously confirmed missing window remains actionable on the list, but
+	// another scan must not ask the operator to confirm the same absence again.
+	rescan, err := service.SubmitScan(profileActor("user-1"), SnapshotInput{
+		BitMainUserID: "main-user-1",
+		ObservedAt:    testNow,
+		Profiles: []ProfileInput{
+			{BitProfileID: "p1", BitUserID: "bit-user-1", BitMainUserID: "main-user-1", BitName: "新名称", BitProfileStatus: "1", BitProxyType: "socks5", BitProxyHost: "2.2.2.2", BitProxyPort: 1080, BitRemark: "新备注"},
+			{BitProfileID: "p3", BitUserID: "bit-user-2", BitMainUserID: "main-user-1", BitName: "新增"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range rescan.Diff {
+		if item.Kind == DiffMissing && item.BitProfileID == "p2" {
+			t.Fatal("already confirmed missing window was prompted again")
+		}
 	}
 }
 
@@ -766,11 +789,13 @@ func (s *memoryStore) ApplyScan(scan ProfileScan, observedBitProfileIDs []string
 	return nil
 }
 
-func (s *memoryStore) DeleteProfile(id string) error {
+func (s *memoryStore) DeleteProfile(id string, actorID identityservice.UserID, at time.Time) error {
 	if _, ok := s.profiles[id]; !ok {
 		return ErrProfileNotFound
 	}
 	delete(s.profiles, id)
+	s.profileAccountRefs[id] = false
+	s.audits = append(s.audits, identityservice.AuditEvent{Action: "bitbrowser.profile_missing.delete", ActorUserID: actorID, TargetType: "browser_profile", TargetID: id, CreatedAt: at})
 	return nil
 }
 

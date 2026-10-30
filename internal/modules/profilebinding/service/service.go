@@ -2,6 +2,7 @@
 package service
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -47,13 +48,14 @@ var (
 	ErrBitBrowserOffline          = model.ErrBitBrowserOffline
 	ErrBitMainUserMismatch        = model.ErrBitMainUserMismatch
 	ErrScanNotFound               = model.ErrScanNotFound
+	ErrProfileProxyPending        = model.ErrProfileProxyPending
 	ErrScanNotReady               = model.ErrScanNotReady
 	ErrScanExpired                = model.ErrScanExpired
 	ErrProfileNotFound            = model.ErrProfileNotFound
 	ErrProfileAssignedToOtherUser = model.ErrProfileAssignedToOtherUser
 	ErrProfileInactive            = model.ErrProfileInactive
 	ErrProfileReferenced          = model.ErrProfileReferenced
-	ErrProfileNotDisabled         = model.ErrProfileNotDisabled
+	ErrProfileNotMissing          = model.ErrProfileNotMissing
 )
 
 const (
@@ -81,7 +83,7 @@ type Store interface {
 	FindScanByUser(userID identityservice.UserID) (ProfileScan, bool, error)
 	DeleteScanByUser(userID identityservice.UserID) error
 	ApplyScan(scan ProfileScan, observedBitProfileIDs []string, at time.Time) error
-	DeleteProfile(id string) error
+	DeleteProfile(id string, actorID identityservice.UserID, at time.Time) error
 	UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time) error
 	ProfileHasAccountReferences(profileID string) (bool, error)
 	ProfileHasDependencies(profileID string) (bool, error)
@@ -213,7 +215,7 @@ func (s *Service) SubmitScan(actor identityservice.PublicUser, input SnapshotInp
 		candidates = append(candidates, candidate)
 	}
 	for _, current := range existing {
-		if _, ok := seen[current.BitProfileID]; !ok && current.LocalState != ProfileArchived {
+		if _, ok := seen[current.BitProfileID]; !ok && current.LocalState != ProfileArchived && current.LocalState != ProfileLocalMissing {
 			diff = append(diff, ProfileDiff{Kind: DiffMissing, BitProfileID: current.BitProfileID, ProfileID: current.ID, Fields: []string{"local_state"}})
 		}
 	}
@@ -313,11 +315,11 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, a
 	if scan.UserID != actor.ID {
 		return ProfileScan{}, ErrForbidden
 	}
-	if scan.Status != ScanReady {
+	if scan.Status != ScanReady && scan.Status != ScanConfirmed {
 		return ProfileScan{}, ErrScanNotReady
 	}
 	now := s.now()
-	if now.After(scan.ExpiresAt) {
+	if scan.Status != ScanConfirmed && now.After(scan.ExpiresAt) {
 		return ProfileScan{}, ErrScanExpired
 	}
 	binding, found, err := s.store.FindBinding(actor.ID)
@@ -329,6 +331,9 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, a
 	}
 	if binding.BitMainUserID != scan.BitMainUserID {
 		return ProfileScan{}, ErrBitMainUserMismatch
+	}
+	if scan.Status == ScanConfirmed {
+		return scan, nil
 	}
 	owners, err := s.store.ListProfileOwners(scan.BitMainUserID)
 	if err != nil {
@@ -367,6 +372,12 @@ func (s *Service) ConfirmScan(actor identityservice.PublicUser, scanID string, a
 	// 确认扫描只应用 Profile。绑定由 Local Agent 通过 /local-agent/bit-account/bind
 	// 观察写入，扫描不能顺带建立或更换主账号。
 	if err := s.store.ApplyScan(scan, observed, now); err != nil {
+		// Another confirmation may have committed while this request waited.
+		if errors.Is(err, ErrScanNotReady) {
+			if saved, readErr := s.GetScan(actor, scan.ID); readErr == nil && saved.Status == ScanConfirmed {
+				return saved, nil
+			}
+		}
 		return ProfileScan{}, err
 	}
 	return scan, nil
@@ -495,19 +506,15 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	if actor.Role != identityservice.RoleAdmin && profile.UserID != actor.ID {
 		return ErrForbidden
 	}
-	// 同步删除只允许已停用的窗口：BitBrowser 中已不存在（扫描报告缺失）且业务已
-	// 停用，Cloud 镜像不再有价值。启用的窗口不允许删除。
-	if profile.Enabled {
-		return ErrProfileNotDisabled
+	if profile.ReservedProxyID != "" {
+		return ErrProfileProxyPending
 	}
-	referenced, err := s.store.ProfileHasDependencies(profile.ID)
-	if err != nil {
-		return err
+	// 删除只对已从比特扫描结果中缺失的 Cloud 记录开放。数据库事务中再次锁行
+	// 核对，防止同步恢复与清理并发时误删正常窗口。
+	if profile.LocalState != ProfileLocalMissing {
+		return ErrProfileNotMissing
 	}
-	if referenced {
-		return ErrProfileReferenced
-	}
-	return s.store.DeleteProfile(profileID)
+	return s.store.DeleteProfile(profile.ID, actor.ID, s.now())
 }
 
 func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID string, remark *string, enabled *bool) (BrowserProfile, error) {
@@ -531,6 +538,9 @@ func (s *Service) UpdateProfile(actor identityservice.PublicUser, profileID stri
 	}
 	if !isOwner && enabled != nil {
 		return BrowserProfile{}, ErrForbidden
+	}
+	if enabled != nil && profile.ReservedProxyID != "" {
+		return BrowserProfile{}, ErrProfileProxyPending
 	}
 	if err := s.store.UpdateProfile(profileID, remark, enabled, s.now()); err != nil {
 		return BrowserProfile{}, err

@@ -104,6 +104,11 @@ describe('desktop role guard', () => {
     expect(personalInfo).toContain('v-if="localAgentAllowed" class="device-card"')
   })
 
+  it('waits for the local agent before the window page performs its entry scan', () => {
+    expect(desktopMain).toContain('if (to.path === "/browser-windows") await agentReady')
+    expect(desktopMain).toContain('if (key === syncedAgentUser) return agentSyncPromise')
+  })
+
   it('uses a native form submit for session replacement login', () => {
     expect(loginPage).toContain('<form class="login-form" @submit.prevent="submitLogin">')
     expect(loginPage).toContain('@confirm="submitReplacementLogin"')

@@ -1,8 +1,11 @@
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { onBeforeRouteLeave } from "vue-router"
 import { createProxyClient } from "../../../shared/api/proxy.js"
 import { createSessionClient } from "../../../shared/api/session.js"
 import { createUsersClient } from "../../../apps/cloud/pages/users/usersApi.js"
+import { createLocalAgentService } from "../../../apps/desktop/features/local-agent/service.js"
+import { invoke } from "@tauri-apps/api/core"
 import { isDesktop } from "../../../utils.js"
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue"
 import { feedback } from "../../../shared/ui/feedback/index.js"
@@ -18,9 +21,13 @@ import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelect
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
+import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
 import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js"
+import { markImportUnknown, prepareFailedCheckRetry, reconcileImportItems } from "./importResult.js"
+import { MAX_IMPORT_ROWS, PROXY_IMPORT_TEMPLATE, readProxyImportFile } from "./importFile.js"
 
 const proxyClient = createProxyClient()
+const localAgent = createLocalAgentService({ invoke })
 const sessionClient = createSessionClient()
 const usersClient = createUsersClient()
 
@@ -37,7 +44,6 @@ const advancedFilters = ref(false)
 const filterTeam = ref("")
 const filterStatus = ref("")
 const filterRegion = ref("")
-const filterSupplier = ref("")
 const filterCheck = ref("")
 const filterExpiry = ref("")
 const filterText = ref("")
@@ -47,6 +53,8 @@ const isGovernor = computed(() => ["admin", "senior_operator"].includes(currentU
 const canExtract = computed(() => isDesktop() && ["operator", "senior_operator"].includes(currentUser.value?.role))
 
 const teamOptions = computed(() => teams.value.map((team) => ({ label: team.name, value: String(team.id) })))
+const exactFilterTeamID = computed(() => String(teams.value.find(team =>
+  String(team.id) === filterTeam.value.trim() || String(team.name || '').trim() === filterTeam.value.trim())?.id || ''))
 const ownTeamLabel = computed(() => currentUser.value?.team_name || "本人团队")
 
 const visibleProxies = computed(() => proxies.value.filter((proxy) => {
@@ -62,15 +70,18 @@ const pagedProxies = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
   return visibleProxies.value.slice(start, start + pagination.value.pageSize)
 })
+const hasProxyFilter = computed(() => [filterTeam.value, filterStatus.value, filterRegion.value,
+  filterCheck.value, filterExpiry.value, filterText.value]
+  .some(value => String(value || '').trim()))
 
 const proxyActionLabels = computed(() => isGovernor.value
   ? ["详情", "编辑", "检测", "设置配额", "删除"]
   : ["详情", "编辑", "检测"])
 const columns = computed(() => [
-  { colKey: "row-select", type: "multiple", width: 48 },
+  { colKey: "row-select", type: "multiple", width: 48, disabled: ({ row }) => !row.host || !row.port },
   { colKey: "id", title: "ID", width: 70 },
   { colKey: "name", title: "名称 / 地址", width: 200 },
-  { colKey: "region_supplier", title: "地区 / 供应商", width: 130 },
+  { colKey: "region", title: "地区", width: 90 },
   { colKey: "source", title: "来源", width: 80 },
   { colKey: "usage", title: "已用 / 额度", width: 110 },
   { colKey: "enabled", title: "资源启停", width: 100 },
@@ -81,6 +92,7 @@ const columns = computed(() => [
 ])
 
 const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, column) => sum + (column.width || 0), 0)}px` }))
+watch([() => pagination.value.current, () => pagination.value.pageSize], () => { selectedRowKeys.value = [] })
 
 // 新增 / 编辑抽屉
 const formVisible = ref(false)
@@ -89,6 +101,9 @@ const formError = ref("")
 const savingForm = ref(false)
 const parsingAddress = ref(false)
 const extracting = ref(false)
+const extractionPreviewVisible = ref(false)
+const extractionPreview = ref(null)
+const extractedCredentialsApplied = ref(false)
 const form = ref(emptyForm())
 const editingProxy = ref(null)
 
@@ -115,6 +130,14 @@ const importError = ref("")
 const importPreviewing = ref(false)
 const importing = ref(false)
 const importStep = ref("input")
+const importMetadata = ref([])
+const importFileName = ref("")
+const importDefaultSupplier = ref("")
+const importDefaultRegion = ref("")
+const importDefaultQuota = ref(3)
+const editingImportLine = ref(null)
+const editingImportRaw = ref("")
+const editingImportQuota = ref(3)
 
 // 启停
 const statusConfirmVisible = ref(false)
@@ -129,8 +152,30 @@ const progressItems = ref([])
 const progressMode = ref("")
 const progressLabels = ref({})
 const retryPayload = ref(null)
+const pendingImportResult = computed(() => progressMode.value === "import"
+  && progressPhase.value === "done"
+  && progressItems.value.some(item => item.status === "failed" || item.status === "unconfirmed"))
+let pageActive = true
+
+function warnBeforeUnload(event) {
+  if (!(progressVisible.value && progressPhase.value === "running")) return
+  event.preventDefault()
+  event.returnValue = ""
+}
+
+onBeforeRouteLeave(() => {
+  if (!(progressVisible.value && progressPhase.value === "running")) return
+  feedback.toast.info("正在处理，请等待当前操作完成后再离开。")
+  return false
+})
+
+onBeforeUnmount(() => {
+  pageActive = false
+  window.removeEventListener("beforeunload", warnBeforeUnload)
+})
 
 onMounted(async () => {
+  window.addEventListener("beforeunload", warnBeforeUnload)
   try {
     currentUser.value = await sessionClient.me()
   } catch {}
@@ -150,10 +195,9 @@ async function loadProxies() {
   loading.value = true
   try {
     const params = {}
-    if (isAdmin.value && filterTeam.value) params.team_id = filterTeam.value
+    if (isAdmin.value && filterTeam.value.trim()) params.team_search = filterTeam.value.trim()
     if (filterStatus.value) params.enabled = filterStatus.value === "active"
     if (filterRegion.value.trim()) params.region = filterRegion.value.trim()
-    if (filterSupplier.value.trim()) params.supplier = filterSupplier.value.trim()
     if (filterText.value.trim()) params.search = filterText.value.trim()
     const result = await proxyClient.list(params)
     proxies.value = Array.isArray(result) ? result : (Array.isArray(result?.list) ? result.list : [])
@@ -170,6 +214,7 @@ async function loadProxies() {
 function applyFilters() {
   pagination.value.current = 1
   pagination.value.total = visibleProxies.value.length
+  selectedRowKeys.value = []
 }
 
 function applyClientFilters() {
@@ -185,15 +230,9 @@ function resetFilters() {
   filterTeam.value = ""
   filterStatus.value = ""
   filterRegion.value = ""
-  filterSupplier.value = ""
   filterCheck.value = ""
   filterExpiry.value = ""
   filterText.value = ""
-  loadProxies()
-}
-
-function onTeamChanged() {
-  selectedRowKeys.value = []
   loadProxies()
 }
 
@@ -208,8 +247,11 @@ function emptyForm() {
 function openCreate() {
   formMode.value = "create"
   form.value = emptyForm()
-  form.value.team_id = isAdmin.value ? String(filterTeam.value || "") : String(currentUser.value?.team_id || "")
+  form.value.team_id = isAdmin.value ? exactFilterTeamID.value : String(currentUser.value?.team_id || "")
   formError.value = ""
+  extractionPreviewVisible.value = false
+  extractionPreview.value = null
+  extractedCredentialsApplied.value = false
   formVisible.value = true
 }
 
@@ -235,6 +277,9 @@ function openEdit(proxy) {
     remark: proxy.remark || "",
   }
   formError.value = ""
+  extractionPreviewVisible.value = false
+  extractionPreview.value = null
+  extractedCredentialsApplied.value = false
   formVisible.value = true
 }
 
@@ -278,18 +323,23 @@ async function extractAddress() {
     formError.value = "动态提取需要本人桌面端在线；网页版和管理员只能维护提取来源或手动录入地址。"
     return
   }
-  if (!form.value.extract_url.trim()) {
-    formError.value = "请填写提取地址。"
-    return
-  }
   extracting.value = true
   formError.value = ""
   try {
-    applyParsedAddress(await proxyClient.previewExtract({
-      extract_url: form.value.extract_url.trim(),
-      protocol: form.value.protocol,
-    }))
-    feedback.toast.info("已提取一条地址；保存后才会写入资源，检测成功前不能分配。")
+    const extractUrl = form.value.extract_url.trim()
+      || (formMode.value === "edit" && editingProxy.value?.id
+        ? (await proxyClient.extractionConfig(editingProxy.value.id)).extract_url
+        : "")
+    if (!extractUrl) {
+      formError.value = "请填写提取地址。"
+      return
+    }
+    const extracted = await localAgent.proxyExtract({
+      extractUrl,
+      proxyProtocol: form.value.protocol,
+    })
+    extractionPreview.value = extracted
+    extractionPreviewVisible.value = true
   } catch (e) {
     formError.value = e.message || "动态代理提取失败"
   } finally {
@@ -297,8 +347,18 @@ async function extractAddress() {
   }
 }
 
+function useExtractedAddress() {
+  if (!extractionPreview.value) return
+  applyParsedAddress({ ...extractionPreview.value, protocol: extractionPreview.value.proxy_protocol })
+  extractedCredentialsApplied.value = true
+  extractionPreviewVisible.value = false
+  extractionPreview.value = null
+  feedback.toast.info("已回填提取结果；保存后请点击检测。")
+}
+
 async function refreshDynamic() {
-  if (!editingProxy.value) return
+  if (!editingProxy.value || !canExtract.value || !isGovernor.value) return
+  const proxyId = editingProxy.value.id
   const confirmed = await feedback.confirmWarning({
     title: "提取新地址并检测",
     message: `将按已保存的提取地址重新获取并检测，检测结果会替换当前记录。已有 ${editAffectedWindows.value} 个关联窗口不会自动改写，需在窗口页重新同步。`,
@@ -307,15 +367,30 @@ async function refreshDynamic() {
   if (!confirmed) return
   savingForm.value = true
   formError.value = ""
+  let submitted = false
   try {
-    const updated = await proxyClient.refreshDynamic(editingProxy.value.id)
+    const config = await proxyClient.extractionConfig(proxyId)
+    const extracted = await localAgent.proxyExtract({
+      extractUrl: config.extract_url,
+      proxyProtocol: config.proxy_protocol,
+    })
+    submitted = true
+    const updated = await proxyClient.refreshDynamic(proxyId, {
+      extract_url: config.extract_url,
+      resource_updated_at: config.resource_updated_at,
+      ...extracted,
+    })
     feedback.toast.info(updated.assignment_blocker
       ? `已提取新地址，但检测未通过：${updated.assignment_blocker}`
       : "已提取新地址并检测通过。")
     formVisible.value = false
     await loadProxies()
   } catch (e) {
-    formError.value = e.message || "动态代理提取失败"
+    formError.value = submitted && e.errcode === 23004
+      ? "代理信息在提取期间已修改，本次结果没有保存。请重新打开代理后再提取。"
+      : submitted
+      ? `保存或检测结果未确认，请先查看代理详情再决定是否重新提取。${e.message || ""}`
+      : (e.message || "动态代理提取失败")
   } finally {
     savingForm.value = false
   }
@@ -357,6 +432,7 @@ async function saveForm() {
       port: Number(target.port) || 0,
       username: target.username.trim(),
       password: target.password,
+      replace_credentials: extractedCredentialsApplied.value && target.source === "api",
       region: target.region.trim(),
       supplier: target.supplier.trim(),
       tags: target.tags,
@@ -512,18 +588,24 @@ async function checkOne(proxy) {
   }
 }
 
-async function runBatchCheck(targets) {
+async function runBatchCheck(targets, { retry = false } = {}) {
   progressMode.value = "check"
   progressTitle.value = "批量检测代理"
   progressLabels.value = { success: "正常", failed: "检测失败" }
-  progressItems.value = targets.map((proxy) => ({
-    key: proxy.id,
-    label: `${proxy.name || `${proxy.host}:${proxy.port}`}（${proxy.host}:${proxy.port}）`,
-    status: "pending",
-  }))
+  if (retry) {
+    const targetIds = new Set(targets.map(proxy => proxy.id))
+    progressItems.value = prepareFailedCheckRetry(progressItems.value, targetIds)
+  } else {
+    progressItems.value = targets.map((proxy) => ({
+      key: proxy.id,
+      label: `${proxy.name || `${proxy.host}:${proxy.port}`}（${proxy.host}:${proxy.port}）`,
+      status: "pending",
+    }))
+  }
   progressPhase.value = "running"
   progressVisible.value = true
-  for (const item of progressItems.value) {
+  for (const item of progressItems.value.filter(candidate => candidate.status === "pending")) {
+    if (!pageActive) break
     item.status = "processing"
     const proxy = targets.find((candidate) => candidate.id === item.key)
     try {
@@ -537,11 +619,11 @@ async function runBatchCheck(targets) {
   }
   progressPhase.value = "done"
   retryPayload.value = { kind: "check", ids: progressItems.value.filter((item) => item.status === "failed").map((item) => item.key) }
-  await loadProxies()
+  if (pageActive) await loadProxies()
 }
 
 function startBatchCheck() {
-  const targets = proxies.value.filter((proxy) => selectedRowKeys.value.includes(proxy.id))
+  const targets = pagedProxies.value.filter((proxy) => selectedRowKeys.value.includes(proxy.id) && proxy.host && proxy.port)
   if (!targets.length) return
   runBatchCheck(targets)
 }
@@ -553,33 +635,61 @@ async function retryFailed() {
       progressVisible.value = false
       return
     }
-    await runBatchCheck(targets)
+    await runBatchCheck(targets, { retry: true })
     return
   }
   if (progressMode.value === "import") {
     const failedLines = new Set(retryPayload.value?.rows?.map((row) => row.line) || [])
     const rows = importRows.value
       .filter((row) => failedLines.has(row.line))
-      .map((row) => ({ line: row.line, raw: row.raw, selected: true }))
+      .map((row) => importPayloadRow(row, true))
     if (!rows.length) {
       progressVisible.value = false
       return
     }
-    await submitImport(rows)
+    await submitImport(rows, { retry: true })
   }
+}
+
+async function verifyImportResult() {
+  if (progressMode.value !== "import" || progressPhase.value === "running") return
+  const uncertain = progressItems.value.filter(item => item.status === "unconfirmed")
+  if (!uncertain.length) return
+  progressPhase.value = "running"
+  try {
+    const rows = importRows.value.filter(row => uncertain.some(item => item.key === String(row.line)))
+    const preview = await proxyClient.previewImport(isAdmin.value ? Number(importTeam.value) : null, rows.map(row => row.raw))
+    const current = Array.isArray(preview?.rows) ? preview.rows : []
+    for (const [index, row] of rows.entries()) {
+      const item = uncertain.find(candidate => candidate.key === String(row.line))
+      const observed = current[index]
+      if (!item || !observed) continue
+      if (observed.duplicate) {
+        item.reason = `${observed.duplicate_reason || "同连接代理已存在"}；请在代理列表核对，暂不重复导入。`
+      } else {
+        item.status = "failed"
+        item.reason = observed.error || "系统中未找到同连接代理，可重试此行。"
+      }
+    }
+    retryPayload.value = { kind: "import", rows: rows.filter(row => progressItems.value.find(item => item.key === String(row.line))?.status === "failed") }
+    await loadProxies()
+  } catch (error) {
+    feedback.toast.error(error.message || "核实导入结果失败，请稍后再试。")
+  } finally {
+    progressPhase.value = "done"
+  }
+}
+
+function importPreviewLabel(row) {
+  return row?.parsed?.host ? `${row.parsed.protocol || "代理"}://${row.parsed.host}:${row.parsed.port}` : `第 ${row?.sourceLine || row?.line || "?"} 行（请在输入框核对原文）`
 }
 
 function closeProgress() {
   progressVisible.value = false
+  if (pendingImportResult.value) return
   progressMode.value = ""
   retryPayload.value = null
-  if (importStep.value === "done") {
-    importVisible.value = false
-    importText.value = ""
-    importRows.value = []
-    importSelected.value = []
-    importStep.value = "input"
-  }
+  if (importStep.value === "done") resetImport()
 }
 
 function sourceLabel(source) {
@@ -619,30 +729,78 @@ function formatDate(value) {
 // --- 导入 ---
 
 function openImport() {
-  importTeam.value = isAdmin.value ? filterTeam.value : String(currentUser.value?.team_id || "")
+  if (pendingImportResult.value) {
+    progressVisible.value = true
+    return
+  }
+  importTeam.value = isAdmin.value ? exactFilterTeamID.value : String(currentUser.value?.team_id || "")
+  resetImport()
+  importVisible.value = true
+}
+
+function resetImport() {
   importText.value = ""
   importRows.value = []
   importSelected.value = []
   importError.value = ""
   importStep.value = "input"
-  importVisible.value = true
+  importVisible.value = false
+  importMetadata.value = []
+  importFileName.value = ""
+  importDefaultSupplier.value = ""
+  importDefaultRegion.value = ""
+  importDefaultQuota.value = 3
+  editingImportLine.value = null
+  editingImportRaw.value = ""
+  editingImportQuota.value = 3
 }
 
-function onFileSelected(event) {
+async function onFileSelected(event) {
   const file = event.target?.files?.[0]
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    importText.value = String(reader.result || "")
-    event.target.value = ""
+  importError.value = ""
+  importPreviewing.value = true
+  try {
+    const parsed = await readProxyImportFile(file)
+    importText.value = parsed.lines.join("\n")
+    importMetadata.value = parsed.metadata
+    importFileName.value = parsed.name
     importRows.value = []
     importSelected.value = []
+    importStep.value = "input"
+  } catch (error) {
+    importError.value = error.message || "文件读取失败，请检查格式。"
+  } finally {
+    event.target.value = ""
+    importPreviewing.value = false
   }
-  reader.readAsText(file)
+}
+
+function onImportTextInput() {
+  importMetadata.value = []
+  importFileName.value = ""
+  importRows.value = []
+  importSelected.value = []
+  importStep.value = "input"
+}
+
+function downloadImportTemplate() {
+  const blob = new Blob(["\uFEFF", PROXY_IMPORT_TEMPLATE], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = "代理导入模板.csv"
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 function importLines() {
   return importText.value.split("\n").map((line) => line.trim()).filter(Boolean)
+}
+
+function importSourceLines() {
+  return importText.value.split("\n").map((line, index) => ({ line: line.trim(), sourceLine: index + 1 }))
+    .filter(row => row.line).map(row => row.sourceLine)
 }
 
 async function previewImport() {
@@ -652,14 +810,37 @@ async function previewImport() {
     importError.value = "请粘贴或选择要导入的代理内容。"
     return
   }
+  if (lines.length > MAX_IMPORT_ROWS) {
+    importError.value = `每次最多导入 ${MAX_IMPORT_ROWS} 行。`
+    return
+  }
   if (isAdmin.value && !importTeam.value) {
     importError.value = "请选择目标团队。"
     return
   }
+  if (!Number.isInteger(Number(importDefaultQuota.value)) || Number(importDefaultQuota.value) < 1 || Number(importDefaultQuota.value) > 1000) {
+    importError.value = "默认窗口数须为 1–1000 的整数。"
+    return
+  }
   importPreviewing.value = true
   try {
+    const sourceLines = importSourceLines()
     const result = await proxyClient.previewImport(isAdmin.value ? Number(importTeam.value) : null, lines)
-    importRows.value = Array.isArray(result?.rows) ? result.rows : []
+    importRows.value = (Array.isArray(result?.rows) ? result.rows : []).map((row, index) => {
+      const metadata = importMetadata.value[index] || {}
+      return {
+        ...row,
+        metadata: {
+          name: metadata.name || "",
+          region: metadata.region || importDefaultRegion.value.trim(),
+          supplier: metadata.supplier || importDefaultSupplier.value.trim(),
+          max_profiles: metadata.max_profiles || Number(importDefaultQuota.value) || 3,
+          remark: metadata.remark || "",
+        },
+        sourceLine: metadata.sourceLine || sourceLines[index] || row.line,
+        error: metadata.error || row.error,
+      }
+    })
     importSelected.value = importRows.value
       .filter((row) => isImportable(row))
       .map((row) => row.line)
@@ -683,49 +864,80 @@ function toggleImportRow(line, checked) {
     : importSelected.value.filter((value) => value !== line)
 }
 
+function beginImportCorrection(row) {
+  editingImportLine.value = row.line
+  editingImportRaw.value = row.raw
+  editingImportQuota.value = row.metadata?.max_profiles || 3
+}
+
+async function applyImportCorrection() {
+  const line = editingImportLine.value
+  if (!line || !editingImportRaw.value.trim()) return
+  const quota = Number(editingImportQuota.value)
+  if (!Number.isInteger(quota) || quota < 1 || quota > 1000) {
+    importError.value = "窗口数须为 1–1000 的整数。"
+    return
+  }
+  const lines = importLines()
+  lines[line - 1] = editingImportRaw.value.trim()
+  importText.value = lines.join("\n")
+  importMetadata.value[line - 1] = {
+    ...(importMetadata.value[line - 1] || {}),
+    sourceLine: importRows.value.find(row => row.line === line)?.sourceLine || line,
+    max_profiles: quota, error: "",
+  }
+  const previous = new Set(importSelected.value)
+  editingImportLine.value = null
+  editingImportRaw.value = ""
+  editingImportQuota.value = 3
+  await previewImport()
+  if (importStep.value === "preview") {
+    importSelected.value = importRows.value.filter(row => isImportable(row) && (previous.has(row.line) || row.line === line)).map(row => row.line)
+  }
+}
+
+function importPayloadRow(row, selected) {
+  return { line: row.line, raw: row.raw, selected, ...(row.metadata || {}) }
+}
+
 const importSelectedCount = computed(() => importSelected.value.length)
 
-async function submitImport(rows) {
+async function submitImport(rows, { retry = false } = {}) {
   importStep.value = "submitting"
   importing.value = true
   importError.value = ""
-  const payload = (rows || importRows.value.map((row) => ({
-    line: row.line,
-    raw: row.raw,
-    selected: importSelected.value.includes(row.line),
-  })))
+  const payload = (rows || importRows.value.map((row) => importPayloadRow(row, importSelected.value.includes(row.line))))
   progressMode.value = "import"
   progressTitle.value = "批量导入代理"
   progressPhase.value = "running"
-  progressItems.value = payload.map((row) => ({
-    key: String(row.line),
-    label: `第 ${row.line} 行：${row.raw}`,
-    status: "pending",
-  }))
+  if (retry) {
+    for (const row of payload) {
+      const item = progressItems.value.find(candidate => candidate.key === String(row.line))
+      if (item && item.status === "failed") {
+        item.status = "pending"
+        item.reason = ""
+      }
+    }
+  } else {
+    progressItems.value = payload.map((row) => ({
+      key: String(row.line),
+      label: `第 ${importRows.value.find(item => item.line === row.line)?.sourceLine || row.line} 行：${importPreviewLabel(importRows.value.find(item => item.line === row.line))}`,
+      status: row.selected ? "pending" : "skipped",
+    }))
+  }
   progressVisible.value = true
+  importVisible.value = false
   try {
     const result = await proxyClient.bulkImport(isAdmin.value ? Number(importTeam.value) : null, payload)
-    const byLine = new Map((result?.rows || []).map((row) => [row.line, row]))
-    const remaining = []
-    for (const item of progressItems.value) {
-      const row = byLine.get(Number(item.key))
-      if (!row) {
-        item.status = "skipped"
-        item.reason = "本轮未返回结果"
-        continue
-      }
-      item.status = { imported: "success", failed: "failed", skipped: "skipped" }[row.status] || "unconfirmed"
-      item.reason = row.reason || ""
-      if (row.status === "failed") remaining.push(row)
-    }
-    retryPayload.value = { kind: "import", rows: remaining }
+    progressItems.value = reconcileImportItems(progressItems.value, result?.rows || [])
+    retryPayload.value = { kind: "import", rows: importRows.value.filter(row => progressItems.value.find(item => item.key === String(row.line))?.status === "failed") }
     importStep.value = "done"
     feedback.toast.success(`导入处理完成：成功 ${result?.imported ?? 0} 条，跳过 ${result?.skipped ?? 0} 条，失败 ${result?.failed ?? 0} 条。`)
     await loadProxies()
   } catch (e) {
-    importError.value = e.message || "批量导入失败"
-    progressVisible.value = false
-    importStep.value = "preview"
+    progressItems.value = markImportUnknown(progressItems.value)
+    importStep.value = "done"
+    feedback.toast.error(e.message || "导入结果未返回，请先核实。")
   } finally {
     importing.value = false
     progressPhase.value = "done"
@@ -734,21 +946,13 @@ async function submitImport(rows) {
 
 function confirmImport() {
   if (!importSelectedCount.value) return
-  const rows = importRows.value.map((row) => ({
-    line: row.line,
-    raw: row.raw,
-    selected: importSelected.value.includes(row.line),
-  }))
+  const rows = importRows.value.map((row) => importPayloadRow(row, importSelected.value.includes(row.line)))
   submitImport(rows)
 }
 
 function closeImport() {
   if (importing.value) return
-  importVisible.value = false
-  importRows.value = []
-  importSelected.value = []
-  importText.value = ""
-  importStep.value = "input"
+  resetImport()
 }
 </script>
 
@@ -759,6 +963,7 @@ function closeImport() {
         <template #actions>
           <t-button theme="primary" @click="openCreate">新增代理</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="openImport">批量导入</t-button>
+          <t-button v-if="pendingImportResult" variant="text" @click="progressVisible = true">查看上次导入结果</t-button>
         </template>
       </ResourcePageHeader>
 
@@ -769,11 +974,7 @@ function closeImport() {
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
           <label v-if="isAdmin" class="wt-filter-field">
             <span class="wt-filter-field__label">团队</span>
-            <t-select v-model="filterTeam" clearable placeholder="全部" :options="teamOptions" filterable @change="onTeamChanged" />
-          </label>
-          <label v-else class="wt-filter-field">
-            <span class="wt-filter-field__label">团队</span>
-            <span class="proxy-fixed-team">{{ ownTeamLabel }}</span>
+            <t-input v-model="filterTeam" clearable placeholder="输入团队名称或 ID" @enter="submitSearch" />
           </label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">资源启停</span>
             <t-select v-model="filterStatus" clearable placeholder="全部" @change="submitSearch">
@@ -795,9 +996,8 @@ function closeImport() {
             </t-select>
           </label>
           <label v-show="advancedFilters" class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
-          <label v-show="advancedFilters" class="wt-filter-field"><span class="wt-filter-field__label">供应商</span><t-input v-model="filterSupplier" clearable placeholder="供应商" @enter="submitSearch" /></label>
           <div class="wt-filter-actions">
-            <t-button theme="default" variant="text" :aria-expanded="advancedFilters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? "收起筛选" : "更多筛选" }}{{ !advancedFilters && (filterRegion || filterSupplier) ? " · 已设置" : "" }}</t-button>
+            <t-button theme="default" variant="text" :aria-expanded="advancedFilters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? "收起筛选" : "更多筛选" }}{{ !advancedFilters && filterRegion ? " · 已设置" : "" }}</t-button>
             <t-button theme="primary" @click="submitSearch">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
           </div>
@@ -819,18 +1019,29 @@ function closeImport() {
             :scroll="tableScroll"
             empty="暂无符合条件的数据"
           >
+            <template #empty>
+              <ResourceEmptyState
+                :title="error ? '代理列表加载失败' : hasProxyFilter ? '没有找到符合条件的代理' : '还没有代理资源'"
+                :description="error ? '保留了当前筛选条件，可以重新加载。' : hasProxyFilter ? '调整筛选条件后再查询。' : '添加代理或批量导入，检测通过后即可在窗口中分配。'"
+              >
+                <t-button v-if="error" theme="primary" @click="loadProxies">重新加载</t-button>
+                <t-button v-else-if="hasProxyFilter" variant="outline" @click="resetFilters">清除筛选</t-button>
+                <template v-else>
+                  <t-button theme="primary" @click="openCreate">新增代理</t-button>
+                  <t-button variant="outline" @click="openImport">批量导入</t-button>
+                </template>
+              </ResourceEmptyState>
+            </template>
             <template #id="{ row }"><span class="proxy-id">{{ row.id }}</span></template>
             <template #name="{ row }">
               <div class="proxy-name" :title="row.name || ''">{{ row.name || "-" }}</div>
               <div class="proxy-addr" :title="row.host ? `${row.host}:${row.port}` : '尚未提取地址'">{{ row.host ? `${row.host}:${row.port}` : "尚未提取地址" }}</div>
             </template>
-            <template #region_supplier="{ row }">
-              <div>{{ row.region || "-" }}</div>
-              <div class="proxy-sub">{{ row.supplier || "-" }}</div>
-            </template>
+            <template #region="{ row }">{{ row.region || "-" }}</template>
             <template #source="{ row }"><span>{{ sourceLabel(row.source) }}</span></template>
             <template #usage="{ row }">
               <span>{{ row.assigned_profile_count || 0 }} / {{ row.max_profiles || 3 }}</span>
+              <div v-if="Number(row.reserved_profile_count || 0) > 0" class="proxy-sub">待确认占用 {{ row.reserved_profile_count }}</div>
               <div class="proxy-sub">剩余 {{ row.remaining_profile_count ?? ((row.max_profiles || 3) - (row.assigned_profile_count || 0)) }}</div>
             </template>
             <template #enabled="{ row }">
@@ -861,13 +1072,13 @@ function closeImport() {
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar">
+        <div v-if="visibleProxies.length" class="pagination-bar">
           <t-pagination
             v-model:current="pagination.current"
             v-model:pageSize="pagination.pageSize"
             :total="visibleProxies.length"
             :page-size-options="[10, 20, 50, 100]"
-            show-jumper
+            :show-jumper="false"
           />
         </div>
       </ResourceCard>
@@ -905,7 +1116,7 @@ function closeImport() {
               <t-form-item label="提取链接" class="resource-form-full"><t-input v-model="form.extract_url" placeholder="供应商提供的代理提取链接" /></t-form-item>
               <t-form-item label="" class="resource-form-full">
                 <t-space><t-button theme="default" variant="outline" :loading="extracting" :disabled="!canExtract" @click="extractAddress">测试提取</t-button>
-                  <t-button v-if="formMode === 'edit' && isGovernor" theme="default" variant="outline" :disabled="!canExtract" :loading="savingForm" @click="refreshDynamic">提取新地址并检测</t-button></t-space>
+                  <t-button v-if="formMode === 'edit' && isGovernor && canExtract" theme="default" variant="outline" :loading="savingForm" @click="refreshDynamic">提取新地址并检测</t-button></t-space>
                 <span v-if="!canExtract" class="form-hint">请在本人桌面端提取，或手动填写已有地址。</span>
               </t-form-item>
             </template>
@@ -934,6 +1145,22 @@ function closeImport() {
         </template>
       </ResourceOverlay>
 
+      <ResourceOverlay v-model:visible="extractionPreviewVisible" title="动态代理提取预览" kind="dialog" :width="560">
+        <template v-if="extractionPreview">
+          <ResourceDescriptions size="small">
+            <t-descriptions-item label="提取到的地址">{{ extractionPreview.proxy_protocol?.toUpperCase() }}://{{ extractionPreview.host }}:{{ extractionPreview.port }}</t-descriptions-item>
+            <t-descriptions-item label="认证信息">{{ extractionPreview.username || extractionPreview.password ? "已返回，敏感内容不显示" : "未返回" }}</t-descriptions-item>
+          </ResourceDescriptions>
+          <ResourceNotice tone="info" style="margin-top:16px">本次只提取地址。使用结果后还需保存并检测；现有关联窗口不会自动改写。</ResourceNotice>
+        </template>
+        <template #footer>
+          <t-space>
+            <t-button class="wt-secondary-button" variant="outline" @click="extractionPreviewVisible = false">取消</t-button>
+            <t-button theme="primary" @click="useExtractedAddress">使用此结果</t-button>
+          </t-space>
+        </template>
+      </ResourceOverlay>
+
       <ResourceOverlay v-model:visible="detailVisible" :title="'代理详情'" :footer="false" kind="drawer" :width="800">
         <t-loading :loading="detailLoading">
           <template v-if="detailProxy">
@@ -955,7 +1182,8 @@ function closeImport() {
               </t-descriptions-item>
               </ResourceDescriptions></ResourceSection>
             <ResourceSection title="使用与检测"><ResourceDescriptions size="small">
-              <t-descriptions-item label="地区 / 供应商">{{ detailProxy.region || "-" }} / {{ detailProxy.supplier || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="地区">{{ detailProxy.region || "-" }}</t-descriptions-item>
+              <t-descriptions-item label="供应商">{{ detailProxy.supplier || "-" }}</t-descriptions-item>
               <t-descriptions-item label="业务标签">{{ (detailProxy.tags || []).join("、") || "-" }}</t-descriptions-item>
               <t-descriptions-item label="资源启停">{{ detailProxy.enabled ? "启用" : "停用" }}</t-descriptions-item>
               <t-descriptions-item label="到期时间">
@@ -964,7 +1192,11 @@ function closeImport() {
               </t-descriptions-item>
               <t-descriptions-item label="检测结果">{{ checkResultLabel(detailProxy.last_check_result) }}（{{ formatTime(detailProxy.last_check_at) }}）</t-descriptions-item>
               <t-descriptions-item label="检测原因">{{ detailProxy.last_check_message || "-" }}</t-descriptions-item>
-              <t-descriptions-item label="窗口额度">{{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profiles || 3 }} 已用</t-descriptions-item>
+              <t-descriptions-item label="窗口额度">
+                {{ detailProxy.assigned_profile_count || 0 }} / {{ detailProxy.max_profiles || 3 }} 已用
+                <span v-if="Number(detailProxy.reserved_profile_count || 0) > 0"> · {{ detailProxy.reserved_profile_count }} 个待确认占用</span>
+                · 剩余 {{ detailProxy.remaining_profile_count ?? 0 }}
+              </t-descriptions-item>
               <t-descriptions-item label="备注"><span class="proxy-detail-remark">{{ detailProxy.remark || "-" }}</span></t-descriptions-item>
             </ResourceDescriptions></ResourceSection>
             <ResourceSection :title="`关联窗口 · ${detailBindings.length} 个`">
@@ -974,14 +1206,14 @@ function closeImport() {
               size="small"
               :columns="[
                 { colKey: 'id', title: 'ID', width: 80 },
-                { colKey: 'name', title: '窗口名称', width: 180 },
+                { colKey: 'bit_name', title: '窗口名称', width: 180 },
                 { colKey: 'bit_profile_id', title: '比特窗口ID', width: 150 },
                 { colKey: 'user_id', title: '运营UID', width: 90 },
                 { colKey: 'local_state', title: '状态', width: 90 },
               ]"
               empty="暂无关联窗口"
             >
-              <template #local_state="{ row }">{{ row.local_state === 'active' ? '在册' : row.local_state === 'local_missing' ? '窗口缺失' : '尚未确认' }}</template>
+              <template #local_state="{ row }">{{ row.local_state === 'active' ? '比特中可见' : row.local_state === 'local_missing' ? '最近同步未找到' : '尚未确认' }}</template>
             </t-table>
             </ResourceSection>
           </template>
@@ -1012,7 +1244,7 @@ function closeImport() {
         title="批量导入代理"
         :footer="importStep === 'input' || importStep === 'preview'"
         @close="closeImport"
-        kind="drawer" :width="960" :busy="importing">
+        kind="dialog" :width="importStep === 'input' ? 720 : 960" :busy="importing">
         <template v-if="importStep === 'input' || importStep === 'preview'">
           <FeedbackAlert v-if="importError" :message="importError" theme="error" style="margin-bottom:12px" />
           <div class="import-team">
@@ -1020,13 +1252,19 @@ function closeImport() {
             <t-select v-if="isAdmin" v-model="importTeam" :options="teamOptions" placeholder="请选择目标团队" style="width:220px" />
             <strong v-else>{{ ownTeamLabel }}</strong>
           </div>
-          <ResourceNotice details="支持 host:port、host:port:user:pass、protocol://user:pass@host:port。">每行一个代理，仅新增，不覆盖已有资源。</ResourceNotice>
+          <ResourceNotice details="支持 host:port、host:port:user:pass、protocol://user:pass@host:port。Excel/CSV 请使用下载模板。">每行一个代理，仅新增，不覆盖已有资源。</ResourceNotice>
           <div class="import-file">
             <t-button size="small" variant="outline" @click="$refs.importFile.click()">选择文件</t-button>
-            <span class="form-hint">支持 .txt / .csv</span>
-            <input ref="importFile" type="file" accept=".txt,.csv" style="display:none" @change="onFileSelected" />
+            <t-button size="small" variant="text" @click="downloadImportTemplate">下载模板</t-button>
+            <span class="form-hint">{{ importFileName || '支持 .xlsx / .csv / .txt' }}</span>
+            <input ref="importFile" type="file" accept=".xlsx,.csv,.txt" style="display:none" @change="onFileSelected" />
           </div>
-          <t-textarea v-model="importText" :rows="7" placeholder="粘贴代理文本，每行一个…" />
+          <t-textarea v-model="importText" :rows="5" placeholder="粘贴代理文本，每行一个…" @input="onImportTextInput" />
+          <div class="import-defaults">
+            <label class="wt-filter-field"><span class="wt-filter-field__label">默认供应商</span><t-input v-model="importDefaultSupplier" placeholder="可留空" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">默认地区</span><t-input v-model="importDefaultRegion" placeholder="可留空" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">默认窗口数</span><t-input-number v-model="importDefaultQuota" :min="1" :max="1000" /></label>
+          </div>
           <div class="import-actions">
             <t-button theme="primary" :loading="importPreviewing" @click="previewImport">解析预览</t-button>
           </div>
@@ -1035,9 +1273,11 @@ function closeImport() {
             <t-divider>解析结果（已选 {{ importSelectedCount }} 条）</t-divider>
             <t-table :data="importRows" row-key="line" size="small" :columns="[
               { colKey: 'selected', title: '选择', width: 70 },
-              { colKey: 'line', title: '行号', width: 80 },
-              { colKey: 'raw', title: '原文', width: 220 },
-              { colKey: 'status', title: '结果' },
+              { colKey: 'sourceLine', title: '行号', width: 70 },
+              { colKey: 'raw', title: '连接地址', width: 220 },
+              { colKey: 'metadata', title: '资源资料', width: 220 },
+              { colKey: 'status', title: '结果', width: 130 },
+              { colKey: 'action', title: '处理', width: 90 },
             ]">
               <template #selected="{ row }">
                 <t-checkbox
@@ -1046,10 +1286,23 @@ function closeImport() {
                   @change="(checked) => toggleImportRow(row.line, checked)"
                 />
               </template>
+              <template #raw="{ row }">
+                <t-input v-if="editingImportLine === row.line" v-model="editingImportRaw" size="small" @enter="applyImportCorrection" />
+                <span v-else>{{ importPreviewLabel(row) }}</span>
+              </template>
+              <template #metadata="{ row }">
+                <t-input-number v-if="editingImportLine === row.line" v-model="editingImportQuota" :min="1" :max="1000" size="small" />
+                <span v-else>{{ row.metadata?.name || '按地址命名' }} · {{ row.metadata?.region || '地区未填' }} · {{ row.metadata?.supplier || '供应商未填' }} · {{ row.metadata?.max_profiles || 3 }} 窗口</span>
+              </template>
               <template #status="{ row }">
                 <ResourceStatusBadge v-if="isImportable(row)" tone="success" label="可导入" />
                 <ResourceStatusBadge v-else-if="row.duplicate" tone="warning" :label="row.duplicate_reason || '重复'" />
                 <ResourceStatusBadge v-else tone="danger" :label="row.error || '无效'" />
+              </template>
+              <template #action="{ row }">
+                <t-button v-if="editingImportLine === row.line" size="small" variant="text" @click="applyImportCorrection">保存</t-button>
+                <t-button v-else-if="row.error" size="small" variant="text" @click="beginImportCorrection(row)">修正</t-button>
+                <span v-else>—</span>
               </template>
             </t-table>
           </template>
@@ -1077,6 +1330,7 @@ function closeImport() {
         :status-labels="progressLabels"
         retry-label="重试失败项"
         @retry="retryFailed"
+        @verify="verifyImportResult"
         @done="closeProgress"
       />
     </div>
@@ -1097,5 +1351,8 @@ function closeImport() {
 .import-team { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .import-team .form-hint { margin-top: 0; }
 .import-file { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.import-defaults { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.import-defaults :deep(.t-input-number) { width: 100%; }
 .import-actions { margin-top: 8px; }
+@media (max-width: 640px) { .import-defaults { grid-template-columns: 1fr; } }
 </style>

@@ -30,8 +30,8 @@ describe('profile binding client', () => {
     await client.listProfiles()
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/browser-profiles/sync/confirm', expect.objectContaining({ method: 'POST', credentials: 'include' }))
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ adopt_bit_profile_ids: [] })
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ adopt_bit_profile_ids: ['bit-1'] })
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ sync_id: "scan-1", adopt_bit_profile_ids: [] })
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ sync_id: 'scan-1', adopt_bit_profile_ids: ['bit-1'] })
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/browser-profiles', expect.objectContaining({ credentials: 'include' }))
   })
 

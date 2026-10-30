@@ -4,6 +4,16 @@ import { createLocalAgentService, LOCAL_AGENT_COMMANDS } from './apps/desktop/fe
 import { startDesktopLocalAgent } from './apps/desktop/features/local-agent/init.js'
 
 describe('local agent desktop service', () => {
+  it('extracts dynamic proxy through the Desktop bridge', async () => {
+    const extracted = { proxy_protocol: 'socks5', host: '203.0.113.9', port: 1080 }
+    const invoke = vi.fn(async () => extracted)
+    const service = createLocalAgentService({ invoke })
+    await expect(service.proxyExtract({ extractUrl: 'https://provider.example/extract', proxyProtocol: 'socks5' })).resolves.toEqual(extracted)
+    expect(invoke).toHaveBeenCalledWith('local_agent_proxy_extract', {
+      args: { extract_url: 'https://provider.example/extract', proxy_protocol: 'socks5' },
+    })
+    await expect(createLocalAgentService({}).proxyExtract({ extractUrl: 'https://provider.example/extract' })).rejects.toThrow('桌面端')
+  })
   it('starts the Agent through Tauri only when Desktop is available', async () => {
     const invoke = vi.fn(async (command) => {
       if (command === LOCAL_AGENT_COMMANDS.tokenFacts) return { configured: false, expires_at: null }

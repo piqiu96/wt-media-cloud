@@ -7,6 +7,7 @@ import (
 
 // RegisterRoutes installs the module's root handlers.
 func RegisterRoutes(h *server.Hertz) {
+	h.GET("/api/v1/browser-profiles/:id/proxy-operation", GetProfileProxyOperation)
 	h.POST("/api/v1/browser-profiles/:id/proxy-operation", StartProfileProxyOperation)
 	h.POST("/api/v1/browser-profiles/:id/proxy-operation/result", FinishProfileProxyOperation)
 	h.GET("/api/v1/proxies", ListProxies)
@@ -14,7 +15,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/proxies/:id", GetProxy)
 	h.GET("/api/v1/proxies/:id/bindings", GetProxyBindings)
 	h.POST("/api/v1/proxies/parse", ParseProxy)
-	h.POST("/api/v1/proxies/extract-preview", PreviewProxyExtraction)
+	h.GET("/api/v1/proxies/:id/extraction-config", GetProxyExtractionConfig)
 	h.POST("/api/v1/proxies/:id/refresh", RefreshProxy)
 	h.POST("/api/v1/proxies", CreateProxy)
 	h.PATCH("/api/v1/proxies/:id", UpdateProxy)

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.29.2"
+revision: "2026.10.30.1"
 schemas:
   BrowserProfile:
     type: object
@@ -27,8 +27,9 @@ schemas:
       remark: {type: string}
       enabled: {type: boolean}
       local_state: {type: string, enum: [active, local_missing, archived]}
-      proxy_id: {type: string, nullable: true}
-      reserved_proxy_id: {type: string, nullable: true}
+      proxy_id: {type: integer, format: int64, nullable: true}
+      reserved_proxy_id: {type: integer, format: int64, nullable: true}
+      proxy_operation: {type: object, description: Internal current/last operation receipt containing operation_id/action/proxy_id/outcome only; no credentials, not included in profile list.}
       reserved_since: {type: string, format: date-time, nullable: true}
       last_synced_at: {type: string, format: date-time}
     forbidden_properties: [cookie, password, proxy_username, proxy_password, oper_user_id]
@@ -62,3 +63,6 @@ sync_policy:
   snapshot_carries_bit_main_user_id: true
   snapshot_carries_observed_at: true
   confirmation_never_deletes_unseen_profiles: true
+  confirmed_snapshot_retained_until_next_scan: true
+  new_clients_confirm_reviewed_sync_id: true
+  repeated_confirmation_returns_receipt: true

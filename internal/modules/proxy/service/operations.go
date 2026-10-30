@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy/repository"
@@ -17,10 +16,6 @@ func ReserveProfileProxy(profileID, proxyID string, teamID sharedidentity.TeamID
 
 func ReserveProfileUnbind(profileID string, teamID sharedidentity.TeamID) (repository.ProfileProxyTarget, model.Proxy, error) {
 	return repository.ReserveProfileUnbind(profileID, teamID, time.Now().UTC())
-}
-
-func ResolveProfileProxyOperation(profileID, proxyID string, apply, success bool) (repository.ProfileProxyTarget, error) {
-	return repository.ResolveProfileProxyOperation(profileID, proxyID, apply, success, time.Now().UTC())
 }
 
 func ReleaseProfileProxy(profileID string, teamID sharedidentity.TeamID) (repository.ProfileProxyTarget, model.Proxy, error) {
@@ -70,6 +65,10 @@ func Update(id string, input dto.CreateProxyInput, govern bool) (model.Proxy, er
 	return newProxyService(mysqlStore{}).Update(id, input, govern)
 }
 
+func RefreshExtractedConnection(id, expectedURL string, expectedUpdatedAt time.Time, input dto.CreateProxyInput) (model.Proxy, error) {
+	return newProxyService(mysqlStore{}).RefreshExtractedConnection(id, expectedURL, expectedUpdatedAt, input)
+}
+
 func UpdateGovernance(id string, enabled *bool, maxProfiles *int) (model.Proxy, error) {
 	return newProxyService(mysqlStore{}).UpdateGovernance(id, enabled, maxProfiles)
 }
@@ -105,10 +104,8 @@ func WithAssignmentLock(proxyID string, fn func() error) error {
 }
 
 type (
-	ProxyCheckInput       = dto.ProxyCheckInput
-	ProxyCheckResult      = dto.ProxyCheckResult
-	ProxyExtractionInput  = dto.ProxyExtractionInput
-	ProxyExtractionResult = dto.ProxyExtractionResult
+	ProxyCheckInput  = dto.ProxyCheckInput
+	ProxyCheckResult = dto.ProxyCheckResult
 )
 
 // CheckProxy 探测已保存的代理。检测在 Cloud 进程内执行，不依赖本机 Agent，
@@ -121,10 +118,12 @@ func CheckProxy(id string) (model.Proxy, dto.ProxyCheckResult, error) {
 	}
 	result := svc.Probe(proxy, ProbeOptions{})
 	updated, applied, err := svc.RecordCheckResult(id, dto.ProxyCheckInput{
-		ProxyID:  proxy.ID,
+		ProxyID:  sharedidentity.ProxyID(proxy.ID),
 		Protocol: proxy.Protocol,
 		Host:     proxy.Host,
 		Port:     proxy.Port,
+		Username: proxy.Username,
+		Password: proxy.Password,
 	}, result.Connectivity, result.Reason)
 	if err != nil {
 		return model.Proxy{}, result, err
@@ -132,25 +131,10 @@ func CheckProxy(id string) (model.Proxy, dto.ProxyCheckResult, error) {
 	if !applied {
 		return updated, dto.ProxyCheckResult{
 			Connectivity: CheckInvalid,
-			Reason:       "代理地址在检测期间被修改，本次结果已丢弃，请重新检测",
+			Reason:       "代理连接信息在检测期间被修改，本次结果已丢弃，请重新检测",
 		}, nil
 	}
 	return updated, result, nil
-}
-
-// ExtractProxy 仍在运营工作站执行：动态代理商 URL 要用运营可用的网络抓取，
-// 取到的地址再由 Cloud 保存并检测。
-func ExtractProxy(ctx context.Context, input dto.ProxyExtractionInput) (dto.ProxyExtractionResult, error) {
-	result, err := agentclient.Get().ExtractProxy(ctx, agentclient.ProxyExtractionRequest{
-		ExtractURL: input.ExtractURL, ProxyProtocol: string(input.Protocol),
-	})
-	if err != nil {
-		return dto.ProxyExtractionResult{}, err
-	}
-	return dto.ProxyExtractionResult{
-		Protocol: model.Protocol(result.ProxyProtocol), Host: result.Host, Port: result.Port,
-		Username: result.Username, Password: result.Password,
-	}, nil
 }
 
 // MarkExpiringProxies 保留为调度入口，但到期状态改为读取时由 expires_at 现算。

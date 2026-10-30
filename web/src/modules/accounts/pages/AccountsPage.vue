@@ -254,7 +254,7 @@ function profileWindowStateText(account) {
   if (!profile) return "窗口未同步"
   if (profile.local_state === "local_missing") return "窗口缺失"
   if (profile.enabled === false) return "窗口已停用"
-  return "窗口在册"
+  return "窗口可使用"
 }
 
 function profileProxyModeText(account) {

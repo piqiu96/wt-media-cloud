@@ -16,13 +16,14 @@ var (
 	ErrBitBrowserOffline          = errors.New("BitBrowser observation is stale")
 	ErrBitMainUserMismatch        = errors.New("BitBrowser main account does not match the bound account")
 	ErrScanNotFound               = errors.New("profile scan was not found")
+	ErrProfileProxyPending        = errors.New("profile proxy operation requires verification")
 	ErrScanNotReady               = errors.New("profile scan is not ready")
 	ErrScanExpired                = errors.New("profile scan has expired")
 	ErrProfileNotFound            = errors.New("browser profile was not found")
 	ErrProfileAssignedToOtherUser = errors.New("browser profile belongs to another user")
 	ErrProfileInactive            = errors.New("browser profile is not active")
 	ErrProfileReferenced          = errors.New("browser profile is still referenced")
-	ErrProfileNotDisabled         = errors.New("browser profile is not disabled")
+	ErrProfileNotMissing          = errors.New("browser profile is not missing from BitBrowser")
 )
 
 // 主账号绑定只由 Local Agent 的 bind 端点写入，审计动作与绑定模型放在一起。
@@ -83,8 +84,8 @@ type BrowserProfile struct {
 	BitProxyType     string                 `json:"bit_proxy_type,omitempty"`
 	BitProxyHost     string                 `json:"bit_proxy_host,omitempty"`
 	BitProxyPort     int                    `json:"bit_proxy_port,omitempty"`
-	ProxyID          string                 `json:"proxy_id,omitempty"`
-	ReservedProxyID  string                 `json:"reserved_proxy_id,omitempty"`
+	ProxyID          sharedidentity.ProxyID `json:"proxy_id,omitempty"`
+	ReservedProxyID  sharedidentity.ProxyID `json:"reserved_proxy_id,omitempty"`
 	ReservedSince    *time.Time             `json:"reserved_since,omitempty"`
 	BitRemark        string                 `json:"bit_remark,omitempty"`
 	Remark           string                 `json:"remark,omitempty"`

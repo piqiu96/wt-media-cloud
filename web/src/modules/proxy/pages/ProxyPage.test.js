@@ -37,14 +37,25 @@ describe('proxy resource page', () => {
     expect(source).toContain('>资源启停</span>')
     expect(source).toContain('>检测结果</span>')
     expect(source).toContain('>到期</span>')
-    expect(source).toContain('>供应商</span>')
     expect(source).toContain('>搜索</span>')
   })
 
-  // AdminUI 规范 §4.1：属性与关联在前，状态与检测结果紧随其后。把状态放回供应商
+  it('shows supplier only in proxy details, not in list filters or rows', () => {
+    expect(source).toContain('{ colKey: "region", title: "地区"')
+    expect(source).toContain('<t-descriptions-item label="供应商">')
+    expect(source).not.toContain('region_supplier')
+    expect(source).not.toContain('filterSupplier')
+  })
+
+  it('uses the binding API window-name field in proxy details', () => {
+    expect(source).toContain("{ colKey: 'bit_name', title: '窗口名称'")
+    expect(source).not.toContain("{ colKey: 'name', title: '窗口名称'")
+  })
+
+  // AdminUI 规范 §4.1：属性与关联在前，状态与检测结果紧随其后。把状态放回地区
   // 后面会让「这台还能不能用」先于「这台绑了谁」出现，读表顺序与运营的判断顺序相反。
   it('puts the status columns after capacity and bindings', () => {
-    const ordered = ['region_supplier', 'source', 'usage', 'enabled', 'last_check_result', 'expires_at']
+    const ordered = ['region', 'source', 'usage', 'enabled', 'last_check_result', 'expires_at']
     const offsets = ordered.map((key) => source.indexOf(`{ colKey: "${key}"`))
     expect(offsets.every((at) => at > -1), '六列都必须找得到').toBe(true)
     for (let i = 1; i < offsets.length; i += 1) {

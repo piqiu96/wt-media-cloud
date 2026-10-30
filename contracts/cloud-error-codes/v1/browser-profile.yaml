@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.23.1"
+revision: "2026.10.30.1"
 # Codes shared by the BitBrowser bind, the Profile scan/sync and Profile CRUD.
 # Profile reads and writes are scoped to `user_id + main_user_id`; anything outside that
 # pair is reported as not found rather than leaked.
@@ -24,5 +24,6 @@ errors:
   profile_scan_expired: {http_status: 410, code: 20004}
   profile_scan_not_ready: {http_status: 409, code: 20009}
   profile_referenced: {http_status: 409, code: 20003}
-  profile_not_disabled: {http_status: 409, code: 20011}
+  profile_not_missing: {http_status: 409, code: 20011}
   profile_store_error: {http_status: 500}
+  profile_proxy_pending: {http_status: 409, code: 20009, error_code: PROFILE_PROXY_PENDING, retryable: false, recovery_action: verify_proxy}

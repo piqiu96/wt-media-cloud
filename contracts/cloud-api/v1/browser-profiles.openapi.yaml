@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Browser Profile API
-  version: 2026.10.29.2
+  version: 2026.10.30.1
   description: >
     Browser-window mirrors are read by role and team. BitBrowser is written only by
     Desktop through the Local Agent; Cloud stores intent, reservations and the
@@ -37,7 +37,7 @@ paths:
     post:
       operationId: submitBrowserProfileSync
       security: [{sessionCookie: []}]
-      summary: Replace the caller's current BitBrowser snapshot and compute its diff.
+      summary: Stage the caller's current BitBrowser snapshot and compute its diff.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ProfileSyncInput'}}}
@@ -54,7 +54,7 @@ paths:
     get:
       operationId: getBrowserProfileSync
       security: [{sessionCookie: []}]
-      summary: Read the caller's one current snapshot.
+      summary: Read the caller's current preview or last confirmed receipt.
       responses:
         '200':
           description: Current snapshot and diff.
@@ -76,7 +76,7 @@ paths:
     post:
       operationId: confirmBrowserProfileSync
       security: [{sessionCookie: []}]
-      summary: Apply accepted changes and delete the one-shot snapshot.
+      summary: Apply the reviewed snapshot once and retain its confirmed receipt until the next scan.
       requestBody:
         required: false
         content:
@@ -85,13 +85,16 @@ paths:
               type: object
               additionalProperties: false
               properties:
+                sync_id:
+                  type: string
+                  description: Reviewed snapshot ID. New clients must send it; omitted only for compatibility with old clients. Stale IDs never apply a newer preview.
                 adopt_bit_profile_ids:
                   type: array
                   items: {type: string}
                   description: New windows selected for ownership. Unselected additions are ignored; conflicts are never claimed.
       responses:
         '200':
-          description: Formal mirrors updated from the current user's snapshot.
+          description: Formal mirrors updated or the same confirmed receipt replayed. Confirmation serializes on the snapshot and never reapplies a confirmed mirror.
           content:
             application/json:
               schema:
@@ -156,12 +159,33 @@ paths:
     delete:
       operationId: deleteBrowserProfile
       security: [{sessionCookie: []}]
-      summary: Delete a disabled local-missing window with no references.
+      summary: Delete a confirmed BitBrowser-missing Cloud window record.
+      description: >
+        Only a window marked local_missing by a successful scan may be deleted.
+        The operator must confirm it was deleted in BitBrowser. Cloud atomically
+        unlinks media accounts, resets their login/check conclusions, releases
+        the managed proxy occupancy, physically removes the window record, and
+        writes a credential-free audit entry. Pending proxy operations block deletion.
       responses:
-        '200': {description: Window mirror deleted.}
+        '204': {description: Window record deleted.}
         '403': {description: Only the owner or an admin may delete the mirror.}
-        '409': {description: Window is enabled or still referenced.}
+        '409': {description: Window is not missing or has a pending proxy operation.}
   /api/v1/browser-profiles/{id}/proxy-operation:
+    get:
+      operationId: recoverBrowserProfileProxyOperation
+      security: [{sessionCookie: []}]
+      summary: Recover the owner's current or last proxy operation after re-entering the page.
+      description: Only the owning non-admin user may read. Credentials are returned only for a pending local comparison, never for a terminal receipt. Unknown reservations do not expire automatically.
+      responses:
+        '200':
+          description: Durable current operation and secret-free receipt, or pending local instructions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {data: {$ref: '#/components/schemas/ProfileProxyOperationStart'}}
+        '403': {description: Not the window owner.}
+        '409': {description: No recoverable current operation.}
     post:
       operationId: startBrowserProfileProxyOperation
       security: [{sessionCookie: []}]
@@ -169,7 +193,9 @@ paths:
       description: >
         `apply` and `unbind` return credentials/instruction for Desktop and require
         the result endpoint. `release` only clears the formal relation while keeping
-        BitBrowser-managed proxy facts and completes immediately.
+        BitBrowser-managed proxy facts and completes immediately with a saved
+        `success` receipt. A caller that lost the start response must match the
+        returned operation_id before treating a terminal receipt as this attempt.
       requestBody:
         required: true
         content:
@@ -191,7 +217,7 @@ paths:
       operationId: finishBrowserProfileProxyOperation
       security: [{sessionCookie: []}]
       summary: Settle a reserved proxy operation from Desktop's actual result.
-      description: Success commits the formal relation. Every failure clears the reservation and keeps the previous formal relation for a direct retry.
+      description: Success commits the formal relation. Explicit refusal or verified mismatch clears the reservation. Unknown write/settlement outcomes MUST NOT be reported as failed. operation_id and action fence late results; the same settled outcome replays without rewriting. New reservations require the returned operation_id; old clients missing it receive conflict and must upgrade to recover.
       requestBody:
         required: true
         content:
@@ -256,11 +282,13 @@ components:
         bit_remark: {type: string}
     ProfileSync:
       type: object
-      required: [id, user_id, bit_main_user_id, profiles, diff, created_at, expires_at]
+      required: [id, user_id, bit_main_user_id, status, profiles, diff, created_at, expires_at]
       properties:
         id: {type: string}
         user_id: {type: integer, format: int64}
         bit_main_user_id: {type: string}
+        status: {type: string, enum: [ready, confirmed]}
+        confirmed_at: {type: string, format: date-time}
         profiles: {type: array, items: {$ref: '#/components/schemas/BrowserProfile'}}
         diff: {type: array, items: {$ref: '#/components/schemas/ProfileDiff'}}
         created_at: {type: string, format: date-time}
@@ -296,8 +324,8 @@ components:
         remark: {type: string, description: Cloud operational remark.}
         enabled: {type: boolean}
         local_state: {type: string, enum: [active, local_missing, archived]}
-        proxy_id: {type: string, nullable: true}
-        reserved_proxy_id: {type: string, nullable: true}
+        proxy_id: {type: integer, format: int64, nullable: true}
+        reserved_proxy_id: {type: integer, format: int64, nullable: true}
         reserved_since: {type: string, format: date-time, nullable: true}
         last_synced_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -309,15 +337,17 @@ components:
       additionalProperties: false
       properties:
         action: {type: string, enum: [apply, unbind, release]}
-        proxy_id: {type: string, description: Required for apply; ignored for unbind/release.}
+        proxy_id: {type: integer, format: int64, description: Required for apply; ignored for unbind/release.}
     ProfileProxyOperationStart:
       type: object
       required: [action, profile_id, bit_profile_id, agent_required]
       properties:
+        operation_id: {type: string, description: Required for settling apply/unbind and retained for recovery; release also returns a terminal receipt ID.}
+        outcome: {type: string, enum: [pending, success, failed]}
         action: {type: string, enum: [apply, unbind, release]}
         profile_id: {type: string}
         bit_profile_id: {type: string}
-        proxy_id: {type: string}
+        proxy_id: {type: integer, format: int64}
         protocol: {type: string, enum: [http, https, socks5]}
         host: {type: string}
         port: {type: integer}
@@ -326,10 +356,11 @@ components:
         agent_required: {type: boolean}
     ProfileProxyOperationResult:
       type: object
-      required: [action, proxy_id, outcome]
+      required: [operation_id, action, proxy_id, outcome]
       additionalProperties: false
       properties:
+        operation_id: {type: string}
         action: {type: string, enum: [apply, unbind]}
-        proxy_id: {type: string}
+        proxy_id: {type: integer, format: int64}
         outcome: {type: string, enum: [success, failed]}
         message: {type: string}

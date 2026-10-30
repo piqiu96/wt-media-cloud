@@ -56,12 +56,19 @@ func ConfirmProfileSync(ctx context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	var req struct {
+		SyncID             string   `json:"sync_id"`
 		AdoptBitProfileIDs []string `json:"adopt_bit_profile_ids"`
 	}
 	if len(c.Request.Body()) > 0 && !api.DecodeJSON(c, &req) {
 		return
 	}
-	scan, err := profileservice.ConfirmCurrentSync(actor, req.AdoptBitProfileIDs)
+	var scan profileservice.ProfileScan
+	var err error
+	if req.SyncID != "" {
+		scan, err = profileservice.ConfirmScan(actor, req.SyncID, req.AdoptBitProfileIDs)
+	} else {
+		scan, err = profileservice.ConfirmCurrentSync(actor, req.AdoptBitProfileIDs)
+	}
 	if err != nil {
 		writeProfileError(c, err)
 		return
@@ -240,12 +247,14 @@ func writeProfileError(c *hertzapp.RequestContext, err error) {
 		api.NotFound(c, 20004, "Profile 扫描或 Profile 不存在")
 	case errors.Is(err, profileservice.ErrScanExpired):
 		api.Failure(c, 410, 20004, "Profile 扫描已过期", nil)
+	case errors.Is(err, profileservice.ErrProfileProxyPending):
+		api.FailureCode(c, 409, 20009, "窗口有代理结果待核实，请先在管理代理中核实后再接受变化", "PROFILE_PROXY_PENDING", nil, false, "verify_proxy")
 	case errors.Is(err, profileservice.ErrScanNotReady):
 		api.Conflict(c, 20009, "Profile 扫描未就绪")
 	case errors.Is(err, profileservice.ErrProfileReferenced):
 		api.Conflict(c, 20003, "浏览器窗口已被媒体账号引用，不能直接分配给其他用户")
-	case errors.Is(err, profileservice.ErrProfileNotDisabled):
-		api.Conflict(c, 20011, "仅已停用的浏览器窗口可同步删除；请先停用该窗口")
+	case errors.Is(err, profileservice.ErrProfileNotMissing):
+		api.Conflict(c, 20011, "仅最近一次同步中已缺失的窗口可删除；请先核实比特中的窗口")
 	default:
 		api.InternalError(c, "Profile 服务内部错误")
 	}

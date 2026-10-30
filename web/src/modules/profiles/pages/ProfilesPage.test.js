@@ -17,7 +17,8 @@ describe('browser window resource page', () => {
     expect(source).toContain('const isOwnDesktop = computed(() => isDesktopClient.value && (isOperator.value || (isSenior.value && !viewingMember.value)))')
     expect(source).toContain('? ["详情", "打开", "编辑", "处理异常", "运营备注"]')
     expect(source).toContain(': ["详情", "运营备注"]')
-    expect(source).toContain('if (isOwnDesktop.value) list.push({ colKey: "row-select", type: "multiple", width: 48 })')
+    expect(source).toContain('if (isOwnDesktop.value) list.push({ colKey: "row-select", type: "multiple"')
+    expect(source).toContain('disabled: ({ row }) => !canSelectWindow(row)')
     expect(source).toContain('if (isAdmin.value) list.push({ colKey: "team", title: "运营团队", width: 120 })')
     expect(source).toContain('<ResourceStatusBadge\n                v-else')
     expect(source).toContain('if (!isOwnDesktop.value) return')
@@ -49,6 +50,25 @@ describe('browser window resource page', () => {
     expect(source).toContain('{ colKey: "op", title: "操作", width: opColumnWidth(rowActionLabels.value, { variant: "text", loading: true, primary: isOwnDesktop.value }), fixed: "right" }')
   })
 
+  it('places window status before running state and labels deletion at both entry and confirmation', () => {
+    const columns = source.slice(source.indexOf('const columns = computed('), source.indexOf('const tableScroll = computed('))
+    expect(columns.indexOf('colKey: "window_state"')).toBeLessThan(columns.indexOf('colKey: "running"'))
+    const filters = source.slice(source.indexOf('<div class="filter-bar">'), source.indexOf('class="wt-resource-table"'))
+    expect(filters.indexOf('>窗口状态</span>')).toBeLessThan(filters.indexOf('>运行状态</span>'))
+    expect(source).toContain('>删除</t-button>')
+    expect(source).not.toContain('>删除记录</t-button>')
+    expect(source).toContain('class="is-danger"')
+  })
+
+  it('keeps historical missing windows actionable in sync without reporting them as new issues', () => {
+    expect(source).toContain('const syncHistoricalMissingProfiles = computed(')
+    expect(source).toContain("{ key: \"history\", label: \"历史待处理\"")
+    expect(source).toContain('本次没有新增异常。')
+    expect(source).toContain('另有 {{ syncHistoricalMissingProfiles.length }} 个历史未处理的缺失窗口。')
+    expect(source).toContain('v-if="!syncHasChanges && syncHistoricalMissingProfiles.length"')
+    expect(source).toContain('@click="syncDeleteAction(row)">删除</t-button>')
+  })
+
   it('requires a fresh running-state read before disabling a window', () => {
     const body = source.slice(source.indexOf('async function requestEnabledChange('))
     const disable = body.slice(0, body.indexOf('enabledTarget.value = profile'))
@@ -70,11 +90,11 @@ describe('browser window resource page', () => {
     expect(source).toContain('syncSelectedAdded.value = []')
     expect(source).toContain(':disabled="Boolean(row.ownership_conflict)"')
     expect(source).toContain('const syncSelectableAdded = computed(() => syncAddedProfiles.value.filter((profile) => !profile.ownership_conflict))')
-    expect(source).toContain('本机发现但 Cloud 尚无关联的窗口。勾选后才会建立关联；不勾选不会认领，其他运营已登记的窗口不可选择。')
+    expect(source).toContain('勾选后建立关联，已归属其他运营的窗口不可选择。')
   })
 
   it('accepts one user-scoped sync without a separate proxy scan stage', () => {
-    expect(source).toContain('await bindingClient.confirm(syncScan.value.id, syncSelectedAdded.value)')
+    expect(source).toContain('confirm: (id, selection) => bindingClient.confirm(id, selection)')
     expect(source).not.toContain('proxyClient.confirmLocalScan')
     expect(source).not.toContain('proxyClient.previewLocalScan')
   })
@@ -102,9 +122,46 @@ describe('browser window resource page', () => {
     expect(source).not.toContain('Math.random')
   })
 
+  it('automatically reads once on entering the owner view, without extra scans on metadata reload or member change handlers', () => {
+    const watcher = source.slice(source.indexOf('watch(isOwnDesktop'), source.indexOf('onMounted('))
+    expect(watcher).toContain('if (value) refreshRunningStates({ silent: false })')
+    expect(watcher).toContain('runningReader.invalidate()')
+    const reload = source.slice(source.indexOf('async function reloadAll()'), source.indexOf('function pruneSelection()'))
+    expect(reload).not.toContain('refreshRunningStates')
+    const memberChange = source.slice(source.indexOf('function onSeniorMemberChange()'), source.indexOf('function onAdminTeamChange()'))
+    expect(memberChange).not.toContain('refreshRunningStates')
+    const sync = source.slice(source.indexOf('const syncWorkflow ='), source.indexOf('function toggleSyncAdded'))
+    expect(sync).toContain('runningReader.read({ notifyError: false })')
+    expect(sync).not.toContain('localAgent.profileScan()')
+  })
+
+  it('puts the only running-state refresh in the page actions and disables unknown row actions', () => {
+    const header = source.slice(source.indexOf('<ResourcePageHeader'), source.indexOf('</ResourcePageHeader>'))
+    expect(header).toContain('>刷新运行状态</t-button>')
+    expect(header).toContain('@click="refreshRunningStates({ announce: true })"')
+    expect(source).toContain('{ colKey: "running", title: "运行状态", width: 100 }')
+    expect(source).not.toContain('<template #runningHeader>')
+    expect(source).toContain(':disabled="rowOperable(row) === false || runningState(row) === undefined || runningLoading"')
+    const readFailure = source.slice(source.indexOf('const runningReader ='), source.indexOf('function applyRunningSnapshot('))
+    expect(readFailure).toContain('runningStates.value = {}')
+    expect(readFailure).toContain('feedback.toast.error(')
+    expect(readFailure).not.toContain('FeedbackAlert')
+  })
+
+  it('uses a compact dialog for a missing window and hides the empty account table', () => {
+    const dialog = source.slice(source.indexOf('<ResourceOverlay v-model:visible="missingVisible"'), source.indexOf('<ResourceOverlay v-model:visible="mismatchVisible"'))
+    expect(dialog).toContain('kind="dialog" :width="640"')
+    expect(dialog).toContain('class="missing-summary-grid"')
+    expect(dialog).toContain('class="missing-account-list"')
+    expect(dialog).not.toContain('<t-table')
+    expect(dialog).toContain('v-if="missingAccounts.length"')
+    expect(dialog).toContain('v-else class="missing-empty-accounts"')
+    expect(dialog).not.toContain('重要提示')
+  })
+
   it('keeps the read-only detail drawer footerless and the progress dialog reachable', () => {
     expect(source).toContain('v-model:visible="detailVisible" title="窗口详情" :footer="false" kind="drawer" :width="800"')
-    expect(source).toContain(':footer="syncDone || syncHasChanges"')
+    expect(source).toContain(':footer="true"')
     expect(source).toContain('@retry="retryFailed"')
     expect(source).toContain('@verify="verifyPending"')
     expect(source).toContain('@done="closeProgress"')

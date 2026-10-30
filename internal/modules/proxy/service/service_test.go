@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -91,6 +92,57 @@ func TestDynamicResourceCanBeRegisteredBeforeItsFirstExtraction(t *testing.T) {
 	}
 }
 
+func TestDynamicExtractionReplacesOldAuthentication(t *testing.T) {
+	store := newFakeStore()
+	version := time.Date(2026, 10, 28, 11, 0, 0, 0, time.UTC)
+	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Name: "动态代理", Source: ProxySourceAPI,
+		Protocol: ProtocolHTTP, Host: "10.0.0.1", Port: 8080, Username: "old-user", Password: "old-secret",
+		ExtractURL: "https://supplier.example/extract", Enabled: true, MaxProfiles: 3, LastCheckResult: CheckOK,
+		Remark: "提取期间新增的备注", UpdatedAt: version})
+	svc := newTestProxyService(store)
+	updated, err := svc.RefreshExtractedConnection("proxy-1", "https://supplier.example/extract", version, CreateProxyInput{
+		Protocol: ProtocolHTTP, Host: "10.0.0.2", Port: 8080})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != "" || updated.Password != "" || updated.LastCheckResult != "" {
+		t.Fatalf("extraction retained old authentication or check: %#v", updated)
+	}
+	if updated.ExtractURL != "https://supplier.example/extract" {
+		t.Fatal("extraction removed the stored supplier URL")
+	}
+	if updated.Remark != "提取期间新增的备注" || !updated.Enabled || updated.MaxProfiles != 3 {
+		t.Fatalf("extraction overwrote unrelated resource fields: %#v", updated)
+	}
+	if _, err := svc.RefreshExtractedConnection("proxy-1", "https://supplier.example/old", version, CreateProxyInput{
+		Protocol: ProtocolHTTP, Host: "10.0.0.3", Port: 8080}); !errors.Is(err, ErrExtractionSourceChanged) {
+		t.Fatalf("old extraction source error = %v", err)
+	}
+	if store.proxies["proxy-1"].Host != "10.0.0.2" {
+		t.Fatal("stale extraction changed the connection")
+	}
+	if _, err := svc.RefreshExtractedConnection("proxy-1", "https://supplier.example/extract", version, CreateProxyInput{
+		Protocol: ProtocolHTTP, Host: "10.0.0.4", Port: 8080}); !errors.Is(err, ErrExtractionSourceChanged) {
+		t.Fatalf("concurrent extraction error = %v", err)
+	}
+}
+
+func TestAcceptedExtractionCanClearCredentialsThroughGovernedEdit(t *testing.T) {
+	store := newFakeStore()
+	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Name: "动态代理", Source: ProxySourceAPI,
+		Protocol: ProtocolHTTP, Host: "10.0.0.1", Port: 8080, Username: "old-user", Password: "old-secret",
+		ExtractURL: "https://supplier.example/extract", Enabled: true, MaxProfiles: 3, LastCheckResult: CheckOK})
+	svc := newTestProxyService(store)
+	updated, err := svc.Update("proxy-1", CreateProxyInput{Name: "动态代理", Source: ProxySourceAPI,
+		Protocol: ProtocolHTTP, Host: "10.0.0.2", Port: 8080, ReplaceCredentials: true}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != "" || updated.Password != "" || updated.LastCheckResult != "" {
+		t.Fatalf("accepted extraction reused credentials or check: %#v", updated)
+	}
+}
+
 func TestOperatorUpdateCannotChangeConnection(t *testing.T) {
 	store := newFakeStore()
 	store.seed(Proxy{ID: "proxy-1", TeamID: 7, Name: "旧名称", Host: "10.0.0.1", Port: 8080, Protocol: ProtocolHTTP, Enabled: true, MaxProfiles: 3, LastCheckResult: CheckOK})
@@ -174,7 +226,7 @@ func TestImportAccountsForEverySubmittedRow(t *testing.T) {
 	store := newFakeStore()
 	svc := newTestProxyService(store)
 	result, err := svc.Import([]ImportRowInput{
-		{Line: 1, Raw: "10.0.0.1:8080", Selected: true},
+		{Line: 1, Raw: "10.0.0.1:8080", Selected: true, Name: "运营主线路", Region: "上海", Supplier: "星云", MaxProfiles: 5, Remark: "发布使用"},
 		{Line: 2, Raw: "10.0.0.2:8080", Selected: false},
 		{Line: 3, Raw: "10.0.0.3:8080", Selected: true},
 		{Line: 4, Raw: "10.0.0.1:8080", Selected: true},
@@ -196,6 +248,9 @@ func TestImportAccountsForEverySubmittedRow(t *testing.T) {
 	}
 	if len(store.created) != 2 || store.created[0].TeamID != 7 {
 		t.Fatalf("created = %#v", store.created)
+	}
+	if store.created[0].Name != "运营主线路" || store.created[0].Region != "上海" || store.created[0].Supplier != "星云" || store.created[0].MaxProfiles != 5 || store.created[0].Remark != "发布使用" {
+		t.Fatalf("imported row metadata was dropped: %#v", store.created[0])
 	}
 }
 
@@ -265,9 +320,10 @@ func newFakeStore() *fakeStore {
 
 func (f *fakeStore) seed(proxy Proxy) { f.proxies[proxy.ID] = proxy }
 
-func (f *fakeStore) Create(proxy Proxy) error {
-	f.proxies[proxy.ID] = proxy
-	f.created = append(f.created, proxy)
+func (f *fakeStore) Create(proxy *Proxy) error {
+	proxy.ID = fmt.Sprintf("%d", len(f.created)+1)
+	f.proxies[proxy.ID] = *proxy
+	f.created = append(f.created, *proxy)
 	return nil
 }
 
@@ -287,6 +343,19 @@ func (f *fakeStore) List(ProxyFilter) ([]Proxy, error) {
 func (f *fakeStore) Update(proxy Proxy) error {
 	f.proxies[proxy.ID] = proxy
 	return nil
+}
+
+func (f *fakeStore) UpdateExtractedConnection(id, expectedURL string, expectedUpdatedAt time.Time, connection Proxy, now time.Time) (bool, error) {
+	proxy, ok := f.proxies[id]
+	if !ok || proxy.Source != ProxySourceAPI || proxy.ExtractURL != expectedURL || !proxy.UpdatedAt.Equal(expectedUpdatedAt) {
+		return false, nil
+	}
+	proxy.Protocol, proxy.Host, proxy.Port = connection.Protocol, connection.Host, connection.Port
+	proxy.Username, proxy.Password = connection.Username, connection.Password
+	proxy.LastCheckAt, proxy.LastCheckResult, proxy.LastCheckMessage = nil, "", ""
+	proxy.UpdatedAt = now
+	f.proxies[id] = proxy
+	return true, nil
 }
 
 func (f *fakeStore) Delete(id string) error {
@@ -309,7 +378,7 @@ func (f *fakeStore) SetMaxProfiles(id string, maxProfileCount int, now time.Time
 	return true, nil
 }
 
-func (f *fakeStore) RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
+func (f *fakeStore) RecordCheckResult(id, protocol, host string, port int, username, password, result, message string, checkedAt time.Time) (bool, error) {
 	if !f.checkApplied {
 		return false, nil
 	}
@@ -334,7 +403,6 @@ func (f *fakeStore) WithAssignmentLock(string, func() error) error {
 func newTestProxyService(store Store) *proxyService {
 	svc := newProxyService(store)
 	svc.now = func() time.Time { return time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC) }
-	svc.newID = func(prefix string) string { return prefix + "-generated" }
 	return svc
 }
 

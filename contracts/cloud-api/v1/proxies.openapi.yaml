@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Proxy API
-  version: 2026.10.29.2
+  version: 2026.10.30.1
   description: >
     Proxy resources belong to a team. Operators and senior operators read and write
     their own team only; admins may read every team and must name the target team
@@ -18,10 +18,13 @@ paths:
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: team_id, schema: {type: integer, format: int64}, description: Admin-only team filter.}
+        - {in: query, name: team_search, schema: {type: string}, description: Admin-only partial match against team name or numeric id.}
         - {in: query, name: enabled, schema: {type: boolean}}
         - {in: query, name: supplier, schema: {type: string}}
         - {in: query, name: region, schema: {type: string}}
-        - {in: query, name: search, schema: {type: string}, description: Substring over name, host and supplier.}
+        - {in: query, name: search, schema: {type: string}, description: Substring over name, numeric id, host, remark and supplier.}
+        - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 200}, description: Page size; defaults to 200.}
+        - {in: query, name: offset, schema: {type: integer, minimum: 0}, description: Zero-based offset; defaults to 0.}
       responses:
         '200':
           description: Secret-free proxy views. Username and password never appear in list responses.
@@ -186,28 +189,6 @@ paths:
                 properties:
                   data: {$ref: '#/components/schemas/ProxyAddress'}
         '400': {description: The address format is invalid.}
-  /api/v1/proxies/extract-preview:
-    post:
-      operationId: extractProxyPreview
-      summary: Ask the current local Agent to fetch and parse the first valid plain-text proxy address without persisting a proxy record.
-      security: [{sessionCookie: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/ProxyExtractionRequest'}
-      responses:
-        '200':
-          description: Authorized caller receives parsed draft fields; the source URL is never returned.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data: {$ref: '#/components/schemas/ProxyAddress'}
-        '400': {description: Source URL or extracted proxy format is invalid.}
-        '503': {description: The current local Agent could not extract the proxy.}
   /api/v1/proxies/import/preview:
     post:
       operationId: previewProxyImport
@@ -280,17 +261,47 @@ paths:
                     items: {$ref: '#/components/schemas/ProxyBindingSummary'}
         '403': {description: The proxy belongs to another team.}
         '404': {description: Proxy does not exist.}
+  /api/v1/proxies/{proxy_id}/extraction-config:
+    get:
+      operationId: getDynamicProxyExtractionConfig
+      summary: Return the saved supplier URL only to a senior operator in the proxy's team for local Desktop extraction.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      responses:
+        '200':
+          description: Sensitive source URL; keep only in the current Desktop operation and never log or persist in Vue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [extract_url, proxy_protocol, resource_updated_at]
+                    properties:
+                      extract_url: {type: string, format: uri}
+                      proxy_protocol: {type: string, enum: [http, https, socks5]}
+                      resource_updated_at: {type: string, format: date-time, description: Current resource version used to reject a stale extraction.}
+        '403': {description: Not a senior operator in this proxy's team.}
   /api/v1/proxies/{proxy_id}/refresh:
     post:
       operationId: refreshDynamicProxy
-      summary: Manually extract and check a dynamic API proxy, update the ledger connection fields, and never write BitBrowser Profiles.
+      summary: Save a locally extracted dynamic address and check it from Cloud; never write BitBrowser Profiles.
       description: >
-        Extraction stays on the operator's workstation because the provider URL
-        needs the operator's network; the extracted connection replaces the saved
-        one and is then checked by Cloud. A changed connection clears the previous
-        check fact.
+        Desktop first fetches the saved supplier URL, then invokes the local Agent.
+        The returned connection replaces the saved one (including clearing absent
+        credentials), and Cloud checks it. This write changes connection fields
+        only, preserving any name, quota, status or note edited during extraction.
+        The source URL and resource version must still match the saved record;
+        a concurrent edit or another refresh rejects the stale result.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/ProxyID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProxyExtractionResultInput'}
       responses:
         '200':
           description: Current dynamic address was extracted and checked. Bound windows may require later resynchronization.
@@ -302,15 +313,15 @@ paths:
                 properties:
                   data: {$ref: '#/components/schemas/ProxyView'}
         '400': {description: Proxy is not an API source or the extracted response is invalid.}
-        '403': {description: Only a senior operator or admin may govern this proxy.}
-        '503': {description: Local extraction did not succeed; no BitBrowser Profile was modified.}
+        '403': {description: Only a senior operator in the owning team may submit a local extraction.}
+        '409': {description: The source URL or resource version changed before the extracted result was saved.}
 components:
   parameters:
     ProxyID:
       in: path
       name: proxy_id
       required: true
-      schema: {type: string}
+      schema: {type: integer, format: int64, minimum: 1}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
@@ -326,6 +337,7 @@ components:
         port: {type: integer, minimum: 1, maximum: 65535}
         username: {type: string}
         password: {type: string, writeOnly: true}
+        replace_credentials: {type: boolean, description: On a governed edit, replace stored credentials with the supplied username/password, including empty values after an accepted dynamic extraction. Omission retains the current empty-means-keep behavior.}
         region: {type: string}
         supplier: {type: string}
         tags: {type: array, items: {type: string}}
@@ -337,7 +349,7 @@ components:
       type: object
       required: [id, team_id, name, source, protocol, enabled, max_profiles, tags, expired, created_at, updated_at]
       properties:
-        id: {type: string}
+        id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
         team_name: {type: string}
         name: {type: string}
@@ -370,13 +382,18 @@ components:
       additionalProperties: false
       properties:
         proxy_address: {type: string, description: 'host:port, host:port:username:password, or protocol://username:password@host:port'}
-    ProxyExtractionRequest:
+    ProxyExtractionResultInput:
       type: object
-      required: [extract_url]
+      required: [extract_url, resource_updated_at, proxy_protocol, host, port]
       additionalProperties: false
       properties:
         extract_url: {type: string, format: uri, writeOnly: true}
-        protocol: {type: string, enum: [http, https, socks5], default: http}
+        resource_updated_at: {type: string, format: date-time, description: Version returned by extraction-config.}
+        proxy_protocol: {type: string, enum: [http, https, socks5]}
+        host: {type: string}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        username: {type: string}
+        password: {type: string, writeOnly: true}
     ProxyAddress:
       type: object
       required: [protocol, host, port]
@@ -401,7 +418,7 @@ components:
       additionalProperties: false
       properties:
         team_id: {type: integer, format: int64, description: Required for admins; ignored for other roles.}
-        lines: {type: array, items: {type: string}}
+        lines: {type: array, maxItems: 1000, items: {type: string}}
     ProxyImportPreviewResult:
       type: object
       required: [rows, total]
@@ -409,6 +426,7 @@ components:
         total: {type: integer}
         rows:
           type: array
+          maxItems: 1000
           items:
             type: object
             required: [line, raw, duplicate]
@@ -427,6 +445,7 @@ components:
         team_id: {type: integer, format: int64, description: Required for admins; ignored for other roles.}
         rows:
           type: array
+          maxItems: 1000
           items:
             type: object
             required: [line, raw, selected]
@@ -434,6 +453,11 @@ components:
               line: {type: integer}
               raw: {type: string}
               selected: {type: boolean}
+              name: {type: string, description: Optional display name from the approved file row or import defaults.}
+              region: {type: string}
+              supplier: {type: string}
+              max_profiles: {type: integer, minimum: 1}
+              remark: {type: string}
     ProxyImportResult:
       type: object
       required: [total, imported, failed, skipped, rows]
@@ -452,4 +476,4 @@ components:
               raw: {type: string}
               status: {type: string, enum: [imported, failed, skipped]}
               reason: {type: string}
-              proxy_id: {type: string}
+              proxy_id: {type: integer, format: int64}

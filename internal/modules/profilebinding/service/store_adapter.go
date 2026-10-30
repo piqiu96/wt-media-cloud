@@ -47,7 +47,9 @@ func (mysqlStore) DeleteScanByUser(userID identityservice.UserID) error {
 func (mysqlStore) ApplyScan(scan model.ProfileScan, observedBitProfileIDs []string, at time.Time) error {
 	return repository.ApplyScan(scan, observedBitProfileIDs, at)
 }
-func (mysqlStore) DeleteProfile(id string) error { return repository.DeleteProfile(id) }
+func (mysqlStore) DeleteProfile(id string, actorID identityservice.UserID, at time.Time) error {
+	return repository.DeleteProfile(id, actorID, at)
+}
 func (mysqlStore) UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time) error {
 	return repository.UpdateProfile(profileID, remark, enabled, at)
 }

@@ -12,24 +12,28 @@ import (
 
 type mysqlStore struct{}
 
-func (mysqlStore) Create(proxy model.Proxy) error { return repository.Create(proxy) }
+func (mysqlStore) Create(proxy *model.Proxy) error { return repository.Create(proxy) }
 func (mysqlStore) FindByID(id string) (model.Proxy, bool, error) {
 	return repository.FindByID(id)
 }
 func (mysqlStore) List(filter dto.ProxyFilter) ([]model.Proxy, error) {
 	return repository.List(repository.ProxyFilter{
-		TeamID:   filter.TeamID,
-		Platform: filter.Platform,
-		Supplier: filter.Supplier,
-		Enabled:  filter.Enabled,
-		Region:   filter.Region,
-		Search:   filter.Search,
-		Limit:    filter.Limit,
-		Offset:   filter.Offset,
+		TeamID:     filter.TeamID,
+		TeamSearch: filter.TeamSearch,
+		Platform:   filter.Platform,
+		Supplier:   filter.Supplier,
+		Enabled:    filter.Enabled,
+		Region:     filter.Region,
+		Search:     filter.Search,
+		Limit:      filter.Limit,
+		Offset:     filter.Offset,
 	})
 }
 func (mysqlStore) Update(proxy model.Proxy) error { return repository.Update(proxy) }
-func (mysqlStore) Delete(id string) error         { return repository.Delete(id) }
+func (mysqlStore) UpdateExtractedConnection(id, expectedURL string, expectedUpdatedAt time.Time, connection model.Proxy, now time.Time) (bool, error) {
+	return repository.UpdateExtractedConnection(id, expectedURL, expectedUpdatedAt, connection, now)
+}
+func (mysqlStore) Delete(id string) error { return repository.Delete(id) }
 
 func (mysqlStore) ListConnectionKeys(teamID sharedidentity.TeamID) ([]StoredConnectionKey, error) {
 	keys, err := repository.ListConnectionKeys(teamID)
@@ -47,8 +51,8 @@ func (mysqlStore) SetMaxProfiles(id string, maxProfileCount int, now time.Time) 
 	return repository.SetMaxProfiles(id, maxProfileCount, now)
 }
 
-func (mysqlStore) RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
-	return repository.RecordCheckResult(id, protocol, host, port, result, message, checkedAt)
+func (mysqlStore) RecordCheckResult(id, protocol, host string, port int, username, password, result, message string, checkedAt time.Time) (bool, error) {
+	return repository.RecordCheckResult(id, protocol, host, port, username, password, result, message, checkedAt)
 }
 
 func (mysqlStore) WithAssignmentLock(proxyID string, fn func() error) error {

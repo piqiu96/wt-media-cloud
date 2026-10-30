@@ -19,6 +19,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   profileUpdate: "local_agent_profile_update",
   profileRestore: "local_agent_profile_restore",
   profileProxyOperation: "local_agent_profile_proxy_operation",
+  proxyExtract: "local_agent_proxy_extract",
 });
 
 const DEFAULT_STATUS = Object.freeze({
@@ -176,10 +177,11 @@ export function createLocalAgentService({ invoke }) {
     async profileRestore(profiles) {
       return invoke(LOCAL_AGENT_COMMANDS.profileRestore, { profiles });
     },
-    async profileProxyOperation({ action, bitProfileId, proxyProtocol = "", host = "", port = null, username = "", password = "" }) {
+    async profileProxyOperation({ action, bitProfileId, proxyProtocol = "", host = "", port = null, username = "", password = "", verify = false }) {
       return invoke(LOCAL_AGENT_COMMANDS.profileProxyOperation, {
         args: {
           action,
+          verify,
           bit_profile_id: bitProfileId,
           proxy_protocol: proxyProtocol,
           host,
@@ -187,6 +189,11 @@ export function createLocalAgentService({ invoke }) {
           username,
           password,
         },
+      });
+    },
+    async proxyExtract({ extractUrl, proxyProtocol = "http" }) {
+      return invoke(LOCAL_AGENT_COMMANDS.proxyExtract, {
+        args: { extract_url: extractUrl, proxy_protocol: proxyProtocol },
       });
     },
   };
@@ -277,6 +284,9 @@ export function createMockLocalAgentService(initialStatus = DEFAULT_STATUS) {
     },
     async profileProxyOperation({ action, bitProfileId }) {
       return { action, bit_profile_id: bitProfileId, readback: true };
+    },
+    async proxyExtract() {
+      throw new Error("动态代理提取需要在桌面端执行");
     },
     async profileRestore(profiles) {
       return {

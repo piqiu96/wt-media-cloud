@@ -23,21 +23,25 @@ type ConnectionKey struct {
 	Port     int
 }
 
-func Create(p model.Proxy) error {
+func Create(p *model.Proxy) error {
 	return create(database.DB(), p)
 }
 
-func create(db *gorm.DB, p model.Proxy) error {
-	err := execSQL(db,
-		`INSERT INTO proxies (`+proxyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.TeamID, p.Name, p.Source, p.Protocol, p.Host, p.Port,
-		nullIfEmpty(p.Username), nullIfEmpty(p.Password),
-		nullIfEmpty(p.Region), nullIfEmpty(p.Supplier), nullIfEmpty(joinTags(p.Tags)), nullIfEmpty(p.ExtractURL),
-		p.ExpiresAt, p.Enabled, p.MaxProfiles,
-		p.LastCheckAt, nullIfEmpty(p.LastCheckResult), p.LastCheckMessage, nullIfEmpty(p.Remark),
-		p.CreatedAt, p.UpdatedAt,
-	)
-	return err
+func create(db *gorm.DB, p *model.Proxy) error {
+	return db.Connection(func(conn *gorm.DB) error {
+		if err := execSQL(conn,
+			`INSERT INTO proxies (team_id, name, source, protocol, host, port, username, password, region, supplier, tags, extract_url, expires_at, enabled, max_profiles, last_check_at, last_check_result, last_check_message, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.TeamID, p.Name, p.Source, p.Protocol, p.Host, p.Port,
+			nullIfEmpty(p.Username), nullIfEmpty(p.Password),
+			nullIfEmpty(p.Region), nullIfEmpty(p.Supplier), nullIfEmpty(joinTags(p.Tags)), nullIfEmpty(p.ExtractURL),
+			p.ExpiresAt, p.Enabled, p.MaxProfiles,
+			p.LastCheckAt, nullIfEmpty(p.LastCheckResult), p.LastCheckMessage, nullIfEmpty(p.Remark),
+			p.CreatedAt, p.UpdatedAt,
+		); err != nil {
+			return err
+		}
+		return queryRow(conn, `SELECT LAST_INSERT_ID()`).Scan(&p.ID)
+	})
 }
 
 func FindByID(id string) (model.Proxy, bool, error) {
@@ -68,6 +72,11 @@ func list(db *gorm.DB, filter ProxyFilter) ([]model.Proxy, error) {
 		conditions = append(conditions, "team_id = ?")
 		args = append(args, *filter.TeamID)
 	}
+	if filter.TeamSearch != "" {
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM operation_teams ot WHERE ot.id = proxies.team_id AND (ot.name LIKE ? ESCAPE '!' OR CAST(ot.id AS CHAR) LIKE ? ESCAPE '!'))")
+		search := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(filter.TeamSearch) + "%"
+		args = append(args, search, search)
+	}
 	if filter.Enabled != nil {
 		conditions = append(conditions, "enabled = ?")
 		args = append(args, *filter.Enabled)
@@ -81,9 +90,9 @@ func list(db *gorm.DB, filter ProxyFilter) ([]model.Proxy, error) {
 		args = append(args, filter.Region)
 	}
 	if filter.Search != "" {
-		conditions = append(conditions, "(name LIKE ? OR host LIKE ? OR remark LIKE ? OR supplier LIKE ?)")
+		conditions = append(conditions, "(name LIKE ? OR host LIKE ? OR remark LIKE ? OR supplier LIKE ? OR CAST(id AS CHAR) LIKE ?)")
 		s := "%" + filter.Search + "%"
-		args = append(args, s, s, s, s)
+		args = append(args, s, s, s, s, s)
 	}
 
 	where := ""
@@ -91,7 +100,7 @@ func list(db *gorm.DB, filter ProxyFilter) ([]model.Proxy, error) {
 		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query := fmt.Sprintf("SELECT %s FROM proxies%s ORDER BY created_at DESC LIMIT ? OFFSET ?", proxyColumns, where)
+	query := fmt.Sprintf("SELECT %s FROM proxies%s ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", proxyColumns, where)
 	args = append(args, filter.Limit, filter.Offset)
 
 	rows, err := queryRows(db, query, args...)
@@ -153,16 +162,32 @@ func update(db *gorm.DB, p model.Proxy) error {
 	return err
 }
 
-// RecordCheckResult 仅在代理仍保持探测时的连接时写入结果。没有连接条件，
-// 针对旧地址的慢检测会覆盖新地址的结果。
-func RecordCheckResult(id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
-	return recordCheckResult(database.DB(), id, protocol, host, port, result, message, checkedAt)
+// UpdateExtractedConnection 通过来源链接作并发条件，仅改提取到的连接字段。
+// 因此提取期间发生的运营字段编辑不会被旧快照覆盖。
+func UpdateExtractedConnection(id, expectedURL string, expectedUpdatedAt time.Time, connection model.Proxy, now time.Time) (bool, error) {
+	return updateExtractedConnection(database.DB(), id, expectedURL, expectedUpdatedAt, connection, now)
 }
 
-func recordCheckResult(db *gorm.DB, id, protocol, host string, port int, result, message string, checkedAt time.Time) (bool, error) {
+func updateExtractedConnection(db *gorm.DB, id, expectedURL string, expectedUpdatedAt time.Time, connection model.Proxy, now time.Time) (bool, error) {
+	result := db.Exec(
+		`UPDATE proxies SET protocol = ?, host = ?, port = ?, username = ?, password = ?, last_check_at = NULL, last_check_result = NULL, last_check_message = '', updated_at = ? WHERE id = ? AND source = 'api' AND BINARY extract_url = BINARY ? AND updated_at = ?`,
+		connection.Protocol, connection.Host, connection.Port,
+		nullIfEmpty(connection.Username), nullIfEmpty(connection.Password),
+		now, id, expectedURL, expectedUpdatedAt,
+	)
+	return result.RowsAffected > 0, result.Error
+}
+
+// RecordCheckResult 仅在代理仍保持探测时的连接时写入结果。没有连接条件，
+// 针对旧地址的慢检测会覆盖新地址的结果。
+func RecordCheckResult(id, protocol, host string, port int, username, password, result, message string, checkedAt time.Time) (bool, error) {
+	return recordCheckResult(database.DB(), id, protocol, host, port, username, password, result, message, checkedAt)
+}
+
+func recordCheckResult(db *gorm.DB, id, protocol, host string, port int, username, password, result, message string, checkedAt time.Time) (bool, error) {
 	applied := db.Exec(
-		`UPDATE proxies SET last_check_at = ?, last_check_result = ?, last_check_message = ?, updated_at = ? WHERE id = ? AND protocol = ? AND host = ? AND port = ?`,
-		checkedAt, nullIfEmpty(result), nullIfEmpty(message), checkedAt, id, protocol, host, port,
+		`UPDATE proxies SET last_check_at = ?, last_check_result = ?, last_check_message = ?, updated_at = ? WHERE id = ? AND protocol = ? AND host = ? AND port = ? AND BINARY COALESCE(username, '') = BINARY ? AND BINARY COALESCE(password, '') = BINARY ?`,
+		checkedAt, result, message, checkedAt, id, protocol, host, port, username, password,
 	)
 	return applied.RowsAffected > 0, applied.Error
 }

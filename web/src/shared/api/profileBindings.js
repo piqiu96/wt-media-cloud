@@ -41,8 +41,8 @@ export function createProfileBindingClient({ base = '/api/v1', fetch = globalThi
     review() {
       return api.get('/browser-profiles/sync')
     },
-    confirm(_syncId, adoptBitProfileIds = []) {
-      return api.post('/browser-profiles/sync/confirm', { adopt_bit_profile_ids: adoptBitProfileIds })
+    confirm(syncId, adoptBitProfileIds = []) {
+      return api.post('/browser-profiles/sync/confirm', { sync_id: syncId, adopt_bit_profile_ids: adoptBitProfileIds })
     },
     reject() {
       return api.delete('/browser-profiles/sync')
