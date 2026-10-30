@@ -32,7 +32,7 @@ const continueCount=computed(()=>blocked.value?0:batch.value?.counts?.pending||0
 const shownItems=computed(()=>(content.value?.items||[]).filter(i=>tab.value==='all'||tab.value==='done'&&i.status==='succeeded'||tab.value==='attention'&&!['succeeded','skipped'].includes(i.status)))
 const title=computed(()=>screen.value==='input'?'批量接入账号':screen.value==='preview'?'确认接入内容':screen.value==='history'?'接入记录':busy.value?'正在接入账号':'批量接入结果')
 const progress=computed(()=>batch.value?Math.round((batch.value.counts.succeeded+batch.value.counts.failed+batch.value.counts.skipped)/batch.value.counts.total*100):0)
-const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value,content.value?.items))
+const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value))
 const resultCounts=computed(()=>{
  const counts=batch.value?.counts||{}
  if(!busy.value)return [
@@ -131,7 +131,7 @@ async function close(){
  <ol v-if="screen==='input'||screen==='preview'" class="import-steps"><li :class="{active:screen==='input'}">1　输入资料</li><li :class="{active:screen==='preview'}">2　确认接入</li><li>3　结果处理</li></ol>
  <FeedbackAlert v-if="error" :message="error" theme="error" />
  <template v-if="screen==='input'">
-  <p class="intro">每行一个 Cookie，先校验内容，再逐个接入。已有账号不会被重复创建。</p>
+  <p class="intro">每行一个 Cookie，先校验内容，再逐个接入。同一账号可在不同窗口接入，各窗口独立维护。</p>
   <ResourceForm>
    <div class="form-grid">
     <t-form-item label="平台"><t-select v-model="platform"><t-option value="bilibili" label="B站"/><t-option value="baidu" label="百度"/></t-select></t-form-item>
