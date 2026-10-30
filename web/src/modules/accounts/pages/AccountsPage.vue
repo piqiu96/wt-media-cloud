@@ -472,7 +472,7 @@ function executableText(account) {
   const profile = profileForAccount(account)
   if (profile && (profile.local_state !== "active" || !profile.enabled)) return "不可执行：绑定窗口已停用"
   if (account.platform_login_status !== "normal") return "待检查：需要真实账号检查"
-  return "可进入后续预检"
+  return "可用于运营任务"
 }
 
 function enabledText(enabled) {
@@ -550,14 +550,6 @@ function profileOptionLabel(profile) {
   return parts.join(" - ")
 }
 
-function checkItemStatusText(status) {
-  return {
-    pass: "通过",
-    fail: "未通过",
-    skip: "跳过",
-    na: "不适用",
-  }[status] || status || "-"
-}
 
 function canCheckAccount(account) {
   return checkAvailability({ isDesktop, isOwner: canOperateLocalAccount(account), account, windowAvailable: canOperateBoundWindow(account) })
@@ -821,7 +813,7 @@ function bindingUnavailableReason(profile) {
 }
 
 const bindingCandidates = computed(() => activeProfiles.value.filter(profile =>
-  [profile.bit_name, profile.bit_seq, profile.group_name].join(" ").toLowerCase().includes(bindSearch.value.trim().toLowerCase())))
+  [profile.bit_name, profile.bit_seq, profile.bit_group_name].join(" ").toLowerCase().includes(bindSearch.value.trim().toLowerCase())))
 function openBind(account) {
   if (!canOperateLocalAccount(account)) return
   createdGuide.value = null
@@ -1178,7 +1170,7 @@ const columns = [
       <p class="form-tip">关联已有窗口不会修改窗口内的登录信息。绑定后检查并识别当前账号。</p>
       <FeedbackAlert v-if="bindingError" :message="bindingError" theme="error" />
       <t-input v-model="bindSearch" clearable placeholder="搜索窗口名称 / 序号 / 分组" style="margin:16px 0" />
-      <t-table :data="bindingCandidates" row-key="id" size="small" :loading="bindingLoading" :max-height="360" :pagination="null" :columns="[{colKey:'select',title:'',width:48},{colKey:'bit_name',title:'窗口名称'},{colKey:'bit_seq',title:'序号',width:80},{colKey:'group_name',title:'分组'},{colKey:'usage',title:'使用情况',width:180}]">
+      <t-table :data="bindingCandidates" row-key="id" size="small" :loading="bindingLoading" :max-height="360" :pagination="null" :columns="[{colKey:'select',title:'',width:48},{colKey:'bit_name',title:'窗口名称'},{colKey:'bit_seq',title:'序号',width:80},{colKey:'bit_group_name',title:'分组'},{colKey:'usage',title:'使用情况',width:180}]">
         <template #select="{row}"><t-radio :checked="bindProfileId === row.id" :disabled="Boolean(bindingUnavailableReason(row))" :aria-label="'选择' + row.bit_name" @change="bindProfileId = row.id" /></template>
         <template #usage="{row}"><span :style="{color:bindingUnavailableReason(row) ? 'var(--td-text-color-secondary)' : 'var(--td-success-color)'}">{{ bindingUnavailableReason(row) || (row.id === bindAccount?.browser_profile_id ? '当前账号已绑定' : '可关联') }}</span></template>
       </t-table>
@@ -1239,45 +1231,35 @@ const columns = [
     </t-dialog>
 
     <t-drawer :close-btn="true" v-model:visible="detailVisible" header="账号详情" :size="'800px'" destroy-on-close :footer="false">
+      <div v-if="detailAccount" class="account-detail-heading">
+        <t-avatar size="56px" :image="detailAccount.platform_avatar_url || undefined">{{ accountDisplayName(detailAccount).slice(0,1) }}</t-avatar>
+        <div><h2>{{ accountDisplayName(detailAccount) }}</h2><p>{{ platformLabel(detailAccount.platform) }} · ID {{ detailAccount.id }} · UID {{ detailAccount.platform_account_id || '尚未识别' }}</p>
+          <t-space size="small"><ResourceStatusBadge :tone="detailAccount.enabled ? 'success' : 'neutral'" :label="enabledText(detailAccount.enabled)" /><ResourceStatusBadge :tone="accountStatusTheme(detailAccount) === 'success' ? 'success' : accountStatusTheme(detailAccount) === 'danger' ? 'danger' : 'warning'" :label="accountStatusText(detailAccount)" /></t-space>
+        </div>
+      </div>
+      <div class="form-section">业务信息</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
-        <t-descriptions-item label="账号ID">{{ detailAccount.id }}</t-descriptions-item>
-        <t-descriptions-item label="平台">{{ platformLabel(detailAccount.platform) }}</t-descriptions-item>
-        <t-descriptions-item label="使用人">{{ detailAccount.user_name || '--' }}</t-descriptions-item>
-        <t-descriptions-item label="类目">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
-        <t-descriptions-item label="平台账号UID">{{ detailAccount.platform_account_id || '未回填' }}</t-descriptions-item>
-        <t-descriptions-item label="账号名称">{{ detailAccount.platform_name || '未回填' }}</t-descriptions-item>
+        <t-descriptions-item label="业务分类">{{ categoryNames(detailAccount.category_ids) }}</t-descriptions-item>
+        <t-descriptions-item label="业务标签"><t-space size="small" wrap><t-tag v-for="tag in detailAccount.tags" :key="tag" size="small" variant="light">{{ tag }}</t-tag><span v-if="!detailAccount.tags?.length">—</span></t-space></t-descriptions-item>
+        <t-descriptions-item label="运营备注">{{ detailAccount.remark || '—' }}</t-descriptions-item>
+        <t-descriptions-item v-if="canFilterByOwner" label="使用人">{{ detailAccount.user_name || '—' }}</t-descriptions-item>
       </t-descriptions>
-      <div class="form-section">关联资源</div>
+      <div class="form-section">关联窗口</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
-        <t-descriptions-item label="绑定窗口">
-          <div v-if="profileForAccount(detailAccount)" class="window-binding">
-            <div class="window-binding-name">{{ profileName(detailAccount.browser_profile_id) }}</div>
-            <div class="window-binding-meta">
-              <span>系统ID {{ profileForAccount(detailAccount).id }}</span>
-              <span class="window-bit-id" :title="profileForAccount(detailAccount).bit_profile_id || ''">BitBrowser {{ profileForAccount(detailAccount).bit_profile_id || '--' }}</span>
-            </div>
-          </div>
-          <span v-else>未绑定</span>
-        </t-descriptions-item>
+        <t-descriptions-item label="浏览器窗口">{{ detailAccount.browser_profile_id ? profileName(detailAccount.browser_profile_id) : '未绑定' }}</t-descriptions-item>
+        <t-descriptions-item label="窗口分组">{{ profileForAccount(detailAccount)?.bit_group_name || '—' }}</t-descriptions-item>
       </t-descriptions>
-      <div class="form-section">状态与检查</div>
+      <div class="form-section">账号检查</div>
       <t-descriptions v-if="detailAccount" :column="1" bordered size="small">
         <t-descriptions-item label="登录状态">{{ loginStatusText(detailAccount.platform_login_status) }}</t-descriptions-item>
-        <t-descriptions-item label="可执行结论">{{ executableText(detailAccount) }}</t-descriptions-item>
+        <t-descriptions-item label="可执行性">{{ executableText(detailAccount) }}</t-descriptions-item>
         <t-descriptions-item label="最近检查">{{ detailAccount.last_check_at ? formatTime(detailAccount.last_check_at) : '尚未检查' }}</t-descriptions-item>
+        <t-descriptions-item label="账号资料">{{ detailAccount.platform_account_id ? '已取得平台身份' : '尚未识别' }}</t-descriptions-item>
       </t-descriptions>
       <FeedbackAlert v-if="detailAccount?.last_check_status === 'failed'" theme="error" :message="detailAccount.last_check_message || '本次检查失败，保留上次登录结论'" style="margin-top:12px" />
       <div v-if="detailAccount?.platform_login_status === 'account_mismatch' && detailAccount?.last_check_identity" class="identity-comparison">
         <div><strong>已记录账号</strong><p>{{ detailAccount.platform_name || '待识别' }}</p><p>UID {{ detailAccount.platform_account_id || '—' }}</p></div>
         <div><strong>窗口当前账号</strong><p>{{ detailAccount.last_check_identity.platform_name || '未取得昵称' }}</p><p>UID {{ detailAccount.last_check_identity.platform_account_id || '—' }}</p></div>
-      </div>
-      <div v-if="detailAccount?.last_check_items?.length" class="check-items-box" style="margin-top:12px">
-        <div class="check-items-title">检查明细</div>
-        <div v-for="item in detailAccount.last_check_items" :key="item.key" class="check-item">
-          <span class="check-item-status" :class="'status-' + (item.status || 'na')">{{ checkItemStatusText(item.status) }}</span>
-          <span class="check-item-label">{{ item.label }}</span>
-          <span v-if="item.message" class="check-item-msg">{{ item.message }}</span>
-        </div>
       </div>
       <FeedbackAlert v-if="checkFailure" theme="error" style="margin-top:12px">
         <template #message>{{ checkFailure }}</template>
@@ -1305,6 +1287,9 @@ const columns = [
 </template>
 
 <style scoped>
+.account-detail-heading { display:flex;gap:16px;align-items:center;margin-bottom:24px; }
+.account-detail-heading h2 { margin:0;font-size:20px; }
+.account-detail-heading p { margin:6px 0 10px;font-size:12px;color:var(--td-text-color-secondary); }
 .account-resource-card { padding: 18px 20px; }
 .form-section { font-weight: 600; font-size: 13px; color: var(--td-text-color-secondary); margin: 12px 0 6px; }
 .form-section:first-child { margin-top: 0; }
@@ -1351,19 +1336,6 @@ const columns = [
 .info-popup .info-sub { color: var(--td-text-color-secondary, #666); font-size: 13px; }
 .info-tip { color: var(--td-text-color-secondary, #666); font-size: 12px; }
 .status-green { color: var(--td-success-color, #2ba471); }
-.check-items-box {
-  border: 1px solid var(--td-component-border, #ddd);
-  border-radius: 4px;
-  padding: 8px;
-}
-.check-items-title { font-weight: 600; margin-bottom: 6px; font-size: 13px; }
-.check-item { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 13px; }
-.check-item-status { width: 48px; text-align: center; border-radius: 3px; padding: 1px 4px; font-size: 12px; flex-shrink: 0; }
-.check-item-status.status-pass { background: #e8f7ef; color: #2ba471; }
-.check-item-status.status-fail { background: #fdecee; color: #d54941; }
-.check-item-status.status-na, .check-item-status.status-skip { background: #f0f0f0; color: #666; }
-.check-item-label { flex-shrink: 0; }
-.check-item-msg { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-manage-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .tag-count { color: var(--td-text-color-secondary, #666); font-size: 12px; flex: 1; }
 .batch-summary {
