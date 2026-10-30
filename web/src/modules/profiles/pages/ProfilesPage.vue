@@ -208,7 +208,7 @@ const memberOptions = computed(() => {
 
 const adminMemberOptions = computed(() => roster.value
   .filter((user) => user.role !== "admin")
-  .filter((user) => !draftTeam.value || teamMatches(user.team_id, user.team_name, draftTeam.value))
+  .filter((user) => !draftTeam.value || teamMatches(user.team_id, draftTeam.value))
   .map((user) => ({
     label: `${user.nickname || user.username || `用户 ${user.id}`}${user.status === "disabled" ? "（已停用）" : ""}`,
     value: String(user.id),
@@ -234,7 +234,7 @@ const accountsByProfile = computed(() => {
 const scopedProfiles = computed(() => {
   if (!isAdmin.value) return profiles.value
   return profiles.value.filter((profile) => {
-    if (appliedTeam.value && !teamMatches(profile.team_id, teamName(profile), appliedTeam.value)) return false
+    if (appliedTeam.value && !teamMatches(profile.team_id, appliedTeam.value)) return false
     if (appliedMember.value && String(profile.user_id ?? "") !== appliedMember.value) return false
     return true
   })
@@ -795,9 +795,8 @@ function teamName(profile) {
   return profileTeamName(profile, currentUser.value, roster.value, selfId.value, teams.value)
 }
 
-function teamMatches(teamId, teamLabel, query) {
-  const needle = String(query || '').trim().toLocaleLowerCase()
-  return !needle || String(teamId ?? '').includes(needle) || String(teamLabel || '').toLocaleLowerCase().includes(needle)
+function teamMatches(teamId, selectedId) {
+  return !selectedId || String(teamId ?? '') === String(selectedId)
 }
 
 function groupOwnerText(profile) {

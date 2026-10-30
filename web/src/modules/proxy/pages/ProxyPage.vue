@@ -54,8 +54,7 @@ const isGovernor = computed(() => ["admin", "senior_operator"].includes(currentU
 const canExtract = computed(() => isDesktop() && ["operator", "senior_operator"].includes(currentUser.value?.role))
 
 const teamOptions = computed(() => teams.value.map((team) => ({ label: team.name, value: String(team.id) })))
-const exactFilterTeamID = computed(() => String(teams.value.find(team =>
-  String(team.id) === filterTeam.value.trim() || String(team.name || '').trim() === filterTeam.value.trim())?.id || ''))
+const exactFilterTeamID = computed(() => String(filterTeam.value || ''))
 const ownTeamLabel = computed(() => currentUser.value?.team_name || "本人团队")
 
 const visibleProxies = computed(() => proxies.value.filter((proxy) => {
@@ -196,7 +195,7 @@ async function loadProxies() {
   loading.value = true
   try {
     const params = {}
-    if (isAdmin.value && filterTeam.value.trim()) params.team_search = filterTeam.value.trim()
+    if (isAdmin.value && filterTeam.value) params.team_id = filterTeam.value
     if (filterStatus.value) params.enabled = filterStatus.value === "active"
     if (filterRegion.value.trim()) params.region = filterRegion.value.trim()
     if (filterText.value.trim()) params.search = filterText.value.trim()
