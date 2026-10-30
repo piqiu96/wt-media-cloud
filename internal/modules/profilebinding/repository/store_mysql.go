@@ -631,7 +631,7 @@ func deleteProfile(db *gorm.DB, profileID string, actorID sharedidentity.UserID,
 		if _, err := execSQL(tx, `UPDATE media_accounts SET browser_profile_id = NULL, platform_login_status = 'unknown', last_check_at = NULL, last_check_items = NULL, updated_at = ? WHERE browser_profile_id = ?`, at, profileID); err != nil {
 			return err
 		}
-		rows, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ? AND local_state = 'local_missing' AND reserved_proxy_id IS NULL`, profileID)
+		rows, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ? AND local_state = 'local_missing' AND reserved_proxy_id IS NULL AND cookie_operation_id IS NULL`, profileID)
 		if err != nil {
 			return err
 		}
@@ -684,7 +684,7 @@ func updateProfile(db *gorm.DB, profileID string, remark *string, enabled *bool,
 	args = append(args, profileID)
 	where := " WHERE id = ?"
 	if enabled != nil {
-		where += " AND reserved_proxy_id IS NULL"
+		where += " AND reserved_proxy_id IS NULL AND cookie_operation_id IS NULL"
 	}
 	rows, err := execSQL(db, `UPDATE browser_profiles SET `+strings.Join(sets, ", ")+where, args...)
 	if err == nil && rows == 0 && enabled != nil {

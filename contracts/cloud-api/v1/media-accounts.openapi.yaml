@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Media Account API
-  version: 2026.10.30.2
+  version: 2026.10.30.3
 paths:
   /api/v1/media-accounts:
     get:
@@ -123,40 +123,6 @@ paths:
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: stale_account_check; operation or target changed.}
-  /api/v1/media-accounts/{account_id}/cookies/read-sync:
-    post:
-      operationId: readMediaAccountCookiesSync
-      description: >-
-        Authorizes a synchronous local cookie read. Operators may read cookies
-        from their own accounts; senior operators only the accounts they created;
-        admins cannot start local work.
-      security: [{sessionCookie: []}]
-      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
-      responses:
-        '201':
-          description: Sensitive task authorized for the local agent.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/MediaAccountCookieReadStartResponse'}
-        '400': {$ref: '#/components/responses/InvalidRequest'}
-        '401': {$ref: '#/components/responses/AuthenticationRequired'}
-        '403': {$ref: '#/components/responses/Forbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-        '409': {description: Binding window is unavailable or belongs to another user.}
-  /api/v1/media-accounts/{account_id}/cookies/read-sync/result:
-    post:
-      operationId: applyMediaAccountCookieReadResult
-      security: [{sessionCookie: []}]
-      parameters: [{in: path, name: account_id, required: true, schema: {type: string}}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/MediaAccountCookieReadResultRequest'}
-      responses:
-        '200': {description: Cookie read result persisted and returned without secrets.}
-        '400': {$ref: '#/components/responses/InvalidRequest'}
-        '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/media-accounts/{account_id}/profile:
     patch:
       operationId: bindMediaAccountProfile
@@ -182,6 +148,188 @@ paths:
         '200': {description: Window relation removed without modifying browser Cookies.}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/media-accounts/{account_id}/credentials:
+    get:
+      operationId: getAccountCredentials
+      description: Explicit credentials view. No local read or write. Internal before_cookie
+        is excluded.
+      security:
+      - sessionCookie: []
+      parameters:
+      - in: path
+        name: account_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current operation receipt; repeated requests never authorize
+            another external write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AccountCredentials'
+        '403':
+          description: Only the owning operator may access credentials or local operations.
+        '409':
+          description: 'cookie_operation_conflict (23003): stale operation, changed
+            target or occupied window.'
+  /api/v1/media-accounts/{account_id}/cookie-updates:
+    post:
+      operationId: startAccountCookieUpdate
+      description: Acquire current target window operation. Same key/content returns
+        receipt; changed content or stale expected_operation_id conflicts. Only a fresh
+        start grants allow_execute.
+      security:
+      - sessionCookie: []
+      parameters:
+      - in: path
+        name: account_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current operation receipt; repeated requests never authorize
+            another external write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CookieUpdate'
+        '403':
+          description: Only the owning operator may access credentials or local operations.
+        '409':
+          description: 'cookie_operation_conflict (23003): stale operation, changed
+            target or occupied window.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CookieUpdateStart'
+  /api/v1/media-accounts/{account_id}/cookie-updates/{operation_id}:
+    get:
+      operationId: getAccountCookieUpdate
+      description: Read current matching operation, including execution input only while
+        unresolved. Old operation conflicts.
+      security:
+      - sessionCookie: []
+      parameters:
+      - in: path
+        name: account_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: operation_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current operation receipt; repeated requests never authorize
+            another external write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CookieUpdate'
+        '403':
+          description: Only the owning operator may access credentials or local operations.
+        '409':
+          description: 'cookie_operation_conflict (23003): stale operation, changed
+            target or occupied window.'
+  /api/v1/media-accounts/{account_id}/cookie-updates/{operation_id}/snapshot:
+    put:
+      operationId: prepareAccountCookieUpdate
+      description: Persist complete live target-platform Cookies before first can_apply=true.
+        Actual different/unknown account refuses write. A repeated snapshot never grants
+        another write.
+      security:
+      - sessionCookie: []
+      parameters:
+      - in: path
+        name: account_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: operation_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current operation receipt; repeated requests never authorize
+            another external write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CookieUpdate'
+        '403':
+          description: Only the owning operator may access credentials or local operations.
+        '409':
+          description: 'cookie_operation_conflict (23003): stale operation, changed
+            target or occupied window.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CookieSnapshot'
+  /api/v1/media-accounts/{account_id}/cookie-updates/{operation_id}/result:
+    put:
+      operationId: settleAccountCookieUpdate
+      description: Applied requires matching input, real identity and readback. Failed/uncertain
+        preserve last confirmed credentials. Unknown retains window occupation and must
+        inspect without another write.
+      security:
+      - sessionCookie: []
+      parameters:
+      - in: path
+        name: account_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: operation_id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current operation receipt; repeated requests never authorize
+            another external write.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CookieUpdate'
+        '403':
+          description: Only the owning operator may access credentials or local operations.
+        '409':
+          description: 'cookie_operation_conflict (23003): stale operation, changed
+            target or occupied window.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CookieUpdateResult'
 
 components:
   securitySchemes:
@@ -262,23 +410,10 @@ components:
         platform: {$ref: '#/components/schemas/Platform'}
         expected_platform_account_id: {type: string}
         platform_login_status: {$ref: '#/components/schemas/PlatformLoginStatus'}
-    MediaAccountCookieReadStart:
-      type: object
-      required: [operation_id, account_id, browser_profile_id, bit_profile_id, platform]
-      properties:
-        operation_id: {type: string}
-        account_id: {type: string}
-        browser_profile_id: {type: string}
-        bit_profile_id: {type: string}
-        platform: {$ref: '#/components/schemas/Platform'}
     MediaAccountCheckStartResponse:
       type: object
       required: [data]
       properties: {data: {$ref: '#/components/schemas/MediaAccountCheckStart'}}
-    MediaAccountCookieReadStartResponse:
-      type: object
-      required: [data]
-      properties: {data: {$ref: '#/components/schemas/MediaAccountCookieReadStart'}}
     MediaAccountCheckResultRequest:
       type: object
       required: [operation_id, execution_status]
@@ -291,9 +426,125 @@ components:
         platform_login_status: {$ref: '#/components/schemas/PlatformLoginStatus'}
         message: {type: string}
         check_items: {type: array, items: {type: object}}
-    MediaAccountCookieReadResultRequest:
+
+    CookieUpdateStart:
       type: object
-      required: [operation_id, cookies]
+      additionalProperties: false
+      required:
+      - request_key
+      - input_cookie
       properties:
-        operation_id: {type: string}
-        cookies: {type: array, items: {type: object, additionalProperties: true}}
+        request_key:
+          type: string
+          maxLength: 64
+        expected_operation_id:
+          type: string
+        input_cookie:
+          type: string
+          maxLength: 1048576
+    CookieSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+      - before_cookie
+      - fingerprint
+      - login_status
+      properties:
+        before_cookie:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        fingerprint:
+          type: string
+        login_status:
+          type: string
+        platform_account_id:
+          type: string
+    CookieUpdateResult:
+      type: object
+      additionalProperties: false
+      required:
+      - status
+      properties:
+        verified:
+          type: boolean
+          description: Read-only inspection obtained a definite platform result; permits
+            settling a failed update without repeating a write.
+        status:
+          type: string
+          enum:
+          - applied
+          - failed
+          - uncertain
+        applied:
+          type: boolean
+        cookies:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        platform_account_id:
+          type: string
+        name:
+          type: string
+        avatar_url:
+          type: string
+        login_status:
+          type: string
+        input_matches:
+          type: boolean
+        message:
+          type: string
+          maxLength: 500
+    CookieUpdate:
+      type: object
+      required:
+      - operation_id
+      - request_key
+      - status
+      - step
+      - browser_profile_id
+      - bit_profile_id
+      - platform
+      properties:
+        existing_account_id: {type: string, description: Duplicate identity points to the existing account without changing its window or credentials.}
+        operation_id:
+          type: string
+        request_key:
+          type: string
+        status:
+          type: string
+        step:
+          type: string
+        browser_profile_id:
+          type: string
+        bit_profile_id:
+          type: string
+        platform:
+          type: string
+        expected_platform_account_id:
+          type: string
+        message:
+          type: string
+        input_cookie:
+          type: string
+        fingerprint:
+          type: string
+        allow_execute:
+          type: boolean
+        can_apply:
+          type: boolean
+    AccountCredentials:
+      type: object
+      properties:
+        original_cookie:
+          type: string
+        active_cookie:
+          type: string
+        cookie_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        current_update:
+          $ref: '#/components/schemas/CookieUpdate'

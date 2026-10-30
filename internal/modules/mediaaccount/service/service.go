@@ -2,7 +2,6 @@
 package service
 
 import (
-	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,9 +25,6 @@ type (
 	AccountCheckStartInput  = dto.AccountCheckStartInput
 	AccountCheckStart       = dto.AccountCheckStart
 	AccountCheckResultInput = dto.AccountCheckResultInput
-	CookieReadStartInput    = dto.CookieReadStartInput
-	CookieReadStart         = dto.CookieReadStart
-	CookieReadResultInput   = dto.CookieReadResultInput
 	UpdateAccountInput      = dto.UpdateAccountInput
 	AccountFilter           = dto.AccountFilter
 	AccountQuery            = dto.AccountFilter
@@ -73,7 +69,6 @@ type Store interface {
 	FindByProfilePlatform(profileID string, platform Platform) (AccountRecord, bool, error)
 	UpdateMetadata(AccountRecord, UpdateAccountInput) error
 	SetProfile(AccountRecord) error
-	Update(AccountRecord, *[]identityservice.CategoryID) error
 	List(AccountQuery) ([]AccountRecord, error)
 	ListTags(accountIDs []string) (map[string][]string, error)
 	AppendAudit(identityservice.AuditEvent) error
@@ -432,6 +427,9 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 	if err != nil {
 		return AccountCheckStart{}, err
 	}
+	if record.CookieUpdate != nil && (record.CookieUpdate.Status == "running" || record.CookieUpdate.Status == "uncertain") {
+		return AccountCheckStart{}, ErrCookieConflict
+	}
 	if !record.Enabled {
 		return AccountCheckStart{}, ErrInvalidInput
 	}
@@ -471,75 +469,6 @@ func (s *accountService) StartLocalAccountCheck(actor identityservice.PublicUser
 		OperationID: operationID, AccountID: record.ID, BrowserProfileID: record.BrowserProfileID, BitProfileID: bitProfileID,
 		Platform: record.Platform, ExpectedPlatformAccountID: record.PlatformAccountID, PlatformLoginStatus: record.PlatformLoginStatus,
 	}, nil
-}
-
-func (s *accountService) StartCookieRead(actor identityservice.PublicUser, accountID string, input CookieReadStartInput) (CookieReadStart, error) {
-	if !canStartLocalOperation(actor.Role) {
-		return CookieReadStart{}, ErrForbidden
-	}
-	if s.profileFacts == nil {
-		return CookieReadStart{}, ErrProfileUnavailable
-	}
-	record, err := s.GetOwnedAccountRecord(actor, accountID)
-	if err != nil {
-		return CookieReadStart{}, err
-	}
-	if !record.Enabled {
-		return CookieReadStart{}, ErrInvalidInput
-	}
-	if strings.TrimSpace(record.BrowserProfileID) == "" {
-		return CookieReadStart{}, ErrProfileUnavailable
-	}
-	_, profileUserID, bitProfileID, profileInScope, profileActive, found, err := s.profileFacts.ResolveProfileForAccountCheck(record.BrowserProfileID)
-	if err != nil {
-		return CookieReadStart{}, err
-	}
-	if !found || !profileInScope {
-		return CookieReadStart{}, ErrProfileNotFound
-	}
-	if profileUserID != actor.ID {
-		return CookieReadStart{}, ErrProfileAssignedToOtherUser
-	}
-	if !profileActive || bitProfileID == "" {
-		return CookieReadStart{}, ErrProfileUnavailable
-	}
-	operationID := s.newID("cookie-read")
-	if err := s.audit(actor.ID, "media_account.cookie_read.start", record.ID, map[string]string{
-		"operation_id": operationID, "browser_profile_id": record.BrowserProfileID, "bit_profile_id": bitProfileID,
-	}); err != nil {
-		return CookieReadStart{}, err
-	}
-	return CookieReadStart{
-		OperationID: operationID, AccountID: record.ID, BrowserProfileID: record.BrowserProfileID, BitProfileID: bitProfileID, Platform: record.Platform,
-	}, nil
-}
-
-func (s *accountService) ApplyCookieReadResult(actor identityservice.PublicUser, accountID string, input CookieReadResultInput) (Account, error) {
-	record, err := s.GetOwnedAccountRecord(actor, accountID)
-	if err != nil {
-		return Account{}, err
-	}
-	if strings.TrimSpace(input.OperationID) == "" {
-		return Account{}, ErrInvalidInput
-	}
-	now := s.now()
-	serialized, err := json.Marshal(input.Cookies)
-	if err != nil {
-		return Account{}, ErrInvalidInput
-	}
-	record.ActiveCookie = string(serialized)
-	record.CookieStatus = "active"
-	record.CookieUpdatedAt = &now
-	record.UpdatedAt = now
-	if err := s.store.Update(record, nil); err != nil {
-		return Account{}, err
-	}
-	if err := s.audit(actor.ID, "media_account.cookie_read.result", record.ID, map[string]string{
-		"operation_id": strings.TrimSpace(input.OperationID), "cookie_count": strconv.Itoa(len(input.Cookies)),
-	}); err != nil {
-		return Account{}, err
-	}
-	return record.Account, nil
 }
 
 func (s *accountService) ApplyLocalAccountCheckResult(actor identityservice.PublicUser, accountID string, input AccountCheckResultInput) (Account, error) {

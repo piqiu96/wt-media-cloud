@@ -36,9 +36,6 @@ func (mysqlStore) FindByIdentity(userID identityservice.UserID, platform model.P
 func (mysqlStore) FindByProfilePlatform(profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
 	return repository.FindByProfilePlatform(profileID, platform)
 }
-func (mysqlStore) Update(record model.AccountRecord, replaceCategoryIDs *[]identityservice.CategoryID) error {
-	return repository.Update(record, replaceCategoryIDs)
-}
 func (mysqlStore) List(query dto.AccountFilter) ([]model.AccountRecord, error) {
 	return repository.List(repository.AccountFilter(query))
 }
@@ -84,4 +81,8 @@ func defaultAccountService() *accountService {
 		withUserResolver(productionUserResolver{}),
 		withCategoryResolver(productionCategoryResolver{}),
 	)
+}
+
+func (mysqlStore) MutateCookie(id string, userID identityservice.UserID, mutate func(*model.AccountRecord, *string) error) (model.AccountRecord, error) {
+	return repository.MutateCookie(id, userID, mutate)
 }

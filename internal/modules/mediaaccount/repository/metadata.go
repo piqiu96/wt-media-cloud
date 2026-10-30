@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
@@ -56,16 +57,44 @@ func replaceAccountTags(tx *gorm.DB, accountID string, tags []string, now any) e
 	}
 	return nil
 }
-func SetProfile(record model.AccountRecord) error {
-	n, err := execSQL(database.DB(), `UPDATE media_accounts SET browser_profile_id=?, check_operation_id=NULL, check_profile_id=NULL, check_started_at=NULL, last_check_status='never', last_check_message=NULL, last_check_identity=NULL, updated_at=? WHERE id=? AND user_id=?`, nullIfEmpty(record.BrowserProfileID), record.UpdatedAt, record.ID, record.UserID)
-	if duplicateKey(err) {
-		return model.ErrProfilePlatformTaken
-	}
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return model.ErrNotFound
-	}
-	return nil
+func SetProfile(record model.AccountRecord) error { return setProfile(database.DB(), record) }
+func setProfile(db *gorm.DB, record model.AccountRecord) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var old sql.NullString
+		if err := queryRow(tx, `SELECT browser_profile_id FROM media_accounts WHERE id=? AND user_id=? FOR UPDATE`, record.ID, record.UserID).Scan(&old); err != nil {
+			return err
+		}
+		rows, err := queryRows(tx, `SELECT id,cookie_operation_id FROM browser_profiles WHERE id IN (?,?) ORDER BY id FOR UPDATE`, old.String, record.BrowserProfileID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			var op sql.NullString
+			if err = rows.Scan(&id, &op); err != nil {
+				rows.Close()
+				return err
+			}
+			if op.Valid && op.String != "" {
+				rows.Close()
+				return model.ErrCookieConflict
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		n, err := execSQL(tx, `UPDATE media_accounts SET browser_profile_id=?, check_operation_id=NULL, check_profile_id=NULL, check_started_at=NULL, last_check_status='never', last_check_message=NULL, last_check_identity=NULL, updated_at=? WHERE id=? AND user_id=?`, nullIfEmpty(record.BrowserProfileID), record.UpdatedAt, record.ID, record.UserID)
+		if duplicateKey(err) {
+			return model.ErrProfilePlatformTaken
+		}
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return model.ErrNotFound
+		}
+		return nil
+	})
 }

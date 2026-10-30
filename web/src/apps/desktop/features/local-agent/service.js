@@ -10,7 +10,7 @@ export const LOCAL_AGENT_COMMANDS = Object.freeze({
   tokenFacts: "local_agent_token_facts",
   bitAccountBind: "local_agent_bit_account_bind",
   accountCheck: "local_agent_account_check",
-  cookieRead: "local_agent_cookie_read",
+  accountCookie: "local_agent_account_cookie",
   profileScan: "local_agent_profile_scan",
   profileGroups: "local_agent_profile_groups",
   profileOpen: "local_agent_profile_open",
@@ -133,13 +133,8 @@ export function createLocalAgentService({ invoke }) {
         },
       });
     },
-    async cookieRead({ operationId, bitProfileId }) {
-      return invoke(LOCAL_AGENT_COMMANDS.cookieRead, {
-        args: {
-          operation_id: operationId,
-          bit_profile_id: bitProfileId,
-        },
-      });
+    async accountCookie({stage,operationId,bitProfileId,platform,expectedPlatformAccountId="",inputCookie="",fingerprint=""}) {
+      return invoke(LOCAL_AGENT_COMMANDS.accountCookie,{args:{stage,operation_id:operationId,bit_profile_id:bitProfileId,platform,expected_platform_account_id:expectedPlatformAccountId,input_cookie:inputCookie,fingerprint}})
     },
     async profileScan() {
       return invoke(LOCAL_AGENT_COMMANDS.profileScan);

@@ -21,7 +21,7 @@ const accountColumns = `id, user_id, team_id, platform, platform_account_id, pla
 // accountReadColumns must stay in the same order as scanAccount's destinations.
 // The owner name is resolved by the join rather than stored, so a renamed user
 // shows the new name and an account whose user row is gone shows an empty one.
-const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at`
+const accountReadColumns = `ma.id, ma.user_id, ma.team_id, ma.platform, ma.platform_account_id, ma.platform_name, ma.platform_avatar_url, ma.browser_profile_id, ma.remark, ma.identification_status, ma.duplicate_of_account_id, ma.enabled, ma.platform_login_status, ma.original_cookie, ma.active_cookie, ma.cookie_status, ma.cookie_updated_at, ma.last_check_at, ma.last_check_items, ma.created_at, ma.updated_at, COALESCE(NULLIF(u.nickname, ''), u.username, ''), ma.last_check_status, ma.last_check_message, ma.last_check_identity, ma.check_operation_id, ma.check_profile_id, ma.check_started_at, ma.before_cookie, ma.cookie_update`
 
 const accountReadFrom = ` FROM media_accounts ma LEFT JOIN users u ON u.id = ma.user_id`
 
@@ -139,38 +139,6 @@ func findByQuery(db *gorm.DB, query string, args ...any) (model.AccountRecord, b
 		return model.AccountRecord{}, false, err
 	}
 	return records[0], true, nil
-}
-
-func Update(record model.AccountRecord, replaceCategoryIDs *[]sharedidentity.CategoryID) error {
-	return update(database.DB(), record, replaceCategoryIDs)
-}
-
-func update(db *gorm.DB, record model.AccountRecord, replaceCategoryIDs *[]sharedidentity.CategoryID) error {
-	tx := db.Begin()
-	defer rollbackTx(tx)
-	result, err := execSQL(tx,
-		`UPDATE media_accounts SET check_operation_id = IF(browser_profile_id <=> ?, check_operation_id, NULL), user_id = ?, team_id = ?, platform = ?, platform_account_id = ?, platform_name = ?, platform_avatar_url = ?, browser_profile_id = ?, remark = ?, identification_status = ?, duplicate_of_account_id = ?, enabled = ?, platform_login_status = ?, original_cookie = ?, active_cookie = ?, cookie_status = ?, cookie_updated_at = ?, last_check_at = ?, last_check_items = ?, updated_at = ? WHERE id = ?`,
-		nullIfEmpty(record.BrowserProfileID), record.UserID, record.TeamID, record.Platform, nullIfEmpty(record.PlatformAccountID), nullIfEmpty(record.PlatformName),
-		nullIfEmpty(record.PlatformAvatarURL), nullIfEmpty(record.BrowserProfileID), nullIfEmpty(record.Remark), record.IdentificationStatus,
-		nullIfEmpty(record.DuplicateOfAccountID), record.Enabled, record.PlatformLoginStatus,
-		nullIfEmpty(record.OriginalCookie), nullIfEmpty(record.ActiveCookie), nullIfEmpty(record.CookieStatus),
-		record.CookieUpdatedAt, record.LastCheckAt, marshalLastCheckItems(record.LastCheckItems), record.UpdatedAt, record.ID,
-	)
-	if duplicateKey(err) {
-		return model.ErrDuplicateAccount
-	}
-	if err != nil {
-		return err
-	}
-	if result == 0 {
-		return model.ErrNotFound
-	}
-	if replaceCategoryIDs != nil {
-		if err := replaceAccountCategoryIDs(tx, record.ID, *replaceCategoryIDs); err != nil {
-			return err
-		}
-	}
-	return tx.Commit().Error
 }
 
 func List(query AccountFilter) ([]model.AccountRecord, error) {
@@ -390,6 +358,7 @@ func scanAccountSummary(row scanner) (model.AccountRecord, error) {
 
 func scanAccount(row scanner) (model.AccountRecord, error) {
 	var record model.AccountRecord
+	var beforeCookie, cookieUpdate sql.NullString
 	var platformAccountID, name, avatarURL, browserProfileID, remark sql.NullString
 	var duplicateOfAccountID, originalCookie, activeCookie, cookieStatus sql.NullString
 	var activeCookieUpdatedAt, lastCheckedAt sql.NullTime
@@ -402,7 +371,7 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 		&remark, &record.IdentificationStatus, &duplicateOfAccountID, &record.Enabled, &record.PlatformLoginStatus,
 		&originalCookie, &activeCookie, &cookieStatus, &activeCookieUpdatedAt, &lastCheckedAt,
 		&checkItemsJSON, &record.CreatedAt, &record.UpdatedAt, &userName,
-		&record.LastCheckStatus, &checkMessage, &checkIdentity, &checkOperation, &checkProfile, &checkStarted,
+		&record.LastCheckStatus, &checkMessage, &checkIdentity, &checkOperation, &checkProfile, &checkStarted, &beforeCookie, &cookieUpdate,
 	)
 	if err != nil {
 		return model.AccountRecord{}, err
@@ -415,6 +384,12 @@ func scanAccount(row scanner) (model.AccountRecord, error) {
 	record.DuplicateOfAccountID = duplicateOfAccountID.String
 	record.OriginalCookie = originalCookie.String
 	record.ActiveCookie = activeCookie.String
+	record.BeforeCookie = beforeCookie.String
+	if cookieUpdate.Valid {
+		if err := json.Unmarshal([]byte(cookieUpdate.String), &record.CookieUpdate); err != nil {
+			return model.AccountRecord{}, err
+		}
+	}
 	record.CookieStatus = cookieStatus.String
 	record.UserName = userName.String
 	record.LastCheckMessage = checkMessage.String

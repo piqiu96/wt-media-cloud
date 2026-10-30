@@ -9,6 +9,7 @@ import (
 )
 
 var (
+	ErrCookieConflict             = errors.New("cookie operation conflicts with current target or receipt")
 	ErrStaleCheck                 = errors.New("media account check is stale")
 	ErrForbidden                  = errors.New("media account operation is forbidden")
 	ErrInvalidInput               = errors.New("media account input is invalid")
@@ -99,6 +100,8 @@ type AccountRecord struct {
 	Account
 	OriginalCookie string
 	ActiveCookie   string
+	BeforeCookie   string
+	CookieUpdate   *CookieUpdate
 }
 
 type AccountCounts struct {
@@ -106,4 +109,21 @@ type AccountCounts struct {
 	Normal   int `json:"normal"`
 	Abnormal int `json:"abnormal"`
 	Unbound  int `json:"unbound"`
+}
+
+// CookieUpdate is private execution state, never part of Account projections.
+type CookieUpdate struct {
+	ExistingAccountID         string   `json:"existing_account_id,omitempty"`
+	RequestKey                string   `json:"request_key"`
+	RequestDigest             string   `json:"request_digest"`
+	OperationID               string   `json:"operation_id"`
+	BrowserProfileID          string   `json:"browser_profile_id"`
+	BitProfileID              string   `json:"bit_profile_id"`
+	Platform                  Platform `json:"platform"`
+	ExpectedPlatformAccountID string   `json:"expected_platform_account_id"`
+	InputCookie               string   `json:"input_cookie,omitempty"`
+	Fingerprint               string   `json:"fingerprint,omitempty"`
+	Status                    string   `json:"status"`
+	Step                      string   `json:"step"`
+	Message                   string   `json:"message"`
 }

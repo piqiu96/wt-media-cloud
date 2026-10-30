@@ -4,7 +4,7 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
   const api = createApiClient({ base, fetchImpl: fetch })
   const sanitize = (account) => {
     if (!account || typeof account !== 'object') return account
-    const { original_cookie: _originalCookie, active_cookie: _activeCookie, ...safe } = account
+    const { original_cookie: _originalCookie, active_cookie: _activeCookie, before_cookie: _beforeCookie, cookie_update: _cookieUpdate, ...safe } = account
     return safe
   }
   return {
@@ -37,14 +37,11 @@ export function createMediaAccountClient({ base = '/api/v1', fetch = globalThis.
     submitCheckResult(accountId, input) {
       return api.post(`/media-accounts/${accountId}/check/result`, { ...input, check_items: input.check_items ?? [] }).then(sanitize)
     },
-    fetchCookies(accountId) {
-      return api.get(`/media-accounts/${accountId}/cookies`)
-    },
-    startCookieReadSync(accountId) {
-      return api.post(`/media-accounts/${accountId}/cookies/read-sync`, {})
-    },
-    submitCookieReadResult(accountId, input) {
-      return api.post(`/media-accounts/${accountId}/cookies/read-sync/result`, input).then(sanitize)
-    },
+    get(id) { return api.get(`/media-accounts/${id}`).then(sanitize) },
+    credentials(id) { return api.get(`/media-accounts/${id}/credentials`) },
+    startCookieUpdate(id,input) { return api.post(`/media-accounts/${id}/cookie-updates`,input) },
+    snapshotCookieUpdate(id,op,input) { return api.put(`/media-accounts/${id}/cookie-updates/${op}/snapshot`,input) },
+    settleCookieUpdate(id,op,input) { return api.put(`/media-accounts/${id}/cookie-updates/${op}/result`,input) },
+    getCookieUpdate(id,op) { return api.get(`/media-accounts/${id}/cookie-updates/${op}`) },
   }
 }

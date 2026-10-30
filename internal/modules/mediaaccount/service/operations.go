@@ -3,7 +3,7 @@ package service
 import "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
 import identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 
-// Package-level operations preserve the existing Media Account behavior.
+// Package-level entry points construct the production account service.
 func CreateAccount(actor identityservice.PublicUser, input CreateAccountInput) (Account, error) {
 	return defaultAccountService().CreateAccount(actor, input)
 }
@@ -30,14 +30,6 @@ func UpdateAccount(actor identityservice.PublicUser, accountID string, input Upd
 
 func StartLocalAccountCheck(actor identityservice.PublicUser, accountID string, input AccountCheckStartInput) (AccountCheckStart, error) {
 	return defaultAccountService().StartLocalAccountCheck(actor, accountID, input)
-}
-
-func StartCookieRead(actor identityservice.PublicUser, accountID string, input CookieReadStartInput) (CookieReadStart, error) {
-	return defaultAccountService().StartCookieRead(actor, accountID, input)
-}
-
-func ApplyCookieReadResult(actor identityservice.PublicUser, accountID string, input CookieReadResultInput) (Account, error) {
-	return defaultAccountService().ApplyCookieReadResult(actor, accountID, input)
 }
 
 func ApplyLocalAccountCheckResult(actor identityservice.PublicUser, accountID string, input AccountCheckResultInput) (Account, error) {

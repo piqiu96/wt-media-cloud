@@ -40,21 +40,6 @@ type AccountCheckResultInput struct {
 	LastCheckItems      []model.AccountCheckItem
 }
 
-type CookieReadStartInput struct{}
-
-type CookieReadStart struct {
-	OperationID      string         `json:"operation_id"`
-	AccountID        string         `json:"account_id"`
-	BrowserProfileID string         `json:"browser_profile_id"`
-	BitProfileID     string         `json:"bit_profile_id"`
-	Platform         model.Platform `json:"platform"`
-}
-
-type CookieReadResultInput struct {
-	OperationID string
-	Cookies     []map[string]any
-}
-
 type UpdateAccountInput struct {
 	Tags        *[]string
 	Enabled     *bool

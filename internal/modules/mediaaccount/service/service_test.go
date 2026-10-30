@@ -424,27 +424,17 @@ func TestLocalOperationsFollowAccountOwnership(t *testing.T) {
 	if _, err := service.StartLocalAccountCheck(senior, "own", AccountCheckStartInput{}); err != nil {
 		t.Fatalf("senior own StartLocalAccountCheck error=%v", err)
 	}
-	if _, err := service.StartCookieRead(senior, "own", CookieReadStartInput{}); err != nil {
-		t.Fatalf("senior own StartCookieRead error=%v", err)
-	}
 	if _, err := service.StartLocalAccountCheck(senior, "teammate", AccountCheckStartInput{}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("senior teammate StartLocalAccountCheck error=%v, want ErrForbidden", err)
-	}
-	if _, err := service.StartCookieRead(senior, "teammate", CookieReadStartInput{}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("senior teammate StartCookieRead error=%v, want ErrForbidden", err)
 	}
 	for _, accountID := range []string{"own", "admin-own"} {
 		if _, err := service.StartLocalAccountCheck(admin, accountID, AccountCheckStartInput{}); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("admin %s StartLocalAccountCheck error=%v, want ErrForbidden", accountID, err)
 		}
-		if _, err := service.StartCookieRead(admin, accountID, CookieReadStartInput{}); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("admin %s StartCookieRead error=%v, want ErrForbidden", accountID, err)
-		}
 	}
 }
 
-// ReadMediaAccountCookies (the async cloud-agent path) applies this exported
-// gate in the handler; it must stay the same rule as the two synchronous starts.
+// Checks and Cookie operations share the owning-operator role gate.
 func TestCanStartLocalOperationExcludesAdmins(t *testing.T) {
 	for _, role := range []identityservice.Role{identityservice.RoleOperator, identityservice.RoleSeniorOperator} {
 		if !CanStartLocalOperation(role) {
@@ -795,15 +785,6 @@ func (s *memoryStore) FindByProfilePlatform(profileID string, platform Platform)
 		}
 	}
 	return AccountRecord{}, false, nil
-}
-
-func (s *memoryStore) Update(record AccountRecord, replaceCategoryIDs *[]identityservice.CategoryID) error {
-	if replaceCategoryIDs != nil {
-		s.categoryIDs[record.ID] = append([]identityservice.CategoryID(nil), (*replaceCategoryIDs)...)
-	}
-	record.CategoryIDs = nil
-	s.records[record.ID] = record
-	return nil
 }
 
 func (s *memoryStore) List(query AccountQuery) ([]AccountRecord, error) {

@@ -1,4 +1,5 @@
 <script setup>
+import { executeCookieUpdate, reconcileCookieUpdate } from "./cookieUpdates.js"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from "vue"
@@ -68,7 +69,13 @@ const detailVisible = ref(false)
 const detailAccount = ref(null)
 const checkFailure = ref("")
 const checkFailureEnv = ref(false)
-const readingCookie = ref(false)
+const updatingCookie = ref(false)
+const cookieUpdateVisible = ref(false)
+const cookieInput = ref("")
+const cookieError = ref("")
+const cookieRequestKey = ref("")
+const cookieOperation = ref(null)
+const cookieShown = ref({active_cookie:false,original_cookie:false})
 const showCookieDialog = ref(false)
 const cookieDialog = ref(null)
 const editVisible = ref(false)
@@ -400,7 +407,7 @@ async function toggleEnabled(account) {
 }
 
 function rowMoreOptions(account) {
- return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"查看 Cookie",value:"credentials"}] : []),{content:account.enabled ? "停用" : "启用",value:"enabled"}]
+ return [...(canOperateLocalAccount(account) ? [{content: account.browser_profile_id ? "更换窗口" : "绑定窗口", value:"bind"}] : []), ...(!isAdmin.value && isOwnAccount(account) ? [{content:"账号凭证",value:"credentials"}] : []),{content:account.enabled ? "停用" : "启用",value:"enabled"}]
 }
 function onRowMore(option, account) { if (option.value === "bind") openBind(account); else if (option.value === "credentials") openCookieDialog(account); else if (option.value === "enabled") toggleEnabled(account) }
 function splitTags(value) {
@@ -448,7 +455,7 @@ function isOwnAccount(account) {
 }
 
 // 本地操作按账号归属：普通运营可操作自己的账号，高级运营只能操作本人创建的账号，
-// 管理员一律只读。服务端 StartLocalAccountCheck / StartCookieRead 用同一套归属判定。
+// 管理员一律只读。服务端 StartLocalAccountCheck / StartCookieUpdate 用同一套归属判定。
 function canOperateLocalAccount(account) {
   if (!isDesktop || !account) return false
   if (user.value?.role === "operator") return isOwnAccount(account)
@@ -606,71 +613,60 @@ async function runSingleAccountCheck(account, service) {
   })
 }
 
-async function readProfileCookieFor(account) {
-  const target = account || cookieDialog.value?.account
-  if (!target?.id || !target.browser_profile_id) return
-  if (!canOperateLocalAccount(target)) {
-    feedback.toast.info(localOperationHint(target))
-    return
-  }
-  if (!canOperateBoundWindow(target)) {
-    feedback.toast.info("绑定窗口不可用，无法读取 Cookie")
-    return
-  }
-  readingCookie.value = true
-  error.value = ""
-  try {
-    const service = await desktopLocalAgentService()
-    const start = await accountClient.startCookieReadSync(target.id)
-    const localResult = await service.cookieRead({
-      operationId: start.operation_id,
-      bitProfileId: start.bit_profile_id,
-    })
-    const cookies = localResult.cookies || []
-    const updated = await accountClient.submitCookieReadResult(target.id, {
-      operation_id: start.operation_id,
-      cookies,
-    })
-    const idx = accounts.value.findIndex(a => a.id === target.id)
-    if (idx >= 0) accounts.value[idx] = { ...accounts.value[idx], ...updated }
-    if (cookieDialog.value?.account?.id === target.id) {
-      cookieDialog.value = { ...cookieDialog.value, ...updated, account: { ...cookieDialog.value.account, ...updated } }
-    }
-    feedback.toast.success(`已从 Profile 读回 ${cookies.length} 条真实 Cookie 并更新 active_cookie`)
-  } catch (e) {
-    feedback.toast.error(e.message || "读取 Cookie 失败")
-  } finally {
-    readingCookie.value = false
-  }
-}
-
 async function openCookieDialog(account) {
   if (!account?.id) return
   try {
-    const data = await accountClient.fetchCookies(account.id)
-    cookieDialog.value = {
-      account,
-      original_cookie: (data && data.original_cookie) || "",
-      active_cookie: (data && data.active_cookie) || "",
-    }
+    const data = await accountClient.credentials(account.id)
+    cookieDialog.value = {...data, account}
+    cookieOperation.value = data.current_update?.operation_id ? data.current_update : null
+    cookieShown.value = {active_cookie:false,original_cookie:false}
     showCookieDialog.value = true
-  } catch (e) {
-    feedback.toast.error(e.message || "获取 Cookie 失败")
+  } catch (e) { feedback.toast.error(e.message || "获取 Cookie 失败") }
+}
+function openCookieUpdate() {
+  cookieInput.value="";cookieError.value="";cookieRequestKey.value="";showCookieDialog.value=false;cookieUpdateVisible.value=true
+}
+const cookieUnresolved = computed(()=>['running','uncertain'].includes(cookieOperation.value?.status))
+async function finishCookieFeedback(receipt) {
+  cookieOperation.value=receipt
+  if (receipt.status==='succeeded') {
+    cookieInput.value="";cookieUpdateVisible.value=false
+    feedback.toast.success("登录 Cookie 已更新，账号检查完成")
+    await loadAccounts()
+  } else if(receipt.status==='failed') {
+    cookieError.value=receipt.message || "本次更新失败，请重试";cookieRequestKey.value="";feedback.toast.error(cookieError.value)
+  } else {
+    cookieError.value=receipt.message || "更新结果待确认，请核实当前登录状态";feedback.toast.info(cookieError.value)
   }
 }
-
-async function copyCookie(field) {
-  const value = cookieDialog.value?.[field]
-  if (!value) {
-    feedback.toast.info("当前 Cookie 为空，无可复制内容")
-    return
+async function submitCookieUpdate(reconcile=false) {
+  const target=cookieDialog.value?.account
+  if(updatingCookie.value||!target||!canOperateBoundWindow(target))return
+  if(!reconcile) {
+    if(!cookieInput.value.trim()){cookieError.value="请输入新的 Cookie";return}
+    if(!await feedback.confirmWarning({title:"更新当前账号的登录 Cookie？",message:`将更新「${accountDisplayName(target)}」在「${profileForAccount(target)?.bit_name || "绑定窗口"}」内的 ${platformLabel(target.platform)} 登录信息。`,confirmText:"更新并检查"}))return
   }
+  updatingCookie.value=true;cookieError.value=""
   try {
-    await navigator.clipboard.writeText(value)
-    feedback.toast.success(`已复制 ${field === "active_cookie" ? "Active" : "原始"} Cookie 到剪贴板`)
-  } catch (e) {
-    feedback.toast.error("复制失败，请手动选择复制")
-  }
+    const local=await desktopLocalAgentService()
+    if(!cookieRequestKey.value)cookieRequestKey.value=crypto.randomUUID()
+    const receipt=reconcile ? await reconcileCookieUpdate(accountClient,local,target.id,cookieOperation.value.operation_id) : await executeCookieUpdate(accountClient,local,target.id,{request_key:cookieRequestKey.value,expected_operation_id:cookieOperation.value?.operation_id || "",input_cookie:cookieInput.value},r=>cookieOperation.value=r)
+    await finishCookieFeedback(receipt)
+  } catch(e) {
+    cookieError.value=e.message || "本次操作未完成，请核实后继续"
+    // A lost response may already have persisted the operation. Reopen reads its receipt.
+    try { const data=await accountClient.credentials(target.id);cookieOperation.value=data.current_update?.operation_id?data.current_update:cookieOperation.value } catch {}
+    feedback.toast.error(cookieError.value)
+  } finally {updatingCookie.value=false}
+}
+async function viewExistingCookieAccount() {
+ try {const account=await accountClient.get(cookieOperation.value.existing_account_id);cookieUpdateVisible.value=false;showCookieDialog.value=false;detailAccount.value=account;detailVisible.value=true}
+ catch(e){feedback.toast.error(e.message || "读取已有账号失败")}
+}
+async function copyCookie(field) {
+ const value=cookieDialog.value?.[field];if(!value)return
+ try {await navigator.clipboard.writeText(value);feedback.toast.success("已复制 Cookie")}
+ catch {cookieShown.value[field]=true;feedback.toast.error("复制失败，请手动选择复制")}
 }
 
 function accountLabel(account) {
@@ -1269,24 +1265,29 @@ const columns = [
       </FeedbackAlert>
     </t-drawer>
 
-    <t-dialog v-model:visible="showCookieDialog" width="640px" header="账号 Cookie" :footer="false">
-      <p v-if="cookieDialog?.account"><strong>账号：</strong>{{ accountDisplayName(cookieDialog.account) }}</p>
-      <p><strong>原始 Cookie：</strong></p>
-      <pre class="cookie-box">{{ cookieDialog?.original_cookie || '（空）' }}</pre>
-      <p><strong>当前真实 Cookie（active）：</strong></p>
-      <pre class="cookie-box">{{ cookieDialog?.active_cookie || '（空）' }}</pre>
-      <div class="form-tip">Cookie 为敏感数据，请勿泄露。复制后建议及时清理剪贴板；导出仅用于授权用途。</div>
-      <t-space style="margin-top:8px">
-        <t-button v-if="isDesktop && cookieDialog?.account?.browser_profile_id" size="small" :disabled="!canOperateLocalAccount(cookieDialog?.account) || !canOperateBoundWindow(cookieDialog?.account)" :title="localOperationHint(cookieDialog?.account)" :loading="readingCookie" @click="readProfileCookieFor(cookieDialog.account)">从 Profile 读真实 Cookie</t-button>
-        <t-button size="small" @click="copyCookie('active_cookie')">复制 Active Cookie</t-button>
-        <t-button size="small" variant="outline" @click="copyCookie('original_cookie')">复制原始 Cookie</t-button>
-      </t-space>
+    <t-dialog v-model:visible="showCookieDialog" width="640px" header="账号凭证" :footer="false">
+      <div class="account-object"><strong>{{ accountDisplayName(cookieDialog?.account) }}</strong><span>{{ platformLabel(cookieDialog?.account?.platform) }} · UID {{ cookieDialog?.account?.platform_account_id || '待识别' }}</span></div>
+      <section v-for="field in ['active_cookie','original_cookie']" :key="field" class="credential-section">
+        <h4>{{ field==='active_cookie' ? '当前登录 Cookie' : '首次导入 Cookie' }}</h4>
+        <pre class="cookie-box">{{ !cookieDialog?.[field] ? '暂无 Cookie' : cookieShown[field] ? cookieDialog[field] : '••••••••••••••••••••••••••••••••' }}</pre>
+        <div class="credential-actions"><t-button variant="text" size="small" :disabled="!cookieDialog?.[field]" @click="cookieShown[field]=!cookieShown[field]">{{ cookieShown[field]?'隐藏':'显示' }}</t-button><t-button variant="text" size="small" :disabled="!cookieDialog?.[field]" @click="copyCookie(field)">复制</t-button></div>
+        <div v-if="field==='active_cookie'" class="form-tip">最近同步：{{ cookieDialog?.cookie_updated_at ? new Date(cookieDialog.cookie_updated_at).toLocaleString() : '尚未同步' }}</div>
+      </section>
+      <div class="dialog-footer"><t-button theme="primary" :disabled="!isDesktop || !canOperateBoundWindow(cookieDialog?.account)" @click="openCookieUpdate">{{ cookieUnresolved ? '核实更新结果' : '更新登录 Cookie' }}</t-button></div>
+    </t-dialog>
+    <t-dialog v-model:visible="cookieUpdateVisible" width="640px" header="更新登录 Cookie" :footer="false" :close-btn="!updatingCookie" :close-on-overlay-click="false" :close-on-esc-keydown="!updatingCookie">
+      <div class="account-object"><strong>{{ accountDisplayName(cookieDialog?.account) }}</strong><span>{{ platformLabel(cookieDialog?.account?.platform) }} · UID {{ cookieDialog?.account?.platform_account_id || '待识别' }}</span></div>
+      <p class="form-tip">目标窗口：{{ profileForAccount(cookieDialog?.account)?.bit_name || '未绑定' }}</p>
+      <template v-if="!cookieUnresolved"><label class="field-label">新的 Cookie</label><t-textarea v-model="cookieInput" :autosize="{minRows:7,maxRows:10}" placeholder="粘贴此账号的新 Cookie" :disabled="updatingCookie" /><p class="form-tip">更新当前平台的登录信息，完成后检查账号身份。首次导入的 Cookie 保留。</p></template>
+      <FeedbackAlert v-if="cookieError || cookieUnresolved" :theme="cookieUnresolved?'warning':'error'" :message="cookieError || cookieOperation?.message || '更新结果待确认，请核实当前登录状态'" />
+      <div class="dialog-footer"><t-button v-if="cookieUnresolved" variant="outline" :disabled="updatingCookie" @click="openAccountProfile(cookieDialog?.account)">打开窗口</t-button><t-button v-if="cookieOperation?.existing_account_id" variant="outline" @click="viewExistingCookieAccount">查看已有账号</t-button><t-button variant="outline" :disabled="updatingCookie" @click="cookieUpdateVisible=false">取消</t-button><t-button theme="primary" :loading="updatingCookie" @click="submitCookieUpdate(cookieUnresolved)">{{ updatingCookie ? '处理中…' : cookieUnresolved ? '核实更新结果' : '更新并检查' }}</t-button></div>
     </t-dialog>
   </div>
   </t-loading>
 </template>
 
 <style scoped>
+.account-object{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}.account-object span{font-size:12px;color:var(--td-text-color-secondary)}.credential-section{position:relative;margin-bottom:20px}.credential-section h4{font-size:14px;margin:0 0 10px}.credential-actions{display:flex;justify-content:flex-end;gap:4px}.field-label{display:block;margin-bottom:8px}.dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 .account-detail-heading { display:flex;gap:16px;align-items:center;margin-bottom:24px; }
 .account-detail-heading h2 { margin:0;font-size:20px; }
 .account-detail-heading p { margin:6px 0 10px;font-size:12px;color:var(--td-text-color-secondary); }
