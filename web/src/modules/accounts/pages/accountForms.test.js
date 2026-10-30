@@ -55,3 +55,28 @@ describe('account create/edit form lifecycle', () => {
     })
   }
 })
+
+
+describe('Cookie editor close lifecycle', () => {
+  function cookieContext() {
+    const state = { updatingCookie: { value: false }, cookieInput: { value: 'demo-only' }, cookieUnresolved: { value: false }, cookieUpdateVisible: { value: true }, feedback: { confirmWarning: vi.fn(async () => false) } }
+    const close = new Function(...Object.keys(state), `${command('closeCookieUpdate')}; return closeCookieUpdate`)(...Object.values(state))
+    return { ...state, close }
+  }
+  it('retains the draft when discard is cancelled and closes after confirmation', async () => {
+    const c = cookieContext(); await c.close()
+    expect(c.cookieUpdateVisible.value).toBe(true); expect(c.cookieInput.value).toBe('demo-only')
+    c.feedback.confirmWarning.mockResolvedValueOnce(true); await c.close()
+    expect(c.cookieUpdateVisible.value).toBe(false)
+  })
+  it('blocks closing while processing and does not discard an unresolved receipt', async () => {
+    const c = cookieContext(); c.updatingCookie.value = true; await c.close()
+    expect(c.cookieUpdateVisible.value).toBe(true); expect(c.feedback.confirmWarning).not.toHaveBeenCalled()
+    c.updatingCookie.value = false; c.cookieUnresolved.value = true; await c.close()
+    expect(c.cookieUpdateVisible.value).toBe(false); expect(c.feedback.confirmWarning).not.toHaveBeenCalled()
+  })
+  it('closes an empty draft without a confirmation', async () => {
+    const c = cookieContext(); c.cookieInput.value = ' '; await c.close()
+    expect(c.cookieUpdateVisible.value).toBe(false); expect(c.feedback.confirmWarning).not.toHaveBeenCalled()
+  })
+})

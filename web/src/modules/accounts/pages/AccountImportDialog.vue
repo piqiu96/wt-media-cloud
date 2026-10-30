@@ -1,6 +1,8 @@
 <script setup>
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue"
 import ResourceForm from "../../../shared/ui/resource/ResourceForm.vue"
+import OperationResultSummary from "../../../shared/ui/feedback/OperationResultSummary.vue"
+import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 import CategoryFields from "../../../shared/ui/fields/CategoryFields.vue"
 import TagInput from "../../../shared/ui/fields/TagInput.vue"
 import {computed,ref,watch} from 'vue'
@@ -10,6 +12,7 @@ import {feedback} from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import {platformLabel} from '../../../shared/utils/platforms.js'
 import {runImportItem} from './accountImports.js'
+import {importResultSummary} from './importResultSummary.js'
 const props=defineProps({visible:Boolean,initialId:{type:String,default:''},historyOnly:Boolean,categories:{type:Array,default:()=>[]},getLocal:{type:Function,required:true}})
 const emit=defineEmits(['update:visible','changed','view-account'])
 const api=createMediaAccountImportClient(),profiles=createProfileBindingClient()
@@ -26,7 +29,8 @@ const continueCount=computed(()=>blocked.value?0:batch.value?.counts?.pending||0
 const shownItems=computed(()=>(content.value?.items||[]).filter(i=>tab.value==='all'||tab.value==='done'&&i.status==='succeeded'||tab.value==='attention'&&!['succeeded','skipped'].includes(i.status)))
 const title=computed(()=>screen.value==='input'?'批量接入账号':screen.value==='preview'?'确认接入内容':screen.value==='history'?'接入记录':busy.value?'正在接入账号':'批量接入结果')
 const progress=computed(()=>batch.value?Math.round((batch.value.counts.succeeded+batch.value.counts.failed+batch.value.counts.skipped)/batch.value.counts.total*100):0)
-const resultTitle=computed(()=>busy.value?'正在接入账号':blocked.value||batch.value?.counts.pending?'本轮接入已暂停':batch.value?.counts.failed?'接入完成，部分账号需处理':'本轮接入完成')
+const resultPresentation=computed(()=>importResultSummary(batch.value?.counts,busy.value))
+const resultCounts=computed(()=>Object.entries(countLabels).map(([key,label])=>({key,label,value:batch.value?.counts[key]||0,tone:key==='succeeded'?'success':key==='failed'?'danger':key==='uncertain'?'warning':key==='running'?'info':'neutral'})))
 async function readFile(event){const f=event.target.files?.[0];if(!f)return;if(f.size>2*1024*1024){error.value='文件超过 2 MB，请拆分后再接入';return}raw.value=await f.text();event.target.value=''}
 const columns=[{colKey:'row_number',title:'原行号',width:68},{colKey:'account',title:'账号',width:150},{colKey:'window',title:'浏览器窗口',width:132},{colKey:'status',title:'接入状态',width:100},{colKey:'message',title:'结果说明',minWidth:180},{colKey:'op',title:'操作',width:225,fixed:'right'}]
 function resetInput() {
@@ -119,23 +123,22 @@ async function close(){
  <template v-else-if="screen==='preview'">
   <div class="preview-summary"><strong>{{ platformLabel(platform) }} · {{ validRows.length }} 行可接入</strong><span>{{ preview.length-validRows.length }} 行无效，不会接入</span></div>
   <p class="hint">确认前不会创建窗口或账号。行号对应原始输入，后续可按行继续处理。</p>
-  <t-table :data="preview" row-key="row_number" :columns="[{colKey:'row_number',title:'原行号',width:90},{colKey:'account',title:'待接入资料'},{colKey:'plan',title:'窗口安排'},{colKey:'message',title:'校验结果'}]" :max-height="330" size="small"><template #account="{row}">输入第 {{ row.row_number }} 行</template><template #plan="{row}">{{ row.valid?'优先新建独立窗口':'不接入' }}</template><template #message="{row}"><span :class="{'error-text':!row.valid}">{{ row.message }}</span></template></t-table>
+  <t-table class="wt-resource-table" :data="preview" row-key="row_number" :columns="[{colKey:'row_number',title:'原行号',width:90},{colKey:'account',title:'待接入资料',width:180},{colKey:'plan',title:'窗口安排',width:190},{colKey:'message',title:'校验结果',minWidth:240}]" :scroll="{x:'700px'}" :max-height="330" size="small"><template #account="{row}">输入第 {{ row.row_number }} 行</template><template #plan="{row}">{{ row.valid?'优先新建独立窗口':'不接入' }}</template><template #message="{row}"><span class="result-message" :class="{'error-text':!row.valid}">{{ row.message }}</span></template></t-table>
  </template>
  <template v-else-if="screen==='history'">
   <p class="hint">最近 20 次接入，可随时查看和继续处理。</p><t-empty v-if="!history.length" description="暂无接入记录"/>
   <button v-for="h in history" :key="h.id" class="history-row" @click="openBatch(h.id)"><span>{{ platformLabel(h.platform) }} · 接入 {{ h.counts.total }} 个账号<small>{{ new Date(h.created_at).toLocaleString() }}</small></span><span>成功 {{ h.counts.succeeded }} / 待处理 {{ h.counts.pending+h.counts.failed+h.counts.uncertain+h.counts.running }}　查看结果 →</span></button>
  </template>
  <template v-else-if="batch">
-  <div class="result-title"><t-icon :name="busy?'time':batch.counts.failed||batch.counts.uncertain?'info-circle':'check-circle'" :class="{attention:batch.counts.failed||batch.counts.uncertain}" size="32px"/><h2>{{ resultTitle }}</h2><p>{{ platformLabel(batch.platform) }} · {{ content.remark || '账号批量接入' }}</p><span>{{ busy?'当前项完成后可暂停':'成功项已保存，可继续处理未完成项' }}</span></div>
-  <div class="counts"><div v-for="(label,key) in countLabels" :key="key" :class="key"><span>{{ label }}</span><strong>{{ batch.counts[key] }}</strong></div></div>
+  <OperationResultSummary :title="resultPresentation.title" :tone="resultPresentation.tone" :running="busy" :description="resultPresentation.description" :counts="resultCounts"><span>{{ platformLabel(batch.platform) }} · {{ content.remark || '账号批量接入' }}</span></OperationResultSummary>
   <t-progress v-if="busy" :percentage="progress" :label="false" style="margin-bottom:16px"/>
   <FeedbackAlert v-if="blocked&&!busy" message="有一项结果尚未确认，请先按行核实，再继续接入。" theme="warning"/>
   <t-tabs v-model="tab" class="result-tabs"><t-tab-panel value="all" label="全部"/><t-tab-panel value="attention" label="需要继续处理"/><t-tab-panel value="done" label="成功接入"/></t-tabs>
-  <t-table :data="shownItems" :columns="columns" row-key="row_number" :max-height="360" size="small">
+  <t-table class="wt-resource-table" :data="shownItems" :columns="columns" row-key="row_number" :max-height="360" :scroll="{x:'855px'}" size="small">
    <template #account="{row}"><div>{{ row.name||'待识别账号' }}<small v-if="row.platform_account_id">UID：{{ row.platform_account_id }}</small></div></template>
    <template #window="{row}"><span>{{ row.window_name||(row.browser_profile_id?'窗口 #'+row.browser_profile_id:'待准备窗口') }}</span></template>
-   <template #status="{row}"><t-tag variant="light" :theme="row.status==='succeeded'?'success':row.status==='failed'?'danger':row.status==='uncertain'?'warning':'default'">{{ row.step==='manual'&&row.status==='failed'?'需人工登录':labels[row.status] }}</t-tag></template>
-   <template #message="{row}"><span :class="{'error-text':row.status==='failed'}">{{ row.message||'等待接入' }}</span></template>
+   <template #status="{row}"><ResourceStatusBadge :tone="row.status==='succeeded'?'success':row.status==='failed'?'danger':row.status==='uncertain'?'warning':row.status==='running'?'info':'neutral'" :label="row.step==='manual'&&row.status==='failed'?'需人工登录':labels[row.status]" /></template>
+   <template #message="{row}"><span class="result-message" :class="{'error-text':row.status==='failed'}">{{ row.message||'等待接入' }}</span></template>
    <template #op="{row}"><t-space size="small" break-line>
     <t-button v-if="row.bit_profile_id&&row.status!=='succeeded'" size="small" variant="text" :disabled="busy" @click="openWindow(row)">打开窗口</t-button>
     <t-button v-if="['running','uncertain'].includes(row.status)||row.step==='manual'&&row.status==='failed'" size="small" variant="text" :disabled="busy" @click="action(row,'reconcile')">{{ row.step==='manual'?'检查并同步':'核实结果' }}</t-button>
@@ -158,11 +161,31 @@ async function close(){
  </div>
  </template>
 </ResourceOverlay>
-<t-dialog :visible="!!reuseItem" header="选择空闲窗口" width="560px" confirm-btn="使用并检查" @close="reuseItem=null" @confirm="confirmReuse">
+<ResourceOverlay :visible="!!reuseItem" title="选择空闲窗口" :width="560" :busy="busy" @close="reuseItem=null">
  <p class="intro">当前无法新建窗口。请选择本人已有窗口，系统会先检查占用和登录情况。</p>
- <t-select v-model="candidateId" filterable placeholder="选择一个已有窗口"><t-option v-for="p in candidates.filter(p=>p.enabled!==false&&p.local_state==='active')" :key="p.id" :value="String(p.id)" :label="p.bit_name||'窗口 #'+p.id"/></t-select>
-</t-dialog>
+ <ResourceForm><t-form-item label="浏览器窗口"><t-select v-model="candidateId" filterable placeholder="选择一个已有窗口"><t-option v-for="p in candidates.filter(p=>p.enabled!==false&&p.local_state==='active')" :key="p.id" :value="String(p.id)" :label="p.bit_name||'窗口 '+p.id"/></t-select></t-form-item></ResourceForm>
+ <template #footer><t-button variant="outline" :disabled="busy" @click="reuseItem=null">取消</t-button><t-button theme="primary" :disabled="!candidateId||busy" @click="confirmReuse">使用并检查</t-button></template>
+</ResourceOverlay>
 </template>
 <style scoped>
-.import-steps{display:flex;list-style:none;padding:0 0 20px;gap:30px;color:var(--td-text-color-placeholder);font-size:13px}.import-steps .active{color:var(--td-brand-color);font-weight:500}.import-file{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px;font-size:12px;color:var(--td-text-color-secondary)}.result-title{flex-direction:column;gap:8px;text-align:center;padding:8px 0}.result-title h2{font-size:20px;font-weight:600;margin:0}.result-title p{margin:0;font-size:13px;color:var(--td-text-color-secondary)}.result-title .t-icon{color:var(--td-success-color)}.result-title .attention{color:var(--td-warning-color)}:deep(.t-table td){font-size:13px}.import-body{min-width:0}.intro{margin:0 0 20px;color:var(--td-text-color-secondary);line-height:1.7}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}.hint,small{color:var(--td-text-color-secondary);font-size:12px;line-height:1.7}small{display:block}.footer{display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap}.spacer{flex:1}.preview-summary,.result-title{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}.result-title span,.preview-summary span{color:var(--td-text-color-secondary);font-size:12px}.counts{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:20px 0;background:var(--td-bg-color-secondarycontainer);border-radius:6px;padding:16px 10px}.counts>div{display:flex;flex-direction:column;gap:8px;padding:0 10px}.counts span{font-size:12px;color:var(--td-text-color-secondary)}.counts strong{font-size:22px}.succeeded strong{color:var(--td-success-color)}.failed strong,.error-text{color:var(--td-error-color)}.uncertain strong{color:var(--td-warning-color)}.result-tabs{margin:16px 0}.history-row{display:flex;justify-content:space-between;align-items:center;width:100%;padding:18px 10px;border:0;border-bottom:1px solid var(--td-component-border);background:transparent;text-align:left;color:var(--td-text-color-primary);cursor:pointer}.history-row:hover{background:var(--td-bg-color-container-hover)}
+.import-body { min-width: 0; }
+.import-steps { display: flex; flex-wrap: wrap; list-style: none; margin: 0 0 20px; padding: 0; gap: 12px 30px; color: var(--wt-text-tertiary); font-size: 13px; }
+.import-steps .active { color: var(--wt-primary); font-weight: 500; }
+.intro { margin: 0 0 20px; color: var(--wt-text-secondary); line-height: 1.7; }
+.form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 24px; }
+.form-grid > * { min-width: 0; }
+.import-file { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 12px; font-size: 12px; color: var(--wt-text-tertiary); }
+.hint, small { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.7; }
+small { display: block; overflow-wrap: anywhere; }
+.footer { display: flex; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
+.spacer { flex: 1; }
+.preview-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 14px; }
+.preview-summary span { color: var(--wt-text-tertiary); font-size: 12px; }
+.result-message { white-space: normal; overflow-wrap: anywhere; line-height: 1.7; }
+.error-text { color: var(--wt-danger); }
+.result-tabs { margin: 16px 0; }
+.history-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; width: 100%; padding: 18px 10px; border: 0; border-bottom: 1px solid var(--wt-border); background: transparent; text-align: left; color: var(--wt-text-primary); cursor: pointer; overflow-wrap: anywhere; }
+.history-row > span { min-width: 0; }
+.history-row:hover { background: var(--td-bg-color-container-hover); }
+@media (max-width: 600px) { .form-grid { grid-template-columns: minmax(0,1fr); } .spacer { display: none; } }
 </style>
