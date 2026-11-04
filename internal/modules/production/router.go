@@ -14,7 +14,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/compose-tasks/batch-cancel", BatchCancelComposeTasks)
 	h.GET("/api/v1/compose-outputs", ListComposeOutputs)
 	h.GET("/api/v1/compose-outputs/:output_id", GetComposeOutput)
-	h.POST("/api/v1/compose-outputs/:output_id/archive", ArchiveComposeOutput)
+	h.GET("/api/v1/compose-output-materials", ListComposeOutputMaterials)
 	h.GET("/api/v1/compose-outputs/:output_id/video-url", GetComposeOutputVideoURL)
 	h.POST("/api/v1/compose-outputs/:output_id/downloads", CreateOutputDownload)
 	h.GET("/api/v1/compose-tasks/:task_id", GetComposeTask)

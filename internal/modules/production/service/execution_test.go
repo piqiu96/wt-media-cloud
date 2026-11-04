@@ -230,7 +230,7 @@ func (r *runnerStub) Run(_ context.Context, runDir *compose.RunDir, request comp
 	if err := os.WriteFile(path, r.output, 0o644); err != nil {
 		return compose.Output{}, err
 	}
-	return compose.Output{Path: path, DurationMS: 900}, nil
+	return compose.Output{Path: path, DurationMS: 900, Width: 1080, Height: 1920}, nil
 }
 
 // killedRunner stands in for an FFmpeg process the worker terminated: it runs
@@ -304,6 +304,9 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if out.TaskID != 77 || out.MaterialID != 42 || usageIDValue(out.MaterialUsageID) != 9 || out.TemplateCode != "basic_cut" || out.TemplateVersion != 1 {
 		t.Fatalf("committed=%+v", out)
 	}
+	if out.Name == "" {
+		t.Fatal("new output name missing")
+	}
 	if out.ObjectKey != "compose-outputs/77/1/output.mp4" || out.PublishStatus != "pending_publish" {
 		t.Fatalf("committed=%+v key=%s", out, lifecycle.committedKey)
 	}
@@ -311,7 +314,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if out.SHA256 != hex.EncodeToString(sum[:]) || out.FileSizeBytes != int64(len("composed-output-bytes")) {
 		t.Fatalf("storage facts drifted: %+v", out)
 	}
-	if string(out.Media) != `{"duration_ms":900}` {
+	if string(out.Media) != `{"duration_ms":900,"height":1920,"width":1080}` {
 		t.Fatalf("media=%s", out.Media)
 	}
 	if _, ok := store.objects["compose-outputs/77/1/output.mp4"]; !ok {

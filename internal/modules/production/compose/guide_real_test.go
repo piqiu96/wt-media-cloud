@@ -85,6 +85,9 @@ func TestGuideTemplatesProducePlayableVideo(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if output.Width <= 0 || output.Height <= 0 {
+				t.Fatalf("missing actual output dimensions: %+v", output)
+			}
 			if output.DurationMS < tc.expectedMS-300 || output.DurationMS > tc.expectedMS+300 {
 				t.Fatalf("duration = %dms; want about %dms", output.DurationMS, tc.expectedMS)
 			}

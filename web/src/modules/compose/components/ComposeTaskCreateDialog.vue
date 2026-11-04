@@ -5,15 +5,17 @@ import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { createComposeClient } from '../../../shared/api/compose.js'
+import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { enabledCategories } from '../../../shared/utils/categories.js'
 import { settingFields, strategySettings } from '../strategySettings.js'
 import { groupOverridePayload, validateTaskGroup } from '../taskGroupOverrides.js'
+import { outputRemakeBody, outputRemakeSeed, submitOutputRemake, remakeTaskName } from '../outputRemake.js'
 import ComposeTaskSettings from './ComposeTaskSettings.vue'
 import ComposeTaskMaterialSelector from './ComposeTaskMaterialSelector.vue'
-const props = defineProps({ visible: Boolean })
+const props = defineProps({ visible: Boolean, sourceOutput: Object })
 const emit = defineEmits(['update:visible', 'created'])
-const client = createComposeClient(), session = createSessionClient()
+const client = createComposeClient(), session = createSessionClient(), materialsClient = createMaterialsClient()
 const currentUser = ref(null), categories = ref([]), teams = ref([]), strategies = ref([]), templates = ref([]), operators = ref([])
 const taskName = ref(''), teamID = ref(null), categoryID = ref(null), operatorID = ref(null), strategyID = ref(null)
 const loading = ref(false), operatorsLoading = ref(false), saving = ref(false), error = ref(''), nameError = ref(''), strategyError = ref(''), selected = ref([]), overrides = ref({}), remakeConfirmed = ref(false), materialVisible = ref(false), failures = ref([])
@@ -22,20 +24,30 @@ let operatorSequence = 0
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const canAssign = computed(() => ['admin','senior_operator'].includes(currentUser.value?.role))
 const categoryOptions = computed(() => enabledCategories(categories.value))
-const selectedStrategy = computed(() => strategies.value.find((row) => row.id === strategyID.value))
-const selectedTemplate = computed(() => templates.value.find((row) => row.id === selectedStrategy.value?.compose_template_id && row.version === selectedStrategy.value?.compose_template_version))
+const isSource = computed(() => Boolean(props.sourceOutput?.output?.id))
+const sourceSeed = computed(() => outputRemakeSeed(props.sourceOutput, templates.value))
+const selectedStrategy = computed(() => isSource.value ? sourceSeed.value.strategy : strategies.value.find((row) => row.id === strategyID.value))
+const selectedTemplate = computed(() => isSource.value ? sourceSeed.value.template : templates.value.find((row) => row.id === selectedStrategy.value?.compose_template_id && row.version === selectedStrategy.value?.compose_template_version))
 const strategyOptions = computed(() => strategies.value.filter((row) => row.status === 'enabled' && row.team_id === teamID.value && row.category_id === categoryID.value && row.operator_id === operatorID.value).map((row) => ({label:row.name,value:row.id})))
 const context = computed(() => ({ strategy_id:strategyID.value, operator_id:operatorID.value, team_id:teamID.value, category_id:categoryID.value, operator_name:canAssign.value ? operators.value.find((row) => row.id === operatorID.value)?.display_name : currentUser.value?.display_name || currentUser.value?.name, team_name:teams.value.find((row) => row.id === teamID.value)?.name, category_name:categories.value.find((row) => row.id === categoryID.value)?.name }))
 const groups = computed(() => selectedStrategy.value ? strategySettings(selectedStrategy.value) : [])
 const estimated = computed(() => selected.value.length * groups.value.reduce((sum,row) => sum + row.copies,0))
-const hasPriorWork = computed(() => selected.value.some((row) => Number(row.usage?.output_count || 0) > 0 || Object.entries(row.strategy_history || {}).some(([key,value]) => key.endsWith('_count') && Number(value)>0)))
+const hasPriorWork = computed(() => isSource.value || selected.value.some((row) => Number(row.usage?.output_count || 0) > 0 || Object.entries(row.strategy_history || {}).some(([key,value]) => key.endsWith('_count') && Number(value)>0)))
 watch(() => props.visible, async (visible) => {
   if (!visible) return
   taskName.value=''; teamID.value=null; categoryID.value=null; operatorID.value=null; strategyID.value=null; selected.value=[]; overrides.value={}; error.value=''; nameError.value=''; strategyError.value=''; failures.value=[]; remakeConfirmed.value=false; submitted.value={signature:'',key:''}
   loading.value=true
   try {
-    const [me, strategyRows, templateRows, categoryRows, teamRows] = await Promise.all([session.me(),client.listStrategies(),client.listTemplates(),client.listCategories(),client.listTeams()])
+    const [me, strategyRows, templateRows, categoryRows, teamRows] = await Promise.all([session.me(),isSource.value ? Promise.resolve([]) : client.listStrategies(),isSource.value && props.sourceOutput?.trace?.strategy?.template_schema ? Promise.resolve([]) : client.listTemplates(),client.listCategories(),client.listTeams()])
     currentUser.value=me; strategies.value=Array.isArray(strategyRows)?strategyRows:strategyRows.items || []; templates.value=templateRows || []; categories.value=categoryRows || []; teams.value=teamRows || []
+    if (isSource.value) {
+      const output = props.sourceOutput.output
+      taskName.value = remakeTaskName(output.name)
+      teamID.value=output.team_id; categoryID.value=output.category_id; operatorID.value=output.operator_id; strategyID.value=output.compose_strategy_id
+      if(sourceSeed.value.reason) error.value=sourceSeed.value.reason
+      else selected.value=[sourceSeed.value.material]
+      return
+    }
     if (me.role !== 'admin') teamID.value=me.team_id
     if (!['admin','senior_operator'].includes(me.role)) operatorID.value=me.id
   } catch(e) { error.value=e?.message || '新建任务配置读取失败' }
@@ -72,13 +84,14 @@ function removeSelected(id) { selected.value=selected.value.filter((row)=>row.id
 function close() {
   if(saving.value) return
   if(!taskName.value && !selected.value.length && !Object.keys(overrides.value).length) { emit('update:visible',false);return }
-  const dialog=DialogPlugin.confirm({header:'放弃未保存的任务？',body:'任务尚未提交，关闭后将丢失当前草稿。已加入的负责人素材关系会保留。',confirmBtn:{content:'放弃',theme:'danger'},onConfirm:()=>{emit('update:visible',false);dialog.hide()}})
+  const dialog=DialogPlugin.confirm({header:'放弃未保存的任务？',body:isSource.value ? '任务尚未提交，关闭后将丢失当前草稿。' : '任务尚未提交，关闭后将丢失当前草稿。已加入的负责人素材关系会保留。',confirmBtn:{content:'放弃',theme:'danger'},onConfirm:()=>{emit('update:visible',false);dialog.hide()}})
 }
 async function submit() {
   if(saving.value) return
   nameError.value='';strategyError.value='';error.value=''
   const name=taskName.value.trim()
   if(!name) {nameError.value='请输入任务名称';return}
+  if(isSource.value && sourceSeed.value.reason) {error.value=sourceSeed.value.reason;return}
   if(!selectedStrategy.value) {strategyError.value='请选择合成策略';return}
   if(!selected.value.length) {error.value='请选择至少一条素材';return}
   if(hasPriorWork.value && !remakeConfirmed.value) {error.value='请确认本次重新制作';return}
@@ -87,13 +100,13 @@ async function submit() {
     const issues=validateTaskGroup(group,{...group.params,...overrides.value[group.key]},fields)
     if(Object.keys(issues).length) {error.value=`${group.name}：${Object.values(issues)[0]}`;return}
   }
-  const body={name,strategy_id:strategyID.value,operator_id:operatorID.value,material_ids:selected.value.map((row)=>row.id),setting_overrides:groupOverridePayload(groups.value,overrides.value,fields),remake_confirmed:remakeConfirmed.value}
+  const body=isSource.value ? outputRemakeBody(props.sourceOutput,name,sourceSeed.value,overrides.value) : {name,strategy_id:strategyID.value,operator_id:operatorID.value,material_ids:selected.value.map((row)=>row.id),setting_overrides:groupOverridePayload(groups.value,overrides.value,fields),remake_confirmed:remakeConfirmed.value}
   const signature=JSON.stringify(body)
   if(submitted.value.signature!==signature) submitted.value={signature,key:crypto.randomUUID()}
   body.request_key=submitted.value.key
   saving.value=true
   try {
-    const result=await client.createComposeTasks(body)
+    const result=isSource.value ? await submitOutputRemake(props.sourceOutput,body,{materialsClient,composeClient:client,submission:submitted.value}) : await client.createComposeTasks(body)
     failures.value=result.failed || []
     emit('created',result)
     if(failures.value.length) error.value=`已创建 ${result.created?.length || 0} 个任务，${failures.value.length} 项未受理`
@@ -103,30 +116,41 @@ async function submit() {
 }
 </script>
 <template>
-  <ResourceOverlay kind="drawer" :visible="visible" title="新建合成任务" :width="880" :busy="saving" @close="close">
+  <ResourceOverlay kind="drawer" :visible="visible" :title="isSource ? '再次制作' : '新建合成任务'" :width="880" :busy="saving" @close="close">
     <t-loading :loading="loading" :show-overlay="true">
       <div class="task-create">
         <FeedbackAlert v-if="error" theme="error" :message="error" />
         <t-form label-width="100px">
-          <t-form-item label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="120" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
+          <t-form-item label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="60" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
+          <template v-if="isSource">
+            <t-form-item label="运营团队"><span>{{ context.team_name || '—' }}</span></t-form-item>
+            <t-form-item label="业务分类"><span>{{ context.category_name || '—' }}</span></t-form-item>
+            <t-form-item label="负责人"><span>{{ sourceOutput.output.operator_name || '—' }}</span></t-form-item>
+            <t-form-item label="来源策略"><span>{{ sourceOutput.output.strategy_name || sourceOutput.trace?.strategy?.name || '—' }}</span></t-form-item>
+            <t-form-item label="原模板版本"><span>{{ sourceOutput.trace?.compose_task?.template_code }} v{{ sourceOutput.trace?.compose_task?.template_version }}</span></t-form-item>
+          </template>
+          <template v-else>
           <t-form-item v-if="isAdmin" label="运营团队" required-mark><BusinessSelect kind="team" :value="teamID" clearable @change="changeContext('team',$event)"><t-option v-for="row in teams" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
           <t-form-item v-else label="运营团队"><span>{{ context.team_name || (teamID ? `团队 ${teamID}` : '—') }}</span></t-form-item>
           <t-form-item label="业务分类" required-mark><BusinessSelect kind="category" :value="categoryID" :disabled="!teamID" clearable @change="changeContext('category',$event)"><t-option v-for="row in categoryOptions" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
           <t-form-item label="负责人" required-mark><BusinessSelect v-if="canAssign" kind="member" :value="operatorID" :disabled="!categoryID || operatorsLoading" :loading="operatorsLoading" clearable @change="changeContext('operator',$event)"><t-option v-for="row in operators" :key="row.id" :value="row.id" :label="row.display_name" /></BusinessSelect><span v-else>{{ context.operator_name || '本人' }}</span></t-form-item>
           <t-form-item label="合成策略" required-mark><div class="task-create__field"><t-select :value="strategyID" :options="strategyOptions" :disabled="!operatorID || !categoryID" clearable placeholder="选择负责人可用的策略" :status="strategyError?'error':undefined" @change="changeContext('strategy',$event)" /><p v-if="strategyError" class="task-create__error">{{ strategyError }}</p></div></t-form-item>
+          </template>
         </t-form>
-        <section><div class="task-create__heading"><h4>选用素材</h4><t-button variant="outline" class="wt-secondary-button" :disabled="!selectedStrategy" @click="materialVisible=true">选择素材</t-button></div><p v-if="!selected.length" class="task-create__hint">选择负责人工作集或同团队、同类目的素材。</p><div v-else class="task-create__selected"><div v-for="row in selected" :key="row.id"><span>{{ row.title || `素材 ${row.id}` }}</span><t-button size="small" variant="text" @click="removeSelected(row.id)">移除</t-button></div></div></section>
+        <section><div class="task-create__heading"><h4>选用素材</h4><t-button variant="outline" class="wt-secondary-button" v-if="!isSource" :disabled="!selectedStrategy" @click="materialVisible=true">选择素材</t-button></div><p v-if="!selected.length" class="task-create__hint">选择负责人工作集或同团队、同类目的素材。</p><div v-else class="task-create__selected"><div v-for="row in selected" :key="row.id"><span>{{ row.title || `素材 ${row.id}` }}</span><t-button v-if="!isSource" size="small" variant="text" @click="removeSelected(row.id)">移除</t-button></div></div></section>
+        <p v-if="isSource" class="task-create__hint">沿用原素材、原模板版本与原成片设置，生成一份新成片。仅可调整模板开放的参数。确认创建时，原素材将加入负责人的“我的素材”，并准备制作所需视频。</p>
         <section v-if="selectedStrategy"><h4>成片设置</h4><ComposeTaskSettings v-model="overrides" :strategy="selectedStrategy" :template="selectedTemplate" :material-count="selected.length" /></section>
         <div v-if="selected.length" class="task-create__summary"><strong>已选 {{ selected.length }} 条素材，预计创建 {{ estimated }} 个任务、生成 {{ estimated }} 个成片</strong><t-checkbox v-if="hasPriorWork" v-model="remakeConfirmed">所选素材已有产出或任务，确认本次新建任务，保留旧任务和成片。</t-checkbox></div>
         <div v-if="failures.length" class="task-create__failures"><p v-for="(item,index) in failures" :key="item.material_id || index">素材 {{ item.material_id }} · {{ item.message || item.reason || '未受理' }}</p></div>
       </div>
     </t-loading>
-    <template #footer><t-button variant="outline" class="wt-secondary-button" :disabled="saving" @click="close">取消</t-button><t-button theme="primary" :loading="saving" :disabled="!selected.length || !selectedStrategy || (hasPriorWork && !remakeConfirmed)" @click="submit">创建任务</t-button></template>
+    <template #footer><t-button variant="outline" class="wt-secondary-button" :disabled="saving" @click="close">取消</t-button><t-button theme="primary" :loading="saving" :disabled="!selected.length || !selectedStrategy || (isSource && Boolean(sourceSeed.reason)) || (hasPriorWork && !remakeConfirmed)" @click="submit">创建任务</t-button></template>
   </ResourceOverlay>
-  <ComposeTaskMaterialSelector v-model:visible="materialVisible" :context="context" :selected="selected" @selected="acceptSelection" />
+  <ComposeTaskMaterialSelector v-if="!isSource" v-model:visible="materialVisible" :context="context" :selected="selected" @selected="acceptSelection" />
 </template>
 <style scoped>
-.task-create { display:grid; gap:20px; }
+.task-create { display:grid; gap:20px; min-width:0; }
+.task-create > * { min-width:0; }
 .task-create section { border:1px solid var(--wt-border); border-radius:var(--wt-radius-md); padding:16px; }
 .task-create h4 { margin:0 0 14px; color:var(--wt-text-primary); font-size:14px; }
 .task-create__heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
@@ -135,8 +159,8 @@ async function submit() {
 .task-create__error { margin:0; color:var(--td-error-color); font-size:12px; }
 .task-create__hint { color:var(--wt-text-tertiary); font-size:13px; }
 .task-create__selected { display:grid; max-height:220px; overflow:auto; }
-.task-create__selected > div { display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--wt-border); padding:6px 0; }
-.task-create__selected span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.task-create__selected > div { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--wt-border); padding:6px 0; }
+.task-create__selected span { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .task-create__summary { display:grid; gap:12px; padding:14px; background:var(--wt-info-bg); border-radius:var(--wt-radius-md); font-size:13px; }
 .task-create__failures { max-height:180px; overflow:auto; color:var(--wt-text-secondary); font-size:13px; }
 </style>

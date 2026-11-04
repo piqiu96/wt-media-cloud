@@ -233,6 +233,12 @@ func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey strin
 		if err := tx.Create(&out).Error; err != nil {
 			return err
 		}
+		if out.Name != "" {
+			out.FileName = model.ComposeOutputFileName(out.Name, out.ID, ".mp4")
+			if err := tx.Exec(`UPDATE composite_outputs SET file_name=? WHERE id=?`, out.FileName, out.ID).Error; err != nil {
+				return err
+			}
+		}
 		result := tx.Exec(`UPDATE compose_tasks SET status = 'success', output_object_key = ?, composite_output_id = ?, finished_at = ?, progress = 100, cancel_requested = 0, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND cancel_requested = 0 AND lease_expires_at > ?`, outputKey, out.ID, now, now, out.TaskID, nodeID, attempt, now)
 		if result.Error != nil {
 			return result.Error

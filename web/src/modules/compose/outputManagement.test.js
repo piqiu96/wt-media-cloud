@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canQueueOutputDownload, outputDownloadState, outputTitle } from './outputManagement.js'
+import { canQueueOutputDownload, canDownloadOutput, outputDownloadState, outputTitle, outputVideoState } from './outputManagement.js'
 
 const task = (status, extra = {}) => ({
   asset_type: 'composite_output', asset_id: 59, execution_scope: 'local_agent',
@@ -7,9 +7,9 @@ const task = (status, extra = {}) => ({
 })
 
 describe('output management facts', () => {
-  it('uses material and strategy facts for a stable output title', () => {
-    expect(outputTitle({ material_id: 161, compose_strategy_id: 34 }, '来源标题', '测试')).toBe('来源标题 · 测试')
-    expect(outputTitle({ material_id: 161, compose_strategy_id: 34 }, '', '')).toBe('素材 161 · 策略 34')
+  it('uses only the fixed output name and leaves missing history unknown', () => {
+    expect(outputTitle({ name: '原素材 · 原组' }, '改名素材', '新策略')).toBe('原素材 · 原组')
+    expect(outputTitle({ material_id: 161 }, '现素材', '现策略')).toBe('—')
   })
 
   it('only reports downloaded after the desktop confirms the file exists', () => {
@@ -31,4 +31,15 @@ describe('output management facts', () => {
     for (const key of ['not_downloaded', 'failed', 'missing']) expect(canQueueOutputDownload({ key })).toBe(true)
     for (const key of ['downloaded', 'downloading', 'unverified', 'unknown']) expect(canQueueOutputDownload({ key })).toBe(false)
   })
+  it('projects verified object and device facts separately without inventing availability', () => {
+    expect(outputVideoState({video:{status:'unknown'}},{key:'unverified'}).label).toBe('—')
+    expect(outputVideoState({video:{status:'ready'}},{key:'unverified'}).label).toBe('可用')
+    expect(outputVideoState({video:{status:'failed'}},{key:'downloaded'}).label).toBe('可用')
+    expect(outputVideoState({video:{status:'ready'}},{key:'downloading'}).label).toBe('下载中')
+    expect(outputVideoState({video:{status:'ready'}},{key:'failed',reason:'连接中断'})).toMatchObject({label:'失败',reason:'连接中断'})
+    expect(canDownloadOutput({actions:{download:false}},{key:'not_downloaded'})).toBe(false)
+    expect(canDownloadOutput({actions:{download:true}},{key:'unverified'})).toBe(false)
+    expect(canDownloadOutput({actions:{download:true}},{key:'missing'})).toBe(true)
+  })
+
 })

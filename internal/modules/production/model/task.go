@@ -206,6 +206,18 @@ type ComposeUncertainReview struct {
 // a row here always has a verified object behind it. Publish facts live in
 // the M6 publication domain; PublishStatus is only this row's projection.
 type CompositeOutput struct {
+	Name          string               `json:"name" gorm:"column:name"`
+	FileName      string               `json:"file_name" gorm:"column:file_name"`
+	MaterialTitle string               `json:"material_title" gorm:"-"`
+	AuthorName    string               `json:"author_name" gorm:"-"`
+	StrategyName  string               `json:"strategy_name" gorm:"-"`
+	BatchID       *int64               `json:"batch_id" gorm:"-"`
+	SettingKey    string               `json:"setting_key" gorm:"-"`
+	SettingName   string               `json:"setting_name" gorm:"-"`
+	Platforms     []string             `json:"platforms" gorm:"-"`
+	Video         ComposeOutputVideo   `json:"video" gorm:"-"`
+	Actions       ComposeOutputActions `json:"actions" gorm:"-"`
+
 	ID              int64                     `json:"id"`
 	TeamID          int64                     `json:"team_id"`
 	CategoryID      sharedidentity.CategoryID `json:"category_id"`

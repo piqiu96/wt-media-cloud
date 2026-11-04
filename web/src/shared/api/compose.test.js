@@ -151,35 +151,24 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[1][1].method).toBe('POST')
   })
 
-  // CHG-20261013-084：成片四条命令与 production/router.go 一一对应。列表的
-  // publish_status 筛选由服务端读 query；video-url 每次预览现取，客户端不做缓存。
-  it('maps the compose output commands to the contract paths', async () => {
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(ok([]))
-      .mockResolvedValueOnce(ok({ output: {}, trace: {} }))
-      .mockResolvedValueOnce(ok({ id: 5, publish_status: 'archived' }))
-      .mockResolvedValueOnce(ok({ url: 'https://signed.example/x' }))
-      .mockResolvedValueOnce(ok({ id: 'transfer-1', status: 'pending' }, 202))
-    const client = createComposeClient({ fetch })
-
-    await client.listComposeOutputs({ publish_status: 'pending_publish' })
+  it('maps paged output assets and material aggregation without an archive command', async () => {
+    const page={items:[{id:5}],total:210,page:3,page_size:20}
+    const fetch=vi.fn().mockResolvedValue(ok(page))
+    const client=createComposeClient({fetch})
+    await expect(client.listComposeOutputs({material_id:8,batch_id:12,page:3,page_size:20,platform:'baidu',video_status:'ready'})).resolves.toEqual(page)
+    await client.listComposeOutputMaterials({page:2,page_size:10,search:'素材',operator_id:3})
     await client.getComposeOutput(5)
-    await client.archiveComposeOutput(5)
     await client.getComposeOutputVideoUrl(5)
     await client.createOutputDownload(5)
-
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-outputs?publish_status=pending_publish')
-    expect(fetch.mock.calls[0][1].method).toBe('GET')
-    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-outputs/5')
-    expect(fetch.mock.calls[1][1].method).toBe('GET')
-    expect(fetch.mock.calls[2][0]).toBe('/api/v1/compose-outputs/5/archive')
-    expect(fetch.mock.calls[2][1].method).toBe('POST')
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-outputs?material_id=8&batch_id=12&page=3&page_size=20&platform=baidu&video_status=ready')
+    const aggregation=new URL(fetch.mock.calls[1][0],'https://cloud.test')
+    expect(aggregation.pathname).toBe('/api/v1/compose-output-materials')
+    expect(Object.fromEntries(aggregation.searchParams)).toEqual({page:'2',page_size:'10',search:'素材',operator_id:'3'})
+    expect(fetch.mock.calls[2][0]).toBe('/api/v1/compose-outputs/5')
     expect(fetch.mock.calls[3][0]).toBe('/api/v1/compose-outputs/5/video-url')
-    expect(fetch.mock.calls[3][1].method).toBe('GET')
-    // CHG-20261013-085：成片下载与素材 createDownload 同一个 202 语义 —— 此刻还没有
-    // 任何字节被下载，下一次诚实的进度来源是 GET /file-transfer-tasks。
     expect(fetch.mock.calls[4][0]).toBe('/api/v1/compose-outputs/5/downloads')
     expect(fetch.mock.calls[4][1].method).toBe('POST')
+    expect(client.archiveComposeOutput).toBeUndefined()
   })
 
 describe('compose batch operations', () => {

@@ -10,7 +10,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-var outputRowColumns = []string{"id", "team_id", "category_id", "operator_id", "material_id", "material_usage_id", "compose_task_id", "compose_strategy_id", "template_code", "template_version", "object_key", "file_size_bytes", "sha256", "media_json", "publish_status", "created_by", "created_at", "updated_at"}
+var outputRowColumns = []string{"id", "team_id", "category_id", "operator_id", "material_id", "material_usage_id", "compose_task_id", "compose_strategy_id", "template_code", "template_version", "object_key", "file_size_bytes", "sha256", "media_json", "publish_status", "created_by", "created_at", "updated_at", "name", "file_name"}
 
 func TestListComposeOutputsSearchesFactsAndTriggerInSQL(t *testing.T) {
 	from := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)

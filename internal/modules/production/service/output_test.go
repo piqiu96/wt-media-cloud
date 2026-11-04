@@ -82,13 +82,15 @@ func (f *outputTaskFake) Find(int64) (model.ComposeTask, bool, error) {
 
 type outputLinkerFake struct{ key string }
 
+func (f *outputLinkerFake) ObjectExists(context.Context, string) (bool, error) { return true, nil }
+
 func (f *outputLinkerFake) PresignObjectURL(_ context.Context, key string) (string, error) {
 	f.key = key
 	return "https://signed.example/" + key, nil
 }
 
 func outputFixture(id int64) model.CompositeOutput {
-	return model.CompositeOutput{ID: id, TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
+	return model.CompositeOutput{ID: id, OperatorID: ptrInt64(9), TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
 }
 
 func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks *outputTaskFake, linker *outputLinkerFake) *ComposeOutputService {
@@ -126,7 +128,7 @@ func TestListComposeOutputsScopesLikeTheTaskPage(t *testing.T) {
 		t.Fatalf("filters = %d", len(store.filters))
 	}
 	filter := store.filters[0]
-	if filter.TeamID != 7 || len(filter.CategoryIDs) != 1 || filter.CategoryIDs[0] != 1 || filter.OperatorID != 9 || filter.IncludeUnownedCreatedBy != 9 {
+	if filter.TeamID != 7 || len(filter.CategoryIDs) != 1 || filter.CategoryIDs[0] != 1 || filter.OperatorID != 9 || filter.IncludeUnownedCreatedBy != 0 {
 		t.Fatalf("operator filter = %+v", filter)
 	}
 	if filter.PublishStatus != "pending_publish" {
@@ -402,22 +404,21 @@ func TestCreateOutputDownloadRefusesAnOutputOutsideTheActorsScope(t *testing.T) 
 	}
 }
 
-func TestComposeOutputOperatorMineKeepsLegacyCreatorRowsVisible(t *testing.T) {
+func TestComposeOutputOperatorCannotReadUnownedOrForeignAssets(t *testing.T) {
 	team := identity.TeamID(7)
-	operator := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
-	legacy := outputFixture(1)
-	foreignLegacy := outputFixture(2)
-	foreignLegacy.CreatedBy = 10
-	assignedToOther := outputFixture(3)
-	assignedToOther.OperatorID = operatorIDPtr(10)
-	store := &outputMemoryStore{outputs: []model.CompositeOutput{legacy, foreignLegacy, assignedToOther}}
-	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
-	if _, err := svc.Get(operator, 1); err != nil {
-		t.Fatalf("legacy output for its creator must stay visible: %v", err)
+	actor := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
+	own := outputFixture(1)
+	legacy := outputFixture(2)
+	legacy.OperatorID = nil
+	foreign := outputFixture(3)
+	foreign.OperatorID = ptrInt64(10)
+	svc := newOutputService(&outputMemoryStore{outputs: []model.CompositeOutput{own, legacy, foreign}}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
+	if _, err := svc.Get(actor, 1); err != nil {
+		t.Fatal(err)
 	}
 	for _, id := range []int64{2, 3} {
-		if _, err := svc.Get(operator, id); !errors.Is(err, ErrComposeOutputNotFound) {
-			t.Fatalf("output %d error = %v", id, err)
+		if _, err := svc.Get(actor, id); !errors.Is(err, ErrComposeOutputNotFound) {
+			t.Fatalf("id=%d err=%v", id, err)
 		}
 	}
 }
@@ -428,6 +429,7 @@ func TestComposeOutputListRefusesForeignOperatorFiltersAndDecoratesNames(t *test
 	assigned := outputFixture(1)
 	assigned.OperatorID = operatorIDPtr(9)
 	legacy := outputFixture(2)
+	legacy.OperatorID = nil
 	store := &outputMemoryStore{outputs: []model.CompositeOutput{assigned, legacy}}
 	svc := newOutputService(store, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{})
 	svc.operators = func() ([]identity.PublicUser, error) {

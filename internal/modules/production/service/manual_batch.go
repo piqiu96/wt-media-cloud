@@ -34,12 +34,19 @@ func normalizeManualInput(actorID int64, input CreateComposeTasksInput) (normali
 		return out, fmt.Errorf("%w: %s", ErrComposeTaskInvalid, message)
 	}
 	out.ActorID = actorID
+	out.SourceOutputID = input.SourceOutputID
 	out.StrategyID = input.StrategyID
 	out.OperatorID = input.OperatorID
 	out.Name = strings.TrimSpace(input.Name)
 	out.RemakeConfirmed = input.RemakeConfirmed
-	if out.StrategyID <= 0 || input.OperatorID < 0 {
+	if input.SourceOutputID < 0 || input.StrategyID < 0 || (out.SourceOutputID == 0 && out.StrategyID == 0) || input.OperatorID < 0 {
 		return invalid("strategy_id/operator_id is invalid")
+	}
+	if out.SourceOutputID > 0 && (len(input.MaterialIDs) > 0 || len(input.Items) > 0 || len(input.ConfigOverride) > 0) {
+		return invalid("source_output_id cannot be combined with material_ids, items or config_override")
+	}
+	if out.SourceOutputID > 0 && !input.RemakeConfirmed {
+		return invalid("source_output_id requires explicit remake_confirmed:true")
 	}
 	if n := utf8.RuneCountInString(out.Name); n < 1 || n > 60 {
 		return invalid("name must contain 1-60 characters")
@@ -70,7 +77,7 @@ func normalizeManualInput(actorID int64, input CreateComposeTasksInput) (normali
 	if len(key) < 8 || len(key) > 64 {
 		return invalid("request_key must contain 8-64 characters")
 	}
-	if len(out.MaterialIDs) < 1 || len(out.MaterialIDs) > 50 {
+	if out.SourceOutputID == 0 && (len(out.MaterialIDs) < 1 || len(out.MaterialIDs) > 50) {
 		return invalid("material_ids must contain 1-50 entries")
 	}
 	seen := map[int64]bool{}
@@ -94,13 +101,14 @@ func normalizeManualInput(actorID int64, input CreateComposeTasksInput) (normali
 	}
 	intent := struct {
 		ActorID                int64
+		SourceOutputID         int64 `json:"source_output_id,omitempty"`
 		StrategyID, OperatorID int64
 		Name                   string
 		MaterialIDs            []int64
 		Overrides              []ComposeSettingOverride
 		LegacyOverride         json.RawMessage
 		RemakeConfirmed        bool
-	}{actorID, input.StrategyID, input.OperatorID, out.Name, out.MaterialIDs, out.Overrides, out.LegacyOverride, out.RemakeConfirmed}
+	}{actorID, input.SourceOutputID, input.StrategyID, input.OperatorID, out.Name, out.MaterialIDs, out.Overrides, out.LegacyOverride, out.RemakeConfirmed}
 	raw, err := json.Marshal(intent)
 	if err != nil {
 		return invalid("parameters cannot be encoded")
@@ -168,6 +176,25 @@ func (s *ComposeTaskService) createManualBatch(actor identity.PublicUser, input 
 		return CreateComposeTasksResult{}, err
 	}
 	command := normalized.ManualBatchCommand
+	command.AuthorizeSource = func(output model.CompositeOutput) error {
+		if !canReadComposeOutput(actor, output) {
+			return ErrComposeTaskNotFound
+		}
+		return nil
+	}
+	command.ValidateSourceInput = func(material model.Material) error {
+		if strings.TrimSpace(material.SourceURL) == "" && material.VideoStatus != model.VideoReady {
+			return fmt.Errorf("%w: original material input is not ready and has no source to prepare", ErrComposeTaskInvalid)
+		}
+		available, _, err := newWiredService().materialSelectionAvailable(material)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return fmt.Errorf("%w: original material input is unavailable", ErrComposeTaskInvalid)
+		}
+		return nil
+	}
 	command.Authorize = func(strategy model.ComposeStrategy) error {
 		if !canReadStrategy(actor, strategy) {
 			return ErrComposeTaskNotFound
@@ -198,7 +225,7 @@ func (s *ComposeTaskService) createManualBatch(actor identity.PublicUser, input 
 		err = ErrComposeTaskConflict
 	}
 	if errors.Is(err, repository.ErrManualBatchInvalid) {
-		err = ErrComposeTaskInvalid
+		err = fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
 	}
 	if err != nil {
 		return CreateComposeTasksResult{}, err

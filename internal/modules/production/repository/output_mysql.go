@@ -20,8 +20,13 @@ import (
 // list is scoped: admins pass nothing, everyone else passes their team, categories
 // and (for operators) the created-by narrowing.
 type ComposeOutputFilter struct {
-	TeamID     int64
-	OperatorID int64
+	MaterialID  int64
+	BatchID     int64
+	Platform    string
+	OutputIDs   []int64
+	RestrictIDs bool
+	TeamID      int64
+	OperatorID  int64
 	// IncludeUnownedCreatedBy mirrors ComposeTaskFilter: historical outputs
 	// without an operator remain visible to their creator under "mine".
 	IncludeUnownedCreatedBy int64
@@ -34,7 +39,7 @@ type ComposeOutputFilter struct {
 	CreatedBefore           time.Time
 }
 
-const composeOutputColumns = `id, team_id, category_id, operator_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at`
+const composeOutputColumns = `id, team_id, category_id, operator_id, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, object_key, file_size_bytes, sha256, media_json, publish_status, created_by, created_at, updated_at, name, file_name`
 
 // ComposeOutputStore reads the verified-output asset table and archives rows.
 // Writes to this table belong to the worker's success transaction; the only
@@ -168,7 +173,8 @@ func scanComposeOutput(row composeOutputScanner) (model.CompositeOutput, error) 
 	var item model.CompositeOutput
 	var media []byte
 	var operatorID, usageID sql.NullInt64
-	err := row.Scan(&item.ID, &item.TeamID, &item.CategoryID, &operatorID, &item.MaterialID, &usageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt)
+	var name, fileName sql.NullString
+	err := row.Scan(&item.ID, &item.TeamID, &item.CategoryID, &operatorID, &item.MaterialID, &usageID, &item.TaskID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &item.ObjectKey, &item.FileSizeBytes, &item.SHA256, &media, &item.PublishStatus, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt, &name, &fileName)
 	if err != nil {
 		return model.CompositeOutput{}, err
 	}
@@ -180,6 +186,8 @@ func scanComposeOutput(row composeOutputScanner) (model.CompositeOutput, error) 
 		value := usageID.Int64
 		item.MaterialUsageID = &value
 	}
+	item.Name = name.String
+	item.FileName = fileName.String
 	item.Media = media
 	return item, nil
 }

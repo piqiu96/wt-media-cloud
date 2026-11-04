@@ -13,6 +13,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 	"gorm.io/gorm"
 )
 
@@ -31,17 +32,22 @@ type ManualBatchResult struct {
 	Replayed bool
 }
 type ManualBatchCommand struct {
+	SourceOutputID                  int64
 	ActorID, StrategyID, OperatorID int64
 	Name, RequestKey, IntentHash    string
 	MaterialIDs                     []int64
 	RemakeConfirmed                 bool
 	Authorize                       func(model.ComposeStrategy) error
+	AuthorizeSource                 func(model.CompositeOutput) error
+	ValidateSourceInput             func(model.Material) error
 	ResolveSettings                 func(model.ComposeStrategy, model.ComposeTemplate) ([]model.ComposeOutputSetting, error)
 }
 
 type manualBatchSnapshot struct {
-	Settings   []model.ComposeOutputSetting `json:"settings"`
-	Acceptance []ManualBatchFailure         `json:"acceptance"`
+	SourceOutputID int64                        `json:"source_output_id,omitempty"`
+	SourceTaskID   int64                        `json:"source_task_id,omitempty"`
+	Settings       []model.ComposeOutputSetting `json:"settings"`
+	Acceptance     []ManualBatchFailure         `json:"acceptance"`
 }
 
 func (ComposeTaskStore) CreateManualBatch(command ManualBatchCommand) (ManualBatchResult, error) {
@@ -50,10 +56,58 @@ func (ComposeTaskStore) CreateManualBatch(command ManualBatchCommand) (ManualBat
 
 func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (ManualBatchResult, error) {
 	result := ManualBatchResult{Created: []model.ComposeTask{}, Failures: []ManualBatchFailure{}}
-	if command.ActorID <= 0 || command.StrategyID <= 0 || len(command.MaterialIDs) == 0 || command.Authorize == nil || command.ResolveSettings == nil {
+	isSource := command.SourceOutputID > 0
+	if command.ActorID <= 0 || command.SourceOutputID < 0 || command.StrategyID < 0 || command.OperatorID < 0 || (!isSource && (command.StrategyID == 0 || len(command.MaterialIDs) == 0)) || command.Authorize == nil || command.ResolveSettings == nil || (isSource && (command.AuthorizeSource == nil || command.ValidateSourceInput == nil)) {
 		return result, ErrManualBatchInvalid
 	}
+	var transactionOptions []*sql.TxOptions
+	if isSource {
+		// Source discovery must precede the strategy lock. Read committed keeps
+		// later replay reads current when a competing source command commits.
+		transactionOptions = append(transactionOptions, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		var sourceOutput model.CompositeOutput
+		var sourceTask model.ComposeTask
+		var sourceSetting model.ComposeOutputSetting
+		if isSource {
+			// A persisted source command can replay even after its source or current
+			// strategy changes. The batch's immutable scope still gates access.
+			if replay, found, err := replayManualSourceBatch(tx, command); err != nil || found {
+				result = replay
+				return err
+			}
+			var found bool
+			var err error
+			sourceOutput, found, err = findComposeOutput(tx, command.SourceOutputID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return ErrNotFound
+			}
+			if err = command.AuthorizeSource(sourceOutput); err != nil {
+				return err
+			}
+			sourceTask, found, err = findComposeTask(tx, sourceOutput.TaskID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("%w: original task history is missing; use normal creation", ErrManualBatchInvalid)
+			}
+			sourceSetting, err = ManualSourceSetting(sourceOutput, sourceTask)
+			if err != nil {
+				return err
+			}
+			if (command.StrategyID > 0 && command.StrategyID != sourceOutput.StrategyID) || (command.OperatorID > 0 && command.OperatorID != *sourceOutput.OperatorID) || len(command.MaterialIDs) > 0 {
+				return fmt.Errorf("%w: supplied ownership does not match original output", ErrManualBatchInvalid)
+			}
+			command.StrategyID = sourceOutput.StrategyID
+			command.OperatorID = *sourceOutput.OperatorID
+			command.MaterialIDs = []int64{sourceOutput.MaterialID}
+			command.RemakeConfirmed = true
+		}
 		// All creation sources lock strategy first. Resolve replays before mutable
 		// template/assignment/usage state; the immutable batch supplies its own scope.
 		var strategyID int64
@@ -64,7 +118,13 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 			return err
 		}
 		var batchID int64
-		err := tx.Raw(`SELECT id FROM compose_task_batches WHERE request_key=?`, command.RequestKey).Row().Scan(&batchID)
+		batchQuery := `SELECT id FROM compose_task_batches WHERE request_key=?`
+		if isSource {
+			// The preflight above opened a read snapshot; use a current read after
+			// waiting on the strategy lock so a concurrent identical command replays.
+			batchQuery += ` FOR UPDATE`
+		}
+		err := tx.Raw(batchQuery, command.RequestKey).Row().Scan(&batchID)
 		if err == nil {
 			batch, found, err := findComposeTaskBatch(tx, batchID)
 			if err != nil {
@@ -83,6 +143,9 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 			if err = json.Unmarshal(batch.ConfigSnapshot, &snapshot); err != nil {
 				return err
 			}
+			if snapshot.SourceOutputID != command.SourceOutputID {
+				return ErrManualBatchConflict
+			}
 			tasks, err := manualBatchTasks(tx, batch.ID)
 			if err != nil {
 				return err
@@ -93,7 +156,11 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		strategy, err := scanComposeStrategy(tx.Raw(`SELECT `+strategyColumns+` FROM compose_strategies WHERE id=?`, strategyID).Row())
+		strategyQuery := `SELECT ` + strategyColumns + ` FROM compose_strategies WHERE id=?`
+		if isSource {
+			strategyQuery += ` FOR UPDATE`
+		}
+		strategy, err := scanComposeStrategy(tx.Raw(strategyQuery, strategyID).Row())
 		if err != nil {
 			return err
 		}
@@ -103,20 +170,42 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 		if strategy.Status != model.ComposeStrategyEnabled || strategy.OperatorID == nil || *strategy.OperatorID <= 0 || (command.OperatorID > 0 && command.OperatorID != *strategy.OperatorID) {
 			return ErrManualBatchInvalid
 		}
+		if isSource {
+			if err = ValidateManualSourceStrategy(sourceOutput, strategy); err != nil {
+				return err
+			}
+		}
 		var template model.ComposeTemplate
 		var schema []byte
-		err = tx.Raw(`SELECT id, code, name, version, schema_json, executor, status FROM compose_templates WHERE id=? AND version=? FOR UPDATE`, strategy.TemplateID, strategy.TemplateVersion).Row().Scan(&template.ID, &template.Code, &template.Name, &template.Version, &schema, &template.ExecutorID, &template.Status)
+		templateQuery := `SELECT id, code, name, version, schema_json, executor, status FROM compose_templates WHERE id=? AND version=? FOR UPDATE`
+		templateArgs := []any{strategy.TemplateID, strategy.TemplateVersion}
+		if isSource {
+			templateQuery = `SELECT id, code, name, version, schema_json, executor, status FROM compose_templates WHERE code=? AND version=? FOR UPDATE`
+			templateArgs = []any{sourceTask.TemplateCode, sourceTask.TemplateVersion}
+		}
+		err = tx.Raw(templateQuery, templateArgs...).Row().Scan(&template.ID, &template.Code, &template.Name, &template.Version, &schema, &template.ExecutorID, &template.Status)
 		if err != nil {
+			if isSource && errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: original template version is unavailable", ErrManualBatchInvalid)
+			}
 			return err
 		}
 		template.Schema = append(json.RawMessage(nil), schema...)
-		groups, err := command.ResolveSettings(strategy, template)
+		settingStrategy := strategy
+		if isSource {
+			settingStrategy.OutputSettings = []model.ComposeOutputSetting{sourceSetting}
+			settingStrategy.OutputSettingsJSON = nil
+		}
+		groups, err := command.ResolveSettings(settingStrategy, template)
 		if err != nil {
 			return err
 		}
 		groups, err = model.NormalizeComposeOutputSettings(groups)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrManualBatchInvalid, err)
+		}
+		if isSource && (len(groups) != 1 || groups[0].Key != sourceSetting.Key || groups[0].Name != sourceSetting.Name || groups[0].Copies != 1) {
+			return fmt.Errorf("%w: source output must retain its original single setting", ErrManualBatchInvalid)
 		}
 		var owner int64
 		err = tx.Raw(`SELECT u.id FROM users u JOIN user_category_scopes s ON s.user_id=u.id WHERE u.id=? AND u.team_id=? AND s.category_id=? AND u.status='enabled' AND u.role IN ('operator','senior_operator') LIMIT 1 FOR UPDATE`, *strategy.OperatorID, strategy.TeamID, strategy.CategoryID).Row().Scan(&owner)
@@ -155,9 +244,14 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 				reject(materialID, "invalid", "素材当前不可选用")
 				continue
 			}
-			if !(videoStatus == "ready" && objectKey.String != "") && sourceURL.String == "" {
+			if !isSource && !(videoStatus == "ready" && objectKey.String != "") && sourceURL.String == "" {
 				reject(materialID, "input_unavailable", "素材没有可用视频或可准备的来源")
 				continue
+			}
+			if isSource {
+				if err = command.ValidateSourceInput(model.Material{ID: materialID, TeamID: identity.TeamID(teamID), Status: model.MaterialAvailable, VideoStatus: model.VideoStatus(videoStatus), SourceURL: sourceURL.String, SourceObjectKey: objectKey.String}); err != nil {
+					return err
+				}
 			}
 			var usage model.MaterialUsage
 			err = scanUsage(tx.Raw(`SELECT id, team_id, material_id, user_id, status, removed_at, created_at, updated_at FROM material_usages WHERE user_id=? AND material_id=? AND status='active' FOR UPDATE`, owner, materialID).Row(), &usage)
@@ -188,7 +282,7 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 		if len(accepted) == 0 {
 			return nil
 		}
-		snapshot, err := json.Marshal(manualBatchSnapshot{Settings: groups, Acceptance: result.Failures})
+		snapshot, err := json.Marshal(manualBatchSnapshot{SourceOutputID: command.SourceOutputID, SourceTaskID: sourceTask.ID, Settings: groups, Acceptance: result.Failures})
 		if err != nil {
 			return err
 		}
@@ -220,7 +314,7 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 		batch.Counts.Pending = len(result.Created)
 		result.Batch = &batch
 		return nil
-	})
+	}, transactionOptions...)
 	if err != nil {
 		return ManualBatchResult{}, err
 	}

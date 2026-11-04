@@ -41,7 +41,7 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     // 是短时预签名，每次预览现取，客户端不做缓存。
     listComposeOutputs(params) { return api.get('/compose-outputs', params) },
     getComposeOutput(id) { return api.get(`/compose-outputs/${id}`) },
-    archiveComposeOutput(id) { return api.post(`/compose-outputs/${id}/archive`) },
+    listComposeOutputMaterials(params) { return api.get('/compose-output-materials', params) },
     getComposeOutputVideoUrl(id) { return api.get(`/compose-outputs/${id}/video-url`) },
     // 成片下载（CHG-20261013-085）：与素材 createDownload 同一个 202 语义与同一个
     // Desktop 前置（本机 Agent 必须持有执行凭证）。挂在 compose client 上是因为路由在

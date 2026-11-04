@@ -28,6 +28,7 @@ type CreateComposeTaskItemInput struct {
 }
 
 type CreateComposeTasksInput struct {
+	SourceOutputID   int64                    `json:"source_output_id"`
 	RequestKey       string                   `json:"request_key"`
 	MaterialIDs      []int64                  `json:"material_ids"`
 	SettingOverrides []ComposeSettingOverride `json:"setting_overrides"`
@@ -36,9 +37,7 @@ type CreateComposeTasksInput struct {
 	// OperatorID is optional on the wire; when present it must name the
 	// strategy's own operator, because a task snapshots that assignment.
 	OperatorID int64 `json:"operator_id"`
-	// Name is the operator's label for this batch. Blank keeps the derived
-	// material · strategy name; otherwise the whole batch shares it, numbered
-	// in submission order (model.ComposeTaskBatchDisplayName).
+	// Name is the required 1-60 character operator label for this batch.
 	Name           string                       `json:"name"`
 	ConfigOverride json.RawMessage              `json:"config_override"`
 	Items          []CreateComposeTaskItemInput `json:"items"`
@@ -199,6 +198,9 @@ func ListComposeTaskAttempts(actor identity.PublicUser, id int64) ([]model.Compo
 func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateComposeTasksInput) (CreateComposeTasksResult, error) {
 	if batchStore, ok := s.tasks.(manualBatchRepository); ok {
 		return s.createManualBatch(actor, input, batchStore)
+	}
+	if input.SourceOutputID != 0 {
+		return CreateComposeTasksResult{}, fmt.Errorf("%w: source output creation is unavailable", ErrComposeTaskInvalid)
 	}
 	if actor.Status != identity.UserStatusEnabled || (actor.Role != identity.RoleOperator && actor.Role != identity.RoleSeniorOperator && actor.Role != identity.RoleAdmin) {
 		return CreateComposeTasksResult{}, ErrComposeTaskForbidden

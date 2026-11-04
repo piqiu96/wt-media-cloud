@@ -38,3 +38,11 @@ func TestManualBatchObjectSnapshotRedactsAndPreservesAcceptance(t *testing.T) {
 		t.Fatalf("%s %v", raw, err)
 	}
 }
+
+func TestSourceBatchRedactsParametersAndKeepsHistoricalLinks(t *testing.T) {
+	b := ComposeTaskBatch{ConfigSnapshot: json.RawMessage(`{"source_output_id":91,"source_task_id":71,"settings":[{"key":"a","params":{"guide_video_url":"https://secret.example/key","insert_seconds":2}}],"acceptance":[]}`)}
+	raw, err := json.Marshal(b)
+	if err != nil || strings.Contains(string(raw), "secret.example") || !strings.Contains(string(raw), `"source_output_id":91`) || !strings.Contains(string(raw), `"source_task_id":71`) {
+		t.Fatalf("source links lost or private address exposed: %s err=%v", raw, err)
+	}
+}

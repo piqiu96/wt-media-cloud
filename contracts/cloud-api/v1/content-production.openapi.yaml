@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.11.05.2
+  version: 2026.11.05.3
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -334,34 +334,286 @@ paths:
         '403': {description: Task is outside the actor's scope.}
         '404': {description: Task absent or outside the actor's scope.}
         '409': {description: "Task is terminal (success, failed or cancelled; named compose_task_not_cancellable)."}
+  /api/v1/compose-output-materials:
+    get:
+      operationId: listComposeOutputMaterials
+      summary: Group visible successful outputs by material ID across task batches.
+      description: Authorization is applied before counts and pagination. Unknown-owner historical rows are visible only to authorized managers. Configuration
+        and target platforms come from frozen task facts; storage keys are never returned.
+      security:
+      - sessionCookie: []
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+      - in: query
+        name: material_id
+        required: false
+        description: Exact source material ID.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: batch_id
+        required: false
+        description: Exact original task batch ID.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: search
+        required: false
+        description: Stable output name, material title or exact output/material/batch ID.
+        schema:
+          type: string
+      - in: query
+        name: category_id
+        required: false
+        description: Exact category narrowing, never an authorization grant.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: category_ids
+        required: false
+        description: Comma-separated category IDs; intersected with category_id and authorized scope.
+        schema:
+          type: string
+      - in: query
+        name: team_id
+        required: false
+        description: Administrator target team; other roles remain within their team.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: operator_id
+        required: false
+        description: Responsible operator; ordinary operators remain pinned to themselves.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: operator_scope
+        required: false
+        description: mine, team or administrator-only all; unknown owners are manager-only.
+        schema:
+          type: string
+      - in: query
+        name: trigger_type
+        required: false
+        description: manual, immediate or scheduled.
+        schema:
+          type: string
+          enum:
+          - manual
+          - immediate
+          - scheduled
+      - in: query
+        name: platform
+        required: false
+        description: Frozen target platform; bilibili, baidu or xiaohongshu.
+        schema:
+          type: string
+          enum:
+          - bilibili
+          - baidu
+          - xiaohongshu
+      - in: query
+        name: video_status
+        required: false
+        description: Verified ready, failed or unknown. Device download facts are never Cloud filters.
+        schema:
+          type: string
+          enum:
+          - ready
+          - failed
+          - unknown
+      - in: query
+        name: created_from
+        required: false
+        description: Inclusive generation timestamp.
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: created_before
+        required: false
+        description: Exclusive generation timestamp.
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Authorized server page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+                properties:
+                  errcode:
+                    type: integer
+                  message:
+                    type: string
+                  logid:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/ComposeOutputMaterialPage'
+        '400':
+          description: Invalid filter.
+        '403':
+          description: Requested scope is not authorized.
+        '503':
+          description: Storage verification could not complete; no guessed availability or total is returned.
   /api/v1/compose-outputs:
     get:
       operationId: listComposeOutputs
-      summary: List compose outputs visible in the current user's scope.
-      description: >-
-        The my-outputs page. Scope follows the compose-task shape — admins see
-        everything or one named team, senior operators see every category of their
-        team, operators only outputs assigned to them (and, for historical rows,
-        ones they created while unassigned) inside the categories they cover. The
-        category_id filter only narrows that scope; it never widens it. The response
-        never carries an object address; previews go through the video-url
-        endpoint.
-      security: [{sessionCookie: []}]
+      summary: List visible output assets with verified availability.
+      description: Authorization is applied before counts and pagination. Unknown-owner historical rows are visible only to authorized managers. Configuration
+        and target platforms come from frozen task facts; storage keys are never returned.
+      security:
+      - sessionCookie: []
       parameters:
-        - {$ref: '#/components/parameters/OutputStatus'}
-        - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
-        - {in: query, name: search, required: false, description: "Output ID, source material ID/title, or strategy name substring.", schema: {type: string, maxLength: 100}}
-        - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, immediate, scheduled]}}
-        - {in: query, name: category_id, required: false, description: "Exact category of the output. A narrowing filter, not a grant; an ordinary operator naming a category they do not cover answers 403.", schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
-        - {$ref: '#/components/parameters/CreatedFrom'}
-        - {$ref: '#/components/parameters/CreatedBefore'}
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+      - in: query
+        name: material_id
+        required: false
+        description: Exact source material ID.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: batch_id
+        required: false
+        description: Exact original task batch ID.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: search
+        required: false
+        description: Stable output name, material title or exact output/material/batch ID.
+        schema:
+          type: string
+      - in: query
+        name: category_id
+        required: false
+        description: Exact category narrowing, never an authorization grant.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: category_ids
+        required: false
+        description: Comma-separated category IDs; intersected with category_id and authorized scope.
+        schema:
+          type: string
+      - in: query
+        name: team_id
+        required: false
+        description: Administrator target team; other roles remain within their team.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: operator_id
+        required: false
+        description: Responsible operator; ordinary operators remain pinned to themselves.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: operator_scope
+        required: false
+        description: mine, team or administrator-only all; unknown owners are manager-only.
+        schema:
+          type: string
+      - in: query
+        name: trigger_type
+        required: false
+        description: manual, immediate or scheduled.
+        schema:
+          type: string
+          enum:
+          - manual
+          - immediate
+          - scheduled
+      - in: query
+        name: platform
+        required: false
+        description: Frozen target platform; bilibili, baidu or xiaohongshu.
+        schema:
+          type: string
+          enum:
+          - bilibili
+          - baidu
+          - xiaohongshu
+      - in: query
+        name: video_status
+        required: false
+        description: Verified ready, failed or unknown. Device download facts are never Cloud filters.
+        schema:
+          type: string
+          enum:
+          - ready
+          - failed
+          - unknown
+      - in: query
+        name: created_from
+        required: false
+        description: Inclusive generation timestamp.
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: created_before
+        required: false
+        description: Exclusive generation timestamp.
+        schema:
+          type: string
+          format: date-time
       responses:
-        '200': {description: '[ComposeOutput] — newest first, optional source, category and time filters.'}
-        '400': {description: Invalid filter (named compose_output_invalid).}
-        '403': {description: category_id is outside an ordinary operator's covered categories (named compose_output_forbidden).}
+        '200':
+          description: Authorized server page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+                properties:
+                  errcode:
+                    type: integer
+                  message:
+                    type: string
+                  logid:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/ComposeOutputPage'
+        '400':
+          description: Invalid filter.
+        '403':
+          description: Requested scope is not authorized.
+        '503':
+          description: Storage verification could not complete; no guessed availability or total is returned.
   /api/v1/compose-outputs/{output_id}:
     get:
       operationId: getComposeOutput
@@ -379,23 +631,7 @@ paths:
         '200': {description: '{output: ComposeOutput, trace: ComposeOutputTrace}.'}
         '403': {description: Output is outside the actor's scope (named compose_output_forbidden).}
         '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
-  /api/v1/compose-outputs/{output_id}/archive:
-    post:
-      operationId: archiveComposeOutput
-      summary: Archive a pending-publish compose output.
-      description: >-
-        One conditional write flips pending_publish to archived. A published
-        output refuses (its publish facts belong to the publication domain) and
-        an already-archived output refuses the second write; both answer 409
-        (named compose_output_not_archivable). Archiving never deletes the
-        object or the row.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/OutputID'}]
-      responses:
-        '200': {description: "The archived ComposeOutput, read back from storage."}
-        '403': {description: Output is outside the actor's scope (named compose_output_forbidden).}
-        '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
-        '409': {description: Output is published or already archived (named compose_output_not_archivable).}
+        '503': {description: Storage verification failed (named compose_output_verification_failed); no guessed availability is returned.}
   /api/v1/compose-outputs/{output_id}/video-url:
     get:
       operationId: getComposeOutputVideoURL
@@ -404,14 +640,15 @@ paths:
         Same boundary as the material video-url: the only endpoint that hands
         out the address, checked against the actor's scope, a short-lived
         presigned GET for the one object, no expiry published here — a caller
-        asks again rather than holding one. Every output row already has a
-        verified object behind it, so there is no not-prepared refusal.
+        asks again rather than holding one. The object is verified with Stat before signing; missing objects are refused and storage errors are not treated as absence.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/OutputID'}]
       responses:
         '200': {description: '{url: string} — a signed address, valid for the configured grant lifetime.'}
         '403': {description: Output is outside the actor's scope (named compose_output_forbidden).}
         '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
+        '409': {description: Output file is missing or unavailable (named compose_output_unavailable).}
+        '503': {description: Storage verification failed (named compose_output_verification_failed).}
   /api/v1/compose-outputs/{output_id}/downloads:
     post:
       operationId: createOutputDownload
@@ -419,15 +656,15 @@ paths:
       description: >-
         Same queue and Drawer as the material download (CHG-20261013-085): one
         `file_transfer_task` row with `asset_type=composite_output`, assigned to the
-        actor's trusted Local Agent node. An output always has a verified object behind
-        it, so unlike the material there is no cloud-prepare dependency. The scope gate
+        actor's trusted Local Agent node. The object is checked before queueing. Unlike material input, missing output objects are not automatically regenerated. The scope gate
         is the page's own — absent and out-of-scope both answer the 404.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/OutputID'}]
       responses:
         '202': {description: A pending local-agent file transfer task.}
         '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
-        '409': {description: No bound Local Agent node is available.}
+        '409': {description: 'No bound Local Agent node is available, or the output file is unavailable (named compose_output_unavailable).'}
+        '503': {description: Storage verification failed (named compose_output_verification_failed).}
   /api/v1/materials:
     get:
       operationId: listMaterials
@@ -824,37 +1061,99 @@ components:
     ComposeTaskBatch:
       type: object
       additionalProperties: false
-      required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at,
-        counts, operator_name, strategy_name]
+      required:
+      - id
+      - name
+      - team_id
+      - category_id
+      - operator_id
+      - compose_strategy_id
+      - trigger_type
+      - created_by
+      - config_snapshot
+      - created_at
+      - counts
+      - operator_name
+      - strategy_name
       properties:
-        id: {type: integer, format: int64}
-        name: {type: string}
-        team_id: {type: integer, format: int64}
-        category_id: {type: integer, format: int64, minimum: 1}
-        operator_id: {type: [integer, 'null'], format: int64}
-        compose_strategy_id: {type: integer, format: int64}
-        trigger_type: {type: string, enum: [manual, immediate, scheduled], description: 'Manual material creation, immediate strategy execution,
-            or scheduled strategy execution.'}
-        created_by: {type: integer, format: int64}
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        team_id:
+          type: integer
+          format: int64
+        category_id:
+          type: integer
+          format: int64
+          minimum: 1
+        operator_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        compose_strategy_id:
+          type: integer
+          format: int64
+        trigger_type:
+          type: string
+          enum:
+          - manual
+          - immediate
+          - scheduled
+          description: Manual material creation, immediate strategy execution, or scheduled strategy execution.
+        created_by:
+          type: integer
+          format: int64
         config_snapshot:
           oneOf:
-          - {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}}
+          - type: array
+            items:
+              $ref: '#/components/schemas/ComposeOutputSetting'
           - type: object
-            required: [settings, acceptance]
+            required:
+            - settings
+            - acceptance
             properties:
-              settings: {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}}
+              settings:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ComposeOutputSetting'
               acceptance:
                 type: array
                 items:
                   type: object
-                  required: [material_id, code, message]
-                  properties: {material_id: {type: integer, minimum: 1}, code: {type: string}, message: {type: string}}
-          description: Frozen settings and optional manual acceptance outcomes. Guide addresses are redacted; legacy batches may return
-            an empty array.
-        created_at: {type: string, format: date-time}
-        counts: {$ref: '#/components/schemas/ComposeBatchCounts'}
-        operator_name: {type: string, description: Resolved owner display name; empty if unknown.}
-        strategy_name: {type: string, description: Resolved strategy display name.}
+                  required:
+                  - material_id
+                  - code
+                  - message
+                  properties:
+                    material_id:
+                      type: integer
+                      minimum: 1
+                    code:
+                      type: string
+                    message:
+                      type: string
+              source_output_id:
+                type: integer
+                minimum: 1
+              source_task_id:
+                type: integer
+                minimum: 1
+          description: Frozen settings and optional manual acceptance outcomes. Guide addresses are redacted; legacy batches may return an empty array.
+        created_at:
+          type: string
+          format: date-time
+        counts:
+          $ref: '#/components/schemas/ComposeBatchCounts'
+        operator_name:
+          type: string
+          description: Resolved owner display name; empty if unknown.
+        strategy_name:
+          type: string
+          description: Resolved strategy display name.
     BasicCutV1Config:
       type: object
       additionalProperties: false
@@ -1054,23 +1353,100 @@ components:
     CreateComposeTasks:
       type: object
       additionalProperties: false
-      required: [strategy_id, name]
-      oneOf: [{required: [request_key, material_ids]}, {required: [items]}]
+      required:
+      - name
+      oneOf:
+      - required:
+        - strategy_id
+        - request_key
+        - material_ids
+        not:
+          anyOf:
+          - required:
+            - source_output_id
+          - required:
+            - items
+      - required:
+        - strategy_id
+        - items
+        not:
+          anyOf:
+          - required:
+            - source_output_id
+          - required:
+            - material_ids
+      - required:
+        - request_key
+        - source_output_id
+        - remake_confirmed
+        properties:
+          remake_confirmed:
+            const: true
+        not:
+          anyOf:
+          - required:
+            - material_ids
+          - required:
+            - items
+          - required:
+            - config_override
       properties:
-        strategy_id: {type: integer, format: int64, minimum: 1}
-        operator_id: {type: integer, format: int64, minimum: 1, description: Optional echo of the valid strategy owner; cannot reassign
-            it.}
-        name: {type: string, minLength: 1, maxLength: 60}
-        request_key: {type: string, minLength: 8, maxLength: 64, description: Whole-command idempotency key scoped to the actor. Same key
-            and content replay; different content conflicts.}
-        material_ids: {type: array, minItems: 1, maxItems: 50, uniqueItems: true, items: {type: integer, format: int64, minimum: 1}}
-        setting_overrides: {type: array, items: {$ref: '#/components/schemas/ComposeSettingOverride'}}
-        remake_confirmed: {type: boolean, default: false, description: Explicitly acknowledge previous successful or unfinished production
-            before creating another batch.}
-        config_override: {type: object, deprecated: true, description: Legacy parameter override for a single setting; cannot be combined
-            with setting_overrides. Editable parameter validation still applies.}
-        items: {type: array, minItems: 1, maxItems: 50, deprecated: true, description: Legacy material/request_key adapter; cannot be combined
-            with material_ids., items: {$ref: '#/components/schemas/CreateComposeTaskItem'}}
+        strategy_id:
+          type: integer
+          format: int64
+          minimum: 1
+        operator_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Optional echo of the valid strategy owner; cannot reassign it.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        request_key:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: Whole-command idempotency key scoped to the actor. Same key and content replay; different content conflicts.
+        material_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        setting_overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComposeSettingOverride'
+        remake_confirmed:
+          type: boolean
+          default: false
+          description: Explicitly acknowledge previous successful or unfinished production before creating another batch.
+        config_override:
+          type: object
+          deprecated: true
+          description: Legacy parameter override for a single setting; cannot be combined with setting_overrides. Editable parameter validation still applies.
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          deprecated: true
+          description: Legacy material/request_key adapter; cannot be combined with material_ids.
+          items:
+            $ref: '#/components/schemas/CreateComposeTaskItem'
+        source_output_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Remake from one authorized original output/task group and template version; exactly one copy. Incompatible with material_ids/items/config_override.
+            The server derives source owner/strategy/material and validates any echoes.
+      description: Normal manual creation expands the strategy groups. source_output_id remakes exactly the original group as one copy with its final frozen
+        parameters; only explicit editable original-template parameters may be overridden. New requests revalidate active strategy, unchanged owner/team/category
+        and deployable original template. Idempotent replay precedes mutable current-state checks.
     CreateComposeTaskItem:
       type: object
       additionalProperties: false
@@ -1081,35 +1457,267 @@ components:
     ComposeOutput:
       type: object
       additionalProperties: false
-      required: [id, team_id, category_id, operator_id, operator_name, material_id, material_usage_id, compose_task_id, compose_strategy_id, template_code, template_version, file_size_bytes, sha256, media, publish_status, created_by, created_at, updated_at]
+      required:
+      - id
+      - team_id
+      - category_id
+      - operator_id
+      - operator_name
+      - material_id
+      - material_usage_id
+      - compose_task_id
+      - compose_strategy_id
+      - template_code
+      - template_version
+      - file_size_bytes
+      - sha256
+      - media
+      - publish_status
+      - created_by
+      - created_at
+      - updated_at
+      - name
+      - file_name
+      - material_title
+      - author_name
+      - strategy_name
+      - batch_id
+      - setting_key
+      - setting_name
+      - platforms
+      - video
+      - actions
       properties:
-        id: {type: integer, format: int64}
-        team_id: {type: integer, format: int64}
-        category_id: {type: integer, format: int64, minimum: 1}
-        operator_id: {type: [integer, 'null'], format: int64, description: "Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by."}
-        operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
-        material_id: {type: integer, format: int64}
-        material_usage_id: {type: [integer, 'null'], format: int64, description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.}
-        compose_task_id: {type: integer, format: int64}
-        compose_strategy_id: {type: integer, format: int64}
-        template_code: {type: string}
-        template_version: {type: integer, minimum: 1}
-        file_size_bytes: {type: integer, format: int64, minimum: 1}
-        sha256: {type: string}
-        media: {type: object, description: 'Media facts the executor verified, currently {duration_ms}.'}
-        publish_status: {type: string, enum: [pending_publish, published, archived]}
-        created_by: {type: integer, format: int64}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        id:
+          type: integer
+          format: int64
+        team_id:
+          type: integer
+          format: int64
+        category_id:
+          type: integer
+          format: int64
+          minimum: 1
+        operator_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by.
+        operator_name:
+          type: string
+          description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.
+        material_id:
+          type: integer
+          format: int64
+        material_usage_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.
+        compose_task_id:
+          type: integer
+          format: int64
+        compose_strategy_id:
+          type: integer
+          format: int64
+        template_code:
+          type: string
+        template_version:
+          type: integer
+          minimum: 1
+        file_size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+        sha256:
+          type: string
+        media:
+          type:
+          - object
+          - 'null'
+          description: Verified final output probe facts only. Unknown fields are omitted.
+          properties:
+            duration_ms:
+              type: integer
+              minimum: 1
+            width:
+              type: integer
+              minimum: 1
+            height:
+              type: integer
+              minimum: 1
+        publish_status:
+          type: string
+          enum:
+          - pending_publish
+          - published
+          - archived
+          description: Legacy stored field; never used as evidence for per-platform publishing.
+        created_by:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        name:
+          type: string
+          description: Persisted creation-time material title and setting name; empty when historical facts are unknown.
+        file_name:
+          type: string
+          description: Persisted safe video filename including output ID and extension; unknown legacy rows remain empty.
+        material_title:
+          type: string
+        author_name:
+          type: string
+        strategy_name:
+          type: string
+        batch_id:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        setting_key:
+          type: string
+        setting_name:
+          type: string
+        platforms:
+          type:
+          - array
+          - 'null'
+          items:
+            type: string
+            enum:
+            - bilibili
+            - baidu
+            - xiaohongshu
+        video:
+          $ref: '#/components/schemas/ComposeOutputVideo'
+        actions:
+          $ref: '#/components/schemas/ComposeOutputActions'
     ComposeOutputTrace:
       type: object
       additionalProperties: false
-      required: [material, material_usage, strategy, compose_task]
+      required:
+      - material
+      - material_usage
+      - strategy
+      - compose_task
+      - publishing
       properties:
-        material: {type: object, required: [id, title], properties: {id: {type: integer, format: int64}, title: {type: string}}}
-        material_usage: {type: [object, 'null'], required: [id, status], properties: {id: {type: integer, format: int64}, status: {type: string, description: "active or removed — the usage is history, not a live requirement."}}, description: "Null when the output came from a scheduled task over the team material pool; the key stays, the value is null."}
-        strategy: {type: object, required: [id, name, template_code, template_version, config_snapshot], properties: {id: {type: integer, format: int64}, name: {type: string}, template_code: {type: string}, template_version: {type: integer, minimum: 1}, config_snapshot: {type: object, description: "The task's frozen snapshot, not the strategy's current config."}}}
-        compose_task: {type: object, required: [id, status, config_snapshot, created_at], properties: {id: {type: integer, format: int64}, status: {type: string}, config_snapshot: {type: object}, created_at: {type: string, format: date-time}}}
+        material:
+          type: object
+          required:
+          - id
+          - title
+          properties:
+            id:
+              type: integer
+              format: int64
+            title:
+              type: string
+        material_usage:
+          type:
+          - object
+          - 'null'
+          required:
+          - id
+          - status
+          properties:
+            id:
+              type: integer
+              format: int64
+            status:
+              type: string
+              description: active or removed — the usage is history, not a live requirement.
+          description: Null when the output came from a scheduled task over the team material pool; the key stays, the value is null.
+        strategy:
+          type: object
+          required:
+          - id
+          - name
+          - template_code
+          - template_version
+          - config_snapshot
+          - template_schema
+          properties:
+            id:
+              type: integer
+              format: int64
+            name:
+              type: string
+            template_code:
+              type: string
+            template_version:
+              type: integer
+              minimum: 1
+            config_snapshot:
+              type:
+              - object
+              - 'null'
+              description: Original task final parameter snapshot with fixed guide addresses redacted.
+            template_schema:
+              type:
+              - object
+              - 'null'
+              description: Exact original template version schema, never a current-version substitution.
+        compose_task:
+          type: object
+          required:
+          - id
+          - status
+          - config_snapshot
+          - created_at
+          - batch_id
+          - setting_key
+          - setting_name
+          - platforms
+          - template_code
+          - template_version
+          properties:
+            id:
+              type: integer
+              format: int64
+            status:
+              type: string
+            config_snapshot:
+              type:
+              - object
+              - 'null'
+              description: Original task final parameter snapshot with fixed guide addresses redacted.
+            created_at:
+              type: string
+              format: date-time
+            batch_id:
+              type:
+              - integer
+              - 'null'
+              format: int64
+            setting_key:
+              type: string
+            setting_name:
+              type: string
+            platforms:
+              type:
+              - array
+              - 'null'
+              items:
+                type: string
+                enum:
+                - bilibili
+                - baidu
+                - xiaohongshu
+            template_code:
+              type: string
+            template_version:
+              type: integer
+              minimum: 0
+        publishing:
+          $ref: '#/components/schemas/ComposeOutputPublishing'
     ComposeOutputDetail:
       type: object
       additionalProperties: false
@@ -1378,9 +1986,175 @@ components:
       required: [items, accepted, skipped, failed]
       properties: {items: {type: array, items: {$ref: '#/components/schemas/ComposeBulkItem'}}, accepted: {type: integer, minimum: 0}, skipped: {
           type: integer, minimum: 0}, failed: {type: integer, minimum: 0}}
+    ComposeOutputVideo:
+      type: object
+      additionalProperties: false
+      required:
+      - status
+      - reason
+      - checked_at
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - failed
+          - unknown
+        reason:
+          type: string
+        checked_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    ComposeOutputActions:
+      type: object
+      additionalProperties: false
+      required:
+      - download
+      - remake
+      - download_reason
+      - remake_reason
+      properties:
+        download:
+          type: boolean
+        remake:
+          type: boolean
+        download_reason:
+          type: string
+        remake_reason:
+          type: string
+    ComposeOutputPublishing:
+      type: object
+      additionalProperties: false
+      required:
+      - available
+      - reason
+      - platforms
+      properties:
+        available:
+          type: boolean
+          const: false
+        reason:
+          type: string
+        platforms:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - platform
+            - status
+            properties:
+              platform:
+                type: string
+                enum:
+                - bilibili
+                - baidu
+                - xiaohongshu
+              status:
+                type:
+                - string
+                - 'null'
+                enum:
+                - null
+                - unarranged
+                - arranged
+                - published
+                description: Null when the publishing domain is unavailable; no inferred legacy global status.
+    ComposeOutputPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - total
+      - page
+      - page_size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComposeOutput'
+        total:
+          type: integer
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+    ComposeOutputMaterial:
+      type: object
+      additionalProperties: false
+      required:
+      - material_id
+      - material_title
+      - author_name
+      - category_id
+      - output_count
+      - strategies
+      - latest_created_at
+      properties:
+        material_id:
+          type: integer
+          format: int64
+        material_title:
+          type: string
+        author_name:
+          type: string
+        category_id:
+          type: integer
+          format: int64
+        output_count:
+          type: integer
+          minimum: 1
+        strategies:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - id
+            - name
+            properties:
+              id:
+                type: integer
+                format: int64
+              name:
+                type: string
+        latest_created_at:
+          type: string
+          format: date-time
+    ComposeOutputMaterialPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - total
+      - page
+      - page_size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComposeOutputMaterial'
+        total:
+          type: integer
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:
+    Page: {in: query, name: page, required: false, schema: {type: integer, minimum: 1, default: 1}}
+    PageSize: {in: query, name: page_size, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
     MaterialID: {in: path, name: material_id, required: true, schema: {type: integer, format: int64}}
     UsageID: {in: path, name: usage_id, required: true, schema: {type: integer, format: int64}}
     StrategyID: {in: path, name: strategy_id, required: true, schema: {type: integer, format: int64}}

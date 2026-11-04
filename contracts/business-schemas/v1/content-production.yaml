@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.2"
+revision: "2026.11.05.3"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -171,37 +171,99 @@ schemas:
   ComposeTaskBatch:
     type: object
     additionalProperties: false
-    required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at,
-      counts, operator_name, strategy_name]
+    required:
+    - id
+    - name
+    - team_id
+    - category_id
+    - operator_id
+    - compose_strategy_id
+    - trigger_type
+    - created_by
+    - config_snapshot
+    - created_at
+    - counts
+    - operator_name
+    - strategy_name
     properties:
-      id: {type: integer, format: int64}
-      name: {type: string}
-      team_id: {type: integer, format: int64}
-      category_id: {type: integer, format: int64, minimum: 1}
-      operator_id: {type: [integer, 'null'], format: int64}
-      compose_strategy_id: {type: integer, format: int64}
-      trigger_type: {type: string, enum: [manual, immediate, scheduled], description: 'Manual material creation, immediate strategy execution,
-          or scheduled strategy execution.'}
-      created_by: {type: integer, format: int64}
+      id:
+        type: integer
+        format: int64
+      name:
+        type: string
+      team_id:
+        type: integer
+        format: int64
+      category_id:
+        type: integer
+        format: int64
+        minimum: 1
+      operator_id:
+        type:
+        - integer
+        - 'null'
+        format: int64
+      compose_strategy_id:
+        type: integer
+        format: int64
+      trigger_type:
+        type: string
+        enum:
+        - manual
+        - immediate
+        - scheduled
+        description: Manual material creation, immediate strategy execution, or scheduled strategy execution.
+      created_by:
+        type: integer
+        format: int64
       config_snapshot:
         oneOf:
-        - {type: array, items: {ref: ComposeOutputSetting}}
+        - type: array
+          items:
+            ref: ComposeOutputSetting
         - type: object
-          required: [settings, acceptance]
+          required:
+          - settings
+          - acceptance
           properties:
-            settings: {type: array, items: {ref: ComposeOutputSetting}}
+            settings:
+              type: array
+              items:
+                ref: ComposeOutputSetting
             acceptance:
               type: array
               items:
                 type: object
-                required: [material_id, code, message]
-                properties: {material_id: {type: integer, minimum: 1}, code: {type: string}, message: {type: string}}
-        description: Frozen settings and optional manual acceptance outcomes. Guide addresses are redacted; legacy batches may return
-          an empty array.
-      created_at: {type: string, format: date-time}
-      counts: {ref: ComposeBatchCounts}
-      operator_name: {type: string, description: Resolved owner display name; empty if unknown.}
-      strategy_name: {type: string, description: Resolved strategy display name.}
+                required:
+                - material_id
+                - code
+                - message
+                properties:
+                  material_id:
+                    type: integer
+                    minimum: 1
+                  code:
+                    type: string
+                  message:
+                    type: string
+            source_output_id:
+              type: integer
+              minimum: 1
+            source_task_id:
+              type: integer
+              minimum: 1
+        description: Frozen settings and optional manual acceptance outcomes. Guide addresses are redacted; legacy batches may return an empty array.
+      created_at:
+        type: string
+        format: date-time
+      counts:
+        ref: ComposeBatchCounts
+      operator_name:
+        type: string
+        description: Resolved owner display name; empty if unknown.
+      strategy_name:
+        type: string
+        description: Resolved strategy display name.
   ComposeBatchCounts:
     type: object
     required: [pending, running, success, failed, cancelled]
@@ -471,3 +533,431 @@ schemas:
     required: [material_id, request_key, errcode, error, message]
     properties: {material_id: {type: integer, minimum: 1}, request_key: {type: string}, errcode: {type: integer}, error: {type: string},
       message: {type: string}}
+  ComposeOutput:
+    type: object
+    additionalProperties: false
+    required:
+    - id
+    - team_id
+    - category_id
+    - operator_id
+    - operator_name
+    - material_id
+    - material_usage_id
+    - compose_task_id
+    - compose_strategy_id
+    - template_code
+    - template_version
+    - file_size_bytes
+    - sha256
+    - media
+    - publish_status
+    - created_by
+    - created_at
+    - updated_at
+    - name
+    - file_name
+    - material_title
+    - author_name
+    - strategy_name
+    - batch_id
+    - setting_key
+    - setting_name
+    - platforms
+    - video
+    - actions
+    properties:
+      id:
+        type: integer
+        format: int64
+      team_id:
+        type: integer
+        format: int64
+      category_id:
+        type: integer
+        format: int64
+        minimum: 1
+      operator_id:
+        type:
+        - integer
+        - 'null'
+        format: int64
+        description: Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by.
+      operator_name:
+        type: string
+        description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.
+      material_id:
+        type: integer
+        format: int64
+      material_usage_id:
+        type:
+        - integer
+        - 'null'
+        format: int64
+        description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.
+      compose_task_id:
+        type: integer
+        format: int64
+      compose_strategy_id:
+        type: integer
+        format: int64
+      template_code:
+        type: string
+      template_version:
+        type: integer
+        minimum: 1
+      file_size_bytes:
+        type: integer
+        format: int64
+        minimum: 1
+      sha256:
+        type: string
+      media:
+        type:
+        - object
+        - 'null'
+        description: Verified final output probe facts only. Unknown fields are omitted.
+        properties:
+          duration_ms:
+            type: integer
+            minimum: 1
+          width:
+            type: integer
+            minimum: 1
+          height:
+            type: integer
+            minimum: 1
+      publish_status:
+        type: string
+        enum:
+        - pending_publish
+        - published
+        - archived
+        description: Legacy stored field; never used as evidence for per-platform publishing.
+      created_by:
+        type: integer
+        format: int64
+      created_at:
+        type: string
+        format: date-time
+      updated_at:
+        type: string
+        format: date-time
+      name:
+        type: string
+        description: Persisted creation-time material title and setting name; empty when historical facts are unknown.
+      file_name:
+        type: string
+        description: Persisted safe video filename including output ID and extension; unknown legacy rows remain empty.
+      material_title:
+        type: string
+      author_name:
+        type: string
+      strategy_name:
+        type: string
+      batch_id:
+        type:
+        - integer
+        - 'null'
+        format: int64
+      setting_key:
+        type: string
+      setting_name:
+        type: string
+      platforms:
+        type:
+        - array
+        - 'null'
+        items:
+          type: string
+          enum:
+          - bilibili
+          - baidu
+          - xiaohongshu
+      video:
+        ref: ComposeOutputVideo
+      actions:
+        ref: ComposeOutputActions
+  ComposeOutputTrace:
+    type: object
+    additionalProperties: false
+    required:
+    - material
+    - material_usage
+    - strategy
+    - compose_task
+    - publishing
+    properties:
+      material:
+        type: object
+        required:
+        - id
+        - title
+        properties:
+          id:
+            type: integer
+            format: int64
+          title:
+            type: string
+      material_usage:
+        type:
+        - object
+        - 'null'
+        required:
+        - id
+        - status
+        properties:
+          id:
+            type: integer
+            format: int64
+          status:
+            type: string
+            description: active or removed — the usage is history, not a live requirement.
+        description: Null when the output came from a scheduled task over the team material pool; the key stays, the value is null.
+      strategy:
+        type: object
+        required:
+        - id
+        - name
+        - template_code
+        - template_version
+        - config_snapshot
+        - template_schema
+        properties:
+          id:
+            type: integer
+            format: int64
+          name:
+            type: string
+          template_code:
+            type: string
+          template_version:
+            type: integer
+            minimum: 1
+          config_snapshot:
+            type:
+            - object
+            - 'null'
+            description: Original task final parameter snapshot with fixed guide addresses redacted.
+          template_schema:
+            type:
+            - object
+            - 'null'
+            description: Exact original template version schema, never a current-version substitution.
+      compose_task:
+        type: object
+        required:
+        - id
+        - status
+        - config_snapshot
+        - created_at
+        - batch_id
+        - setting_key
+        - setting_name
+        - platforms
+        - template_code
+        - template_version
+        properties:
+          id:
+            type: integer
+            format: int64
+          status:
+            type: string
+          config_snapshot:
+            type:
+            - object
+            - 'null'
+            description: Original task final parameter snapshot with fixed guide addresses redacted.
+          created_at:
+            type: string
+            format: date-time
+          batch_id:
+            type:
+            - integer
+            - 'null'
+            format: int64
+          setting_key:
+            type: string
+          setting_name:
+            type: string
+          platforms:
+            type:
+            - array
+            - 'null'
+            items:
+              type: string
+              enum:
+              - bilibili
+              - baidu
+              - xiaohongshu
+          template_code:
+            type: string
+          template_version:
+            type: integer
+            minimum: 0
+      publishing:
+        ref: ComposeOutputPublishing
+  ComposeOutputVideo:
+    type: object
+    additionalProperties: false
+    required:
+    - status
+    - reason
+    - checked_at
+    properties:
+      status:
+        type: string
+        enum:
+        - ready
+        - failed
+        - unknown
+      reason:
+        type: string
+      checked_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+  ComposeOutputActions:
+    type: object
+    additionalProperties: false
+    required:
+    - download
+    - remake
+    - download_reason
+    - remake_reason
+    properties:
+      download:
+        type: boolean
+      remake:
+        type: boolean
+      download_reason:
+        type: string
+      remake_reason:
+        type: string
+  ComposeOutputPublishing:
+    type: object
+    additionalProperties: false
+    required:
+    - available
+    - reason
+    - platforms
+    properties:
+      available:
+        type: boolean
+        const: false
+      reason:
+        type: string
+      platforms:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required:
+          - platform
+          - status
+          properties:
+            platform:
+              type: string
+              enum:
+              - bilibili
+              - baidu
+              - xiaohongshu
+            status:
+              type:
+              - string
+              - 'null'
+              enum:
+              - null
+              - unarranged
+              - arranged
+              - published
+              description: Null when the publishing domain is unavailable; no inferred legacy global status.
+  ComposeOutputPage:
+    type: object
+    additionalProperties: false
+    required:
+    - items
+    - total
+    - page
+    - page_size
+    properties:
+      items:
+        type: array
+        items:
+          ref: ComposeOutput
+      total:
+        type: integer
+        minimum: 0
+      page:
+        type: integer
+        minimum: 1
+      page_size:
+        type: integer
+        minimum: 1
+        maximum: 100
+  ComposeOutputMaterial:
+    type: object
+    additionalProperties: false
+    required:
+    - material_id
+    - material_title
+    - author_name
+    - category_id
+    - output_count
+    - strategies
+    - latest_created_at
+    properties:
+      material_id:
+        type: integer
+        format: int64
+      material_title:
+        type: string
+      author_name:
+        type: string
+      category_id:
+        type: integer
+        format: int64
+      output_count:
+        type: integer
+        minimum: 1
+      strategies:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required:
+          - id
+          - name
+          properties:
+            id:
+              type: integer
+              format: int64
+            name:
+              type: string
+      latest_created_at:
+        type: string
+        format: date-time
+  ComposeOutputMaterialPage:
+    type: object
+    additionalProperties: false
+    required:
+    - items
+    - total
+    - page
+    - page_size
+    properties:
+      items:
+        type: array
+        items:
+          ref: ComposeOutputMaterial
+      total:
+        type: integer
+        minimum: 0
+      page:
+        type: integer
+        minimum: 1
+      page_size:
+        type: integer
+        minimum: 1
+        maximum: 100

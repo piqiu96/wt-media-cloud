@@ -51,8 +51,10 @@ func (b ComposeTaskBatch) MarshalJSON() ([]byte, error) {
 		b.ConfigSnapshot, _ = json.Marshal(redact(groups))
 	} else {
 		var snapshot struct {
-			Settings   []ComposeOutputSetting `json:"settings"`
-			Acceptance json.RawMessage        `json:"acceptance"`
+			SourceOutputID int64                  `json:"source_output_id,omitempty"`
+			SourceTaskID   int64                  `json:"source_task_id,omitempty"`
+			Settings       []ComposeOutputSetting `json:"settings"`
+			Acceptance     json.RawMessage        `json:"acceptance"`
 		}
 		if json.Unmarshal(b.ConfigSnapshot, &snapshot) == nil && snapshot.Settings != nil {
 			snapshot.Settings = redact(snapshot.Settings)

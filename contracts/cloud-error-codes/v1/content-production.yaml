@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.2"
+revision: "2026.11.05.3"
 
 errors:
   material_not_found: {http_status: 404}
@@ -20,3 +20,8 @@ errors:
   compose_task_conflict: {http_status: 409, errcode: 15219, description: Request key reused with different content or remake requires explicit confirmation.}
   compose_preview_changed: {http_status: 409, errcode: 15214, description: Execution facts or quotas changed since preview; refresh preview before confirming.}
   compose_already_running: {http_status: 409, errcode: 15215, description: Strategy has unfinished work; inspect the active batch.}
+  compose_output_invalid: {http_status: 400, errcode: 15214}
+  compose_output_forbidden: {http_status: 403, errcode: 15215}
+  compose_output_not_found: {http_status: 404, errcode: 15216}
+  compose_output_unavailable: {http_status: 409, errcode: 15240, description: Output object is absent or lacks verified file facts; original successful task is unchanged.}
+  compose_output_verification_failed: {http_status: 503, errcode: 15241, description: Storage verification failed or exceeded its deadline; absence is not inferred.}

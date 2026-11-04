@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
@@ -18,23 +16,32 @@ import (
 )
 
 var (
-	ErrComposeOutputInvalid       = errors.New("compose output input is invalid")
-	ErrComposeOutputForbidden     = errors.New("compose output operation is forbidden")
-	ErrComposeOutputNotFound      = errors.New("compose output not found")
-	ErrComposeOutputNotArchivable = errors.New("compose output is not archivable")
+	ErrComposeOutputUnavailable        = errors.New("compose output object is unavailable")
+	ErrComposeOutputVerificationFailed = errors.New("compose output verification failed")
+	ErrComposeOutputInvalid            = errors.New("compose output input is invalid")
+	ErrComposeOutputForbidden          = errors.New("compose output operation is forbidden")
+	ErrComposeOutputNotFound           = errors.New("compose output not found")
+	ErrComposeOutputNotArchivable      = errors.New("compose output is not archivable")
 )
 
 type ListComposeOutputsInput struct {
-	PublishStatus string              `json:"publish_status"`
-	Source        string              `json:"source"`
-	Search        string              `json:"search"`
-	TriggerType   string              `json:"trigger_type"`
-	CategoryID    identity.CategoryID `json:"category_id"`
-	TeamID        int64               `json:"team_id"`
-	OperatorID    int64               `json:"operator_id"`
-	OperatorScope string              `json:"operator_scope"`
-	CreatedFrom   time.Time           `json:"created_from"`
-	CreatedBefore time.Time           `json:"created_before"`
+	Page          int                   `json:"page"`
+	PageSize      int                   `json:"page_size"`
+	MaterialID    int64                 `json:"material_id"`
+	BatchID       int64                 `json:"batch_id"`
+	Platform      string                `json:"platform"`
+	VideoStatus   string                `json:"video_status"`
+	CategoryIDs   []identity.CategoryID `json:"category_ids"`
+	PublishStatus string                `json:"publish_status"`
+	Source        string                `json:"source"`
+	Search        string                `json:"search"`
+	TriggerType   string                `json:"trigger_type"`
+	CategoryID    identity.CategoryID   `json:"category_id"`
+	TeamID        int64                 `json:"team_id"`
+	OperatorID    int64                 `json:"operator_id"`
+	OperatorScope string                `json:"operator_scope"`
+	CreatedFrom   time.Time             `json:"created_from"`
+	CreatedBefore time.Time             `json:"created_before"`
 }
 
 // ComposeOutputRepository is the my-outputs read and the one actor-facing
@@ -65,6 +72,7 @@ type composeOutputTraceTaskSource interface {
 // enters a body.
 type composeOutputLinker interface {
 	PresignObjectURL(ctx context.Context, key string) (string, error)
+	ObjectExists(ctx context.Context, key string) (bool, error)
 }
 
 // ComposeOutputTraceMaterial is the trace's material projection: the page
@@ -85,16 +93,33 @@ type ComposeOutputTraceStrategy struct {
 	TemplateCode    string          `json:"template_code"`
 	TemplateVersion uint32          `json:"template_version"`
 	ConfigSnapshot  json.RawMessage `json:"config_snapshot"`
+	TemplateSchema  json.RawMessage `json:"template_schema"`
 }
 
 type ComposeOutputTraceTask struct {
-	ID             int64                   `json:"id"`
-	Status         model.ComposeTaskStatus `json:"status"`
-	ConfigSnapshot json.RawMessage         `json:"config_snapshot"`
-	CreatedAt      time.Time               `json:"created_at"`
+	BatchID         *int64                  `json:"batch_id"`
+	SettingKey      string                  `json:"setting_key"`
+	SettingName     string                  `json:"setting_name"`
+	Platforms       []string                `json:"platforms"`
+	TemplateCode    string                  `json:"template_code"`
+	TemplateVersion uint32                  `json:"template_version"`
+	ID              int64                   `json:"id"`
+	Status          model.ComposeTaskStatus `json:"status"`
+	ConfigSnapshot  json.RawMessage         `json:"config_snapshot"`
+	CreatedAt       time.Time               `json:"created_at"`
 }
 
+type ComposeOutputPublishingPlatform struct {
+	Platform string  `json:"platform"`
+	Status   *string `json:"status"`
+}
+type ComposeOutputPublishing struct {
+	Available bool                              `json:"available"`
+	Reason    string                            `json:"reason"`
+	Platforms []ComposeOutputPublishingPlatform `json:"platforms"`
+}
 type ComposeOutputTrace struct {
+	Publishing    ComposeOutputPublishing    `json:"publishing"`
 	Material      ComposeOutputTraceMaterial `json:"material"`
 	MaterialUsage *ComposeOutputTraceUsage   `json:"material_usage"`
 	Strategy      ComposeOutputTraceStrategy `json:"strategy"`
@@ -174,55 +199,12 @@ func CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task
 // a scope answers an empty page rather than an error, because the scope is
 // legitimate and simply contains nothing.
 func (s *ComposeOutputService) List(actor identity.PublicUser, input ListComposeOutputsInput) ([]model.CompositeOutput, error) {
-	if actor.Status != identity.UserStatusEnabled {
-		return nil, ErrComposeOutputForbidden
-	}
-	source := strings.TrimSpace(input.Source)
-	if len([]rune(source)) > 100 {
-		return nil, fmt.Errorf("%w: source is too long", ErrComposeOutputInvalid)
-	}
-	search := strings.TrimSpace(input.Search)
-	if len([]rune(search)) > 100 {
-		return nil, fmt.Errorf("%w: search is too long", ErrComposeOutputInvalid)
-	}
-	filter := repository.ComposeOutputFilter{Source: source, Search: search, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
-	if input.PublishStatus != "" {
-		switch input.PublishStatus {
-		case "pending_publish", "published", "archived":
-			filter.PublishStatus = input.PublishStatus
-		default:
-			return nil, fmt.Errorf("%w: unknown publish_status %s", ErrComposeOutputInvalid, input.PublishStatus)
-		}
-	}
-	if input.TriggerType != "" {
-		switch input.TriggerType {
-		case "manual", "scheduled":
-			filter.TriggerType = input.TriggerType
-		default:
-			return nil, fmt.Errorf("%w: unknown trigger_type %s", ErrComposeOutputInvalid, input.TriggerType)
-		}
-	}
-	scope, err := resolveComposeListScope(actor, input.TeamID, input.OperatorID, input.OperatorScope)
+	filter, empty, err := s.outputFilter(actor, input)
 	if err != nil {
-		if errors.Is(err, errComposeScopeForbidden) {
-			return nil, ErrComposeOutputForbidden
-		}
-		return nil, fmt.Errorf("%w: %v", ErrComposeOutputInvalid, err)
+		return nil, err
 	}
-	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
-	categoryID := input.CategoryID
-	if categoryID < 0 {
-		return nil, fmt.Errorf("%w: category_id is invalid", ErrComposeOutputInvalid)
-	}
-	// The category is a narrowing filter, never a grant: an operator may only name a
-	// category they cover, and everyone else still reads within the team scope above.
-	if categoryID > 0 {
-		if actor.Role == identity.RoleOperator && !slices.Contains(actor.CategoryIDs, categoryID) {
-			return nil, ErrComposeOutputForbidden
-		}
-		filter.CategoryIDs = []identity.CategoryID{categoryID}
-	} else if actor.Role == identity.RoleOperator {
-		filter.CategoryIDs = actor.CategoryIDs
+	if empty {
+		return []model.CompositeOutput{}, nil
 	}
 	items, err := s.outputs.List(filter)
 	if err != nil {
@@ -251,36 +233,65 @@ func (s *ComposeOutputService) withOperatorNames(items []model.CompositeOutput) 
 }
 
 // Get reads one output with its source chain. The chain is a read-side
-// projection: the referenced rows answer as they are now, while the frozen
-// creation facts ride on the output row itself.
+// projection: mutable source labels are joined for display; execution parameters
+// and template binding always come from the original task snapshot.
 func (s *ComposeOutputService) Get(actor identity.PublicUser, id int64) (ComposeOutputDetail, error) {
 	output, err := s.readable(actor, id)
 	if err != nil {
 		return ComposeOutputDetail{}, err
 	}
-	detail := ComposeOutputDetail{Output: output}
-	if material, found, err := s.materials.FindMaterial(output.MaterialID); err != nil {
-		return ComposeOutputDetail{}, err
-	} else if found {
-		detail.Trace.Material = ComposeOutputTraceMaterial{ID: material.ID, Title: material.Title}
+	detail := ComposeOutputDetail{Output: output, Trace: ComposeOutputTrace{ComposeTask: ComposeOutputTraceTask{Platforms: []string{}}}}
+	material, _, err := s.materials.FindMaterial(output.MaterialID)
+	if err != nil {
+		return detail, err
 	}
+	detail.Trace.Material = ComposeOutputTraceMaterial{ID: output.MaterialID, Title: material.Title}
 	if output.MaterialUsageID != nil {
-		if usage, found, err := s.usages.FindUsage(*output.MaterialUsageID); err != nil {
-			return ComposeOutputDetail{}, err
-		} else if found {
+		usage, found, err := s.usages.FindUsage(*output.MaterialUsageID)
+		if err != nil {
+			return detail, err
+		}
+		if found {
 			detail.Trace.MaterialUsage = &ComposeOutputTraceUsage{ID: usage.ID, Status: string(usage.Status)}
 		}
 	}
-	if strategy, found, err := s.strategies.Find(output.StrategyID); err != nil {
-		return ComposeOutputDetail{}, err
-	} else if found {
-		detail.Trace.Strategy = ComposeOutputTraceStrategy{ID: strategy.ID, Name: strategy.Name, TemplateCode: output.TemplateCode, TemplateVersion: output.TemplateVersion, ConfigSnapshot: strategy.Config}
+	strategy, _, err := s.strategies.Find(output.StrategyID)
+	if err != nil {
+		return detail, err
 	}
-	if task, found, err := s.tasks.Find(output.TaskID); err != nil {
-		return ComposeOutputDetail{}, err
-	} else if found {
-		detail.Trace.ComposeTask = ComposeOutputTraceTask{ID: task.ID, Status: task.Status, ConfigSnapshot: task.ConfigSnapshot, CreatedAt: task.CreatedAt}
+	task, found, err := s.tasks.Find(output.TaskID)
+	if err != nil {
+		return detail, err
 	}
+	detail.Trace.Strategy = ComposeOutputTraceStrategy{ID: output.StrategyID, Name: strategy.Name, TemplateCode: output.TemplateCode, TemplateVersion: output.TemplateVersion, ConfigSnapshot: json.RawMessage(`{}`), TemplateSchema: json.RawMessage(`{}`)}
+	if found {
+		safe := model.SafeComposeSnapshot(task.ConfigSnapshot)
+		detail.Trace.Strategy.ConfigSnapshot = safe
+		detail.Trace.ComposeTask = ComposeOutputTraceTask{ID: task.ID, Status: task.Status, ConfigSnapshot: safe, CreatedAt: task.CreatedAt, BatchID: task.BatchID, SettingKey: task.SettingKey, SettingName: task.SettingName, Platforms: []string{}, TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion}
+		_ = json.Unmarshal(task.PlatformsJSON, &detail.Trace.ComposeTask.Platforms)
+		detail.Output.BatchID = task.BatchID
+		detail.Output.SettingKey = task.SettingKey
+		detail.Output.SettingName = task.SettingName
+		detail.Output.Platforms = detail.Trace.ComposeTask.Platforms
+	}
+	detail.Output.MaterialTitle = material.Title
+	detail.Output.AuthorName = material.AuthorName
+	detail.Output.StrategyName = strategy.Name
+	template, templateFound, err := s.originalTemplate(output)
+	if err != nil {
+		return detail, err
+	}
+	if templateFound {
+		detail.Trace.Strategy.TemplateSchema = safeOutputSchema(template.Schema)
+	}
+	if err := s.decorateOutput(context.Background(), actor, &detail.Output); err != nil {
+		return detail, err
+	}
+	detail.Trace.Publishing = ComposeOutputPublishing{Available: false, Reason: "发布能力尚未提供", Platforms: []ComposeOutputPublishingPlatform{}}
+	for _, p := range detail.Output.Platforms {
+		detail.Trace.Publishing.Platforms = append(detail.Trace.Publishing.Platforms, ComposeOutputPublishingPlatform{Platform: p})
+	}
+
 	return detail, nil
 }
 
@@ -314,11 +325,14 @@ func (s *ComposeOutputService) Archive(actor identity.PublicUser, id int64) (mod
 }
 
 // VideoURL answers the preview grant — the detail drawer's link, deliberately
-// not part of any body. Every output row already has a verified object behind
-// it, so unlike the material link there is no readiness refusal.
+// not part of any body. The stored success fact is followed by a fresh object
+// check, since the storage object can disappear after production.
 func (s *ComposeOutputService) VideoURL(ctx context.Context, actor identity.PublicUser, id int64) (string, error) {
 	output, err := s.readable(actor, id)
 	if err != nil {
+		return "", err
+	}
+	if err := s.requireObject(ctx, output); err != nil {
 		return "", err
 	}
 	return s.links.PresignObjectURL(ctx, output.ObjectKey)
@@ -328,12 +342,9 @@ func (s *ComposeOutputService) VideoURL(ctx context.Context, actor identity.Publ
 // output onto their own Local Agent — the same `user_download` task a material
 // download queues, with `composite_output` as the type.
 //
-// Unlike the material download there is no preparation arm: an output row only
-// exists once the compose success transaction wrote a verified object behind
-// it, so the object key, the size and the hash are facts of the row rather than
-// facts to be produced. That is also why the title is resolved here — the row
-// has no title of its own, and the executor names its file from what the task
-// carries.
+// The immutable asset name is passed as the transfer title. The Local Agent
+// reports its actual completed filename through the existing transfer domain.
+// Object presence is checked again before queueing the transfer.
 //
 // The refusal mirrors the material download's: the scope gate answers not-found
 // for an output the actor cannot see. The task carries no machine: any machine
@@ -341,6 +352,9 @@ func (s *ComposeOutputService) VideoURL(ctx context.Context, actor identity.Publ
 func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task, error) {
 	output, err := s.readable(actor, id)
 	if err != nil {
+		return transferdto.Task{}, err
+	}
+	if err := s.requireObject(context.Background(), output); err != nil {
 		return transferdto.Task{}, err
 	}
 	categoryName := ""
@@ -355,7 +369,7 @@ func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, i
 		TeamID:          identity.TeamID(output.TeamID),
 		AssetType:       transfermodel.AssetCompositeOutput,
 		AssetID:         output.ID,
-		AssetTitle:      fmt.Sprintf("成片-%d", output.ID),
+		AssetTitle:      outputDownloadTitle(output),
 		CategoryName:    categoryName,
 		SourceObjectKey: output.ObjectKey,
 		RequestedBy:     actor.ID,
@@ -420,7 +434,6 @@ func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput)
 	if !inCategory {
 		return false
 	}
-	// Same fallback as tasks: a historical row with no operator stays
-	// reachable by its creator without being attributed to them.
-	return (item.OperatorID != nil && *item.OperatorID == int64(actor.ID)) || (item.OperatorID == nil && item.CreatedBy == int64(actor.ID))
+	// An absent owner is a management-only historical asset; creator is not ownership.
+	return item.OperatorID != nil && *item.OperatorID == int64(actor.ID)
 }
