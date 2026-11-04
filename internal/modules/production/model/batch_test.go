@@ -30,3 +30,11 @@ func TestBatchSnapshotHidesGuideAddress(t *testing.T) {
 		t.Fatal("nonsecret fields lost")
 	}
 }
+
+func TestManualBatchObjectSnapshotRedactsAndPreservesAcceptance(t *testing.T) {
+	b := ComposeTaskBatch{ConfigSnapshot: json.RawMessage(`{"settings":[{"key":"a","params":{"guide_video_url":"https://secret.example/key","insert_seconds":2}}],"acceptance":[{"material_id":3,"code":"missing"}]}`)}
+	raw, err := json.Marshal(b)
+	if err != nil || strings.Contains(string(raw), "secret.example") || !strings.Contains(string(raw), "acceptance") || !strings.Contains(string(raw), "insert_seconds") {
+		t.Fatalf("%s %v", raw, err)
+	}
+}

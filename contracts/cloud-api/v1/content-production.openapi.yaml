@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.11.05.1
+  version: 2026.11.05.2
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -174,33 +174,17 @@ paths:
   /api/v1/compose-strategies/{strategy_id}/runs:
     get:
       operationId: listComposeStrategyRuns
-      summary: Read the latest 20 schedule runs and per-material skip reasons in the actor's strategy scope.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/StrategyID'}]
-      responses:
-        '200':
-          description: Latest persisted schedule runs, newest first.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: {$ref: '#/components/schemas/ComposeScheduleRun'}
-        '404': {description: Strategy absent or outside the actor's scope.}
-  /api/v1/compose-strategies/{strategy_id}/runs/history:
-    get:
-      operationId: listComposeStrategyRunHistory
       summary: Read paged strategy run history with optional trigger and time filters.
       security: [{sessionCookie: []}]
       parameters:
-        - {$ref: '#/components/parameters/StrategyID'}
-        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
-        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 50, default: 10}}
-        - {in: query, name: trigger_type, schema: {type: string, enum: [manual, immediate, scheduled]}}
-        - {in: query, name: created_from, schema: {type: string, format: date-time}, description: Inclusive UTC or offset-aware execution start.}
-        - {in: query, name: created_before, schema: {type: string, format: date-time}, description: Exclusive UTC or offset-aware execution end.}
+      - {$ref: '#/components/parameters/StrategyID'}
+      - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+      - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 50, default: 10}}
+      - {in: query, name: trigger_type, schema: {type: string, enum: [manual, immediate, scheduled]}}
+      - {in: query, name: created_from, schema: {type: string, format: date-time}, description: Inclusive UTC or offset-aware execution
+          start.}
+      - {in: query, name: created_before, schema: {type: string, format: date-time}, description: Exclusive UTC or offset-aware execution
+          end.}
       responses:
         '200':
           description: Persisted runs and an exact filtered total, newest first.
@@ -208,112 +192,65 @@ paths:
             application/json:
               schema:
                 type: object
-                properties:
-                  data: {$ref: '#/components/schemas/ComposeScheduleRunHistoryPage'}
+                properties: {data: {$ref: '#/components/schemas/ComposeScheduleRunHistoryPage'}}
         '400': {description: Invalid pagination or filters.}
         '404': {description: Strategy absent or outside the actor's scope.}
-  /api/v1/compose-strategies/{strategy_id}/runs/tasks:
-    get:
-      operationId: listComposeStrategyRunTasks
-      summary: Read one schedule run's tasks and per-status counts in the actor's strategy scope.
-      description: >-
-        Returns the persisted run for the requested slot, every task it created
-        for that slot, and counts read from those rows. A slot with no run is a
-        404 — the page must not render an empty zero-valued run.
-      security: [{sessionCookie: []}]
-      parameters:
-        - {$ref: '#/components/parameters/StrategyID'}
-        - {in: query, name: schedule_slot, required: true, schema: {type: string, format: date-time}, description: RFC3339 plan time of the run; the same slot stored on the run and its tasks.}
-      responses:
-        '200':
-          description: The run, its tasks and per-status counts.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: {$ref: '#/components/schemas/ComposeBatchView'}
-        '400': {description: Missing or non-RFC3339 schedule_slot.}
-        '404': {description: "Strategy absent or outside the actor's scope, or no run exists for the slot."}
-  /api/v1/compose-strategies/{strategy_id}/material-states:
-    get:
-      operationId: listComposeStrategyMaterialStates
-      summary: Read what one strategy has done with each of the given materials, for the create drawer's 未使用过/已使用过 split.
-      description: >-
-        The decision behind the split is "does this strategy already have a task
-        row for this material", whatever that task's status: any of the four
-        counts above zero reads as 已使用过 and stays read-only, and all four at
-        zero is the only shape a create accepts — running a pair again is the
-        retry action on its task. A pair never used at all is answered with
-        zeros, so the response always holds one entry per requested id,
-        ascending by material_id — a caller must never read "missing" as "never
-        used". Read-only; it neither blocks nor reserves a create.
-      security: [{sessionCookie: []}]
-      parameters:
-        - {$ref: '#/components/parameters/StrategyID'}
-        - in: query
-          name: material_ids
-          required: true
-          schema: {type: string, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}
-          description: Comma-separated material ids, deduplicated by the server. 1-200 ids.
-      responses:
-        '200':
-          description: One entry per requested id, ascending.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: {$ref: '#/components/schemas/ComposeMaterialState'}
-        '400': {description: "material_ids missing, malformed, empty or over 200 ids (named compose_strategy_invalid)."}
-        '404': {description: Strategy absent or outside the actor's scope (named compose_strategy_not_found).}
   /api/v1/compose-tasks:
     post:
       operationId: createComposeTasks
-      summary: Create one queued compose task per material from an active strategy binding.
-      description: >-
-        One command, one task per item, no shared batch row (PRD §5.4.4/§5.6.5).
-        Each item carries a client-generated request_key; a key the server has
-        already stored answers the existing task instead of creating a second
-        one, so a retried submission is safe. A failed item never stops the
-        others — the response splits created from failed per item. The task row
-        freezes strategy_id, template_code, template_version and the merged,
-        schema-validated config_snapshot at creation; later strategy edits and
-        template versions never reach it (ADR-0021). A material whose pair with
-        this strategy already has a task row — pending, running, succeeded,
-        failed or cancelled — is refused per item (named compose_task_conflict):
-        a pair is produced once, and running it again is the retry action on the
-        existing task. The drawer's 已使用过 read applies the same rule, so what
-        it offers is exactly what the server accepts.
+      summary: Create one manual task batch with one task per material, output setting and copy.
+      description: The nominated operator owns each material usage; the actor is the audit creator. A material may be produced again after
+        explicit remake confirmation. Same command replay returns the original batch and per-material outcome; a new command creates new
+        tasks. A zero-accepted result has a null batch. Each task freezes the final permitted parameter snapshot; retries keep the original
+        task and configuration.
       security: [{sessionCookie: []}]
       requestBody:
         required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/CreateComposeTasks'}
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateComposeTasks'}}}
       responses:
-        '200': {description: '{created: [ComposeTask], failed: [{material_id, request_key, errcode, error, message}]}'}
+        '200':
+          description: Batch and per-material acceptance results, including whole-command replay.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/CreateComposeTasksResult'}}
         '400': {description: Command body invalid (named compose_task_invalid).}
         '403': {description: Strategy or a material is outside the actor's scope (named compose_task_forbidden).}
         '404': {description: Strategy absent or outside the actor's scope (named compose_task_not_found).}
-        '409': {description: The strategy's bound template version is unavailable (named compose_template_unavailable).}
+        '409': {description: 'Template unavailable, reused request key with different command content, or remake confirmation required
+            (compose_task_conflict).'}
     get:
       operationId: listComposeTasks
       summary: List compose tasks visible in the current user's scope.
       security: [{sessionCookie: []}]
       parameters:
-        - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
-        - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, immediate, scheduled]}}
-        - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
-        - {$ref: '#/components/parameters/CreatedFrom'}
-        - {$ref: '#/components/parameters/CreatedBefore'}
+      - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
+      - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, immediate, scheduled]}}
+      - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned
+          to their own., schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves.,
+        schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical
+          unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string,
+          enum: [mine, team, all]}}
+      - {$ref: '#/components/parameters/CreatedFrom'}
+      - {$ref: '#/components/parameters/CreatedBefore'}
+      - {in: query, name: search, schema: {type: string}, description: Task name or exact task/material/batch ID.}
+      - {in: query, name: batch_id, schema: {type: integer, minimum: 1}}
+      - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+      - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
       responses:
-        '200': {description: '[ComposeTask] — newest first, at most 200 matches after scoped filters.'}
+        '200':
+          description: Exact server-paged scoped task results, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/ComposeTaskPage'}}
         '400': {description: Invalid filter (named compose_task_invalid).}
   /api/v1/compose-tasks/{task_id}:
     get:
@@ -358,41 +295,26 @@ paths:
         '404': {description: Task absent or outside the actor's scope.}
         '409': {description: Task is neither cancelled nor a failed task other than execution_uncertain (named compose_task_not_retryable).}
   /api/v1/compose-tasks/{task_id}/uncertain-review:
-    get:
-      operationId: listComposeUncertainReviews
-      summary: Read human verification records for one visible task.
-      description: Admins and same-team senior operators only. Returns records in attempt order; an empty list means the execution_uncertain failure is still awaiting verification. Records are human declarations, not automated process checks.
-      security: [{sessionCookie: []}]
-      parameters: [{$ref: '#/components/parameters/TaskID'}]
-      responses:
-        '200': {description: '[ComposeUncertainReview] for the task.'}
-        '403': {description: Actor is neither an admin nor a same-team senior operator (named compose_task_forbidden).}
-        '404': {description: Task absent or outside the actor's scope.}
     post:
       operationId: resolveComposeUncertain
       summary: Verify an uncertain execution and retry the same task.
-      description: >-
-        Admins and same-team senior operators only. The reviewer must independently
-        verify that the old FFmpeg process has stopped and no output has been
-        committed, then provide a reviewable evidence note. A guarded transaction
-        records the declaration, audit event and manual next attempt, and requeues
-        only a currently failed/execution_uncertain task with no composite output.
-        This endpoint does not claim to verify the external process automatically.
-        An unverified task remains failed/execution_uncertain and cannot use
-        ordinary retry.
+      description: Admins and same-team senior operators only. The reviewer must independently verify that the old FFmpeg process has
+        stopped and no output has been committed, then provide a reviewable evidence note. A guarded transaction records the declaration,
+        audit event and manual next attempt, and requeues only a currently failed/execution_uncertain task with no composite output. This
+        endpoint does not claim to verify the external process automatically. An unverified task remains failed/execution_uncertain and
+        cannot use ordinary retry.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody:
         required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/ResolveComposeUncertainInput'}
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResolveComposeUncertainInput'}}}
       responses:
-        '200': {description: ComposeUncertainResolution with the current task projection and persisted review; a Worker may already have claimed the requeued task.}
+        '200': {description: ComposeUncertainResolution with the current task projection and persisted review; a Worker may already have
+            claimed the requeued task.}
         '400': {description: Missing verification declarations or invalid evidence note (named compose_task_invalid).}
         '403': {description: Actor is neither an admin nor a same-team senior operator (named compose_task_forbidden).}
         '404': {description: Task absent or outside the actor's scope.}
-        '409': {description: "Task changed, was already resolved, or has a committed output (named compose_task_not_retryable)."}
+        '409': {description: 'Task changed, was already resolved, or has a committed output (named compose_task_not_retryable).'}
   /api/v1/compose-tasks/{task_id}/cancel:
     post:
       operationId: cancelComposeTask
@@ -510,33 +432,66 @@ paths:
     get:
       operationId: listMaterials
       summary: List the team's public material library, optionally narrowed by category and usage dimensions.
-      description: >-
-        The library is the team's public selection pool, not each operator's own
-        working set. An ordinary or senior operator sees every material in their
-        team regardless of which categories they are responsible for; a category is a
-        filter, not a visibility boundary. An administrator must name the target
-        team to read one team's library. Each material carries the viewer's own
-        relation (`usage_status` / `added_at`), whether the viewer has produced a
-        successful output from it (`my_usage`), and the team's known use
-        (`usage`). Those three dimensions are independent and are also accepted
-        as filters. Each material also names who put it into the library
-        (`created_by`, `created_by_name`), a fact about the material that every
-        role reads. "My Materials" remains the personal working set and is read
-        from `/api/v1/my-materials`.
+      description: The library is the team's public selection pool, not each operator's own working set. An ordinary or senior operator
+        sees every material in their team regardless of which categories they are responsible for; a category is a filter, not a visibility
+        boundary. An administrator must name the target team to read one team's library. Each material carries the viewer's own relation
+        (`usage_status` / `added_at`), whether the viewer has produced a successful output from it (`my_usage`), and the team's known
+        use (`usage`). Those three dimensions are independent and are also accepted as filters. Each material also names who put it into
+        the library (`created_by`, `created_by_name`), a fact about the material that every role reads. "My Materials" remains the personal
+        working set and is read from `/api/v1/my-materials`. Selector context enforces the strategy team and exact category even for administrators;
+        defaults usage filters to all and never filters on local downloads or cloud readiness. Known inaccessible sources require a usable
+        cloud input. The viewer success facts remain the actor even while selecting for another owner.
       security: [{sessionCookie: []}]
       parameters:
-        - {in: query, name: search, required: false, description: "Material ID, title, platform content ID or author name substring.", schema: {type: string, maxLength: 100}}
-        - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: category_ids, required: false, description: "One or more exact numeric category IDs, comma separated (at most 50). Narrows the list; it does not restrict visibility.", schema: {type: string}}
-        - {in: query, name: category_id, required: false, description: "Exact category ID, combined with `category_ids` when both are present.", schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: joined, required: false, description: '`joined`: the viewer has an active material usage. `not_joined`: no active usage, which includes a relation that was removed.', schema: {type: string, enum: [joined, not_joined]}}
-        - {in: query, name: my_usage, required: false, description: '`used`: the viewer is the operator of at least one successful composite output. `unused`: no such output.', schema: {type: string, enum: [used, unused]}}
-        - {in: query, name: team_usage, required: false, description: '`used`: at least one successful composite output has a known operator. `unused`: no such output. Historical outputs without an operator count as an output but not as known use.', schema: {type: string, enum: [used, unused]}}
-        - {in: query, name: video_status, required: false, description: Exact source-video preparation state., schema: {type: string, enum: [not_downloaded, downloading, ready, failed]}}
-        - {in: query, name: sort_by, required: false, schema: {type: string, enum: [id, published_at, created_at, updated_at], default: published_at}}
-        - {in: query, name: sort_order, required: false, schema: {type: string, enum: [asc, desc], default: desc}}
+      - {in: query, name: search, required: false, description: 'Material ID, title, platform content ID or author name substring.', schema: {
+          type: string, maxLength: 100}}
+      - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior
+          operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: category_ids, required: false, description: 'One or more exact numeric category IDs, comma separated (at most
+          50). Narrows the list; it does not restrict visibility.', schema: {type: string}}
+      - {in: query, name: category_id, required: false, description: 'Exact category ID, combined with `category_ids` when both are present.',
+        schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: joined, required: false, description: '`joined`: the viewer has an active material usage. `not_joined`: no active
+          usage, which includes a relation that was removed.', schema: {type: string, enum: [joined, not_joined]}}
+      - {in: query, name: my_usage, required: false, description: '`used`: the viewer is the operator of at least one successful composite
+          output. `unused`: no such output.', schema: {type: string, enum: [used, unused]}}
+      - {in: query, name: team_usage, required: false, description: '`used`: at least one successful composite output has a known operator.
+          `unused`: no such output. Historical outputs without an operator count as an output but not as known use.', schema: {type: string,
+          enum: [used, unused]}}
+      - {in: query, name: video_status, required: false, description: Exact source-video preparation state., schema: {type: string, enum: [
+            not_downloaded, downloading, ready, failed]}}
+      - {in: query, name: sort_by, required: false, schema: {type: string, enum: [id, published_at, created_at, updated_at, view_count,
+            like_count, favorite_count], default: published_at}}
+      - {in: query, name: sort_order, required: false, schema: {type: string, enum: [asc, desc], default: desc}}
+      - {in: query, name: strategy_id, schema: {type: integer, minimum: 1}, description: Authorized selector context; fixes team and exact
+          category to this readable enabled strategy.}
+      - {in: query, name: operator_id, schema: {type: integer, minimum: 1}, description: Required with strategy_id and must equal its
+          valid assigned operator. Without selector context the field is forbidden.}
+      - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+      - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 200, default: 20}}
+      - {in: query, name: published_from, schema: {type: string, format: date-time}, description: Inclusive publication boundary.}
+      - {in: query, name: published_before, schema: {type: string, format: date-time}, description: Exclusive publication boundary.}
+      - {in: query, name: view_count_min, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: view_count_max, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: like_count_min, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: like_count_max, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: favorite_count_min, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never
+          satisfy the bound.}
+      - {in: query, name: favorite_count_max, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never
+          satisfy the bound.}
       responses:
-        '200': {description: "Visible materials with their video preparation projection, the viewer's relation and the team's use summary."}
+        '200':
+          description: Server-paged matching rows and exact total, ordered by publication time descending by default.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/MaterialPage'}}
         '400': {description: Invalid filter value.}
         '403': {description: Actor is disabled or names another team.}
   /api/v1/materials/{material_id}:
@@ -552,25 +507,86 @@ paths:
   /api/v1/materials/{material_id}/usages:
     post:
       operationId: addMaterialUsage
-      summary: Idempotently create or restore the current user's material usage.
+      summary: Join or restore a personal material, or explicitly confirm authorized owner selection.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/MaterialID'}]
-      responses:
-        '200': {description: Existing active usage returned.}
-        '201': {description: New or restored active usage returned.}
+      responses: {'200': {description: Existing active usage returned.}, '201': {description: New or restored active usage returned.},
+        '400': {description: Malformed selector context.}, '403': {description: 'Unauthorized owner, team or category context.'}, '409': {
+          description: Material source unavailable and no usable cloud input.}}
+      description: 'Without context this preserves the logged-in user join-only behavior and does not prepare video. With strategy_id/operator_id
+        this confirms selection: verify strategy, owner, team and exact category, join or restore that owner relation, then ensure deduplicated
+        Cloud preparation when needed. Cancellation and all reads produce no mutations. Local download permission remains scoped to the
+        logged-in downloader.'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              dependentRequired: {strategy_id: [operator_id], operator_id: [strategy_id]}
+              properties: {strategy_id: {type: integer, minimum: 1}, operator_id: {type: integer, minimum: 1}}
   /api/v1/my-materials:
     get:
       operationId: listMyMaterialUsages
-      summary: List the current user's material usages, in both states.
-      description: >-
-        Every relation the user has with a material, not only the ones in use.
-        A given-up relation is returned as such — `status: removed` with the
-        moment it was given up — because that row is what "My Materials" renders
-        as 已放弃 and what its 恢复使用 action addresses. `material` is embedded on
-        each usage, so the page needs no second request.
+      summary: Read paged personal material relations, or an authorized strategy operator workset.
+      description: Independent browsing remains the logged-in user only and defaults to active plus removed relations; usage_status narrows
+        it. In selector context only active relations of the nominated strategy operator are returned. My-use facts always refer to the
+        logged-in actor and team-use includes that actor. Reads never join materials or start preparation; owner context grants no local-file
+        or download permission.
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: "The user's usages, active and removed, each with its material."}
+        '200':
+          description: Server-paged matching rows and exact total, ordered by publication time descending by default.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/MaterialUsagePage'}}
+      parameters:
+      - {in: query, name: search, required: false, description: 'Material ID, title, platform content ID or author name substring.', schema: {
+          type: string, maxLength: 100}}
+      - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior
+          operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: category_ids, required: false, description: 'One or more exact numeric category IDs, comma separated (at most
+          50). Narrows the list; it does not restrict visibility.', schema: {type: string}}
+      - {in: query, name: category_id, required: false, description: 'Exact category ID, combined with `category_ids` when both are present.',
+        schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: joined, required: false, description: '`joined`: the viewer has an active material usage. `not_joined`: no active
+          usage, which includes a relation that was removed.', schema: {type: string, enum: [joined, not_joined]}}
+      - {in: query, name: my_usage, required: false, description: '`used`: the viewer is the operator of at least one successful composite
+          output. `unused`: no such output.', schema: {type: string, enum: [used, unused]}}
+      - {in: query, name: team_usage, required: false, description: '`used`: at least one successful composite output has a known operator.
+          `unused`: no such output. Historical outputs without an operator count as an output but not as known use.', schema: {type: string,
+          enum: [used, unused]}}
+      - {in: query, name: video_status, required: false, description: Exact source-video preparation state., schema: {type: string, enum: [
+            not_downloaded, downloading, ready, failed]}}
+      - {in: query, name: sort_by, required: false, schema: {type: string, enum: [id, published_at, created_at, updated_at, view_count,
+            like_count, favorite_count], default: published_at}}
+      - {in: query, name: sort_order, required: false, schema: {type: string, enum: [asc, desc], default: desc}}
+      - {in: query, name: strategy_id, schema: {type: integer, minimum: 1}, description: Authorized selector context; fixes team and exact
+          category to this readable enabled strategy.}
+      - {in: query, name: operator_id, schema: {type: integer, minimum: 1}, description: Required with strategy_id and must equal its
+          valid assigned operator. Without selector context the field is forbidden.}
+      - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+      - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 200, default: 20}}
+      - {in: query, name: published_from, schema: {type: string, format: date-time}, description: Inclusive publication boundary.}
+      - {in: query, name: published_before, schema: {type: string, format: date-time}, description: Exclusive publication boundary.}
+      - {in: query, name: view_count_min, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: view_count_max, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: like_count_min, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: like_count_max, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never satisfy
+          the bound.}
+      - {in: query, name: favorite_count_min, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never
+          satisfy the bound.}
+      - {in: query, name: favorite_count_max, schema: {type: integer, minimum: 0}, description: Inclusive range; unknown counts never
+          satisfy the bound.}
+      - {in: query, name: usage_status, schema: {type: string, enum: [active, removed, all], default: all}, description: Normal personal
+          browsing only. Selector context always uses active relations.}
   /api/v1/material-usages/{usage_id}:
     delete:
       operationId: removeMaterialUsage
@@ -640,6 +656,97 @@ paths:
         # asleep yields a queueing task instead: reachability is answered when a lease is
         # claimed, not guessed at click time. (It read "No fresh bound Local Agent node"
         # before 2026.09.27, which is what the Desktop bind/refresh button used to reset.)
+  /api/v1/compose-tasks/batch-cancel:
+    post:
+      operationId: batchCancelComposeTasks
+      summary: Cancel authorized tasks from a whole batch or explicit IDs.
+      description: Exactly one scope is required. The server enumerates the complete batch independently of loaded pages, fixes the operation
+        set and rechecks permission/state per task. Running cancellation is only a request until the worker confirms termination; retry
+        retains task/batch identity and snapshots.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ComposeBulkInput'}}}
+      responses:
+        '200':
+          description: Per-item accepted, skipped or failed outcomes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/ComposeBulkResult'}}
+        '400': {description: Invalid or ambiguous operation scope.}
+        '404': {description: Batch outside actor scope.}
+  /api/v1/compose-task-batches/{batch_id}:
+    get:
+      operationId: getComposeTaskBatch
+      summary: Read batch identity, entire-batch status counts and allowed action counts.
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: batch_id, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200':
+          description: Batch with whole-batch progress facts and action counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/ComposeTaskBatchDetail'}}
+        '404': {description: Batch absent or outside actor scope.}
+  /api/v1/compose-tasks/batch-retry:
+    post:
+      operationId: batchRetryComposeTasks
+      summary: Retry authorized tasks from a whole batch or explicit IDs.
+      description: Exactly one scope is required. The server enumerates the complete batch independently of loaded pages, fixes the operation
+        set and rechecks permission/state per task. Running cancellation is only a request until the worker confirms termination; retry
+        retains task/batch identity and snapshots.
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ComposeBulkInput'}}}
+      responses:
+        '200':
+          description: Per-item accepted, skipped or failed outcomes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/ComposeBulkResult'}}
+        '400': {description: Invalid or ambiguous operation scope.}
+        '404': {description: Batch outside actor scope.}
+  /api/v1/compose-task-batches:
+    get:
+      operationId: listComposeTaskBatches
+      summary: Read authorized task batches with server paging and whole-batch counts.
+      security: [{sessionCookie: []}]
+      parameters:
+      - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
+      - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, immediate, scheduled]}}
+      - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned
+          to their own., schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves.,
+        schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical
+          unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string,
+          enum: [mine, team, all]}}
+      - {$ref: '#/components/parameters/CreatedFrom'}
+      - {$ref: '#/components/parameters/CreatedBefore'}
+      - {in: query, name: search, schema: {type: string}, description: Task name or exact task/material/batch ID.}
+      - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+      - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Matching real batches and full-batch task counts; local task filters do not alter counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties: {errcode: {type: integer}, message: {type: string}, logid: {type: string}, data: {$ref: '#/components/schemas/ComposeTaskBatchPage'}}
+        '400': {description: Invalid filters.}
 components:
   schemas:
     ComposeTemplate:
@@ -717,7 +824,8 @@ components:
     ComposeTaskBatch:
       type: object
       additionalProperties: false
-      required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at, counts]
+      required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at,
+        counts, operator_name, strategy_name]
       properties:
         id: {type: integer, format: int64}
         name: {type: string}
@@ -725,11 +833,28 @@ components:
         category_id: {type: integer, format: int64, minimum: 1}
         operator_id: {type: [integer, 'null'], format: int64}
         compose_strategy_id: {type: integer, format: int64}
-        trigger_type: {type: string, enum: [manual, immediate, scheduled], description: "Manual material creation, immediate strategy execution, or scheduled strategy execution."}
+        trigger_type: {type: string, enum: [manual, immediate, scheduled], description: 'Manual material creation, immediate strategy execution,
+            or scheduled strategy execution.'}
         created_by: {type: integer, format: int64}
-        config_snapshot: {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Frozen output settings projected for readers; fixed guide addresses remain redacted."}
+        config_snapshot:
+          oneOf:
+          - {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}}
+          - type: object
+            required: [settings, acceptance]
+            properties:
+              settings: {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}}
+              acceptance:
+                type: array
+                items:
+                  type: object
+                  required: [material_id, code, message]
+                  properties: {material_id: {type: integer, minimum: 1}, code: {type: string}, message: {type: string}}
+          description: Frozen settings and optional manual acceptance outcomes. Guide addresses are redacted; legacy batches may return
+            an empty array.
         created_at: {type: string, format: date-time}
         counts: {$ref: '#/components/schemas/ComposeBatchCounts'}
+        operator_name: {type: string, description: Resolved owner display name; empty if unknown.}
+        strategy_name: {type: string, description: Resolved strategy display name.}
     BasicCutV1Config:
       type: object
       additionalProperties: false
@@ -815,13 +940,10 @@ components:
       type: object
       additionalProperties: false
       required: [material_id, success_count, active_count, failed_count, cancelled_count, last_task_at]
-      properties:
-        material_id: {type: integer, format: int64}
-        success_count: {type: integer, minimum: 0, description: "Tasks of this (strategy, material) that reached success. Above zero means the pair is 已使用过."}
-        active_count: {type: integer, minimum: 0, description: "Tasks of this (strategy, material) still pending or running — the drawer marks the row 排队中 and the create endpoint refuses a new one."}
-        failed_count: {type: integer, minimum: 0, description: "Failed tasks, shown as 上次失败 in the drawer. Above zero means the pair is 已使用过 and waits for 重试 on its task."}
-        cancelled_count: {type: integer, minimum: 0, description: "Cancelled tasks, shown as 已取消 in the drawer. Above zero means the pair is 已使用过; re-running it is 重试 on the cancelled task."}
-        last_task_at: {type: [string, 'null'], format: date-time, description: Creation time of the newest task of this pair; null when there is none.}
+      properties: {material_id: {type: integer, format: int64}, success_count: {type: integer, minimum: 0}, active_count: {type: integer,
+          minimum: 0}, failed_count: {type: integer, minimum: 0}, cancelled_count: {type: integer, minimum: 0}, last_task_at: {type: [string,
+            'null'], format: date-time}}
+      description: Read-only history for confirmation; previous production may be made again using a new command and batch.
     ComposeScheduleRun:
       type: object
       required: [batch_id, run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
@@ -863,6 +985,8 @@ components:
         success: {type: integer, minimum: 0}
         failed: {type: integer, minimum: 0}
         cancelled: {type: integer, minimum: 0}
+      description: Counts over every authorized task in the real batch, independent of local filters. Ended progress is (success+failed+cancelled)/total;
+        success rate remains separate.
     ComposeBatchView:
       type: object
       required: [run, tasks, counts]
@@ -930,30 +1054,23 @@ components:
     CreateComposeTasks:
       type: object
       additionalProperties: false
-      required: [strategy_id, items]
+      required: [strategy_id, name]
+      oneOf: [{required: [request_key, material_ids]}, {required: [items]}]
       properties:
-        strategy_id: {type: integer, format: int64}
-        operator_id: {type: integer, format: int64, minimum: 1, description: Optional echo of the strategy's operator. When present it must equal that operator; the task always snapshots the strategy's assignment.}
-        name:
-          type: string
-          maxLength: 60
-          description: >-
-            Optional label for the whole command. When present, every created
-            task is named `<name>-<n>` in submission order, or exactly `name`
-            when the command carries a single item; when absent or blank, each
-            task keeps its derived material · strategy name.
-        config_override:
-          type: object
-          description: >-
-            Optional per-command parameter overrides, merged over the strategy
-            config and validated against the bound template version's schema;
-            the merge, not the override alone, is what the snapshot stores.
-            guide_video_url belongs to the strategy and cannot be overridden by a task.
-        items:
-          type: array
-          minItems: 1
-          maxItems: 50
-          items: {$ref: '#/components/schemas/CreateComposeTaskItem'}
+        strategy_id: {type: integer, format: int64, minimum: 1}
+        operator_id: {type: integer, format: int64, minimum: 1, description: Optional echo of the valid strategy owner; cannot reassign
+            it.}
+        name: {type: string, minLength: 1, maxLength: 60}
+        request_key: {type: string, minLength: 8, maxLength: 64, description: Whole-command idempotency key scoped to the actor. Same key
+            and content replay; different content conflicts.}
+        material_ids: {type: array, minItems: 1, maxItems: 50, uniqueItems: true, items: {type: integer, format: int64, minimum: 1}}
+        setting_overrides: {type: array, items: {$ref: '#/components/schemas/ComposeSettingOverride'}}
+        remake_confirmed: {type: boolean, default: false, description: Explicitly acknowledge previous successful or unfinished production
+            before creating another batch.}
+        config_override: {type: object, deprecated: true, description: Legacy parameter override for a single setting; cannot be combined
+            with setting_overrides. Editable parameter validation still applies.}
+        items: {type: array, minItems: 1, maxItems: 50, deprecated: true, description: Legacy material/request_key adapter; cannot be combined
+            with material_ids., items: {$ref: '#/components/schemas/CreateComposeTaskItem'}}
     CreateComposeTaskItem:
       type: object
       additionalProperties: false
@@ -1037,27 +1154,27 @@ components:
         updated_at: {type: string, format: date-time}
     ComposeTaskAttempt:
       type: object
-      required: [id, compose_task_id, attempt, source, started_at, outcome, stage, error_code, error_message, steps, created_at, updated_at]
+      required: [id, compose_task_id, attempt, source, started_at, outcome, stage, error_code, error_message, steps, created_at, updated_at,
+        finished_at]
       properties:
         id: {type: integer, format: int64}
         compose_task_id: {type: integer, format: int64}
         attempt: {type: integer, minimum: 1, description: Matches the task's attempt_count for that run.}
-        source: {type: string, enum: [auto, manual], description: auto — the worker's own transient retry; manual — an authorized human retry.}
+        source: {type: string, enum: [auto, manual], description: auto — the worker's own transient retry; manual — an authorized human
+            retry.}
         started_at: {type: string, format: date-time, nullable: true, description: Null until the worker claims the attempt.}
         finished_at: {type: string, format: date-time, nullable: true, description: Null while the attempt is pending or running.}
         outcome: {type: string, enum: [pending, running, success, failed, cancelled]}
         stage: {type: string, description: Last projected phase of the attempt; empty until the worker reports progress.}
         error_code: {type: string}
-        error_message: {type: string, description: "Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned."}
-        steps:
-          type: array
-          description: >-
-            The steps this attempt completed or failed on, in execution order.
-            Server-authored labels and allowlisted metrics only — never a source
-            address, a storage key, a local path or raw FFmpeg output.
-          items: {$ref: '#/components/schemas/ComposeTaskAttemptStep'}
+        error_message: {type: string, description: 'Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never
+            returned.'}
+        steps: {type: array, description: 'The steps this attempt completed or failed on, in execution order. Server-authored labels and
+            allowlisted metrics only — never a source address, a storage key, a local path or raw FFmpeg output.', items: {$ref: '#/components/schemas/ComposeTaskAttemptStep'}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        uncertain_review: {$ref: '#/components/schemas/ComposeUncertainReview', description: Only admins and same-team senior operators
+            receive the recorded review event and evidence; omitted for ordinary operators. At most one per attempt.}
     ComposeTaskAttemptStep:
       type: object
       additionalProperties: false
@@ -1106,6 +1223,161 @@ components:
       properties:
         task: {$ref: '#/components/schemas/ComposeTask'}
         review: {$ref: '#/components/schemas/ComposeUncertainReview'}
+    ComposeSettingOverride:
+      type: object
+      additionalProperties: false
+      required: [key, params]
+      properties: {key: {type: string}, params: {type: object, description: Partial parameter changes within the existing setting. Only
+            template parameters with editable=true may be supplied; fixed/unknown keys and guide_video_url are rejected. Group name/platforms/copies/order
+            cannot change.}}
+    ComposeTaskPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/ComposeTask'}}, total: {type: integer, minimum: 0}, page: {
+          type: integer, minimum: 1}, page_size: {type: integer, minimum: 1}}
+    ComposeBatchActions:
+      type: object
+      required: [retry_count, cancel_count]
+      properties: {retry_count: {type: integer, minimum: 0}, cancel_count: {type: integer, minimum: 0}}
+      description: Eligible task counts from the entire batch, independent of task-page filters. Retry is zero for roles without retry permission.
+    MaterialUsage:
+      type: object
+      description: 「我的素材」里的一条关系；移出保留同一行，只把状态改写，故历史可追溯、可恢复。
+      required: [id, team_id, material_id, user_id, status, created_at, updated_at]
+      properties:
+        id: {type: integer, format: int64}
+        team_id: {type: integer, format: int64}
+        material_id: {type: integer, format: int64}
+        user_id: {type: integer, format: int64}
+        status: {type: string, enum: [active, removed]}
+        download_status: {type: string, enum: [downloading, downloaded, failed], description: 该用户在这条素材上的下载生命周期，按「最新一条 user_download 任务」派生
+            （pending/running→downloading；success→downloaded；failed/cancelled→failed）， 与素材云侧 `video_status` 正交。从未下载过时该键不出现。}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        removed_at: {type: string, format: date-time, description: 关系仍是 active 时该键不出现。}
+        material: {type: object, description: 这条关系指向的素材，随列表一并返回，键集即上方 `Material`。没有它，「我的素材」 列表每行都要再发一次请求才能显示标题与视频状态 —— 代价付在页面上。 这里不重复列它的属性：同一批键写两遍就是第二个落点，改了这处忘了那处不会有任何症状。}
+    CreateComposeTasksResult:
+      type: object
+      required: [batch, replayed, created, failed]
+      properties: {batch: {oneOf: [{$ref: '#/components/schemas/ComposeTaskBatch'}, {type: 'null'}]}, replayed: {type: boolean}, created: {
+          type: array, items: {$ref: '#/components/schemas/ComposeTask'}}, failed: {type: array, items: {$ref: '#/components/schemas/ComposeTaskCreateFailure'}}}
+    ComposeTaskCreateFailure:
+      type: object
+      required: [material_id, request_key, errcode, error, message]
+      properties: {material_id: {type: integer, minimum: 1}, request_key: {type: string}, errcode: {type: integer}, error: {type: string},
+        message: {type: string}}
+    ComposeBulkInput:
+      type: object
+      additionalProperties: false
+      oneOf: [{required: [batch_id], not: {required: [task_ids]}}, {required: [task_ids], not: {required: [batch_id]}}]
+      properties: {batch_id: {type: integer, minimum: 1}, task_ids: {type: array, minItems: 1, maxItems: 200, uniqueItems: true, items: {
+            type: integer, minimum: 1}}}
+    Material:
+      type: object
+      description: Material projection, successful-output use facts and optional authorized selection metadata. Unknown optional values
+        are not fabricated.
+      required:
+      - id
+      - team_id
+      - source_content_id
+      - title
+      - source_url
+      - platform
+      - status
+      - video_status
+      - view_count
+      - like_count
+      - favorite_count
+      - comment_count
+      - share_count
+      - created_at
+      - updated_at
+      - created_by
+      properties:
+        id: {type: integer, format: int64}
+        team_id: {type: integer, format: int64}
+        source_content_id: {type: integer, format: int64}
+        title: {type: string}
+        source_url: {type: string, format: uri}
+        platform: {type: string}
+        video_status: {type: string, enum: [not_downloaded, downloading, ready, failed]}
+        status: {type: string, enum: [available, paused, delisted]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        created_by: {type: integer, format: int64}
+        created_by_name: {type: string}
+        usage_status: {type: string, enum: [active, removed], description: 当前查看者自己的素材关系状态；没有关系时该键不出现。}
+        added_at: {type: string, format: date-time, description: 当前查看者这条关系建立的时间；没有关系时该键不出现。}
+        my_usage: {type: string, enum: [used, unused], description: 当前查看者是否是至少一条成功成片的负责人。只按成功成片计算：失败、取消、 等待中的成片都不算；移出素材关系后，历史成功成片仍然算「已使用」。}
+        usage:
+          type: object
+          description: 当前团队在这条素材上的成功成片事实，按 (素材, 团队) 聚合，跨团队不合并。 output_count 统计所有成功成片；operator_count 只统计有负责人的成片 —— 历史行没有负责人时仍计入前者的总数，但不计为「有人用过」，也不回填。
+            operators 只返回给高级运营与管理员，普通运营只拿到两个计数。
+          required: [output_count, operator_count]
+          properties:
+            output_count: {type: integer, format: int64, minimum: 0}
+            operator_count: {type: integer, format: int64, minimum: 0}
+            operators:
+              type: array
+              description: 有负责人的成功成片按操作人分组；普通运营看不到该键。
+              items:
+                type: object
+                required: [id, output_count]
+                properties: {id: {type: integer, format: int64}, name: {type: string, description: 姓名目录里查不到时该键不出现。}, output_count: {type: integer,
+                    format: int64, minimum: 0}}
+        category_id: {type: integer, format: int64, minimum: 1, description: 素材未归类目时该键不出现。}
+        author_name: {type: string, description: 为空时该键不出现。}
+        cover_url: {type: string, format: uri, description: 来源没有封面时该键不出现。}
+        author_home_url: {type: string, format: uri, description: 来源没有作者主页时该键不出现。}
+        view_count: {type: integer, format: int64}
+        like_count: {type: integer, format: int64}
+        favorite_count: {type: integer, format: int64}
+        comment_count: {type: integer, format: int64}
+        share_count: {type: integer, format: int64}
+        published_at: {type: string, format: date-time, description: 来源没有发布时间时该键不出现。}
+        video_size_bytes: {type: integer, format: int64, description: 准备通过校验前该键不出现。}
+        video_sha256: {type: string, description: 准备通过校验前该键不出现。}
+        media_summary: {type: object, description: 准备通过校验前该键不出现；形状由媒体探针决定，不是对外契约。}
+        last_error: {type: string, description: 最近一次准备没有错误时该键不出现。}
+        video_prepared_at: {type: string, format: date-time, description: 尚未有一次通过校验的准备时该键不出现。}
+        selectable: {type: boolean, description: Selector eligibility; prior successful or unfinished tasks do not automatically prevent
+            a new confirmed production.}
+        selection_reason: {type: string, description: Source or material refusal reason when selection is unavailable.}
+        strategy_history: {$ref: '#/components/schemas/ComposeMaterialState'}
+        metric_presence:
+          type: object
+          required: [view_count, like_count, favorite_count]
+          properties: {view_count: {type: boolean}, like_count: {type: boolean}, favorite_count: {type: boolean}}
+          description: Selector source evidence. False means unknown; display a dash rather than the legacy numeric default zero.
+    MaterialPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/Material'}}, total: {type: integer, minimum: 0}, page: {type: integer,
+          minimum: 1}, page_size: {type: integer, minimum: 1}}
+    ComposeBulkItem:
+      type: object
+      required: [task_id, status]
+      properties: {task_id: {type: integer, minimum: 1}, status: {type: string, enum: [accepted, skipped, failed]}, reason: {type: string},
+        task: {$ref: '#/components/schemas/ComposeTask'}}
+    ComposeTaskBatchPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/ComposeTaskBatch'}}, total: {type: integer, minimum: 0}, page: {
+          type: integer, minimum: 1}, page_size: {type: integer, minimum: 1}}
+    ComposeTaskBatchDetail:
+      type: object
+      required: [batch, actions]
+      properties: {batch: {$ref: '#/components/schemas/ComposeTaskBatch'}, actions: {$ref: '#/components/schemas/ComposeBatchActions'}}
+    MaterialUsagePage:
+      type: object
+      required: [items, total, page, page_size]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/MaterialUsage'}}, total: {type: integer, minimum: 0}, page: {
+          type: integer, minimum: 1}, page_size: {type: integer, minimum: 1}}
+    ComposeBulkResult:
+      type: object
+      required: [items, accepted, skipped, failed]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/ComposeBulkItem'}}, accepted: {type: integer, minimum: 0}, skipped: {
+          type: integer, minimum: 0}, failed: {type: integer, minimum: 0}}
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   parameters:

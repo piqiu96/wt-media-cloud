@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"strconv"
-	"strings"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -64,7 +63,7 @@ func composeTaskErrorFor(err error) (composeTaskErrorShape, bool) {
 	case errors.Is(err, productionservice.ErrComposeTaskNotRetryable):
 		return composeTaskErrorShape{consts.StatusConflict, 15217, "compose_task_not_retryable", "该任务当前状态不支持重试"}, true
 	case errors.Is(err, productionservice.ErrComposeTaskConflict):
-		return composeTaskErrorShape{consts.StatusConflict, 15219, "compose_task_conflict", "该素材在这个策略下已有任务记录，不能再次创建；如需重跑请在任务列表点「重试」"}, true
+		return composeTaskErrorShape{consts.StatusConflict, 15219, "compose_task_conflict", "素材已有制作记录，请确认再次制作"}, true
 	case errors.Is(err, productionservice.ErrStrategyTemplateUnavailable):
 		return composeTaskErrorShape{consts.StatusConflict, 15213, "compose_template_unavailable", "合成模板版本不可用"}, true
 	}
@@ -106,9 +105,11 @@ func composeTaskFailurePayloads(failed []productionservice.CreateComposeTaskFail
 
 func writeComposeTaskCreated(c *hertzapp.RequestContext, result productionservice.CreateComposeTasksResult) {
 	api.Success(c, struct {
-		Created []model.ComposeTask         `json:"created"`
-		Failed  []composeTaskFailurePayload `json:"failed"`
-	}{Created: result.Created, Failed: composeTaskFailurePayloads(result.Failed)})
+		Batch    *model.ComposeTaskBatch     `json:"batch"`
+		Replayed bool                        `json:"replayed"`
+		Created  []model.ComposeTask         `json:"created"`
+		Failed   []composeTaskFailurePayload `json:"failed"`
+	}{Batch: result.Batch, Replayed: result.Replayed, Created: result.Created, Failed: composeTaskFailurePayloads(result.Failed)})
 }
 
 func ListComposeTasks(_ context.Context, c *hertzapp.RequestContext) {
@@ -116,28 +117,12 @@ func ListComposeTasks(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	input := productionservice.ListComposeTasksInput{Status: strings.TrimSpace(c.Query("status")), TriggerType: strings.TrimSpace(c.Query("trigger_type"))}
-	teamID, operatorID, scope, err := parseComposeListScope(c)
+	input, err := parseTaskListInput(c)
 	if err != nil {
-		api.FailureNamed(c, consts.StatusBadRequest, 15214, "合成任务筛选参数无效："+err.Error(), "compose_task_invalid")
+		api.FailureNamed(c, consts.StatusBadRequest, 15214, "合成任务筛选参数无效", "compose_task_invalid")
 		return
 	}
-	input.TeamID, input.OperatorID, input.OperatorScope = teamID, operatorID, scope
-	from, before, err := parseComposeCreatedRange(strings.TrimSpace(c.Query("created_from")), strings.TrimSpace(c.Query("created_before")))
-	if err != nil {
-		api.FailureNamed(c, consts.StatusBadRequest, 15214, "合成任务时间范围无效", "compose_task_invalid")
-		return
-	}
-	input.CreatedFrom, input.CreatedBefore = from, before
-	if raw := strings.TrimSpace(c.Query("compose_strategy_id")); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value <= 0 {
-			api.FailureNamed(c, consts.StatusBadRequest, 15214, "合成任务筛选参数无效", "compose_task_invalid")
-			return
-		}
-		input.StrategyID = value
-	}
-	items, err := productionservice.ListComposeTasks(current, input)
+	items, err := productionservice.ListComposeTasksPage(current, input)
 	if err != nil {
 		writeComposeTaskError(c, err)
 		return

@@ -2,7 +2,7 @@
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
@@ -26,6 +26,10 @@ import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import MaterialDetailDrawer from '../../materials/MaterialDetailDrawer.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
+import ComposeTaskSelectionActions from '../components/ComposeTaskSelectionActions.vue'
+import ComposeTaskBatchDetail from '../components/ComposeTaskBatchDetail.vue'
+import { platformText } from '../strategySettings.js'
+import { batchProgress } from '../batchActions.js'
 import ComposeTaskCreateDialog from '../components/ComposeTaskCreateDialog.vue'
 import { publicObjectReadUrl } from '../../../shared/utils/objectReadUrl.js'
 
@@ -36,6 +40,14 @@ const router = useRouter()
 const route = useRoute()
 
 const rows = ref([])
+const total = ref(0)
+const selectedTaskKeys = ref([]), knownTaskRows = ref({}), bulkBusy = ref(false)
+const selectedTaskRows = computed(() => selectedTaskKeys.value.map(id => knownTaskRows.value[id]).filter(Boolean))
+const activeView = ref('batches')
+const batchVisible = ref(false)
+const batchID = ref(null)
+const viewPages = { batches: { current: 1, pageSize: 20 }, tasks: { current: 1, pageSize: 20 } }
+function openBatch(row) { batchID.value = row.id; batchVisible.value = true }
 const strategies = ref([])
 const templates = ref([])
 const categories = ref([])
@@ -45,9 +57,10 @@ const operatorsLoading = ref(false)
 let operatorRequest = 0
 const loading = ref(false)
 const error = ref('')
-const filters = ref({ status: '', trigger_type: '', compose_strategy_id: '', created_range: [], team_id: '', operator: '' })
+const filters = ref({ search: '', status: '', trigger_type: '', compose_strategy_id: '', created_range: [], team_id: '', operator: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 const createVisible = ref(false)
+const advancedFilters = ref(false)
 
 const statusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
 const statusTones = { pending: 'warning', running: 'info', success: 'success', failed: 'danger', cancelled: 'neutral' }
@@ -62,7 +75,14 @@ const stageLabels = {
 
 // 列序固定：识别 → 来源 → 结果 → 状态 → 时间 → 操作（AdminUI 规范 §4.1）。
 // 执行阶段是过程信息，只在详情里；列表放的是决策信息。
-const columns = computed(() => [
+const batchColumns = [
+  { colKey: 'id', title: 'ID', width: 80 }, { colKey: 'name', title: '批次名称', width: 240 },
+  { colKey: 'strategy', title: '合成策略', width: 180 }, { colKey: 'operator', title: '负责人', width: 110 },
+  { colKey: 'trigger_type', title: '触发来源', width: 110 }, { colKey: 'progress', title: '全批进度', width: 210 },
+  { colKey: 'created_at', title: '创建时间', width: 160 }, { colKey: 'op', title: '操作', width: opColumnWidth(['详情']), fixed: 'right' },
+]
+const taskColumns = computed(() => [
+  { colKey: 'row-select', type: 'multiple', width: 44, checkProps: () => ({disabled:bulkBusy.value}) },
   { colKey: 'id', title: '任务 ID', width: 90 },
   { colKey: 'name', title: '任务名称', width: 240 },
   { colKey: 'trigger_type', title: '触发方式', width: 100 },
@@ -76,14 +96,20 @@ const columns = computed(() => [
   { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消', '重试']), fixed: 'right' },
 ])
 
+const columns = computed(() => activeView.value === 'batches' ? batchColumns : taskColumns.value)
 const tableScroll = computed(() => ({
   x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
-const pagedRows = computed(() => {
-  const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return rows.value.slice(start, start + pagination.value.pageSize)
+const pagedRows = computed(() => rows.value)
+watch(activeView, (next, previous) => {
+  viewPages[previous] = { ...pagination.value }
+  pagination.value = { ...viewPages[next] }
+  load()
 })
+function query() { pagination.value.current = 1; load() }
+function onPageChange() { load() }
+function onPageSizeChange() { pagination.value.current = 1; load() }
 
 const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }))
 const strategyOptions = computed(() => strategies.value.map((item) => ({ value: String(item.id), label: item.name })))
@@ -97,6 +123,7 @@ function strategyName(row) {
  * 产品口径把这两种等待分开——运行中是在合成，等待素材是在等源文件。
  */
 function statusText(row) {
+  if (row.status === 'running' && row.cancel_requested) return '停止请求已受理'
   if (row.status === 'running' && row.stage === 'waiting_input') return stageLabels.waiting_input
   return statusLabels[row.status] || row.status
 }
@@ -138,7 +165,7 @@ async function load({ quiet = false } = {}) {
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const params = {}
+    const params = { page: pagination.value.current, page_size: pagination.value.pageSize, search: filters.value.search.trim() }
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type
     if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id
@@ -148,9 +175,10 @@ async function load({ quiet = false } = {}) {
     const namedOperator = operatorIdFromOption(filters.value.operator)
     if (isAdmin.value && filters.value.team_id) params.team_id = Number(filters.value.team_id)
     if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator
-    const data = await client.listComposeTasks(params)
-    rows.value = Array.isArray(data) ? data : []
-    if (!quiet) pagination.value.current = 1
+    const data = await (activeView.value === 'batches' ? client.listComposeTaskBatches(params) : client.listComposeTasks(params))
+    rows.value = data.items || []
+    total.value = data.total || 0
+    if (activeView.value === 'tasks') for (const row of rows.value) knownTaskRows.value[row.id] = row
   } catch (e) {
     if (!quiet) error.value = e?.message || '读取合成任务失败'
   } finally {
@@ -159,21 +187,18 @@ async function load({ quiet = false } = {}) {
 }
 
 function reset() {
-  filters.value = { status: '', trigger_type: '', compose_strategy_id: '', created_range: [], team_id: '', operator: '' }
-  load()
+  filters.value = { search: '', status: '', trigger_type: '', compose_strategy_id: '', created_range: [], team_id: '', operator: '' }
+  query()
 }
 
 // 新建走创建抽屉（它自己取「使用中的素材」当候选：入口只剩这一处了）。创建后回到第一屏
 // 重读 —— 新的排队中任务会被列表轮询接管，不需要这一页自己再起一个 timer。
 async function onCreated(result) {
-  const created = result.created || []
-  const failed = result.failed || []
-  if (failed.length > 0) {
-    feedback.toast.error(`已创建 ${created.length} 个任务，${failed.length} 个失败：${failed.map((item) => item.message).join('；')}`)
-  } else {
-    feedback.toast.success(`已创建 ${created.length} 个合成任务`)
-  }
-  await load()
+  const created = result.created || [], failed = result.failed || []
+  if (failed.length) feedback.toast.info(`已创建 ${created.length} 个任务，${failed.length} 项未受理`)
+  else feedback.toast.success(`已创建 ${created.length} 个合成任务`)
+  await query()
+  if (result.batch?.id) openBatch(result.batch)
 }
 
 async function loadStrategies() {
@@ -231,7 +256,7 @@ function onTeamFilterChange() {
 // 列表这一份：页面开着就每 10 秒重读一次（用户 2026-10-27 裁定，去刷新按钮）。
 // 创建/详情打开时让开，避免在脚下换掉正在看的行。
 useAutoRefresh(() => load({ quiet: true }), {
-  shouldSkip: () => createVisible.value || detailVisible.value || reviewBusy.value,
+  shouldSkip: () => createVisible.value || detailVisible.value || batchVisible.value || reviewBusy.value || bulkBusy.value,
 })
 
 const detailVisible = ref(false)
@@ -250,8 +275,6 @@ const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const canFilterOperators = computed(() => isSenior.value || isAdmin.value)
 // 负责人候选只有本团队启用的成员（含本人）：未选择就是团队全部，不造伪选项。
 const operatorFilterOptions = computed(() => operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name })))
-const reviews = ref([])
-const reviewsError = ref('')
 const reviewBusy = ref(false)
 const reviewInput = ref({ oldExecutionStopped: false, noOutputCommitted: false, evidence: '' })
 const reviewValid = computed(() => reviewReady(reviewInput.value))
@@ -261,18 +284,6 @@ const detailPolling = useTaskPolling(() => (detail.value ? reloadDetail(detail.v
 function syncDetailPolling() {
   if (detailVisible.value && (detail.value?.status === 'pending' || detail.value?.status === 'running')) detailPolling.start()
   else detailPolling.stop()
-}
-
-async function loadReviews(id) {
-  reviews.value = []
-  reviewsError.value = ''
-  if (!canReviewUncertain.value) return
-  try {
-    const data = await client.listComposeUncertainReviews(id)
-    reviews.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    reviewsError.value = e?.message || '核对记录读取失败'
-  }
 }
 
 // 「哪些任务能重试」与「为什么没有按钮」都在 retryPolicy 一处：页面据此决定给不给入口，
@@ -300,8 +311,6 @@ async function openDetail(row) {
   outputSummary.value = null
   attempts.value = []
   attemptsError.value = ''
-  reviews.value = []
-  reviewsError.value = ''
   reviewInput.value = { oldExecutionStopped: false, noOutputCommitted: false, evidence: '' }
   try {
     // 按 id 重取：详情里的快照必须是库里存的那份，不是列表加载那一刻的副本。
@@ -313,8 +322,7 @@ async function openDetail(row) {
     }
     attempts.value = []
     attemptsError.value = ''
-    attempts.value = await client.listComposeTaskAttempts(row.id)
-    await loadReviews(row.id)
+    attempts.value = (await client.listComposeTaskAttempts(row.id) || []).sort((a,b) => b.attempt-a.attempt)
   } catch (e) {
     // 任务读不到才关弹窗；执行记录读不到走 attemptsError 就地提示，不掀桌子。
     if (!detail.value) {
@@ -338,8 +346,7 @@ async function reloadDetail(id) {
       client.getComposeOutput(outputID(detail.value)).then((data) => { if (detail.value?.id === id) outputSummary.value = data?.output || null }).catch(() => {})
     }
     attemptsError.value = ''
-    attempts.value = await client.listComposeTaskAttempts(id)
-    await loadReviews(id)
+    attempts.value = (await client.listComposeTaskAttempts(id) || []).sort((a,b) => b.attempt-a.attempt)
   } catch (e) {
     attemptsError.value = e?.message || '执行记录读取失败'
   } finally {
@@ -496,8 +503,9 @@ onMounted(() => {
   sessionClient.me().then((me) => {
     currentUser.value = me
     loadOperators()
-    if (detail.value) loadReviews(detail.value.id)
   }).catch(() => {})
+  const routedBatch = String(route.query.batch_id || '')
+  if (/^\d+$/.test(routedBatch)) openBatch({ id: Number(routedBatch) })
   const taskID = String(route.query.task_id || '')
   if (/^\d+$/.test(taskID)) openDetail({ id: Number(taskID) })
 })
@@ -507,67 +515,68 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page resource-visual-approved compose-tasks-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="合成任务" description="从我的素材创建的合成任务，在这里查看任务状态和生产结果">
+      <ResourcePageHeader title="合成任务" description="查看任务批次、生产进度和执行结果">
         <template #actions>
           <t-button theme="primary" @click="createVisible = true">新建合成任务</t-button>
         </template>
       </ResourcePageHeader>
       <ResourceCard class="compose-tasks-card">
+        <t-tabs v-model="activeView" class="compose-workspace-tabs"><t-tab-panel value="batches" label="任务批次" /><t-tab-panel value="tasks" label="任务列表" /></t-tabs>
         <div class="filter-bar">
-          <!-- 顺序按运营找任务时的顺序：先认团队/策略，再认负责人，然后才是触发方式、状态与时间。 -->
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.team_id" clearable @change="onTeamFilterChange">
-            <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-          </BusinessSelect></label>
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索名称或 ID" @enter="query" /></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.team_id" clearable @change="onTeamFilterChange"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
           <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="operatorsLoading || (isAdmin && !filters.team_id)" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
-          <div class="wt-filter-actions">
-            <t-button theme="primary" @click="load()">查询</t-button>
-            <t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button variant="text" :aria-expanded="advancedFilters" aria-controls="compose-advanced-filters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? '收起筛选' : '高级筛选' }}</t-button></div>
+          <div v-show="advancedFilters" id="compose-advanced-filters" class="wt-advanced-filters">
+            <label class="wt-filter-field"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
+            <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           </div>
         </div>
+        <ComposeTaskSelectionActions v-if="activeView === 'tasks'" :tasks="selectedTaskRows" :can-retry="canRetry" @clear="selectedTaskKeys = []" @busy="bulkBusy = $event" @changed="load({quiet:true})" />
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="还没有合成任务">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedTaskKeys" reserve-selected-row-on-paginate hover size="small" :scroll="tableScroll" empty="还没有合成任务">
             <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
-            <template #name="{ row }"><span class="compose-task-name" :title="taskName(row)">{{ taskName(row) }}</span></template>
+            <template #name="{ row }"><span class="compose-task-name" :title="activeView === 'batches' ? row.name : taskName(row)">{{ activeView === 'batches' ? row.name : taskName(row) }}</span></template>
             <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link></template>
             <template #strategy="{ row }"><t-link class="compose-strategy-link" theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link></template>
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
+            <template #progress="{row}"><span>已结束 {{ batchProgress(row.counts).finished }} / {{ batchProgress(row.counts).total }} · 成功 {{ row.counts?.success ?? 0 }}</span></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
               <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button v-if="canCancelTask(row)" size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="cancel(row)">取消</t-button>
-                <t-button v-if="canRetryTask(row)" size="small" class="wt-secondary-button" variant="outline" @click="retry(row)">重试</t-button>
+                <t-button size="small" class="wt-secondary-button" variant="outline" @click="activeView === 'batches' ? openBatch(row) : openDetail(row)">详情</t-button>
+                <t-button v-if="activeView === 'tasks' && canCancelTask(row)" size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="cancel(row)">取消</t-button>
+                <t-button v-if="activeView === 'tasks' && canRetryTask(row)" size="small" class="wt-secondary-button" variant="outline" @click="retry(row)">重试</t-button>
               </t-space>
             </template>
           </t-table>
         </div>
-        <p v-if="rows.length === 200" class="compose-list-limit">仅展示当前条件下最新的 200 条任务，请缩小时间范围继续查找。</p>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="onPageChange" @page-size-change="onPageSizeChange" /></div>
       </ResourceCard>
 
+      <ComposeTaskBatchDetail v-model:visible="batchVisible" :batch-id="batchID" :can-retry="canRetry" @task="openDetail" @changed="load({quiet:true})" />
       <t-drawer v-model:visible="detailVisible" header="任务详情" size="min(62vw, 880px)" :close-btn="true" :footer="detailFooterOps.length > 0" @close="closeDetail">
         <t-loading :loading="!detail" :show-overlay="true">
           <div v-if="detail" class="compose-detail">
             <t-tabs v-model="detailTab" class="compose-detail__tabs">
-              <t-tab-panel value="overview" label="概览">
+              <t-tab-panel value="overview" label="任务信息">
                 <div class="compose-detail__section">
                   <h4>任务信息</h4>
                   <div class="compose-detail__grid">
                     <div><span class="compose-detail__label">任务名称</span><span>{{ taskName(detail) }}</span></div>
                     <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
                     <div><span class="compose-detail__label">触发方式</span><span>{{ triggerLabel(detail.trigger_type) }}</span></div>
-                    <div><span class="compose-detail__label">创建人 ID</span><span>{{ detail.created_by }}</span></div>
+                    <div><span class="compose-detail__label">任务批次</span><t-link v-if="detail.batch_id" theme="primary" @click="closeDetail(); openBatch({id:detail.batch_id})">批次 {{ detail.batch_id }}</t-link><span v-else>未记录</span></div>
                     <div><span class="compose-detail__label">负责人</span><span>{{ detail.operator_name || '未记录' }}</span></div>
                     <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
-                    <div><span class="compose-detail__label">当前状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusText(detail)" /></div>
+                    <div><span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
+                    <div><span class="compose-detail__label">状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusText(detail)" /></div>
                     <!-- 失败原因就写在任务信息里：找「为什么失败」的人先看的就是这一段，不必
                          再翻到执行记录去对错误码。列表页不加列（详情才需要这个上下文）。 -->
                     <div v-if="detail.status === 'failed'"><span class="compose-detail__label">失败原因</span><span class="compose-detail__failure-reason">{{ safeComposeError(detail.error_code) }}</span></div>
@@ -575,6 +584,18 @@ onMounted(() => {
                   <!-- 重试按钮为什么不在，就写在这里：这一格给的是「不是所有失败都能重试」的
                        那个理由（错误类型 / 账号权限），两列网格里放不下，也不属于任务信息。 -->
                   <p v-if="retryHint(detail, canRetry)" class="compose-detail__hint">{{ retryHint(detail, canRetry) }}</p>
+                </div>
+                <div class="compose-detail__section">
+                  <h4>合成配置</h4>
+                  <p class="compose-detail__hint">任务按创建时的配置执行，后续策略修改不会影响该任务。</p>
+                  <div class="compose-detail__grid compose-detail__snapshot-fields">
+                    <div><span class="compose-detail__label">模板</span><span>{{ detail.template_code }}</span></div>
+                    <div><span class="compose-detail__label">成片设置</span><span>{{ detail.setting_name || '未记录' }} · 第 {{ detail.copy_index || 1 }} 份</span></div>
+                    <div><span class="compose-detail__label">适用平台</span><span>{{ platformText(detail.platforms) }}</span></div>
+                    <div><span class="compose-detail__label">模板版本</span><span>v{{ detail.template_version }}</span></div>
+                    <div v-for="field in snapshotFields(detail)" :key="field.key"><span class="compose-detail__label">{{ field.label }}</span><span>{{ snapshotValue(detail, field) }}</span></div>
+                  </div>
+                  <p v-if="!snapshotFields(detail).length" class="compose-detail__hint">当前没有可安全展示的模板参数定义。</p>
                 </div>
                 <div class="compose-detail__section">
                   <h4>关联信息</h4>
@@ -589,7 +610,6 @@ onMounted(() => {
                     <div><span class="compose-detail__label">当前阶段</span><span>{{ stageText(detail) }}</span></div>
                     <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
                     <div><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
-                    <div><span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
                     <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
                   </div>
                 </div>
@@ -622,18 +642,18 @@ onMounted(() => {
                   <FeedbackAlert v-if="attemptsError" theme="error" :message="attemptsError" />
                   <template v-else>
                     <p v-if="!attempts.length" class="compose-detail__empty">还没有执行记录。</p>
-                    <div v-for="attempt in attempts" :key="attempt.attempt" class="compose-detail__attempt">
-                      <div class="compose-detail__attempt-head">
+                    <details v-for="(attempt, attemptIndex) in attempts" :key="attempt.attempt" :open="attemptIndex === 0" class="compose-detail__attempt">
+                      <summary class="compose-detail__attempt-head">
                         <strong>第 {{ attempt.attempt }} 次执行</strong>
                         <ResourceStatusBadge :tone="outcomeTones[attempt.outcome] || 'neutral'" :label="outcomeLabels[attempt.outcome] || '状态未知'" />
-                      </div>
+                      </summary>
                       <div class="compose-detail__attempt-meta">开始：{{ formatDateTime(attempt.started_at) }} · 结束：{{ formatDateTime(attempt.finished_at) }}</div>
                       <!-- 过程：云端每走完一步追加一条，谁在哪一步倒下、每步花了多久都在这。
                            没有步骤的用户是更早的执行记录（那一列当时还不存在），如实说没有。 -->
                       <ul v-if="attemptSteps(attempt).length > 0" class="compose-detail__steps">
                         <li v-for="step in attemptSteps(attempt)" :key="step.step">
                           <span class="compose-detail__step-name">{{ step.label || '未记录' }}</span>
-                          <span>{{ formatDateTime(step.finished_at) }}</span>
+                          <span>{{ formatDateTime(step.started_at) }} → {{ formatDateTime(step.finished_at) }}</span>
                           <span>用时 {{ formatDurationMs(step.duration_ms) }}</span>
                           <span v-if="stepMetricsText(step)" class="compose-detail__step-metrics">{{ stepMetricsText(step) }}</span>
                           <span v-if="step.outcome === 'failed'" class="compose-detail__step-error">失败：{{ step.error_label || '原因未记录' }}</span>
@@ -646,15 +666,11 @@ onMounted(() => {
                         <p class="compose-detail__attempt-err">失败原因：{{ attempt.error_code === 'execution_uncertain' ? '执行结果不明确，需人工核对' : safeComposeError(attempt.error_code) }}</p>
                         <p class="compose-detail__attempt-meta">可重试：{{ attempt.error_code === UNCERTAIN_CODE ? '不可直接重试' : '可由高级运营提交重试' }}</p>
                       </template>
-                    </div>
-                    <template v-if="canReviewUncertain">
-                      <FeedbackAlert v-if="reviewsError" theme="error" :message="reviewsError" />
-                      <div v-for="review in reviews" :key="review.id" class="compose-detail__attempt">
-                        <strong>第 {{ review.attempt }} 次结果不明确 · 人工核对</strong>
-                        <p class="compose-detail__attempt-meta">核对人 {{ review.actor_user_id }} · {{ formatDateTime(review.created_at) }}</p>
-                        <p class="compose-detail__review-evidence">{{ review.evidence }}</p>
+                      <div v-if="attempt.uncertain_review" class="compose-detail__review">
+                        <strong>人工核对</strong><p class="compose-detail__attempt-meta">核对人 {{ attempt.uncertain_review.actor_user_id }} · {{ formatDateTime(attempt.uncertain_review.created_at) }}</p>
+                        <p v-if="attempt.uncertain_review.evidence" class="compose-detail__review-evidence">{{ attempt.uncertain_review.evidence }}</p>
                       </div>
-                    </template>
+                    </details>
                   </template>
                 </div>
                 <div v-if="detail.status === 'failed' && detail.error_code === 'execution_uncertain'" class="compose-detail__section compose-detail__review">
@@ -670,20 +686,7 @@ onMounted(() => {
                   <p v-else class="compose-detail__hint">请联系高级运营或管理员核对，当前任务不会自动重试。</p>
                 </div>
               </t-tab-panel>
-              <t-tab-panel value="snapshot" label="配置快照">
-                <div class="compose-detail__section">
-                  <h4>创建时的生效配置</h4>
-                  <p class="compose-detail__hint">任务按创建时的配置执行，后续策略修改不会影响该任务。</p>
-                  <div class="compose-detail__grid compose-detail__snapshot-fields">
-                    <div><span class="compose-detail__label">创建时任务名称</span><span>{{ taskName(detail) }}</span></div>
-                    <div><span class="compose-detail__label">合成策略 ID</span><span>{{ detail.compose_strategy_id }}</span></div>
-                    <div><span class="compose-detail__label">模板</span><span>{{ detail.template_code }}</span></div>
-                    <div><span class="compose-detail__label">模板版本</span><span>v{{ detail.template_version }}</span></div>
-                    <div v-for="field in snapshotFields(detail)" :key="field.key"><span class="compose-detail__label">{{ field.label }}</span><span>{{ snapshotValue(detail, field) }}</span></div>
-                  </div>
-                  <p v-if="!snapshotFields(detail).length" class="compose-detail__hint">当前没有可安全展示的模板参数定义。</p>
-                </div>
-              </t-tab-panel>
+
             </t-tabs>
           </div>
         </t-loading>
@@ -750,7 +753,7 @@ onMounted(() => {
 
 <style scoped>
 .compose-tasks-card { padding: 14px 20px 18px; }
-.filter-bar > .compose-date-filter { flex-basis: 300px; }
+.wt-advanced-filters > .compose-date-filter { flex: 0 0 320px; min-width: 280px; max-width: 100%; }
 .compose-date-filter :deep(.t-date-range-picker) { min-width: 0; width: 100%; }
 .compose-task-id { color: var(--wt-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .compose-task-name { display: block; overflow: hidden; color: var(--wt-text-primary); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }

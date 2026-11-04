@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.1"
+revision: "2026.11.05.2"
 
 video_statuses: [not_downloaded, downloading, ready, failed]
 material_usage_statuses: [active, removed]
@@ -11,3 +11,4 @@ compose_target_platforms: [bilibili, baidu, xiaohongshu]
 compose_rule_actions: [match, filter]
 compose_rule_logics: [all, any]
 compose_condition_states: [matched, not_matched, unknown]
+compose_bulk_item_statuses: [accepted, skipped, failed]

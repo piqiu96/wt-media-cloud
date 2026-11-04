@@ -64,10 +64,14 @@ type MaterialUsageSummary struct {
 // Material is the production projection of an M3 source material. It contains
 // a Cloud-owned readiness projection, never a user-local file location.
 type Material struct {
-	ID              int64                `json:"id"`
-	TeamID          identity.TeamID      `json:"team_id"`
-	CategoryID      *identity.CategoryID `json:"category_id,omitempty"`
-	SourceContentID int64                `json:"source_content_id"`
+	MetricPresence  map[string]bool       `json:"metric_presence,omitempty"`
+	Selectable      *bool                 `json:"selectable,omitempty"`
+	SelectionReason string                `json:"selection_reason,omitempty"`
+	StrategyHistory *ComposeMaterialState `json:"strategy_history,omitempty"`
+	ID              int64                 `json:"id"`
+	TeamID          identity.TeamID       `json:"team_id"`
+	CategoryID      *identity.CategoryID  `json:"category_id,omitempty"`
+	SourceContentID int64                 `json:"source_content_id"`
 	// PlatformContentID is the provider's own id for this video, carried so the
 	// worker can ask the provider for the source by the id it knows. It is not
 	// SourceContentID: that is this database's row id in `source_contents`, and a

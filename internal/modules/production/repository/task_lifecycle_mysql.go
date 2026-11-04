@@ -464,7 +464,7 @@ func findComposeStagingCleanupCandidates(db *gorm.DB, limit int) ([]model.Compos
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	rows, err := db.Raw(`SELECT a.task_id, a.attempt FROM compose_task_attempts a WHERE a.staging_cleaned_at IS NULL AND a.outcome IN ('success', 'failed', 'cancelled') AND (a.error_code <> 'execution_uncertain' OR EXISTS (SELECT 1 FROM compose_uncertain_reviews r WHERE r.task_id = a.task_id AND r.attempt = a.attempt)) AND a.attempt > 0 ORDER BY a.id LIMIT ?`, limit).Rows()
+	rows, err := db.Raw(`SELECT a.task_id, a.attempt FROM compose_task_attempts a WHERE a.staging_cleaned_at IS NULL AND a.outcome IN ('success', 'failed', 'cancelled') AND (a.error_code <> 'execution_uncertain' OR a.uncertain_reviewed_at IS NOT NULL) AND a.attempt > 0 ORDER BY a.id LIMIT ?`, limit).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +485,7 @@ func (ComposeTaskStore) MarkStagingCleaned(taskID int64, attempt int) (bool, err
 }
 
 func markComposeStagingCleaned(db *gorm.DB, taskID int64, attempt int, now time.Time) (bool, error) {
-	result := db.Exec(`UPDATE compose_task_attempts a SET a.staging_cleaned_at = ? WHERE a.task_id = ? AND a.attempt = ? AND a.staging_cleaned_at IS NULL AND a.outcome IN ('success', 'failed', 'cancelled') AND (a.error_code <> 'execution_uncertain' OR EXISTS (SELECT 1 FROM compose_uncertain_reviews r WHERE r.task_id = a.task_id AND r.attempt = a.attempt))`, now, taskID, attempt)
+	result := db.Exec(`UPDATE compose_task_attempts a SET a.staging_cleaned_at = ? WHERE a.task_id = ? AND a.attempt = ? AND a.staging_cleaned_at IS NULL AND a.outcome IN ('success', 'failed', 'cancelled') AND (a.error_code <> 'execution_uncertain' OR a.uncertain_reviewed_at IS NOT NULL)`, now, taskID, attempt)
 	if result.Error != nil {
 		return false, result.Error
 	}

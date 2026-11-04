@@ -128,31 +128,10 @@ const runFilters = ref({ trigger_type: '', created_range: [] })
 const appliedRunFilters = ref({ trigger_type: '', created_range: [] })
 let runHistorySequence = 0
 
-// 批次结果归集（CHG-20261015-095）：一次运行创建的一批任务逐素材展开；
-// 统计数字直接来自服务端对库内行的 GROUP BY，页面不做二次推算。
-const batchStatusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
-const batchDetail = ref({})
-
-async function toggleRunBatch(run) {
-  const state = batchDetail.value[run.run_key]
-  if (state) {
-    batchDetail.value[run.run_key] = { ...state, open: !state.open }
-    return
-  }
-  batchDetail.value[run.run_key] = { open: true, loading: true, error: '', view: null }
-  try {
-    const view = await client.listStrategyRunTasks(detailRow.value.id, run.schedule_slot)
-    if (detailRow.value?.id) batchDetail.value[run.run_key] = { open: true, loading: false, error: '', view }
-  } catch (e) {
-    batchDetail.value[run.run_key] = { open: true, loading: false, error: e?.message || '批次任务读取失败', view: null }
-  }
-}
-
-function batchCountText(counts) {
-  if (!counts) return ''
-  return Object.entries(batchStatusLabels)
-    .map(([key, label]) => `${label} ${counts[key] ?? 0}`)
-    .join(' · ')
+function openRunBatch(run) {
+  if (!run.batch_id) return
+  detailVisible.value = false
+  router.push({ name: 'Compose', query: { batch_id: String(run.batch_id) } })
 }
 
 async function loadRunHistory(strategyID) {
@@ -169,7 +148,7 @@ async function loadRunHistory(strategyID) {
       end.setDate(end.getDate() + 1)
       params.created_before = end.toISOString()
     }
-    const data = await client.listStrategyRunHistory(strategyID, params)
+    const data = await client.listStrategyRuns(strategyID, params)
     if (detailRow.value?.id === strategyID && sequence === runHistorySequence) {
       runHistory.value = data.items || []
       runHistoryTotal.value = data.total || 0
@@ -203,12 +182,12 @@ function openDetail(row) {
   runPagination.value = { current: 1, pageSize: 10 }
   runFilters.value = { trigger_type: '', created_range: [] }
   appliedRunFilters.value = { trigger_type: '', created_range: [] }
-  batchDetail.value = {}
   detailVisible.value = true
   loadRunHistory(row.id)
 }
 
 // 筛选走列表接口（search/category_id/template_id/status），页面只对返回行做分页切片。
+const advancedFiltersVisible = ref(false)
 const filters = ref({ search: '', category_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
 
@@ -689,12 +668,10 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="load" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">所属类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
             <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
           </BusinessSelect></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
-            <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
-          </t-select></label>
+
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
@@ -702,6 +679,12 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="load">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
+            <t-button variant="text" @click="advancedFiltersVisible = !advancedFiltersVisible">{{ advancedFiltersVisible ? '收起高级筛选' : '高级筛选' }}</t-button>
+          </div>
+          <div v-if="advancedFiltersVisible" class="wt-advanced-filters">
+          <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
+            <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
+          </t-select></label>
           </div>
         </div>
         <div class="table-scroll-wrap">
@@ -958,21 +941,8 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                     <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
                     <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
                     <template #skipped_count="{ row }">{{ row.skipped?.length ?? 0 }}</template>
-                    <template #op="{ row }"><t-link v-if="row.created_count" theme="primary" @click="toggleRunBatch(row)">{{ batchDetail[row.run_key]?.open ? '收起本次任务' : '查看本次任务' }}</t-link><span v-else>—</span></template>
+                    <template #op="{ row }"><t-link v-if="row.batch_id" theme="primary" @click="openRunBatch(row)">详情</t-link><span v-else>—</span></template>
                   </t-table>
-                </div>
-                <div v-for="run in runHistory.filter((item) => batchDetail[item.run_key]?.open)" :key="run.run_key" class="strategy-history__tasks">
-                  <strong>本次任务 · {{ formatDateTime(run.created_at) }}</strong>
-                  <p v-if="batchDetail[run.run_key].loading" class="strategy-run-message">任务读取中…</p>
-                  <p v-else-if="batchDetail[run.run_key].error" class="strategy-run-message">{{ batchDetail[run.run_key].error }}</p>
-                  <template v-else-if="batchDetail[run.run_key].view">
-                    <p class="strategy-run__counts">{{ batchCountText(batchDetail[run.run_key].view.counts) }}</p>
-                    <div v-for="task in batchDetail[run.run_key].view.tasks" :key="task.id" class="strategy-run__task">
-                      <t-link theme="primary" @click="openRunTask(task)">任务 {{ task.id }} · 素材 {{ task.material_id }}</t-link>
-                      <span>{{ batchStatusLabels[task.status] || task.status }}<template v-if="task.composite_output_id"> · 成片 {{ task.composite_output_id }}</template></span>
-                      <em v-if="task.error_message || task.error_code">{{ task.error_code ? `${task.error_code}: ` : '' }}{{ task.error_message || '—' }}</em>
-                    </div>
-                  </template>
                 </div>
                 <div class="pagination-bar"><t-pagination v-model:current="runPagination.current" v-model:pageSize="runPagination.pageSize" :total="runHistoryTotal" :page-size-options="[10, 20, 50]" @current-change="onRunPageChange" @page-size-change="onRunPageChange" /></div>
               </t-loading>

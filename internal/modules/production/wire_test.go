@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
@@ -86,7 +87,13 @@ func readyMaterial() model.Material {
 	added := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	size := int64(4096)
 	prepared := time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC)
+	selectable := true
 	return model.Material{
+		Selectable:      &selectable,
+		SelectionReason: "source_unavailable",
+		StrategyHistory: &model.ComposeMaterialState{MaterialID: 7, SuccessCount: 2},
+		MetricPresence:  map[string]bool{"view_count": true, "like_count": true, "favorite_count": true},
+		SourceObjectKey: "private-material-object-key",
 		ID:              7,
 		TeamID:          3,
 		CategoryID:      &category,
@@ -135,10 +142,9 @@ func TestMaterialBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 		t.Fatal("contract has no Material schema")
 	}
 	want := schemaPropertyNames(schema.Properties)
-	// 31 = 25（素材自身与来源投影）+ 4（查看者关系与团队使用投影，CHG-20261026-104）
-	// + 2（素材操作人 created_by / created_by_name，CHG-20261015-098 T-21）。
-	if len(want) != 31 {
-		t.Fatalf("Material declares %d properties, want the measured 31: %v", len(want), want)
+	// Existing 31 properties plus the four optional authorized selector projections.
+	if len(want) != 35 {
+		t.Fatalf("Material declares %d properties, want 35: %v", len(want), want)
 	}
 
 	if got := marshalledKeys(t, readyMaterial()); !reflect.DeepEqual(got, want) {
@@ -314,6 +320,7 @@ func TestTheComposeTaskAttemptResponseMatchesTheOpenAPISchema(t *testing.T) {
 			Schemas struct {
 				ComposeTaskAttempt struct {
 					Properties map[string]yaml.Node `yaml:"properties"`
+					Required   []string             `yaml:"required"`
 				} `yaml:"ComposeTaskAttempt"`
 			} `yaml:"schemas"`
 		} `yaml:"components"`
@@ -325,8 +332,28 @@ func TestTheComposeTaskAttemptResponseMatchesTheOpenAPISchema(t *testing.T) {
 	if len(schema) == 0 {
 		t.Fatal("the OpenAPI file declares no ComposeTaskAttempt properties")
 	}
-	if got, want := marshalledKeys(t, model.ComposeTaskAttempt{}), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
-		t.Errorf("ComposeTaskAttempt keys = %v, contract = %v", got, want)
+	base := marshalledKeys(t, model.ComposeTaskAttempt{})
+	if got, want := base, sortedCopy(parsed.Components.Schemas.ComposeTaskAttempt.Required); !reflect.DeepEqual(got, want) {
+		t.Fatalf("base attempt keys=%v required=%v", got, want)
+	}
+	if slices.Contains(base, "uncertain_review") {
+		t.Fatal("unreviewed or ordinary attempt leaked privileged evidence key")
+	}
+	reviewed := model.ComposeTaskAttempt{UncertainReview: &model.ComposeUncertainReview{Evidence: "independently checked old execution stopped"}}
+	if got, want := marshalledKeys(t, reviewed), schemaPropertyNames(schema); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reviewed attempt keys=%v contract=%v", got, want)
+	}
+	body, err := json.Marshal(reviewed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	var review model.ComposeUncertainReview
+	if err := json.Unmarshal(fields["uncertain_review"], &review); err != nil || review.Evidence != reviewed.UncertainReview.Evidence {
+		t.Fatalf("privileged review did not survive projection: %+v %v", review, err)
 	}
 }
 
@@ -421,7 +448,7 @@ func TestTheComposeTaskResponseMatchesTheOpenAPISchema(t *testing.T) {
 // The run-tasks endpoint returns the service's own JSON. The page renders the
 // run's counts as-is, so both the envelope keys and the five count fields have
 // to be declared — a missing count would read as zero.
-func TestTheComposeBatchViewResponseMatchesTheOpenAPISchema(t *testing.T) {
+func TestTheComposeBatchDetailResponseMatchesTheOpenAPISchema(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
 	if err != nil {
 		t.Fatalf("read compose batch view openapi: %v", err)
@@ -432,7 +459,7 @@ func TestTheComposeBatchViewResponseMatchesTheOpenAPISchema(t *testing.T) {
 				View struct {
 					Properties map[string]yaml.Node `yaml:"properties"`
 					Required   []string             `yaml:"required"`
-				} `yaml:"ComposeBatchView"`
+				} `yaml:"ComposeTaskBatchDetail"`
 				Counts struct {
 					Properties map[string]yaml.Node `yaml:"properties"`
 					Required   []string             `yaml:"required"`
@@ -445,14 +472,14 @@ func TestTheComposeBatchViewResponseMatchesTheOpenAPISchema(t *testing.T) {
 	}
 	view := parsed.Components.Schemas.View.Properties
 	if len(view) == 0 {
-		t.Fatal("the OpenAPI file declares no ComposeBatchView properties")
+		t.Fatal("the OpenAPI file declares no ComposeTaskBatchDetail properties")
 	}
-	if got, want := marshalledKeys(t, productionservice.ComposeBatchView{}), schemaPropertyNames(view); !reflect.DeepEqual(got, want) {
-		t.Errorf("ComposeBatchView keys = %v, contract = %v", got, want)
+	if got, want := marshalledKeys(t, productionservice.ComposeBatchDetail{}), schemaPropertyNames(view); !reflect.DeepEqual(got, want) {
+		t.Errorf("ComposeTaskBatchDetail keys = %v, contract = %v", got, want)
 	}
-	for _, key := range []string{"run", "tasks", "counts"} {
+	for _, key := range []string{"batch", "actions"} {
 		if !containsString(parsed.Components.Schemas.View.Required, key) {
-			t.Errorf("ComposeBatchView must require %q", key)
+			t.Errorf("ComposeTaskBatchDetail must require %q", key)
 		}
 	}
 	counts := parsed.Components.Schemas.Counts.Properties
@@ -562,20 +589,33 @@ func TestTheComposeMaterialStateResponseMatchesTheOpenAPISchema(t *testing.T) {
 	if err := yaml.Unmarshal(content, &parsed); err != nil {
 		t.Fatalf("parse content-production openapi: %v", err)
 	}
-	path, ok := parsed.Paths["/api/v1/compose-strategies/{strategy_id}/material-states"]
-	if !ok {
-		t.Fatal("the material-states path is not declared")
+	for _, retired := range []string{"/api/v1/compose-strategies/{strategy_id}/material-states", "/api/v1/compose-strategies/{strategy_id}/runs/history", "/api/v1/compose-strategies/{strategy_id}/runs/tasks"} {
+		if _, ok := parsed.Paths[retired]; ok {
+			t.Fatalf("retired route still public: %s", retired)
+		}
 	}
-	if path.Get.OperationID != "listComposeStrategyMaterialStates" {
-		t.Fatalf("operationId = %q", path.Get.OperationID)
+	for route, want := range map[string]string{"/api/v1/compose-task-batches": "listComposeTaskBatches", "/api/v1/compose-task-batches/{batch_id}": "getComposeTaskBatch", "/api/v1/compose-strategies/{strategy_id}/runs": "listComposeStrategyRuns"} {
+		path, ok := parsed.Paths[route]
+		if !ok || path.Get.OperationID != want {
+			t.Fatalf("required replacement route %s absent or renamed", route)
+		}
 	}
-	declared := make([]string, 0, len(path.Get.Parameters))
-	for _, parameter := range path.Get.Parameters {
-		declared = append(declared, parameter.Name)
+	var generic struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Ref string `yaml:"$ref"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
 	}
-	if !slices.Contains(declared, "material_ids") {
-		t.Fatalf("material-states parameters = %v, want material_ids", declared)
+	if err := yaml.Unmarshal(content, &generic); err != nil {
+		t.Fatal(err)
 	}
+	if got := generic.Components.Schemas["Material"].Properties["strategy_history"].Ref; got != "#/components/schemas/ComposeMaterialState" {
+		t.Fatalf("material history lost its schema reference: %q", got)
+	}
+
 	schema := parsed.Components.Schemas.MaterialState.Properties
 	if len(schema) == 0 {
 		t.Fatal("the OpenAPI file declares no ComposeMaterialState properties")
@@ -659,7 +699,7 @@ func TestUncertainReviewContractRequiresExplicitHumanVerification(t *testing.T) 
 		t.Fatal(err)
 	}
 	endpoint, ok := parsed.Paths["/api/v1/compose-tasks/{task_id}/uncertain-review"]
-	if !ok || endpoint.Get.OperationID != "listComposeUncertainReviews" || endpoint.Post.OperationID != "resolveComposeUncertain" {
+	if !ok || endpoint.Get.OperationID != "" || endpoint.Post.OperationID != "resolveComposeUncertain" {
 		t.Fatalf("uncertain review operations absent or renamed: %+v", endpoint)
 	}
 	for _, status := range []string{"200", "400", "403", "404", "409"} {
@@ -701,6 +741,71 @@ func TestUncertainReviewBodiesMatchTheCloudContract(t *testing.T) {
 		}
 		if got, want := marshalledKeys(t, item.value), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s body keys = %v, contract = %v", item.name, got, want)
+		}
+	}
+}
+
+func TestOrdinaryMaterialBodiesOmitSelectorContext(t *testing.T) {
+	base := model.Material{ID: 7, SourceObjectKey: "private-key"}
+	keys := marshalledKeys(t, base)
+	for _, optional := range []string{"selectable", "selection_reason", "strategy_history", "metric_presence"} {
+		if slices.Contains(keys, optional) {
+			t.Fatalf("unselected material includes %s", optional)
+		}
+	}
+}
+
+func TestCHG116PagedBodiesAndBatchRoutesMatchProviderContract(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Paths map[string]map[string]struct {
+			OperationID string `yaml:"operationId"`
+		} `yaml:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Required   []string             `yaml:"required"`
+				Properties map[string]yaml.Node `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &contract); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range []struct {
+		name string
+		body any
+	}{
+		{"MaterialPage", productionservice.MaterialPage{}},
+		{"MaterialUsagePage", productionservice.MaterialUsagePage{}},
+		{"ComposeTaskPage", repository.ComposeTaskPage{}},
+		{"ComposeTaskBatchPage", repository.ComposeBatchPage{}},
+		{"ComposeTaskBatchDetail", productionservice.ComposeBatchDetail{}},
+		{"ComposeBatchActions", productionservice.ComposeBatchActions{}},
+		{"ComposeBulkResult", productionservice.ComposeBulkResult{}},
+	} {
+		schema, ok := contract.Components.Schemas[fixture.name]
+		if !ok {
+			t.Fatalf("missing %s", fixture.name)
+		}
+		actual := marshalledKeys(t, fixture.body)
+		if want := schemaPropertyNames(schema.Properties); !slices.Equal(actual, want) {
+			t.Errorf("%s wire=%v schema=%v", fixture.name, actual, want)
+		}
+		if !slices.Equal(actual, sortedCopy(schema.Required)) {
+			t.Errorf("%s unconditional paging/action keys must be required", fixture.name)
+		}
+	}
+	for _, route := range []struct{ path, method, operation string }{
+		{"/api/v1/compose-task-batches", "get", "listComposeTaskBatches"},
+		{"/api/v1/compose-task-batches/{batch_id}", "get", "getComposeTaskBatch"},
+		{"/api/v1/compose-tasks/batch-retry", "post", "batchRetryComposeTasks"},
+		{"/api/v1/compose-tasks/batch-cancel", "post", "batchCancelComposeTasks"},
+	} {
+		if got := contract.Paths[route.path][route.method].OperationID; got != route.operation {
+			t.Errorf("%s %s operation=%q want=%q", route.method, route.path, got, route.operation)
 		}
 	}
 }

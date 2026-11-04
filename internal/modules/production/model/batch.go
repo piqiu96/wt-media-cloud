@@ -7,6 +7,8 @@ import (
 )
 
 type ComposeTaskBatch struct {
+	OperatorName   string                    `json:"operator_name" gorm:"-"`
+	StrategyName   string                    `json:"strategy_name" gorm:"-"`
 	ID             int64                     `json:"id"`
 	Name           string                    `json:"name"`
 	TeamID         int64                     `json:"team_id"`
@@ -36,16 +38,28 @@ func (c ComposeBatchCounts) ProgressPercent() int {
 // A batch is a task snapshot projection and follows the task address redaction.
 func (b ComposeTaskBatch) MarshalJSON() ([]byte, error) {
 	type projection ComposeTaskBatch
-	var groups []ComposeOutputSetting
-	if json.Unmarshal(b.ConfigSnapshot, &groups) == nil && groups != nil {
+	redact := func(groups []ComposeOutputSetting) []ComposeOutputSetting {
 		for i := range groups {
 			raw, _ := json.Marshal(groups[i].Params)
 			safe := safeComposeSnapshot(raw)
 			_ = json.Unmarshal(safe, &groups[i].Params)
 		}
-		b.ConfigSnapshot, _ = json.Marshal(groups)
+		return groups
+	}
+	var groups []ComposeOutputSetting
+	if json.Unmarshal(b.ConfigSnapshot, &groups) == nil && groups != nil {
+		b.ConfigSnapshot, _ = json.Marshal(redact(groups))
 	} else {
-		b.ConfigSnapshot = json.RawMessage(`[]`)
+		var snapshot struct {
+			Settings   []ComposeOutputSetting `json:"settings"`
+			Acceptance json.RawMessage        `json:"acceptance"`
+		}
+		if json.Unmarshal(b.ConfigSnapshot, &snapshot) == nil && snapshot.Settings != nil {
+			snapshot.Settings = redact(snapshot.Settings)
+			b.ConfigSnapshot, _ = json.Marshal(snapshot)
+		} else {
+			b.ConfigSnapshot = json.RawMessage(`[]`)
+		}
 	}
 	return json.Marshal(projection(b))
 }

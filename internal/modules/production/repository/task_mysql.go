@@ -29,6 +29,8 @@ var ErrComposeTaskMaterialUsed = errors.New("compose task material already used"
 const composeTaskInFlight = `status IN ('pending', 'running')`
 
 type ComposeTaskFilter struct {
+	BatchID    int64
+	Search     string
 	TeamID     int64
 	OperatorID int64
 	// IncludeUnownedCreatedBy is the actor's own ID when the caller asks for
@@ -143,7 +145,7 @@ func (ComposeTaskStore) ListAttempts(taskID int64) ([]model.ComposeTaskAttempt, 
 }
 
 func listComposeTaskAttempts(db *gorm.DB, taskID int64) ([]model.ComposeTaskAttempt, error) {
-	rows, err := db.Raw(`SELECT id, task_id, attempt, source, started_at, finished_at, outcome, stage, error_code, error_message, steps_json, created_at, updated_at FROM compose_task_attempts WHERE task_id = ? ORDER BY attempt ASC`, taskID).Rows()
+	rows, err := db.Raw(`SELECT id, task_id, attempt, source, started_at, finished_at, outcome, stage, error_code, error_message, steps_json, created_at, updated_at, uncertain_review_actor_id, uncertain_review_evidence, uncertain_reviewed_at FROM compose_task_attempts WHERE task_id = ? ORDER BY attempt ASC`, taskID).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +155,14 @@ func listComposeTaskAttempts(db *gorm.DB, taskID int64) ([]model.ComposeTaskAtte
 		var item model.ComposeTaskAttempt
 		var started, finished sql.NullTime
 		var steps []byte
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.Attempt, &item.Source, &started, &finished, &item.Outcome, &item.Stage, &item.ErrorCode, &item.ErrorMessage, &steps, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var reviewActor sql.NullInt64
+		var reviewEvidence sql.NullString
+		var reviewedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.Attempt, &item.Source, &started, &finished, &item.Outcome, &item.Stage, &item.ErrorCode, &item.ErrorMessage, &steps, &item.CreatedAt, &item.UpdatedAt, &reviewActor, &reviewEvidence, &reviewedAt); err != nil {
 			return nil, err
+		}
+		if reviewedAt.Valid && reviewActor.Valid {
+			item.UncertainReview = &model.ComposeUncertainReview{ID: item.ID, TaskID: item.TaskID, Attempt: item.Attempt, ActorUserID: reviewActor.Int64, Evidence: reviewEvidence.String, CreatedAt: reviewedAt.Time}
 		}
 		if started.Valid {
 			item.StartedAt = &started.Time

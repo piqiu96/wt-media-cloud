@@ -13,6 +13,7 @@ func TestSourceMetricKnownRequiresOriginalZeroEvidence(t *testing.T) {
 	}{
 		{"manual explicit zero", `{"statistics":{"digg_count":0}}`, "like_count", 0, true},
 		{"discovery explicit zero", `{"like_count":0,"raw":{"statistics":{"digg_count":0}}}`, "like_count", 0, true},
+		{"views explicit zero", `{"statistics":{"play_count":0}}`, "view_count", 0, true},
 		{"favorite explicit zero", `{"statistics":{"collect_count":0}}`, "favorite_count", 0, true},
 		{"discovery missing metric", `{"like_count":0,"favorite_count":0,"raw":{"statistics":{}}}`, "like_count", 0, false},
 		{"normalized zero is not evidence", `{"like_count":0}`, "like_count", 0, false},

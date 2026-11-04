@@ -191,9 +191,9 @@ async function loadLookups() {
     client.listCategories({ scope: 'all' }).catch(() => []),
     client.listCategories({ scope: 'all', enabled: true }).catch(() => []),
   ])
-  materials.value = [...new Map([...materials.value, ...(Array.isArray(materialRows) ? materialRows : [])].map((item) => [item.id, item])).values()]
+  materials.value = [...new Map([...materials.value, ...(Array.isArray(materialRows) ? materialRows : materialRows?.items || [])].map((item) => [item.id, item])).values()]
   strategies.value = Array.isArray(strategyRows) ? strategyRows : []
-  taskRows.value = Array.isArray(composeTasks) ? composeTasks : []
+  taskRows.value = Array.isArray(composeTasks) ? composeTasks : composeTasks?.items || []
   teams.value = Array.isArray(teamRows) ? teamRows : []
   categories.value = Array.isArray(categoryRows) ? categoryRows : []
   enabledCategories.value = Array.isArray(enabledCategoryRows) ? enabledCategoryRows : []

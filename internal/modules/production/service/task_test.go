@@ -935,3 +935,20 @@ func TestComposeTaskListRefusesForeignOperatorFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestAttemptReviewEvidenceFollowsReviewRole(t *testing.T) {
+	owner := int64(8)
+	team := identity.TeamID(2)
+	task := model.ComposeTask{ID: 1, TeamID: 2, CategoryID: 3, OperatorID: &owner}
+	for _, role := range []identity.Role{identity.RoleOperator, identity.RoleSeniorOperator, identity.RoleAdmin} {
+		store := &taskMemoryStore{tasks: []model.ComposeTask{task}, attempts: []model.ComposeTaskAttempt{{ID: 9, TaskID: 1, Attempt: 1, UncertainReview: &model.ComposeUncertainReview{Evidence: "private review evidence"}}}}
+		svc := NewComposeTaskService(store, nil, nil)
+		items, err := svc.ListAttempts(identity.PublicUser{ID: 8, TeamID: &team, CategoryIDs: []identity.CategoryID{3}, Role: role, Status: identity.UserStatusEnabled}, 1)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("%s %v", role, err)
+		}
+		if (items[0].UncertainReview != nil) != (role != identity.RoleOperator) {
+			t.Fatalf("evidence visibility %s", role)
+		}
+	}
+}

@@ -3,7 +3,7 @@ package production
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"slices"
@@ -62,8 +62,6 @@ func TestComposeStrategyRoutesRequireAuthentication(t *testing.T) {
 		{consts.MethodPost, "/api/v1/compose-strategies/next-run-preview"},
 		{consts.MethodPost, "/api/v1/compose-strategies/5/run-now"},
 		{consts.MethodGet, "/api/v1/compose-strategies/5/runs"},
-		{consts.MethodGet, "/api/v1/compose-strategies/5/runs/tasks"},
-		{consts.MethodGet, "/api/v1/compose-strategies/5/material-states"},
 	} {
 		response := ut.PerformRequest(engine.Engine, request.method, request.path, nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {
@@ -79,7 +77,7 @@ func TestComposeStrategyRoutesRequireAuthentication(t *testing.T) {
 func TestUncertainReviewRoutesRequireAuthentication(t *testing.T) {
 	engine := server.New()
 	RegisterRoutes(engine)
-	for _, method := range []string{consts.MethodGet, consts.MethodPost} {
+	for _, method := range []string{consts.MethodPost} {
 		response := ut.PerformRequest(engine.Engine, method, "/api/v1/compose-tasks/42/uncertain-review", nil)
 		if response.Result().StatusCode() != consts.StatusUnauthorized {
 			t.Fatalf("%s uncertain-review status = %d, want 401", method, response.Result().StatusCode())
@@ -413,6 +411,14 @@ func TestTheComposeTaskNamesAreTheFrozenOnes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read frozen error codes: %v", err)
 	}
+	var catalog struct {
+		Errors map[string]struct {
+			HTTPStatus int `yaml:"http_status"`
+		} `yaml:"errors"`
+	}
+	if err := yaml.Unmarshal(content, &catalog); err != nil {
+		t.Fatalf("parse error catalog: %v", err)
+	}
 	for _, frozen := range []struct {
 		name   string
 		status int
@@ -423,9 +429,9 @@ func TestTheComposeTaskNamesAreTheFrozenOnes(t *testing.T) {
 		{"compose_task_not_cancellable", consts.StatusConflict},
 		{"compose_task_conflict", consts.StatusConflict},
 	} {
-		declared := fmt.Sprintf("%s: {http_status: %d}", frozen.name, frozen.status)
-		if !strings.Contains(string(content), declared) {
-			t.Errorf("content-production.yaml does not declare %q", declared)
+		entry, ok := catalog.Errors[frozen.name]
+		if !ok || entry.HTTPStatus != frozen.status {
+			t.Errorf("catalog %s status=%d present=%v want=%d", frozen.name, entry.HTTPStatus, ok, frozen.status)
 		}
 	}
 }
@@ -480,7 +486,7 @@ func TestComposeTaskFailurePayloadsCarryTheFrozenErrcodes(t *testing.T) {
 	// The service leaves Message empty for a conflict on purpose: the sentence
 	// has to come from the mapping table, or a five-item batch would answer in
 	// two different voices.
-	if body.Data.Failed[2].Errcode != 15219 || body.Data.Failed[2].Error != "compose_task_conflict" || body.Data.Failed[2].Message != "该素材在这个策略下已有任务记录，不能再次创建；如需重跑请在任务列表点「重试」" {
+	if body.Data.Failed[2].Errcode != 15219 || body.Data.Failed[2].Error != "compose_task_conflict" || body.Data.Failed[2].Message != "素材已有制作记录，请确认再次制作" {
 		t.Fatalf("failed[2] = %+v", body.Data.Failed[2])
 	}
 }

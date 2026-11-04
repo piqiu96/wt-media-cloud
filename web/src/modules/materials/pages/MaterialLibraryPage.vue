@@ -2,7 +2,7 @@
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { Button as TButton } from 'tdesign-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
@@ -39,6 +39,8 @@ const route = useRoute()
 const router = useRouter()
 
 const rows = ref([])
+const total = ref(0)
+let loadSequence = 0
 const loading = ref(false)
 const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
@@ -106,21 +108,21 @@ const tableScroll = computed(() => ({
   x: `${columns.reduce((sum, col) => sum + (col.width ?? 0), 0)}px`,
 }))
 
-const pagedRows = computed(() => {
-  const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return rows.value.slice(start, start + pagination.value.pageSize)
-})
+const pagedRows = computed(() => rows.value)
 
 // 选项是类目管理里已启用的全量类目，不是本人负责的那几个，也不依赖当前页加载过
 // 哪些行：默认勾选只决定第一次看到什么，能筛到哪些类目由类目管理决定。
 const categoryOptions = computed(() => categories.value.map((category) => ({ id: category.id, name: category.name })))
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
-async function load({ quiet = false } = {}) {
+async function load({ quiet = false, keepPage = false } = {}) {
+  if (!quiet && !keepPage) pagination.value.current = 1
+  const sequence = ++loadSequence
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
     const data = await client.list({
+      page: pagination.value.current, page_size: pagination.value.pageSize,
       search: search.value,
       team_id: teamFilter.value,
       category_ids: categoryFilters.value,
@@ -130,12 +132,13 @@ async function load({ quiet = false } = {}) {
       sort_by: sortBy.value,
       sort_order: sortOrder.value,
     })
-    rows.value = Array.isArray(data) ? data : []
-    if (!quiet) pagination.value.current = 1
+    if (sequence !== loadSequence) return
+    rows.value = data.items || []
+    total.value = data.total || 0
   } catch (e) {
-    if (!quiet) error.value = e?.message || '读取素材失败'
+    if (!quiet && sequence === loadSequence) error.value = e?.message || '读取素材失败'
   } finally {
-    if (!quiet) loading.value = false
+    if (!quiet && sequence === loadSequence) loading.value = false
   }
 }
 
@@ -340,7 +343,7 @@ onMounted(async () => {
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
       </ResourceCard>
 
       <MaterialDetailDrawer
