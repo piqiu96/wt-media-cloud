@@ -1,105 +1,54 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe,expect,it } from 'vitest'
 import MyOutputsPage from './MyOutputsPage.vue'
-
-const source = readFileSync(new URL('./MyOutputsPage.vue', import.meta.url), 'utf8')
-const listMarkup = source.slice(source.indexOf('<ResourcePageHeader'), source.indexOf('<t-drawer'))
-const rowActions = listMarkup.slice(listMarkup.indexOf('<template #op='), listMarkup.indexOf('</template>', listMarkup.indexOf('<template #op=')))
-
-describe('output management page', () => {
-  it('compiles as the shared Cloud and Desktop page', () => {
-    expect(MyOutputsPage).toBeTruthy()
-  })
-  it('keeps the operating filters and selected batch download on the existing table', () => {
-    for (const name of ['search', 'trigger', 'download', 'created_range']) {
-      expect(source).toContain(`v-model="filters.${name}"`)
-    }
-    expect(source).toContain('综合搜索')
-    expect(source).not.toContain('v-model="filters.archived"')
-    expect(source).not.toContain('v-model="filters.output"')
-    expect(source).not.toContain('v-model="filters.source"')
-    expect(source).toContain('v-model:selected-row-keys="selectedRowKeys"')
-    expect(source).toContain('已选 {{ selectedRowKeys.length }} 项')
-    expect(source).toContain('批量下载')
-    expect(source).not.toContain('取消选择</t-button>')
-    expect(source).toContain("checkProps: ({ row }) => ({ disabled: !canDownload(row) })")
-    expect(source).toContain('selectedRowKeys.value = selectedRowKeys.value.filter')
-    expect(source).toContain('已提交 ${submitted} 个下载任务')
-    expect(source).toContain('下载任务提交失败')
-  })
-
-  it('sends search, trigger and operator filters to the backend and keeps only the local download overlay', () => {
-    expect(source).toContain('params.search = filters.value.search.trim()')
-    expect(source).toContain('params.trigger_type = filters.value.trigger')
-    expect(source).toContain('v-model="filters.operator"')
-    expect(source).toContain('operatorOptions.value.map((option) => ({ value: `op:${option.id}`, label: option.display_name }))')
-    expect(source).not.toContain("value: 'mine'")
-    expect(source).not.toContain("value: 'team'")
-    expect(source).not.toContain("filters.value.operator = 'mine'")
-    expect(source).not.toContain('params.operator_scope')
-    expect(source).toContain('if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator')
-    expect(source).toContain('const namedOperator = operatorIdFromOption(filters.value.operator)')
-    // 清空下拉给的是 undefined，不是空串：解析和“选项是否还在”都必须走守卫。
-    expect(source).toContain('missingOperatorOption(filters.value.operator, operatorFilterOptions.value)')
-    expect(source).not.toContain('filters.value.operator.startsWith')
-    expect(source).toContain('params.team_id = Number(filters.value.team_id)')
-    expect(source).not.toContain(':clearable="!isSenior"')
-    expect(source).not.toContain('matchesOutputSearch')
-    expect(source).not.toContain('searchedMaterials')
-    expect(source).toContain("!filters.value.download || downloadFor(row).key === filters.value.download")
-  })
-
-  it('shows asset, source, category, strategy, operator, generation and real download facts in the list', () => {
-    for (const key of ['output', 'material_id', 'category', 'strategy', 'operator', 'trigger', 'download_status', 'created_at']) {
-      expect(source).toContain(`<template #${key}=`)
-    }
-    expect(source).toContain('categoryName(row.category_id)')
-    expect(source).toContain("row.operator_name || '未记录'")
-    expect(source).toContain('titleFor(row)')
-    expect(source).toContain('triggerLabel(triggerFor(row))')
-    expect(source).toContain(':options="TRIGGER_TYPE_OPTIONS"')
-    expect(source).not.toContain('generationLabel')
-    expect(source).not.toContain('const triggerOptions')
-    expect(source).toContain('downloadFor(row).label')
-    expect(source).toContain('filteredRows.length')
-    // 类目列紧跟来源素材，早于策略；筛选与列说的是同一个字段。
-    expect(source.indexOf("{ colKey: 'category'")).toBeGreaterThan(source.indexOf("{ colKey: 'material_id'"))
-    expect(source.indexOf("{ colKey: 'category'")).toBeLessThan(source.indexOf("{ colKey: 'strategy'"))
-  })
-
-  // 类目筛选只列类目管理启用项；普通运营再与本人负责类目取交集（他不负责的类目
-  // 本来就没有成片可读）。名称字典另取全量，停用类目的历史成片仍显示名字。
-  it('filters by an enabled category and sends category_id to the server', () => {
-    expect(source).toContain('v-model="filters.category_id"')
-    expect(source).toContain(':options="categoryFilterOptions"')
-    expect(source).toContain('if (filters.value.category_id) params.category_id = filters.value.category_id')
-    expect(source).toContain("category_id: ''")
-    expect(source).toContain('const categoryFilterOptions = computed')
-    expect(source).toContain('isAdmin.value || isSenior.value || own.has(category.id)')
-    expect(source).toContain("client.listCategories({ scope: 'all' })")
-    expect(source).toContain("client.listCategories({ scope: 'all', enabled: true })")
-  })
-
-  it('uses the existing outlined row actions and keeps local opening inside file information', () => {
-    expect(rowActions).toContain('详情')
-    expect(rowActions).toContain('下载')
-    expect(rowActions).toContain('class="wt-secondary-button" variant="outline"')
-    expect(rowActions).not.toContain('打开文件')
-    expect(rowActions).not.toContain('打开文件夹')
-    expect(rowActions).not.toContain('去发布')
-    expect(rowActions).not.toContain('归档')
-    expect(source).toContain('@open-folder="openLocalFolder(detail.output)"')
-    expect(source).not.toContain('@open-file=')
-    expect(source).not.toContain('openSavedFile')
-  })
-
-  it('opens a fresh preview using the existing video link and associated entity drawers', () => {
-    expect(source).toContain('client.getComposeOutputVideoUrl(row.id)')
-    expect(source).toContain('client.getComposeOutput(row.id)')
-    expect(source.match(/publicObjectReadUrl\(link\?\.url\)/g)).toHaveLength(2)
-    expect(source).toContain('MaterialDetailDrawer')
-    expect(source).toContain('ComposeStrategySummary')
-    expect(source).toContain('@open-task="openTask"')
-    expect(source).not.toContain('router.push')
-  })
+import ComposeOutputTable from '../components/ComposeOutputTable.vue'
+import ComposeOutputMaterialDetail from '../components/ComposeOutputMaterialDetail.vue'
+const read=file=>readFileSync(new URL(file,import.meta.url),'utf8')
+const source=read('./MyOutputsPage.vue'),table=read('../components/ComposeOutputTable.vue'),material=read('../components/ComposeOutputMaterialDetail.vue')
+describe('output asset workspace',()=>{
+ it('compiles shared pages and separate material output detail',()=>{expect(MyOutputsPage).toBeTruthy();expect(ComposeOutputTable).toBeTruthy();expect(ComposeOutputMaterialDetail).toBeTruthy()})
+ it('defaults to material aggregation and requests server pages with real totals',()=>{
+  expect(source).toContain("activeView=ref('batches')")
+  expect(source).toContain('client.listComposeOutputMaterials(params):client.listComposeOutputs(params)')
+  expect(source).toContain('page:pagination.value.current,page_size:pagination.value.pageSize')
+  expect(source).toContain('total.value=data.total||0')
+  expect(source).not.toContain('.slice(start,')
+  expect(material).toContain('material_id:props.material.material_id,page:page.value,page_size:pageSize.value')
+ })
+ it('keeps material rows detail-only and flat asset rows at most three actions',()=>{
+  const batch=source.slice(source.indexOf('<template v-if="activeView'),source.indexOf('<ComposeOutputTable v-else'))
+  expect(batch).toContain('openMaterialGroup(row)')
+  for(const label of ['下载','再次制作','去发布'])expect(batch).not.toContain(`>${label}<`)
+  for(const label of ['详情','下载','再次制作'])expect(table).toContain(`>${label}<`)
+  expect(table).not.toContain('file_size_bytes')
+  expect(table).not.toContain('formatBytes')
+  expect(table).not.toContain('<video')
+  expect(table).not.toContain('>去发布<')
+ })
+ it('preserves cross-page selection with narrow checkboxes and truthful disabled publishing',()=>{
+  expect(table).toContain("type:'multiple', width:44")
+  expect(table).toContain('reserve-selected-row-on-paginate')
+  expect(source).toContain('knownRows.value[row.id]=row')
+  for(const text of [source,material]){expect(text).toContain('class="wt-selection-toolbar"');expect(text).toContain('<t-button variant="outline" disabled>去发布</t-button>')}
+  expect(source).toContain('发布能力尚未交付')
+ })
+ it('keeps role category boundaries and advanced date/video filters without local-page filtering',()=>{
+  expect(source).toContain('isAdmin.value||isSenior.value||own.has(category.id)')
+  expect(source).toContain('missingOperatorOption(filters.value.operator,operatorFilterOptions.value)')
+  expect(source).toContain('operatorIdFromOption(filters.value.operator)')
+  expect(source).toContain('params.operator_id=namedOperator')
+  expect(source).toContain('class="wt-advanced-filters"')
+  expect(source).toContain('min-width:280px')
+  expect(source).toContain('video_status:filters.value.video_status')
+  expect(source).not.toContain('filters.download')
+  expect(source).not.toContain('listComposeTasks({})')
+ })
+ it('opens fresh verified video URLs and passes original source context to the shared creation dialog',()=>{
+  expect(source).toContain('client.getComposeOutputVideoUrl(id)')
+  expect(source).toContain('publicObjectReadUrl(link?.url)')
+  expect(source).toContain(':source-output="createSource"')
+  expect(source).toContain('createSource.value=data')
+  expect(source).toContain("router.push({name:'Compose',query:{batch_id:id}})")
+  expect(source).not.toContain('archiveComposeOutput')
+ })
 })

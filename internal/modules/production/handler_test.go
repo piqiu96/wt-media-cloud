@@ -594,7 +594,7 @@ func TestComposeOutputRoutesRequireAuthentication(t *testing.T) {
 	}{
 		{consts.MethodGet, "/api/v1/compose-outputs"},
 		{consts.MethodGet, "/api/v1/compose-outputs/5"},
-		{consts.MethodPost, "/api/v1/compose-outputs/5/archive"},
+		{consts.MethodGet, "/api/v1/compose-output-materials"},
 		{consts.MethodGet, "/api/v1/compose-outputs/5/video-url"},
 		{consts.MethodPost, "/api/v1/compose-outputs/5/downloads"},
 	} {

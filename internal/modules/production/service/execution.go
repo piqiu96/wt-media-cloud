@@ -263,11 +263,34 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		return ComposeAttemptLeaseLost
 	}
 	commitStep := beginStep(model.ComposeStepCommit)
+	source, found, err := deps.Materials.FindMaterial(task.MaterialID)
+	if err != nil {
+		return transientFailureInContext(ctx, deps, task, nodeID, commitStep, composeErrStorageError, "source metadata unavailable")
+	}
+	if !found {
+		return failTerminal(deps.Tasks, task, nodeID, commitStep, composeErrInputMissing, "source metadata missing")
+	}
+	title := source.Title
+	if title == "" {
+		title = fmt.Sprintf("素材 %d", task.MaterialID)
+	}
+	settingName := task.SettingName
+	if settingName == "" {
+		settingName = "默认成片"
+	}
 	if err := deps.Store.Copy(ctx, tempKey, formalKey); err != nil {
 		return transientFailureInContext(ctx, deps, task, nodeID, commitStep, composeErrStorageError, "copy to formal key: "+err.Error())
 	}
-	media, _ := json.Marshal(map[string]int64{"duration_ms": output.DurationMS})
+	mediaFacts := map[string]int64{"duration_ms": output.DurationMS}
+	if output.Width > 0 {
+		mediaFacts["width"] = int64(output.Width)
+	}
+	if output.Height > 0 {
+		mediaFacts["height"] = int64(output.Height)
+	}
+	media, _ := json.Marshal(mediaFacts)
 	out := model.CompositeOutput{
+		Name:   model.ComposeOutputName(title, settingName),
 		TeamID: task.TeamID, CategoryID: task.CategoryID, OperatorID: task.OperatorID,
 		MaterialID: task.MaterialID, MaterialUsageID: task.MaterialUsageID,
 		TaskID: task.ID, StrategyID: task.StrategyID,

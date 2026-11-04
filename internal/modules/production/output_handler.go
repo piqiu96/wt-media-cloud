@@ -26,6 +26,10 @@ func outputID(c *hertzapp.RequestContext) (int64, bool) {
 // to the frozen contract pair, the same way the compose-task handler maps.
 func writeComposeOutputError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, productionservice.ErrComposeOutputUnavailable):
+		api.FailureNamed(c, consts.StatusConflict, 15240, "成片文件不可用", "compose_output_unavailable")
+	case errors.Is(err, productionservice.ErrComposeOutputVerificationFailed):
+		api.FailureNamed(c, consts.StatusServiceUnavailable, 15241, "暂时无法核验成片文件，请稍后重试", "compose_output_verification_failed")
 	case errors.Is(err, productionservice.ErrComposeOutputInvalid):
 		api.FailureNamed(c, consts.StatusBadRequest, 15214, "成片请求参数无效："+err.Error(), "compose_output_invalid")
 	case errors.Is(err, productionservice.ErrComposeOutputForbidden):
@@ -41,7 +45,13 @@ func writeComposeOutputError(c *hertzapp.RequestContext, err error) {
 	}
 }
 
-func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
+func ListComposeOutputs(ctx context.Context, c *hertzapp.RequestContext) {
+	listOutputPage(ctx, c, false)
+}
+func ListComposeOutputMaterials(ctx context.Context, c *hertzapp.RequestContext) {
+	listOutputPage(ctx, c, true)
+}
+func listOutputPage(ctx context.Context, c *hertzapp.RequestContext, materials bool) {
 	current, ok := actor(c)
 	if !ok {
 		return
@@ -61,13 +71,45 @@ func ListComposeOutputs(_ context.Context, c *hertzapp.RequestContext) {
 		api.FailureNamed(c, consts.StatusBadRequest, 15214, "类目 ID 无效", "compose_output_invalid")
 		return
 	}
-	items, err := productionservice.ListComposeOutputs(current, productionservice.ListComposeOutputsInput{
-		PublishStatus: c.Query("publish_status"), Source: strings.TrimSpace(c.Query("source")),
-		Search: strings.TrimSpace(c.Query("search")), TriggerType: strings.TrimSpace(c.Query("trigger_type")),
-		CategoryID: categoryID,
-		TeamID:     teamID, OperatorID: operatorID, OperatorScope: scope,
-		CreatedFrom: from, CreatedBefore: before,
-	})
+	page, size := 1, 20
+	for key, target := range map[string]*int{"page": &page, "page_size": &size} {
+		if raw := c.Query(key); raw != "" {
+			v, e := strconv.Atoi(raw)
+			if e != nil || v <= 0 || (key == "page_size" && v > 100) {
+				writeComposeOutputError(c, productionservice.ErrComposeOutputInvalid)
+				return
+			}
+			*target = v
+		}
+	}
+	materialID, batchID := int64(0), int64(0)
+	for key, target := range map[string]*int64{"material_id": &materialID, "batch_id": &batchID} {
+		if raw := c.Query(key); raw != "" {
+			v, e := strconv.ParseInt(raw, 10, 64)
+			if e != nil || v <= 0 {
+				writeComposeOutputError(c, productionservice.ErrComposeOutputInvalid)
+				return
+			}
+			*target = v
+		}
+	}
+	input := productionservice.ListComposeOutputsInput{PublishStatus: c.Query("publish_status"), Source: strings.TrimSpace(c.Query("source")), Search: strings.TrimSpace(c.Query("search")), TriggerType: strings.TrimSpace(c.Query("trigger_type")), CategoryID: categoryID, TeamID: teamID, OperatorID: operatorID, OperatorScope: scope, CreatedFrom: from, CreatedBefore: before, Page: page, PageSize: size, MaterialID: materialID, BatchID: batchID, Platform: c.Query("platform"), VideoStatus: c.Query("video_status")}
+	if raw := c.Query("category_ids"); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			id, e := parseOptionalCategoryID(strings.TrimSpace(part))
+			if e != nil || id <= 0 {
+				writeComposeOutputError(c, productionservice.ErrComposeOutputInvalid)
+				return
+			}
+			input.CategoryIDs = append(input.CategoryIDs, id)
+		}
+	}
+	var items any
+	if materials {
+		items, err = productionservice.ListComposeOutputMaterials(ctx, current, input)
+	} else {
+		items, err = productionservice.ListComposeOutputPage(ctx, current, input)
+	}
 	if err != nil {
 		writeComposeOutputError(c, err)
 		return

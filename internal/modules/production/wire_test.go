@@ -809,3 +809,82 @@ func TestCHG116PagedBodiesAndBatchRoutesMatchProviderContract(t *testing.T) {
 		}
 	}
 }
+
+func TestOutputAssetFactsMatchBusinessContractAndHideStorageKeys(t *testing.T) {
+	schemas := readContentProductionSchema(t)
+	for _, fixture := range []struct {
+		name string
+		body any
+	}{
+		{"ComposeOutput", model.CompositeOutput{ObjectKey: "private-storage-key"}},
+		{"ComposeOutputVideo", model.ComposeOutputVideo{}},
+		{"ComposeOutputActions", model.ComposeOutputActions{}},
+		{"ComposeOutputPage", repository.ComposeOutputPage{}},
+		{"ComposeOutputMaterial", repository.ComposeOutputMaterial{}},
+		{"ComposeOutputMaterialPage", repository.ComposeOutputMaterialPage{}},
+		{"ComposeOutputPublishing", productionservice.ComposeOutputPublishing{}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			schema := schemas[fixture.name]
+			actual := marshalledKeys(t, fixture.body)
+			if want := schemaPropertyNames(schema.Properties); !slices.Equal(actual, want) {
+				t.Fatalf("wire=%v schema=%v", actual, want)
+			}
+			if !slices.Equal(actual, sortedCopy(schema.Required)) {
+				t.Fatal("unconditional asset fact keys must be declared required")
+			}
+			data, err := json.Marshal(fixture.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := decoded["object_key"]; exists {
+				t.Fatal("asset body exposed a storage key")
+			}
+		})
+	}
+}
+
+func TestSourceOutputCreateContractKeepsThreeExclusiveCommands(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "cloud-api", "v1", "content-production.openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Paths      map[string]map[string]any `yaml:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Required []string `yaml:"required"`
+				OneOf    []struct {
+					Required []string       `yaml:"required"`
+					Not      map[string]any `yaml:"not"`
+				} `yaml:"oneOf"`
+				Properties map[string]yaml.Node `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(content, &contract); err != nil {
+		t.Fatal(err)
+	}
+	create := contract.Components.Schemas["CreateComposeTasks"]
+	if !slices.Equal(create.Required, []string{"name"}) || len(create.OneOf) != 3 {
+		t.Fatal("manual, legacy and source commands must each have their own required fields")
+	}
+	if got, want := marshalledKeys(t, productionservice.CreateComposeTasksInput{}), schemaPropertyNames(create.Properties); !slices.Equal(got, want) {
+		t.Fatalf("create fields wire=%v contract=%v", got, want)
+	}
+	for _, branch := range create.OneOf {
+		if len(branch.Not) == 0 {
+			t.Fatal("command branches must reject mixed source/material inputs")
+		}
+	}
+	if _, exists := contract.Paths["/api/v1/compose-outputs/{output_id}/archive"]; exists {
+		t.Fatal("archive has no approved product entry")
+	}
+	if _, exists := contract.Paths["/api/v1/compose-output-materials"]["get"]; !exists {
+		t.Fatal("material aggregation read is absent")
+	}
+}

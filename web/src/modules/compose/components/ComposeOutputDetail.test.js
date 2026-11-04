@@ -1,116 +1,29 @@
-import { createSSRApp, h } from 'vue'
+import { createSSRApp,h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { describe, expect, it } from 'vitest'
+import { describe,expect,it } from 'vitest'
 import ComposeOutputDetail from './ComposeOutputDetail.vue'
-import { readFileSync } from 'node:fs'
-
-const source = readFileSync(new URL('./ComposeOutputDetail.vue', import.meta.url), 'utf8')
-
-// 这个组件同时伺候两个宿主（我的成片页与合成任务页的关联抽屉），共用同一段正文。
-// 字符串断言看不见「同一段正文在两个宿主下渲染出什么」，所以这里真渲染一遍 ——
-// 本仓第一处渲染断言，只为这条共享边界：编号一律裸数字，来源追踪里没有 `#`。
-const detail = {
-  output: { id: 42, publish_status: 'pending_publish', file_size_bytes: 2048, sha256: 'cafe', created_at: '2026-10-15T10:00:00Z', media: { duration_ms: 12500 } },
-  trace: {
-    material: { id: 157, title: '素材标题' },
-    material_usage: { id: 9, status: 'active' },
-    strategy: { id: 24, name: '策略名', template_code: 'insert', template_version: 2 },
-    compose_task: { id: 252, status: 'success', created_at: '2026-10-15T10:00:00Z', config_snapshot: { insert_seconds: 3, guide_video_url: 'https://signed.example/x.mp4' } },
-  },
-}
-const templates = [{ code: 'insert', version: 2, schema: { properties: {
-  insert_seconds: { title: '插入位置（秒）', type: 'integer' },
-  guide_video_url: { title: '引导视频下载地址', type: 'string' },
-} } }]
-
-async function render(props) {
-  const app = createSSRApp({ render: () => h(ComposeOutputDetail, props) })
-  app.component('t-button', { setup: (_, { slots }) => () => h('button', slots.default?.()) })
-  return renderToString(app)
-}
-
-describe('compose output detail', () => {
-  it('renders the source-tracking ids bare, with no hash prefix anywhere', async () => {
-    const html = await render({ detail, tab: 'source' })
-    for (const id of ['157', '24', '252', '9']) expect(html).toContain(id)
-    expect(html).not.toMatch(/#\d/)
-    for (const label of ['基本信息', '来源追踪', '配置快照']) expect(html).toContain(label)
-  })
-
-  it('renders a dash for a scheduled output that carries no personal usage', async () => {
-    const scheduled = { ...detail, trace: { ...detail.trace, material_usage: null } }
-    const html = await render({ detail: scheduled, tab: 'source' })
-    const usage = html.slice(html.indexOf('素材使用'), html.indexOf('生产记录'))
-    expect(usage).toContain('—')
-    expect(usage).not.toContain('undefined')
-    expect(usage).not.toContain('9 ·')
-  })
-
-  it('renders only the panels the host allows and keeps signed URLs out of readable snapshots', async () => {
-    const html = await render({ detail, tab: 'source', tabs: ['basic', 'source'] })
-    expect(html).toContain('来源追踪')
-    expect(html).not.toContain('配置快照')
-    expect(html).not.toContain('guide_video_url')
-    const full = await render({ detail, templates, tab: 'snapshot' })
-    expect(full).toContain('插入位置（秒）')
-    expect(full).toContain('3 秒')
-    expect(full).not.toContain('guide_video_url')
-    expect(full).not.toContain('signed.example')
-  })
-
-  it('renders the management view in asset order without production internals', async () => {
-    const html = await render({
-      detail,
-      management: true,
-      title: '素材标题 · 策略名',
-      triggerType: 'manual',
-      downloadState: { key: 'unverified', label: '下载记录完成 · 本机未核验', tone: 'neutral' },
-      linkable: true,
-    })
-    for (const label of ['核心信息', '标题', '素材标题 · 策略名', '人工创建', '生成来源', '文件信息', '查看素材详情', '查看策略详情', '查看任务详情']) {
-      expect(html).toContain(label)
-    }
-    expect(html.indexOf('核心信息')).toBeLessThan(html.indexOf('生成来源'))
-    expect(html.indexOf('生成来源')).toBeLessThan(html.indexOf('文件信息'))
-    expect(html).not.toContain('素材使用')
-    expect(html).not.toContain('配置快照')
-    expect(html).not.toContain('待发布')
-    const core = html.slice(html.indexOf('核心信息'), html.indexOf('生成来源'))
-    const source = html.slice(html.indexOf('生成来源'), html.indexOf('文件信息'))
-    const file = html.slice(html.indexOf('文件信息'))
-    expect(core).not.toContain('文件大小')
-    expect(core).not.toContain('下载状态')
-    expect(file).toContain('文件大小')
-    expect(source).not.toContain('insert v2')
-    expect(source).not.toContain('成功 ·')
-    expect(source).not.toContain('任务创建')
-  })
-
-  it('uses the confirmed local file name as a link to its folder', async () => {
-    const downloaded = await render({ detail, management: true, downloadState: { key: 'downloaded', label: '已下载', tone: 'success', fileName: '成片-42.mp4' } })
-    const unverified = await render({ detail, management: true, downloadState: { key: 'unverified', label: '本机未核验', tone: 'neutral' } })
-    expect(downloaded.indexOf('成片-42.mp4')).toBeGreaterThan(downloaded.indexOf('文件信息'))
-    expect(downloaded).not.toContain('>打开文件夹</button>')
-    expect(unverified).not.toContain('成片-42.mp4')
-    expect(downloaded).toContain('文件校验信息')
-    expect(downloaded).toContain('SHA-256 · cafe')
-    expect(downloaded).not.toContain('<details')
-    expect(source).toContain('<t-link class="output-detail__file-link" theme="primary" title="打开文件所在文件夹" @click="emit(\'open-folder\')">{{ downloadState.fileName }}</t-link>')
-    expect(source).not.toContain('>打开文件夹</t-button>')
-  })
-
-  it('opens the cloud video from file information in a new browser window', async () => {
-    const url = 'https://data.bucket.oss.longyanyue.cn/wt_media/dev/compose-outputs/42/1/output.mp4'
-    const html = await render({ detail, management: true, previewUrl: url })
-    const file = html.slice(html.indexOf('文件信息'))
-    expect(file).toContain('云端视频')
-    expect(file).toContain(`href="${url}"`)
-    expect(file).toContain('target="_blank"')
-    expect(file).toContain('rel="noopener noreferrer"')
-    expect(file).toContain('打开云端视频')
-
-    const unavailable = await render({ detail, management: true })
-    expect(unavailable.slice(unavailable.indexOf('文件信息'))).toContain('暂不可用')
-    expect(unavailable).not.toContain('打开云端视频')
-  })
+const detail={output:{id:42,name:'原素材 · 原设置',file_name:'原素材-42.mp4',file_size_bytes:2048,created_at:'2026-10-15T10:00:00Z',video:{status:'ready'},media:{duration_ms:12500,width:720,height:1280}},trace:{material:{id:157,title:'原素材'},strategy:{id:24,name:'原策略',template_schema:{properties:{insert_seconds:{title:'插入秒数',type:'integer'},guide_video_url:{title:'引导视频',type:'string'}}}},compose_task:{id:252,batch_id:30,setting_name:'原设置',template_code:'insert',template_version:2,platforms:['baidu'],config_snapshot:{insert_seconds:3,guide_video_url:'（下载地址已隐藏）'}},publishing:{available:false,reason:'发布能力尚未交付',platforms:[{platform:'baidu',status:null}]}}}
+async function render(props){const app=createSSRApp({render:()=>h(ComposeOutputDetail,props)});for(const name of ['t-button','t-link'])app.component(name,{setup:(_,ctx)=>()=>h('button',ctx.slots.default?.())});return renderToString(app)}
+describe('output asset detail',()=>{
+ it('renders four expanded sections without a player or cover placeholder',async()=>{
+  const html=await render({detail,management:true})
+  for(const label of ['基本信息','成片 ID','视频状态','成片名称','负责人','视频信息','制作来源','发布情况'])expect(html).toContain(label)
+  expect(html).not.toContain('<video');expect(html).not.toContain('暂时无法预览');expect(html).not.toContain('<details')
+  expect(html.indexOf('基本信息')).toBeLessThan(html.indexOf('视频信息'))
+ })
+ it('opens the real file URL by its fixed filename and compacts measured metadata',async()=>{
+  const html=await render({detail,previewUrl:'https://media.test/real.mp4'})
+  expect(html).toContain('href="https://media.test/real.mp4"');expect(html).toContain('原素材-42.mp4');expect(html).toContain('target="_blank"')
+  expect(html).toContain('12.5');expect(html).toContain('720 × 1280');expect(html).toContain('2.0 KB')
+ })
+ it('uses original final parameters and exact schema, never current strategy defaults or signed guide URL',async()=>{
+  const html=await render({detail,linkable:true,templates:[{code:'insert',version:99,schema:{properties:{wrong:{title:'错误新版默认'}}}}]})
+  for(const value of ['插入秒数','3 秒','原设置','30','252','已配置（固定）'])expect(html).toContain(value)
+  expect(html).not.toContain('错误新版默认');expect(html).not.toContain('下载地址已隐藏');expect(html).not.toContain('策略当前参数');expect(html).not.toMatch(/#\d/)
+ })
+ it('does not invent platform publishing state or missing historical names and measurements',async()=>{
+  const html=await render({detail:{...detail,output:{id:42,media:{},video:{status:'unknown',reason:'尚未核验'}},trace:detail.trace}})
+  expect(html).toContain('发布能力尚未交付');expect(html).not.toContain('未安排');expect(html).not.toContain('已安排');expect(html).not.toContain('待发布')
+  expect(html).toContain('文件名未记录');expect(html).toContain('分辨率 —');expect(html).toContain('文件大小 —');expect(html).not.toContain('undefined')
+ })
 })

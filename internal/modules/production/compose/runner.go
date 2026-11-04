@@ -28,6 +28,8 @@ type Request struct {
 type Output struct {
 	Path       string
 	DurationMS int64
+	Width      int
+	Height     int
 }
 
 func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Output, error) {
@@ -95,5 +97,5 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if output.durationMS*10 > requestedMS*11 {
 		return Output{}, fmt.Errorf("output duration %d ms is longer than 110%% of the requested %d ms", output.durationMS, requestedMS)
 	}
-	return Output{Path: outputPath, DurationMS: output.durationMS}, nil
+	return Output{Path: outputPath, DurationMS: output.durationMS, Width: output.width, Height: output.height}, nil
 }

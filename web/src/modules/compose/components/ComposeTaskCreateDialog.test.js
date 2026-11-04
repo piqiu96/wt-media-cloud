@@ -34,6 +34,14 @@ describe('manual task batch creation', () => {
     for(const action of ['新增成片设置','拖动排序','复制','移除']) expect(settings).not.toContain(`>${action}<`)
     expect(settings).toContain('validateTaskGroup')
   })
+  it('seeds source mode from the original output with a locked material and source-only submit', () => {
+    expect(source).toContain('sourceOutput: Object')
+    expect(source).toContain('outputRemakeSeed(props.sourceOutput, templates.value)')
+    expect(source).toContain('isSource.value ? sourceSeed.value.strategy')
+    expect(source).toContain('isSource.value ? outputRemakeBody(props.sourceOutput,name,sourceSeed.value,overrides.value)')
+    expect(source).toContain('<ComposeTaskMaterialSelector v-if="!isSource"')
+    expect(source).toContain('沿用原素材、原模板版本与原成片设置')
+  })
   it('uses owner-context server queries without local file or video status filters', () => {
     const selector=read('./ComposeTaskMaterialSelector.vue')
     expect(selector).toContain('client.listMyMaterials(params) : client.list(params)')
