@@ -4,6 +4,7 @@ import { TRIGGER_TYPE_OPTIONS, triggerLabel } from './labels.js'
 describe('compose trigger labels', () => {
   it('uses the same wording for task triggers and output generation', () => {
     expect(triggerLabel('manual')).toBe('人工创建')
+    expect(triggerLabel('immediate')).toBe('立即执行')
     expect(triggerLabel('scheduled')).toBe('策略自动')
     expect(triggerLabel('')).toBe('—')
     expect(triggerLabel(undefined)).toBe('—')
@@ -12,6 +13,7 @@ describe('compose trigger labels', () => {
   it('keeps the filter order used by every compose page', () => {
     expect(TRIGGER_TYPE_OPTIONS).toEqual([
       { value: 'manual', label: '人工创建' },
+      { value: 'immediate', label: '立即执行' },
       { value: 'scheduled', label: '策略自动' },
     ])
   })

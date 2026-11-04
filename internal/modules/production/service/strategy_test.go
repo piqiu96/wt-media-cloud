@@ -296,3 +296,38 @@ func TestStrategyUpdateRejectsLeavingAnEnabledStrategyUnassigned(t *testing.T) {
 		t.Fatalf("update=%+v err=%v", updated, err)
 	}
 }
+
+func TestStrategyCreateIndependentOutputSettingsAndValidatesEveryGroup(t *testing.T) {
+	svc, store, actor := strategyFixture()
+	input := CreateStrategyInput{CategoryID: 1, OperatorID: 9, Name: "多组", TemplateID: 3, TemplateVersion: 1, ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, OutputSettings: []model.ComposeOutputSetting{
+		{Key: "first", Name: "短版", Platforms: []string{"bilibili"}, Copies: 2, Params: map[string]any{"start_seconds": 0, "end_seconds": 5}},
+		{Key: "second", Name: "长版", Platforms: []string{"baidu", "xiaohongshu"}, Copies: 3, Params: map[string]any{"start_seconds": 1, "end_seconds": 15}}}}
+	item, err := svc.Create(actor, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(item.EffectiveOutputSettings()) != 2 || len(item.OutputSettingsJSON) == 0 || item.DailyLimit != 0 {
+		t.Fatalf("item=%+v", item)
+	}
+	input.OutputSettings[1].Params["end_seconds"] = 0
+	if _, err = svc.Create(actor, input); !errors.Is(err, ErrStrategyInvalid) {
+		t.Fatalf("invalid second group err=%v", err)
+	}
+	if store.writes != 1 {
+		t.Fatalf("writes=%d", store.writes)
+	}
+}
+
+func TestStrategyUpdateLegacyReadBackUsesSubmittedConfig(t *testing.T) {
+	svc, store, actor := strategyFixture()
+	old := model.ComposeStrategy{ID: 4, TeamID: 7, CategoryID: 1, TemplateID: 3, TemplateVersion: 1, Name: "旧策略", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":9}`), Status: "enabled", OperatorID: operatorIDPtr(9)}
+	old.OutputSettings = old.EffectiveOutputSettings() // Repository hydration of nullable legacy row.
+	store.items = []model.ComposeStrategy{old}
+	updated, err := svc.Update(actor, 4, UpdateStrategyInput{Name: "新策略", Config: json.RawMessage(`{"start_seconds":1,"end_seconds":12}`), ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.EffectiveOutputSettings()[0].Params["end_seconds"]; got != float64(12) {
+		t.Fatalf("legacy edit end_seconds=%v", got)
+	}
+}

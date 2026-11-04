@@ -67,6 +67,11 @@ const (
 // the worker lifecycle (M4-C5) writes them.
 type ComposeTask struct {
 	ID              int64                     `json:"id"`
+	BatchID         *int64                    `json:"batch_id"`
+	SettingKey      string                    `json:"setting_key"`
+	SettingName     string                    `json:"setting_name"`
+	PlatformsJSON   json.RawMessage           `json:"platforms" gorm:"column:platforms_json;type:json"`
+	CopyIndex       int                       `json:"copy_index"`
 	DisplayName     string                    `json:"display_name" gorm:"column:display_name"`
 	TeamID          int64                     `json:"team_id"`
 	CategoryID      sharedidentity.CategoryID `json:"category_id"`

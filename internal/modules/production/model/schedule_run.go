@@ -8,6 +8,8 @@ type ComposeScheduleSkip struct {
 }
 
 type ComposeScheduleRun struct {
+	RequestHash    string                `json:"-"`
+	BatchID        *int64                `json:"batch_id"`
 	RunKey         string                `json:"run_key"`
 	StrategyID     int64                 `json:"compose_strategy_id"`
 	TriggerType    string                `json:"trigger_type"`

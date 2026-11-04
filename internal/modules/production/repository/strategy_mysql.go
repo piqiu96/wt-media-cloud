@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const strategyColumns = `id, team_id, category_id, operator_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at`
+const strategyColumns = `id, team_id, category_id, operator_id, compose_template_id, compose_template_version, name, config_json, execution_mode, schedule_json, priority_rules_json, single_limit, daily_limit, next_run_at, status, created_by, updated_by, created_at, updated_at, output_settings_json`
 
 type StrategyFilter struct {
 	TeamID      int64
@@ -98,7 +98,7 @@ func updateComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, actio
 		}
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Exec(`UPDATE compose_strategies SET name = ?, operator_id = ?, config_json = ?, execution_mode = ?, schedule_json = ?, priority_rules_json = ?, single_limit = ?, daily_limit = ?, next_run_at = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND category_id = ?`, item.Name, item.OperatorID, item.Config, item.ExecutionMode, scheduleJSON, item.RulesJSON, item.SingleLimit, item.DailyLimit, item.NextRunAt, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.CategoryID)
+		result := tx.Exec(`UPDATE compose_strategies SET name = ?, operator_id = ?, config_json = ?, output_settings_json = ?, execution_mode = ?, schedule_json = ?, priority_rules_json = ?, single_limit = ?, daily_limit = ?, next_run_at = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND category_id = ?`, item.Name, item.OperatorID, item.Config, []byte(item.OutputSettingsJSON), item.ExecutionMode, scheduleJSON, item.RulesJSON, item.SingleLimit, item.DailyLimit, item.NextRunAt, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.CategoryID)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -148,7 +148,7 @@ func (StrategyStore) List(filter StrategyFilter) ([]model.ComposeStrategy, error
 }
 
 func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeStrategy, error) {
-	query := `SELECT s.id, s.team_id, s.category_id, s.operator_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.execution_mode, s.schedule_json, s.priority_rules_json, s.single_limit, s.daily_limit, s.next_run_at, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
+	query := `SELECT s.id, s.team_id, s.category_id, s.operator_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.execution_mode, s.schedule_json, s.priority_rules_json, s.single_limit, s.daily_limit, s.next_run_at, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at, s.output_settings_json FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
 	args := make([]any, 0, len(filter.CategoryIDs)+3)
 	if filter.TeamID > 0 {
 		query += ` AND s.team_id = ?`
@@ -206,11 +206,12 @@ type strategyScanner interface{ Scan(...any) error }
 func scanComposeStrategy(row strategyScanner) (model.ComposeStrategy, error) {
 	var item model.ComposeStrategy
 	var config []byte
+	var outputSettings []byte
 	var schedule []byte
 	var rules []byte
 	var nextRun sql.NullTime
 	var operatorID sql.NullInt64
-	err := row.Scan(&item.ID, &item.TeamID, &item.CategoryID, &operatorID, &item.TemplateID, &item.TemplateVersion, &item.Name, &config, &item.ExecutionMode, &schedule, &rules, &item.SingleLimit, &item.DailyLimit, &nextRun, &item.Status, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.TeamID, &item.CategoryID, &operatorID, &item.TemplateID, &item.TemplateVersion, &item.Name, &config, &item.ExecutionMode, &schedule, &rules, &item.SingleLimit, &item.DailyLimit, &nextRun, &item.Status, &item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt, &outputSettings)
 	if err != nil {
 		return model.ComposeStrategy{}, err
 	}
@@ -222,6 +223,19 @@ func scanComposeStrategy(row strategyScanner) (model.ComposeStrategy, error) {
 		return model.ComposeStrategy{}, fmt.Errorf("strategy %d has invalid config_json", item.ID)
 	}
 	item.Config = append(json.RawMessage(nil), config...)
+	if outputSettings != nil {
+		if err := json.Unmarshal(outputSettings, &item.OutputSettings); err != nil {
+			return model.ComposeStrategy{}, fmt.Errorf("strategy %d has invalid output_settings_json: %w", item.ID, err)
+		}
+		normalized, err := model.NormalizeComposeOutputSettings(item.OutputSettings)
+		if err != nil {
+			return model.ComposeStrategy{}, fmt.Errorf("strategy %d has invalid output_settings_json: %w", item.ID, err)
+		}
+		item.OutputSettings = normalized
+		item.OutputSettingsJSON = append(json.RawMessage(nil), outputSettings...)
+	} else {
+		item.OutputSettings = item.EffectiveOutputSettings()
+	}
 	if err := json.Unmarshal(rules, &item.PriorityRules); err != nil {
 		return model.ComposeStrategy{}, fmt.Errorf("strategy %d has invalid priority_rules_json: %w", item.ID, err)
 	}

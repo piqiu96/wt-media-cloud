@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -39,10 +41,10 @@ func RunDueComposeSchedules(now time.Time) (int, error) {
 	return NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{}).RunDue(now)
 }
 
-func RunComposeStrategyNow(actor identity.PublicUser, strategyID int64, requestKey string) (model.ComposeScheduleRun, error) {
+func RunComposeStrategyNow(actor identity.PublicUser, strategyID int64, requestKey string, previewTokens ...string) (model.ComposeScheduleRun, error) {
 	service := NewComposeSchedulerService(repository.ComposeScheduleStore{}, repository.StrategyStore{})
 	service.operators = identity.ListUsers
-	return service.RunNow(actor, strategyID, requestKey)
+	return service.RunNow(actor, strategyID, requestKey, previewTokens...)
 }
 
 func ListComposeStrategyRuns(actor identity.PublicUser, strategyID int64) ([]model.ComposeScheduleRun, error) {
@@ -130,7 +132,7 @@ func (s *ComposeSchedulerService) RunDue(now time.Time) (int, error) {
 	processed := 0
 	var failures []error
 	for _, id := range ids {
-		_, done, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: id, Now: now, NextRun: nextRunForStrategy})
+		_, done, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: id, Now: now, Validate: validateExecutionStrategy, NextRun: nextRunForStrategy})
 		if err != nil {
 			failures = append(failures, fmt.Errorf("strategy %d: %w", id, err))
 			continue
@@ -142,7 +144,7 @@ func (s *ComposeSchedulerService) RunDue(now time.Time) (int, error) {
 	return processed, errors.Join(failures...)
 }
 
-func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID int64, requestKey string) (model.ComposeScheduleRun, error) {
+func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID int64, requestKey string, previewTokens ...string) (model.ComposeScheduleRun, error) {
 	if !canManageStrategies(actor) {
 		return model.ComposeScheduleRun{}, ErrStrategyForbidden
 	}
@@ -180,7 +182,11 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 			return model.ComposeScheduleRun{}, err
 		}
 	}
-	result, processed, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: strategyID, Now: s.now(), ManualKey: requestKey, NextRun: nextRunForStrategy})
+	token := ""
+	if len(previewTokens) > 0 {
+		token = previewTokens[0]
+	}
+	result, processed, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: strategyID, Now: s.now(), ManualKey: requestKey, Validate: validateExecutionStrategy, NextRun: nextRunForStrategy, PreviewToken: token})
 	if err != nil {
 		return model.ComposeScheduleRun{}, err
 	}
@@ -188,4 +194,47 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 		return model.ComposeScheduleRun{}, fmt.Errorf("%w: strategy is not available", ErrStrategyInvalid)
 	}
 	return result, nil
+}
+
+// PreviewComposeStrategyExecution performs no mutation: only the confirmed command creates work.
+func PreviewComposeStrategyExecution(actor identity.PublicUser, id int64) (repository.ComposeExecutionPreview, error) {
+	if !canManageStrategies(actor) {
+		return repository.ComposeExecutionPreview{}, ErrStrategyForbidden
+	}
+	strategy, err := GetComposeStrategy(actor, id)
+	if err != nil {
+		return repository.ComposeExecutionPreview{}, err
+	}
+	if strategy.Status != model.ComposeStrategyEnabled {
+		return repository.ComposeExecutionPreview{}, fmt.Errorf("%w: strategy is disabled", ErrStrategyInvalid)
+	}
+	if err := validateExecutionStrategy(strategy); err != nil {
+		return repository.ComposeExecutionPreview{}, err
+	}
+	return (repository.ComposeScheduleStore{}).Preview(strategy, time.Now().UTC())
+}
+
+func validateExecutionStrategy(s model.ComposeStrategy) error {
+	groups := s.EffectiveOutputSettings()
+	if len(groups) == 0 {
+		return fmt.Errorf("%w: output settings invalid", ErrStrategyInvalid)
+	}
+	tpl, found, err := (repository.StrategyStore{}).FindTemplate(s.TemplateID, s.TemplateVersion)
+	if err != nil {
+		return err
+	}
+	if !found || tpl.Status != "active" {
+		return ErrStrategyTemplateUnavailable
+	}
+	def, err := executor.DeployedDefinition(tpl.Code, tpl.Version)
+	if err != nil || tpl.ExecutorID != def.ExecutorID || !sameJSON(tpl.Schema, def.Schema) {
+		return ErrStrategyTemplateUnavailable
+	}
+	for _, g := range groups {
+		raw, _ := json.Marshal(g.Params)
+		if _, err := def.Executor.ValidateParams(raw); err != nil {
+			return fmt.Errorf("%w: %s parameters invalid", ErrStrategyInvalid, g.Name)
+		}
+	}
+	return nil
 }

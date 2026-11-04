@@ -79,3 +79,88 @@ func TestComposeRecentHoursAndDaysUseRollingBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeMissingMetricsAreNotZero(t *testing.T) {
+	rule := ComposePriorityRule{Logic: "all", Conditions: []ComposeCondition{condition("favorite_count", "eq", "0")}}
+	if ComposeGroupPredicate(rule, ComposeCandidateFacts{}, time.Now()) {
+		t.Fatal("absent favorite count matched recorded zero")
+	}
+}
+
+func TestComposeRuleDecisionExcludesBeforePriority(t *testing.T) {
+	rules := []ComposePriorityRule{
+		{Priority: 1, Action: "match", Logic: "all", Conditions: []ComposeCondition{condition("like_count", "gte", "10")}},
+		{Priority: 2, Action: "filter", Logic: "all", Conditions: []ComposeCondition{condition("favorite_count", "eq", "0")}},
+	}
+	facts := ComposeCandidateFacts{LikeCount: 20, FavoriteCountKnown: true}
+	got := EvaluateComposeRules(rules, facts, time.Now())
+	if got.Eligible || got.Reason != "filtered" || got.Priority != 2 {
+		t.Fatalf("decision=%+v", got)
+	}
+	if rules[0].Priority != 1 {
+		t.Fatal("evaluation mutated supplied priority order")
+	}
+}
+
+func TestComposeUnknownGroupOnlyBlocksWhenNeeded(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct{ name, logic, operator, threshold, want string }{
+		{"any true decides", "any", "gte", "10", "matched"},
+		{"all false decides", "all", "gte", "100", "not_matched"},
+		{"any false needs missing", "any", "gte", "100", "unknown"},
+		{"all true needs missing", "all", "gte", "10", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := ComposePriorityRule{Logic: tc.logic, Conditions: []ComposeCondition{condition("favorite_count", "eq", "0"), condition("like_count", tc.operator, tc.threshold)}}
+			got := EvaluateComposeGroup(group, ComposeCandidateFacts{LikeCount: 20}, now)
+			if got.State != tc.want {
+				t.Fatalf("got=%+v want=%s", got, tc.want)
+			}
+			if tc.want == "unknown" && (len(got.MissingFields) != 1 || got.MissingFields[0] != "favorite_count") {
+				t.Fatalf("missing=%v", got.MissingFields)
+			}
+			if tc.want != "unknown" && len(got.MissingFields) != 0 {
+				t.Fatalf("decidable group reported blocking missing fields: %v", got.MissingFields)
+			}
+		})
+	}
+}
+
+func TestComposeUnknownFilterBlocksSelectionButKnownFilterWins(t *testing.T) {
+	rules := []ComposePriorityRule{
+		{Priority: 1, Action: "match", Logic: "all", Conditions: []ComposeCondition{condition("like_count", "gte", "10")}},
+		{Priority: 2, Action: "filter", Logic: "all", Conditions: []ComposeCondition{condition("favorite_count", "eq", "0")}},
+	}
+	got := EvaluateComposeRules(rules, ComposeCandidateFacts{LikeCount: 20}, time.Now())
+	if got.Eligible || got.Reason != "metrics_missing" || got.Priority != 2 || len(got.MissingFields) != 1 {
+		t.Fatalf("decision=%+v", got)
+	}
+	rules = append(rules, ComposePriorityRule{Priority: 3, Action: "filter", Logic: "all", Conditions: []ComposeCondition{condition("like_count", "gte", "10")}})
+	got = EvaluateComposeRules(rules, ComposeCandidateFacts{LikeCount: 20}, time.Now())
+	if got.Reason != "filtered" || got.Priority != 3 {
+		t.Fatalf("decision=%+v", got)
+	}
+}
+
+func TestComposeRuleDecisionMatchOrderAndEvidence(t *testing.T) {
+	rules := []ComposePriorityRule{
+		{Priority: 2, Action: "match", Logic: "all", Conditions: []ComposeCondition{condition("like_count", "gte", "10")}},
+		{Priority: 1, Action: "match", Logic: "all", Conditions: []ComposeCondition{condition("favorite_count", "eq", "0")}},
+	}
+	got := EvaluateComposeRules(rules, ComposeCandidateFacts{LikeCount: 20}, time.Now())
+	if got.Eligible || got.Reason != "metrics_missing" || got.Priority != 1 {
+		t.Fatalf("uncertain first match=%+v", got)
+	}
+	got = EvaluateComposeRules(rules, ComposeCandidateFacts{LikeCount: 20, FavoriteCount: 5}, time.Now())
+	if !got.Eligible || got.Priority != 2 || got.Reason != "matched" {
+		t.Fatalf("matched=%+v", got)
+	}
+	evidence := got.Conditions[0]
+	if evidence.Field != "like_count" || evidence.Operator != "gte" || string(evidence.Expected) != "10" || string(evidence.Actual) != "20" || evidence.State != "matched" {
+		t.Fatalf("evidence=%+v", evidence)
+	}
+	got = EvaluateComposeRules(rules, ComposeCandidateFacts{LikeCountKnown: true, FavoriteCount: 5}, time.Now())
+	if got.Eligible || got.Reason != "no_match" {
+		t.Fatalf("zero recorded value=%+v", got)
+	}
+}

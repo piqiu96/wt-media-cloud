@@ -18,8 +18,8 @@ import (
 const basicCutSchema = `{
 	"type": "object",
 	"properties": {
-		"start_seconds": {"type": "integer", "minimum": 0, "title": "开始秒数"},
-		"end_seconds": {"type": "integer", "minimum": 1, "title": "结束秒数"}
+		"start_seconds": {"type": "integer", "minimum": 0, "title": "开始秒数", "editable": true},
+		"end_seconds": {"type": "integer", "minimum": 1, "title": "结束秒数", "editable": true}
 	},
 	"required": ["start_seconds", "end_seconds"],
 	"additionalProperties": false

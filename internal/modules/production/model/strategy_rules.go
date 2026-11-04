@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -12,6 +13,9 @@ type ComposeCandidateFacts struct {
 	PublishedAt   *time.Time
 	LikeCount     int64
 	FavoriteCount int64
+	// Nonzero counters are known for compatibility. Recorded zero requires its Known flag.
+	LikeCountKnown     bool
+	FavoriteCountKnown bool
 }
 
 func ValidateComposePriorityRules(groups []ComposePriorityRule) error {
@@ -87,24 +91,138 @@ func ValidateComposeCondition(condition ComposeCondition) error {
 	return nil
 }
 
-func ComposeGroupPredicate(group ComposePriorityRule, facts ComposeCandidateFacts, now time.Time) bool {
-	result := group.Logic == "all"
-	for _, condition := range group.Conditions {
-		matches := composeConditionMatches(condition, facts, now)
-		if group.Logic == "all" {
-			result = result && matches
-		} else {
-			result = result || matches
+// ComposeConditionDecision preserves the exact facts used for a preview reason.
+// Actual is omitted for an unknown fact; it is never fabricated as zero.
+type ComposeConditionDecision struct {
+	Field    string          `json:"field"`
+	Operator string          `json:"operator"`
+	Expected json.RawMessage `json:"expected"`
+	Actual   json.RawMessage `json:"actual,omitempty"`
+	State    string          `json:"state"`
+}
+
+type ComposeGroupDecision struct {
+	State         string                     `json:"state"` // matched, not_matched, unknown
+	MissingFields []string                   `json:"missing_fields,omitempty"`
+	Conditions    []ComposeConditionDecision `json:"conditions"`
+}
+
+type ComposeRuleDecision struct {
+	Eligible      bool                       `json:"eligible"`
+	Reason        string                     `json:"reason"` // matched, filtered, no_match, metrics_missing
+	Priority      int                        `json:"priority,omitempty"`
+	MissingFields []string                   `json:"missing_fields,omitempty"`
+	Conditions    []ComposeConditionDecision `json:"conditions"`
+}
+
+// EvaluateComposeRules is shared by read-only preview and execution. All filters
+// apply before match priority, regardless of their position in the supplied slice.
+// An unresolved filter or higher-priority match cannot safely admit a candidate.
+func EvaluateComposeRules(groups []ComposePriorityRule, facts ComposeCandidateFacts, now time.Time) ComposeRuleDecision {
+	ordered := append([]ComposePriorityRule(nil), groups...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Priority < ordered[j].Priority })
+	var unknown *ComposeRuleDecision
+	for _, group := range ordered {
+		if group.Action != "filter" {
+			continue
 		}
+		result := EvaluateComposeGroup(group, facts, now)
+		decision := ComposeRuleDecision{Priority: group.Priority, Conditions: result.Conditions, MissingFields: result.MissingFields}
+		if result.State == "matched" {
+			decision.Reason = "filtered"
+			return decision
+		}
+		if result.State == "unknown" && unknown == nil {
+			decision.Reason = "metrics_missing"
+			unknown = &decision
+		}
+	}
+	if unknown != nil {
+		return *unknown
+	}
+	evidence := []ComposeConditionDecision{}
+	for _, group := range ordered {
+		if group.Action != "match" {
+			continue
+		}
+		result := EvaluateComposeGroup(group, facts, now)
+		decision := ComposeRuleDecision{Priority: group.Priority, Conditions: result.Conditions, MissingFields: result.MissingFields}
+		if result.State == "matched" {
+			decision.Eligible = true
+			decision.Reason = "matched"
+			return decision
+		}
+		if result.State == "unknown" {
+			decision.Reason = "metrics_missing"
+			return decision
+		}
+		evidence = append(evidence, result.Conditions...)
+	}
+	return ComposeRuleDecision{Reason: "no_match", Conditions: evidence}
+}
+
+func ComposeGroupPredicate(group ComposePriorityRule, facts ComposeCandidateFacts, now time.Time) bool {
+	return EvaluateComposeGroup(group, facts, now).State == "matched"
+}
+
+// EvaluateComposeGroup uses three-valued logic: true settles any, false settles
+// all. Missing fields block only when the known predicates cannot settle a group.
+func EvaluateComposeGroup(group ComposePriorityRule, facts ComposeCandidateFacts, now time.Time) ComposeGroupDecision {
+	result := ComposeGroupDecision{State: "not_matched", Conditions: []ComposeConditionDecision{}}
+	if len(group.Conditions) == 0 || (group.Logic != "all" && group.Logic != "any") {
+		return result
+	}
+	missing := []string{}
+	decisive := false
+	for _, condition := range group.Conditions {
+		detail := composeConditionDecision(condition, facts, now)
+		result.Conditions = append(result.Conditions, detail)
+		if detail.State == "unknown" {
+			found := false
+			for _, field := range missing {
+				if field == condition.Field {
+					found = true
+					break
+				}
+			}
+			if !found {
+				missing = append(missing, condition.Field)
+			}
+		}
+		if (group.Logic == "any" && detail.State == "matched") || (group.Logic == "all" && detail.State == "not_matched") {
+			decisive = true
+		}
+	}
+	if decisive {
+		if group.Logic == "any" {
+			result.State = "matched"
+		}
+		return result
+	}
+	if len(missing) > 0 {
+		result.State = "unknown"
+		result.MissingFields = missing
+		return result
+	}
+	if group.Logic == "all" {
+		result.State = "matched"
 	}
 	return result
 }
 
-func composeConditionMatches(condition ComposeCondition, facts ComposeCandidateFacts, now time.Time) bool {
+func composeConditionDecision(condition ComposeCondition, facts ComposeCandidateFacts, now time.Time) ComposeConditionDecision {
+	detail := ComposeConditionDecision{Field: condition.Field, Operator: condition.Operator, Expected: append(json.RawMessage(nil), condition.Value...), State: "unknown"}
+	// Persisted rules are validated on save and run. Still fail closed for malformed
+	// input to the shared pure helper, rather than interpreting bad JSON as zero.
+	if ValidateComposeCondition(condition) != nil {
+		return detail
+	}
+	matches := false
 	if condition.Field == "published_at" {
 		if facts.PublishedAt == nil {
-			return false
+			return detail
 		}
+		detail.Actual, _ = json.Marshal(facts.PublishedAt.UTC().Format(time.RFC3339Nano))
 		if condition.Operator == "recent_days" || condition.Operator == "recent_hours" {
 			var amount int
 			_ = json.Unmarshal(condition.Value, &amount)
@@ -112,29 +230,39 @@ func composeConditionMatches(condition ComposeCondition, facts ComposeCandidateF
 			if condition.Operator == "recent_days" {
 				duration *= 24
 			}
-			start := now.Add(-duration)
-			return !facts.PublishedAt.Before(start) && !facts.PublishedAt.After(now)
+			matches = !facts.PublishedAt.Before(now.Add(-duration)) && !facts.PublishedAt.After(now)
+		} else {
+			var text string
+			_ = json.Unmarshal(condition.Value, &text)
+			boundary, _ := time.Parse(time.RFC3339, text)
+			matches = facts.PublishedAt.Before(boundary)
+			if condition.Operator == "gte" {
+				matches = !matches
+			}
 		}
-		var text string
-		_ = json.Unmarshal(condition.Value, &text)
-		boundary, _ := time.Parse(time.RFC3339, text)
-		if condition.Operator == "gte" {
-			return !facts.PublishedAt.Before(boundary)
+	} else {
+		value, known := facts.LikeCount, facts.LikeCountKnown || facts.LikeCount != 0
+		if condition.Field == "favorite_count" {
+			value, known = facts.FavoriteCount, facts.FavoriteCountKnown || facts.FavoriteCount != 0
 		}
-		return facts.PublishedAt.Before(boundary)
+		if !known {
+			return detail
+		}
+		detail.Actual, _ = json.Marshal(value)
+		var threshold int64
+		_ = json.Unmarshal(condition.Value, &threshold)
+		switch condition.Operator {
+		case "eq":
+			matches = value == threshold
+		case "gte":
+			matches = value >= threshold
+		case "lte":
+			matches = value <= threshold
+		}
 	}
-	var threshold int64
-	_ = json.Unmarshal(condition.Value, &threshold)
-	value := facts.LikeCount
-	if condition.Field == "favorite_count" {
-		value = facts.FavoriteCount
+	detail.State = "not_matched"
+	if matches {
+		detail.State = "matched"
 	}
-	switch condition.Operator {
-	case "eq":
-		return value == threshold
-	case "gte":
-		return value >= threshold
-	default:
-		return value <= threshold
-	}
+	return detail
 }

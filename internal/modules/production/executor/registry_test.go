@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -70,5 +71,24 @@ func TestRegistryRejectsAnUnknownTemplateVersion(t *testing.T) {
 func TestRegistryRejectsEmptyRegistrations(t *testing.T) {
 	if _, err := NewRegistry(); err == nil {
 		t.Fatal("NewRegistry() = nil error, want a rejection for a registry with no executor at all")
+	}
+}
+
+func TestDeployedTemplateTaskEditabilityIsExplicitAndGuideURLLocked(t *testing.T) {
+	for _, definition := range DeployedDefinitions() {
+		var schema struct {
+			Properties map[string]struct {
+				Editable *bool `json:"editable"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(definition.Schema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		for name, property := range schema.Properties {
+			want := name != "guide_video_url"
+			if property.Editable == nil || *property.Editable != want {
+				t.Errorf("%s.%s editable=%v want %v", definition.Code, name, property.Editable, want)
+			}
+		}
 	}
 }

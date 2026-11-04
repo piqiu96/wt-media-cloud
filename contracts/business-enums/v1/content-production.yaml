@@ -1,7 +1,13 @@
 schema_version: 1
-revision: "2026.10.12.3"
+revision: "2026.11.05.1"
 
 video_statuses: [not_downloaded, downloading, ready, failed]
 material_usage_statuses: [active, removed]
 compose_template_statuses: [active, inactive]
-compose_strategy_statuses: [active, inactive]
+compose_strategy_statuses: [enabled, disabled]
+compose_execution_modes: [manual, scheduled]
+compose_trigger_types: [manual, immediate, scheduled]
+compose_target_platforms: [bilibili, baidu, xiaohongshu]
+compose_rule_actions: [match, filter]
+compose_rule_logics: [all, any]
+compose_condition_states: [matched, not_matched, unknown]

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.26.1"
+revision: "2026.11.05.1"
 
 errors:
   material_not_found: {http_status: 404}
@@ -18,3 +18,5 @@ errors:
   compose_task_not_cancellable: {http_status: 409}
   compose_task_not_retryable: {http_status: 409}
   compose_task_conflict: {http_status: 409}
+  compose_preview_changed: {http_status: 409, errcode: 15214, description: Execution facts or quotas changed since preview; refresh preview before confirming.}
+  compose_already_running: {http_status: 409, errcode: 15215, description: Strategy has unfinished work; inspect the active batch.}

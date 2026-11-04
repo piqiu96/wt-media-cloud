@@ -10,6 +10,9 @@ describe('compose strategy page', () => {
   it('compiles the strategy detail and shared summary templates', () => {
     for (const [name, input] of [
       ['ComposeStrategyPage.vue', source],
+      ['ComposeReorderActions.vue', readFileSync(new URL('../components/ComposeReorderActions.vue', import.meta.url), 'utf8')],
+      ['ComposeStrategySettings.vue', readFileSync(new URL('../components/ComposeStrategySettings.vue', import.meta.url), 'utf8')],
+      ['ComposeStrategyExecutionPreview.vue', readFileSync(new URL('../components/ComposeStrategyExecutionPreview.vue', import.meta.url), 'utf8')],
       ['ComposeStrategySummary.vue', readFileSync(new URL('../components/ComposeStrategySummary.vue', import.meta.url), 'utf8')],
     ]) {
       const parsed = parse(input, { filename: name })
@@ -19,8 +22,11 @@ describe('compose strategy page', () => {
     }
   })
   it('keeps immediate execution separate from saving the next planned time', () => {
-    expect(source).toContain('client.runStrategyNow(row.id, crypto.randomUUID())')
-    expect(source).toContain('不改变')
+    expect(source).toContain('client.previewStrategyExecution(executionStrategy.value.id)')
+    expect(source).toContain('client.runStrategyNow(row.id, executionRequestKey.value, executionView.value.preview_token)')
+    const command = source.slice(source.indexOf('async function confirmExecution()'), source.indexOf('function openExecutionProgress'))
+    expect(command).not.toContain('updateStrategy')
+    expect(command).not.toContain('next_run_at =')
   })
   // 运行记录的触发方式与任务页、成片管理共用一组文案；策略自身的
   // 「手动执行 / 定时执行」是另一个字段（执行方式），不能一起换掉。
@@ -34,7 +40,7 @@ describe('compose strategy page', () => {
   })
   // 普通运营只有详情；管理角色可详情、编辑、执行、复制。列宽跟着这份清单走。
   it('derives the op column width from the buttons the current role can see', () => {
-    expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '执行', '复制'] : ['详情'])")
+    expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情'])")
     expect(source).not.toContain("width: 170, fixed: 'right'")
   })
 
