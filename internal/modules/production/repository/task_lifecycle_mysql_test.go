@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -83,6 +84,20 @@ func TestClaimNextRefusesTheClusterCapacityBeforeSelectingATask(t *testing.T) {
 	_, found, err := claimNextComposeTask(db, 9, time.Minute, now)
 	if err != nil || found {
 		t.Fatalf("full cluster must not claim: found=%v err=%v", found, err)
+	}
+	assertExpectations(t, mock)
+}
+
+// An uncertain worker still owns capacity until its current attempt is reviewed.
+func TestClaimNextCountsUnreviewedCurrentUncertainAttemptUnderCapacityLock(t *testing.T) {
+	db, mock := newMockGORM(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{"max_running"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM compose_tasks WHERE status = 'running' OR (status = 'failed' AND error_code = 'execution_uncertain' AND NOT EXISTS (SELECT 1 FROM compose_task_attempts a WHERE a.task_id = compose_tasks.id AND a.attempt = compose_tasks.attempt_count AND a.uncertain_reviewed_at IS NOT NULL))`)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectRollback()
+	_, found, err := claimNextComposeTask(db, 9, time.Minute, time.Now())
+	if err != nil || found {
+		t.Fatalf("uncertain capacity claimed: found=%v err=%v", found, err)
 	}
 	assertExpectations(t, mock)
 }

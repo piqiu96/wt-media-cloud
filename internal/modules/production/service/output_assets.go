@@ -280,6 +280,10 @@ func (s *ComposeOutputService) decorateOutput(ctx context.Context, actor identit
 		o.Video.Reason = "成片文件位置未记录"
 	}
 	o.Actions.DownloadReason = o.Video.Reason
+	if !canDownloadLocally(actor) {
+		o.Actions.Download = false
+		o.Actions.DownloadReason = "仅运营和高级运营可下载到本机"
+	}
 	task, found, err := s.tasks.Find(o.TaskID)
 	if err != nil {
 		return err

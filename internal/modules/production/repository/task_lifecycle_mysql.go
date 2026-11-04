@@ -59,7 +59,9 @@ func claimNextComposeTask(db *gorm.DB, nodeID int64, lease time.Duration, now ti
 		if err := tx.Raw(`SELECT max_running FROM compose_worker_capacity WHERE id = 1 FOR UPDATE`).Row().Scan(&limit); err != nil {
 			return err
 		}
-		if err := tx.Raw(`SELECT COUNT(*) FROM compose_tasks WHERE status = 'running'`).Row().Scan(&running); err != nil {
+		// An uncertain process may still be executing. Only an explicit review of
+		// its current attempt releases that slot; missing evidence stays occupied.
+		if err := tx.Raw(`SELECT COUNT(*) FROM compose_tasks WHERE status = 'running' OR (status = 'failed' AND error_code = 'execution_uncertain' AND NOT EXISTS (SELECT 1 FROM compose_task_attempts a WHERE a.task_id = compose_tasks.id AND a.attempt = compose_tasks.attempt_count AND a.uncertain_reviewed_at IS NOT NULL))`).Row().Scan(&running); err != nil {
 			return err
 		}
 		if running >= limit {

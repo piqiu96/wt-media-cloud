@@ -350,6 +350,9 @@ func (s *ComposeOutputService) VideoURL(ctx context.Context, actor identity.Publ
 // for an output the actor cannot see. The task carries no machine: any machine
 // the user is logged in on can claim it.
 func (s *ComposeOutputService) CreateOutputDownload(actor identity.PublicUser, id int64) (transferdto.Task, error) {
+	if !canDownloadLocally(actor) {
+		return transferdto.Task{}, ErrComposeOutputForbidden
+	}
 	output, err := s.readable(actor, id)
 	if err != nil {
 		return transferdto.Task{}, err

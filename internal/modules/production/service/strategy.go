@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -75,9 +78,12 @@ func wiredStrategyService() *StrategyService {
 	return service
 }
 
-// ComposeStrategyListQuery carries the list page's filters. Pagination stays
-// client-side; the repository caps the result at 200 rows.
+// ComposeStrategyListQuery carries the authorized strategy page filters.
 type ComposeStrategyListQuery struct {
+	Page       int
+	PageSize   int
+	TeamID     int64
+	OperatorID int64
 	Search     string
 	CategoryID identity.CategoryID
 	TemplateID int64
@@ -514,4 +520,57 @@ func (s *StrategyService) prepareOutputSettings(templateID int64, version uint32
 func (s *StrategyService) validateOutputSettings(item model.ComposeStrategy, active bool) error {
 	_, _, _, err := s.prepareOutputSettings(item.TemplateID, item.TemplateVersion, item.EffectiveOutputSettings(), item.Config, active)
 	return err
+}
+
+// The old List method remains for internal compatibility; HTTP always calls
+// Page so no visible strategy directory is silently truncated at 200 rows.
+type strategyPageRepository interface {
+	Page(context.Context, repository.StrategyFilter, int, int) (repository.ComposeStrategyPage, error)
+}
+
+func ListComposeStrategyPage(ctx context.Context, actor identity.PublicUser, query ComposeStrategyListQuery) (repository.ComposeStrategyPage, error) {
+	return wiredStrategyService().Page(ctx, actor, query)
+}
+func (s *StrategyService) Page(ctx context.Context, actor identity.PublicUser, query ComposeStrategyListQuery) (repository.ComposeStrategyPage, error) {
+	page, size := query.Page, query.PageSize
+	if page == 0 {
+		page = 1
+	}
+	if size == 0 {
+		size = 20
+	}
+	result := repository.ComposeStrategyPage{Items: []model.ComposeStrategy{}, Page: page, PageSize: size}
+	if page < 1 || size < 1 || size > 100 || page-1 > math.MaxInt/size || query.TeamID < 0 || query.OperatorID < 0 || query.CategoryID < 0 || query.TemplateID < 0 || len([]rune(strings.TrimSpace(query.Search))) > 100 {
+		return result, ErrStrategyInvalid
+	}
+	if query.Status != "" && query.Status != model.ComposeStrategyEnabled && query.Status != model.ComposeStrategyDisabled {
+		return result, ErrStrategyInvalid
+	}
+	scope, err := resolveComposeListScope(actor, query.TeamID, query.OperatorID, "")
+	if err != nil {
+		if errors.Is(err, errComposeScopeForbidden) {
+			return result, ErrStrategyForbidden
+		}
+		return result, ErrStrategyInvalid
+	}
+	f := repository.StrategyFilter{TeamID: scope.TeamID, OperatorID: scope.OperatorID, ActiveOnly: actor.Role == identity.RoleOperator, Search: strings.TrimSpace(query.Search), CategoryID: query.CategoryID, TemplateID: query.TemplateID, Status: query.Status}
+	if actor.Role == identity.RoleOperator {
+		if len(actor.CategoryIDs) == 0 {
+			return result, nil
+		}
+		if query.CategoryID > 0 && !slices.Contains(actor.CategoryIDs, query.CategoryID) {
+			return result, ErrStrategyForbidden
+		}
+		f.CategoryIDs = append([]identity.CategoryID(nil), actor.CategoryIDs...)
+	}
+	store, ok := s.store.(strategyPageRepository)
+	if !ok {
+		return result, errors.New("strategy paging unavailable")
+	}
+	result, err = store.Page(ctx, f, page, size)
+	if err != nil {
+		return result, err
+	}
+	result.Items, err = s.withOperatorNames(result.Items)
+	return result, err
 }

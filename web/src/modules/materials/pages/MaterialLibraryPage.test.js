@@ -18,6 +18,19 @@ function sliceBetween(text, start, end) {
 const opBlock = sliceBetween(source, '#op=', '</t-space>')
 
 describe('material library page', () => {
+  it('keeps search and ownership basic while grouping usage filters under advanced controls', () => {
+    const bar=source.slice(source.indexOf('class="filter-bar"'),source.indexOf('class="table-scroll-wrap"'))
+    const split=bar.indexOf('class="wt-advanced-filters"')
+    expect(split).toBeGreaterThan(0)
+    expect(bar.slice(0,split)).toContain('综合搜索')
+    expect(bar.slice(0,split)).toContain('运营团队')
+    expect(bar.slice(0,split)).toContain('业务分类')
+    for(const title of ['加入状态','我的使用','使用情况']) {
+      expect(bar.slice(0,split)).not.toContain(title)
+      expect(bar.slice(split)).toContain(title)
+    }
+    expect(bar).toContain('高级筛选')
+  })
   /**
    * `?material_id=N` 是一个**真实入口**，不是装饰。
    *

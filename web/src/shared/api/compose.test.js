@@ -8,6 +8,16 @@ function ok(data, status = 200) {
 // 路径与 production/router.go 的六条策略路由 + 模板目录逐一比对（CHG-20261012-081 T-01
 // 合同）。客户端只做路径映射，不改方法名与路径的对应关系；错一条就是打到 404 上。
 describe('compose api client', () => {
+  it('reads authorized strategy pages with exact assignment filters and server totals', async () => {
+    const data = {items:[{id:225,name:'Older strategy'}],total:251,page:3,page_size:20}
+    const fetch = vi.fn().mockResolvedValue(ok(data))
+    const client = createComposeClient({fetch})
+    await expect(client.listStrategies({search:'Older',category_id:3,template_id:4,status:'enabled',team_id:2,operator_id:5,page:3,page_size:20})).resolves.toEqual(data)
+    const url = new URL(fetch.mock.calls[0][0], 'http://local')
+    expect(url.pathname).toBe('/api/v1/compose-strategies')
+    expect(Object.fromEntries(url.searchParams)).toEqual({search:'Older',category_id:'3',template_id:'4',status:'enabled',team_id:'2',operator_id:'5',page:'3',page_size:'20'})
+  })
+
   it('previews before confirming the reviewed result', async () => {
     const fetch = vi.fn().mockResolvedValue(ok({ selected_count: 2, estimated_output_count: 10, preview_token: 'x'.repeat(64) }))
     const client = createComposeClient({ fetch })

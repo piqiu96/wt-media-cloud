@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.3"
+revision: "2026.11.05.4"
 
 errors:
   material_not_found: {http_status: 404}

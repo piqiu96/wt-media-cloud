@@ -12,7 +12,7 @@ const PAGES = [
   ['挖掘任务', 'src/modules/contentpool/pages/CrawlTasksPage.vue', 'load'],
   ['素材库', 'src/modules/materials/pages/MaterialLibraryPage.vue', 'load', 'server'],
   ['我的素材', 'src/modules/materials/pages/MyMaterialsPage.vue', 'load', 'server'],
-  ['合成策略', 'src/modules/compose/pages/ComposeStrategyPage.vue', 'load'],
+  ['合成策略', 'src/modules/compose/pages/ComposeStrategyPage.vue', 'load', 'server'],
   ['合成任务', 'src/modules/compose/pages/ComposeTasksPage.vue', 'load', 'server'],
   ['成片管理', 'src/modules/compose/pages/MyOutputsPage.vue', 'load', 'if (resetPage) pagination.value.current = 1'],
   ['用户管理', 'src/apps/cloud/pages/users/UsersPage.vue', 'loadAll'],
@@ -31,7 +31,7 @@ function serverLoader(path, client, overrides = {}) {
   const load = source.slice(start, source.indexOf('\n}', start) + 2)
   const ref = (value) => ({ value })
   const state = {
-    client, pagination: ref({ current: 3, pageSize: 25 }),
+    client, sessionClient: { me: async () => ({role:'admin'}) }, currentUser: ref({role:'admin'}), templates: ref([]), categories: ref([]), teams: ref([]), pagination: ref({ current: 3, pageSize: 25 }),
     rows: ref([{ id: 'previous' }]), total: ref(72), loading: ref(false), error: ref('previous notice'),
     filters: ref({ search: ' query ', created_range: [] }), activeView: ref('batches'),
     isAdmin: ref(false), isSenior: ref(false), knownTaskRows: ref({}),
@@ -63,7 +63,7 @@ describe('list pages auto refresh', () => {
 
   it.each(SERVER_PAGES)('%s quietly rereads the current server page and preserves filters', async (_name, path) => {
     const request = vi.fn().mockResolvedValue({ items: [{ id: 'updated' }], total: 73 })
-    const { state, run } = serverLoader(path, { list: request, listMyMaterials: request, listComposeTaskBatches: request, listComposeTasks: request })
+    const { state, run } = serverLoader(path, { list: request, listMyMaterials: request, listComposeTaskBatches: request, listComposeTasks: request, listStrategies: request, listTemplates: async () => [], listCategories: async () => [], listTeams: async () => [] })
     await run()
     expect(request).toHaveBeenCalledOnce()
     expect(request.mock.calls[0][0]).toMatchObject({ page: 3, page_size: 25, search: 'query' })
@@ -77,7 +77,7 @@ describe('list pages auto refresh', () => {
 
   it.each(SERVER_PAGES)('%s keeps the last server page when a quiet read fails', async (_name, path) => {
     const request = vi.fn().mockRejectedValue(new Error('offline'))
-    const { state, run } = serverLoader(path, { list: request, listMyMaterials: request, listComposeTaskBatches: request, listComposeTasks: request })
+    const { state, run } = serverLoader(path, { list: request, listMyMaterials: request, listComposeTaskBatches: request, listComposeTasks: request, listStrategies: request, listTemplates: async () => [], listCategories: async () => [], listTeams: async () => [] })
     await run()
     expect(state.pagination.value).toEqual({ current: 3, pageSize: 25 })
     expect(state.rows.value).toEqual([{ id: 'previous' }])

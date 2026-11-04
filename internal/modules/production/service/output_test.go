@@ -453,3 +453,21 @@ func TestComposeOutputListRefusesForeignOperatorFiltersAndDecoratesNames(t *test
 		}
 	}
 }
+
+func TestCreateOutputDownloadRefusesAdministratorBeforeAssetRead(t *testing.T) {
+	// Nil repositories make an accidental read fail loudly before any queue call.
+	svc := &ComposeOutputService{}
+	_, err := svc.CreateOutputDownload(identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}, 5)
+	if !errors.Is(err, ErrComposeOutputForbidden) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestReadyOutputAdministratorDownloadActionIsUnavailable(t *testing.T) {
+	svc := NewComposeOutputService(&outputMemoryStore{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTaskFake{}, &outputLinkerFake{}, &stubTransfers{})
+	output := outputFixture(5)
+	err := svc.decorateOutput(context.Background(), identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}, &output)
+	if err != nil || output.Video.Status != "ready" || output.Actions.Download || output.Actions.DownloadReason == "" {
+		t.Fatalf("output=%+v err=%v", output, err)
+	}
+}

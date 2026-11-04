@@ -147,8 +147,12 @@ func (StrategyStore) List(filter StrategyFilter) ([]model.ComposeStrategy, error
 	return listComposeStrategies(database.DB(), filter)
 }
 
-func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeStrategy, error) {
-	query := `SELECT s.id, s.team_id, s.category_id, s.operator_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.execution_mode, s.schedule_json, s.priority_rules_json, s.single_limit, s.daily_limit, s.next_run_at, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at, s.output_settings_json FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version WHERE 1=1`
+const strategyListSelect = `SELECT s.id, s.team_id, s.category_id, s.operator_id, s.compose_template_id, s.compose_template_version, s.name, s.config_json, s.execution_mode, s.schedule_json, s.priority_rules_json, s.single_limit, s.daily_limit, s.next_run_at, s.status, s.created_by, s.updated_by, s.created_at, s.updated_at, s.output_settings_json`
+const strategyListFrom = ` FROM compose_strategies s JOIN compose_templates t ON t.id = s.compose_template_id AND t.version = s.compose_template_version`
+
+func strategyListWhere(filter StrategyFilter) (string, []any) {
+	query := ` WHERE 1=1`
+
 	args := make([]any, 0, len(filter.CategoryIDs)+3)
 	if filter.TeamID > 0 {
 		query += ` AND s.team_id = ?`
@@ -184,6 +188,11 @@ func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeS
 		query += ` AND s.status = ?`
 		args = append(args, filter.Status)
 	}
+	return query, args
+}
+func listComposeStrategies(db *gorm.DB, filter StrategyFilter) ([]model.ComposeStrategy, error) {
+	where, args := strategyListWhere(filter)
+	query := strategyListSelect + strategyListFrom + where
 	query += ` ORDER BY s.id DESC LIMIT 200`
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {

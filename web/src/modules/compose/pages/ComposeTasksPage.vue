@@ -1,4 +1,5 @@
 <script setup>
+import ComposeStrategyPicker from '../components/ComposeStrategyPicker.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -48,7 +49,6 @@ const batchVisible = ref(false)
 const batchID = ref(null)
 const viewPages = { batches: { current: 1, pageSize: 20 }, tasks: { current: 1, pageSize: 20 } }
 function openBatch(row) { batchID.value = row.id; batchVisible.value = true }
-const strategies = ref([])
 const templates = ref([])
 const categories = ref([])
 const teams = ref([])
@@ -112,11 +112,7 @@ function onPageChange() { load() }
 function onPageSizeChange() { pagination.value.current = 1; load() }
 
 const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }))
-const strategyOptions = computed(() => strategies.value.map((item) => ({ value: String(item.id), label: item.name })))
-function strategyName(row) {
-  const found = strategies.value.find((item) => item.id === row.compose_strategy_id)
-  return found ? found.name : `策略 ${row.compose_strategy_id}`
-}
+function strategyName(row) { return row.strategy_name || `策略 ${row.compose_strategy_id}` }
 
 /**
  * 状态徽标：等待素材时底层状态仍是「运行中」，但用户看到的事实是「还在等文件」。
@@ -199,15 +195,6 @@ async function onCreated(result) {
   else feedback.toast.success(`已创建 ${created.length} 个合成任务`)
   await query()
   if (result.batch?.id) openBatch(result.batch)
-}
-
-async function loadStrategies() {
-  try {
-    const data = await client.listStrategies()
-    strategies.value = Array.isArray(data) ? data : []
-  } catch {
-    strategies.value = []
-  }
 }
 
 async function loadTemplates() {
@@ -496,7 +483,6 @@ function cancel(row) {
 
 onMounted(() => {
   load()
-  loadStrategies()
   loadTemplates()
   loadLookups()
   // 只为藏/显重试按钮；读失败不拦页面，角色判定由服务端兜底。
@@ -529,7 +515,7 @@ onMounted(() => {
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button variant="text" :aria-expanded="advancedFilters" aria-controls="compose-advanced-filters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? '收起筛选' : '高级筛选' }}</t-button></div>
           <div v-show="advancedFilters" id="compose-advanced-filters" class="wt-advanced-filters">
-            <label class="wt-filter-field"><span class="wt-filter-field__label">合成策略</span><t-select v-model="filters.compose_strategy_id" :options="strategyOptions" clearable placeholder="全部" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">合成策略</span><ComposeStrategyPicker v-model="filters.compose_strategy_id" :filters="{ team_id: filters.team_id, operator_id: operatorIdFromOption(filters.operator) || undefined }" placeholder="全部" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
             <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">创建时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
           </div>

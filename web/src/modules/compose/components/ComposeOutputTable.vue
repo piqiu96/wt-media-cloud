@@ -5,7 +5,7 @@ import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { platformText } from '../strategySettings.js'
 import { outputTitle } from '../outputManagement.js'
-const props=defineProps({rows:{type:Array,default:()=>[]},selectedKeys:{type:Array,default:()=>[]},materialMode:Boolean,videoState:{type:Function,required:true},canDownload:{type:Function,required:true},downloadingId:Number,categoryName:{type:Function,default:()=> '—'}})
+const props=defineProps({rows:{type:Array,default:()=>[]},selectedKeys:{type:Array,default:()=>[]},materialMode:Boolean,videoState:{type:Function,required:true},canDownload:{type:Function,required:true},downloadReason:{type:Function,default:()=>''},downloadingId:Number,categoryName:{type:Function,default:()=> '—'}})
 // Extra viewport space belongs to the name column; checkbox and actions keep their measured widths.
 const tableRoot=ref(null),availableWidth=ref(0)
 let resizeObserver
@@ -30,13 +30,14 @@ const tableScroll = computed(()=>({x:`${columns.value.reduce((sum,col)=>sum+(col
   <template #output="{row}"><div class="output-table__related"><strong :title="outputTitle(row)">{{ outputTitle(row) }}</strong><span>{{ formatDateTime(row.created_at) }}</span><span v-if="materialMode">{{ row.setting_name || '成片设置未记录' }}</span></div></template>
   <template #source="{row}"><div v-if="materialMode" class="output-table__related"><strong>{{ row.strategy_name || '—' }}</strong><t-link v-if="row.batch_id" theme="primary" @click="emit('batch',row.batch_id)">任务批次 {{ row.batch_id }}</t-link><span v-else>任务批次未记录</span></div><div v-else class="output-table__related"><t-link v-if="row.material_id" theme="primary" :title="row.material_title" @click="emit('material',row.material_id)">{{ row.material_title || `素材 ${row.material_id}` }}</t-link><span>{{ row.material_id }}</span></div></template>
   <template #category="{row}">{{ categoryName(row.category_id) }}</template>
-  <template #operator="{row}"><span :title="!row.operator_name ? '历史负责人无法可靠确定' : ''">{{ row.operator_name || '—' }}</span></template>
+  <template #operator="{row}"><span class="output-table__operator" :title="row.operator_name || '历史负责人无法可靠确定'">{{ row.operator_name || '—' }}</span></template>
   <template #platforms="{row}">{{ row.platforms?.length ? platformText(row.platforms) : '—' }}</template>
   <template #video="{row}"><span :title="videoState(row).reason"><ResourceStatusBadge :label="videoState(row).label" :tone="videoState(row).tone" /></span></template>
-  <template #op="{row}"><t-space class="wt-resource-actions" size="small"><t-button size="small" variant="outline" class="wt-secondary-button" @click="emit('detail',row)">详情</t-button><t-button v-if="canDownload(row)" size="small" variant="outline" class="wt-secondary-button" :loading="downloadingId===row.id" @click="emit('download',row)">下载</t-button><t-button v-if="row.actions?.remake" size="small" variant="outline" class="wt-secondary-button" @click="emit('remake',row)">再次制作</t-button></t-space></template>
+  <template #op="{row}"><t-space class="wt-resource-actions" size="small"><t-button size="small" variant="outline" class="wt-secondary-button" @click="emit('detail',row)">详情</t-button><t-button v-if="canDownload(row)||downloadReason(row)" :disabled="!canDownload(row)" :title="downloadReason(row)" size="small" variant="outline" class="wt-secondary-button" :loading="downloadingId===row.id" @click="emit('download',row)">下载</t-button><t-button v-if="row.actions?.remake" size="small" variant="outline" class="wt-secondary-button" @click="emit('remake',row)">再次制作</t-button></t-space></template>
  </t-table></div>
 </template>
 <style scoped>
+.output-table__operator {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .output-table__related {display:flex;flex-direction:column;gap:3px;min-width:0;}
 .output-table__related strong,.output-table__related :deep(.t-link){font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
 .output-table__related span{font-size:12px;color:var(--wt-text-tertiary);}

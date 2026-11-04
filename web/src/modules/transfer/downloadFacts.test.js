@@ -169,21 +169,20 @@ describe('row actions', () => {
     expect(canRedownload(task({ status: 'pending' }))).toBe(false)
   })
 
-  /**
-   * 成功的行**不给**重新下载 —— 走查裁定「已成功的不能再次下载」。
-   *
-   * 下载在库里是**执行记录**，一个素材的「已下载」是**资产状态**：重复发起不会得到第二
-   * 份文件，只会再落一行执行历史。文件在不在不由这里断言（`presence` 只有 Desktop 实测
-   * 过才有意义），所以也不按「文件找不到了」再开一个口子。
-   */
-  it('never offers a re-download of a material that already succeeded', () => {
-    expect(canRedownload(task({ status: 'success' }))).toBe(false)
-    expect(canRedownload(task({ status: 'success' }), 'unknown')).toBe(false)
-    expect(canRedownload(task({ status: 'success' }), 'present_current')).toBe(false)
-    expect(canRedownload(task({ status: 'success' }), 'present_elsewhere')).toBe(false)
-    expect(canRedownload(task({ status: 'success' }), 'absent')).toBe(false)
-    // 成功行的原动作是「打开文件」，不是因为少了这个按钮就没了。
-    expect(canOpenFile(task({ status: 'success', file_name: 'x.mp4' }))).toBe(true)
+  it.each(['material', 'composite_output'])('permits a successful %s download only when its local file was measured absent', (asset_type) => {
+    const success = task({ asset_type, status: 'success', purpose: 'user_download', file_name: 'x.mp4' })
+    expect(canRedownload(success, 'absent')).toBe(true)
+    for (const presence of [undefined, 'unknown', 'present_current', 'present_elsewhere']) {
+      expect(canRedownload(success, presence)).toBe(false)
+    }
+    expect(canOpenFile(success, 'absent')).toBe(false)
+  })
+
+  it('does not treat cloud preparation, missing filenames, or unfinished work as a lost completed download', () => {
+    const success = task({ status: 'success', purpose: 'user_download', file_name: 'x.mp4' })
+    for (const over of [{execution_scope:'cloud'}, {purpose:'compose_input_prepare'}, {purpose:undefined}, {file_name:null}, {file_name:' '}, {asset_type:'compose_input'}, {asset_id:0}, {status:'pending'}, {status:'running'}]) {
+      expect(canRedownload({...success, ...over}, 'absent')).toBe(false)
+    }
   })
 
   // 不是素材的任务（`compose_input_prepare` 这类中间产物）没有「重新下载」这个动作：
@@ -200,8 +199,7 @@ describe('row actions', () => {
  * 「已下载且本地系统**有**对应文件 → 详情｜放弃使用；已下载但本地**没有** → 重新下载」）。
  *
  * 与上一条 `canRedownload` 是两个判据、两处用途，不是同一条规则的两份实现：
- * 那一条问的是**任务**（失败/已取消 → 再来一次），这一条问的是**资产在不在本机**。
- * 已下载行在下载任务表里是 success，永远过不了 `canRedownload`。
+ * 那一条问的是**任务**，这一条供资产列表根据下载状态和实测文件位置决定动作。
  *
  * 三态里只有 `absent` 翻转 —— `unknown`（浏览器读不到本机、Desktop 还没扫完）不给，
  * 否则 Cloud Web 上每一条已下载的行都会长出一颗按不出东西的按钮。
@@ -285,14 +283,14 @@ describe('where a downloaded file is', () => {
 
   // 「打开文件」在实测不在时收回：那时它点下去必然是一句「可能已被移动或删除」。
   it('withdraws the open action only once the file is measured gone', () => {
-    const success = task({ status: 'success', file_name: 'a.mp4' })
+    const success = task({ status: 'success', purpose: 'user_download', file_name: 'a.mp4' })
 
     expect(canOpenFile(success)).toBe(true)
     expect(canOpenFile(success, 'unknown')).toBe(true)
     expect(canOpenFile(success, 'present_current')).toBe(true)
     expect(canOpenFile(success, 'absent')).toBe(false)
-    // 实测不在也不给重新下载：已成功的素材不重下（走查裁定），扫描结果不改变这一条。
-    expect(canRedownload(success, 'absent')).toBe(false)
+    // 原执行记录保持成功，实测文件丢失时可以发起新的下载。
+    expect(canRedownload(success, 'absent')).toBe(true)
   })
 })
 

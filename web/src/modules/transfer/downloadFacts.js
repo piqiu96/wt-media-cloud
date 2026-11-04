@@ -208,21 +208,23 @@ export function canOpenFile(task, presence = FILE_PRESENCE.unknown) {
  * 准备的失败行会被服务端直接拒绝。已取消的行原先一个动作都没有（`canOpenFile` 只认
  * success、`canCancel` 只认非终态），「已取消的无法再次点击下载」就是这么来的。
  *
- * 成功的行**不给**：走查裁定「已成功的不能再次下载」。下载在库里是**执行记录**，一个
- * 素材的「已下载」是**资产状态** —— 重复发起不会得到第二份文件，只会再落一行执行历史。
- * 文件在不在也不由这里断言（`presence` 只有 Desktop 实测过才有意义），所以不按「文件
- * 找不到了」另开一个口子。
+ * 成功记录仅在本机文件已实测丢失时允许重新下载。未知位置和已知位置仍有文件时不给，
+ * 原成功记录保持不变；这次点击沿用既有下载入口创建新的执行记录。
  */
-export function canRedownload(task) {
+export function canRedownload(task, presence = FILE_PRESENCE.unknown) {
   if (!DOWNLOADABLE_ASSET_TYPES.includes(task?.asset_type) || !task?.asset_id) return false
-  return task?.status === 'failed' || task?.status === 'cancelled'
+  if (task.status === 'failed' || task.status === 'cancelled') return true
+  return task.status === 'success'
+    && task.execution_scope === 'local_agent'
+    && task.purpose === 'user_download'
+    && typeof task.file_name === 'string' && Boolean(task.file_name.trim())
+    && presence === FILE_PRESENCE.absent
 }
 
 /**
  * 「已下载」的行还要不要一次「重新下载」：**只有实测本机那份文件不在时才给**。
  *
- * 与 `canRedownload` 是两件事：那一条认的是任务状态（失败/已取消 → 再来一次），这一条认的是
- * 资产在不在本机。已下载就默认文件在 —— `FILE_PRESENCE.unknown` 不给，因为「读不到本机」
+ * `canRedownload` 供下载中心判断任务动作，这一条供资产列表根据下载状态和实测位置判断。已下载就默认文件在 —— `FILE_PRESENCE.unknown` 不给，因为「读不到本机」
  * 不是「文件不在」，而一个已经下好的素材被画成可以重下，是凭空多出来的动作。
  */
 export function needsRedownload(downloadStatus, presence) {

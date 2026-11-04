@@ -50,7 +50,7 @@ export function transferRow(task, { tasks = [], cancelRequested = false, presenc
     finishedText: task.finished_at ? formatDateTime(task.finished_at) : '',
     canCancel: canCancel(task) && !cancelRequested,
     canOpen: canOpenFile(task, presenceOfFile),
-    canRedownload: canRedownload(task),
+    canRedownload: canRedownload(task, presenceOfFile),
     // `presence` 是给界面读的：文件在旧目录里时要说出来在哪儿，不然「打开文件」能用而
     // 「重新下载」没出现的组合看起来像少了点什么。`fileFact` 是那一条记录（含目录与
     // 体积），`null` 表示没查过或不适用。

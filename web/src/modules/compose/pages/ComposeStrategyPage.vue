@@ -186,10 +186,15 @@ function openDetail(row) {
   loadRunHistory(row.id)
 }
 
-// 筛选走列表接口（search/category_id/template_id/status），页面只对返回行做分页切片。
+// 列表总数与当前页均由服务端按权限和筛选计算。
 const advancedFiltersVisible = ref(false)
 const filters = ref({ search: '', category_id: '', template_id: '', status: '' })
 const pagination = ref({ current: 1, pageSize: 20 })
+const total = ref(0)
+let loadSequence = 0
+function query() { pagination.value.current = 1; load() }
+function onPageChange() { load() }
+function onPageSizeChange() { pagination.value.current = 1; load() }
 
 const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
@@ -200,7 +205,7 @@ const columns = computed(() => [
   { colKey: 'operator', title: '负责人', width: 120 },
   { colKey: 'schedule', title: '执行计划', width: 150 },
   { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情']), fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情'], { loading: canManage.value }), fixed: 'right' },
 ])
 
 // 横向滚动宽度由列宽推导，不写死（写死值与列宽合计无关，是个漂移源）。
@@ -208,10 +213,7 @@ const tableScroll = computed(() => ({
   x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
-const pagedRows = computed(() => {
-  const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return rows.value.slice(start, start + pagination.value.pageSize)
-})
+const pagedRows = computed(() => rows.value)
 
 const templateOptions = computed(() => templates.value.map((template) => ({
   label: `${template.name} v${template.version}`,
@@ -245,6 +247,7 @@ onMounted(() => {
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数；会话只读一次。
 async function load({ quiet = false } = {}) {
+  const sequence = ++loadSequence
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
@@ -252,18 +255,19 @@ async function load({ quiet = false } = {}) {
     // 管理员的创建表单另用它选目标团队。
     if (!quiet || !currentUser.value) currentUser.value = await sessionClient.me()
     const [strategyRows, templateRows, categoryRows, teamRows] = await Promise.all([
-      client.listStrategies({ search: filters.value.search.trim(), category_id: filters.value.category_id, template_id: filters.value.template_id, status: filters.value.status }),
+      client.listStrategies({ search: filters.value.search.trim(), category_id: filters.value.category_id, template_id: filters.value.template_id, status: filters.value.status, page: pagination.value.current, page_size: pagination.value.pageSize }),
       client.listTemplates(), client.listCategories(), client.listTeams().catch(() => []),
     ])
-    rows.value = Array.isArray(strategyRows) ? strategyRows : []
+    if (sequence !== loadSequence) return
+    rows.value = strategyRows.items || []
+    total.value = strategyRows.total || 0
     templates.value = Array.isArray(templateRows) ? templateRows : []
     categories.value = Array.isArray(categoryRows) ? categoryRows : []
     teams.value = Array.isArray(teamRows) ? teamRows : []
-    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    if (!quiet) error.value = e.message || '合成策略加载失败'
+    if (sequence === loadSequence && !quiet) error.value = e.message || '合成策略加载失败'
   } finally {
-    if (!quiet) loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -667,7 +671,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <!-- 筛选区与表格同卡（与内容池一致）：filter-bar 自带分隔线，下方接表格与分页。 -->
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="load" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="query" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">所属类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
             <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
           </BusinessSelect></label>
@@ -677,7 +681,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             <t-option value="disabled" label="停用" />
           </t-select></label>
           <div class="wt-filter-actions">
-            <t-button theme="primary" @click="load">查询</t-button>
+            <t-button theme="primary" @click="query">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
             <t-button variant="text" @click="advancedFiltersVisible = !advancedFiltersVisible">{{ advancedFiltersVisible ? '收起高级筛选' : '高级筛选' }}</t-button>
           </div>
@@ -717,7 +721,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="onPageChange" @page-size-change="onPageSizeChange" /></div>
       </ResourceCard>
 
       <ResourceOverlay :visible="visible" :title="editingID ? '编辑合成策略' : '新增合成策略'" :width="1040" :busy="saving" @close="requestCloseEditor">

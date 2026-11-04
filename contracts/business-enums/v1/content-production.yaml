@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.3"
+revision: "2026.11.05.4"
 
 video_statuses: [not_downloaded, downloading, ready, failed]
 material_usage_statuses: [active, removed]

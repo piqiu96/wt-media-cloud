@@ -283,7 +283,7 @@ func (s *Service) CreateUserDownload(input CreateUserDownloadInput) (dto.Task, e
 		AssetType:        assetType,
 		AssetID:          input.AssetID,
 		AssetTitle:       input.AssetTitle,
-		CategoryName:         input.CategoryName,
+		CategoryName:     input.CategoryName,
 		PublishedAt:      input.PublishedAt,
 		SourceObjectKey:  input.SourceObjectKey,
 		RequestedBy:      input.RequestedBy,
@@ -496,7 +496,7 @@ func (s *Service) LatestUserDownloadStatuses(userID identityservice.UserID, mate
 // `running` until the executor confirms it (see `cancelTask` in the repository
 // for why), so the refreshed body is the only honest answer to "what happened".
 func (s *Service) CancelTask(actor identityservice.PublicUser, taskID string) (dto.Task, error) {
-	task, team, err := s.scopedTask(actor, taskID)
+	task, team, err := s.cancellableTask(actor, taskID)
 	if err != nil {
 		return dto.Task{}, err
 	}
@@ -784,10 +784,31 @@ func claimedByFor(userID int64) string {
 	return fmt.Sprintf("user-%d", userID)
 }
 
-// scopedTask reads a task and decides whether this actor may act on it, also
-// answering with the team the update statements are to be scoped by.
-//
-// The team returned is the actor's, not the row's. Handing the row's own value
+// cancellableTask permits an administrator to stop only their own historical
+// queue. Other roles retain the current-team gate used for normal operations.
+func (s *Service) cancellableTask(actor identityservice.PublicUser, taskID string) (model.Task, identityservice.TeamID, error) {
+	if actor.Role != identityservice.RoleAdmin {
+		return s.scopedTask(actor, taskID)
+	}
+	if actor.Status != identityservice.UserStatusEnabled {
+		return model.Task{}, 0, ErrTaskForbidden
+	}
+	if strings.TrimSpace(taskID) == "" || actor.ID <= 0 {
+		return model.Task{}, 0, ErrInvalidInput
+	}
+	task, err := s.store.GetTask(taskID)
+	if err != nil {
+		return model.Task{}, 0, missingOr(err)
+	}
+	if task.RequestedBy != actor.ID {
+		return model.Task{}, 0, ErrTaskForbidden
+	}
+	// Administrators have no Agent token or required team. They may stop only
+	// their own historical queue, retaining the row's team in the guarded write.
+	return task, task.TeamID, nil
+}
+
+// scopedTask answers with the actor's team, not the row's. Handing the row's own value
 // to a statement whose `WHERE` already names the team would make that clause a
 // restatement of the row rather than a constraint; the actor's value makes it a
 // real one, and a team that changed between the read and the write is then
@@ -883,7 +904,7 @@ func leaseBody(task model.Task, grant DownloadGrant, lease time.Duration) *dto.L
 		AssetType:            string(task.AssetType),
 		AssetID:              task.AssetID,
 		Title:                task.AssetTitle,
-		CategoryName:             task.CategoryName,
+		CategoryName:         task.CategoryName,
 		PublishedAt:          task.PublishedAt,
 		TotalBytes:           task.TotalBytes,
 		ExpectedSHA256:       task.ExpectedSHA256,

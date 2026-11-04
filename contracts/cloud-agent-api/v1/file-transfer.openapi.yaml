@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent File Transfer API
-  version: 2026.10.23.1
+  version: 2026.11.05.1
   description: >-
     Additive M4-A Local Agent contract. Only user_download/local_agent tasks are leasable here; Cloud
     preparation is never exposed to an Agent. A lease carries a short-lived single-object download grant
@@ -19,7 +19,7 @@ paths:
             A lease with a short-lived single-object download grant, or an explicit no-task result. The
             lease is the only place a signed download URL appears; it is never stored.
           content: {application/json: {schema: {$ref: '#/components/schemas/ClaimResult'}}}
-        '401': {description: The Agent Token is missing, invalid, expired, or its Desktop session is no longer current (`AUTH_AGENT_TOKEN_*` / `AUTH_DESKTOP_REPLACED` / `DESKTOP_LOGIN_REQUIRED`).}
+        '401': {description: "The Agent Token is missing, invalid, expired, or its Desktop session is no longer current (`AUTH_AGENT_TOKEN_*` / `AUTH_DESKTOP_REPLACED` / `DESKTOP_LOGIN_REQUIRED`)."}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/heartbeat:
     post:
       operationId: heartbeatLocalFileTransferTask
@@ -30,7 +30,7 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/Heartbeat'}}}
       responses:
         '200': {description: 'Lease remains valid. The response carries no task body; a renewed lease is implicit in the request succeeding.'}
-        '409': {description: Task is cancelled, terminal, or not leased by this attempt.}
+        '409': {description: "Task is cancelled, terminal, or not leased by this attempt."}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/progress:
     post:
       operationId: reportLocalFileTransferProgress
@@ -41,7 +41,7 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/Progress'}}}
       responses:
         '200': {description: 'Progress recorded. The response carries no task body. Progress does not renew the lease; only heartbeat does.'}
-        '409': {description: Task is cancelled, terminal, expired, or not leased by this attempt.}
+        '409': {description: "Task is cancelled, terminal, expired, or not leased by this attempt."}
   /api/v1/cloud-agent/file-transfer-tasks/{task_id}/complete:
     post:
       operationId: completeLocalFileTransferTask
@@ -54,11 +54,11 @@ paths:
         '200':
           description: 'Terminal result recorded after integrity validation. The body echoes what Cloud recorded, so an executor can confirm the outcome it produced.'
           content: {application/json: {schema: {$ref: '#/components/schemas/TransferTerminal'}}}
-        '409': {description: Terminal, cancelled, or not leased by this attempt.}
+        '409': {description: "Terminal, cancelled, or not leased by this attempt."}
         '422': {description: 'Reported success lacks the expected size or SHA-256 of the leased task (error name `transfer_integrity_failed`).'}
 components:
   securitySchemes:
-    agentBearer: {type: http, scheme: bearer, description: Signed, session-bound Agent Token; never a user session.}
+    agentBearer: {type: http, scheme: bearer, description: "Signed, session-bound Agent Token; never a user session."}
   parameters:
     TaskID: {in: path, name: task_id, required: true, schema: {type: string}}
   schemas:
@@ -130,6 +130,8 @@ components:
           description: >-
             The category's name as the operator chose it, or absent when the asset has no category. The executor
             uses it to name the file, falling back to a fixed placeholder when it is absent.
+            This is the canonical field. Updated consumers may accept legacy game_name only when
+            category_name is absent; an explicitly empty category_name remains unknown.
         published_at:
           type: string
           format: date-time

@@ -888,3 +888,30 @@ func TestSourceOutputCreateContractKeepsThreeExclusiveCommands(t *testing.T) {
 		t.Fatal("material aggregation read is absent")
 	}
 }
+
+func TestStrategyPageMatchesContractAndPreservesPageCoordinates(t *testing.T) {
+	schema := readContentProductionSchema(t)["ComposeStrategyPage"]
+	body := repository.ComposeStrategyPage{Items: []model.ComposeStrategy{}, Total: 205, Page: 3, PageSize: 100}
+	if got, want := marshalledKeys(t, body), schemaPropertyNames(schema.Properties); !slices.Equal(got, want) {
+		t.Fatalf("wire=%v schema=%v", got, want)
+	}
+	if !slices.Equal(schemaPropertyNames(schema.Properties), sortedCopy(schema.Required)) {
+		t.Fatal("page facts must be unconditional")
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actual struct {
+		Items    []json.RawMessage `json:"items"`
+		Total    int64             `json:"total"`
+		Page     int               `json:"page"`
+		PageSize int               `json:"page_size"`
+	}
+	if err = json.Unmarshal(data, &actual); err != nil {
+		t.Fatal(err)
+	}
+	if actual.Items == nil || actual.Total != 205 || actual.Page != 3 || actual.PageSize != 100 {
+		t.Fatalf("page lost coordinates: %s", data)
+	}
+}
