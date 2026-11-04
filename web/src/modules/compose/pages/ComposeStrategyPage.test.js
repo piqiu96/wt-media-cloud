@@ -44,18 +44,22 @@ describe('compose strategy page', () => {
     expect(source).not.toContain("width: 170, fixed: 'right'")
   })
 
-  // 名称搜索是主条件：给 wide 位、排第一；动作组在所有字段之后。
-  it('puts the name search first in the wide slot and keeps the actions last', () => {
+  // 名称、类目、状态为常用条件；模板放高级区域，动作留在常用条件之后。
+  it('keeps common filters before actions and the template in advanced filters', () => {
     const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
+    const basic = bar.slice(0, bar.indexOf('class="wt-advanced-filters"'))
+    const advanced = bar.slice(bar.indexOf('class="wt-advanced-filters"'))
     expect(bar).not.toContain('<t-space')
-    expect(bar.indexOf('策略名称')).toBeLessThan(bar.indexOf('业务分类'))
-    expect(bar.indexOf('业务分类')).toBeLessThan(bar.indexOf('合成模板'))
-    expect(bar.indexOf('合成模板')).toBeLessThan(bar.indexOf('状态'))
+    expect(basic.indexOf('策略名称')).toBeLessThan(basic.indexOf('所属类目'))
+    expect(basic.indexOf('所属类目')).toBeLessThan(basic.indexOf('状态'))
+    expect(basic).not.toContain('合成模板')
+    expect(advanced).toContain('合成模板')
+    expect(bar).toContain('v-if="advancedFiltersVisible"')
     expect(bar).toContain('wt-filter-field--wide')
     const widePos = bar.indexOf('wt-filter-field--wide')
     const nameLabelPos = bar.indexOf('策略名称')
     expect(widePos).toBeLessThan(nameLabelPos)
-    expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
+    expect(basic.indexOf('wt-filter-actions')).toBeGreaterThan(basic.lastIndexOf('wt-filter-field'))
   })
 
   // 运算符词表跟着字段走（发布时间一套、计数一套）。这两套只能走 :options 传，
@@ -92,10 +96,11 @@ describe('compose strategy page', () => {
 
   // 批次结果归集（CHG-20261015-095）：统计由服务端 GROUP BY 给出，页面不二次
   // 推算；批次按运行记录的计划时间懒加载，部分失败要能逐素材看到。
-  it('reads run batches lazily and renders server-side counts per material', () => {
-    expect(source).toContain('client.listStrategyRunTasks(detailRow.value.id, run.schedule_slot)')
-    expect(source).toContain('batchCountText(batchDetail[run.run_key].view.counts)')
-    expect(source).toContain('素材 {{ task.material_id }}')
-    expect(source).toContain('task.error_message')
+  it('reads unified paged runs and navigates only through the actual batch ID', () => {
+    expect(source).toContain('client.listStrategyRuns(strategyID, params)')
+    expect(source).toContain('if (!run.batch_id) return')
+    expect(source).toContain('batch_id: String(run.batch_id)')
+    expect(source).not.toContain('client.listStrategyRunTasks')
+    expect(source).not.toContain('client.listStrategyRunHistory')
   })
 })

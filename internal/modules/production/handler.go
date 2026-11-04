@@ -2,13 +2,16 @@ package production
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
@@ -73,6 +76,7 @@ func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFil
 		return repository.MaterialFilter{}, errors.New("category_id 无效")
 	}
 	filter := repository.MaterialFilter{
+		UsageStatus: strings.TrimSpace(c.Query("usage_status")),
 		Search:      strings.TrimSpace(c.Query("search")),
 		CategoryID:  categoryID,
 		VideoStatus: strings.TrimSpace(c.Query("video_status")),
@@ -125,6 +129,55 @@ func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFil
 		}
 		*enum.value = raw
 	}
+
+	for _, field := range []struct {
+		name   string
+		target *int64
+	}{{"strategy_id", &filter.StrategyID}, {"operator_id", &filter.OperatorID}} {
+		if raw := strings.TrimSpace(c.Query(field.name)); raw != "" {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || value <= 0 {
+				return repository.MaterialFilter{}, errors.New(field.name + " 无效")
+			}
+			*field.target = value
+		}
+	}
+	for _, field := range []struct {
+		name   string
+		target *int
+	}{{"page", &filter.Page}, {"page_size", &filter.PageSize}} {
+		if raw := c.Query(field.name); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || (field.name == "page_size" && value > 200) {
+				return repository.MaterialFilter{}, errors.New(field.name + " 无效")
+			}
+			*field.target = value
+		}
+	}
+	for _, field := range []struct {
+		name   string
+		target **time.Time
+	}{{"published_from", &filter.PublishedFrom}, {"published_before", &filter.PublishedBefore}} {
+		if raw := c.Query(field.name); raw != "" {
+			value, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				return repository.MaterialFilter{}, errors.New(field.name + " 无效")
+			}
+			*field.target = &value
+		}
+	}
+	for _, field := range []struct {
+		name   string
+		target **int64
+	}{{"view_count_min", &filter.ViewCountMin}, {"view_count_max", &filter.ViewCountMax}, {"like_count_min", &filter.LikeCountMin}, {"like_count_max", &filter.LikeCountMax}, {"favorite_count_min", &filter.FavoriteCountMin}, {"favorite_count_max", &filter.FavoriteCountMax}} {
+		if raw := c.Query(field.name); raw != "" {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || value < 0 {
+				return repository.MaterialFilter{}, errors.New(field.name + " 无效")
+			}
+			*field.target = &value
+		}
+	}
 	return filter, nil
 }
 
@@ -150,7 +203,7 @@ func ListMaterials(_ context.Context, c *hertzapp.RequestContext) {
 		api.BadRequest(c, 15001, "素材筛选参数无效")
 		return
 	}
-	items, err := productionservice.ListMaterialsFiltered(actor, filter)
+	items, err := productionservice.ListMaterialPage(actor, filter)
 	if err != nil {
 		writeProductionError(c, err)
 		return
@@ -184,7 +237,21 @@ func AddMaterialUsage(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	usage, created, err := productionservice.AddUsage(actor, id)
+	var selection productionservice.MaterialSelectorContext
+	if len(c.Request.Body()) > 0 {
+		if err := json.Unmarshal(c.Request.Body(), &selection); err != nil {
+			api.BadRequest(c, 15001, "选材上下文无效")
+			return
+		}
+	}
+	var usage model.MaterialUsage
+	var created bool
+	var err error
+	if selection.StrategyID != 0 || selection.OperatorID != 0 {
+		usage, created, err = productionservice.AddUsageForSelection(actor, id, selection)
+	} else {
+		usage, created, err = productionservice.AddUsage(actor, id)
+	}
 	if err != nil {
 		writeProductionError(c, err)
 		return
@@ -258,7 +325,12 @@ func ListMyMaterials(_ context.Context, c *hertzapp.RequestContext) {
 	if !ok {
 		return
 	}
-	items, err := productionservice.ListMyMaterialsFiltered(actor, productionservice.MyMaterialsQuery{Search: c.Query("search"), VideoStatus: c.Query("video_status"), SortBy: c.Query("sort_by"), SortOrder: c.Query("sort_order")})
+	filter, err := parseMaterialListFilter(c)
+	if err != nil {
+		api.BadRequest(c, 15001, "素材筛选参数无效")
+		return
+	}
+	items, err := productionservice.ListMyMaterialPage(actor, filter)
 	if err != nil {
 		writeProductionError(c, err)
 		return

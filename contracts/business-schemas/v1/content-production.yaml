@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.1"
+revision: "2026.11.05.2"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -171,7 +171,8 @@ schemas:
   ComposeTaskBatch:
     type: object
     additionalProperties: false
-    required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at, counts]
+    required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at,
+      counts, operator_name, strategy_name]
     properties:
       id: {type: integer, format: int64}
       name: {type: string}
@@ -179,20 +180,39 @@ schemas:
       category_id: {type: integer, format: int64, minimum: 1}
       operator_id: {type: [integer, 'null'], format: int64}
       compose_strategy_id: {type: integer, format: int64}
-      trigger_type: {type: string, enum: [manual, immediate, scheduled], description: "Manual material creation, immediate strategy execution, or scheduled strategy execution."}
+      trigger_type: {type: string, enum: [manual, immediate, scheduled], description: 'Manual material creation, immediate strategy execution,
+          or scheduled strategy execution.'}
       created_by: {type: integer, format: int64}
-      config_snapshot: {type: array, items: {ref: ComposeOutputSetting}, description: "Frozen output settings projected for readers; fixed guide addresses remain redacted."}
+      config_snapshot:
+        oneOf:
+        - {type: array, items: {ref: ComposeOutputSetting}}
+        - type: object
+          required: [settings, acceptance]
+          properties:
+            settings: {type: array, items: {ref: ComposeOutputSetting}}
+            acceptance:
+              type: array
+              items:
+                type: object
+                required: [material_id, code, message]
+                properties: {material_id: {type: integer, minimum: 1}, code: {type: string}, message: {type: string}}
+        description: Frozen settings and optional manual acceptance outcomes. Guide addresses are redacted; legacy batches may return
+          an empty array.
       created_at: {type: string, format: date-time}
       counts: {ref: ComposeBatchCounts}
+      operator_name: {type: string, description: Resolved owner display name; empty if unknown.}
+      strategy_name: {type: string, description: Resolved strategy display name.}
   ComposeBatchCounts:
     type: object
     required: [pending, running, success, failed, cancelled]
     properties:
-      pending: {type: integer, minimum: 0, description: "Tasks of this run still waiting for a worker."}
-      running: {type: integer, minimum: 0, description: "Tasks of this run currently executing."}
+      pending: {type: integer, minimum: 0, description: Tasks of this run still waiting for a worker.}
+      running: {type: integer, minimum: 0, description: Tasks of this run currently executing.}
       success: {type: integer, minimum: 0}
       failed: {type: integer, minimum: 0}
       cancelled: {type: integer, minimum: 0}
+    description: Counts over every authorized task in the real batch, independent of local filters. Ended progress is (success+failed+cancelled)/total;
+      success rate remains separate.
   ComposeTask:
     type: object
     required: [id, team_id, category_id, operator_id, operator_name, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
@@ -230,8 +250,25 @@ schemas:
       updated_at: {type: string, format: date-time}
   Material:
     type: object
-    description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。
-    required: [id, team_id, source_content_id, title, source_url, platform, status, video_status, view_count, like_count, favorite_count, comment_count, share_count, created_at, updated_at, created_by]
+    description: Material projection, successful-output use facts and optional authorized selection metadata. Unknown optional values
+      are not fabricated.
+    required:
+    - id
+    - team_id
+    - source_content_id
+    - title
+    - source_url
+    - platform
+    - status
+    - video_status
+    - view_count
+    - like_count
+    - favorite_count
+    - comment_count
+    - share_count
+    - created_at
+    - updated_at
+    - created_by
     properties:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
@@ -240,35 +277,17 @@ schemas:
       source_url: {type: string, format: uri}
       platform: {type: string}
       video_status: {type: string, enum: [not_downloaded, downloading, ready, failed]}
-      # 素材库自己的生命周期，与 video_status 是两个维度（规范 §7.2）：文件状态回答「源视频
-      # 准备好了没有」，这一档回答「这条素材还提供给运营选用吗」，可以同时是「已暂停 + 可下载」。
-      # 库列 NOT NULL DEFAULT 'available'，键恒在。写路径尚未存在，所以值恒为 available ——
-      # 那是这批素材的真实状态，不是兜底默认值。
       status: {type: string, enum: [available, paused, delisted]}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
-      # 素材操作人（= 创建人）：人工转换时是执行转换的人，自动转素材时是任务创建人。
-      # 库列 NOT NULL，键恒在；权限与「谁用过这条素材」的 usage 投影无关，三种角色都读。
       created_by: {type: integer, format: int64}
-      # 创建人昵称（无昵称回退用户名）；目录里已没有此人时不出现，页面显示「未记录」。
       created_by_name: {type: string}
-      # 以下四个键只出现在素材库列表与详情读取里，是「当前查看者」的投影，不是素材自己的
-      # 事实：两个人读同一行可能看到不同的值。没有关系时 usage_status 与 added_at 都不出现；
-      # removed 表示关系还在、用户已移出，在素材库口径里等同于未加入。
       usage_status: {type: string, enum: [active, removed], description: 当前查看者自己的素材关系状态；没有关系时该键不出现。}
       added_at: {type: string, format: date-time, description: 当前查看者这条关系建立的时间；没有关系时该键不出现。}
-      my_usage:
-        type: string
-        enum: [used, unused]
-        description: >-
-          当前查看者是否是至少一条成功成片的负责人。只按成功成片计算：失败、取消、
-          等待中的成片都不算；移出素材关系后，历史成功成片仍然算「已使用」。
+      my_usage: {type: string, enum: [used, unused], description: 当前查看者是否是至少一条成功成片的负责人。只按成功成片计算：失败、取消、 等待中的成片都不算；移出素材关系后，历史成功成片仍然算「已使用」。}
       usage:
         type: object
-        description: >-
-          当前团队在这条素材上的成功成片事实，按 (素材, 团队) 聚合，跨团队不合并。
-          output_count 统计所有成功成片；operator_count 只统计有负责人的成片 ——
-          历史行没有负责人时仍计入前者的总数，但不计为「有人用过」，也不回填。
+        description: 当前团队在这条素材上的成功成片事实，按 (素材, 团队) 聚合，跨团队不合并。 output_count 统计所有成功成片；operator_count 只统计有负责人的成片 —— 历史行没有负责人时仍计入前者的总数，但不计为「有人用过」，也不回填。
           operators 只返回给高级运营与管理员，普通运营只拿到两个计数。
         required: [output_count, operator_count]
         properties:
@@ -280,21 +299,12 @@ schemas:
             items:
               type: object
               required: [id, output_count]
-              properties:
-                id: {type: integer, format: int64}
-                name: {type: string, description: 姓名目录里查不到时该键不出现。}
-                output_count: {type: integer, format: int64, minimum: 0}
+              properties: {id: {type: integer, format: int64}, name: {type: string, description: 姓名目录里查不到时该键不出现。}, output_count: {type: integer,
+                  format: int64, minimum: 0}}
       category_id: {type: integer, format: int64, minimum: 1, description: 素材未归类目时该键不出现。}
       author_name: {type: string, description: 为空时该键不出现。}
-      # 封面与作者主页是来源行自己的两个链接（CHG-20260930-069）：投影在读取时 JOIN
-      # source_contents 带出来，不是物化时抄进 materials 的副本 —— 来源是唯一事实，
-      # 抄一份就是第二个会漂移的事实。两页列表的封面缩略图与详情抽屉里的作者主页
-      # 链接读的都是这两个键。
       cover_url: {type: string, format: uri, description: 来源没有封面时该键不出现。}
       author_home_url: {type: string, format: uri, description: 来源没有作者主页时该键不出现。}
-      # 来源行采集到时的内容池统计（CHG-20260930-069 走查反馈）：同样是读取时 JOIN
-      # source_contents 带出的事实，键与库列同名。列 NOT NULL，所以键恒在，0 表示
-      # 「采集时就是 0 / 采集器没有提供」，不是「未知」。
       view_count: {type: integer, format: int64}
       like_count: {type: integer, format: int64}
       favorite_count: {type: integer, format: int64}
@@ -306,8 +316,16 @@ schemas:
       media_summary: {type: object, description: 准备通过校验前该键不出现；形状由媒体探针决定，不是对外契约。}
       last_error: {type: string, description: 最近一次准备没有错误时该键不出现。}
       video_prepared_at: {type: string, format: date-time, description: 尚未有一次通过校验的准备时该键不出现。}
+      selectable: {type: boolean, description: Selector eligibility; prior successful or unfinished tasks do not automatically prevent
+          a new confirmed production.}
+      selection_reason: {type: string, description: Source or material refusal reason when selection is unavailable.}
+      strategy_history: {ref: ComposeMaterialState}
+      metric_presence:
+        type: object
+        required: [view_count, like_count, favorite_count]
+        properties: {view_count: {type: boolean}, like_count: {type: boolean}, favorite_count: {type: boolean}}
+        description: Selector source evidence. False means unknown; display a dash rather than the legacy numeric default zero.
     forbidden_properties: [object_key, local_path, download_url, video_url, storage_credential]
-
   MaterialVideoLink:
     type: object
     description: >-
@@ -334,19 +352,122 @@ schemas:
       material_id: {type: integer, format: int64}
       user_id: {type: integer, format: int64}
       status: {type: string, enum: [active, removed]}
-      download_status:
-        type: string
-        enum: [downloading, downloaded, failed]
-        description: >-
-          该用户在这条素材上的下载生命周期，按「最新一条 user_download 任务」派生
-          （pending/running→downloading；success→downloaded；failed/cancelled→failed），
-          与素材云侧 `video_status` 正交。从未下载过时该键不出现。
+      download_status: {type: string, enum: [downloading, downloaded, failed], description: 该用户在这条素材上的下载生命周期，按「最新一条 user_download 任务」派生
+          （pending/running→downloading；success→downloaded；failed/cancelled→failed）， 与素材云侧 `video_status` 正交。从未下载过时该键不出现。}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
       removed_at: {type: string, format: date-time, description: 关系仍是 active 时该键不出现。}
-      material:
-        type: object
-        description: >-
-          这条关系指向的素材，随列表一并返回，键集即上方 `Material`。没有它，「我的素材」
-          列表每行都要再发一次请求才能显示标题与视频状态 —— 代价付在页面上。
-          这里不重复列它的属性：同一批键写两遍就是第二个落点，改了这处忘了那处不会有任何症状。
+      material: {type: object, description: 这条关系指向的素材，随列表一并返回，键集即上方 `Material`。没有它，「我的素材」 列表每行都要再发一次请求才能显示标题与视频状态 —— 代价付在页面上。 这里不重复列它的属性：同一批键写两遍就是第二个落点，改了这处忘了那处不会有任何症状。}
+  MaterialPage:
+    type: object
+    required: [items, total, page, page_size]
+    properties: {items: {type: array, items: {ref: Material}}, total: {type: integer, minimum: 0}, page: {type: integer, minimum: 1},
+      page_size: {type: integer, minimum: 1}}
+  MaterialUsagePage:
+    type: object
+    required: [items, total, page, page_size]
+    properties: {items: {type: array, items: {ref: MaterialUsage}}, total: {type: integer, minimum: 0}, page: {type: integer, minimum: 1},
+      page_size: {type: integer, minimum: 1}}
+  ComposeTaskPage:
+    type: object
+    required: [items, total, page, page_size]
+    properties: {items: {type: array, items: {ref: ComposeTask}}, total: {type: integer, minimum: 0}, page: {type: integer, minimum: 1},
+      page_size: {type: integer, minimum: 1}}
+  ComposeTaskBatchPage:
+    type: object
+    required: [items, total, page, page_size]
+    properties: {items: {type: array, items: {ref: ComposeTaskBatch}}, total: {type: integer, minimum: 0}, page: {type: integer, minimum: 1},
+      page_size: {type: integer, minimum: 1}}
+  ComposeBatchActions:
+    type: object
+    required: [retry_count, cancel_count]
+    properties: {retry_count: {type: integer, minimum: 0}, cancel_count: {type: integer, minimum: 0}}
+    description: Eligible task counts from the entire batch, independent of task-page filters. Retry is zero for roles without retry permission.
+  ComposeTaskBatchDetail:
+    type: object
+    required: [batch, actions]
+    properties: {batch: {ref: ComposeTaskBatch}, actions: {ref: ComposeBatchActions}}
+  ComposeBulkItem:
+    type: object
+    required: [task_id, status]
+    properties: {task_id: {type: integer, minimum: 1}, status: {type: string, enum: [accepted, skipped, failed]}, reason: {type: string},
+      task: {ref: ComposeTask}}
+  ComposeBulkResult:
+    type: object
+    required: [items, accepted, skipped, failed]
+    properties: {items: {type: array, items: {ref: ComposeBulkItem}}, accepted: {type: integer, minimum: 0}, skipped: {type: integer,
+        minimum: 0}, failed: {type: integer, minimum: 0}}
+  ComposeTaskAttempt:
+    type: object
+    required: [id, compose_task_id, attempt, source, started_at, outcome, stage, error_code, error_message, steps, created_at, updated_at,
+      finished_at]
+    properties:
+      id: {type: integer, format: int64}
+      compose_task_id: {type: integer, format: int64}
+      attempt: {type: integer, minimum: 1, description: Matches the task's attempt_count for that run.}
+      source: {type: string, enum: [auto, manual], description: auto — the worker's own transient retry; manual — an authorized human
+          retry.}
+      started_at: {type: string, format: date-time, nullable: true, description: Null until the worker claims the attempt.}
+      finished_at: {type: string, format: date-time, nullable: true, description: Null while the attempt is pending or running.}
+      outcome: {type: string, enum: [pending, running, success, failed, cancelled]}
+      stage: {type: string, description: Last projected phase of the attempt; empty until the worker reports progress.}
+      error_code: {type: string}
+      error_message: {type: string, description: 'Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never
+          returned.'}
+      steps: {type: array, description: 'The steps this attempt completed or failed on, in execution order. Server-authored labels and
+          allowlisted metrics only — never a source address, a storage key, a local path or raw FFmpeg output.', items: {ref: ComposeTaskAttemptStep}}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
+      uncertain_review: {ref: ComposeUncertainReview, description: Only admins and same-team senior operators receive the recorded review
+          event and evidence; omitted for ordinary operators. At most one per attempt.}
+  ComposeTaskAttemptStep:
+    type: object
+    additionalProperties: false
+    required: [step, label, outcome, started_at, finished_at, duration_ms, error_code, error_label, metrics]
+    properties:
+      step: {type: string, enum: [validate_input, prepare_input, fetch_guide, cut, upload, commit]}
+      label: {type: string, description: Server-authored Chinese label for the step key.}
+      outcome: {type: string, enum: [success, failed]}
+      started_at: {type: string, format: date-time}
+      finished_at: {type: string, format: date-time}
+      duration_ms: {type: integer, minimum: 0}
+      error_code: {type: string, description: Empty on a successful step; the bounded failure code on a failed one.}
+      error_label: {type: string, description: 'Fixed human-readable failure category, empty on a successful step.'}
+      metrics: {ref: ComposeTaskAttemptStepMetrics}
+  ComposeTaskAttemptStepMetrics:
+    type: object
+    additionalProperties: false
+    properties:
+      size_bytes: {type: integer, format: int64, minimum: 1, description: Bytes this step staged or stored.}
+      sha256: {type: string, description: Digest of the verified output; 64 lowercase hex characters.}
+      output_duration_ms: {type: integer, format: int64, minimum: 1, description: Duration of the composed output the executor reported.}
+      output_id: {type: integer, format: int64, minimum: 1, description: Row id of the composite output committed by this step.}
+  ComposeUncertainReview:
+    type: object
+    additionalProperties: false
+    required: [id, compose_task_id, attempt, actor_user_id, evidence, created_at]
+    properties:
+      id: {type: integer, format: int64}
+      compose_task_id: {type: integer, format: int64}
+      attempt: {type: integer, minimum: 1, description: The uncertain attempt reviewed before manual retry.}
+      actor_user_id: {type: integer, format: int64}
+      evidence: {type: string, description: 'Reviewer''s verification note, not automated proof.'}
+      created_at: {type: string, format: date-time}
+  ComposeMaterialState:
+    type: object
+    additionalProperties: false
+    required: [material_id, success_count, active_count, failed_count, cancelled_count, last_task_at]
+    properties: {material_id: {type: integer, format: int64}, success_count: {type: integer, minimum: 0}, active_count: {type: integer,
+        minimum: 0}, failed_count: {type: integer, minimum: 0}, cancelled_count: {type: integer, minimum: 0}, last_task_at: {type: [string,
+          'null'], format: date-time}}
+    description: Read-only history for confirmation; previous production may be made again using a new command and batch.
+  CreateComposeTasksResult:
+    type: object
+    required: [batch, replayed, created, failed]
+    properties: {batch: {oneOf: [{ref: ComposeTaskBatch}, {type: 'null'}]}, replayed: {type: boolean}, created: {type: array, items: {
+          ref: ComposeTask}}, failed: {type: array, items: {ref: ComposeTaskCreateFailure}}}
+  ComposeTaskCreateFailure:
+    type: object
+    required: [material_id, request_key, errcode, error, message]
+    properties: {material_id: {type: integer, minimum: 1}, request_key: {type: string}, errcode: {type: integer}, error: {type: string},
+      message: {type: string}}

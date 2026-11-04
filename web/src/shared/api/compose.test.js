@@ -84,9 +84,9 @@ describe('compose api client', () => {
   })
 
   it('reads strategy schedule run history', async () => {
-    const fetch = vi.fn().mockResolvedValue(ok([{ run_key: 'slot-1', skipped: [{ material_id: 8, reason: 'already_produced' }] }]))
+    const fetch = vi.fn().mockResolvedValue(ok({items:[{ run_key: 'slot-1', skipped: [{ material_id: 8, reason: 'previously_run' }] }],total:1,page:1,page_size:20}))
     const client = createComposeClient({ fetch })
-    await expect(client.listStrategyRuns(7)).resolves.toHaveLength(1)
+    await expect(client.listStrategyRuns(7)).resolves.toMatchObject({total:1})
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs')
     expect(fetch.mock.calls[0][1].method).toBe('GET')
   })
@@ -94,16 +94,16 @@ describe('compose api client', () => {
   it('reads a filtered history page with the server total', async () => {
     const fetch = vi.fn().mockResolvedValue(ok({ items: [{ run_key: 'run-1' }], total: 21, page: 2, page_size: 10 }))
     const client = createComposeClient({ fetch })
-    await expect(client.listStrategyRunHistory(7, { page: 2, page_size: 10, trigger_type: 'manual' })).resolves.toMatchObject({ total: 21, page: 2 })
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs/history?page=2&page_size=10&trigger_type=manual')
+    await expect(client.listStrategyRuns(7, { page: 2, page_size: 10, trigger_type: 'immediate' })).resolves.toMatchObject({ total: 21, page: 2 })
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs?page=2&page_size=10&trigger_type=immediate')
   })
 
-  it('reads a run batch with its schedule slot as the query', async () => {
-    const fetch = vi.fn().mockResolvedValue(ok({ run: { run_key: 'slot-1' }, tasks: [{ id: 1, status: 'failed' }], counts: { success: 0, failed: 1 } }))
-    const client = createComposeClient({ fetch })
-    await expect(client.listStrategyRunTasks(7, '2026-10-15T01:00:00Z')).resolves.toMatchObject({ counts: { failed: 1 } })
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/runs/tasks?schedule_slot=2026-10-15T01%3A00%3A00Z')
-    expect(fetch.mock.calls[0][1].method).toBe('GET')
+  it('reads batch metadata with its global counts and available actions', async () => {
+    const data={batch:{id:7,counts:{pending:3,failed:2}},actions:{retry_count:2,cancel_count:3}}
+    const fetch=vi.fn().mockResolvedValue(ok(data))
+    const client=createComposeClient({fetch})
+    await expect(client.getComposeTaskBatch(7)).resolves.toEqual(data)
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-task-batches/7')
   })
 })
 
@@ -117,14 +117,14 @@ describe('compose api client', () => {
       .mockResolvedValueOnce(ok({ id: 9, status: 'cancelled' }))
     const client = createComposeClient({ fetch })
 
-    await client.createComposeTasks({ strategy_id: 5, items: [{ material_id: 42, request_key: 'rk-a' }] })
+    await client.createComposeTasks({ request_key:'batch-1', name:'新制作', strategy_id:5, operator_id:9, material_ids:[42], setting_overrides:[{key:'main',params:{end_seconds:20}}], remake_confirmed:true })
     await client.listComposeTasks({ status: 'pending', compose_strategy_id: '3' })
     await client.getComposeTask(9)
     await client.cancelComposeTask(9)
 
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-tasks')
     expect(fetch.mock.calls[0][1].method).toBe('POST')
-    expect(fetch.mock.calls[0][1].body).toBe(JSON.stringify({ strategy_id: 5, items: [{ material_id: 42, request_key: 'rk-a' }] }))
+    expect(fetch.mock.calls[0][1].body).toBe(JSON.stringify({ request_key:'batch-1', name:'新制作', strategy_id:5, operator_id:9, material_ids:[42], setting_overrides:[{key:'main',params:{end_seconds:20}}], remake_confirmed:true }))
     expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-tasks?status=pending&compose_strategy_id=3')
     expect(fetch.mock.calls[1][1].method).toBe('GET')
     expect(fetch.mock.calls[2][0]).toBe('/api/v1/compose-tasks/9')
@@ -182,40 +182,37 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[4][1].method).toBe('POST')
   })
 
-// 素材使用情况（创建抽屉的未使用过/已使用过分组）：服务端一次最多认 200 个 ID，超了整块
-// 400，所以分片必须在客户端做掉 —— 留给调用方就是留一个「素材多了就整块不可用」的坑。
-describe('compose material states', () => {
-  it('reads one query for a small candidate list', async () => {
-    const fetch = vi.fn().mockResolvedValue(ok([{ material_id: 42, success_count: 1 }]))
-    const client = createComposeClient({ fetch })
-    await expect(client.listStrategyMaterialStates(7, [42, 43])).resolves.toHaveLength(1)
-    expect(fetch.mock.calls).toHaveLength(1)
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/material-states?material_ids=42%2C43')
-    expect(fetch.mock.calls[0][1].method).toBe('GET')
+describe('compose batch operations', () => {
+  it('forwards server pagination and exact batch context without reshaping totals', async () => {
+    const data={items:[{id:1}],total:501,page:3,page_size:20}
+    const fetch=vi.fn().mockResolvedValue(ok(data))
+    const client=createComposeClient({fetch})
+    await expect(client.listComposeTaskBatches({page:3,page_size:20,operator_id:9,search:'名字'})).resolves.toEqual(data)
+    const url=new URL(fetch.mock.calls[0][0],'https://cloud.test')
+    expect(url.pathname).toBe('/api/v1/compose-task-batches')
+    expect(Object.fromEntries(url.searchParams)).toEqual({page:'3',page_size:'20',operator_id:'9',search:'名字'})
+    await client.listComposeTasks({batch_id:7,status:'failed',page:2,page_size:10})
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-tasks?batch_id=7&status=failed&page=2&page_size=10')
   })
-
-  it('splits more than 200 ids and merges the answers', async () => {
-    const ids = Array.from({ length: 450 }, (_, index) => index + 1)
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(ok([{ material_id: 1 }]))
-      .mockResolvedValueOnce(ok([{ material_id: 201 }]))
-      .mockResolvedValueOnce(ok([{ material_id: 401 }]))
-    const client = createComposeClient({ fetch })
-    await expect(client.listStrategyMaterialStates(7, ids)).resolves.toHaveLength(3)
-    expect(fetch.mock.calls).toHaveLength(3)
-    const counts = fetch.mock.calls.map((call) => call[0].split('material_ids=')[1].split('%2C'))
-    expect(counts.map((list) => list.length)).toEqual([200, 200, 50])
-    expect(counts[0][0]).toBe('1')
-    expect(counts[1][0]).toBe('201')
-    expect(counts[2][49]).toBe('450')
+  it('keeps full batch and explicit task ID command scopes distinct', async () => {
+    const fetch=vi.fn().mockResolvedValue(ok({accepted:1,skipped:1,failed:0,items:[{task_id:2,status:'accepted'},{task_id:3,status:'skipped',reason:'已结束'}]}))
+    const client=createComposeClient({fetch})
+    await client.batchRetryComposeTasks({batch_id:7})
+    await client.batchCancelComposeTasks({task_ids:[2,3]})
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-tasks/batch-retry')
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({batch_id:7})
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-tasks/batch-cancel')
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({task_ids:[2,3]})
   })
-
-  // 同一个 ID 出现两次只该问一次：重复只浪费额度，还会让「每个请求的 ID 都有一条」这个
-  // 契约看起来被违反了。
-  it('asks about a repeated id once', async () => {
-    const fetch = vi.fn().mockResolvedValue(ok([]))
-    const client = createComposeClient({ fetch })
-    await client.listStrategyMaterialStates(7, [42, 42, 43])
-    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/material-states?material_ids=42%2C43')
+  it('reads privileged disposition through attempts and retains protected recovery write', async () => {
+    const fetch=vi.fn().mockResolvedValue(ok([{attempt:1,uncertain_review:{actor_user_id:9,evidence:'受权依据'}}]))
+    const client=createComposeClient({fetch})
+    await expect(client.listComposeTaskAttempts(5)).resolves.toMatchObject([{uncertain_review:{actor_user_id:9}}])
+    await client.resolveComposeUncertain(5,{old_execution_stopped:true,no_output_committed:true,evidence:'受权依据'})
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-tasks/5/attempts')
+    expect(fetch.mock.calls[1][0]).toBe('/api/v1/compose-tasks/5/uncertain-review')
+    expect(fetch.mock.calls[1][1].method).toBe('POST')
+    expect(client.listComposeUncertainReviews).toBeUndefined()
+    expect(client.listStrategyMaterialStates).toBeUndefined()
   })
 })

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
@@ -30,12 +31,17 @@ func resolveComposeUncertain(db *gorm.DB, taskID, actorID int64, evidence string
 		if err != nil || !found {
 			return err
 		}
-		if err := tx.Exec(`INSERT INTO compose_uncertain_reviews (task_id, attempt, actor_user_id, evidence, created_at) VALUES (?, ?, ?, ?, ?)`, taskID, item.AttemptCount, actorID, evidence, now).Error; err != nil {
+		result = tx.Exec(`UPDATE compose_task_attempts SET uncertain_review_actor_id=?,uncertain_review_evidence=?,uncertain_reviewed_at=?,updated_at=? WHERE task_id=? AND attempt=? AND error_code='execution_uncertain' AND uncertain_reviewed_at IS NULL`, actorID, evidence, now, now, taskID, item.AttemptCount)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("uncertain attempt missing or already reviewed")
+		}
+		if err := tx.Raw(`SELECT id,task_id,attempt,uncertain_review_actor_id,uncertain_review_evidence,uncertain_reviewed_at FROM compose_task_attempts WHERE task_id=? AND attempt=?`, taskID, item.AttemptCount).Row().Scan(&review.ID, &review.TaskID, &review.Attempt, &review.ActorUserID, &review.Evidence, &review.CreatedAt); err != nil {
 			return err
 		}
-		if err := tx.Raw(`SELECT id, task_id, attempt, actor_user_id, evidence, created_at FROM compose_uncertain_reviews WHERE task_id = ? AND attempt = ?`, taskID, item.AttemptCount).Row().Scan(&review.ID, &review.TaskID, &review.Attempt, &review.ActorUserID, &review.Evidence, &review.CreatedAt); err != nil {
-			return err
-		}
+
 		if err := tx.Exec(`INSERT INTO compose_task_attempts (task_id, attempt, source, outcome, created_at, updated_at) VALUES (?, ?, 'manual', 'pending', ?, ?)`, taskID, item.AttemptCount+1, now, now).Error; err != nil {
 			return err
 		}
@@ -56,7 +62,7 @@ func (ComposeTaskStore) ListUncertainReviews(taskID int64) ([]model.ComposeUncer
 }
 
 func listComposeUncertainReviews(db *gorm.DB, taskID int64) ([]model.ComposeUncertainReview, error) {
-	rows, err := db.Raw(`SELECT id, task_id, attempt, actor_user_id, evidence, created_at FROM compose_uncertain_reviews WHERE task_id = ? ORDER BY attempt`, taskID).Rows()
+	rows, err := db.Raw(`SELECT id, task_id, attempt, uncertain_review_actor_id, uncertain_review_evidence, uncertain_reviewed_at FROM compose_task_attempts WHERE task_id = ? AND uncertain_reviewed_at IS NOT NULL ORDER BY attempt`, taskID).Rows()
 	if err != nil {
 		return nil, err
 	}

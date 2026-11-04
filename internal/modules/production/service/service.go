@@ -138,10 +138,11 @@ type ObjectLinker interface {
 }
 
 type Service struct {
-	store     Store
-	transfers TransferCreator
-	links     ObjectLinker
-	now       func() time.Time
+	selectorStrategy func(int64) (model.ComposeStrategy, bool, error)
+	store            Store
+	transfers        TransferCreator
+	links            ObjectLinker
+	now              func() time.Time
 	// resolveCategory names the category a download is filed under. It is a field so the
 	// unit tests can stub the store call; the constructor installs the real one.
 	resolveCategory func(categoryID identityservice.CategoryID) (string, bool, error)

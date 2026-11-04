@@ -306,7 +306,7 @@ func TestComposeRetryDelayIsBoundedExponential(t *testing.T) {
 
 func TestStagingCleanupSelectsOnlySafeClosedAttempts(t *testing.T) {
 	db, mock := newMockGORM(t)
-	mock.ExpectQuery("SELECT a.task_id, a.attempt FROM compose_task_attempts a WHERE a.staging_cleaned_at IS NULL AND a.outcome IN.*EXISTS \\(SELECT 1 FROM compose_uncertain_reviews").
+	mock.ExpectQuery("SELECT a.task_id, a.attempt FROM compose_task_attempts a WHERE a.staging_cleaned_at IS NULL AND a.outcome IN.*a.uncertain_reviewed_at IS NOT NULL").
 		WithArgs(100).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "attempt"}).AddRow(int64(77), 2))
 	items, err := findComposeStagingCleanupCandidates(db, 100)
@@ -319,7 +319,7 @@ func TestStagingCleanupSelectsOnlySafeClosedAttempts(t *testing.T) {
 func TestStagingCleanupMarksOnlyKnownFinishedAttempt(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 15, 2, 0, 0, 0, time.UTC)
-	mock.ExpectExec("UPDATE compose_task_attempts a SET a.staging_cleaned_at = \\?.*EXISTS \\(SELECT 1 FROM compose_uncertain_reviews").
+	mock.ExpectExec("UPDATE compose_task_attempts a SET a.staging_cleaned_at = \\?.*a.uncertain_reviewed_at IS NOT NULL").
 		WithArgs(now, int64(77), 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	ok, err := markComposeStagingCleaned(db, 77, 2, now)
@@ -467,12 +467,12 @@ func TestFailExpiredComposeLeaseTerminalizesTheDeadWorkersRow(t *testing.T) {
 func TestListComposeTaskAttemptsReadsOldestFirst(t *testing.T) {
 	db, mock := newMockGORM(t)
 	now := time.Date(2026, 10, 14, 9, 14, 0, 0, time.UTC)
-	attemptColumns := []string{"id", "task_id", "attempt", "source", "started_at", "finished_at", "outcome", "stage", "error_code", "error_message", "steps_json", "created_at", "updated_at"}
+	attemptColumns := []string{"id", "task_id", "attempt", "source", "started_at", "finished_at", "outcome", "stage", "error_code", "error_message", "steps_json", "created_at", "updated_at", "uncertain_review_actor_id", "uncertain_review_evidence", "uncertain_reviewed_at"}
 	mock.ExpectQuery("SELECT .* FROM compose_task_attempts WHERE task_id = \\? ORDER BY attempt ASC").
 		WithArgs(int64(77)).
 		WillReturnRows(sqlmock.NewRows(attemptColumns).
-			AddRow(int64(1), int64(77), 1, "manual", nil, now, "failed", "uploading", "storage_error", "boom", nil, now, now).
-			AddRow(int64(2), int64(77), 2, "auto", now, nil, "running", "cutting", "", "", []byte(`[{"step":"cut","label":"视频合成","outcome":"success","started_at":"2026-10-14T09:13:00Z","finished_at":"2026-10-14T09:14:00Z","duration_ms":60000,"error_code":"","error_label":"","metrics":{"output_duration_ms":15000}}]`), now, now))
+			AddRow(int64(1), int64(77), 1, "manual", nil, now, "failed", "uploading", "storage_error", "boom", nil, now, now, nil, nil, nil).
+			AddRow(int64(2), int64(77), 2, "auto", now, nil, "running", "cutting", "", "", []byte(`[{"step":"cut","label":"视频合成","outcome":"success","started_at":"2026-10-14T09:13:00Z","finished_at":"2026-10-14T09:14:00Z","duration_ms":60000,"error_code":"","error_label":"","metrics":{"output_duration_ms":15000}}]`), now, now, nil, nil, nil))
 	items, err := listComposeTaskAttempts(db, 77)
 	if err != nil || len(items) != 2 {
 		t.Fatalf("items=%v err=%v", items, err)

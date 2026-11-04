@@ -37,6 +37,8 @@ const route = useRoute()
 const downloadCentre = useDownloadCentre()
 
 const rows = ref([])
+const total = ref(0)
+let loadSequence = 0
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
@@ -179,24 +181,24 @@ watch([search, statusFilter], () => {
   selectedRowKeys.value = []
 })
 
-const pagedRows = computed(() => {
-  const start = (pagination.value.current - 1) * pagination.value.pageSize
-  return rows.value.slice(start, start + pagination.value.pageSize)
-})
+const pagedRows = computed(() => rows.value)
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
-async function load({ quiet = false } = {}) {
+async function load({ quiet = false, keepPage = false } = {}) {
+  if (!quiet && !keepPage) pagination.value.current = 1
+  const sequence = ++loadSequence
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const data = await client.listMyMaterials({ search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
-    rows.value = toRows(Array.isArray(data) ? data : [])
+    const data = await client.listMyMaterials({ page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
+    if (sequence !== loadSequence) return
+    rows.value = toRows(data.items || [])
+    total.value = data.total || 0
     selectedRowKeys.value = selectedRowKeys.value.filter((key) => rows.value.some((row) => String(row.usage_id) === String(key) && canSelectForDownload(row)))
-    if (!quiet) pagination.value.current = 1
   } catch (e) {
-    if (!quiet) error.value = e?.message || '读取我的素材失败'
+    if (!quiet && sequence === loadSequence) error.value = e?.message || '读取我的素材失败'
   } finally {
-    if (!quiet) loading.value = false
+    if (!quiet && sequence === loadSequence) loading.value = false
   }
   await loadPresence()
 }
@@ -373,7 +375,7 @@ onMounted(() => {
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
+        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
       </ResourceCard>
 
       <MaterialDetailDrawer

@@ -12,6 +12,8 @@ func SourceMetricKnown(raw json.RawMessage, field string, value int64) bool {
 	switch field {
 	case "like_count":
 		statistic = "digg_count"
+	case "view_count":
+		statistic = "play_count"
 	case "favorite_count":
 		statistic = "collect_count"
 	default:

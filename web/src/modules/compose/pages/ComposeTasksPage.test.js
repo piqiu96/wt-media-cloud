@@ -81,8 +81,8 @@ describe('compose tasks page', () => {
 
   // 列序固定：识别 → 来源（含负责人）→ 结果 → 状态 → 时间（创建、完成）→ 操作。
   it('declares the eleven columns in the fixed order', () => {
-    const columns = source.slice(source.indexOf('const columns'), source.indexOf('const tableScroll'))
-    const order = ['id', 'name', 'trigger_type', 'material_id', 'strategy', 'operator', 'output', 'status', 'created_at', 'finished_at', 'op']
+    const columns = source.slice(source.indexOf('const taskColumns'), source.indexOf('const tableScroll'))
+    const order = ['row-select', 'id', 'name', 'trigger_type', 'material_id', 'strategy', 'operator', 'output', 'status', 'created_at', 'finished_at', 'op']
     // 分母可见：列数对不上说明列结构被改过，立刻失败而不是让后面的顺序断言空转。
     expect((columns.match(/colKey:/g) || [])).toHaveLength(order.length)
     for (let index = 1; index < order.length; index += 1) {
@@ -134,11 +134,11 @@ describe('compose tasks page', () => {
   // 成功与部分失败分开说，失败的原因逐条带上 —— 只说「创建失败」等于让运营再试一次同样的错。
   it('re-reads the list after creating and splits the created from the failed', () => {
     const handler = source.slice(source.indexOf('async function onCreated'), source.indexOf('\n}', source.indexOf('async function onCreated')))
-    expect(handler).toContain('await load()')
+    expect(handler).toContain('await query()')
     expect(handler).toContain('result.created')
     expect(handler).toContain('result.failed')
     expect(handler).toContain('feedback.toast.success(`已创建 ${created.length} 个合成任务`)')
-    expect(handler).toMatch(/feedback\.toast\.error\(/)
+    expect(handler).toMatch(/feedback\.toast\.info\(/)
     // 成片是异步作业：这里说不出「合成成功」。
     expect(source).not.toContain('合成成功')
   })
@@ -163,19 +163,15 @@ describe('compose tasks page', () => {
 
   // 顺序即查找顺序：先认团队/策略，再认负责人，然后才是触发方式、状态与时间；
   // 策略名长，仍占宽位。逐项按 label 文本定位（不是裸词 indexOf），顺序写错时这里一定红。
-  it('orders the filter bar 团队 → 合成策略 → 负责人 → 触发方式 → 状态 → 创建时间', () => {
-    const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
-    expect(bar).not.toContain('<t-space')
-    const labels = [...bar.matchAll(/wt-filter-field__label">([^<]+)</g)].map((match) => match[1])
-    expect(labels).toEqual(['运营团队', '合成策略', '负责人', '触发方式', '状态', '创建时间'])
-    const fields = bar.match(/wt-filter-field[^"]*"/g) || []
-    expect(fields.filter((entry) => entry.includes('wt-filter-field--wide'))).toHaveLength(1)
-    // 宽位只归策略（团队、负责人都是窄字段）：宽类之后先出现策略标题，再出现负责人标题。
-    const wideAt = bar.indexOf('wt-filter-field--wide')
-    const strategyAt = bar.indexOf('合成策略', wideAt)
-    expect(strategyAt).toBeGreaterThan(wideAt)
-    expect(bar.indexOf('负责人', wideAt)).toBeGreaterThan(strategyAt)
-    expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
+  it('keeps common basic filters compact and puts strategy, trigger and date in advanced filters', () => {
+    const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('ComposeTaskSelectionActions v-if'))
+    const split = bar.indexOf('id="compose-advanced-filters"')
+    const labels = text => [...text.matchAll(/wt-filter-field__label">([^<]+)</g)].map(match => match[1])
+    expect(labels(bar.slice(0,split))).toEqual(['综合搜索','运营团队','负责人','状态'])
+    expect(labels(bar.slice(split))).toEqual(['合成策略','触发方式','创建时间'])
+    expect(bar).toContain('class="wt-advanced-filters"')
+    expect(source).toContain('min-width: 280px')
+    expect(bar.indexOf('wt-filter-actions')).toBeLessThan(split)
   })
 
   // CHG-20261013-089 T-03：详情按「任务状态 → 快照 → 执行记录 → 成片」组织，逐次
@@ -228,12 +224,13 @@ describe('compose tasks page', () => {
     expect(source).toContain('没有已提交成片')
     expect(source).toContain('reviewReady(')
     expect(source).toContain('client.resolveComposeUncertain(')
-    expect(source).toContain('client.listComposeUncertainReviews(')
+    expect(source).not.toContain('client.listComposeUncertainReviews(')
+    expect(source).toContain('attempt.uncertain_review')
     expect(source).toContain('失败阶段：')
     // 同团队高级运营也能核对，不再是管理员专属。
     expect(source).toContain("const canReviewUncertain = computed(() => ['senior_operator', 'admin'].includes(currentUser.value?.role))")
     expect(source).toContain('<h4>待人工核对</h4>')
-    expect(source).toContain('核对人 {{ review.actor_user_id }}')
+    expect(source).toContain('核对人 {{ attempt.uncertain_review.actor_user_id }}')
     expect(source).not.toContain('待管理员核对')
     expect(source).not.toContain('仅管理员')
     expect(source).not.toContain('管理员才能核对')
@@ -260,10 +257,10 @@ describe('compose tasks page', () => {
     expect(source).toContain(':footer="detailFooterOps.length > 0"')
     expect(source).toContain("detailFooterOps.includes('cancel')")
     expect(source).toContain("detailFooterOps.includes('retry')")
-    const overview = source.slice(source.indexOf('label="概览"'), source.indexOf('label="执行记录"'))
-    expect((overview.match(/<h4>/g) || [])).toHaveLength(4)
-    expect((source.match(/<t-tab-panel/g) || [])).toHaveLength(3)
-    for (const label of ['概览', '执行记录', '配置快照']) expect(source).toContain(`label="${label}"`)
+    const overview = source.slice(source.indexOf('label="任务信息"'), source.indexOf('label="执行记录"'))
+    expect((overview.match(/<h4>/g) || [])).toHaveLength(5)
+    expect((source.match(/<t-tab-panel/g) || [])).toHaveLength(4)
+    for (const label of ['任务信息', '执行记录']) expect(source).toContain(`label="${label}"`)
   })
 
   // 失败任务的成片区只陈述事实：未生成成片 + 为什么，不编一个占位成片。
@@ -344,7 +341,7 @@ describe('compose tasks page', () => {
   // 分页只保留一套总数（TDesign 自带），页面不再自报一个。
   it('shows a single total count', () => {
     expect(source).not.toContain('共 {{ rows.length }} 条')
-    expect(source).toContain(':total="rows.length"')
+    expect(source).toContain(':total="total"')
   })
 
   // 「前往…页面」是关联抽屉里唯一的路由入口：实体链接与表格行都不再换页。
@@ -399,7 +396,7 @@ describe('compose tasks page', () => {
     expect(source).toContain('detailPolling.stop()')
     // 定时那一遍不掀整页 Loading、不把用户正在看的页码拨回去。
     expect(source).toContain('load({ quiet: true })')
-    expect(source).toContain('if (!quiet) pagination.value.current = 1')
+    expect(source).toContain('function query() { pagination.value.current = 1; load() }')
     // 刷新按钮已移除；页面自己不建 timer（交给 useAutoRefresh）。
     expect(source).not.toContain('@click="load()">刷新')
     expect(source).not.toContain('setInterval')

@@ -25,14 +25,21 @@ type CreateUsageInput struct {
 }
 
 type MaterialFilter struct {
-	TeamID      *identity.TeamID
-	CategoryIDs []identity.CategoryID
-	Search      string
-	Limit       int
-	CategoryID  identity.CategoryID
-	VideoStatus string
-	SortBy      string
-	SortOrder   string
+	UsageStatus                                                                                string
+	Page, PageSize                                                                             int
+	StrategyID                                                                                 int64
+	OperatorID                                                                                 int64
+	OwnerID                                                                                    identity.UserID
+	PublishedFrom, PublishedBefore                                                             *time.Time
+	ViewCountMin, ViewCountMax, LikeCountMin, LikeCountMax, FavoriteCountMin, FavoriteCountMax *int64
+	TeamID                                                                                     *identity.TeamID
+	CategoryIDs                                                                                []identity.CategoryID
+	Search                                                                                     string
+	Limit                                                                                      int
+	CategoryID                                                                                 identity.CategoryID
+	VideoStatus                                                                                string
+	SortBy                                                                                     string
+	SortOrder                                                                                  string
 	// UserID is the viewer whose personal relation and success facts the
 	// `joined` / `my_usage` filters read. It is not a scope: team scope stays
 	// TeamID, and this only decides which of the actor's own rows match.
@@ -104,7 +111,7 @@ func ListMaterials(filter MaterialFilter) ([]model.Material, error) {
 	return listMaterials(database.DB(), filter)
 }
 
-func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error) {
+func materialConditions(filter MaterialFilter) ([]string, []any) {
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, len(filter.CategoryIDs)+4)
 	if filter.TeamID != nil {
@@ -166,7 +173,53 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 	case "unused":
 		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM composite_outputs o WHERE o.material_id = m.id AND o.team_id = m.team_id AND o.operator_id IS NOT NULL)")
 	}
+	if filter.OwnerID > 0 {
+		ownerQuery := "EXISTS (SELECT 1 FROM material_usages owner_usage WHERE owner_usage.material_id=m.id AND owner_usage.user_id=?"
+		if filter.UsageStatus == "active" || filter.UsageStatus == "removed" {
+			ownerQuery += " AND owner_usage.status='" + filter.UsageStatus + "'"
+		}
+		conditions = append(conditions, ownerQuery+")")
+		args = append(args, filter.OwnerID)
+	}
+	if filter.PublishedFrom != nil {
+		conditions = append(conditions, "s.published_at >= ?")
+		args = append(args, *filter.PublishedFrom)
+	}
+	if filter.PublishedBefore != nil {
+		conditions = append(conditions, "s.published_at < ?")
+		args = append(args, *filter.PublishedBefore)
+	}
+	for _, metric := range []struct {
+		column   string
+		min, max *int64
+	}{{"s.view_count", filter.ViewCountMin, filter.ViewCountMax}, {"s.like_count", filter.LikeCountMin, filter.LikeCountMax}, {"s.favorite_count", filter.FavoriteCountMin, filter.FavoriteCountMax}} {
+		if metric.min != nil || metric.max != nil {
+			statistic := map[string]string{"s.view_count": "play_count", "s.like_count": "digg_count", "s.favorite_count": "collect_count"}[metric.column]
+			proof := []string{metric.column + " > 0"}
+			for _, prefix := range []string{"$.statistics.", "$.raw.statistics."} {
+				path := "JSON_EXTRACT(s.raw_json, '" + prefix + statistic + "')"
+				proof = append(proof, "(JSON_TYPE("+path+") = 'INTEGER' AND "+path+" >= 0)")
+			}
+			conditions = append(conditions, "("+strings.Join(proof, " OR ")+")")
+		}
+		if metric.min != nil {
+			conditions = append(conditions, metric.column+" >= ?")
+			args = append(args, *metric.min)
+		}
+		if metric.max != nil {
+			conditions = append(conditions, metric.column+" <= ?")
+			args = append(args, *metric.max)
+		}
+	}
+	return conditions, args
+}
+
+func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error) {
+	conditions, args := materialConditions(filter)
 	limit := filter.Limit
+	if filter.PageSize > 0 {
+		limit = filter.PageSize
+	}
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
@@ -174,7 +227,7 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	sortColumns := map[string]string{"id": "m.id", "published_at": "s.published_at", "created_at": "m.created_at", "updated_at": "m.updated_at"}
+	sortColumns := map[string]string{"id": "m.id", "published_at": "s.published_at", "created_at": "m.created_at", "updated_at": "m.updated_at", "view_count": "s.view_count", "like_count": "s.like_count", "favorite_count": "s.favorite_count"}
 	sortColumn := sortColumns[filter.SortBy]
 	if sortColumn == "" {
 		sortColumn = "s.published_at"
@@ -184,6 +237,9 @@ func listMaterials(db *gorm.DB, filter MaterialFilter) ([]model.Material, error)
 		sortOrder = "ASC"
 	}
 	query += fmt.Sprintf(" ORDER BY %s %s, m.id DESC LIMIT %d", sortColumn, sortOrder, limit)
+	if filter.Page > 0 {
+		query += fmt.Sprintf(" OFFSET %d", (filter.Page-1)*limit)
+	}
 	rows, err := db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err

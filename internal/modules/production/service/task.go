@@ -28,7 +28,11 @@ type CreateComposeTaskItemInput struct {
 }
 
 type CreateComposeTasksInput struct {
-	StrategyID int64 `json:"strategy_id"`
+	RequestKey       string                   `json:"request_key"`
+	MaterialIDs      []int64                  `json:"material_ids"`
+	SettingOverrides []ComposeSettingOverride `json:"setting_overrides"`
+	RemakeConfirmed  bool                     `json:"remake_confirmed"`
+	StrategyID       int64                    `json:"strategy_id"`
 	// OperatorID is optional on the wire; when present it must name the
 	// strategy's own operator, because a task snapshots that assignment.
 	OperatorID int64 `json:"operator_id"`
@@ -41,6 +45,10 @@ type CreateComposeTasksInput struct {
 }
 
 type ListComposeTasksInput struct {
+	BatchID       int64     `json:"batch_id"`
+	Search        string    `json:"search"`
+	Page          int       `json:"page"`
+	PageSize      int       `json:"page_size"`
 	Status        string    `json:"status"`
 	TriggerType   string    `json:"trigger_type"`
 	StrategyID    int64     `json:"compose_strategy_id"`
@@ -62,8 +70,10 @@ type CreateComposeTaskFailure struct {
 }
 
 type CreateComposeTasksResult struct {
-	Created []model.ComposeTask
-	Failed  []CreateComposeTaskFailure
+	Batch    *model.ComposeTaskBatch
+	Replayed bool
+	Created  []model.ComposeTask
+	Failed   []CreateComposeTaskFailure
 }
 
 type ComposeTaskRepository interface {
@@ -160,7 +170,16 @@ func (s *ComposeTaskService) ListAttempts(actor identity.PublicUser, id int64) (
 	if _, err := s.Get(actor, id); err != nil {
 		return nil, err
 	}
-	return s.tasks.ListAttempts(id)
+	items, err := s.tasks.ListAttempts(id)
+	if err != nil {
+		return nil, err
+	}
+	if actor.Role != identity.RoleAdmin && actor.Role != identity.RoleSeniorOperator {
+		for i := range items {
+			items[i].UncertainReview = nil
+		}
+	}
+	return items, nil
 }
 
 func RetryComposeTask(actor identity.PublicUser, id int64) (model.ComposeTask, error) {
@@ -178,6 +197,9 @@ func ListComposeTaskAttempts(actor identity.PublicUser, id int64) ([]model.Compo
 // per-item check so a retried item answers its existing task even if its
 // usage has since been removed.
 func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateComposeTasksInput) (CreateComposeTasksResult, error) {
+	if batchStore, ok := s.tasks.(manualBatchRepository); ok {
+		return s.createManualBatch(actor, input, batchStore)
+	}
 	if actor.Status != identity.UserStatusEnabled || (actor.Role != identity.RoleOperator && actor.Role != identity.RoleSeniorOperator && actor.Role != identity.RoleAdmin) {
 		return CreateComposeTasksResult{}, ErrComposeTaskForbidden
 	}
@@ -304,14 +326,14 @@ func (s *ComposeTaskService) Get(actor identity.PublicUser, id int64) (model.Com
 	return s.withOperatorName(item)
 }
 
-func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTasksInput) ([]model.ComposeTask, error) {
+func composeTaskFilter(actor identity.PublicUser, input ListComposeTasksInput) (repository.ComposeTaskFilter, error) {
 	if actor.Status != identity.UserStatusEnabled {
-		return nil, ErrComposeTaskForbidden
+		return repository.ComposeTaskFilter{}, ErrComposeTaskForbidden
 	}
-	filter := repository.ComposeTaskFilter{StrategyID: input.StrategyID, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
+	filter := repository.ComposeTaskFilter{BatchID: input.BatchID, Search: strings.TrimSpace(input.Search), StrategyID: input.StrategyID, CreatedFrom: input.CreatedFrom, CreatedBefore: input.CreatedBefore}
 	if input.TriggerType != "" {
-		if input.TriggerType != "manual" && input.TriggerType != "scheduled" {
-			return nil, fmt.Errorf("%w: unknown trigger_type %s", ErrComposeTaskInvalid, input.TriggerType)
+		if input.TriggerType != "manual" && input.TriggerType != "scheduled" && input.TriggerType != "immediate" {
+			return repository.ComposeTaskFilter{}, fmt.Errorf("%w: unknown trigger_type %s", ErrComposeTaskInvalid, input.TriggerType)
 		}
 		filter.TriggerType = input.TriggerType
 	}
@@ -321,21 +343,32 @@ func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTa
 		case model.ComposeTaskPending, model.ComposeTaskRunning, model.ComposeTaskSuccess, model.ComposeTaskFailed, model.ComposeTaskCancelled:
 			filter.Status = status
 		default:
-			return nil, fmt.Errorf("%w: unknown status %s", ErrComposeTaskInvalid, input.Status)
+			return repository.ComposeTaskFilter{}, fmt.Errorf("%w: unknown status %s", ErrComposeTaskInvalid, input.Status)
 		}
 	}
 	scope, err := resolveComposeListScope(actor, input.TeamID, input.OperatorID, input.OperatorScope)
 	if err != nil {
 		if errors.Is(err, errComposeScopeForbidden) {
-			return nil, ErrComposeTaskForbidden
+			return repository.ComposeTaskFilter{}, ErrComposeTaskForbidden
 		}
-		return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
+		return repository.ComposeTaskFilter{}, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
 	}
 	filter.TeamID, filter.OperatorID, filter.IncludeUnownedCreatedBy = scope.TeamID, scope.OperatorID, scope.IncludeUnowned
 	// Operators stay inside the categories they cover; seniors and admins see every
 	// category of the team they are allowed to read.
 	if actor.Role == identity.RoleOperator {
 		filter.CategoryIDs = actor.CategoryIDs
+		if len(filter.CategoryIDs) == 0 {
+			filter.CategoryIDs = append(filter.CategoryIDs, 0)
+		}
+	}
+	return filter, nil
+}
+
+func (s *ComposeTaskService) List(actor identity.PublicUser, input ListComposeTasksInput) ([]model.ComposeTask, error) {
+	filter, err := composeTaskFilter(actor, input)
+	if err != nil {
+		return nil, err
 	}
 	items, err := s.tasks.List(filter)
 	if err != nil {

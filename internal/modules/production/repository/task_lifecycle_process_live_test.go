@@ -108,7 +108,7 @@ func TestLiveComposeUncertainReviewIsAtomicAndSingleUse(t *testing.T) {
 	_, requestKey, strategyID := composeClaimSetup(t)
 	cleanupComposeTasks(t, requestKey)
 	t.Cleanup(func() {
-		if err := database.DB().Exec(`DELETE r FROM compose_uncertain_reviews r JOIN compose_tasks ct ON r.task_id = ct.id WHERE ct.request_key LIKE ?`, requestKey+"%").Error; err != nil {
+		if err := database.DB().Exec(`UPDATE compose_task_attempts r JOIN compose_tasks ct ON r.task_id = ct.id SET r.uncertain_reviewed_at=NULL,r.uncertain_review_actor_id=NULL,r.uncertain_review_evidence=NULL WHERE ct.request_key LIKE ?`, requestKey+"%").Error; err != nil {
 			t.Errorf("review cleanup: %v", err)
 		}
 	})
@@ -155,7 +155,7 @@ func TestLiveComposeUncertainReviewIsAtomicAndSingleUse(t *testing.T) {
 	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND attempt = 2 AND source = 'manual' AND outcome = 'pending'`, eligibleID).Row().Scan(&count); err != nil || count != 1 {
 		t.Fatalf("manual attempt: count=%d err=%v", count, err)
 	}
-	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_uncertain_reviews WHERE task_id = ?`, eligibleID).Row().Scan(&count); err != nil || count != 1 {
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND uncertain_reviewed_at IS NOT NULL`, eligibleID).Row().Scan(&count); err != nil || count != 1 {
 		t.Fatalf("review count=%d err=%v", count, err)
 	}
 	reviews, err := (ComposeTaskStore{}).ListUncertainReviews(eligibleID)
@@ -199,7 +199,7 @@ func TestLiveComposeUncertainReviewConcurrentSingleWinner(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = database.DB().Exec(`DELETE FROM audit_logs WHERE target_type = 'compose_task' AND target_id = ? AND action = 'compose_task.resolve_uncertain'`, fmt.Sprint(taskID)).Error
-		_ = database.DB().Exec(`DELETE FROM compose_uncertain_reviews WHERE task_id = ?`, taskID).Error
+		_ = database.DB().Exec(`UPDATE compose_task_attempts SET uncertain_reviewed_at=NULL,uncertain_review_actor_id=NULL,uncertain_review_evidence=NULL WHERE task_id = ?`, taskID).Error
 	})
 	if err := database.DB().Exec(`UPDATE compose_tasks SET status = 'failed', error_code = 'execution_uncertain', attempt_count = 1 WHERE id = ?`, taskID).Error; err != nil {
 		t.Fatal(err)
@@ -239,7 +239,7 @@ func TestLiveComposeUncertainReviewConcurrentSingleWinner(t *testing.T) {
 		t.Fatalf("concurrent winners=%d, want 1", winners)
 	}
 	var reviews, attempts int
-	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_uncertain_reviews WHERE task_id = ?`, taskID).Row().Scan(&reviews); err != nil {
+	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND uncertain_reviewed_at IS NOT NULL`, taskID).Row().Scan(&reviews); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.DB().Raw(`SELECT COUNT(*) FROM compose_task_attempts WHERE task_id = ? AND attempt = 2`, taskID).Row().Scan(&attempts); err != nil {
