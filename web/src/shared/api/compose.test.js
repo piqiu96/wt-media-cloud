@@ -8,6 +8,16 @@ function ok(data, status = 200) {
 // 路径与 production/router.go 的六条策略路由 + 模板目录逐一比对（CHG-20261012-081 T-01
 // 合同）。客户端只做路径映射，不改方法名与路径的对应关系；错一条就是打到 404 上。
 describe('compose api client', () => {
+  it('previews before confirming the reviewed result', async () => {
+    const fetch = vi.fn().mockResolvedValue(ok({ selected_count: 2, estimated_output_count: 10, preview_token: 'x'.repeat(64) }))
+    const client = createComposeClient({ fetch })
+    const preview = await client.previewStrategyExecution(7)
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/compose-strategies/7/execution-preview')
+    expect(fetch.mock.calls[0][1].method).toBe('POST')
+    await client.runStrategyNow(7, 'command-1', preview.preview_token)
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ request_key: 'command-1', preview_token: 'x'.repeat(64) })
+  })
+
   it('maps the strategy commands to the contract paths', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(ok([]))
@@ -29,7 +39,7 @@ describe('compose api client', () => {
     await client.copyStrategy(7, '切片 副本')
     await client.setStrategyStatus(7, 'disabled')
     await client.previewStrategyNextRun({ mode: 'interval', interval_minutes: 30, timezone: 'Asia/Shanghai' })
-    await client.runStrategyNow(7, 'request-001')
+    await client.runStrategyNow(7, 'request-001', 'a'.repeat(64))
     await client.listTemplates()
     await client.listTeams()
 
@@ -54,7 +64,7 @@ describe('compose api client', () => {
     expect(fetch.mock.calls[6][1].body).toBe(JSON.stringify({ mode: 'interval', interval_minutes: 30, timezone: 'Asia/Shanghai' }))
     expect(fetch.mock.calls[7][0]).toBe('/api/v1/compose-strategies/7/run-now')
     expect(fetch.mock.calls[7][1].method).toBe('POST')
-    expect(fetch.mock.calls[7][1].body).toBe(JSON.stringify({ request_key: 'request-001' }))
+    expect(fetch.mock.calls[7][1].body).toBe(JSON.stringify({ request_key: 'request-001', preview_token: 'a'.repeat(64) }))
     expect(fetch.mock.calls[8][0]).toBe('/api/v1/compose-templates')
     expect(fetch.mock.calls[9][0]).toBe('/api/v1/operation-teams')
   })

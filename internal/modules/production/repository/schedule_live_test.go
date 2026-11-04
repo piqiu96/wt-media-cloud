@@ -129,9 +129,12 @@ func TestLiveComposeScheduleDueAndRepeatScan(t *testing.T) {
 	if err != nil || processed || second.CreatedCount != 0 {
 		t.Fatalf("repeat=%+v processed=%v err=%v", second, processed, err)
 	}
+	if err := tx.Exec(`UPDATE compose_tasks SET status='success' WHERE compose_strategy_id=?`, strategyID).Error; err != nil {
+		t.Fatal(err)
+	}
 	manual := ScheduleRunOptions{StrategyID: strategyID, Now: now.Add(time.Minute), ManualKey: "test-immediate-001", NextRun: calculate}
 	immediate, processed, err := runComposeSchedule(tx, manual)
-	if err != nil || !processed || immediate.TriggerType != "manual" {
+	if err != nil || !processed || immediate.TriggerType != "immediate" {
 		t.Fatalf("immediate=%+v processed=%v err=%v", immediate, processed, err)
 	}
 	repeated, processed, err := runComposeSchedule(tx, manual)

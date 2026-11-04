@@ -1,18 +1,23 @@
 schema_version: 1
-revision: "2026.10.29.1"
+revision: "2026.11.05.1"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
 schemas:
   ComposeTemplate:
     type: object
+    additionalProperties: false
     required: [id, code, name, version, schema, status]
     properties:
       id: {type: integer, format: int64}
       code: {type: string}
       name: {type: string}
       version: {type: integer, minimum: 1}
-      schema: {type: object}
+      schema:
+        type: object
+        description: Versioned JSON Schema. Each property may declare editable; absent or false means fixed. Required and range validation remains server-side.
+        properties:
+          properties: {type: object, additionalProperties: {ref: ComposeTemplateParameter}}
       status: {type: string, enum: [active, inactive]}
   BasicCutV1Config:
     type: object
@@ -26,51 +31,203 @@ schemas:
     required: [guide_video_url, insert_seconds, guide_duration_seconds, max_duration_seconds]
     additionalProperties: false
     properties:
-      guide_video_url: {type: string, format: uri, description: Public downloadable HTTPS URL, frozen in the task snapshot.}
+      guide_video_url: {type: string, format: uri, description: "Public downloadable HTTPS URL, frozen in the task snapshot."}
       insert_seconds: {type: integer, minimum: 0}
       guide_duration_seconds: {type: integer, minimum: 0, description: Zero uses the whole guide video.}
       max_duration_seconds: {type: integer, minimum: 0, description: Zero has no output duration limit.}
   ComposeStrategy:
     type: object
-    required: [id, team_id, category_id, name, compose_template_id, compose_template_version, config, schedule, next_run_at, status, created_at, updated_at]
+    required: [id, team_id, category_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, output_settings, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
     properties:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
       category_id: {type: integer, format: int64, minimum: 1}
+      operator_id: {type: [integer, 'null'], format: int64, description: "Null on historical rows written before assignment existed; never backfilled from created_by."}
+      operator_name: {type: string, description: "Display name resolved from operator_id; empty when unassigned or no longer resolvable."}
       name: {type: string}
       compose_template_id: {type: integer, format: int64}
       compose_template_version: {type: integer, minimum: 1}
       config:
-        oneOf: [{ref: BasicCutV1Config}, {ref: GuideV1Config}]
-      schedule: {ref: ComposeSchedule, nullable: true}
-      next_run_at: {type: string, format: date-time, nullable: true}
-      status: {type: string, enum: [active, inactive]}
+        oneOf:
+          - {ref: BasicCutV1Config}
+          - {ref: GuideV1Config}
+      output_settings: {type: array, minItems: 1, maxItems: 20, items: {ref: ComposeOutputSetting}, description: "Independent groups in saved order. When omitted by legacy requests config supplies one default group; each group stores complete template parameters."}
+      execution_mode: {type: string, enum: [manual, scheduled]}
+      schedule:
+        oneOf:
+          - {ref: ComposeSchedule}
+          - {type: 'null'}
+      priority_rules: {type: array, items: {ref: ComposePriorityRule}}
+      single_limit: {type: integer, minimum: 1, maximum: 100}
+      daily_limit: {type: integer, minimum: 0, maximum: 1000, description: "Required positive for scheduled strategies; manual strategies have no daily limit and persist zero."}
+      next_run_at: {type: [string, 'null'], format: date-time, description: "UTC time; null unless the enabled strategy uses scheduled execution."}
+      status: {type: string, enum: [enabled, disabled]}
       created_at: {type: string, format: date-time}
       updated_at: {type: string, format: date-time}
   ComposeSchedule:
     type: object
-    required: [enabled, mode, timezone, per_run_limit, daily_limit, material_scope]
+    additionalProperties: false
+    required: [mode, timezone]
     properties:
-      enabled: {type: boolean}
-      mode: {type: string, enum: [manual, interval, daily]}
-      interval_minutes: {type: integer, minimum: 1, maximum: 1440}
-      daily_time: {type: string}
-      timezone: {type: string}
-      per_run_limit: {type: integer, minimum: 1, maximum: 100}
-      daily_limit: {type: integer, minimum: 1, maximum: 1000}
-      material_scope: {type: string, enum: [team_materials, creator_usages], description: "team_materials is the current execution semantics: scheduled production reads the strategy team's material pool. creator_usages is the historical persisted value and remains accepted; existing schedule_json is not rewritten."}
+      mode: {type: string, enum: [interval, daily]}
+      interval_minutes: {type: integer, minimum: 1, maximum: 1440, description: "Required for interval mode; absent for other modes."}
+      daily_time: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: "Required for daily mode; absent for other modes."}
+      timezone: {type: string, description: "IANA timezone, default Asia/Shanghai in the editor."}
   ComposeScheduleRun:
     type: object
-    required: [run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
+    required: [batch_id, run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
     properties:
+      batch_id: {type: [integer, 'null'], format: int64, description: "Actual created batch ID; null for zero-task or historical runs."}
       run_key: {type: string}
       compose_strategy_id: {type: integer, format: int64}
-      trigger_type: {type: string, enum: [manual, scheduled]}
+      trigger_type: {type: string, enum: [manual, immediate, scheduled]}
       schedule_slot: {type: string, format: date-time}
       candidate_count: {type: integer, minimum: 0}
       created_count: {type: integer, minimum: 0}
-      skipped: {type: array}
+      skipped:
+        type: array
+        items:
+          type: object
+          required: [material_id, reason]
+          properties:
+            material_id: {type: integer, format: int64}
+            reason: {type: string}
       created_at: {type: string, format: date-time}
+  ComposeOutputSetting:
+    type: object
+    additionalProperties: false
+    description: Independent output group; array order is execution order. Platforms label each copy and do not multiply output count. All parameters are frozen per task.
+    required: [name, platforms, copies, params]
+    properties:
+      key: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$', description: "Unique stable group key. Omission generates group_N; reads always include the normalized key."}
+      name: {type: string, minLength: 1, maxLength: 120}
+      platforms: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [bilibili, baidu, xiaohongshu]}}
+      copies: {type: integer, minimum: 1, maximum: 20}
+      params: {type: object, description: "Complete template config; only parameters explicitly declared editable may differ from template defaults. Fixed values and unknown keys are rejected by the server."}
+  ComposeTemplateParameter:
+    type: object
+    description: Versioned JSON Schema parameter definition. Missing editable means fixed; disabled UI controls do not grant override permission.
+    properties:
+      type: {type: string}
+      title: {type: string}
+      description: {type: string}
+      default: {}
+      minimum: {type: number}
+      maximum: {type: number}
+      editable: {type: boolean, default: false}
+  ComposePriorityRule:
+    type: object
+    description: All filter groups apply first regardless of priority; match groups then run in ascending priority. Missing facts use three-valued all/any logic and never become zero.
+    additionalProperties: false
+    required: [priority, action, logic, conditions]
+    properties:
+      priority: {type: integer, minimum: 1}
+      action: {type: string, enum: [match, filter]}
+      logic: {type: string, enum: [all, any]}
+      conditions: {type: array, minItems: 1, items: {ref: ComposeCondition}}
+  ComposeCondition:
+    type: object
+    additionalProperties: false
+    required: [field, operator, value]
+    properties:
+      field: {type: string, enum: [published_at, like_count, favorite_count]}
+      operator: {type: string, enum: [eq, gte, lte, lt, recent_hours, recent_days], description: "Server validates allowed operators by field."}
+      value: {oneOf: [{type: integer, minimum: 0}, {type: string, format: date-time}], description: "Integer for counts, recent_hours (1-8760) or recent_days (1-365); RFC3339 date-time for published_at gte/lt. Recent intervals roll backward from the execution instant."}
+  ComposeConditionDecision:
+    type: object
+    additionalProperties: false
+    required: [field, operator, expected, state]
+    properties:
+      field: {type: string, enum: [published_at, like_count, favorite_count]}
+      operator: {type: string, enum: [eq, gte, lte, lt, recent_hours, recent_days]}
+      expected: {oneOf: [{type: integer}, {type: string, format: date-time}]}
+      actual: {oneOf: [{type: integer}, {type: string, format: date-time}], description: "Omitted for unknown facts; missing counts are never substituted with zero."}
+      state: {type: string, enum: [matched, not_matched, unknown]}
+  ComposePreviewMaterial:
+    type: object
+    additionalProperties: false
+    required: [material_id, title, selected, reason]
+    properties:
+      material_id: {type: integer, format: int64}
+      title: {type: string}
+      selected: {type: boolean}
+      reason: {type: string, description: "Specific selection or refusal reason such as matched, filtered, no_match, metrics_missing, already_executed, operator_unavailable, template_unavailable, per_run_limit or daily_limit. Conditions preserve the exact metric values and comparisons."}
+      priority: {type: integer, minimum: 1, description: "Decisive rule priority when applicable. Filters always apply before match rules."}
+      conditions: {type: array, items: {ref: ComposeConditionDecision}}
+  ComposeExecutionPreview:
+    type: object
+    additionalProperties: false
+    required: [strategy, selected_count, estimated_output_count, single_limit, daily_remaining, settings, materials, active_batch, preview_token]
+    properties:
+      strategy: {ref: ComposeStrategy}
+      selected_count: {type: integer, minimum: 0, description: "Selected source materials; limits count materials rather than expanded tasks."}
+      estimated_output_count: {type: integer, minimum: 0, description: "selected_count multiplied by the sum of setting copies; platforms do not multiply it."}
+      single_limit: {type: integer, minimum: 1, maximum: 100}
+      daily_remaining: {type: [integer, 'null'], minimum: 0, description: "Null for manual strategies, which have no daily quota. Scheduled run-now shares the scheduled daily material quota."}
+      settings: {type: array, items: {ref: ComposeOutputSetting}}
+      materials: {type: array, items: {ref: ComposePreviewMaterial}}
+      active_batch: {oneOf: [{ref: ComposeTaskBatch}, {type: 'null'}], description: "Existing unfinished batch blocks immediate execution."}
+      preview_token: {type: string, description: "Opaque confirmation token for this exact read-only result. Empty when execution is blocked by an active batch. Confirm must revalidate facts and quotas."}
+  ComposeTaskBatch:
+    type: object
+    additionalProperties: false
+    required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at, counts]
+    properties:
+      id: {type: integer, format: int64}
+      name: {type: string}
+      team_id: {type: integer, format: int64}
+      category_id: {type: integer, format: int64, minimum: 1}
+      operator_id: {type: [integer, 'null'], format: int64}
+      compose_strategy_id: {type: integer, format: int64}
+      trigger_type: {type: string, enum: [manual, immediate, scheduled], description: "Manual material creation, immediate strategy execution, or scheduled strategy execution."}
+      created_by: {type: integer, format: int64}
+      config_snapshot: {type: array, items: {ref: ComposeOutputSetting}, description: "Frozen output settings projected for readers; fixed guide addresses remain redacted."}
+      created_at: {type: string, format: date-time}
+      counts: {ref: ComposeBatchCounts}
+  ComposeBatchCounts:
+    type: object
+    required: [pending, running, success, failed, cancelled]
+    properties:
+      pending: {type: integer, minimum: 0, description: "Tasks of this run still waiting for a worker."}
+      running: {type: integer, minimum: 0, description: "Tasks of this run currently executing."}
+      success: {type: integer, minimum: 0}
+      failed: {type: integer, minimum: 0}
+      cancelled: {type: integer, minimum: 0}
+  ComposeTask:
+    type: object
+    required: [id, team_id, category_id, operator_id, operator_name, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
+    properties:
+      id: {type: integer, format: int64}
+      batch_id: {type: [integer, 'null'], format: int64, description: "Actual batch identity; null for historical tasks."}
+      setting_key: {type: string, description: "Frozen output setting key; empty on legacy tasks."}
+      setting_name: {type: string, description: "Frozen output setting name; empty on legacy tasks."}
+      copy_index: {type: integer, minimum: 0, description: "One-based copy number for new tasks; zero on historical rows."}
+      platforms: {type: [array, 'null'], items: {type: string, enum: [bilibili, baidu, xiaohongshu]}, description: "Frozen target platform labels; null on legacy tasks."}
+      display_name: {type: string, description: "Creation-time material title and strategy name; empty for legacy tasks that cannot be safely reconstructed."}
+      team_id: {type: integer, format: int64}
+      category_id: {type: integer, format: int64, minimum: 1}
+      operator_id: {type: [integer, 'null'], format: int64, description: "The strategy's operator at creation time, frozen on the task; null on historical rows, never backfilled from created_by."}
+      operator_name: {type: string, description: "Display name resolved from operator_id; empty when unassigned or no longer resolvable."}
+      trigger_type: {type: string, enum: [manual, immediate, scheduled]}
+      material_id: {type: integer, format: int64}
+      material_usage_id: {type: [integer, 'null'], format: int64, description: "Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row."}
+      compose_strategy_id: {type: integer, format: int64}
+      template_code: {type: string}
+      template_version: {type: integer, minimum: 1}
+      config_snapshot: {type: object, description: "Frozen execution settings projected for readers; guide_video_url is replaced with a redaction label while the stored execution snapshot stays unchanged."}
+      status: {type: string, enum: [pending, running, success, failed, cancelled]}
+      cancel_requested: {type: boolean, description: "A cancel was requested while running; the task stays running until the worker confirms the controlled stop."}
+      stage: {type: string, description: "Worker phase projection from the bounded set validating_input, waiting_input, cutting, uploading, committing; a pending task carries an empty stage."}
+      progress: {type: integer, minimum: 0, maximum: 100}
+      error_code: {type: string}
+      error_message: {type: string, description: "Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned."}
+      attempt_count: {type: integer, minimum: 0}
+      started_at: {type: string, format: date-time, nullable: true, description: "Null until execution starts."}
+      finished_at: {type: string, format: date-time, nullable: true, description: "Null until the terminal transition."}
+      composite_output_id: {type: integer, format: int64, nullable: true, description: "Set only after the success transaction commits a verified output; never an object address."}
+      created_by: {type: integer, format: int64}
+      created_at: {type: string, format: date-time}
+      updated_at: {type: string, format: date-time}
   Material:
     type: object
     description: 一条素材及其源视频准备投影；键集与 `model.Material` 的 json tag 一一对应。

@@ -20,10 +20,10 @@ func TestComposePrioritySelectionFiltersBeforeMatchingAndFillsFromLowerPriority(
 		priorityRule(2, "match", "favorite_count", "gte", json.RawMessage(`1`)),
 	}
 	pool := []scheduleCandidate{
-		{MaterialID: 1, LikeCount: 100},
-		{MaterialID: 2, FavoriteCount: 1},
-		{MaterialID: 3},
-		{MaterialID: 4},
+		{LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 1, LikeCount: 100},
+		{LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 2, FavoriteCount: 1},
+		{LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 3},
+		{LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 4},
 	}
 	selected := make([]int64, 0)
 	created, skipped, err := executeComposePriorityRules(rules, pool, time.Now(), 2, 2, func(candidate scheduleCandidate) (bool, error) {
@@ -37,7 +37,7 @@ func TestComposePrioritySelectionFiltersBeforeMatchingAndFillsFromLowerPriority(
 
 func TestComposePrioritySelectionQuotaAndItemFailure(t *testing.T) {
 	rules := []model.ComposePriorityRule{priorityRule(1, "match", "like_count", "gte", json.RawMessage(`0`))}
-	pool := []scheduleCandidate{{MaterialID: 1}, {MaterialID: 2}, {MaterialID: 3}}
+	pool := []scheduleCandidate{{LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 1}, {LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 2}, {LikeCountKnown: true, FavoriteCountKnown: true, MaterialID: 3}}
 	for _, tc := range []struct {
 		name          string
 		single, daily int

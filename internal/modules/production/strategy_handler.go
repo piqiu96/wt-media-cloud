@@ -202,12 +202,17 @@ func RunComposeStrategyNow(_ context.Context, c *hertzapp.RequestContext) {
 		return
 	}
 	var input struct {
-		RequestKey string `json:"request_key"`
+		RequestKey   string `json:"request_key"`
+		PreviewToken string `json:"preview_token"`
 	}
 	if !decodeStrategyBody(c, &input) {
 		return
 	}
-	result, err := productionservice.RunComposeStrategyNow(current, id, input.RequestKey)
+	if len(input.PreviewToken) != 64 {
+		api.FailureNamed(c, consts.StatusBadRequest, 15210, "请先预览本次执行", "compose_strategy_invalid")
+		return
+	}
+	result, err := productionservice.RunComposeStrategyNow(current, id, input.RequestKey, input.PreviewToken)
 	if err != nil {
 		writeStrategyError(c, err)
 		return
@@ -252,7 +257,7 @@ func ListComposeStrategyRunHistory(_ context.Context, c *hertzapp.RequestContext
 		return
 	}
 	options := repository.ScheduleRunHistoryOptions{Page: page, PageSize: pageSize, TriggerType: strings.TrimSpace(c.Query("trigger_type"))}
-	if options.TriggerType != "" && options.TriggerType != "manual" && options.TriggerType != "scheduled" {
+	if options.TriggerType != "" && options.TriggerType != "manual" && options.TriggerType != "scheduled" && options.TriggerType != "immediate" {
 		api.FailureNamed(c, consts.StatusBadRequest, 15210, "触发方式无效", "compose_strategy_invalid")
 		return
 	}
@@ -360,7 +365,11 @@ func parseMaterialStateIDs(raw string) ([]int64, error) {
 
 func writeStrategyError(c *hertzapp.RequestContext, err error) {
 	switch {
-	case errors.Is(err, productionservice.ErrStrategyInvalid):
+	case errors.Is(err, repository.ErrComposePreviewChanged):
+		api.ConflictNamed(c, 15214, err.Error(), "compose_preview_changed")
+	case errors.Is(err, repository.ErrComposeAlreadyRunning):
+		api.ConflictNamed(c, 15215, err.Error(), "compose_already_running")
+	case errors.Is(err, productionservice.ErrStrategyInvalid), errors.Is(err, repository.ErrComposeConfigInvalid):
 		api.FailureNamed(c, consts.StatusBadRequest, 15210, err.Error(), "compose_strategy_invalid")
 	case errors.Is(err, productionservice.ErrStrategyForbidden):
 		api.ForbiddenNamed(c, 15211, "没有权限操作合成策略", "compose_strategy_forbidden")
@@ -371,4 +380,21 @@ func writeStrategyError(c *hertzapp.RequestContext, err error) {
 	default:
 		api.InternalError(c, "合成策略服务内部错误")
 	}
+}
+
+func PreviewComposeStrategyExecution(_ context.Context, c *hertzapp.RequestContext) {
+	current, ok := actor(c)
+	if !ok {
+		return
+	}
+	id, ok := strategyID(c)
+	if !ok {
+		return
+	}
+	p, err := productionservice.PreviewComposeStrategyExecution(current, id)
+	if err != nil {
+		writeStrategyError(c, err)
+		return
+	}
+	api.Success(c, p)
 }

@@ -23,7 +23,8 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
     copyStrategy(id, name) { return api.post(`/compose-strategies/${id}/copy`, { name }) },
     setStrategyStatus(id, status) { return api.patch(`/compose-strategies/${id}/status`, { status }) },
     previewStrategyNextRun(schedule) { return api.post('/compose-strategies/next-run-preview', schedule) },
-    runStrategyNow(id, requestKey) { return api.post(`/compose-strategies/${id}/run-now`, { request_key: requestKey }) },
+    previewStrategyExecution(id) { return api.post(`/compose-strategies/${id}/execution-preview`, {}) },
+    runStrategyNow(id, requestKey, previewToken) { return api.post(`/compose-strategies/${id}/run-now`, { request_key: requestKey, preview_token: previewToken }) },
     listStrategyRuns(id) { return api.get(`/compose-strategies/${id}/runs`) },
     listStrategyRunHistory(id, params) { return api.get(`/compose-strategies/${id}/runs/history`, params) },
     // 批次结果归集（CHG-20261015-095）：按运行记录的计划时间取该批次逐素材任务

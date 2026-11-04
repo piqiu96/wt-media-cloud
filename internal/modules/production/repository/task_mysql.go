@@ -16,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const composeTaskColumns = `id, display_name, team_id, category_id, operator_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at`
+const composeTaskColumns = `id, display_name, team_id, category_id, operator_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at, batch_id, setting_key, setting_name, platforms_json, copy_index`
 
 // ErrComposeTaskMaterialUsed reports that the same (strategy, material) pair
 // already has a task row, whatever its status: a pair is produced once, and a
@@ -95,6 +95,15 @@ func composeTaskInsertWithAudit(tx *gorm.DB, item *model.ComposeTask, action str
 	// fire and a zero MaxAttempts would be persisted as "no retries allowed".
 	if item.MaxAttempts <= 0 {
 		item.MaxAttempts = composeAutoRetryQuota
+	}
+	if item.SettingKey == "" {
+		item.SettingKey = "default"
+	}
+	if item.SettingName == "" {
+		item.SettingName = "默认"
+	}
+	if item.CopyIndex < 1 {
+		item.CopyIndex = 1
 	}
 	item.CreatedAt, item.UpdatedAt = now, now
 	if err := tx.Create(item).Error; err != nil {
@@ -396,13 +405,18 @@ type composeTaskScanner interface{ Scan(...any) error }
 
 func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 	var item model.ComposeTask
-	var snapshot []byte
+	var snapshot, platforms []byte
+	var batchID sql.NullInt64
 	var operatorID, usageID, claimedNode, compositeOutput sql.NullInt64
 	var leaseExpires, heartbeat, nextAttempt, started, finished sql.NullTime
-	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.CategoryID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt)
+	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.CategoryID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt, &batchID, &item.SettingKey, &item.SettingName, &platforms, &item.CopyIndex)
 	if err != nil {
 		return model.ComposeTask{}, err
 	}
+	if batchID.Valid {
+		item.BatchID = &batchID.Int64
+	}
+	item.PlatformsJSON = append(json.RawMessage(nil), platforms...)
 	if operatorID.Valid {
 		value := operatorID.Int64
 		item.OperatorID = &value

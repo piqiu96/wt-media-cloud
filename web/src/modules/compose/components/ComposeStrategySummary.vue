@@ -17,6 +17,7 @@ const props = defineProps({
   // 任务视图里不渲染这一组。空串=这一组三行都不出现。
   guideUrl: { type: String, default: '' },
   overview: { type: Boolean, default: false },
+  showConfig: { type: Boolean, default: true },
 })
 const configFields = computed(() => {
   const template = props.templates.find((item) => item.id === props.strategy.compose_template_id && item.version === props.strategy.compose_template_version)
@@ -49,7 +50,7 @@ const guideName = computed(() => {
         <div class="strategy-overview-field"><span>修改时间</span><strong>{{ formatDateTime(strategy.updated_at) }}</strong></div>
       </div>
     </section>
-    <section class="strategy-overview-section">
+    <section v-if="showConfig" class="strategy-overview-section">
       <h4>合成配置</h4>
       <div class="strategy-overview-grid">
         <div v-for="field in configFields" :key="field.key" class="strategy-overview-field"><span>{{ field.label }}</span><strong>{{ field.value }}</strong></div>

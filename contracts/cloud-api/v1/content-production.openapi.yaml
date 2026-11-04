@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.10.29.1
+  version: 2026.11.05.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -36,7 +36,7 @@ paths:
       summary: List strategies in the actor's team and category scope; an ordinary operator sees only enabled strategies assigned to them.
       security: [{sessionCookie: []}]
       parameters:
-        - {in: query, name: search, required: false, description: Strategy name substring, or exact strategy ID when numeric., schema: {type: string, maxLength: 100}}
+        - {in: query, name: search, required: false, description: "Strategy name substring, or exact strategy ID when numeric.", schema: {type: string, maxLength: 100}}
         - {in: query, name: category_id, required: false, description: Exact category ID., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: template_id, required: false, description: Exact compose template ID; non-positive values are refused., schema: {type: integer, minimum: 1}}
         - {in: query, name: status, required: false, description: Exact strategy status. Unknown values are refused., schema: {type: string, enum: [enabled, disabled]}}
@@ -53,7 +53,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/CreateComposeStrategy'}
       responses:
-        '201': {description: Created strategy, read back from storage.}
+        '201': {description: "Created strategy, read back from storage."}
         '400': {description: Invalid input or config outside the bound template schema.}
         '403': {description: Actor cannot manage the target team or category.}
         '409': {description: Template version is inactive or not executable.}
@@ -126,6 +126,28 @@ paths:
         '200': {description: Object with next_run_at computed at request time.}
         '400': {description: Invalid schedule fields.}
         '403': {description: Actor cannot manage strategies.}
+  /api/v1/compose-strategies/{strategy_id}/execution-preview:
+    post:
+      operationId: previewComposeStrategyExecution
+      summary: Read-only material decisions and estimated outputs for immediate strategy execution.
+      description: Does not create a run, batch, task, material usage or input preparation job. Applies the same eligibility and quota rules as confirmation; reports an existing unfinished batch instead of queuing another run.
+      security: [{sessionCookie: []}]
+      parameters: [{$ref: '#/components/parameters/StrategyID'}]
+      responses:
+        '200':
+          description: Read-only execution preview in the standard Cloud envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties:
+                  errcode: {type: integer}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/ComposeExecutionPreview'}
+                  logid: {type: string}
+        '403': {description: Actor cannot manage this strategy.}
+        '404': {description: Strategy absent or outside the actor's scope.}
   /api/v1/compose-strategies/{strategy_id}/run-now:
     post:
       operationId: runComposeStrategyNow
@@ -139,14 +161,16 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [request_key]
+              required: [request_key, preview_token]
               properties:
+                preview_token: {type: string, minLength: 64, maxLength: 64, description: "Token from the latest execution-preview result. Required at the HTTP boundary; revalidated transactionally before creating tasks."}
                 request_key: {type: string, minLength: 8, maxLength: 64, description: Stable client idempotency key for this command.}
       responses:
-        '200': {description: ComposeScheduleRun with per-material skip reasons.}
+        '200': {description: "ComposeScheduleRun with nullable batch_id and per-material skip reasons. Same request key and content replay the prior result; zero tasks still produce a run but no empty batch."}
         '400': {description: Invalid request or strategy has no plan.}
         '403': {description: Actor cannot manage this strategy.}
         '404': {description: Strategy absent or outside the actor's scope.}
+        '409': {description: 'compose_preview_changed (errcode 15214) when facts, quota or settings changed since preview; compose_already_running (errcode 15215) when the strategy has unfinished work. Refresh preview before confirming again.'}
   /api/v1/compose-strategies/{strategy_id}/runs:
     get:
       operationId: listComposeStrategyRuns
@@ -174,7 +198,7 @@ paths:
         - {$ref: '#/components/parameters/StrategyID'}
         - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
         - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 50, default: 10}}
-        - {in: query, name: trigger_type, schema: {type: string, enum: [manual, scheduled]}}
+        - {in: query, name: trigger_type, schema: {type: string, enum: [manual, immediate, scheduled]}}
         - {in: query, name: created_from, schema: {type: string, format: date-time}, description: Inclusive UTC or offset-aware execution start.}
         - {in: query, name: created_before, schema: {type: string, format: date-time}, description: Exclusive UTC or offset-aware execution end.}
       responses:
@@ -210,7 +234,7 @@ paths:
                 properties:
                   data: {$ref: '#/components/schemas/ComposeBatchView'}
         '400': {description: Missing or non-RFC3339 schedule_slot.}
-        '404': {description: Strategy absent or outside the actor's scope, or no run exists for the slot.}
+        '404': {description: "Strategy absent or outside the actor's scope, or no run exists for the slot."}
   /api/v1/compose-strategies/{strategy_id}/material-states:
     get:
       operationId: listComposeStrategyMaterialStates
@@ -243,7 +267,7 @@ paths:
                   data:
                     type: array
                     items: {$ref: '#/components/schemas/ComposeMaterialState'}
-        '400': {description: material_ids missing, malformed, empty or over 200 ids (named compose_strategy_invalid).}
+        '400': {description: "material_ids missing, malformed, empty or over 200 ids (named compose_strategy_invalid)."}
         '404': {description: Strategy absent or outside the actor's scope (named compose_strategy_not_found).}
   /api/v1/compose-tasks:
     post:
@@ -281,7 +305,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters:
         - {in: query, name: status, required: false, schema: {type: string, enum: [pending, running, success, failed, cancelled]}}
-        - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, scheduled]}}
+        - {in: query, name: trigger_type, required: false, schema: {type: string, enum: [manual, immediate, scheduled]}}
         - {in: query, name: compose_strategy_id, required: false, schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
@@ -330,7 +354,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       responses:
         '200': {description: ComposeTask — status pending again.}
-        '403': {description: Task outside the actor's scope, or the actor is not a senior operator (named compose_task_forbidden).}
+        '403': {description: "Task outside the actor's scope, or the actor is not a senior operator (named compose_task_forbidden)."}
         '404': {description: Task absent or outside the actor's scope.}
         '409': {description: Task is neither cancelled nor a failed task other than execution_uncertain (named compose_task_not_retryable).}
   /api/v1/compose-tasks/{task_id}/uncertain-review:
@@ -368,7 +392,7 @@ paths:
         '400': {description: Missing verification declarations or invalid evidence note (named compose_task_invalid).}
         '403': {description: Actor is neither an admin nor a same-team senior operator (named compose_task_forbidden).}
         '404': {description: Task absent or outside the actor's scope.}
-        '409': {description: Task changed, was already resolved, or has a committed output (named compose_task_not_retryable).}
+        '409': {description: "Task changed, was already resolved, or has a committed output (named compose_task_not_retryable)."}
   /api/v1/compose-tasks/{task_id}/cancel:
     post:
       operationId: cancelComposeTask
@@ -384,10 +408,10 @@ paths:
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       responses:
-        '200': {description: ComposeTask — status cancelled, or status running with cancel_requested true.}
+        '200': {description: "ComposeTask — status cancelled, or status running with cancel_requested true."}
         '403': {description: Task is outside the actor's scope.}
         '404': {description: Task absent or outside the actor's scope.}
-        '409': {description: Task is terminal (success, failed or cancelled; named compose_task_not_cancellable).}
+        '409': {description: "Task is terminal (success, failed or cancelled; named compose_task_not_cancellable)."}
   /api/v1/compose-outputs:
     get:
       operationId: listComposeOutputs
@@ -404,9 +428,9 @@ paths:
       parameters:
         - {$ref: '#/components/parameters/OutputStatus'}
         - {in: query, name: source, required: false, description: Exact material ID when numeric or material title substring; numeric text also matches titles., schema: {type: string, maxLength: 100}}
-        - {in: query, name: search, required: false, description: Output ID, source material ID/title, or strategy name substring., schema: {type: string, maxLength: 100}}
-        - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, scheduled]}}
-        - {in: query, name: category_id, required: false, description: Exact category of the output. A narrowing filter, not a grant; an ordinary operator naming a category they do not cover answers 403., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: search, required: false, description: "Output ID, source material ID/title, or strategy name substring.", schema: {type: string, maxLength: 100}}
+        - {in: query, name: trigger_type, required: false, description: Exact triggering task type. Unknown values are refused., schema: {type: string, enum: [manual, immediate, scheduled]}}
+        - {in: query, name: category_id, required: false, description: "Exact category of the output. A narrowing filter, not a grant; an ordinary operator naming a category they do not cover answers 403.", schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: team_id, required: false, description: Administrators may narrow to one team; operators and seniors are pinned to their own., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_id, required: false, description: Exact responsible operator. Ordinary operators may only name themselves., schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: operator_scope, required: false, description: 'mine matches the assigned operator, or the creator of a historical unassigned row; team drops the operator narrowing inside the actor''s team; all is administrator-only.', schema: {type: string, enum: [mine, team, all]}}
@@ -446,7 +470,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/OutputID'}]
       responses:
-        '200': {description: The archived ComposeOutput, read back from storage.}
+        '200': {description: "The archived ComposeOutput, read back from storage."}
         '403': {description: Output is outside the actor's scope (named compose_output_forbidden).}
         '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
         '409': {description: Output is published or already archived (named compose_output_not_archivable).}
@@ -501,10 +525,10 @@ paths:
         from `/api/v1/my-materials`.
       security: [{sessionCookie: []}]
       parameters:
-        - {in: query, name: search, required: false, description: Material ID, title, platform content ID or author name substring., schema: {type: string, maxLength: 100}}
+        - {in: query, name: search, required: false, description: "Material ID, title, platform content ID or author name substring.", schema: {type: string, maxLength: 100}}
         - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: category_ids, required: false, description: One or more exact numeric category IDs, comma separated (at most 50). Narrows the list; it does not restrict visibility., schema: {type: string}}
-        - {in: query, name: category_id, required: false, description: Exact category ID, combined with `category_ids` when both are present., schema: {type: integer, format: int64, minimum: 1}}
+        - {in: query, name: category_ids, required: false, description: "One or more exact numeric category IDs, comma separated (at most 50). Narrows the list; it does not restrict visibility.", schema: {type: string}}
+        - {in: query, name: category_id, required: false, description: "Exact category ID, combined with `category_ids` when both are present.", schema: {type: integer, format: int64, minimum: 1}}
         - {in: query, name: joined, required: false, description: '`joined`: the viewer has an active material usage. `not_joined`: no active usage, which includes a relation that was removed.', schema: {type: string, enum: [joined, not_joined]}}
         - {in: query, name: my_usage, required: false, description: '`used`: the viewer is the operator of at least one successful composite output. `unused`: no such output.', schema: {type: string, enum: [used, unused]}}
         - {in: query, name: team_usage, required: false, description: '`used`: at least one successful composite output has a known operator. `unused`: no such output. Historical outputs without an operator count as an output but not as known use.', schema: {type: string, enum: [used, unused]}}
@@ -512,7 +536,7 @@ paths:
         - {in: query, name: sort_by, required: false, schema: {type: string, enum: [id, published_at, created_at, updated_at], default: published_at}}
         - {in: query, name: sort_order, required: false, schema: {type: string, enum: [asc, desc], default: desc}}
       responses:
-        '200': {description: Visible materials with their video preparation projection, the viewer's relation and the team's use summary.}
+        '200': {description: "Visible materials with their video preparation projection, the viewer's relation and the team's use summary."}
         '400': {description: Invalid filter value.}
         '403': {description: Actor is disabled or names another team.}
   /api/v1/materials/{material_id}:
@@ -546,7 +570,7 @@ paths:
         each usage, so the page needs no second request.
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: The user's usages, active and removed, each with its material.}
+        '200': {description: "The user's usages, active and removed, each with its material."}
   /api/v1/material-usages/{usage_id}:
     delete:
       operationId: removeMaterialUsage
@@ -569,7 +593,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/UsageID'}]
       responses:
-        '204': {description: Usage in use again, with no removal timestamp.}
+        '204': {description: "Usage in use again, with no removal timestamp."}
         '403': {description: The usage's material is outside the actor's scope.}
         '404': {description: No such usage for this user.}
   /api/v1/materials/{material_id}/video-url:
@@ -609,9 +633,9 @@ paths:
       parameters: [{$ref: '#/components/parameters/MaterialID'}]
       responses:
         '202': {description: A pending local-agent file transfer task.}
-        '403': {description: Material is outside the actor's team, or the actor has no active material usage (named material_usage_forbidden).}
+        '403': {description: "Material is outside the actor's team, or the actor has no active material usage (named material_usage_forbidden)."}
         '404': {description: Material does not exist.}
-        '409': {description: No prepared source is available and none can be prepared (named material_unavailable), or no bound Local Agent node is available.}
+        '409': {description: "No prepared source is available and none can be prepared (named material_unavailable), or no bound Local Agent node is available."}
         # The refusal is the binding, not the heartbeat. A bound node whose machine is
         # asleep yields a queueing task instead: reachability is answered when a lease is
         # claimed, not guessed at click time. (It read "No fresh bound Local Agent node"
@@ -627,8 +651,85 @@ components:
         code: {type: string}
         name: {type: string}
         version: {type: integer, minimum: 1}
-        schema: {type: object}
+        schema:
+          type: object
+          description: Versioned JSON Schema. Each property may declare editable; absent or false means fixed. Required and range validation remains server-side.
+          properties:
+            properties: {type: object, additionalProperties: {$ref: '#/components/schemas/ComposeTemplateParameter'}}
         status: {type: string, enum: [active, inactive]}
+    ComposeOutputSetting:
+      type: object
+      additionalProperties: false
+      description: Independent output group; array order is execution order. Platforms label each copy and do not multiply output count. All parameters are frozen per task.
+      required: [name, platforms, copies, params]
+      properties:
+        key: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$', description: "Unique stable group key. Omission generates group_N; reads always include the normalized key."}
+        name: {type: string, minLength: 1, maxLength: 120}
+        platforms: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [bilibili, baidu, xiaohongshu]}}
+        copies: {type: integer, minimum: 1, maximum: 20}
+        params: {type: object, description: "Complete template config; only parameters explicitly declared editable may differ from template defaults. Fixed values and unknown keys are rejected by the server."}
+    ComposeTemplateParameter:
+      type: object
+      description: Versioned JSON Schema parameter definition. Missing editable means fixed; disabled UI controls do not grant override permission.
+      properties:
+        type: {type: string}
+        title: {type: string}
+        description: {type: string}
+        default: {}
+        minimum: {type: number}
+        maximum: {type: number}
+        editable: {type: boolean, default: false}
+    ComposeConditionDecision:
+      type: object
+      additionalProperties: false
+      required: [field, operator, expected, state]
+      properties:
+        field: {type: string, enum: [published_at, like_count, favorite_count]}
+        operator: {type: string, enum: [eq, gte, lte, lt, recent_hours, recent_days]}
+        expected: {oneOf: [{type: integer}, {type: string, format: date-time}]}
+        actual: {oneOf: [{type: integer}, {type: string, format: date-time}], description: "Omitted for unknown facts; missing counts are never substituted with zero."}
+        state: {type: string, enum: [matched, not_matched, unknown]}
+    ComposePreviewMaterial:
+      type: object
+      additionalProperties: false
+      required: [material_id, title, selected, reason]
+      properties:
+        material_id: {type: integer, format: int64}
+        title: {type: string}
+        selected: {type: boolean}
+        reason: {type: string, description: "Specific selection or refusal reason such as matched, filtered, no_match, metrics_missing, already_executed, operator_unavailable, template_unavailable, per_run_limit or daily_limit. Conditions preserve the exact metric values and comparisons."}
+        priority: {type: integer, minimum: 1, description: "Decisive rule priority when applicable. Filters always apply before match rules."}
+        conditions: {type: array, items: {$ref: '#/components/schemas/ComposeConditionDecision'}}
+    ComposeExecutionPreview:
+      type: object
+      additionalProperties: false
+      required: [strategy, selected_count, estimated_output_count, single_limit, daily_remaining, settings, materials, active_batch, preview_token]
+      properties:
+        strategy: {$ref: '#/components/schemas/ComposeStrategy'}
+        selected_count: {type: integer, minimum: 0, description: "Selected source materials; limits count materials rather than expanded tasks."}
+        estimated_output_count: {type: integer, minimum: 0, description: "selected_count multiplied by the sum of setting copies; platforms do not multiply it."}
+        single_limit: {type: integer, minimum: 1, maximum: 100}
+        daily_remaining: {type: [integer, 'null'], minimum: 0, description: "Null for manual strategies, which have no daily quota. Scheduled run-now shares the scheduled daily material quota."}
+        settings: {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}}
+        materials: {type: array, items: {$ref: '#/components/schemas/ComposePreviewMaterial'}}
+        active_batch: {oneOf: [{$ref: '#/components/schemas/ComposeTaskBatch'}, {type: 'null'}], description: "Existing unfinished batch blocks immediate execution."}
+        preview_token: {type: string, description: "Opaque confirmation token for this exact read-only result. Empty when execution is blocked by an active batch. Confirm must revalidate facts and quotas."}
+    ComposeTaskBatch:
+      type: object
+      additionalProperties: false
+      required: [id, name, team_id, category_id, operator_id, compose_strategy_id, trigger_type, created_by, config_snapshot, created_at, counts]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        team_id: {type: integer, format: int64}
+        category_id: {type: integer, format: int64, minimum: 1}
+        operator_id: {type: [integer, 'null'], format: int64}
+        compose_strategy_id: {type: integer, format: int64}
+        trigger_type: {type: string, enum: [manual, immediate, scheduled], description: "Manual material creation, immediate strategy execution, or scheduled strategy execution."}
+        created_by: {type: integer, format: int64}
+        config_snapshot: {type: array, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Frozen output settings projected for readers; fixed guide addresses remain redacted."}
+        created_at: {type: string, format: date-time}
+        counts: {$ref: '#/components/schemas/ComposeBatchCounts'}
     BasicCutV1Config:
       type: object
       additionalProperties: false
@@ -653,10 +754,10 @@ components:
         id: {type: integer, format: int64}
         username: {type: string}
         nickname: {type: string}
-        display_name: {type: string, description: Nickname when set, otherwise username.}
+        display_name: {type: string, description: "Nickname when set, otherwise username."}
     ComposeStrategy:
       type: object
-      required: [id, team_id, category_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
+      required: [id, team_id, category_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, output_settings, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
@@ -670,14 +771,15 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/BasicCutV1Config'}
             - {$ref: '#/components/schemas/GuideV1Config'}
-        execution_mode: {type: string, enum: [manual, scheduled]}
+        output_settings: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Independent groups in saved order. When omitted by legacy requests config supplies one default group; each group stores complete template parameters."}
+        execution_mode: {type: string, enum: [manual, immediate, scheduled]}
         schedule:
           oneOf:
             - {$ref: '#/components/schemas/ComposeSchedule'}
             - {type: 'null'}
         priority_rules: {type: array, items: {$ref: '#/components/schemas/ComposePriorityRule'}}
         single_limit: {type: integer, minimum: 1, maximum: 100}
-        daily_limit: {type: integer, minimum: 1, maximum: 1000}
+        daily_limit: {type: integer, minimum: 0, maximum: 1000, description: "Required positive for scheduled strategies; manual strategies have no daily limit and persist zero."}
         next_run_at: {type: [string, 'null'], format: date-time, description: UTC time; null unless the enabled strategy uses scheduled execution.}
         status: {type: string, enum: [enabled, disabled]}
         created_at: {type: string, format: date-time}
@@ -690,9 +792,10 @@ components:
         mode: {type: string, enum: [interval, daily]}
         interval_minutes: {type: integer, minimum: 1, maximum: 1440, description: Required for interval mode; absent for other modes.}
         daily_time: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: Required for daily mode; absent for other modes.}
-        timezone: {type: string, description: IANA timezone, default Asia/Shanghai in the editor.}
+        timezone: {type: string, description: "IANA timezone, default Asia/Shanghai in the editor."}
     ComposePriorityRule:
       type: object
+      description: All filter groups apply first regardless of priority; match groups then run in ascending priority. Missing facts use three-valued all/any logic and never become zero.
       additionalProperties: false
       required: [priority, action, logic, conditions]
       properties:
@@ -707,25 +810,26 @@ components:
       properties:
         field: {type: string, enum: [published_at, like_count, favorite_count]}
         operator: {type: string, enum: [eq, gte, lte, lt, recent_hours, recent_days], description: Server validates allowed operators by field.}
-        value: {oneOf: [{type: integer, minimum: 0}, {type: string, format: date-time}], description: Integer for counts, recent_hours (1-8760) or recent_days (1-365); RFC3339 date-time for published_at gte/lt. Recent intervals roll backward from the execution instant.}
+        value: {oneOf: [{type: integer, minimum: 0}, {type: string, format: date-time}], description: "Integer for counts, recent_hours (1-8760) or recent_days (1-365); RFC3339 date-time for published_at gte/lt. Recent intervals roll backward from the execution instant."}
     ComposeMaterialState:
       type: object
       additionalProperties: false
       required: [material_id, success_count, active_count, failed_count, cancelled_count, last_task_at]
       properties:
         material_id: {type: integer, format: int64}
-        success_count: {type: integer, minimum: 0, description: Tasks of this (strategy, material) that reached success. Above zero means the pair is 已使用过.}
-        active_count: {type: integer, minimum: 0, description: Tasks of this (strategy, material) still pending or running — the drawer marks the row 排队中 and the create endpoint refuses a new one.}
-        failed_count: {type: integer, minimum: 0, description: Failed tasks, shown as 上次失败 in the drawer. Above zero means the pair is 已使用过 and waits for 重试 on its task.}
-        cancelled_count: {type: integer, minimum: 0, description: Cancelled tasks, shown as 已取消 in the drawer. Above zero means the pair is 已使用过; re-running it is 重试 on the cancelled task.}
+        success_count: {type: integer, minimum: 0, description: "Tasks of this (strategy, material) that reached success. Above zero means the pair is 已使用过."}
+        active_count: {type: integer, minimum: 0, description: "Tasks of this (strategy, material) still pending or running — the drawer marks the row 排队中 and the create endpoint refuses a new one."}
+        failed_count: {type: integer, minimum: 0, description: "Failed tasks, shown as 上次失败 in the drawer. Above zero means the pair is 已使用过 and waits for 重试 on its task."}
+        cancelled_count: {type: integer, minimum: 0, description: "Cancelled tasks, shown as 已取消 in the drawer. Above zero means the pair is 已使用过; re-running it is 重试 on the cancelled task."}
         last_task_at: {type: [string, 'null'], format: date-time, description: Creation time of the newest task of this pair; null when there is none.}
     ComposeScheduleRun:
       type: object
-      required: [run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
+      required: [batch_id, run_key, compose_strategy_id, trigger_type, schedule_slot, candidate_count, created_count, skipped, created_at]
       properties:
+        batch_id: {type: [integer, 'null'], format: int64, description: "Actual created batch ID; null for zero-task or historical runs."}
         run_key: {type: string}
         compose_strategy_id: {type: integer, format: int64}
-        trigger_type: {type: string, enum: [manual, scheduled]}
+        trigger_type: {type: string, enum: [manual, immediate, scheduled]}
         schedule_slot: {type: string, format: date-time}
         candidate_count: {type: integer, minimum: 0}
         created_count: {type: integer, minimum: 0}
@@ -769,7 +873,11 @@ components:
     CreateComposeStrategy:
       type: object
       additionalProperties: false
-      required: [category_id, operator_id, name, compose_template_id, compose_template_version, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
+      required: [category_id, operator_id, name, compose_template_id, compose_template_version, execution_mode, schedule, priority_rules, single_limit]
+      anyOf: [{required: [output_settings]}, {required: [config]}]
+      allOf:
+        - if: {properties: {execution_mode: {const: scheduled}}}
+          then: {required: [daily_limit], properties: {daily_limit: {minimum: 1}}}
       properties:
         team_id: {type: integer, format: int64, description: Required for administrators; senior operators use their own team.}
         category_id: {type: integer, format: int64, minimum: 1}
@@ -781,15 +889,19 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/BasicCutV1Config'}
             - {$ref: '#/components/schemas/GuideV1Config'}
-        execution_mode: {type: string, enum: [manual, scheduled]}
+        output_settings: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Independent groups in saved order. When omitted by legacy requests config supplies one default group; each group stores complete template parameters."}
+        execution_mode: {type: string, enum: [manual, immediate, scheduled]}
         schedule: {oneOf: [{$ref: '#/components/schemas/ComposeSchedule'}, {type: 'null'}]}
         priority_rules: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ComposePriorityRule'}}
         single_limit: {type: integer, minimum: 1, maximum: 100}
-        daily_limit: {type: integer, minimum: 1, maximum: 1000}
+        daily_limit: {type: integer, minimum: 0, maximum: 1000, description: "Required positive for scheduled strategies; manual strategies have no daily limit and persist zero."}
     UpdateComposeStrategy:
       type: object
       additionalProperties: false
-      required: [name, config, execution_mode, schedule, priority_rules, single_limit, daily_limit]
+      required: [name, execution_mode, schedule, priority_rules, single_limit]
+      allOf:
+        - if: {properties: {execution_mode: {const: scheduled}}}
+          then: {required: [daily_limit], properties: {daily_limit: {minimum: 1}}}
       properties:
         operator_id: {type: integer, format: int64, minimum: 1, description: Optional reassignment; omitted keeps the current operator. An enabled strategy must end the edit with a valid assignee.}
         name: {type: string}
@@ -797,11 +909,12 @@ components:
           oneOf:
             - {$ref: '#/components/schemas/BasicCutV1Config'}
             - {$ref: '#/components/schemas/GuideV1Config'}
-        execution_mode: {type: string, enum: [manual, scheduled]}
+        output_settings: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Independent groups in saved order. When omitted existing stored groups are preserved; legacy single-config strategies use config as the default group. Each group stores complete template parameters."}
+        execution_mode: {type: string, enum: [manual, immediate, scheduled]}
         schedule: {oneOf: [{$ref: '#/components/schemas/ComposeSchedule'}, {type: 'null'}]}
         priority_rules: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ComposePriorityRule'}}
         single_limit: {type: integer, minimum: 1, maximum: 100}
-        daily_limit: {type: integer, minimum: 1, maximum: 1000}
+        daily_limit: {type: integer, minimum: 0, maximum: 1000, description: "Required positive for scheduled strategies; manual strategies have no daily limit and persist zero."}
     CopyComposeStrategy:
       type: object
       additionalProperties: false
@@ -856,7 +969,7 @@ components:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
         category_id: {type: integer, format: int64, minimum: 1}
-        operator_id: {type: [integer, 'null'], format: int64, description: Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by.}
+        operator_id: {type: [integer, 'null'], format: int64, description: "Inherited from the task's operator snapshot; null on historical rows, never backfilled from created_by."}
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
         material_id: {type: integer, format: int64}
         material_usage_id: {type: [integer, 'null'], format: int64, description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.}
@@ -877,8 +990,8 @@ components:
       required: [material, material_usage, strategy, compose_task]
       properties:
         material: {type: object, required: [id, title], properties: {id: {type: integer, format: int64}, title: {type: string}}}
-        material_usage: {type: [object, 'null'], required: [id, status], properties: {id: {type: integer, format: int64}, status: {type: string, description: active or removed — the usage is history, not a live requirement.}}, description: Null when the output came from a scheduled task over the team material pool; the key stays, the value is null.}
-        strategy: {type: object, required: [id, name, template_code, template_version, config_snapshot], properties: {id: {type: integer, format: int64}, name: {type: string}, template_code: {type: string}, template_version: {type: integer, minimum: 1}, config_snapshot: {type: object, description: The task's frozen snapshot, not the strategy's current config.}}}
+        material_usage: {type: [object, 'null'], required: [id, status], properties: {id: {type: integer, format: int64}, status: {type: string, description: "active or removed — the usage is history, not a live requirement."}}, description: "Null when the output came from a scheduled task over the team material pool; the key stays, the value is null."}
+        strategy: {type: object, required: [id, name, template_code, template_version, config_snapshot], properties: {id: {type: integer, format: int64}, name: {type: string}, template_code: {type: string}, template_version: {type: integer, minimum: 1}, config_snapshot: {type: object, description: "The task's frozen snapshot, not the strategy's current config."}}}
         compose_task: {type: object, required: [id, status, config_snapshot, created_at], properties: {id: {type: integer, format: int64}, status: {type: string}, config_snapshot: {type: object}, created_at: {type: string, format: date-time}}}
     ComposeOutputDetail:
       type: object
@@ -892,12 +1005,17 @@ components:
       required: [id, team_id, category_id, operator_id, operator_name, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot, status, created_by, created_at, updated_at]
       properties:
         id: {type: integer, format: int64}
+        batch_id: {type: [integer, 'null'], format: int64, description: "Actual batch identity; null for historical tasks."}
+        setting_key: {type: string, description: "Frozen output setting key; empty on legacy tasks."}
+        setting_name: {type: string, description: "Frozen output setting name; empty on legacy tasks."}
+        copy_index: {type: integer, minimum: 0, description: "One-based copy number for new tasks; zero on historical rows."}
+        platforms: {type: [array, 'null'], items: {type: string, enum: [bilibili, baidu, xiaohongshu]}, description: "Frozen target platform labels; null on legacy tasks."}
         display_name: {type: string, description: Creation-time material title and strategy name; empty for legacy tasks that cannot be safely reconstructed.}
         team_id: {type: integer, format: int64}
         category_id: {type: integer, format: int64, minimum: 1}
-        operator_id: {type: [integer, 'null'], format: int64, description: The strategy's operator at creation time, frozen on the task; null on historical rows, never backfilled from created_by.}
+        operator_id: {type: [integer, 'null'], format: int64, description: "The strategy's operator at creation time, frozen on the task; null on historical rows, never backfilled from created_by."}
         operator_name: {type: string, description: Display name resolved from operator_id; empty when unassigned or no longer resolvable.}
-        trigger_type: {type: string, enum: [manual, scheduled]}
+        trigger_type: {type: string, enum: [manual, immediate, scheduled]}
         material_id: {type: integer, format: int64}
         material_usage_id: {type: [integer, 'null'], format: int64, description: Null when the task was created from the strategy team's material pool; scheduled production does not create a personal usage row.}
         compose_strategy_id: {type: integer, format: int64}
@@ -906,10 +1024,10 @@ components:
         config_snapshot: {type: object, description: Frozen execution settings projected for readers; guide_video_url is replaced with a redaction label while the stored execution snapshot stays unchanged.}
         status: {type: string, enum: [pending, running, success, failed, cancelled]}
         cancel_requested: {type: boolean, description: A cancel was requested while running; the task stays running until the worker confirms the controlled stop.}
-        stage: {type: string, description: Worker phase projection from the bounded set validating_input, waiting_input, cutting, uploading, committing; a pending task carries an empty stage.}
+        stage: {type: string, description: "Worker phase projection from the bounded set validating_input, waiting_input, cutting, uploading, committing; a pending task carries an empty stage."}
         progress: {type: integer, minimum: 0, maximum: 100}
         error_code: {type: string}
-        error_message: {type: string, description: Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned.}
+        error_message: {type: string, description: "Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned."}
         attempt_count: {type: integer, minimum: 0}
         started_at: {type: string, format: date-time, nullable: true, description: Null until execution starts.}
         finished_at: {type: string, format: date-time, nullable: true, description: Null until the terminal transition.}
@@ -930,7 +1048,7 @@ components:
         outcome: {type: string, enum: [pending, running, success, failed, cancelled]}
         stage: {type: string, description: Last projected phase of the attempt; empty until the worker reports progress.}
         error_code: {type: string}
-        error_message: {type: string, description: Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned.}
+        error_message: {type: string, description: "Fixed human-readable error category; raw FFmpeg output, paths and signed URLs are never returned."}
         steps:
           type: array
           description: >-
@@ -952,7 +1070,7 @@ components:
         finished_at: {type: string, format: date-time}
         duration_ms: {type: integer, minimum: 0}
         error_code: {type: string, description: Empty on a successful step; the bounded failure code on a failed one.}
-        error_label: {type: string, description: Fixed human-readable failure category, empty on a successful step.}
+        error_label: {type: string, description: "Fixed human-readable failure category, empty on a successful step."}
         metrics: {$ref: '#/components/schemas/ComposeTaskAttemptStepMetrics'}
     ComposeTaskAttemptStepMetrics:
       type: object
@@ -979,7 +1097,7 @@ components:
         compose_task_id: {type: integer, format: int64}
         attempt: {type: integer, minimum: 1, description: The uncertain attempt reviewed before manual retry.}
         actor_user_id: {type: integer, format: int64}
-        evidence: {type: string, description: Reviewer's verification note, not automated proof.}
+        evidence: {type: string, description: "Reviewer's verification note, not automated proof."}
         created_at: {type: string, format: date-time}
     ComposeUncertainResolution:
       type: object

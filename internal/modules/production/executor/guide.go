@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const guideSchema = `{"type":"object","properties":{"guide_video_url":{"type":"string","format":"uri","title":"引导视频下载地址"},"insert_seconds":{"type":"integer","minimum":0,"title":"插入位置（秒）"},"guide_duration_seconds":{"type":"integer","minimum":0,"title":"引导时长（秒，0 为完整视频）"},"max_duration_seconds":{"type":"integer","minimum":0,"title":"成片最长时长（秒，0 为不限）"}},"required":["guide_video_url","insert_seconds","guide_duration_seconds","max_duration_seconds"],"additionalProperties":false}`
+const guideSchema = `{"type":"object","properties":{"guide_video_url":{"type":"string","format":"uri","title":"引导视频下载地址","editable":false},"insert_seconds":{"type":"integer","minimum":0,"title":"插入位置（秒）","editable":true},"guide_duration_seconds":{"type":"integer","minimum":0,"title":"引导时长（秒，0 为完整视频）","editable":true},"max_duration_seconds":{"type":"integer","minimum":0,"title":"成片最长时长（秒，0 为不限）","editable":true}},"required":["guide_video_url","insert_seconds","guide_duration_seconds","max_duration_seconds"],"additionalProperties":false}`
 
 type GuideMode string
 
