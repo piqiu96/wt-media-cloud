@@ -32,7 +32,7 @@ type CreateTaskInput struct {
 	AssetType        model.AssetType
 	AssetID          int64
 	AssetTitle       string
-	CategoryName         string
+	CategoryName     string
 	PublishedAt      *time.Time
 	SourceObjectKey  string
 	Purpose          model.Purpose
@@ -103,9 +103,9 @@ type CreateUserDownloadInput struct {
 	// AssetType names what is being downloaded. Empty means `material`: the
 	// material download predates the field, and every caller that does not know
 	// about composite outputs must keep meaning what it always meant.
-	AssetType  model.AssetType
-	AssetTitle string
-	CategoryName   string
+	AssetType    model.AssetType
+	AssetTitle   string
+	CategoryName string
 	// PublishedAt is when the material was published, copied onto the task like
 	// CategoryName so the lease can carry it to the executor for naming. A material
 	// without a publish time leaves it nil and the executor omits that segment.
@@ -143,23 +143,18 @@ func CreateTask(input CreateTaskInput, now time.Time) (model.Task, error) {
 // request from "download it", and the first task's row is history that the second
 // one must not overwrite.
 //
-// The count and the insert share a transaction. Read outside it, two clicks could
-// count the same generation and still race to two different keys; inside it, the
-// loser's insert collides and `createTask` reads back the survivor.
+// The count and insert share a transaction. Concurrent requests for the next
+// generation use the same unique key; the losing insert leaves the existing
+// instruction unchanged and reads back the committed survivor.
 //
 // A status filter that meant "outstanding" instead of "finished" would be wrong
 // in the direction that is hard to see: a cancelled transfer would let the next
 // click resurrect the same key, and the row it lands on already carries the
 // cancelled executor's state.
 //
-// A material this user has already downloaded is answered with the task that
-// downloaded it, and no new row is written. "Download", here, is a **record of an
-// execution**; "this material is downloaded" is an **asset state**, and asking
-// for it twice does not produce a second file — it produces a second execution
-// row that the transport view would then have to collapse. The check is on the
-// *latest* task, not on "has ever succeeded": a material that succeeded and was
-// then downloaded again and failed is, right now, a failed download, and
-// re-downloading it is a request that should be honoured.
+// Only an outstanding transfer makes this a duplicate request. A terminal
+// success records a past execution, not continued file presence on any machine;
+// a fresh authorized POST after it finishes creates another generation.
 //
 // The check and the generation count are scoped to the **user**, the same
 // dimension the dedupe key is keyed on. A download belongs to a person, not to
@@ -185,12 +180,15 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 		assetType = model.AssetMaterial
 	}
 	var task model.Task
+	// A duplicate insert may wait for another request to commit. Its survivor
+	// must be visible to the following dedupe-key read, not hidden behind the
+	// snapshot created by the earlier latest-task lookup.
 	err := db.Transaction(func(tx *gorm.DB) error {
 		latest, err := selectTask(tx, "asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? ORDER BY created_at DESC, id DESC LIMIT 1", assetType, input.AssetID, model.PurposeUserDownload, input.RequestedBy)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		if err == nil && (latest.Status == model.StatusSuccess || latest.Status == model.StatusPending || latest.Status == model.StatusRunning) {
+		if err == nil && (latest.Status == model.StatusPending || latest.Status == model.StatusRunning) {
 			task = latest
 			return nil
 		}
@@ -204,7 +202,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			AssetType:        assetType,
 			AssetID:          input.AssetID,
 			AssetTitle:       input.AssetTitle,
-			CategoryName:         input.CategoryName,
+			CategoryName:     input.CategoryName,
 			PublishedAt:      input.PublishedAt,
 			SourceObjectKey:  input.SourceObjectKey,
 			Purpose:          model.PurposeUserDownload,
@@ -217,7 +215,7 @@ func createUserDownloadTask(db *gorm.DB, input CreateUserDownloadInput, now time
 			MaxAttempts:      input.MaxAttempts,
 		}, now)
 		return err
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return model.Task{}, err
 	}

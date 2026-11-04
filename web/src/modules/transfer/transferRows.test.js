@@ -104,7 +104,7 @@ describe('transfer rows', () => {
     }
     const rows = transferRows([
       task({ id: 'x', status: 'success', file_name: 'a.mp4' }),
-      task({ id: 'y', status: 'success', file_name: 'b.mp4' }),
+      task({ id: 'y', status: 'success', purpose: 'user_download', file_name: 'b.mp4' }),
       task({ id: 'z', status: 'success', file_name: 'c.mp4' }),
     ], { presence })
 
@@ -114,15 +114,26 @@ describe('transfer rows', () => {
     expect(rows[0].canRedownload).toBe(false)
 
     expect(rows[1].presence).toBe('absent')
-    // 实测不在：打开文件没了。重新下载也**不给** —— 已成功的素材不重下（走查裁定）。
+    // 实测不在：用重新下载替换必然失败的打开文件动作。
     expect(rows[1].canOpen).toBe(false)
-    expect(rows[1].canRedownload).toBe(false)
+    expect(rows[1].canRedownload).toBe(true)
 
     // 名单里没有的名字是「没查过」，不是「不在」。
     expect(rows[2].presence).toBe('unknown')
     expect(rows[2].fileFact).toBeNull()
     expect(rows[2].canOpen).toBe(true)
     expect(rows[2].canRedownload).toBe(false)
+  })
+
+  it.each(['material', 'composite_output'])('projects measured absence into one re-download action for a completed %s', asset_type => {
+    const completed=task({asset_type,status:'success',purpose:'user_download',file_name:'lost.mp4'})
+    for(const presence of ['absent','unknown','present_current','present_elsewhere']) {
+      const row=transferRow(completed,{presence:{'lost.mp4':{name:'lost.mp4',presence}}})
+      expect(row.canRedownload).toBe(presence==='absent')
+      expect(row.canOpen).toBe(presence!=='absent')
+      expect(row.canCancel).toBe(false)
+      expect(row.state.key).toBe('success')
+    }
   })
 
   // 不传扫描结果时每一行都是「没查过」：界面上不该凭空出现「文件已不在」。

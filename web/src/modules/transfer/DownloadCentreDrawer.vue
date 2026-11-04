@@ -4,6 +4,8 @@ import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { DialogPlugin } from 'tdesign-vue-next'
+import { createSessionClient } from '../../shared/api/session.js'
+import { localDownloadReason } from './localDownloadEligibility.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 // 「重新下载」走的是**发起下载那个入口**，不是 transfer 自己的路由 —— 素材行走
 // `POST /materials/{id}/downloads`（挂在素材的 client 上，`fileTransfer.js` 存在的
@@ -27,6 +29,20 @@ const compose = createComposeClient()
 const router = useRouter()
 const { visible, close } = useDownloadCentre()
 const tasks = ref([])
+const downloadUser = ref(null), permissionError = ref('')
+const downloadReason = computed(() => permissionError.value || localDownloadReason(downloadUser.value))
+let permissionRequest = 0
+async function loadDownloadUser() {
+  const request = ++permissionRequest
+  downloadUser.value = null
+  permissionError.value = ''
+  try {
+    const user = await createSessionClient().me()
+    if (request === permissionRequest) downloadUser.value = user
+  } catch {
+    if (request === permissionRequest) permissionError.value = '无法确认本机下载权限，请重新打开下载中心后重试'
+  }
+}
 const loading = ref(false)
 const error = ref('')
 const clearingID = ref(null)
@@ -185,9 +201,12 @@ watch(activeTab, () => { if (visible.value) ensurePolling() })
 
 watch(visible, async (open) => {
   if (!open) {
+    permissionRequest++
+    downloadUser.value = null
     stopPolling()
     return
   }
+  loadDownloadUser()
   // 重新打开要重扫一次：面板关着的这段时间里文件可能被搬走、被删，也可能换了保存位置。
   // 清掉指纹就够了 —— `load()` 结尾的 `ensurePresence()` 会补上这一次。
   measuredKey = null
@@ -232,13 +251,14 @@ function createDownloadFor(task) {
 }
 
 /**
- * 失败 / 已取消行重新发起下载。
+ * 失败、已取消或成功后本机文件已实测丢失的行重新发起下载。
  *
  * 这是**新建一条任务**：服务端去重键的 generation 把终态算作已结束，所以重新点击会得到
  * 一条新行。走查裁定后 UI 上只有这一个动作 —— 原先并排的「重试」改的是原来那条行（且
  * 要求它没在等准备），两个按钮都在说「再来一次」，收成一个。
  */
 async function redownload(task) {
+  if (downloadReason.value) return
   try {
     await createDownloadFor(task)
     // 新任务要出现在这张列表里 —— 不刷新的话画面停在旧行上，看起来像没反应。
@@ -306,6 +326,7 @@ async function openDetail(row) {
   <t-drawer :close-btn="true" v-model:visible="visible" class="download-centre-drawer" header="下载中心" size="min(62vw, 880px)" :footer="false" destroy-on-close @close="close">
     <t-loading :loading="loading" :show-overlay="true">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:12px" @close="error=''" />
+      <p v-if="downloadReason" class="transfer-permission-hint">{{ downloadReason }}</p>
       <t-tabs v-model="activeTab" class="transfer-tabs">
         <t-tab-panel value="active" :label="activeLabel" />
         <t-tab-panel value="failed" :label="failedLabel" />
@@ -375,7 +396,7 @@ async function openDetail(row) {
             <div class="transfer-item__footer">
               <p class="transfer-item__time">失败于 {{ row.finishedText || row.createdText }}</p>
               <div class="transfer-item__actions">
-                <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
+                <t-button v-if="row.canRedownload" size="small" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="redownload(row.task)">重新下载</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
                 <t-button size="small" class="wt-secondary-button" variant="outline" :loading="clearingID === row.task.id" @click="clearRecord(row.task)">清理记录</t-button>
               </div>
@@ -384,7 +405,7 @@ async function openDetail(row) {
         </ul>
 
         <!-- 历史：表格式。完成时间用终态行的 finished_at；成功可打开文件；
-             已取消/失败给「重新下载」，已成功的素材不重下（走查裁定）。 -->
+             已取消/失败或成功文件已实测丢失时给「重新下载」。 -->
         <t-table v-else class="transfer-table" :data="visibleRows" :columns="historyColumns" :row-key="(row) => row.task.id" size="small" :scroll="{ x: 640 }">
           <template #title="{ row }">
             <span class="transfer-table__title" :title="row.task.asset_title">{{ row.task.asset_title || assetFallbackTitle(row.task) }}</span>
@@ -395,7 +416,7 @@ async function openDetail(row) {
           <template #op="{ row }">
             <t-space class="wt-resource-actions">
               <t-button v-if="row.canOpen && isDesktop()" size="small" class="wt-secondary-button" variant="outline" @click="open(row.task)">打开文件</t-button>
-              <t-button v-if="row.canRedownload" size="small" theme="primary" @click="redownload(row.task)">重新下载</t-button>
+              <t-button v-if="row.canRedownload" size="small" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="redownload(row.task)">重新下载</t-button>
               <t-button size="small" class="wt-secondary-button" variant="outline" :loading="clearingID === row.task.id" @click="clearRecord(row.task)">清理记录</t-button>
             </t-space>
           </template>
@@ -408,6 +429,7 @@ async function openDetail(row) {
 </template>
 
 <style scoped>
+.transfer-permission-hint { margin: 0 0 12px; color: var(--wt-text-secondary); font-size: 13px; }
 .transfer-empty { margin: 0; padding: 28px 8px; color: var(--wt-text-tertiary); font-size: 14px; text-align: center; }
 .transfer-tabs { margin-bottom: 8px; }
 .transfer-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }

@@ -935,8 +935,8 @@ func validUserDownloadInput() CreateUserDownloadInput {
 
 const (
 	countFinishedDownloadsSQL = "SELECT COUNT(*) FROM file_transfer_tasks WHERE asset_type = ? AND asset_id = ? AND purpose = ? AND requested_by = ? AND status IN ('success', 'failed', 'cancelled')"
-	// The latest-task read that decides whether this click is a repeat of a
-	// download that already succeeded. Scoped to the user like the count and the
+	// The latest-task read decides whether a request is already outstanding.
+	// Scoped to the user like the count and the
 	// key: a download belongs to a person, not to the machine it happened to run
 	// on, so the same row is reachable from any machine that user logs in on.
 	// `latestUserDownloadStatuses` uses the same scope for the same reason.
@@ -1048,56 +1048,42 @@ func TestCreateUserDownloadTaskGenerationsDependOnWhatAlreadyFinished(t *testing
 	}
 }
 
-// A material this user has already downloaded is answered with the row that
-// downloaded it, and nothing is written.
-//
-// "Download" here is a record of an **execution**; "this material is downloaded"
-// is an **asset state**, so clicking again does not produce a second file — it
-// produces a second execution row that the transport view would then have to
-// collapse. The check is on the *latest* task, which is what the second arm is
-// about: a material that succeeded and was then re-downloaded into a failure is,
-// right now, a failed download, and asking for it again is a request to honour.
-func TestCreateUserDownloadTaskRepeatsAnAlreadySuccessfulDownload(t *testing.T) {
-	t.Run("the latest task succeeded: that row is the answer", func(t *testing.T) {
-		db, mock := newMockGORM(t)
-		mock.ExpectBegin()
-		mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-			WithArgs("material", int64(42), "user_download", int64(9)).
-			WillReturnRows(taskRow(testNow, map[string]any{"status": "success"}))
-		mock.ExpectCommit()
+// A completed transfer is history, not proof that this machine still has the
+// file. An explicit new request after any terminal state creates a generation.
+func TestCreateUserDownloadTaskStartsANewGenerationAfterAnyTerminalState(t *testing.T) {
+	for _, status := range []string{"success", "failed", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			db, mock := newMockGORM(t)
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).WithArgs("material", int64(42), "user_download", int64(9)).WillReturnRows(taskRow(testNow, map[string]any{"id": "finished-download", "status": status}))
+			expectUserDownloadCount(mock, 1)
+			const key = "8dbd2512aea9a1183f2c29256601cce2609c3143ba63fda4d101ccf0446a07e8"
+			expectUserDownloadInsert(mock, "transfer-1", key)
+			expectTaskByDedupeKey(mock, key, testNow, nil)
+			mock.ExpectCommit()
+			task, err := createUserDownloadTask(db, validUserDownloadInput(), testNow)
+			if err != nil || task.ID == "finished-download" || task.Status != model.StatusPending {
+				t.Fatalf("new request task=%+v err=%v", task, err)
+			}
+			assertExpectations(t, mock)
+		})
+	}
+}
 
-		task, err := createUserDownloadTask(db, validUserDownloadInput(), testNow)
-		if err != nil {
-			t.Fatalf("createUserDownloadTask() error = %v", err)
-		}
-		if task.Status != model.StatusSuccess {
-			t.Fatalf("status = %q, want the task that already succeeded", task.Status)
-		}
-		// Neither the count nor the insert was armed, and sqlmock fails a run that
-		// reaches an un-armed statement — so arriving here is the assertion that no
-		// new row was written.
-		assertExpectations(t, mock)
-	})
-
-	t.Run("a later failure is still re-downloadable", func(t *testing.T) {
-		db, mock := newMockGORM(t)
-		mock.ExpectBegin()
-		mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).
-			WithArgs("material", int64(42), "user_download", int64(9)).
-			WillReturnRows(taskRow(testNow, map[string]any{"status": "failed"}))
-		// Two terminal rows by now — the success and the failure after it — so the
-		// new task is the third generation. The literal is the same kind of frozen
-		// value the table above uses.
-		expectUserDownloadCount(mock, 2)
-		expectUserDownloadInsert(mock, "transfer-1", "f89097a6a33ff14bdce8f05a244c916b93648350a06f6cd74f063082877f75e9")
-		expectTaskByDedupeKey(mock, "f89097a6a33ff14bdce8f05a244c916b93648350a06f6cd74f063082877f75e9", testNow, nil)
-		mock.ExpectCommit()
-
-		if _, err := createUserDownloadTask(db, validUserDownloadInput(), testNow); err != nil {
-			t.Fatalf("createUserDownloadTask() error = %v", err)
-		}
-		assertExpectations(t, mock)
-	})
+func TestCreateUserDownloadTaskReusesPendingAndRunningDownloads(t *testing.T) {
+	for _, status := range []string{"pending", "running"} {
+		t.Run(status, func(t *testing.T) {
+			db, mock := newMockGORM(t)
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta(latestUserDownloadSQL)).WithArgs("material", int64(42), "user_download", int64(9)).WillReturnRows(taskRow(testNow, map[string]any{"id": "outstanding-download", "status": status}))
+			mock.ExpectCommit()
+			task, err := createUserDownloadTask(db, validUserDownloadInput(), testNow)
+			if err != nil || task.ID != "outstanding-download" || string(task.Status) != status {
+				t.Fatalf("duplicate request task=%+v err=%v", task, err)
+			}
+			assertExpectations(t, mock)
+		})
+	}
 }
 
 // The key has to be a function of the tuple and nothing else. A clock or a random

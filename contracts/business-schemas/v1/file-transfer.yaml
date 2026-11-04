@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.10.23.1"
+revision: "2026.11.05.1"
 
 schemas:
   FileTransferTask:
@@ -40,8 +40,8 @@ schemas:
         type: string
         nullable: true
         description: >-
-          The final file name the executor reported, with no directory component. It is the name the
-          executor actually wrote, reported rather than derived a second time by the UI.
+          The final name the executor reported, optionally with one relative download-date directory.
+          It is never an absolute local path and reflects the name actually written.
       error_code: {type: string, nullable: true}
       error_message: {type: string, nullable: true}
       created_at: {type: string, format: date-time}

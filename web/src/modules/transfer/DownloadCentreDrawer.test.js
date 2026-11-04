@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { localDownloadReason } from './localDownloadEligibility.js'
 
 const source = readFileSync(new URL('./DownloadCentreDrawer.vue', import.meta.url), 'utf8')
 
@@ -246,5 +247,32 @@ describe('download centre drawer tabs', () => {
     expect(source).toContain('@click="openDetail(row)"')
     expect(source).toContain('materials.get(row.task.asset_id)')
     expect(source).toContain('mode="transfer"')
+  })
+})
+
+
+describe('download centre Local Agent eligibility', () => {
+  it.each([null, {role:'admin'}])('blocks new download commands for an ineligible or unresolved session: %j', async user => {
+    const createDownloadFor=vi.fn(), load=vi.fn()
+    const fn=sliceBetween(source,'async function redownload(task) {','\n}')+'\n}'
+    const run=new Function('downloadReason','createDownloadFor','load','feedback',`${fn}; return redownload({asset_id:42})`)
+    await run({value:localDownloadReason(user)},createDownloadFor,load,{toast:{error:vi.fn()}})
+    expect(createDownloadFor).not.toHaveBeenCalled()
+    expect(load).not.toHaveBeenCalled()
+  })
+  it.each(['operator','senior_operator'])('keeps the existing new-download entry point for %s', async role => {
+    const createDownloadFor=vi.fn().mockResolvedValue({}),load=vi.fn().mockResolvedValue()
+    const fn=sliceBetween(source,'async function redownload(task) {','\n}')+'\n}'
+    const run=new Function('downloadReason','createDownloadFor','load','feedback',`${fn}; return redownload({asset_id:42})`)
+    await run({value:localDownloadReason({role})},createDownloadFor,load,{toast:{error:vi.fn()}})
+    expect(createDownloadFor).toHaveBeenCalledWith({asset_id:42})
+    expect(load).toHaveBeenCalledOnce()
+  })
+  it('disables both existing retry buttons with a visible reason while preserving cancellation', () => {
+    expect(source.match(/:disabled="Boolean\(downloadReason\)" :title="downloadReason" @click="redownload\(row.task\)"/g)).toHaveLength(2)
+    expect(source).toContain('v-if="downloadReason" class="transfer-permission-hint"')
+    expect(source).toContain('loadDownloadUser()')
+    const cancel=sliceBetween(source,'async function cancel(task) {','\n}')
+    expect(cancel).not.toContain('downloadReason')
   })
 })
