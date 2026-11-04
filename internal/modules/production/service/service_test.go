@@ -1812,3 +1812,13 @@ func TestPreparationSourceRefusesAnIncompleteScope(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateDownloadRefusesAdministratorBeforeReadOrPreparation(t *testing.T) {
+	store := &memoryStore{found: true, material: readyMaterial(service.TeamID(7), sharedidentity.CategoryID(6))}
+	transfers := &stubTransfers{}
+	svc := NewService(store, transfers, &stubLinks{})
+	_, err := svc.CreateDownload(context.Background(), service.PublicUser{ID: 9, Role: service.RoleAdmin, Status: service.UserStatusEnabled}, 42)
+	if !errors.Is(err, ErrForbidden) || store.findCount != 0 || len(store.usageChecks) != 0 || transfers.count != 0 || transfers.prepareCount != 0 {
+		t.Fatalf("err=%v reads=%d usages=%v transfers=%+v", err, store.findCount, store.usageChecks, transfers)
+	}
+}

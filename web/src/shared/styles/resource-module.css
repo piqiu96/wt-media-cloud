@@ -152,6 +152,17 @@
   font-size: 14px;
 }
 
+/* Preserve the disabled state after the shared button appearance overrides. */
+.wt-resource-page .t-button--theme-primary:not(.t-button--variant-text)[disabled] {
+  background: var(--td-brand-color-disabled);
+  border-color: var(--td-brand-color-disabled);
+}
+.wt-resource-page .wt-secondary-button[disabled] {
+  color: var(--td-text-color-disabled);
+  background: var(--td-bg-color-component-disabled);
+  border-color: var(--td-border-level-1-color);
+}
+
 .wt-resource-page .wt-danger-button { color: var(--wt-danger); }
 
 /* 「点下载会先准备视频」这类跟在动作下面的补充说明。它比正文小一号、颜色更淡，

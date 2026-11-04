@@ -198,7 +198,8 @@ func TestOutputDownloadVerificationFailureNeverQueuesTransfer(t *testing.T) {
 	for _, link := range []*verifyingOutputLink{{exists: false}, {err: errors.New("private storage failure")}} {
 		transfers := &stubTransfers{}
 		s := NewComposeOutputService(&outputMemoryStore{outputs: []model.CompositeOutput{outputFixture(1)}}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTraceFakes{}, &outputTaskFake{}, link, transfers)
-		_, err := s.CreateOutputDownload(identity.PublicUser{ID: 1, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}, 1)
+		team := identity.TeamID(7)
+		_, err := s.CreateOutputDownload(identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}, 1)
 		if err == nil || transfers.count != 0 {
 			t.Fatalf("err=%v transfers=%d", err, transfers.count)
 		}

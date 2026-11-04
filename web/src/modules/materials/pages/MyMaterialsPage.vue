@@ -21,6 +21,8 @@ import {
   videoStatusLabel,
   videoStatusTone,
 } from '../labels.js'
+import { localDownloadReason } from '../../transfer/localDownloadEligibility.js'
+import { createSessionClient } from '../../../shared/api/session.js'
 import MaterialDetailDrawer from '../MaterialDetailDrawer.vue'
 import MaterialCover from '../components/MaterialCover.vue'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
@@ -30,6 +32,8 @@ import { downloadedFileName, filePresence, needsRedownload } from '../../transfe
 import { savedFileStates } from '../../transfer/desktopBridge.js'
 import { canSelectForDownload, submitMaterialDownloads } from './myMaterialsBatch.js'
 
+const currentUser = ref(null)
+const downloadReason = computed(() => localDownloadReason(currentUser.value))
 const client = createMaterialsClient()
 const users = createUsersClient()
 const transferClient = createFileTransferClient()
@@ -63,7 +67,7 @@ const batchLoading = ref(false)
 // 点赞与收藏是选素材时的决策依据（走查反馈），所以并排放在「素材」右边；数据在行上
 // （toRows 展开了嵌入的 material），不必再点开详情。
 const columns = [
-  { colKey: 'row-select', type: 'multiple', width: 48, checkProps: ({ row }) => ({ disabled: !canSelectForDownload(row) || batchLoading.value }) },
+  { colKey: 'row-select', type: 'multiple', width: 44, checkProps: ({ row }) => ({ disabled: Boolean(downloadReason.value) || !canSelectForDownload(row) || batchLoading.value }) },
   { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
   { colKey: 'material', title: '素材', width: 380 },
   { colKey: 'like_count', title: '点赞', width: 90 },
@@ -266,6 +270,7 @@ async function restore(row) {
 }
 
 async function download(row) {
+  if (downloadReason.value) return
   try {
     await client.createDownload(row.id)
     feedback.toast.success('已开始下载，可在下载中心查看进度')
@@ -278,6 +283,7 @@ async function download(row) {
 }
 
 async function batchDownload() {
+  if (downloadReason.value) return
   if (!selectedRowKeys.value.length || batchLoading.value) return
   batchLoading.value = true
   try {
@@ -298,6 +304,7 @@ async function batchDownload() {
 }
 
 onMounted(() => {
+  createSessionClient().me().then(user => { currentUser.value = user }).catch(() => {})
   load()
   loadCategories()
   // `/my-material?material_id=7` 与素材库同源（详情抽屉里的操作会带上它）。
@@ -315,7 +322,7 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page my-materials-page">
+    <div class="wt-resource-page resource-visual-approved my-materials-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、查看使用状态与详情" />
       <ResourceCard class="material-table-card">
@@ -326,8 +333,10 @@ onMounted(() => {
         </div>
         <div v-if="selectedRowKeys.length" class="wt-selection-toolbar">
           <span class="wt-selection-toolbar__count">已选 {{ selectedRowKeys.length }} 项</span>
-          <t-button theme="primary" :loading="batchLoading" @click="batchDownload">批量下载</t-button>
+          <t-link theme="primary" @click="selectedRowKeys=[]">清空选择</t-link>
+          <t-button theme="primary" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">批量下载</t-button>
         </div>
+        <p v-if="downloadReason" class="wt-download-reason">{{ downloadReason }}</p>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="我的素材还是空的">
             <template #id="{ row }">{{ row.id }}</template>
@@ -367,8 +376,8 @@ onMounted(() => {
                   <t-button size="small" theme="primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" @click="download(row)">重新下载</t-button>
-                  <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
+                  <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">重新下载</t-button>
+                  <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
                   <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="giveUp(row)">放弃使用</t-button>
                 </template>
               </t-space>
@@ -395,6 +404,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.wt-download-reason { margin: 12px 16px; font-size: 13px; color: var(--wt-text-secondary); }
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */

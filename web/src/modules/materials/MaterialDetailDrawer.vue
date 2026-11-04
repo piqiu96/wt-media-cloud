@@ -4,6 +4,8 @@ import { feedback } from '../../shared/ui/feedback/index.js'
 // 其余在这里；云端视频地址不随素材 body 返回，点击「打开云端视频」时才向
 // 详情链接接口取准确对象路径，再交给共用的公开读取地址转换。
 import { computed, ref, watch } from 'vue'
+import { createSessionClient } from '../../shared/api/session.js'
+import { localDownloadReason } from '../transfer/localDownloadEligibility.js'
 import { createMaterialsClient } from '../../shared/api/materials.js'
 import { createFileTransferClient } from '../../shared/api/fileTransfer.js'
 import { downloadedFileName, isTerminal, needsRedownload } from '../transfer/downloadFacts.js'
@@ -49,6 +51,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel'])
 
+const downloadUser = ref(null)
+const downloadReason = computed(() => localDownloadReason(downloadUser.value))
+watch(() => props.visible, visible => { if (visible && props.mode === 'mine' && !downloadUser.value) createSessionClient().me().then(user => { downloadUser.value = user }).catch(() => {}) }, { immediate: true })
 const client = createMaterialsClient()
 const transfer = createFileTransferClient()
 
@@ -399,13 +404,14 @@ async function openDirectory() {
              「再下载」（文件已经在准备了，再点还是同一条命令），给的是「取消下载」；已下载
              只在**实测本机那份文件不在了**时才给一次「重新下载」（合成的入口在合成任务页）。 -->
         <template v-if="mode === 'mine'">
+          <span v-if="downloadReason" class="detail-download-reason">{{ downloadReason }}</span>
           <template v-if="material.usage_status === 'removed'">
             <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
           </template>
           <template v-else>
-            <t-button v-if="needsRedownload(downloadStatus, localFile?.presence)" theme="primary" @click="$emit('download', material)">重新下载</t-button>
+            <t-button v-if="needsRedownload(downloadStatus, localFile?.presence)" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">重新下载</t-button>
             <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" @click="cancelDownload">取消下载</t-button>
-            <t-button v-else-if="downloadStatus !== 'downloaded'" theme="primary" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
+            <t-button v-else-if="downloadStatus !== 'downloaded'" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
             <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
           </template>
         </template>
@@ -415,6 +421,7 @@ async function openDirectory() {
 </template>
 
 <style scoped>
+.detail-download-reason { color: var(--wt-text-secondary); font-size: 12px; }
 .detail-workspace { display: flex; flex-direction: column; gap: 14px; }
 .detail-hero { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: flex-start; }
 .detail-cover { width: 160px; height: 100px; border-radius: 10px; }

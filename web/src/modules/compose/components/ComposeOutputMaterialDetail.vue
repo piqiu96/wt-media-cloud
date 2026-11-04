@@ -4,7 +4,7 @@ import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import ComposeOutputTable from './ComposeOutputTable.vue'
 import { createComposeClient } from '../../../shared/api/compose.js'
-const props=defineProps({visible:Boolean,material:Object,videoState:Function,canDownload:Function,downloadingId:Number,categoryName:Function,busy:Boolean,publishingReason:String,result:String})
+const props=defineProps({visible:Boolean,material:Object,videoState:Function,canDownload:Function,downloadReason:Function,downloadingId:Number,categoryName:Function,busy:Boolean,publishingReason:String,result:String})
 const emit=defineEmits(['update:visible','detail','download','downloads','remake','batch'])
 const client=createComposeClient(),rows=ref([]),total=ref(0),page=ref(1),pageSize=ref(10),loading=ref(false),error=ref(''),selectedKeys=ref([]),knownRows=ref({})
 const selectedRows=computed(()=>selectedKeys.value.map(id=>knownRows.value[id]).filter(Boolean))
@@ -18,8 +18,8 @@ function paginate(data){page.value=data.current;pageSize.value=data.pageSize;loa
   <div class="output-material"><div><h3>{{ material?.material_title || '来源素材未记录' }}</h3><p>素材 ID {{ material?.material_id }} · {{ categoryName?.(material?.category_id) || '—' }} · {{ total }} 个实际成片</p><p>该素材在不同策略、任务批次下生成的成片。</p></div>
    <FeedbackAlert v-if="error" theme="error" :message="error" />
    <FeedbackAlert v-if="result" theme="info" :message="result" />
-   <div v-if="selectedKeys.length" class="wt-selection-toolbar"><span>已选 {{ selectedKeys.length }} 项</span><t-link theme="primary" @click="selectedKeys=[]">清空选择</t-link><t-button theme="primary" :loading="busy" :disabled="!selectedRows.some(canDownload)" @click="emit('downloads',selectedRows)">下载</t-button><span :title="publishingReason"><t-button variant="outline" disabled>去发布</t-button></span><span class="output-material__reason">{{ publishingReason }}</span></div>
-   <t-loading :loading="loading"><ComposeOutputTable :rows="rows" v-model:selected-keys="selectedKeys" material-mode :video-state="videoState" :can-download="canDownload" :downloading-id="downloadingId" :category-name="categoryName" @detail="emit('detail',$event)" @download="emit('download',$event)" @remake="emit('remake',$event)" @batch="emit('batch',$event)" /></t-loading>
+   <div v-if="selectedKeys.length" class="wt-selection-toolbar"><span>已选 {{ selectedKeys.length }} 项</span><t-link theme="primary" @click="selectedKeys=[]">清空选择</t-link><t-button theme="primary" :loading="busy" :disabled="!selectedRows.some(canDownload)" :title="selectedRows.map(downloadReason).filter(Boolean).join('；')" @click="emit('downloads',selectedRows)">下载</t-button><span :title="publishingReason"><t-button variant="outline" disabled>去发布</t-button></span><span class="output-material__reason">{{ publishingReason }}</span></div>
+   <t-loading :loading="loading"><ComposeOutputTable :rows="rows" v-model:selected-keys="selectedKeys" material-mode :video-state="videoState" :can-download="canDownload" :download-reason="downloadReason" :downloading-id="downloadingId" :category-name="categoryName" @detail="emit('detail',$event)" @download="emit('download',$event)" @remake="emit('remake',$event)" @batch="emit('batch',$event)" /></t-loading>
    <div class="pagination-bar"><t-pagination :current="page" :page-size="pageSize" :total="total" :page-size-options="[10,20,50]" @change="paginate" /></div>
   </div>
  </ResourceOverlay>

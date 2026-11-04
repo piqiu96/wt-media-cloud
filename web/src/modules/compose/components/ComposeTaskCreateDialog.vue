@@ -11,12 +11,13 @@ import { enabledCategories } from '../../../shared/utils/categories.js'
 import { settingFields, strategySettings } from '../strategySettings.js'
 import { groupOverridePayload, validateTaskGroup } from '../taskGroupOverrides.js'
 import { outputRemakeBody, outputRemakeSeed, submitOutputRemake, remakeTaskName } from '../outputRemake.js'
+import ComposeStrategyPicker from './ComposeStrategyPicker.vue'
 import ComposeTaskSettings from './ComposeTaskSettings.vue'
 import ComposeTaskMaterialSelector from './ComposeTaskMaterialSelector.vue'
 const props = defineProps({ visible: Boolean, sourceOutput: Object })
 const emit = defineEmits(['update:visible', 'created'])
 const client = createComposeClient(), session = createSessionClient(), materialsClient = createMaterialsClient()
-const currentUser = ref(null), categories = ref([]), teams = ref([]), strategies = ref([]), templates = ref([]), operators = ref([])
+const currentUser = ref(null), categories = ref([]), teams = ref([]), strategyDetail = ref(null), templates = ref([]), operators = ref([])
 const taskName = ref(''), teamID = ref(null), categoryID = ref(null), operatorID = ref(null), strategyID = ref(null)
 const loading = ref(false), operatorsLoading = ref(false), saving = ref(false), error = ref(''), nameError = ref(''), strategyError = ref(''), selected = ref([]), overrides = ref({}), remakeConfirmed = ref(false), materialVisible = ref(false), failures = ref([])
 const submitted = ref({signature:'',key:''})
@@ -26,20 +27,20 @@ const canAssign = computed(() => ['admin','senior_operator'].includes(currentUse
 const categoryOptions = computed(() => enabledCategories(categories.value))
 const isSource = computed(() => Boolean(props.sourceOutput?.output?.id))
 const sourceSeed = computed(() => outputRemakeSeed(props.sourceOutput, templates.value))
-const selectedStrategy = computed(() => isSource.value ? sourceSeed.value.strategy : strategies.value.find((row) => row.id === strategyID.value))
+const selectedStrategy = computed(() => isSource.value ? sourceSeed.value.strategy : strategyDetail.value)
 const selectedTemplate = computed(() => isSource.value ? sourceSeed.value.template : templates.value.find((row) => row.id === selectedStrategy.value?.compose_template_id && row.version === selectedStrategy.value?.compose_template_version))
-const strategyOptions = computed(() => strategies.value.filter((row) => row.status === 'enabled' && row.team_id === teamID.value && row.category_id === categoryID.value && row.operator_id === operatorID.value).map((row) => ({label:row.name,value:row.id})))
+
 const context = computed(() => ({ strategy_id:strategyID.value, operator_id:operatorID.value, team_id:teamID.value, category_id:categoryID.value, operator_name:canAssign.value ? operators.value.find((row) => row.id === operatorID.value)?.display_name : currentUser.value?.display_name || currentUser.value?.name, team_name:teams.value.find((row) => row.id === teamID.value)?.name, category_name:categories.value.find((row) => row.id === categoryID.value)?.name }))
 const groups = computed(() => selectedStrategy.value ? strategySettings(selectedStrategy.value) : [])
 const estimated = computed(() => selected.value.length * groups.value.reduce((sum,row) => sum + row.copies,0))
 const hasPriorWork = computed(() => isSource.value || selected.value.some((row) => Number(row.usage?.output_count || 0) > 0 || Object.entries(row.strategy_history || {}).some(([key,value]) => key.endsWith('_count') && Number(value)>0)))
 watch(() => props.visible, async (visible) => {
   if (!visible) return
-  taskName.value=''; teamID.value=null; categoryID.value=null; operatorID.value=null; strategyID.value=null; selected.value=[]; overrides.value={}; error.value=''; nameError.value=''; strategyError.value=''; failures.value=[]; remakeConfirmed.value=false; submitted.value={signature:'',key:''}
+  strategyDetail.value=null; taskName.value=''; teamID.value=null; categoryID.value=null; operatorID.value=null; strategyID.value=null; selected.value=[]; overrides.value={}; error.value=''; nameError.value=''; strategyError.value=''; failures.value=[]; remakeConfirmed.value=false; submitted.value={signature:'',key:''}
   loading.value=true
   try {
-    const [me, strategyRows, templateRows, categoryRows, teamRows] = await Promise.all([session.me(),isSource.value ? Promise.resolve([]) : client.listStrategies(),isSource.value && props.sourceOutput?.trace?.strategy?.template_schema ? Promise.resolve([]) : client.listTemplates(),client.listCategories(),client.listTeams()])
-    currentUser.value=me; strategies.value=Array.isArray(strategyRows)?strategyRows:strategyRows.items || []; templates.value=templateRows || []; categories.value=categoryRows || []; teams.value=teamRows || []
+    const [me, templateRows, categoryRows, teamRows] = await Promise.all([session.me(),isSource.value && props.sourceOutput?.trace?.strategy?.template_schema ? Promise.resolve([]) : client.listTemplates(),client.listCategories(),client.listTeams()])
+    currentUser.value=me; templates.value=templateRows || []; categories.value=categoryRows || []; teams.value=teamRows || []
     if (isSource.value) {
       const output = props.sourceOutput.output
       taskName.value = remakeTaskName(output.name)
@@ -68,7 +69,7 @@ function changeContext(field,value) {
     if(field==='category') { categoryID.value=value; operatorID.value=canAssign.value?null:currentUser.value.id; strategyID.value=null }
     if(field==='operator') { operatorID.value=value; strategyID.value=null }
     if(field==='strategy') strategyID.value=value
-    selected.value=[]; overrides.value={}; remakeConfirmed.value=false; strategyError.value=''; failures.value=[]
+    strategyDetail.value=null; selected.value=[]; overrides.value={}; remakeConfirmed.value=false; strategyError.value=''; failures.value=[]
     if(['team','category'].includes(field)) loadOperators()
   }
   const previous={team:teamID.value,category:categoryID.value,operator:operatorID.value,strategy:strategyID.value}[field]
@@ -134,7 +135,7 @@ async function submit() {
           <t-form-item v-else label="运营团队"><span>{{ context.team_name || (teamID ? `团队 ${teamID}` : '—') }}</span></t-form-item>
           <t-form-item label="业务分类" required-mark><BusinessSelect kind="category" :value="categoryID" :disabled="!teamID" clearable @change="changeContext('category',$event)"><t-option v-for="row in categoryOptions" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
           <t-form-item label="负责人" required-mark><BusinessSelect v-if="canAssign" kind="member" :value="operatorID" :disabled="!categoryID || operatorsLoading" :loading="operatorsLoading" clearable @change="changeContext('operator',$event)"><t-option v-for="row in operators" :key="row.id" :value="row.id" :label="row.display_name" /></BusinessSelect><span v-else>{{ context.operator_name || '本人' }}</span></t-form-item>
-          <t-form-item label="合成策略" required-mark><div class="task-create__field"><t-select :value="strategyID" :options="strategyOptions" :disabled="!operatorID || !categoryID" clearable placeholder="选择负责人可用的策略" :status="strategyError?'error':undefined" @change="changeContext('strategy',$event)" /><p v-if="strategyError" class="task-create__error">{{ strategyError }}</p></div></t-form-item>
+          <t-form-item label="合成策略" required-mark><div class="task-create__field"><ComposeStrategyPicker :model-value="strategyID" :filters="{team_id:teamID,category_id:categoryID,operator_id:operatorID,status:'enabled'}" :disabled="!operatorID || !categoryID" placeholder="搜索负责人可用的策略" :status="strategyError?'error':undefined" @update:model-value="changeContext('strategy',$event)" @detail="strategyDetail=$event" /><p v-if="strategyError" class="task-create__error">{{ strategyError }}</p></div></t-form-item>
           </template>
         </t-form>
         <section><div class="task-create__heading"><h4>选用素材</h4><t-button variant="outline" class="wt-secondary-button" v-if="!isSource" :disabled="!selectedStrategy" @click="materialVisible=true">选择素材</t-button></div><p v-if="!selected.length" class="task-create__hint">选择负责人工作集或同团队、同类目的素材。</p><div v-else class="task-create__selected"><div v-for="row in selected" :key="row.id"><span>{{ row.title || `素材 ${row.id}` }}</span><t-button v-if="!isSource" size="small" variant="text" @click="removeSelected(row.id)">移除</t-button></div></div></section>

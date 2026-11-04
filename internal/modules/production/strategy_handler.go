@@ -43,30 +43,48 @@ func decodeStrategyBody(c *hertzapp.RequestContext, dst any) bool {
 	return true
 }
 
-func ListComposeStrategies(_ context.Context, c *hertzapp.RequestContext) {
+func parseStrategyListQuery(c *hertzapp.RequestContext) (productionservice.ComposeStrategyListQuery, error) {
+	query := productionservice.ComposeStrategyListQuery{Page: 1, PageSize: 20, Search: strings.TrimSpace(c.Query("search")), Status: strings.TrimSpace(c.Query("status"))}
+	categoryID, err := parseOptionalCategoryID(c.Query("category_id"))
+	if err != nil {
+		return query, fmt.Errorf("%w: category_id", productionservice.ErrStrategyInvalid)
+	}
+	query.CategoryID = categoryID
+	for key, target := range map[string]*int64{"team_id": &query.TeamID, "operator_id": &query.OperatorID, "template_id": &query.TemplateID} {
+		raw := strings.TrimSpace(c.Query(key))
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			return query, fmt.Errorf("%w: %s", productionservice.ErrStrategyInvalid, key)
+		}
+		*target = value
+	}
+	for key, target := range map[string]*int{"page": &query.Page, "page_size": &query.PageSize} {
+		raw := strings.TrimSpace(c.Query(key))
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 || (key == "page_size" && value > 100) {
+			return query, fmt.Errorf("%w: %s", productionservice.ErrStrategyInvalid, key)
+		}
+		*target = value
+	}
+	return query, nil
+}
+func ListComposeStrategies(ctx context.Context, c *hertzapp.RequestContext) {
 	current, ok := actor(c)
 	if !ok {
 		return
 	}
-	categoryID, err := parseOptionalCategoryID(c.Query("category_id"))
+	query, err := parseStrategyListQuery(c)
 	if err != nil {
-		api.FailureNamed(c, consts.StatusBadRequest, 15210, "类目 ID 无效", "compose_strategy_invalid")
+		writeStrategyError(c, err)
 		return
 	}
-	query := productionservice.ComposeStrategyListQuery{
-		Search:     strings.TrimSpace(c.Query("search")),
-		CategoryID: categoryID,
-		Status:     strings.TrimSpace(c.Query("status")),
-	}
-	if raw := strings.TrimSpace(c.Query("template_id")); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value <= 0 {
-			api.FailureNamed(c, consts.StatusBadRequest, 15210, "模板 ID 无效", "compose_strategy_invalid")
-			return
-		}
-		query.TemplateID = value
-	}
-	items, err := productionservice.ListComposeStrategies(current, query)
+	items, err := productionservice.ListComposeStrategyPage(ctx, current, query)
 	if err != nil {
 		writeStrategyError(c, err)
 		return

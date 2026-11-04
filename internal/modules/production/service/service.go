@@ -533,6 +533,9 @@ func (s *Service) RestoreUsage(actor identityservice.PublicUser, usageID int64) 
 // The download belongs to the user, not to a machine: any Desktop the actor logs
 // in on can claim it, and nothing is assigned here.
 func (s *Service) CreateDownload(ctx context.Context, actor identityservice.PublicUser, materialID int64) (transferdto.Task, error) {
+	if !canDownloadLocally(actor) {
+		return transferdto.Task{}, ErrForbidden
+	}
 	material, err := s.getMaterial(actor, materialID)
 	if err != nil {
 		return transferdto.Task{}, err
@@ -817,4 +820,9 @@ func canAccessMaterial(actor identityservice.PublicUser, material model.Material
 		return true
 	}
 	return actor.TeamID != nil && *actor.TeamID == material.TeamID
+}
+
+// Local downloads require a role that can obtain the Local Agent token.
+func canDownloadLocally(actor identityservice.PublicUser) bool {
+	return actor.ID > 0 && actor.Status == identityservice.UserStatusEnabled && (actor.Role == identityservice.RoleOperator || actor.Role == identityservice.RoleSeniorOperator)
 }

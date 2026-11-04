@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.3"
+revision: "2026.11.05.4"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -953,6 +953,31 @@ schemas:
           ref: ComposeOutputMaterial
       total:
         type: integer
+        minimum: 0
+      page:
+        type: integer
+        minimum: 1
+      page_size:
+        type: integer
+        minimum: 1
+        maximum: 100
+
+  ComposeStrategyPage:
+    type: object
+    additionalProperties: false
+    required:
+    - items
+    - total
+    - page
+    - page_size
+    properties:
+      items:
+        type: array
+        items:
+          ref: ComposeStrategy
+      total:
+        type: integer
+        format: int64
         minimum: 0
       page:
         type: integer

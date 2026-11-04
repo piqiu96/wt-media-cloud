@@ -5,12 +5,26 @@ const read = (file) => readFileSync(new URL(file,import.meta.url),'utf8')
 const source = read('./ComposeTaskCreateDialog.vue')
 describe('manual task batch creation', () => {
   it('compiles creation, material selection, inherited settings and batch detail components', () => {
-    for(const file of ['./ComposeTaskCreateDialog.vue','./ComposeTaskMaterialSelector.vue','./ComposeTaskSettings.vue','./ComposeTaskBatchDetail.vue']) {
+    for(const file of ['./ComposeTaskCreateDialog.vue','./ComposeTaskMaterialSelector.vue','./ComposeTaskSettings.vue','./ComposeTaskBatchDetail.vue','./ComposeStrategyPicker.vue']) {
       const parsed=parse(read(file),{filename:file})
       expect(parsed.errors).toEqual([])
       expect(compileTemplate({source:parsed.descriptor.template.content,filename:file,id:file}).errors).toEqual([])
       expect(()=>compileScript(parsed.descriptor,{id:file})).not.toThrow()
     }
+  })
+  it('queries exact assignment remotely and uses the selected strategy detail for full inherited settings', () => {
+    expect(source).not.toContain('client.listStrategies()')
+    expect(source).toContain("{team_id:teamID,category_id:categoryID,operator_id:operatorID,status:'enabled'}")
+    expect(source).toContain('@detail="strategyDetail=$event"')
+    expect(source).toContain('sourceSeed.value.strategy : strategyDetail.value')
+    const picker=read('./ComposeStrategyPicker.vue')
+    expect(picker).toContain('@search="search"')
+    expect(picker).toContain('remote @search')
+    const select=read('../../../shared/ui/fields/BusinessSelect.vue')
+    expect(select).toContain('remote: Boolean')
+    expect(select).toContain(':filter="remote ? () => true : undefined"')
+    expect(picker).toContain('directory.more()')
+    expect(picker).toContain('directory.resolve(id)')
   })
   it('requires task name before assignment and selection, and confirms invalidating context changes', () => {
     const template=source.slice(source.indexOf('<template>'))

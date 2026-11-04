@@ -209,7 +209,7 @@ describe('my materials page', () => {
     expect(source).toContain('MaterialCover')
     expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
     expect(source).toContain('class="wt-primary-link')
-    expect(source).toContain('theme="primary" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
+    expect(source).toContain('theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
     expect(source).not.toContain('downloadHint')
     expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')
@@ -287,7 +287,7 @@ describe('my materials page', () => {
     it('uses relation keys for the new batch download selection', () => {
       expect(source).toContain("row-key=\"usage_id\"")
       expect(source).toContain('v-model:selected-row-keys="selectedRowKeys"')
-      expect(source).toContain("checkProps: ({ row }) => ({ disabled: !canSelectForDownload(row) || batchLoading.value })")
+      expect(source).toContain("checkProps: ({ row }) => ({ disabled: Boolean(downloadReason.value) || !canSelectForDownload(row) || batchLoading.value })")
       expect(source).toContain('class="wt-selection-toolbar"')
       expect(source).toContain('>批量下载</t-button>')
     })

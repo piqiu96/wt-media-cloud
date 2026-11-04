@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.11.05.3
+  version: 2026.11.05.4
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -33,16 +33,85 @@ paths:
   /api/v1/compose-strategies:
     get:
       operationId: listComposeStrategies
-      summary: List strategies in the actor's team and category scope; an ordinary operator sees only enabled strategies assigned to them.
-      security: [{sessionCookie: []}]
+      summary: Page strategies within the actor scope; ordinary operators only see their own enabled strategies.
+      security:
+      - sessionCookie: []
       parameters:
-        - {in: query, name: search, required: false, description: "Strategy name substring, or exact strategy ID when numeric.", schema: {type: string, maxLength: 100}}
-        - {in: query, name: category_id, required: false, description: Exact category ID., schema: {type: integer, format: int64, minimum: 1}}
-        - {in: query, name: template_id, required: false, description: Exact compose template ID; non-positive values are refused., schema: {type: integer, minimum: 1}}
-        - {in: query, name: status, required: false, description: Exact strategy status. Unknown values are refused., schema: {type: string, enum: [enabled, disabled]}}
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+      - in: query
+        name: search
+        required: false
+        description: Strategy name substring, or exact strategy ID when numeric.
+        schema:
+          type: string
+          maxLength: 100
+      - in: query
+        name: category_id
+        required: false
+        description: Exact category ID.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: template_id
+        required: false
+        description: Exact compose template ID; non-positive values are refused.
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: status
+        required: false
+        description: Exact strategy status. Unknown values are refused.
+        schema:
+          type: string
+          enum:
+          - enabled
+          - disabled
+      - in: query
+        name: team_id
+        required: false
+        description: Optional exact team. Non-admin actors cannot name another team.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: operator_id
+        required: false
+        description: Optional exact owner. An ordinary operator cannot name another owner; senior operators remain in their team.
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
       responses:
-        '200': {description: Visible strategies with their fixed template version and current config.}
-        '400': {description: Invalid filter (named compose_strategy_invalid).}
+        '200':
+          description: Authorized server page with frozen template binding and current strategy configuration.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+                properties:
+                  errcode:
+                    type: integer
+                  message:
+                    type: string
+                  logid:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/ComposeStrategyPage'
+        '400':
+          description: Invalid filter (named compose_strategy_invalid).
+      description: Authorization is applied before counting and stable descending-ID pagination. Page defaults to 1 and page_size
+        to 20 (maximum 100). Exact team_id and operator_id narrow the existing role scope; no browser-side truncation or full-catalog
+        assumption.
     post:
       operationId: createComposeStrategy
       summary: Senior operator creates a strategy bound to one active template version.
@@ -654,7 +723,7 @@ paths:
       operationId: createOutputDownload
       summary: Create one current-session Local Agent user-download transfer task for a compose output.
       description: >-
-        Same queue and Drawer as the material download (CHG-20261013-085): one
+        Local execution requires an operator or senior operator; administrators are refused before creating a queue row. Same queue and Drawer as the material download (CHG-20261013-085): one
         `file_transfer_task` row with `asset_type=composite_output`, assigned to the
         actor's trusted Local Agent node. The object is checked before queueing. Unlike material input, missing output objects are not automatically regenerated. The scope gate
         is the page's own — absent and out-of-scope both answer the 404.
@@ -662,6 +731,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/OutputID'}]
       responses:
         '202': {description: A pending local-agent file transfer task.}
+        '403': {description: Actor cannot perform local downloads (named compose_output_forbidden).}
         '404': {description: Output absent or outside the actor's scope (named compose_output_not_found).}
         '409': {description: 'No bound Local Agent node is available, or the output file is unavailable (named compose_output_unavailable).'}
         '503': {description: Storage verification failed (named compose_output_verification_failed).}
@@ -880,13 +950,14 @@ paths:
         not a library action. A material visible in the team's public library is
         not enough: the current user's material usage must be active, so a
         direct call without one fails closed with `material_usage_forbidden`.
-        The Cloud worker's source-preparation path does not pass through this
-        route and keeps working without a user.
+        Only operator and senior_operator roles can create a Local Agent download;
+        administrators are refused before preparation or queue writes. The Cloud
+        worker source-preparation path is separate and keeps working without a user.
       security: [{sessionCookie: []}]
       parameters: [{$ref: '#/components/parameters/MaterialID'}]
       responses:
         '202': {description: A pending local-agent file transfer task.}
-        '403': {description: "Material is outside the actor's team, or the actor has no active material usage (named material_usage_forbidden)."}
+        '403': {description: "The actor is not operator/senior_operator, material is outside the actor's team, or there is no active material usage (named material_usage_forbidden)."}
         '404': {description: Material does not exist.}
         '409': {description: "No prepared source is available and none can be prepared (named material_unavailable), or no bound Local Agent node is available."}
         # The refusal is the binding, not the heartbeat. A bound node whose machine is
@@ -2142,6 +2213,30 @@ components:
             $ref: '#/components/schemas/ComposeOutputMaterial'
         total:
           type: integer
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+    ComposeStrategyPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - total
+      - page
+      - page_size
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComposeStrategy'
+        total:
+          type: integer
+          format: int64
           minimum: 0
         page:
           type: integer

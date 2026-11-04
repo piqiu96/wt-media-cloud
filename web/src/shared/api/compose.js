@@ -5,7 +5,7 @@ export function createComposeClient({ base = '/api/v1', fetch = globalThis.fetch
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
     listTemplates() { return api.get('/compose-templates') },
-    listStrategies(filters = {}) { return api.get('/compose-strategies', { search: filters.search, category_id: filters.category_id, template_id: filters.template_id, status: filters.status }) },
+    listStrategies(filters = {}) { return api.get('/compose-strategies', { search: filters.search, category_id: filters.category_id, template_id: filters.template_id, status: filters.status, team_id: filters.team_id, operator_id: filters.operator_id, page: filters.page, page_size: filters.page_size }) },
     // 管理员创建策略时要选目标团队；高级运营的团队由服务端固定。
     listTeams() { return api.get('/operation-teams') },
     // 类目列表用于展示映射和筛选/创建表单下拉，与素材/内容池页共用同一端点。

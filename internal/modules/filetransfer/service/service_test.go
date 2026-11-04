@@ -1539,3 +1539,31 @@ func TestAttachCompletedDependencyRefusesAnEmptyTaskID(t *testing.T) {
 		t.Fatal("an empty task id must not reach the store")
 	}
 }
+
+func TestAdministratorCancelsOnlyOwnHistoricalDownloadWithoutTeam(t *testing.T) {
+	for _, status := range []model.Status{model.StatusPending, model.StatusRunning} {
+		store := newMemoryStore(taskFixture("own-history", status, 9, teamOf(7)), taskFixture("others-history", status, 11, teamOf(7)))
+		store.cancelOK = true
+		svc := testService(store, fixedClock(testNow()))
+		admin := identityservice.PublicUser{ID: 9, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusEnabled}
+		if _, err := svc.CancelTask(admin, "others-history"); !errors.Is(err, ErrTaskForbidden) || store.count("cancel") != 0 {
+			t.Fatalf("other's history changed: %v", err)
+		}
+		if _, err := svc.CancelTask(admin, "own-history"); err != nil {
+			t.Fatalf("own %s history: %v", status, err)
+		}
+		if store.lastCancel.team != teamOf(7) || store.lastCancel.user != 9 {
+			t.Fatalf("wrong cancel scope: %+v", store.lastCancel)
+		}
+	}
+}
+
+func TestDisabledAdministratorCannotCancelHistoricalDownload(t *testing.T) {
+	store := newMemoryStore(taskFixture("own-history", model.StatusPending, 9, teamOf(7)))
+	store.cancelOK = true
+	svc := testService(store, fixedClock(testNow()))
+	admin := identityservice.PublicUser{ID: 9, Role: identityservice.RoleAdmin, Status: identityservice.UserStatusDisabled}
+	if _, err := svc.CancelTask(admin, "own-history"); !errors.Is(err, ErrTaskForbidden) || store.count("get") != 0 || store.count("cancel") != 0 {
+		t.Fatalf("disabled administrator acted: err=%v reads=%d writes=%d", err, store.count("get"), store.count("cancel"))
+	}
+}
