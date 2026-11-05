@@ -1,31 +1,4 @@
-/* Content-production pages opt into the approved common resource pattern.
-   Keep the application shell and unrelated resource modules unchanged. */
-.production-page .resource-card { padding: 20px; margin-top: 24px; box-shadow: none; }
-.wt-resource-page.resource-visual-approved.production-page .filter-bar { padding-bottom: 20px; margin-bottom: 0; gap: 16px 24px; }
-.wt-resource-page.resource-visual-approved.production-page .filter-bar > .wt-filter-actions { margin-left: 0; }
-.production-page .wt-filter-field__label { color: var(--wt-text-primary) !important; font-size: 13px; font-weight: 500 !important; }
-.wt-resource-page.resource-visual-approved.production-page .filter-bar > .wt-filter-field { flex: 0 1 152px; }
-.wt-resource-page.resource-visual-approved.production-page .filter-bar > .wt-filter-field--wide { flex: 0 1 320px; max-width: 360px; }
-.production-page .wt-advanced-filters { padding: 0; border: 0; gap: 20px 24px; }
-.production-page .table-scroll-wrap { min-width: 0; }
-.wt-resource-page.production-page .wt-resource-table .t-table__body td { font-size: 13px; padding: 12px 16px; }
-.production-page .wt-resource-table .t-table__header th { padding: 12px 16px; }
-.production-page .wt-resource-table .t-table__cell--select { padding-inline: 12px; }
-.production-page .pagination-bar { padding-top: 16px; }
-.production-page .t-tabs { margin-bottom: 20px; }
-.production-page .t-tabs .t-tabs__nav-item { font-size: 14px; }
-.production-page .t-pagination { width: 100%; }
-.production-page .t-date-range-picker { width: 100%; min-width: 0; }
-.production-page .wt-filter-field:has(> .t-date-range-picker) { flex: 0 1 300px; }
-.production-page .wt-filter-field > .t-date-range-picker { width: 100%; }
-.production-page .wt-resource-table .t-table__cell--fixed-right { background: var(--wt-bg-card); }
-@media (max-width: 680px) {
-  .production-page .resource-card { padding: 16px; }
-  .wt-resource-page.resource-visual-approved.production-page .filter-bar > .wt-filter-field { flex: 1 1 180px; }
-  .wt-resource-page.resource-visual-approved.production-page .filter-bar > .wt-filter-field--wide { max-width: none; }
-}
-
-.wt-resource-page.production-page .wt-resource-table .t-table__body td { vertical-align: middle; }
-.production-page .wt-advanced-filters { flex-basis: 100%; }
-
-.wt-resource-page.resource-visual-approved.production-page .wt-advanced-filters > .compose-date-filter { flex: 0 0 300px; width: 300px; min-width: 280px; max-width: 100%; }
+.production-page .resource-card { margin-top:24px; box-shadow:none; }
+.production-page .table-scroll-wrap { min-width:0; }
+.production-page .t-tabs { margin-bottom:20px; }
+.production-page .t-pagination { width:100%; }

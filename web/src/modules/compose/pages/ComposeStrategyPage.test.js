@@ -10,7 +10,7 @@ describe('compose strategy page', () => {
   it('compiles the strategy detail and shared summary templates', () => {
     for (const [name, input] of [
       ['ComposeStrategyPage.vue', source],
-      ['ComposeReorderActions.vue', readFileSync(new URL('../components/ComposeReorderActions.vue', import.meta.url), 'utf8')],
+      ['ResourceReorderActions.vue', readFileSync(new URL('../../../shared/ui/resource/ResourceReorderActions.vue', import.meta.url), 'utf8')],
       ['ComposeStrategySettings.vue', readFileSync(new URL('../components/ComposeStrategySettings.vue', import.meta.url), 'utf8')],
       ['ComposeStrategyExecutionPreview.vue', readFileSync(new URL('../components/ComposeStrategyExecutionPreview.vue', import.meta.url), 'utf8')],
       ['ComposeStrategySummary.vue', readFileSync(new URL('../components/ComposeStrategySummary.vue', import.meta.url), 'utf8')],
@@ -44,22 +44,11 @@ describe('compose strategy page', () => {
     expect(source).not.toContain("width: 170, fixed: 'right'")
   })
 
-  // 名称、类目、状态为常用条件；模板放高级区域，动作留在常用条件之后。
-  it('keeps common filters before actions and the template in advanced filters', () => {
-    const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('table-scroll-wrap'))
-    const basic = bar.slice(0, bar.indexOf('class="wt-advanced-filters"'))
-    const advanced = bar.slice(bar.indexOf('class="wt-advanced-filters"'))
-    expect(bar).not.toContain('<t-space')
-    expect(basic.indexOf('策略名称')).toBeLessThan(basic.indexOf('所属类目'))
-    expect(basic.indexOf('所属类目')).toBeLessThan(basic.indexOf('状态'))
-    expect(basic).not.toContain('合成模板')
-    expect(advanced).toContain('合成模板')
-    expect(bar).toContain('v-if="advancedFiltersVisible"')
-    expect(bar).toContain('wt-filter-field--wide')
-    const widePos = bar.indexOf('wt-filter-field--wide')
-    const nameLabelPos = bar.indexOf('策略名称')
-    expect(widePos).toBeLessThan(nameLabelPos)
-    expect(basic.indexOf('wt-filter-actions')).toBeGreaterThan(basic.lastIndexOf('wt-filter-field'))
+  it('shows the template with other basic strategy filters', () => {
+    const bar = source.slice(source.indexOf('<ResourceFilterBar>'), source.indexOf('</ResourceFilterBar>'))
+    for (const field of ['策略名称', '所属类目', '状态', '合成模板']) expect(bar).toContain(field)
+    expect(bar).not.toContain('wt-advanced-filters')
+    expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
   })
 
   // 运算符词表跟着字段走（发布时间一套、计数一套）。这两套只能走 :options 传，
