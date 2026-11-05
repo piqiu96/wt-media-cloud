@@ -56,9 +56,9 @@ function parameterValue(key, value) {
         <t-descriptions-item v-if="!overview" label="策略名称" full>{{ strategy.name }}</t-descriptions-item>
         <t-descriptions-item label="策略 ID">{{ strategy.id }}</t-descriptions-item>
         <t-descriptions-item label="状态"><ResourceStatusBadge :tone="strategy.status === 'enabled' ? 'success' : 'neutral'" :label="strategy.status === 'enabled' ? '启用' : '停用'" /></t-descriptions-item>
-        <t-descriptions-item label="所属团队">{{ team || '—' }}</t-descriptions-item>
         <t-descriptions-item label="所属类目">{{ category || '—' }}</t-descriptions-item>
         <t-descriptions-item label="合成模板">{{ templateLabel(templates, strategy.compose_template_id, strategy.compose_template_version) }}</t-descriptions-item>
+        <t-descriptions-item label="所属团队">{{ team || '—' }}</t-descriptions-item>
         <t-descriptions-item label="负责人">{{ strategy.operator_name || '未记录' }}</t-descriptions-item>
         <t-descriptions-item label="创建时间">{{ formatDateTime(strategy.created_at) }}</t-descriptions-item>
         <t-descriptions-item label="修改时间">{{ formatDateTime(strategy.updated_at) }}</t-descriptions-item>

@@ -726,10 +726,6 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
           <ResourceSection title="基本信息" variant="form">
             <ResourceForm class="resource-form-grid">
               <t-form-item label="策略名称" class="resource-form-full" required-mark><div class="strategy-field"><t-input v-model="form.name" :maxlength="120" placeholder="输入策略名称" :status="nameError ? 'error' : undefined" /><p v-if="nameError" class="strategy-field-error">{{ nameError }}</p></div></t-form-item>
-              <t-form-item label="所属团队" required-mark>
-                <BusinessSelect v-if="isAdmin && !editingID" kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect>
-                <t-input v-else :value="String(teamName(isAdmin ? form.team_id : currentUser?.team_id) || '')" disabled />
-              </t-form-item>
               <t-form-item label="所属类目" required-mark>
                 <BusinessSelect v-if="!editingID" kind="category" v-model="form.category_id" clearable @change="form.operator_id = ''"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect>
                 <t-input v-else :value="String(categoryName(form.category_id) || '')" disabled />
@@ -738,6 +734,10 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 <template #label><span class="strategy-template-label">合成模板<ResourceFieldHelp content="模板决定制作方式。保存后如需更换模板，请复制策略。" /><t-link v-if="form.compose_template_id" theme="primary" @click="templateInfoVisible = true">模板说明 ↗</t-link></span></template>
                 <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange"><t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" /></t-select>
                 <t-input v-else :value="templateLabel(templates, form.compose_template_id)" disabled />
+              </t-form-item>
+              <t-form-item label="所属团队" required-mark>
+                <BusinessSelect v-if="isAdmin && !editingID" kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect>
+                <t-input v-else :value="String(teamName(isAdmin ? form.team_id : currentUser?.team_id) || '')" disabled />
               </t-form-item>
               <t-form-item label="负责人" required-mark><div class="strategy-field"><BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="operatorsLoading || !form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''"><t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" /></BusinessSelect><p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p><p v-else-if="form.category_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与类目下没有可指派的运营</p></div></t-form-item>
 
