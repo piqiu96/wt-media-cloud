@@ -14,26 +14,26 @@ import { enabledCategories } from '../../../shared/utils/categories.js'
 import { settingFields, strategySettings } from '../strategySettings.js'
 import { groupOverridePayload, validateTaskGroup } from '../taskGroupOverrides.js'
 import { outputRemakeBody, outputRemakeSeed, submitOutputRemake, remakeTaskName } from '../outputRemake.js'
+import { taskStrategyFilters, taskStrategyContext } from '../taskCreationContext.js'
 import ComposeStrategyPicker from './ComposeStrategyPicker.vue'
 import ComposeTaskSettings from './ComposeTaskSettings.vue'
 import ComposeTaskMaterialSelector from './ComposeTaskMaterialSelector.vue'
 const props = defineProps({ visible: Boolean, sourceOutput: Object })
 const emit = defineEmits(['update:visible', 'created'])
 const client = createComposeClient(), session = createSessionClient(), materialsClient = createMaterialsClient()
-const currentUser = ref(null), categories = ref([]), teams = ref([]), strategyDetail = ref(null), templates = ref([]), operators = ref([])
+const currentUser = ref(null), categories = ref([]), teams = ref([]), strategyDetail = ref(null), templates = ref([])
 const taskName = ref(''), teamID = ref(null), categoryID = ref(null), operatorID = ref(null), strategyID = ref(null)
-const loading = ref(false), operatorsLoading = ref(false), saving = ref(false), error = ref(''), nameError = ref(''), strategyError = ref(''), selected = ref([]), overrides = ref({}), remakeConfirmed = ref(false), materialVisible = ref(false), failures = ref([])
+const loading = ref(false), saving = ref(false), error = ref(''), nameError = ref(''), strategyError = ref(''), selected = ref([]), overrides = ref({}), remakeConfirmed = ref(false), materialVisible = ref(false), failures = ref([])
 const submitted = ref({signature:'',key:''})
-let operatorSequence = 0
-const isAdmin = computed(() => currentUser.value?.role === 'admin')
-const canAssign = computed(() => ['admin','senior_operator'].includes(currentUser.value?.role))
 const categoryOptions = computed(() => enabledCategories(categories.value))
 const isSource = computed(() => Boolean(props.sourceOutput?.output?.id))
 const sourceSeed = computed(() => outputRemakeSeed(props.sourceOutput, templates.value))
-const selectedStrategy = computed(() => isSource.value ? sourceSeed.value.strategy : strategyDetail.value)
+const strategyFilters = computed(() => taskStrategyFilters(categoryID.value, currentUser.value))
+const inheritedContext = computed(() => taskStrategyContext(strategyDetail.value, strategyID.value, categoryID.value, currentUser.value))
+const selectedStrategy = computed(() => isSource.value ? sourceSeed.value.strategy : strategyDetail.value && inheritedContext.value ? strategyDetail.value : null)
 const selectedTemplate = computed(() => isSource.value ? sourceSeed.value.template : templates.value.find((row) => row.id === selectedStrategy.value?.compose_template_id && row.version === selectedStrategy.value?.compose_template_version))
 
-const context = computed(() => ({ strategy_id:strategyID.value, operator_id:operatorID.value, team_id:teamID.value, category_id:categoryID.value, operator_name:canAssign.value ? operators.value.find((row) => row.id === operatorID.value)?.display_name : currentUser.value?.nickname || currentUser.value?.name || currentUser.value?.username, team_name:teams.value.find((row) => row.id === teamID.value)?.name, category_name:categories.value.find((row) => row.id === categoryID.value)?.name }))
+const context = computed(() => ({ strategy_id:strategyID.value, operator_id:operatorID.value, team_id:teamID.value, category_id:categoryID.value, operator_name:isSource.value ? props.sourceOutput.output.operator_name : strategyDetail.value?.operator_name, team_name:teams.value.find((row) => row.id === teamID.value)?.name, category_name:categories.value.find((row) => row.id === categoryID.value)?.name }))
 const groups = computed(() => selectedStrategy.value ? strategySettings(selectedStrategy.value) : [])
 const estimated = computed(() => selected.value.length * groups.value.reduce((sum,row) => sum + row.copies,0))
 const hasPriorWork = computed(() => isSource.value || selected.value.some((row) => Number(row.usage?.output_count || 0) > 0 || Object.entries(row.strategy_history || {}).some(([key,value]) => key.endsWith('_count') && Number(value)>0)))
@@ -52,30 +52,24 @@ watch(() => props.visible, async (visible) => {
       else selected.value=[sourceSeed.value.material]
       return
     }
-    if (me.role !== 'admin') teamID.value=me.team_id
-    if (!['admin','senior_operator'].includes(me.role)) operatorID.value=me.id
   } catch(e) { error.value=e?.message || '新建任务配置读取失败' }
   finally { loading.value=false }
 })
-async function loadOperators() {
-  const sequence=++operatorSequence
-  operators.value=[]
-  if (!canAssign.value || !teamID.value || !categoryID.value) return
-  operatorsLoading.value=true
-  try { const rows=await client.listComposeOperators({team_id:teamID.value,category_id:categoryID.value}); if(sequence===operatorSequence) operators.value=rows || [] }
-  catch(e) { if(sequence===operatorSequence) error.value=e?.message || '负责人读取失败' }
-  finally { if(sequence===operatorSequence) operatorsLoading.value=false }
+function acceptStrategy(detail) {
+  if (!props.visible || isSource.value) return
+  const inherited = taskStrategyContext(detail, strategyID.value, categoryID.value, currentUser.value)
+  if (detail && !inherited) return
+  strategyDetail.value = detail
+  teamID.value = inherited?.team_id ?? null
+  operatorID.value = inherited?.operator_id ?? null
 }
 function changeContext(field,value) {
   const apply = () => {
-    if(field==='team') { teamID.value=value; categoryID.value=null; operatorID.value=canAssign.value?null:currentUser.value.id; strategyID.value=null }
-    if(field==='category') { categoryID.value=value; operatorID.value=canAssign.value?null:currentUser.value.id; strategyID.value=null }
-    if(field==='operator') { operatorID.value=value; strategyID.value=null }
+    if(field==='category') { categoryID.value=value; strategyID.value=null }
     if(field==='strategy') strategyID.value=value
-    strategyDetail.value=null; selected.value=[]; overrides.value={}; remakeConfirmed.value=false; strategyError.value=''; failures.value=[]
-    if(['team','category'].includes(field)) loadOperators()
+    teamID.value=null; operatorID.value=null; strategyDetail.value=null; selected.value=[]; overrides.value={}; remakeConfirmed.value=false; strategyError.value=''; failures.value=[]
   }
-  const previous={team:teamID.value,category:categoryID.value,operator:operatorID.value,strategy:strategyID.value}[field]
+  const previous={category:categoryID.value,strategy:strategyID.value}[field]
   if(previous===value) return
   if(!selected.value.length && !Object.keys(overrides.value).length) { apply(); return }
   const dialog=DialogPlugin.confirm({header:'更换任务配置？',body:'更换后需要重新选择素材并设置本次参数。已加入的负责人素材关系会保留。',confirmBtn:{content:'更换',theme:'primary'},onConfirm:()=>{apply();dialog.hide()}})
@@ -125,8 +119,8 @@ async function submit() {
       <div class="task-create wt-resource-page resource-visual-approved production-page">
         <FeedbackAlert v-if="error" theme="error" :message="error" />
         <ResourceSection title="基本信息" variant="form"><ResourceForm class="resource-form-grid">
-          <t-form-item class="resource-form-full" label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="60" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
           <template v-if="isSource">
+          <t-form-item label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="60" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
             <t-form-item label="运营团队"><span>{{ context.team_name || '—' }}</span></t-form-item>
             <t-form-item label="所属类目"><span>{{ context.category_name || '—' }}</span></t-form-item>
             <t-form-item label="负责人"><span>{{ sourceOutput.output.operator_name || '—' }}</span></t-form-item>
@@ -134,11 +128,11 @@ async function submit() {
             <t-form-item label="原模板版本"><span>{{ sourceOutput.trace?.compose_task?.template_code }} v{{ sourceOutput.trace?.compose_task?.template_version }}</span></t-form-item>
           </template>
           <template v-else>
-          <t-form-item v-if="isAdmin" label="运营团队" required-mark><BusinessSelect kind="team" :value="teamID" clearable @change="changeContext('team',$event)"><t-option v-for="row in teams" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
-          <t-form-item v-else label="运营团队"><span>{{ context.team_name || (teamID ? `团队 ${teamID}` : '—') }}</span></t-form-item>
-          <t-form-item label="所属类目" required-mark><BusinessSelect kind="category" :value="categoryID" :disabled="!teamID" clearable @change="changeContext('category',$event)"><t-option v-for="row in categoryOptions" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
-          <t-form-item label="负责人" required-mark><BusinessSelect v-if="canAssign" kind="member" :value="operatorID" :disabled="!categoryID || operatorsLoading" :loading="operatorsLoading" clearable @change="changeContext('operator',$event)"><t-option v-for="row in operators" :key="row.id" :value="row.id" :label="row.display_name" /></BusinessSelect><span v-else>{{ context.operator_name || '本人' }}</span></t-form-item>
-          <t-form-item label="合成策略" required-mark><div class="task-create__field"><ComposeStrategyPicker :model-value="strategyID" :filters="{team_id:teamID,category_id:categoryID,operator_id:operatorID,status:'enabled'}" :disabled="!operatorID || !categoryID" placeholder="搜索负责人可用的策略" :status="strategyError?'error':undefined" @update:model-value="changeContext('strategy',$event)" @detail="strategyDetail=$event" /><p v-if="strategyError" class="task-create__error">{{ strategyError }}</p></div></t-form-item>
+          <t-form-item label="所属类目" required-mark><BusinessSelect kind="category" :value="categoryID" :disabled="loading" clearable @change="changeContext('category',$event)"><t-option v-for="row in categoryOptions" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
+          <t-form-item label="合成策略" required-mark><div class="task-create__field"><ComposeStrategyPicker :model-value="strategyID" :filters="strategyFilters" :disabled="loading || !categoryID" show-assignment :placeholder="categoryID ? '选择合成策略' : '先选择类目'" :status="strategyError?'error':undefined" @update:model-value="changeContext('strategy',$event)" @detail="acceptStrategy" /><p v-if="strategyError" class="task-create__error">{{ strategyError }}</p></div></t-form-item>
+          <t-form-item label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="60" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
+          <t-form-item label="运营团队"><t-input :value="context.team_name" disabled placeholder="选择策略后带出" /></t-form-item>
+          <t-form-item label="负责人"><t-input :value="context.operator_name" disabled placeholder="选择策略后带出" /></t-form-item>
           </template>
         </ResourceForm></ResourceSection>
         <ResourceSection title="选用素材" variant="form">

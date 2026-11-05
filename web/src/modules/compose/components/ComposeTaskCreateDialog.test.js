@@ -14,8 +14,8 @@ describe('manual task batch creation', () => {
   })
   it('queries exact assignment remotely and uses the selected strategy detail for full inherited settings', () => {
     expect(source).not.toContain('client.listStrategies()')
-    expect(source).toContain("{team_id:teamID,category_id:categoryID,operator_id:operatorID,status:'enabled'}")
-    expect(source).toContain('@detail="strategyDetail=$event"')
+    expect(source).toContain(':filters="strategyFilters"')
+    expect(source).toContain('@detail="acceptStrategy"')
     expect(source).toContain('sourceSeed.value.strategy : strategyDetail.value')
     const picker=read('./ComposeStrategyPicker.vue')
     expect(picker).toContain('@search="search"')
@@ -26,12 +26,18 @@ describe('manual task batch creation', () => {
     expect(picker).toContain('directory.more()')
     expect(picker).toContain('directory.resolve(id)')
   })
-  it('requires task name before assignment and selection, and confirms invalidating context changes', () => {
+  it('places category and strategy before a half-width name and inherited ownership', () => {
     const template=source.slice(source.indexOf('<template>'))
-    expect(template.indexOf('任务名称')).toBeLessThan(template.indexOf('所属类目'))
+    const manual=template.slice(template.indexOf('<template v-else>'))
+    expect(manual.indexOf('所属类目')).toBeLessThan(manual.indexOf('合成策略'))
+    expect(manual.indexOf('合成策略')).toBeLessThan(manual.indexOf('任务名称'))
+    expect(manual).not.toContain('resource-form-full')
+    expect(manual).toContain(':value="context.team_name" disabled')
+    expect(manual).toContain(':value="context.operator_name" disabled')
     expect(source).toContain("if(!name) {nameError.value='请输入任务名称';return}")
     expect(source).toContain('DialogPlugin.confirm')
-    expect(source).toContain("changeContext('operator',$event)")
+    expect(source).not.toContain("changeContext('operator',$event)")
+    expect(source).not.toContain('listComposeOperators')
   })
   it('submits one idempotent batch with explicit owner, groups, and confirmed remake', () => {
     expect(source).toContain('body.request_key=submitted.value.key')
