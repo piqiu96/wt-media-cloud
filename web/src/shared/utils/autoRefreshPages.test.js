@@ -1,3 +1,4 @@
+import { publishedRangeParams, metricRangeParams } from '../../modules/materials/materialFilters.js'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -39,6 +40,7 @@ function serverLoader(path, client, overrides = {}) {
     myUsageFilter: ref(''), teamUsageFilter: ref(''), statusFilter: ref(''),
     sortBy: ref('published_at'), sortOrder: ref('desc'), selectedRowKeys: ref([]),
     operatorIdFromOption: () => null, createdRangeParams: () => ({}),
+    publishedRangeParams, metricRangeParams, publishedRange: ref([]), metricFilters: ref({}), usageStatusFilter: ref('active'),
     toRows: (items) => items, loadPresence: async () => {}, ...overrides,
   }
   const run = new Function(...Object.keys(state), `let loadSequence = 0; ${load}; return load({ quiet: true })`)

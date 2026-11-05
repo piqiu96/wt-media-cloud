@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { bulkResultMessage, selectionSkipSummary, taskActionEligible } from '../batchActions.js'
 const props = defineProps({ tasks: {type:Array,default:()=>[]}, canRetry:Boolean })
@@ -25,7 +26,7 @@ function command(action) {
 </script>
 <template>
   <div v-if="tasks.length || result || error" class="task-selection-actions">
-    <div v-if="tasks.length" class="wt-selection-toolbar task-selection-actions__bar"><span>已选 {{ tasks.length }} 条任务</span><t-link theme="primary" :disabled="busy" @click="emit('clear')">清空选择</t-link><span v-if="tasks.length>200">每次最多操作 200 条，请缩小选择范围。</span><t-button v-if="retryCount" size="small" variant="outline" class="wt-secondary-button" :disabled="tasks.length>200 || busy" @click="command('retry')">重试（{{ retryCount }}）</t-button><t-button v-if="cancelCount" size="small" variant="outline" class="wt-secondary-button wt-danger-button" :disabled="tasks.length>200 || busy" @click="command('cancel')">取消（{{ cancelCount }}）</t-button></div>
+    <ResourceSelectionToolbar :count="tasks.length" unit="条任务" :hint="tasks.length>200 ? '每次最多操作 200 条' : ''" @clear="!busy && emit('clear')"><t-button v-if="retryCount" size="small" variant="outline" class="wt-secondary-button" :disabled="tasks.length>200 || busy" @click="command('retry')">重试（{{ retryCount }}）</t-button><t-button v-if="cancelCount" size="small" variant="outline" class="wt-secondary-button wt-danger-button" :disabled="tasks.length>200 || busy" @click="command('cancel')">取消（{{ cancelCount }}）</t-button></ResourceSelectionToolbar>
     <FeedbackAlert v-if="error" theme="error" :message="error" />
     <FeedbackAlert v-if="result" :theme="result.failed || result.skipped ? 'warning':'success'" :message="bulkResultMessage(result,result.action)" />
     <div v-if="result?.items?.some(row=>row.status!=='accepted')" class="task-selection-actions__results"><p v-for="row in result.items.filter(row=>row.status!=='accepted')" :key="row.task_id">任务 {{ row.task_id }} · {{ row.reason }}</p></div>

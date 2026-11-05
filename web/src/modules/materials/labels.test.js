@@ -272,7 +272,7 @@ describe('usage status dimension', () => {
 // 已经不存在的按钮。文案只承诺「可在合成任务页选用」，不描述那一页怎么操作。
 describe('next-step hint', () => {
   it('speaks from the file state', () => {
-    expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('下载到本机后可在合成任务页选用')
+    expect(nextStepHint({ video_status: 'not_downloaded' })).toBe('可在合成任务页选用；下载到本机需先准备视频')
     expect(nextStepHint({ video_status: 'downloading' })).toBe('文件准备中，完成后即可下载到本机')
     expect(nextStepHint({ video_status: 'ready' })).toBe('可在合成任务页选用，或重新下载到其他机器')
     expect(nextStepHint({ video_status: 'failed' })).toBe('重新下载，或查看最近一次失败原因')
@@ -281,7 +281,7 @@ describe('next-step hint', () => {
   // 已放弃的关系先要恢复，才轮到文件那一维：一句「去下载」会让运营以为这条路还通着。
   // 恢复之后也不必回这一页——合成任务页只列「使用中」的素材，恢复即回到候选里。
   it('sends a given-up relation to restore before anything else', () => {
-    const removed = '恢复使用后可继续下载，并可在合成任务页选用'
+    const removed = '恢复使用后可用于合成或下载'
     expect(nextStepHint({ usage_status: 'removed', video_status: 'ready' })).toBe(removed)
     expect(nextStepHint({ usage_status: 'removed' })).toBe(removed)
   })

@@ -1,4 +1,11 @@
 <script setup>
+import '../../compose/production.css'
+import MaterialMetricFilters from '../components/MaterialMetricFilters.vue'
+import { publishedRangeParams, emptyMetricRanges, metricRangeParams, metricLabel } from '../materialFilters.js'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
+import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -20,8 +27,6 @@ import {
   TEAM_USAGE_FILTERS,
   categoryName,
   joinStatus,
-  materialStatusLabel,
-  materialStatusTone,
   myUsageLabel,
   myUsageTone,
   usageOperatorCount,
@@ -46,10 +51,11 @@ const error = ref('')
 const advancedFilters = ref(false)
 const search = ref(route.query.search ? String(route.query.search) : '')
 const joinedFilter = ref('')
-const myUsageFilter = ref('')
+const myUsageFilter = ref('unused')
 const teamUsageFilter = ref('')
 const teamFilter = ref('')
 const categoryFilters = ref([])
+const publishedRange = ref([]), metricFilters = ref(emptyMetricRanges())
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
 const categories = ref([])
@@ -80,29 +86,19 @@ function defaultCategoryFilters() {
   return responsibleCategories().filter((id) => enabled.has(id))
 }
 
-// 每一列都必须声明 width，不许只写 minWidth —— 理由与实测数据见
-// shared/testing/listPageConventions.js 里那条断言上面的说明（WebKit 的 fixed 布局下
-// minWidth 不产生确定列宽，这些列会被压成「剩余空间列」）。
-// 素材 ID 是第一业务列（规范 §5.1，用户裁定保留）；类目不并进「素材」副行，它有自己的一列。
-// 三个使用维度各自成列：加入状态（查看者自己的关系）、我的使用（查看者是否做过成功
-// 成片）、使用情况（本团队成功成片汇总）。它们不是同一个问题的不同画法，规范 §7.2
-// 明令不得合并。缺值一律画占位，不兜底 —— `row.status || 'available'` 会把读不到
-// 状态的素材画成「可用」。
-// 使用情况是团队汇总，对全部角色成列：普通运营只少姓名，不少计数（2026-10-27 用户裁定）。
-// 文件状态不进列表（同一次裁定）：它是下载链路的中间态，不是运营挑素材
-// 要看的东西，需要时在详情抽屉里看。
+// Explicit widths keep identity, performance and usage readable under horizontal scrolling.
 const columns = [
-  { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
-  { colKey: 'material', title: '素材', width: 360 },
+  { colKey: 'id', title: '素材 ID', width: 80, sorter: true },
+  { colKey: 'material', title: '素材 / 作者', width: 280 },
   { colKey: 'category', title: '类目', width: 100 },
-  { colKey: 'material_status', title: '素材状态', width: 100 },
+  { colKey: 'metrics', title: '浏览 / 赞 / 收藏', width: 175 },
   { colKey: 'joined', title: '加入状态', width: 100 },
   { colKey: 'my_usage', title: '我的使用', width: 100 },
-  { colKey: 'usage', title: '使用情况', width: 200 },
+  { colKey: 'usage', title: '团队使用', width: 155 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
   { colKey: 'created_at', title: '入库时间', width: 105, sorter: true },
   { colKey: 'created_by_name', title: '操作人', width: 110 },
-  { colKey: 'op', title: '操作', width: 290, fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情','加入我的素材'], {variant:'text',primary:true}), fixed: 'right' },
 ]
 
 const tableScroll = computed(() => ({
@@ -125,6 +121,8 @@ async function load({ quiet = false, keepPage = false } = {}) {
     const data = await client.list({
       page: pagination.value.current, page_size: pagination.value.pageSize,
       search: search.value,
+      ...publishedRangeParams(publishedRange.value),
+      ...metricRangeParams(metricFilters.value),
       team_id: teamFilter.value,
       category_ids: categoryFilters.value,
       joined: joinedFilter.value,
@@ -256,7 +254,9 @@ async function addToMine(row) {
 function reset() {
   search.value = ''
   joinedFilter.value = ''
-  myUsageFilter.value = ''
+  myUsageFilter.value = 'unused'
+  publishedRange.value = []
+  metricFilters.value = emptyMetricRanges()
   teamUsageFilter.value = ''
   teamFilter.value = ''
   categoryFilters.value = defaultCategoryFilters()
@@ -286,41 +286,39 @@ onMounted(async () => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved material-library-page">
+    <div class="wt-resource-page resource-visual-approved production-page material-library-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="素材库" description="团队公共素材池：加入「我的素材」后可下载到本机并用于合成" />
+      <ResourcePageHeader title="素材库" description="筛选团队素材，加入我的素材后用于制作。" />
       <ResourceCard class="material-table-card">
         <div class="filter-bar">
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
-          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button variant="text" @click="advancedFilters=!advancedFilters">{{ advancedFilters ? '收起高级筛选' : '高级筛选' }}</t-button></div>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+          <ResourceAdvancedToggle v-model="advancedFilters" />
           <div v-if="advancedFilters" class="wt-advanced-filters">
           <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">使用情况</span><BusinessSelect kind="team" filter v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+          <MaterialMetricFilters v-model="metricFilters" />
           </div>
         </div>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
-            <!-- 封面 + 标题 + 来源平台合成一格；标题跳来源平台落地页，没有则退回普通文本。 -->
+            <!-- 标题进入素材详情，原作品入口统一收在基本信息。 -->
             <template #material="{ row }">
               <div class="material-cell">
                 <MaterialCover class="material-cell__cover" :url="row.cover_url" />
                 <div class="material-cell__text">
-                  <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
-                  <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
-                  <span class="material-cell__source">{{ platformLabel(row.platform) }}</span>
+                  <t-link theme="primary" class="material-title" :title="row.title || '未命名素材'" @click="openDetail(row)">{{ row.title || '未命名素材' }}</t-link>
+                  <span class="material-cell__source">{{ row.author_name || '—' }} · {{ platformLabel(row.platform) }}</span>
                 </div>
               </div>
             </template>
             <template #category="{ row }">{{ categoryName(categories, row.category_id) }}</template>
-            <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的。 -->
-            <template #material_status="{ row }">
-              <ResourceStatusBadge v-if="row.status" :tone="materialStatusTone(row.status)" :label="materialStatusLabel(row.status)" />
-              <template v-else>—</template>
-            </template>
+            <template #metrics="{row}"><div class="material-metrics"><span>{{ metricLabel(row,'view_count') }} 浏览</span><span>{{ metricLabel(row,'like_count') }} 赞 · {{ metricLabel(row,'favorite_count') }} 收藏</span></div></template>
             <!-- 加入状态读服务端投影：active=已加入，removed=已移出，无关系=未加入。 -->
             <template #joined="{ row }"><ResourceStatusBadge :tone="joinStatus(row).tone" :label="joinStatus(row).label" /></template>
             <template #my_usage="{ row }"><ResourceStatusBadge :tone="myUsageTone(row.my_usage)" :label="myUsageLabel(row.my_usage)" /></template>
@@ -336,17 +334,17 @@ onMounted(async () => {
             <template #op="{ row }">
               <!-- 详情 | 单一主操作；已加入的行换成「去我的素材」，不再给必然空转的「加入」。
                    已移出的行给「重新加入」：服务端的同一条 upsert 会把它恢复成 active。 -->
-              <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button v-if="canAdd(row) && row.usage_status !== 'active'" size="small" theme="primary" @click="addToMine(row)">{{ row.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
-                <t-button v-else-if="row.usage_status === 'active'" size="small" theme="primary" @click="goToMyMaterials()">去我的素材</t-button>
+              <ResourceRowActions>
+                <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
+                <t-button v-if="canAdd(row) && row.usage_status !== 'active'" size="small" theme="primary" variant="text" class="is-primary" @click="addToMine(row)">{{ row.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
+                <t-button v-else-if="row.usage_status === 'active'" size="small" theme="primary" variant="text" class="is-primary" @click="goToMyMaterials()">去我的素材</t-button>
                 <!-- 暂停/下架且未加入：没有可做的主操作，画 — 而不是留一颗会被拒的按钮。 -->
                 <template v-else>—</template>
-              </t-space>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
+        <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
       </ResourceCard>
 
       <MaterialDetailDrawer
@@ -380,8 +378,10 @@ onMounted(async () => {
 
 <style scoped>
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
+.material-metrics { display:grid;gap:4px; }
+.material-metrics span+span { font-size:12px;color:var(--wt-text-tertiary); }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.material-cell__cover { width: 56px; height: 36px; flex: none; }
+.material-cell__cover { width: 42px; height: 52px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .material-cell__source { color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* 一行不折行：行高跟着数据变，一张表里每行不一样高，扫描成本立刻上去。 */

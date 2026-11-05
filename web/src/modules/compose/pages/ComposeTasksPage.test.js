@@ -82,7 +82,7 @@ describe('compose tasks page', () => {
   // 列序固定：识别 → 来源（含负责人）→ 结果 → 状态 → 时间（创建、完成）→ 操作。
   it('declares the eleven columns in the fixed order', () => {
     const columns = source.slice(source.indexOf('const taskColumns'), source.indexOf('const tableScroll'))
-    const order = ['row-select', 'id', 'name', 'trigger_type', 'material_id', 'strategy', 'operator', 'output', 'status', 'created_at', 'finished_at', 'op']
+    const order = ['row-select', 'id', 'name', 'material_id', 'strategy', 'operator', 'status', 'created_at', 'op']
     // 分母可见：列数对不上说明列结构被改过，立刻失败而不是让后面的顺序断言空转。
     expect((columns.match(/colKey:/g) || [])).toHaveLength(order.length)
     for (let index = 1; index < order.length; index += 1) {
@@ -92,8 +92,8 @@ describe('compose tasks page', () => {
     }
   })
 
-  it('shows the task finish time in the list and names the detail field the same', () => {
-    expect(source).toContain("{ colKey: 'finished_at', title: '完成时间', width: 150 }")
+  it('keeps completion time in task details', () => {
+    expect(source).not.toContain("{ colKey: 'finished_at'")
     expect(source).toContain('<template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>')
     expect(source).toContain('<span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span>')
     expect(source).not.toContain('结束时间')
@@ -157,7 +157,7 @@ describe('compose tasks page', () => {
 
   // 操作列宽按行里最多会出现的按钮清单推导（排队中的行才有 取消），不再写死 130。
   it('derives the op column width from the buttons a row can show', () => {
-    expect(source).toContain("opColumnWidth(['详情', '取消', '重试'])")
+    expect(source).toContain("opColumnWidth(['详情', '取消', '重试'], {variant:'text'})")
     expect(source).not.toContain("width: 130, fixed: 'right'")
   })
 
@@ -246,9 +246,9 @@ describe('compose tasks page', () => {
   // 详情头只有「任务详情 + ×」：不放 Hero 大卡，也不放任何业务按钮。
   it('drops the hero card and keeps business actions out of the header', () => {
     expect(source).not.toContain('compose-detail__hero')
-    expect(source).toContain('header="任务详情"')
-    expect(source).toContain('size="min(62vw, 880px)"')
-    expect(source).toContain(':close-btn="true"')
+    expect(source).toContain('title="任务详情"')
+    expect(source).toContain('kind="drawer" :width="880"')
+    expect(source).toContain('<ResourceOverlay')
     expect(source).not.toContain('>关闭<')
   })
 
@@ -265,7 +265,7 @@ describe('compose tasks page', () => {
 
   // 失败任务的成片区只陈述事实：未生成成片 + 为什么，不编一个占位成片。
   it('states that a failed task produced no output', () => {
-    expect(source).toContain('任务执行失败，因此没有生成成片。')
+    expect(source).toContain('detail.error_message')
     expect(source).toContain('未生成成片')
     expect(source).toContain("row.status === 'success' ? row.composite_output_id : null")
     // 当前阶段是纯文字，且阶段名带「中」的（视频合成中）不能直接接「失败」。

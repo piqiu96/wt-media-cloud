@@ -24,7 +24,7 @@ const FILES = ['MaterialLibraryPage.vue', 'MyMaterialsPage.vue']
 // 分母留在这里，列数对不上就立刻失败，而不是让宽度断言在一个抽不到的数组上静默空转。
 const TABLES = [
   { file: 'MaterialLibraryPage.vue', name: 'columns', count: 11 },
-  { file: 'MyMaterialsPage.vue', name: 'columns', count: 10 },
+  { file: 'MyMaterialsPage.vue', name: 'columns', count: 12 },
 ]
 
 describe('material list page conventions', () => {

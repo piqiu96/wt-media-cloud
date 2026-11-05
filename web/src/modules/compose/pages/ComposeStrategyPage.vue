@@ -1,4 +1,8 @@
 <script setup>
+import '../production.css'
+import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -19,6 +23,10 @@ import { scheduleLabel } from '../scheduleForm.js'
 import { defaultCondition, displayRules, saveRules } from '../strategyRules.js'
 import { templateLabel } from '../strategyConfig.js'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourceForm from '../../../shared/ui/resource/ResourceForm.vue'
+import ResourceFieldHelp from '../../../shared/ui/resource/ResourceFieldHelp.vue'
+import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import ComposeReorderActions from '../components/ComposeReorderActions.vue'
 import { draggedKey, reorderItems } from '../reorder.js'
@@ -198,14 +206,14 @@ function onPageSizeChange() { pagination.value.current = 1; load() }
 
 const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
-  { colKey: 'name', title: '策略名称', width: 220 },
-  { colKey: 'template', title: '合成模板', width: 180 },
-  { colKey: 'category', title: '所属类目', width: 130 },
-  { colKey: 'team', title: '所属团队', width: 130 },
-  { colKey: 'operator', title: '负责人', width: 120 },
-  { colKey: 'schedule', title: '执行计划', width: 150 },
-  { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情'], { loading: canManage.value }), fixed: 'right' },
+  { colKey: 'name', title: '策略名称', width: 180 },
+  { colKey: 'template', title: '合成模板', width: 115 },
+  { colKey: 'category', title: '类目', width: 85 },
+  ...(isAdmin.value ? [{ colKey: 'team', title: '团队', width: 100 }] : []),
+  { colKey: 'operator', title: '负责人', width: 90 },
+  { colKey: 'schedule', title: '执行计划', width: 180 },
+  { colKey: 'status', title: '状态', width: 80 },
+  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情'], { variant: 'text', primary: canManage.value, loading: canManage.value }), fixed: 'right' },
 ])
 
 // 横向滚动宽度由列宽推导，不写死（写死值与列宽合计无关，是个漂移源）。
@@ -660,9 +668,9 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved strategy-page">
+    <div class="wt-resource-page resource-visual-approved production-page strategy-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="合成策略" :description="canManage ? '维护合成模板的业务参数，普通运营据此创建合成任务' : '选择可用策略，在创建合成任务时使用'">
+      <ResourcePageHeader title="合成策略" description="设置制作方法、选材条件和执行时间。">
         <template #actions>
           <t-button v-if="canManage" theme="primary" @click="openCreate">新增策略</t-button>
         </template>
@@ -671,7 +679,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <!-- 筛选区与表格同卡（与内容池一致）：filter-bar 自带分隔线，下方接表格与分页。 -->
       <ResourceCard class="strategy-card">
         <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">策略名称</span><t-input v-model="filters.search" clearable placeholder="搜索策略名称" @enter="query" /></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="策略名称 / ID" @enter="query" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">所属类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
             <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
           </BusinessSelect></label>
@@ -683,8 +691,8 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="query">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-            <t-button variant="text" @click="advancedFiltersVisible = !advancedFiltersVisible">{{ advancedFiltersVisible ? '收起高级筛选' : '高级筛选' }}</t-button>
-          </div>
+            </div>
+          <ResourceAdvancedToggle v-model="advancedFiltersVisible" />
           <div v-if="advancedFiltersVisible" class="wt-advanced-filters">
           <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
             <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
@@ -696,7 +704,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             <template #id="{ row }"><span class="strategy-id">{{ row.id }}</span></template>
             <template #name="{ row }">
               <div class="strategy-name-cell">
-                <span class="strategy-name-cell__main" :title="row.name">{{ row.name }}</span>
+                <span class="strategy-name-cell__main" :title="row.name">{{ row.name }}</span><span class="strategy-name-cell__sub">{{ strategySettings(row).map(group => `${group.name} × ${group.copies}`).join('、') }}</span>
               </div>
             </template>
             <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
@@ -708,183 +716,114 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
               <t-switch v-if="canManage" :value="row.status === 'enabled'" :label="['启用', '停用']" :loading="statusPendingID === row.id" :disabled="statusPendingID !== null" @change="(value) => toggleStatus(row, value)" />
               <t-switch v-else :value="row.status === 'enabled'" :label="['启用', '停用']" disabled title="当前角色只能查看策略状态" />
             </template>
-            <template #schedule="{ row }">{{ scheduleState(row) }}</template>
+            <template #schedule="{ row }"><div class="strategy-schedule-cell"><span class="strategy-schedule-cell__mode">{{ scheduleState(row) }}</span><span>每次 {{ row.single_limit }}<template v-if="row.execution_mode === 'scheduled'"> / 每日 {{ row.daily_limit }}</template> 条素材</span><span>{{ (row.priority_rules || []).filter(rule => rule.action === 'filter').length }} 条排除 · {{ (row.priority_rules || []).filter(rule => rule.action === 'match').length }} 条选入</span></div></template>
             <template #op="{ row }">
-              <t-space size="small" class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+              <ResourceRowActions>
+                <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
                 <template v-if="canManage">
-                  <t-button size="small" theme="primary" @click="openEdit(row)">编辑</t-button>
-                  <t-button size="small" class="wt-secondary-button" variant="outline" :loading="runPendingID === row.id" :disabled="row.status !== 'enabled' || runPendingID !== null" :title="row.status !== 'enabled' ? '策略已停用，不能执行' : ''" @click="runNow(row)">立即执行</t-button>
-                  <t-button size="small" class="wt-secondary-button" variant="outline" @click="openCopy(row)">复制</t-button>
+                  <t-button size="small" theme="primary" variant="text" @click="openEdit(row)">编辑</t-button>
+                  <t-button size="small" class="is-primary" variant="text" :loading="runPendingID === row.id" :disabled="row.status !== 'enabled' || runPendingID !== null" :title="row.status !== 'enabled' ? '策略已停用，不能执行' : ''" @click="runNow(row)">立即执行</t-button>
+                  <t-button size="small" class="wt-secondary-button" variant="text" @click="openCopy(row)">复制</t-button>
                 </template>
-              </t-space>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="onPageChange" @page-size-change="onPageSizeChange" /></div>
+        <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="onPageChange" @page-size-change="onPageSizeChange" /></div>
       </ResourceCard>
 
-      <ResourceOverlay :visible="visible" :title="editingID ? '编辑合成策略' : '新增合成策略'" :width="1040" :busy="saving" @close="requestCloseEditor">
+      <ResourceOverlay kind="drawer" :visible="visible" :title="editingID ? '编辑合成策略' : '新增合成策略'" :width="960" :busy="saving" @close="requestCloseEditor">
         <div ref="editorRoot" class="strategy-editor">
-          <div class="strategy-editor__form">
-            <div class="strategy-section">
-              <div class="strategy-section__title"><span class="strategy-no">①</span>基本信息</div>
-              <t-form label-width="88px">
-                <t-form-item label="策略名称" required-mark>
-                  <div class="strategy-field">
-                    <t-input v-model="form.name" :maxlength="120" placeholder="例如：王者荣耀高光切片" :status="nameError ? 'error' : undefined" />
-                    <p v-if="nameError" class="strategy-field-error">{{ nameError }}</p>
-                  </div>
-                </t-form-item>
-                <template v-if="!editingID">
-                  <t-form-item v-if="isAdmin" label="运营团队" required-mark>
-                    <BusinessSelect kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''">
-                      <t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" />
-                    </BusinessSelect>
-                  </t-form-item>
-                  <t-form-item v-if="!isAdmin" label="运营团队"><strong class="strategy-readonly">{{ teamName(currentUser?.team_id) }}</strong></t-form-item>
-                  <t-form-item label="业务分类" required-mark>
-                    <BusinessSelect kind="category" v-model="form.category_id" clearable @change="form.operator_id = ''">
-                      <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
-                    </BusinessSelect>
-                  </t-form-item>
-                </template>
-                <!-- 编辑时归属不可改（服务端 Update 不动 team/category），但要展示出来让人知道策略挂在哪。 -->
-                <template v-else>
-                  <t-form-item label="运营团队"><strong class="strategy-readonly">{{ teamName(form.team_id) }}</strong></t-form-item>
-                  <t-form-item label="业务分类"><strong class="strategy-readonly">{{ categoryName(form.category_id) }}</strong></t-form-item>
-                </template>
-                <!-- 负责人是策略的必填归属：任务与成片都从这里继承。候选跟着团队＋类目走。 -->
-                <t-form-item label="负责人" required-mark>
-                  <div class="strategy-field">
-                    <BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="operatorsLoading || !form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''">
-                      <t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" />
-                    </BusinessSelect>
-                    <p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p>
-                    <p v-else-if="form.category_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与类目下没有可指派的运营</p>
-                  </div>
-                </t-form-item>
-                <t-form-item label="合成模板" required-mark>
-                  <div class="strategy-field">
-                  <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange">
-                    <t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" />
-                  </t-select>
-                  <strong v-else class="strategy-readonly">{{ templateLabel(templates, form.compose_template_id) }}</strong>
-                  <t-link v-if="form.compose_template_id" theme="primary" @click="templateInfoVisible = true">模板说明</t-link>
-                  </div>
-                </t-form-item>
-              </t-form>
-            </div>
-
-            <div class="strategy-section">
-              <div class="strategy-section__title"><span class="strategy-no">②</span>默认成片设置</div>
-              <p v-if="!form.compose_template_id" class="strategy-bind-hint">请先选择合成模板</p>
-              <ComposeStrategySettings v-else v-model="outputSettings" :fields="formSchemaFields" :errors="paramErrors" />
-            </div>
-            <div class="strategy-section">
-              <div class="strategy-section__title"><span class="strategy-no">③</span>执行设置</div>
-              <t-form label-width="112px">
-                <t-form-item label="每次素材上限" required-mark><t-input-number v-model="form.single_limit" :min="1" :max="100" suffix="条" /></t-form-item>
-                <t-form-item v-if="form.execution_mode === 'scheduled'" label="每日素材上限" required-mark><t-input-number v-model="form.daily_limit" :min="1" :max="1000" suffix="条" /></t-form-item>
-                <t-form-item label="执行方式" required-mark>
-                  <t-radio-group v-model="form.execution_mode">
-                    <t-radio value="manual">手动执行</t-radio>
-                    <t-radio value="scheduled">定时执行</t-radio>
-                  </t-radio-group>
-                </t-form-item>
-                <template v-if="form.execution_mode === 'scheduled'">
-                  <t-form-item label="执行周期" required-mark>
-                    <t-select v-model="form.schedule.mode"><t-option value="interval" label="每 N 分钟" /><t-option value="daily" label="每天固定时间" /></t-select>
-                  </t-form-item>
-                  <t-form-item v-if="form.schedule.mode === 'interval'" label="执行间隔" required-mark><t-input-number v-model="form.schedule.interval_minutes" :min="1" :max="1440" suffix="分钟" /></t-form-item>
-                  <t-form-item v-else label="每日时间" required-mark><t-input v-model="form.schedule.daily_time" placeholder="09:00" /></t-form-item>
-                  <t-form-item label="时区" required-mark><t-input v-model="form.schedule.timezone" placeholder="Asia/Shanghai" /></t-form-item>
-                  <t-form-item label="下次执行预览"><span class="strategy-readonly">{{ nextRunPreview ? formatDateTime(nextRunPreview) : nextRunPreviewError || '填写有效计划后由服务端计算' }}</span></t-form-item>
-                </template>
-              </t-form>
-            </div>
-            <div class="strategy-section">
-              <div class="strategy-section__title"><span class="strategy-no">④</span>选材条件</div>
-              <p class="strategy-bind-hint">先应用全部排除规则，再按优先级选入；本策略已执行的素材会跳过。</p>
+          <ResourceSection title="基本信息" variant="form">
+            <ResourceForm class="resource-form-grid">
+              <t-form-item label="策略名称" required-mark><div class="strategy-field"><t-input v-model="form.name" :maxlength="120" placeholder="输入策略名称" :status="nameError ? 'error' : undefined" /><p v-if="nameError" class="strategy-field-error">{{ nameError }}</p></div></t-form-item>
+              <t-form-item label="所属类目" required-mark>
+                <BusinessSelect v-if="!editingID" kind="category" v-model="form.category_id" clearable @change="form.operator_id = ''"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect>
+                <span v-else class="resource-form-value">{{ categoryName(form.category_id) }}</span>
+              </t-form-item>
+              <t-form-item required-mark>
+                <template #label><span class="strategy-template-label">合成模板<ResourceFieldHelp content="模板决定制作方式。保存后如需更换模板，请复制策略。" /><t-link v-if="form.compose_template_id" theme="primary" @click="templateInfoVisible = true">模板说明 ↗</t-link></span></template>
+                <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange"><t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" /></t-select>
+                <span v-else class="resource-form-value">{{ templateLabel(templates, form.compose_template_id) }}</span>
+              </t-form-item>
+              <t-form-item label="负责人" required-mark><div class="strategy-field"><BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="operatorsLoading || !form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''"><t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" /></BusinessSelect><p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p><p v-else-if="form.category_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与类目下没有可指派的运营</p></div></t-form-item>
+              <t-form-item v-if="isAdmin" label="运营团队" :required-mark="!editingID"><BusinessSelect v-if="!editingID" kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect><span v-else class="resource-form-value">{{ teamName(form.team_id) }}</span></t-form-item>
+            </ResourceForm>
+          </ResourceSection>
+          <ResourceSection title="默认成片设置" variant="form">
+            <p v-if="!form.compose_template_id" class="strategy-bind-hint">请先选择合成模板</p>
+            <template v-else><p class="strategy-section-note">各组独立保存参数，新增带入模板默认值。</p><ComposeStrategySettings v-model="outputSettings" :fields="formSchemaFields" :errors="paramErrors" /></template>
+          </ResourceSection>
+          <ResourceSection title="执行设置" variant="form">
+            <ResourceForm class="resource-form-grid">
+              <t-form-item required-mark><template #label>执行方式<ResourceFieldHelp :content="form.execution_mode === 'scheduled' ? '按计划自动执行；也可点击立即执行。保存不会立即开始。' : '点击立即执行，确认素材和预计成片数后开始。'" /></template><t-select v-model="form.execution_mode" :options="[{value:'manual',label:'手动执行'},{value:'scheduled',label:'定时执行'}]" /></t-form-item>
+              <t-form-item label="每次素材上限" required-mark><t-input-number v-model="form.single_limit" :min="1" :max="100" suffix="条" theme="column" /></t-form-item>
+              <template v-if="form.execution_mode === 'scheduled'">
+                <t-form-item label="计划类型" required-mark><t-select v-model="form.schedule.mode" :options="[{value:'daily',label:'每天固定时间'},{value:'interval',label:'固定间隔'}]" /></t-form-item>
+                <t-form-item v-if="form.schedule.mode === 'interval'" label="间隔分钟" required-mark><t-input-number v-model="form.schedule.interval_minutes" :min="1" :max="1440" suffix="分钟" theme="column" /></t-form-item>
+                <t-form-item v-else label="每日执行时间" required-mark><t-time-picker v-model="form.schedule.daily_time" format="HH:mm" /></t-form-item>
+                <t-form-item label="每日素材上限" required-mark><t-input-number v-model="form.daily_limit" :min="1" :max="1000" suffix="条" theme="column" /></t-form-item>
+                <t-form-item required-mark><template #label>时区<ResourceFieldHelp content="使用 IANA 时区名称，例如 Asia/Shanghai、UTC。" /></template><t-input v-model="form.schedule.timezone" placeholder="Asia/Shanghai" /></t-form-item>
+                <t-form-item label="下次执行"><span class="resource-form-value">{{ nextRunPreview ? formatDateTime(nextRunPreview) : nextRunPreviewError || '填写计划后计算' }}</span></t-form-item>
+              </template>
+            </ResourceForm>
+          </ResourceSection>
+          <ResourceSection title="选材条件" variant="form">
+            <template #title-extra><ResourceFieldHelp content="先排除，再按优先级选入。缺少必要指标或已在本策略创建过任务的素材将跳过。" /></template>
+            <template #default>
               <div v-for="(rule, index) in form.priority_rules" :key="rule._key" class="strategy-rule" :class="{ 'is-drop-target': ruleDropTarget === rule._key }" @dragover.prevent="ruleDropTarget = rule._key" @dragleave.self="ruleDropTarget = null" @drop.prevent="dropRule($event, rule)">
-                <ComposeReorderActions :item-key="rule._key" scope="rules" :index="index" :count="form.priority_rules.length" @move="moveRule(index, $event)" @remove="removeRule(index)" @dragend="ruleDropTarget = null">
-                  {{ rule.action === 'filter' ? '排除规则' : '选入优先级' }} {{ rule.priority }}
-                </ComposeReorderActions>
-                <t-form label-width="112px">
-                  <t-form-item label="规则类型" required-mark>
-                    <t-radio-group v-model="rule.action"><t-radio value="match">选入</t-radio><t-radio value="filter">排除</t-radio></t-radio-group>
-                  </t-form-item>
-                  <t-form-item label="判断方式" required-mark>
-                    <t-radio-group v-model="rule.logic"><t-radio value="all">全部满足</t-radio><t-radio value="any">任一满足</t-radio></t-radio-group>
-                  </t-form-item>
-                  <t-form-item label="条件" required-mark>
-                    <div class="strategy-rule__conditions">
-                      <div v-for="(condition, conditionIndex) in rule.conditions" :key="conditionIndex" class="strategy-rule__condition">
-                        <t-select v-model="condition.field" @change="changeConditionField(condition)"><t-option v-for="field in conditionFields" :key="field.value" :value="field.value" :label="field.label" /></t-select>
-                        <!-- 运算符选项必须走 :options：<t-option> 子节点是插槽内容，下拉自己把它缓存成
-                             一个 computed，编辑器整体换 form 对象后它追的还是旧对象，第一个条件的运算符
-                             列表会一直停在「发布时间」那一套（收藏量只能选到「早于」这类非法运算符）。 -->
-                        <t-select v-model="condition.operator" :options="conditionOperators(condition.field)" @change="changeConditionOperator(condition)" />
-                        <t-date-picker v-if="condition.field === 'published_at' && ['gte', 'lt'].includes(condition.operator)" v-model="condition.value" enable-time-picker value-type="time-stamp" format="YYYY-MM-DD HH:mm:ss" clearable />
-                        <t-input-number v-else v-model="condition.value" :min="condition.operator === 'recent_hours' || condition.operator === 'recent_days' ? 1 : 0" :max="condition.operator === 'recent_hours' ? 8760 : condition.operator === 'recent_days' ? 365 : undefined" theme="column" />
-                        <t-button size="small" theme="danger" variant="text" :disabled="rule.conditions.length === 1" @click="rule.conditions.splice(conditionIndex, 1)">删除</t-button>
-                      </div>
-                      <t-button size="small" variant="text" @click="rule.conditions.push(defaultCondition())">添加条件</t-button>
+                <ComposeReorderActions :item-key="rule._key" scope="rules" :index="index" :count="form.priority_rules.length" @move="moveRule(index, $event)" @remove="removeRule(index)" @dragend="ruleDropTarget = null">{{ rule.action === 'filter' ? '排除规则' : '选入优先级' }} {{ rule.priority }}</ComposeReorderActions>
+                <ResourceForm class="resource-form-grid">
+                  <t-form-item label="命中后" required-mark><t-select v-model="rule.action" :options="[{value:'match',label:'选入'},{value:'filter',label:'排除'}]" /></t-form-item>
+                  <t-form-item label="条件关系" required-mark><t-select v-model="rule.logic" :options="[{value:'all',label:'全部满足'},{value:'any',label:'任一满足'}]" /></t-form-item>
+                  <div class="strategy-rule__conditions resource-form-full">
+                    <div v-for="(condition, conditionIndex) in rule.conditions" :key="conditionIndex" class="strategy-rule__condition">
+                      <t-form-item label="指标"><t-select v-model="condition.field" :options="conditionFields" @change="changeConditionField(condition)" /></t-form-item>
+                      <t-form-item label="比较"><t-select v-model="condition.operator" :options="conditionOperators(condition.field)" @change="changeConditionOperator(condition)" /></t-form-item>
+                      <t-form-item label="数值"><t-date-picker v-if="condition.field === 'published_at' && ['gte', 'lt'].includes(condition.operator)" v-model="condition.value" enable-time-picker value-type="time-stamp" format="YYYY-MM-DD HH:mm:ss" clearable /><t-input-number v-else v-model="condition.value" :min="['recent_hours','recent_days'].includes(condition.operator) ? 1 : 0" :max="condition.operator === 'recent_hours' ? 8760 : condition.operator === 'recent_days' ? 365 : undefined" theme="column" /></t-form-item>
+                      <t-button size="small" variant="text" :disabled="rule.conditions.length === 1" @click="updateRuleDraft(() => rule.conditions.splice(conditionIndex, 1))">移除条件</t-button>
                     </div>
-                  </t-form-item>
-                </t-form>
+                    <t-button size="small" theme="primary" variant="text" @click="updateRuleDraft(() => rule.conditions.push(defaultCondition()))">添加条件</t-button>
+                  </div>
+                </ResourceForm>
               </div>
-              <t-button class="strategy-rule__add" variant="outline" @click="addRule">添加优先级</t-button>
-
-            </div>
-          </div>
-
-          <div class="strategy-editor__aside">
-            <div class="strategy-aside">
-              <div class="strategy-aside__title">配置说明</div>
-              <div class="strategy-aside__item"><strong>① 基础信息</strong><span>策略名称用于区分不同策略；所属团队与类目决定普通运营的可见范围。</span></div>
-              <div class="strategy-aside__item"><strong>② 默认成片设置</strong><span>每组独立保存平台、份数和完整模板参数。</span></div>
-              <div class="strategy-aside__tip">小提示：预计成片数 = 素材条数 × 各组份数之和。</div>
-            </div>
-          </div>
+              <t-button variant="outline" @click="addRule">添加优先级规则</t-button>
+            </template>
+          </ResourceSection>
         </div>
-        <!-- 取消在左、保存在右（AdminUI 规范：底部动作固定次序，主按钮突出主要动作）。 -->
-        <template #footer>
-          <t-button class="wt-secondary-button" variant="outline" :disabled="saving" @click="requestCloseEditor">取消</t-button>
-          <t-button theme="primary" :loading="saving" @click="save">保存</t-button>
-        </template>
+        <template #footer><t-button class="wt-secondary-button" variant="outline" :disabled="saving" @click="requestCloseEditor">取消</t-button><t-button theme="primary" :loading="saving" @click="save">保存</t-button></template>
       </ResourceOverlay>
 
-      <t-dialog v-model:visible="templateInfoVisible" header="模板说明" width="min(92vw, 640px)" :footer="false">
+      <ResourceOverlay v-model:visible="templateInfoVisible" title="模板说明" :width="720" :footer="false">
         <strong>{{ templateLabel(templates, form.compose_template_id) }}</strong>
         <p>{{ selectedTemplate?.description || selectedTemplate?.schema?.description || '此版本暂未提供用途说明' }}</p>
         <div v-for="field in formSchemaFields" :key="field.key" class="strategy-overview__rule">
           <strong>{{ field.label }}</strong><p>{{ field.description || '暂无参数说明' }}</p>
           <span>{{ field.required ? '必填' : '选填' }} · {{ field.editable === true ? '任务内可调整' : '任务内固定' }}<template v-if="field.minimum !== undefined"> · 最小 {{ field.minimum }}</template><template v-if="field.maximum !== undefined"> · 最大 {{ field.maximum }}</template><template v-if="field.default !== undefined"> · 默认 {{ field.default }}</template></span>
         </div>
-      </t-dialog>
-      <t-dialog :visible="executionVisible" header="立即执行预览" width="min(92vw, 720px)" :footer="false" :close-on-overlay-click="!runPendingID" :close-btn="!runPendingID" @close="!runPendingID && (executionVisible = false)">
+      </ResourceOverlay>
+      <ResourceOverlay :visible="executionVisible" title="立即执行预览" :width="800" :busy="!!runPendingID" @close="!runPendingID && (executionVisible = false)">
         <FeedbackAlert v-if="executionError" theme="error" :message="executionError" />
         <t-loading :loading="executionLoading" :show-overlay="true"><div style="min-height:100px"><ComposeStrategyExecutionPreview v-if="executionView" :view="executionView" @progress="openExecutionProgress" /></div></t-loading>
-        <div class="strategy-editor__footer">
+        <template #footer>
           <t-button class="wt-secondary-button" variant="outline" :disabled="!!runPendingID" @click="executionVisible = false">关闭</t-button>
           <t-button v-if="executionError" variant="outline" :disabled="!!runPendingID || executionLoading" @click="refreshExecutionPreview">重新预览</t-button>
           <t-button v-if="executionView?.selected_count && !executionView?.active_batch" theme="primary" :disabled="!canExecutePreview" :loading="!!runPendingID" @click="confirmExecution">确认执行</t-button>
-        </div>
-      </t-dialog>
+        </template>
+      </ResourceOverlay>
 
-      <t-dialog v-model:visible="copyVisible" header="复制合成策略" width="480px" :footer="false">
-        <t-form label-width="96px">
+      <ResourceOverlay v-model:visible="copyVisible" title="复制合成策略" :width="560" :busy="copySaving">
+        <ResourceForm>
           <t-form-item label="新策略名称" required-mark><t-input v-model="copyName" :maxlength="120" placeholder="输入新策略名称" @enter="submitCopy" /></t-form-item>
           <t-form-item v-if="copyTarget" label="模板"><t-input :value="templateLabel(templates, copyTarget.compose_template_id)" disabled /></t-form-item>
-        </t-form>
-        <div class="strategy-editor__footer">
+        </ResourceForm>
+        <template #footer>
           <t-button class="wt-secondary-button" variant="outline" @click="copyVisible = false">取消</t-button>
           <t-button theme="primary" :loading="copySaving" @click="submitCopy">复制</t-button>
-        </div>
-      </t-dialog>
+        </template>
+      </ResourceOverlay>
 
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" :header="detailRow?.name || '策略详情'" size="min(92vw, 880px)" :footer="canManage">
+      <ResourceOverlay  v-model:visible="detailVisible" :title="detailRow?.name || '策略详情'" kind="drawer" :width="880" :footer="canManage">
         <t-tabs v-if="detailRow" v-model="detailTab" class="strategy-detail-tabs">
           <t-tab-panel value="overview" label="策略信息">
             <div class="strategy-overview">
@@ -948,7 +887,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                     <template #op="{ row }"><t-link v-if="row.batch_id" theme="primary" @click="openRunBatch(row)">详情</t-link><span v-else>—</span></template>
                   </t-table>
                 </div>
-                <div class="pagination-bar"><t-pagination v-model:current="runPagination.current" v-model:pageSize="runPagination.pageSize" :total="runHistoryTotal" :page-size-options="[10, 20, 50]" @current-change="onRunPageChange" @page-size-change="onRunPageChange" /></div>
+                <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="runPagination.current" v-model:pageSize="runPagination.pageSize" :total="runHistoryTotal" :page-size-options="[10, 20, 50]" @current-change="onRunPageChange" @page-size-change="onRunPageChange" /></div>
               </t-loading>
             </div>
           </t-tab-panel>
@@ -960,79 +899,48 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             <span :title="detailRow.status !== 'enabled' ? '策略已停用，请先在策略列表启用后执行。' : ''"><t-button theme="primary" :disabled="detailRow.status !== 'enabled' || runPendingID !== null" :loading="runPendingID === detailRow.id" @click="runNow(detailRow)">立即执行</t-button></span>
           </div>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
     </div>
   </t-loading>
 </template>
 
 <style scoped>
-.strategy-run__counts { margin: 0 0 6px; color: var(--wt-text-tertiary); }
-.strategy-run__task { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--wt-border); }
-.strategy-run__task span { color: var(--wt-text-secondary); }
-.strategy-run__task em { color: var(--td-error-color); font-style: normal; overflow-wrap: anywhere; }
-.strategy-run-message { color: var(--wt-text-tertiary); font-size: 12px; }
-.strategy-card { padding: 18px 20px; margin-top: 16px; }
-.strategy-id { color: var(--wt-text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
-.strategy-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.strategy-name-cell__main { overflow: hidden; color: var(--wt-text-primary); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.strategy-name-cell__sub { color: var(--wt-text-tertiary); font-size: 12px; }
-.strategy-schedule-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; color: var(--wt-text-tertiary); font-size: 12px; }
-.strategy-editor { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; }
-.strategy-editor__form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.strategy-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }
-.strategy-section__title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.strategy-section__title small { color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; }
-.strategy-no { color: var(--wt-primary); font-weight: 700; }
-.strategy-editor__aside { min-width: 0; }
-.strategy-aside { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-page); }
-.strategy-aside__title { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.strategy-aside__item { display: flex; flex-direction: column; gap: 3px; }
-.strategy-aside__item strong { color: var(--wt-text-primary); font-size: 13px; }
-.strategy-aside__item span { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
-.strategy-aside__tip { margin-top: 4px; padding: 10px; border-radius: 8px; background: var(--wt-info-bg); color: var(--wt-primary); font-size: 12px; line-height: 1.55; }
-.strategy-editor__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.strategy-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-.strategy-field-error { margin: 0; color: var(--td-error-color, #d54941); font-size: 12px; line-height: 1.4; }
-.strategy-bind-hint { color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.55; }
-.strategy-rule { overflow-anchor: none; margin: 12px 0; padding: 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
+.strategy-name-cell, .strategy-schedule-cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.strategy-name-cell__main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.strategy-name-cell__sub, .strategy-schedule-cell { color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-schedule-cell__mode { color: var(--wt-text-primary); font-size: 13px; }
+.strategy-editor { min-width: 0; }
+.strategy-editor .resource-section + .resource-section { margin-top: 28px; }
+.strategy-template-label { display: inline-flex; align-items: center; gap: 4px; width: calc(100% - 16px); vertical-align: middle; }
+.strategy-template-label .t-link { margin-left: auto; font-size: 12px; }
+.strategy-section-note { margin: 0 0 20px; padding: 12px 14px; border-left: 3px solid var(--wt-primary); background: var(--wt-bg-page); color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-field { display: grid; gap: 4px; width: 100%; }
+.strategy-field-error { margin: 0; color: var(--wt-danger); font-size: 12px; }
+.strategy-bind-hint { color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-rule { overflow-anchor: none; margin: 16px 0; padding: 20px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }
 .strategy-rule.is-drop-target { border-color: var(--wt-primary); }
-.strategy-rule__conditions { display: flex; flex-direction: column; gap: 8px; width: 100%; }
-.strategy-config-form :deep(.t-form__label) { white-space: normal; overflow-wrap: anywhere; }
-.strategy-rule__condition { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; }
-.strategy-rule__condition > :nth-child(-n + 3) { min-width: 0; width: 100%; }
-.strategy-rule__condition > :last-child { justify-self: end; }
-.strategy-rule__add { width: 100%; margin-bottom: 16px; }
-.strategy-detail-tabs { margin-top: -8px; }
-.strategy-overview { display: grid; gap: 12px; padding-top: 12px; }
-.strategy-overview__section { border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); padding: 14px 16px; }
-.strategy-overview__section h4 { margin: 0 0 12px; color: var(--wt-text-primary); font-size: 14px; }
-.strategy-overview__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
-.strategy-overview__field { display: grid; grid-template-columns: minmax(82px, 0.45fr) minmax(0, 1fr); gap: 8px; font-size: 13px; }
-.strategy-overview__field--wide { grid-column: 1 / -1; }
-.strategy-overview__field span { color: var(--wt-text-tertiary); }
-.strategy-overview__field strong { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
-.strategy-overview__rule { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }
-.strategy-overview__rule-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
-.strategy-overview__rule-head strong { margin-right: auto; color: var(--wt-text-primary); font-size: 13px; }
-.strategy-overview__rule-head span { padding: 2px 8px; border-radius: var(--wt-radius-sm); background: var(--wt-bg-page); color: var(--wt-text-secondary); }
-.strategy-overview__condition { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) minmax(0, 2fr); gap: 8px; padding: 5px 0; border-top: 1px solid var(--wt-border); font-size: 12px; }
-.strategy-overview__condition span { color: var(--wt-text-secondary); }
-.strategy-overview__condition strong { color: var(--wt-text-primary); font-weight: 500; overflow-wrap: anywhere; }
-.strategy-history { padding-top: 12px; }
-.strategy-history__filters { display: grid; grid-template-columns: 160px minmax(220px, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 12px; }
-.strategy-history__actions { display: flex; gap: 8px; }
-.strategy-history__tasks { margin: 12px 0; padding: 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); font-size: 12px; }
-.strategy-history__tasks > strong { display: block; margin-bottom: 8px; color: var(--wt-text-primary); }
-.strategy-detail__footer { display: flex; justify-content: flex-end; gap: 8px; }
-@media (max-width: 680px) { .strategy-overview__grid, .strategy-history__filters { grid-template-columns: 1fr; } .strategy-overview__field--wide { grid-column: auto; } }
-.strategy-readonly { display: block; padding: 7px 0; color: var(--wt-text-primary); font-size: 13px; font-weight: 500; }
-.strategy-media { display: flex; flex-direction: column; gap: 8px; width: 100%; }
-.strategy-media__card { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }
-.strategy-media__card strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wt-text-primary); }
-.strategy-media__card span { color: var(--wt-text-tertiary); }
-.strategy-media__card a { color: var(--wt-primary); }
-</style>
-
-<style scoped>
-@media (max-width: 800px) { .strategy-editor { grid-template-columns: 1fr; } .strategy-editor__aside { display: none; } }
+.strategy-rule-help { display: flex; align-items: center; gap: 4px; color: var(--wt-text-tertiary); font-size: 12px; }
+.strategy-rule__conditions { display: grid; gap: 16px; min-width: 0; }
+.strategy-rule__conditions > .t-button { justify-self: start; }
+.strategy-rule__condition { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) auto; gap: 16px; align-items: end; }
+.strategy-rule__condition > * { min-width: 0; }
+.strategy-editor__footer, .strategy-detail__footer { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+.strategy-overview { display:grid;gap:24px;padding-top:20px; }
+.strategy-overview__section h4 { margin:0 0 16px;padding-left:10px;border-left:3px solid var(--wt-primary);font-size:14px; }
+.strategy-overview__grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px; }
+.strategy-overview__field { display:grid;grid-template-columns:112px minmax(0,1fr);gap:16px;font-size:14px;line-height:24px; }
+.strategy-overview__field span {color:var(--wt-text-tertiary);}
+.strategy-overview__field strong {font-weight:400;overflow-wrap:anywhere;}
+.strategy-overview__field--wide {grid-column:1/-1;}
+.strategy-overview__rule {margin-top:12px;padding:16px;border:1px solid var(--wt-border);border-radius:var(--wt-radius-sm);}
+.strategy-overview__rule-head {display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:12px;font-size:13px;}
+.strategy-overview__rule-head strong {margin-right:auto;}
+.strategy-overview__condition {display:flex;gap:16px;padding:6px 0;font-size:13px;}
+.strategy-history {padding-top:20px;}
+.strategy-history__filters {display:flex;flex-wrap:wrap;gap:20px 24px;align-items:flex-end;margin-bottom:20px;}
+.strategy-history__filters > .wt-filter-field {flex:0 1 180px;flex-direction:column;align-items:stretch;gap:8px;}
+.strategy-history__filters > .wt-filter-field:has(.t-date-range-picker) {flex-basis:300px;}
+.strategy-history__actions {display:flex;gap:8px;}
+.strategy-run-message {font-size:13px;color:var(--wt-text-tertiary);}
+@media(max-width:680px){.strategy-rule__condition{grid-template-columns:1fr 1fr;}.strategy-overview__grid{grid-template-columns:1fr;}.strategy-rule{padding:16px;}}
 </style>

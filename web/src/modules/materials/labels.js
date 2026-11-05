@@ -165,10 +165,10 @@ export function usageStatusTone(value) {
  * 而合成任务页的选素材列表只列「使用中」的关系 —— 「恢复使用后可…选用」就是这么来的。
  */
 export function nextStepHint(material) {
-  if (material?.usage_status === 'removed') return '恢复使用后可继续下载，并可在合成任务页选用'
+  if (material?.usage_status === 'removed') return '恢复使用后可用于合成或下载'
   switch (material?.video_status) {
     case 'not_downloaded':
-      return '下载到本机后可在合成任务页选用'
+      return '可在合成任务页选用；下载到本机需先准备视频'
     case 'downloading':
       return '文件准备中，完成后即可下载到本机'
     case 'ready':
