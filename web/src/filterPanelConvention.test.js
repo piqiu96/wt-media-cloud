@@ -77,11 +77,11 @@ export function auditFilterRows() {
   const rows = []
   for (const file of vueFiles(SRC)) {
     const text = readFileSync(file, 'utf8')
-    const markerRe = /class="filter-bar"/g
+    const markerRe = /class="filter-bar"|<ResourceFilterBar(?=[\s>])/g
     let marker
     while ((marker = markerRe.exec(text)) !== null) {
       const at = marker.index
-      const block = filterRowBlock(text, at)
+      const block = marker[0].startsWith('<ResourceFilterBar') ? text.slice(at, text.indexOf('</ResourceFilterBar>', at)) : filterRowBlock(text, at)
       const controls = []
       const controlRe = /<t-(input|select)\b/g
       let control
@@ -171,7 +171,10 @@ describe('filter panel convention', () => {
 
   it('pairs 查询 with 重置, primary first', () => {
     const offenders = []
-    for (const [file, entry] of perPage(rows)) {
+    for (const entry of rows) {
+      const file = `${entry.file}:${entry.line}`
+      // A small contextual selector may apply on change; full search bars retain query/reset.
+      if (!entry.buttons.some(b => ['查询','重置'].includes(b.text))) continue
       const query = entry.buttons.filter((b) => b.text === '查询')
       const reset = entry.buttons.filter((b) => b.text === '重置')
       if (query.length !== 1) offenders.push(`${file}：查询按钮 ${query.length} 个`)

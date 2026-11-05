@@ -229,3 +229,6 @@
 }
 .wt-resource-page.resource-visual-approved .wt-advanced-filters > .wt-filter-field { flex: 0 1 180px; }
 .wt-resource-page.resource-visual-approved .wt-advanced-filters > .wt-filter-field--wide { flex: 1 1 260px; max-width: 400px; }
+
+/* Selection columns stay 44px even when the table distributes spare space. */
+.resource-visual-approved .wt-resource-table .t-table__cell-check { width:44px; min-width:44px; max-width:44px; box-sizing:border-box; padding-inline:12px; text-align:center; }
