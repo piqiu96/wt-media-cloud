@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(new URL('./MyMaterialsPage.vue', import.meta.url), 'utf8')
 
 describe('my materials page', () => {
+  it('shows performance as content and never sends metric range filters', () => {
+    expect(source).toContain("{ colKey: 'metrics', title: '内容表现'")
+    expect(source).toContain('<MaterialPerformance :material="row" />')
+    expect(source).not.toContain('MaterialMetricFilters')
+    expect(source).not.toContain('metricRangeParams')
+  })
   /**
    * 一行是**一条关系**，而它展示的是嵌入的素材。
    *

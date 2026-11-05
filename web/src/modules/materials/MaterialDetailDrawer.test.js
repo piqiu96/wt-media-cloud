@@ -30,9 +30,8 @@ describe('material detail drawer', () => {
     expect(hero).toContain('MaterialCover')
     expect(template).toContain('material.author_home_url')
   })
-  it('uses metric presence instead of presenting missing values as zero', () => {
-    expect(template).toContain('metricLabel(material,key)')
-    for (const key of ['view_count','like_count','favorite_count','comment_count','share_count']) expect(template).toContain(key)
+  it('shares the measured performance display with the lists', () => {
+    expect(template).toContain('<MaterialPerformance :material="material" detail />')
   })
   it('fetches video access only at click time and resolves the running host', () => {
     expect(template).toContain('@click.prevent="openCloudVideo"')

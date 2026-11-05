@@ -3,10 +3,9 @@ import MaterialUsageDialog from '../components/MaterialUsageDialog.vue'
 import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
 import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
 import '../../compose/production.css'
-import MaterialMetricFilters from '../components/MaterialMetricFilters.vue'
-import { publishedRangeParams, emptyMetricRanges, metricRangeParams, metricLabel } from '../materialFilters.js'
+import MaterialPerformance from '../components/MaterialPerformance.vue'
+import { publishedRangeParams } from '../materialFilters.js'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
-import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
 import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
 import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
@@ -51,15 +50,13 @@ const total = ref(0)
 let loadSequence = 0
 const loading = ref(false)
 const error = ref('')
-const appliedAdvancedCount = ref(0)
-const advancedFilters = ref(false)
 const search = ref(route.query.search ? String(route.query.search) : '')
 const joinedFilter = ref('')
 const myUsageFilter = ref('unused')
 const teamUsageFilter = ref('')
 const teamFilter = ref('')
 const categoryFilters = ref([])
-const publishedRange = ref([]), metricFilters = ref(emptyMetricRanges())
+const publishedRange = ref([])
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
 const categories = ref([])
@@ -95,7 +92,7 @@ const columns = [
   { colKey: 'id', title: '素材 ID', width: 80, sorter: true },
   { colKey: 'material', title: '素材 / 作者', width: 280 },
   { colKey: 'category', title: '类目', width: 100 },
-  { colKey: 'metrics', title: '浏览 / 赞 / 收藏', width: 175 },
+  { colKey: 'metrics', title: '内容表现', width: 250 },
   { colKey: 'joined', title: '加入状态', width: 100 },
   { colKey: 'my_usage', title: '我的使用', width: 100 },
   { colKey: 'usage', title: '团队使用', width: 155 },
@@ -127,7 +124,6 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
       page: pagination.value.current, page_size: pagination.value.pageSize,
       search: search.value,
       ...publishedRangeParams(publishedRange.value),
-      ...metricRangeParams(metricFilters.value),
       team_id: teamFilter.value,
       category_ids: categoryFilters.value,
       joined: joinedFilter.value,
@@ -142,7 +138,6 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
     if (sequence !== loadSequence) return
     rows.value = data.items || []
     total.value = data.total || 0
-    appliedAdvancedCount.value = ['view_count','like_count','favorite_count'].filter(key => [params[`${key}_min`],params[`${key}_max`]].some(value => value != null && value !== '')).length
   } catch (e) {
     if (!quiet && sequence === loadSequence) error.value = e?.message || '读取素材失败'
   } finally {
@@ -265,7 +260,6 @@ function reset() {
   joinedFilter.value = ''
   myUsageFilter.value = 'unused'
   publishedRange.value = []
-  metricFilters.value = emptyMetricRanges()
   teamUsageFilter.value = ''
   teamFilter.value = ''
   categoryFilters.value = defaultCategoryFilters()
@@ -308,13 +302,6 @@ onMounted(async () => {
 <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
 <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
 <div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
-          <ResourceAdvancedToggle v-model="advancedFilters" :count="appliedAdvancedCount" controls="material-advanced-filters" />
-          <div v-if="advancedFilters" id="material-advanced-filters" class="wt-advanced-filters">
-
-
-
-          <MaterialMetricFilters v-model="metricFilters" />
-          </div>
         </ResourceFilterBar>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
@@ -330,7 +317,7 @@ onMounted(async () => {
               </div>
             </template>
             <template #category="{ row }">{{ categoryName(categories, row.category_id) }}</template>
-            <template #metrics="{row}"><div class="material-metrics"><span>{{ metricLabel(row,'view_count') }} 浏览</span><span>{{ metricLabel(row,'like_count') }} 赞 · {{ metricLabel(row,'favorite_count') }} 收藏</span></div></template>
+            <template #metrics="{row}"><MaterialPerformance :material="row" /></template>
             <!-- 加入状态读服务端投影：active=已加入，removed=已移出，无关系=未加入。 -->
             <template #joined="{ row }"><ResourceStatusBadge :tone="joinStatus(row).tone" :label="joinStatus(row).label" /></template>
             <template #my_usage="{ row }"><ResourceStatusBadge :tone="myUsageTone(row.my_usage)" :label="myUsageLabel(row.my_usage)" /></template>
@@ -377,8 +364,6 @@ onMounted(async () => {
 
 <style scoped>
 .material-table-card { margin-top: 16px; }
-.material-metrics { display:grid;gap:4px; }
-.material-metrics span+span { font-size:12px;color:var(--wt-text-tertiary); }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .material-cell__cover { width: 42px; height: 52px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

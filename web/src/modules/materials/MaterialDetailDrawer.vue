@@ -16,12 +16,13 @@ import ResourceOverlay from '../../shared/ui/resource/ResourceOverlay.vue'
 import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import ResourceSection from '../../shared/ui/resource/ResourceSection.vue'
 import ResourceDescriptions from '../../shared/ui/resource/ResourceDescriptions.vue'
-import { materialVideoState, metricLabel } from './materialFilters.js'
+import { materialVideoState } from './materialFilters.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { platformLabel } from '../../shared/utils/platforms.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
+import MaterialPerformance from './components/MaterialPerformance.vue'
 import {
   downloadActionLabel,
   categoryName,
@@ -231,9 +232,7 @@ async function openDirectory() {
           <t-descriptions-item label="操作人">{{ material.created_by_name || '—' }}</t-descriptions-item>
           <t-descriptions-item label="原作品"><a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a><template v-else>—</template></t-descriptions-item>
         </ResourceDescriptions></ResourceSection>
-        <ResourceSection title="内容表现"><ResourceDescriptions>
-          <t-descriptions-item v-for="[key,label] in [['view_count','浏览'],['like_count','点赞'],['favorite_count','收藏'],['comment_count','评论'],['share_count','分享']]" :key="key" :label="label">{{ metricLabel(material,key) }}</t-descriptions-item>
-        </ResourceDescriptions></ResourceSection>
+        <ResourceSection title="内容表现"><MaterialPerformance :material="material" detail /></ResourceSection>
         <ResourceSection title="使用情况"><ResourceDescriptions>
           <t-descriptions-item :label="mode === 'mine' ? '使用状态' : '加入状态'"><template v-if="mode === 'mine'"><ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" /><template v-else>—</template></template><ResourceStatusBadge v-else :tone="join.tone" :label="join.label" /></t-descriptions-item>
           <t-descriptions-item label="我的使用"><ResourceStatusBadge :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" /></t-descriptions-item>

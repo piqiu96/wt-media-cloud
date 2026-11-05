@@ -19,13 +19,12 @@ function sliceBetween(text, start, end) {
 const opBlock = sliceBetween(source, '#op=', '</ResourceRowActions>')
 
 describe('material library page', () => {
-  it('keeps usage and publication time basic and only metrics under advanced', () => {
+  it('keeps material discovery filters without metric ranges or an empty advanced entry', () => {
     const bar=source.slice(source.indexOf('<ResourceFilterBar>'),source.indexOf('</ResourceFilterBar>'))
-    const split=bar.indexOf('class="wt-advanced-filters"')
-    expect(split).toBeGreaterThan(0)
-    for (const label of ['综合搜索','类目','发布时间','我的使用','团队使用','加入状态']) expect(bar.slice(0,split)).toContain(label)
-    expect(bar.slice(split)).toContain('<MaterialMetricFilters')
-    expect(bar).toContain(':count="appliedAdvancedCount"')
+    for (const label of ['综合搜索','类目','发布时间','我的使用','团队使用','加入状态']) expect(bar).toContain(label)
+    expect(bar).not.toContain('MaterialMetricFilters')
+    expect(bar).not.toContain('ResourceAdvancedToggle')
+    expect(page).not.toContain('metricRangeParams')
   })
 
   it('opens the material a deep link names, through the single-material endpoint', () => {
@@ -228,11 +227,10 @@ describe('material library page', () => {
   it('keeps measured material performance after the category', () => {
     const categoryAt = source.indexOf("{ colKey: 'category'")
     const statusAt = source.indexOf("{ colKey: 'metrics'")
-    expect(source).toContain("{ colKey: 'metrics', title: '浏览 / 赞 / 收藏'")
+    expect(source).toContain("{ colKey: 'metrics', title: '内容表现'")
     expect(statusAt).toBeGreaterThan(categoryAt)
     expect(statusAt).toBeLessThan(source.indexOf("{ colKey: 'joined'"))
-    expect(source).toContain("metricLabel(row,'view_count')")
-    expect(source).toContain("metricLabel(row,'like_count')")
+    expect(source).toContain('<MaterialPerformance :material="row" />')
   })
 
   /**
@@ -294,9 +292,7 @@ describe('material library page', () => {
    * 的那一个取值。
    */
   it('uses measured metrics without substituting a missing count with zero', () => {
-    expect(source).toContain("metricLabel(row,'view_count')")
-    expect(source).toContain("metricLabel(row,'like_count')")
-    expect(source).toContain("metricLabel(row,'favorite_count')")
+    expect(source).toContain('<MaterialPerformance :material="row" />')
     expect(source).not.toContain('row.view_count || 0')
   })
 

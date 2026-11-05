@@ -4,8 +4,8 @@ import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue
 import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
 import '../../compose/production.css'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
-import MaterialMetricFilters from '../components/MaterialMetricFilters.vue'
-import { publishedRangeParams, emptyMetricRanges, metricRangeParams, metricLabel, materialVideoState } from '../materialFilters.js'
+import MaterialPerformance from '../components/MaterialPerformance.vue'
+import { publishedRangeParams, materialVideoState } from '../materialFilters.js'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
 import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
@@ -59,7 +59,7 @@ const statusFilter = ref('')
 const usageVisible=ref(false),usageMaterial=ref(null)
 function openUsage(row){usageMaterial.value=row;usageVisible.value=true}
 const appliedAdvancedCount = ref(0)
-const advancedFilters = ref(false), categoryFilters = ref([]), publishedRange = ref([]), metricFilters = ref(emptyMetricRanges())
+const advancedFilters = ref(false), categoryFilters = ref([]), publishedRange = ref([])
 const myUsageFilter = ref('unused'), teamUsageFilter = ref(''), usageStatusFilter = ref('active')
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
@@ -78,7 +78,7 @@ const columns = [
   { colKey: 'material', title: '素材 / 作者', width: 280 },
   { colKey: 'category', title: '类目', width: 100 },
   { colKey: 'published_at', title: '发布时间', width: 155, sorter: true },
-  { colKey: 'metrics', title: '浏览 / 赞 / 收藏', width: 175 },
+  { colKey: 'metrics', title: '内容表现', width: 250 },
   { colKey: 'my_usage', title: '我的使用', width: 100 },
   { colKey: 'team_usage', title: '团队使用', width: 150 },
   { colKey: 'video_status', title: '视频状态', width: 100 },
@@ -110,8 +110,6 @@ function toRows(usages) {
     added_at: usage.created_at,
   }))
 }
-
-function countLabel(value) { return value === null || value === undefined ? '—' : Number(value).toLocaleString() }
 
 function fileStatus(row) {
   return materialVideoState(row, localPresence(row))
@@ -179,7 +177,6 @@ function reset() {
   usageStatusFilter.value = 'active'
   categoryFilters.value = (currentUser.value?.category_ids || []).filter(id => categories.value.some(row => row.id === id))
   publishedRange.value = []
-  metricFilters.value = emptyMetricRanges()
   search.value = ''
   statusFilter.value = ''
   load({ applyFilters: true })
@@ -198,14 +195,14 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const draft = { category_ids: categoryFilters.value.join(','), ...publishedRangeParams(publishedRange.value), ...metricRangeParams(metricFilters.value), my_usage: myUsageFilter.value, team_usage: teamUsageFilter.value, usage_status: usageStatusFilter.value, page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value }
+    const draft = { category_ids: categoryFilters.value.join(','), ...publishedRangeParams(publishedRange.value), my_usage: myUsageFilter.value, team_usage: teamUsageFilter.value, usage_status: usageStatusFilter.value, page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value }
     if (applyFilters || !appliedQuery.value) appliedQuery.value = JSON.parse(JSON.stringify(draft))
     const params = { ...appliedQuery.value, page: pagination.value.current, page_size: pagination.value.pageSize, sort_by: sortBy.value, sort_order: sortOrder.value }
     const data = await client.listMyMaterials(params)
     if (sequence !== loadSequence) return
     rows.value = toRows(data.items || [])
     total.value = data.total || 0
-    appliedAdvancedCount.value = ['view_count','like_count','favorite_count'].filter(key => [params[`${key}_min`],params[`${key}_max`]].some(value => value != null && value !== '')).length + (params.video_status ? 1 : 0)
+    appliedAdvancedCount.value = params.video_status ? 1 : 0
     selectedRowKeys.value = selectedRowKeys.value.filter((key) => rows.value.some((row) => String(row.usage_id) === String(key) && canSelectForDownload(row)))
   } catch (e) {
     if (!quiet && sequence === loadSequence) error.value = e?.message || '读取我的素材失败'
@@ -342,11 +339,7 @@ onMounted(() => {
 <div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
           <ResourceAdvancedToggle v-model="advancedFilters" :count="appliedAdvancedCount" controls="material-advanced-filters" />
           <div v-if="advancedFilters" id="material-advanced-filters" class="wt-advanced-filters">
-
-
-
             <label class="wt-filter-field"><span class="wt-filter-field__label">视频准备</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
-            <MaterialMetricFilters v-model="metricFilters" />
           </div>
         </ResourceFilterBar>
         <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></ResourceSelectionToolbar>
@@ -369,9 +362,7 @@ onMounted(() => {
             <template #category="{row}">{{ categoryName(categories,row.category_id) }}</template>
             <template #my_usage="{row}">{{ myUsageLabel(row.my_usage) }}</template>
             <template #team_usage="{row}"><t-link theme="primary" @click="openUsage(row)">{{ usageSummary(row) }}</t-link></template>
-            <template #metrics="{row}"><div class="material-metrics"><span>{{ metricLabel(row,'view_count') }} 浏览</span><span>{{ metricLabel(row,'like_count') }} 赞 · {{ metricLabel(row,'favorite_count') }} 收藏</span></div></template>
-            <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
-            <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
+            <template #metrics="{row}"><MaterialPerformance :material="row" /></template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="fileStatus(row).tone" :label="fileStatus(row).label" /></template>
             <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的（缺值兜底成「使用中」
                  就是替服务端宣布一条它没说过关系）。 -->
@@ -426,8 +417,6 @@ onMounted(() => {
 .material-table-card { margin-top: 16px; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
-.material-metrics { display:grid;gap:4px; }
-.material-metrics span+span { font-size:12px;color:var(--wt-text-tertiary); }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .material-cell__cover { width: 42px; height: 52px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
