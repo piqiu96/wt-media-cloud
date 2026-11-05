@@ -34,6 +34,7 @@ type MaterialFilter struct {
 	ViewCountMin, ViewCountMax, LikeCountMin, LikeCountMax, FavoriteCountMin, FavoriteCountMax *int64
 	TeamID                                                                                     *identity.TeamID
 	CategoryIDs                                                                                []identity.CategoryID
+	Platform                                                                                   string
 	Search                                                                                     string
 	Limit                                                                                      int
 	CategoryID                                                                                 identity.CategoryID
@@ -69,7 +70,7 @@ type MaterialUsageRelation struct {
 	CreatedAt  time.Time
 }
 
-const materialProjectionColumns = `m.id, m.team_id, s.category_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at, m.created_by`
+const materialProjectionColumns = `m.id, m.team_id, s.category_id, m.source_content_id, s.platform_content_id, m.title, s.source_url, s.platform, s.author_name, s.cover_url, s.author_home_url, s.view_count, s.like_count, s.favorite_count, s.comment_count, s.share_count, s.published_at, m.video_status, m.status, m.source_object_key, m.video_size_bytes, m.video_sha256, m.video_media_json, m.video_error, m.video_prepared_at, m.created_at, m.updated_at, m.created_by, s.metrics_updated_at`
 
 // FindMaterial returns the material readiness projection only within the
 // caller's team boundary. Category-range filtering is applied by the Service.
@@ -117,6 +118,10 @@ func materialConditions(filter MaterialFilter) ([]string, []any) {
 	if filter.TeamID != nil {
 		conditions = append(conditions, "m.team_id = ?")
 		args = append(args, *filter.TeamID)
+	}
+	if filter.Platform != "" {
+		conditions = append(conditions, "s.platform = ?")
+		args = append(args, filter.Platform)
 	}
 	if len(filter.CategoryIDs) > 0 {
 		placeholders := make([]string, 0, len(filter.CategoryIDs))
@@ -787,15 +792,18 @@ func scanMaterial(row rowScanner, material *model.Material) error {
 	var categoryID sql.NullInt64
 	var sourceURL, authorName, coverURL, authorHomeURL, objectKey, sha256, videoError sql.NullString
 	var platformContentID sql.NullString
-	var publishedAt, preparedAt sql.NullTime
+	var publishedAt, preparedAt, metricsUpdatedAt sql.NullTime
 	var size sql.NullInt64
 	var status string
 	// The library lifecycle's column is NOT NULL, so this is a plain string.
 	var materialStatus string
 	var mediaJSON []byte
 	var createdBy int64
-	if err := row.Scan(&material.ID, &teamID, &categoryID, &material.SourceContentID, &platformContentID, &material.Title, &sourceURL, &material.Platform, &authorName, &coverURL, &authorHomeURL, &material.ViewCount, &material.LikeCount, &material.FavoriteCount, &material.CommentCount, &material.ShareCount, &publishedAt, &status, &materialStatus, &objectKey, &size, &sha256, &mediaJSON, &videoError, &preparedAt, &material.CreatedAt, &material.UpdatedAt, &createdBy); err != nil {
+	if err := row.Scan(&material.ID, &teamID, &categoryID, &material.SourceContentID, &platformContentID, &material.Title, &sourceURL, &material.Platform, &authorName, &coverURL, &authorHomeURL, &material.ViewCount, &material.LikeCount, &material.FavoriteCount, &material.CommentCount, &material.ShareCount, &publishedAt, &status, &materialStatus, &objectKey, &size, &sha256, &mediaJSON, &videoError, &preparedAt, &material.CreatedAt, &material.UpdatedAt, &createdBy, &metricsUpdatedAt); err != nil {
 		return err
+	}
+	if metricsUpdatedAt.Valid {
+		material.MetricsUpdatedAt = &metricsUpdatedAt.Time
 	}
 	material.CreatedBy = identity.UserID(createdBy)
 	material.PlatformContentID = platformContentID.String

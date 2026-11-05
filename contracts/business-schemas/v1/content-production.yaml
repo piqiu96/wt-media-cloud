@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.4"
+revision: "2026.11.05.5"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -335,6 +335,8 @@ schemas:
       id: {type: integer, format: int64}
       team_id: {type: integer, format: int64}
       source_content_id: {type: integer, format: int64}
+      platform_content_id: {type: string, description: Original provider work ID; never the internal source_content_id.}
+      metrics_updated_at: {type: string, format: date-time, description: Last successful provider capture persisted with these metrics. Unknown history is omitted; page reads and failed captures never advance it.}
       title: {type: string}
       source_url: {type: string, format: uri}
       platform: {type: string}

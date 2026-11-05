@@ -25,6 +25,9 @@ func TestSourceMetricKnownRequiresOriginalZeroEvidence(t *testing.T) {
 		{"numeric string is not provider count", `{"statistics":{"digg_count":"0"}}`, "like_count", 0, false},
 		{"malformed raw", `{`, "like_count", 0, false},
 		{"legacy positive intrinsically known", `{}`, "like_count", 23, true},
+		{"comments explicit zero", `{"statistics":{"comment_count":0}}`, "comment_count", 0, true},
+		{"shares explicit zero", `{"statistics":{"share_count":0}}`, "share_count", 0, true},
+		{"shares absent", `{"statistics":{}}`, "share_count", 0, false},
 		{"unsupported field", `{"statistics":{"digg_count":0}}`, "title", 23, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

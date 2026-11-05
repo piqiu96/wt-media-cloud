@@ -259,7 +259,7 @@ func normalizeDouyinItem(item map[string]any) map[string]any {
 	if created := int64Value(item["create_time"]); created > 0 {
 		published = time.Unix(created, 0).UTC().Format(time.RFC3339)
 	}
-	return map[string]any{"platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": authorID, "author_sec_uid": authorSecUID, "author_uid": authorID, "author_home_url": authorHomeURL, "author_name": cleanString(author["nickname"]), "published_at": published, "like_count": int64Value(statistics["digg_count"]), "favorite_count": int64Value(statistics["collect_count"]), "view_count": int64Value(statistics["play_count"]), "comment_count": int64Value(statistics["comment_count"]), "share_count": int64Value(statistics["share_count"]), "raw": item}
+	return map[string]any{"metrics_updated_at": time.Now().UTC().Format(time.RFC3339Nano), "platform_content_id": id, "title": truncate(description, 500), "description": description, "cover_url": cover, "source_url": "https://www.douyin.com/video/" + id, "author_id": authorID, "author_sec_uid": authorSecUID, "author_uid": authorID, "author_home_url": authorHomeURL, "author_name": cleanString(author["nickname"]), "published_at": published, "like_count": int64Value(statistics["digg_count"]), "favorite_count": int64Value(statistics["collect_count"]), "view_count": int64Value(statistics["play_count"]), "comment_count": int64Value(statistics["comment_count"]), "share_count": int64Value(statistics["share_count"]), "raw": item}
 }
 func validDouyinAuthorHomeURL(value string) bool {
 	parsed, err := url.Parse(value)

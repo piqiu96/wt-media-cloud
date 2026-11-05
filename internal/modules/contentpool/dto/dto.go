@@ -31,6 +31,7 @@ type SourceInput struct {
 	ViewCount         int64
 	CommentCount      int64
 	ShareCount        int64
+	MetricsUpdatedAt  *time.Time
 	PublishedAt       *time.Time
 	AuditNote         string
 	RawJSON           json.RawMessage
@@ -98,6 +99,7 @@ type SearchResult struct {
 	CommentCount      int64           `json:"comment_count"`
 	ShareCount        int64           `json:"share_count"`
 	PublishedAt       *time.Time      `json:"published_at,omitempty"`
+	MetricsUpdatedAt  *time.Time      `json:"metrics_updated_at,omitempty"`
 	Raw               json.RawMessage `json:"raw,omitempty"`
 }
 

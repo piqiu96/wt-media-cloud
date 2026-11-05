@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool/dto"
@@ -222,5 +223,27 @@ func TestImportResultsPreservesRawPlatformPayload(t *testing.T) {
 	stored, ok := store.raws[1]
 	if !ok || string(stored) != string(raw) {
 		t.Fatalf("raw payload was not preserved: ok=%v raw=%s", ok, stored)
+	}
+}
+
+func TestCaptureTimeSurvivesSearchAndDelayedImport(t *testing.T) {
+	before := time.Now().UTC()
+	result, err := searchWithClient(context.Background(), dto.SearchInput{Platform: "douyin", Keyword: "capture"}, &searchClientStub{})
+	after := time.Now().UTC()
+	if err != nil || len(result.Items) != 1 {
+		t.Fatalf("search: %+v %v", result, err)
+	}
+	capture := result.Items[0].MetricsUpdatedAt
+	if capture == nil || capture.Before(before) || capture.After(after) {
+		t.Fatalf("missing capture time: %v", capture)
+	}
+	store := newMemoryStore()
+	service := newContentService(store)
+	service.now = func() time.Time { return after.Add(time.Hour) }
+	team := identityservice.TeamID(7)
+	actor := identityservice.PublicUser{ID: 2, Role: identityservice.RoleOperator, TeamID: &team}
+	_, err = service.importResults(actor, dto.ImportResultsRequest{Platform: "douyin", CategoryID: testCategoryID(), Items: result.Items})
+	if err != nil || store.items[1].MetricsUpdatedAt == nil || !store.items[1].MetricsUpdatedAt.Equal(*capture) {
+		t.Fatalf("import restamped capture: %+v %v", store.items[1], err)
 	}
 }

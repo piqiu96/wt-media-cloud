@@ -38,6 +38,7 @@ type SourceContent struct {
 	ViewCount         int64                  `json:"view_count"`
 	CommentCount      int64                  `json:"comment_count"`
 	ShareCount        int64                  `json:"share_count"`
+	MetricsUpdatedAt  *time.Time                 `json:"metrics_updated_at,omitempty"`
 	PublishedAt       *time.Time             `json:"published_at,omitempty"`
 	Status            Status                 `json:"status"`
 	IgnoredReason     string                 `json:"ignored_reason,omitempty"`

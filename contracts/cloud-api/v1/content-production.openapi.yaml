@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.11.05.4
+  version: 2026.11.05.5
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -754,6 +754,7 @@ paths:
           type: string, maxLength: 100}}
       - {in: query, name: team_id, required: false, description: Target team. Administrators may name any team; an ordinary or senior
           operator is pinned to their own team and naming another answers 403., schema: {type: integer, format: int64, minimum: 1}}
+      - {in: query, name: platform, required: false, description: Source platform only; currently Douyin., schema: {type: string, enum: [douyin]}}
       - {in: query, name: category_ids, required: false, description: 'One or more exact numeric category IDs, comma separated (at most
           50). Narrows the list; it does not restrict visibility.', schema: {type: string}}
       - {in: query, name: category_id, required: false, description: 'Exact category ID, combined with `category_ids` when both are present.',
@@ -1976,6 +1977,8 @@ components:
         id: {type: integer, format: int64}
         team_id: {type: integer, format: int64}
         source_content_id: {type: integer, format: int64}
+        platform_content_id: {type: string, description: Original provider work ID; never the internal source_content_id.}
+        metrics_updated_at: {type: string, format: date-time, description: Last successful provider capture persisted with these metrics. Unknown history is omitted; page reads and failed captures never advance it.}
         title: {type: string}
         source_url: {type: string, format: uri}
         platform: {type: string}

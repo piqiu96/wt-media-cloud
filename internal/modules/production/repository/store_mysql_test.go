@@ -133,7 +133,7 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 	now := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM materials m JOIN source_contents s ON s.id = m.source_content_id WHERE m.id = ? AND m.team_id = ?")).
 		WithArgs(int64(42), int64(7)).
-		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), int64(1), int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", int64(12000), int64(72313), int64(882), int64(4028), int64(8323), now, "ready", "available", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now, int64(9)))
+		WillReturnRows(sqlmock.NewRows(materialColumns()).AddRow(int64(42), int64(7), int64(1), int64(8), "7123456789012345678", "Demo material", "https://source", "douyin", "Author", "https://cover/42.jpg", "https://author/42", int64(12000), int64(72313), int64(882), int64(4028), int64(8323), now, "ready", "available", "materials/42.mp4", int64(100), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []byte(`{"duration_seconds":10}`), nil, now, now, now, int64(9), now))
 
 	material, found, err := findMaterial(db, 42, identity.TeamID(7))
 	if err != nil {
@@ -145,6 +145,9 @@ func TestFindMaterialScopesTheSourceAndVideoProjectionByTeam(t *testing.T) {
 	// The provider's id and the local row id are separate columns and both have
 	// to land: reading one into the other is the whole defect this projection
 	// was widened for.
+	if material.MetricsUpdatedAt == nil || !material.MetricsUpdatedAt.Equal(now) {
+		t.Fatal("capture time missing from material projection")
+	}
 	if material.SourceContentID != 8 || material.PlatformContentID != "7123456789012345678" {
 		t.Fatalf("material ids = source_content_id %d platform_content_id %q, want 8 and 7123456789012345678",
 			material.SourceContentID, material.PlatformContentID)
@@ -1022,5 +1025,5 @@ func usageColumns() []string {
 }
 
 func materialColumns() []string {
-	return []string{"id", "team_id", "category_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "view_count", "like_count", "favorite_count", "comment_count", "share_count", "published_at", "video_status", "status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at", "created_by"}
+	return []string{"id", "team_id", "category_id", "source_content_id", "platform_content_id", "title", "source_url", "platform", "author_name", "cover_url", "author_home_url", "view_count", "like_count", "favorite_count", "comment_count", "share_count", "published_at", "video_status", "status", "source_object_key", "video_size_bytes", "video_sha256", "video_media_json", "video_error", "video_prepared_at", "created_at", "updated_at", "created_by", "metrics_updated_at"}
 }

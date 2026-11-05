@@ -22,7 +22,7 @@ func TestListSourceViewsProjectsNamesAndFiltersMaterial(t *testing.T) {
 		"author_id", "author_sec_uid", "author_uid", "author_home_url", "author_name", "source_type", "strategy_id", "crawl_task_id",
 		"like_count", "favorite_count", "view_count", "comment_count", "share_count",
 		"published_at", "status", "ignored_reason", "audit_note", "failure_reason", "material_id", "created_by", "updated_by", "audited_by", "audited_at",
-		"created_at", "updated_at", "strategy_name", "crawl_task_name", "created_by_name", "updated_by_name", "audited_by_name",
+		"created_at", "updated_at", "metrics_updated_at", "strategy_name", "crawl_task_name", "created_by_name", "updated_by_name", "audited_by_name",
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM source_contents s") + ".*LEFT JOIN crawl_tasks t.*WHERE s.material_id = ?").
 		WithArgs(int64(17)).
@@ -30,7 +30,7 @@ func TestListSourceViewsProjectsNamesAndFiltersMaterial(t *testing.T) {
 			int64(1), int64(10), nil, "douyin", "aweme-1", "Delta safe route", nil, "https://cover", "https://source",
 			"author-id", "author-sec", "author-id", "https://www.douyin.com/user/author-sec?showSubTab=video&showTab=post", "Author", "strategy", int64(3), int64(23),
 			int64(12000), int64(700), int64(340000), int64(560), int64(88),
-			created, "material_created", nil, nil, nil, int64(17), int64(2), nil, nil, nil, created, created,
+			created, "material_created", nil, nil, nil, int64(17), int64(2), nil, nil, nil, created, created, nil,
 			"Delta hotspot", "Delta hotspot_20260921143000", "admin", "admin", "admin",
 		))
 
@@ -66,7 +66,7 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 		"author_id", "author_sec_uid", "author_uid", "author_home_url", "author_name", "source_type", "strategy_id", "crawl_task_id",
 		"like_count", "favorite_count", "view_count", "comment_count", "share_count",
 		"published_at", "status", "ignored_reason", "audit_note", "failure_reason", "material_id", "created_by", "updated_by", "audited_by", "audited_at",
-		"created_at", "updated_at", "strategy_name", "crawl_task_name", "created_by_name", "updated_by_name", "audited_by_name",
+		"created_at", "updated_at", "metrics_updated_at", "strategy_name", "crawl_task_name", "created_by_name", "updated_by_name", "audited_by_name",
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM source_contents s") + ".*WHERE s.id = ?").
 		WithArgs(int64(9)).
@@ -74,7 +74,7 @@ func TestFindSourceViewProjectsHistoricalTaskName(t *testing.T) {
 			int64(9), int64(10), nil, "douyin", "aweme-9", "Historical item", nil, nil, "https://source",
 			"author-id", nil, nil, nil, "Author", "strategy", int64(3), int64(23),
 			int64(1), int64(2), int64(3), int64(4), int64(5),
-			created, "pending", nil, nil, nil, nil, int64(2), nil, nil, nil, created, created,
+			created, "pending", nil, nil, nil, nil, int64(2), nil, nil, nil, created, created, nil,
 			"Current name", "Historical name_20260921143000", "admin", "admin", "admin",
 		))
 

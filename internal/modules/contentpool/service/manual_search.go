@@ -220,6 +220,7 @@ func typedSearchResults(items []map[string]any) []dto.SearchResult {
 			ViewCount:         int64Value(item["view_count"]),
 			CommentCount:      int64Value(item["comment_count"]),
 			ShareCount:        int64Value(item["share_count"]),
+			MetricsUpdatedAt:  parseSearchTime(cleanString(item["metrics_updated_at"])),
 			PublishedAt:       published,
 		}
 		if raw := item["raw"]; raw != nil {
@@ -300,6 +301,7 @@ func (s *contentService) importResults(actor identityservice.PublicUser, input d
 			ViewCount:         item.ViewCount,
 			CommentCount:      item.CommentCount,
 			ShareCount:        item.ShareCount,
+			MetricsUpdatedAt:  item.MetricsUpdatedAt,
 			PublishedAt:       item.PublishedAt,
 			RawJSON:           raw,
 		})
