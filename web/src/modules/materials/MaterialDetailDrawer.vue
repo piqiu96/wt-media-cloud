@@ -13,6 +13,7 @@ import { transferRow } from '../transfer/transferRows.js'
 import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
 import { handOverCloudVideo } from './cloudVideo.js'
 import ResourceOverlay from '../../shared/ui/resource/ResourceOverlay.vue'
+import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import ResourceSection from '../../shared/ui/resource/ResourceSection.vue'
 import ResourceDescriptions from '../../shared/ui/resource/ResourceDescriptions.vue'
 import { materialVideoState, metricLabel } from './materialFilters.js'
@@ -36,6 +37,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
+  error: { type: String, default: '' },
   categories: { type: Array, default: () => [] },
   // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支，
   // readonly 只读（关联实体引用的那类打开方式）——正文照旧，页脚一个动作都不给。
@@ -44,7 +46,7 @@ const props = defineProps({
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel'])
+const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel', 'retry'])
 
 const downloadUser = ref(null)
 const downloadReason = computed(() => localDownloadReason(downloadUser.value))
@@ -209,8 +211,10 @@ async function openDirectory() {
 </script>
 
 <template>
-  <ResourceOverlay :visible="visible" title="素材详情" kind="drawer" :width="880"
-    :footer="mode !== 'readonly' || showPageLink" @update:visible="$emit('update:visible', $event)">
+  <ResourceOverlay :visible="visible" title="素材详情" kind="drawer" :width="800"
+    :footer="(mode === 'readonly' && showPageLink) || (mode === 'mine' && downloadStatus === 'downloading' && !!activeTransferTask)" @update:visible="$emit('update:visible', $event)">
+    <FeedbackAlert v-if="error" theme="error" :message="error" />
+    <t-button v-if="error" variant="text" @click="$emit('retry')">重试</t-button>
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="material" class="detail-workspace">
         <section class="detail-hero">
@@ -277,31 +281,9 @@ async function openDirectory() {
       </div>
     </t-loading>
 
-    <!-- 必须接管 footer：TDesign 的 footer 属性默认是 true，不给插槽就渲染出一对
-         「取消 / 确认」；接管同时让动作条钉在底部，不随正文高度跳动。 -->
     <template #footer>
-      <div v-if="material" class="material-detail__actions">
-        <!-- 只读上下文（关联实体引用）只给一个明确命名的前往入口：它不改路由，用户自己点才跳。 -->
-        <t-button v-if="mode === 'readonly' && showPageLink" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
-        <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">{{ material.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
-        <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
-        <!-- 我的素材这一组由「使用状态 × 下载状态 × 本机文件」矩阵驱动（CHG-069 任务 23，
-             与行内同一张表）：已放弃只给恢复；使用中按下载状态给一步主操作 —— 下载中不给
-             「再下载」（文件已经在准备了，再点还是同一条命令），给的是「取消下载」；已下载
-             只在**实测本机那份文件不在了**时才给一次「重新下载」（合成的入口在合成任务页）。 -->
-        <template v-if="mode === 'mine'">
-          <span v-if="downloadReason" class="detail-download-reason">{{ downloadReason }}</span>
-          <template v-if="material.usage_status === 'removed'">
-            <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
-          </template>
-          <template v-else>
-            <t-button v-if="needsRedownload(downloadStatus, localFile?.presence)" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">重新下载</t-button>
-            <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" :disabled="cancelRequested" @click="cancelDownload">{{ cancelRequested ? '正在取消…' : '取消下载' }}</t-button>
-            <t-button v-else-if="downloadStatus !== 'downloaded'" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
-            <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
-          </template>
-        </template>
-      </div>
+      <t-button v-if="mode === 'readonly' && showPageLink" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
+      <t-button v-if="mode === 'mine' && downloadStatus === 'downloading' && activeTransferTask" class="wt-secondary-button" variant="outline" :disabled="cancelRequested" @click="cancelDownload">{{ cancelRequested ? '正在取消…' : '取消下载' }}</t-button>
     </template>
   </ResourceOverlay>
 </template>

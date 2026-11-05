@@ -61,7 +61,7 @@ describe('manual task batch creation', () => {
     expect(selector).toContain('client.listMyMaterials(params) : client.list(params)')
     expect(selector).toContain('strategy_id: props.context.strategy_id')
     expect(selector).toContain('operator_id: props.context.operator_id')
-    expect(selector).toContain('publishedRangeParams(filters.value.published)')
+    expect(selector).toContain('publishedRangeParams(criteria.published)')
     expect(selector).toContain('metricLabel(row,')
     expect(selector).not.toContain('download_status')
     expect(selector).not.toContain('video_status')

@@ -1,4 +1,6 @@
 <script setup>
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
+import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
 import { computed, ref, watch } from 'vue'
 import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
 import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
@@ -14,6 +16,7 @@ import { materialRow, mergeSelection, acceptSelectedMaterials } from '../materia
 const props = defineProps({ visible: Boolean, context: { type: Object, required: true }, selected: { type: Array, default: () => [] } })
 const emit = defineEmits(['update:visible', 'selected'])
 const client = createMaterialsClient()
+const appliedAdvancedCount = ref(0)
 const source = ref('mine'), rows = ref([]), total = ref(0), loading = ref(false), busy = ref(false), error = ref(''), selectedMap = ref({}), pageKeys = ref([]), advanced = ref(false), onlySelected = ref(false), failures = ref([])
 const pagination = ref({ current: 1, pageSize: 10 })
 const defaults = () => ({ search: '', published: [], my_usage: '', team_usage: '', view_count_min: null, view_count_max: null, like_count_min: null, like_count_max: null, favorite_count_min: null, favorite_count_max: null })
@@ -30,26 +33,29 @@ function syncKeys() { pageKeys.value = shownRows.value.filter((row) => selectedM
 watch(shownRows, syncKeys)
 watch(() => props.visible, (visible) => {
   if (!visible) { ++sequence; return }
-  selectedMap.value = Object.fromEntries(props.selected.map((row) => [row.id,row])); source.value = 'mine'; filters.value = defaults(); pagination.value.current = 1; onlySelected.value = false; failures.value = []; error.value = ''; load()
+  selectedMap.value = Object.fromEntries(props.selected.map((row) => [row.id,row])); source.value = 'mine'; appliedFilters.value=null; filters.value = defaults(); sort.value = {sortBy:'published_at',descending:true}; pagination.value.current = 1; onlySelected.value = false; failures.value = []; error.value = ''; load()
 })
-async function load() {
+const appliedFilters=ref(null)
+async function load({applyFilters=false}={}) {
+  if(applyFilters||!appliedFilters.value)appliedFilters.value=JSON.parse(JSON.stringify(filters.value))
+  const criteria=appliedFilters.value
   if (!props.visible || onlySelected.value) { syncKeys(); return }
   const request = ++sequence
   loading.value = true; error.value = ''
-  const params = { strategy_id: props.context.strategy_id, operator_id: props.context.operator_id, page: pagination.value.current, page_size: pagination.value.pageSize, search: filters.value.search, my_usage: filters.value.my_usage, team_usage: filters.value.team_usage, sort_by: sort.value.sortBy, sort_order: sort.value.descending ? 'desc':'asc' }
+  const params = { strategy_id: props.context.strategy_id, operator_id: props.context.operator_id, page: pagination.value.current, page_size: pagination.value.pageSize, search: criteria.search, my_usage: criteria.my_usage, team_usage: criteria.team_usage, sort_by: sort.value.sortBy, sort_order: sort.value.descending ? 'desc':'asc' }
   try {
-    Object.assign(params, publishedRangeParams(filters.value.published))
-    for (const key of ['view_count_min','view_count_max','like_count_min','like_count_max','favorite_count_min','favorite_count_max']) if (filters.value[key] !== null && filters.value[key] !== '') params[key] = filters.value[key]
+    Object.assign(params, publishedRangeParams(criteria.published))
+    for (const key of ['view_count_min','view_count_max','like_count_min','like_count_max','favorite_count_min','favorite_count_max']) if (criteria[key] !== null && criteria[key] !== '') params[key] = criteria[key]
     const data = await (source.value === 'mine' ? client.listMyMaterials(params) : client.list(params))
     if (request !== sequence) return
-    rows.value = (data.items || []).map(materialRow); total.value = data.total || 0; syncKeys()
+    rows.value = (data.items || []).map(materialRow); total.value = data.total || 0; appliedAdvancedCount.value = ['view_count','like_count','favorite_count'].filter(key => [params[`${key}_min`],params[`${key}_max`]].some(value => value != null && value !== '')).length; syncKeys()
   } catch(e) { if (request === sequence) error.value = e?.message || '素材读取失败' }
   finally { if (request === sequence) loading.value = false }
 }
-function query() { pagination.value.current=1; load() }
+function query() { pagination.value.current=1; load({applyFilters:true}) }
 function reset() { filters.value = defaults(); sort.value = {sortBy:'published_at',descending:true}; query() }
 function select(keys) { selectedMap.value = mergeSelection(selectedMap.value, shownRows.value, keys); syncKeys() }
-function changeSort(value) { sort.value = value || {sortBy:'published_at',descending:true}; query() }
+function changeSort(value) { sort.value = value || {sortBy:'published_at',descending:true}; pagination.value.current=1; load() }
 function changeSelectedOnly() { pagination.value.current=1; if (onlySelected.value) syncKeys(); else load() }
 function close() { if (!busy.value) emit('update:visible',false) }
 async function confirm() {
@@ -69,17 +75,19 @@ async function confirm() {
   <ResourceOverlay :visible="visible" title="选择素材" :width="1240" :busy="busy" @close="close">
     <div class="material-selector wt-resource-page resource-visual-approved production-page">
       <p class="material-selector__context">负责人：{{ context.operator_name || context.operator_id }} · 团队 {{ context.team_name || context.team_id }} · 类目 {{ context.category_name || context.category_id }}</p>
-      <t-tabs v-model="source" @change="query"><t-tab-panel value="mine" label="我的素材" /><t-tab-panel value="library" label="素材库" /></t-tabs>
+      <t-tabs v-model="source" @change="pagination.current=1;load()"><t-tab-panel value="mine" label="我的素材" /><t-tab-panel value="library" label="素材库" /></t-tabs>
 
       <FeedbackAlert v-if="error" theme="error" :message="error" />
       <div v-if="failures.length" class="material-selector__failures"><p v-for="row in failures" :key="row.id">{{ row.title || `素材 ${row.id}` }} · {{ row.selection_error }}</p></div>
-      <div class="filter-bar">
+      <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="名称 / 作者 / ID" @enter="query" /></label>
-        <label class="wt-filter-field material-selector__date"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="filters.published" value-type="YYYY-MM-DD" clearable /></label>
-        <div class="wt-filter-actions"><t-button theme="primary" :disabled="onlySelected" @click="query">查询</t-button><t-button variant="outline" class="wt-secondary-button" :disabled="onlySelected" @click="reset">重置</t-button></div>
-        <ResourceAdvancedToggle v-model="advanced" />
-        <div v-if="advanced" class="wt-advanced-filters material-selector__advanced"><label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="filters.my_usage" :options="usageOptions" clearable placeholder="全部" /></label><label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="filters.team_usage" :options="usageOptions" clearable placeholder="全部" /></label><MaterialMetricFilters v-model="filters" /></div>
-      </div>
+        <label class="wt-filter-field material-selector__date"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="filters.published" value-type="YYYY-MM-DD" clearable /></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="filters.my_usage" :options="usageOptions" clearable placeholder="全部" /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="filters.team_usage" :options="usageOptions" clearable placeholder="全部" /></label>
+<div class="wt-filter-actions"><t-button theme="primary" :disabled="onlySelected" @click="query">查询</t-button><t-button variant="outline" class="wt-secondary-button" :disabled="onlySelected" @click="reset">重置</t-button></div>
+        <ResourceAdvancedToggle v-model="advanced" :count="appliedAdvancedCount" controls="selector-advanced-filters" />
+        <div v-if="advanced" id="selector-advanced-filters" class="wt-advanced-filters material-selector__advanced"><MaterialMetricFilters v-model="filters" /></div>
+      </ResourceFilterBar>
       <div class="material-selector__selection"><span>匹配 {{ total }} 条</span><t-checkbox v-model="onlySelected" @change="changeSelectedOnly">只看已选</t-checkbox></div>
       <ResourceSelectionToolbar :count="selectedRows.length" unit="条素材" @clear="selectedMap = {}; syncKeys()" />
       <t-loading :loading="loading" :show-overlay="true"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="shownRows" :columns="columns" row-key="id" :selected-row-keys="pageKeys" :sort="sort" :scroll="tableScroll" size="small" hover @select-change="select" @sort-change="changeSort" empty="暂无符合条件的素材"><template #material="{row}"><div class="material-selector__material"><MaterialCover :url="row.cover_url" /><div class="material-selector__text"><strong :title="row.title">{{ row.title || '未命名素材' }}</strong><span>{{ row.author_name || '—' }}</span></div></div></template><template #published_at="{row}">{{ formatDateTime(row.published_at) }}</template><template #view_count="{row}">{{ metricLabel(row,'view_count') }}</template><template #like_count="{row}">{{ metricLabel(row,'like_count') }}</template><template #favorite_count="{row}">{{ metricLabel(row,'favorite_count') }}</template><template #my_usage="{row}">{{ row.my_usage === 'used' ? '已使用' : row.my_usage === 'unused' ? '未使用' : '—' }}</template><template #team_usage="{row}">{{ metric(row.usage?.output_count) }} 个成片</template><template #reason="{row}"><span>{{ row.selectable ? '' : selectionReason(row.selection_reason) }}</span><template v-if="row.strategy_history?.active_count">本策略有 {{ row.strategy_history.active_count }} 个进行中任务</template></template></t-table></div></t-loading>

@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(new URL('./ComposeTasksPage.vue', import.meta.url), 'utf8')
+const page = readFileSync(new URL('./ComposeTasksPage.vue', import.meta.url), 'utf8')
+const detailContent = readFileSync(new URL('../components/ComposeTaskDetailContent.vue', import.meta.url), 'utf8')
+const source = page + '\n' + detailContent
 const createDialog = readFileSync(new URL('../components/ComposeTaskCreateDialog.vue', import.meta.url), 'utf8')
 
 // CHG-20261013-082 T-05 / M4-M5 合成任务页定点整改：列表 9 列、详情 3 Tab 4 分区、
@@ -16,13 +18,13 @@ describe('compose tasks page', () => {
   // 都拼进服务端参数，缺一个那条筛选就是摆设（MyMaterialsPage 有过这个 bug）。
   it('loads the list through the server-side filters it renders', () => {
     expect(source).toContain('client.listComposeTasks(params)')
-    expect(source).toContain('if (filters.value.status) params.status = filters.value.status')
-    expect(source).toContain('if (filters.value.trigger_type) params.trigger_type = filters.value.trigger_type')
-    expect(source).toContain('if (filters.value.compose_strategy_id) params.compose_strategy_id = filters.value.compose_strategy_id')
+    expect(source).toContain('if (criteria.status) params.status = criteria.status')
+    expect(source).toContain('if (criteria.trigger_type) params.trigger_type = criteria.trigger_type')
+    expect(source).toContain('if (criteria.compose_strategy_id) params.compose_strategy_id = criteria.compose_strategy_id')
     expect(source).toContain('v-model="filters.status"')
     expect(source).toContain('v-model="filters.trigger_type"')
     expect(source).toContain('v-model="filters.compose_strategy_id"')
-    expect(source).toContain('createdRangeParams(filters.value.created_range)')
+    expect(source).toContain('createdRangeParams(criteria.created_range)')
     expect(source).toContain('v-model="filters.created_range"')
   })
 
@@ -45,11 +47,11 @@ describe('compose tasks page', () => {
     expect(source).not.toContain("filters.value.operator = 'mine'")
     expect(source).not.toContain('params.operator_scope')
     expect(source).toContain('if ((isAdmin.value || isSenior.value) && namedOperator) params.operator_id = namedOperator')
-    expect(source).toContain('const namedOperator = operatorIdFromOption(filters.value.operator)')
+    expect(source).toContain('const namedOperator = operatorIdFromOption(criteria.operator)')
     // 清空下拉给的是 undefined，不是空串：解析和“选项是否还在”都必须走守卫。
     expect(source).toContain('missingOperatorOption(filters.value.operator, operatorFilterOptions.value)')
     expect(source).not.toContain('filters.value.operator.startsWith')
-    expect(source).toContain('params.team_id = Number(filters.value.team_id)')
+    expect(source).toContain('params.team_id = Number(criteria.team_id)')
     expect(source).not.toContain(':clearable="!isSenior"')
     expect(source).toContain('client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })')
     expect(source).toContain("row.operator_name || '未记录'")
@@ -163,15 +165,12 @@ describe('compose tasks page', () => {
 
   // 顺序即查找顺序：先认团队/策略，再认负责人，然后才是触发方式、状态与时间；
   // 策略名长，仍占宽位。逐项按 label 文本定位（不是裸词 indexOf），顺序写错时这里一定红。
-  it('keeps common basic filters compact and puts strategy, trigger and date in advanced filters', () => {
-    const bar = source.slice(source.indexOf('class="filter-bar"'), source.indexOf('ComposeTaskSelectionActions v-if'))
-    const split = bar.indexOf('id="compose-advanced-filters"')
-    const labels = text => [...text.matchAll(/wt-filter-field__label">([^<]+)</g)].map(match => match[1])
-    expect(labels(bar.slice(0,split))).toEqual(['综合搜索','运营团队','负责人','状态'])
-    expect(labels(bar.slice(split))).toEqual(['合成策略','触发方式','创建时间'])
-    expect(bar).toContain('class="wt-advanced-filters"')
-    expect(source).toContain('min-width: 280px')
-    expect(bar.indexOf('wt-filter-actions')).toBeLessThan(split)
+  it('keeps all seven task filters in the shared basic bar', () => {
+    const bar = page.slice(page.indexOf('<ResourceFilterBar>'), page.indexOf('</ResourceFilterBar>'))
+    const labels = [...bar.matchAll(/wt-filter-field__label">([^<]+)</g)].map(match => match[1])
+    expect(labels).toEqual(['综合搜索','运营团队','负责人','状态','创建时间','合成策略','触发方式'])
+    expect(bar).not.toContain('wt-advanced-filters')
+    expect(bar).toContain('<ResourceDateRange')
   })
 
   // CHG-20261013-089 T-03：详情按「任务状态 → 快照 → 执行记录 → 成片」组织，逐次
@@ -253,14 +252,14 @@ describe('compose tasks page', () => {
   })
 
   // 页脚只在真有业务动作时才渲染；三 Tab 与概览四分区不得增删改名。
-  it('renders the footer only for an actionable task and keeps the four overview sections', () => {
-    expect(source).toContain(':footer="detailFooterOps.length > 0"')
-    expect(source).toContain("detailFooterOps.includes('cancel')")
-    expect(source).toContain("detailFooterOps.includes('retry')")
-    const overview = source.slice(source.indexOf('label="任务信息"'), source.indexOf('label="执行记录"'))
-    expect((overview.match(/<h4>/g) || [])).toHaveLength(5)
-    expect((source.match(/<t-tab-panel/g) || [])).toHaveLength(4)
-    for (const label of ['任务信息', '执行记录']) expect(source).toContain(`label="${label}"`)
+  it('keeps primary task actions on rows and renders shared read-only task content', () => {
+    expect(page).toContain('title="任务详情" :width="960" :footer="false"')
+    expect(page).toContain('<ComposeTaskDetailContent')
+    expect(page).toContain('@click="cancel(row)"')
+    expect(page).toContain('@click="retry(row)"')
+    for (const label of ['任务信息', '执行记录']) expect(detailContent).toContain(`label="${label}"`)
+    expect(detailContent).toContain('<h4>合成配置</h4>')
+    expect(detailContent).not.toContain('detailFooterOps')
   })
 
   // 失败任务的成片区只陈述事实：未生成成片 + 为什么，不编一个占位成片。
@@ -275,11 +274,11 @@ describe('compose tasks page', () => {
   // 成片只在「生成结果」里出现一次：它既是关联（点得进去）也是结果（长什么样），
   // 但两处都写就成了两个事实来源；生成时间也不再藏在成片后面那半句拼出来的话里。
   it('keeps the output link out of the related-info section and gives the time its own cell', () => {
-    const related = source.slice(source.indexOf('<h4>关联信息</h4>'), source.indexOf('<h4>执行信息</h4>'))
+    const related = detailContent.slice(detailContent.indexOf('<h4>关联信息</h4>'), detailContent.indexOf('<h4>执行信息</h4>'))
     expect(related).toContain('关联素材')
     expect(related).toContain('合成策略')
     expect(related).not.toContain('生成成片')
-    const result = source.slice(source.indexOf('<h4>生成结果</h4>'), source.indexOf('label="执行记录"'))
+    const result = detailContent.slice(detailContent.indexOf('<h4>生成结果</h4>'), detailContent.indexOf('label="执行记录"'))
     expect(result).toContain('生成成片')
     expect(result).toContain('生成时间')
     expect(result).toContain("{{ outputSummary ? formatDateTime(outputSummary.created_at) : '—' }}")
@@ -289,7 +288,7 @@ describe('compose tasks page', () => {
   // 失败原因写进**详情**的任务信息并高亮：来查「为什么失败」的人先看的就是这一段，
   // 不必再翻到执行记录去对错误码。列表页不加列（列数见上面那条九列断言）。
   it('writes the failure reason into the detail task info, highlighted', () => {
-    const info = source.slice(source.indexOf('<h4>任务信息</h4>'), source.indexOf('<h4>关联信息</h4>'))
+    const info = detailContent.slice(detailContent.indexOf('<h4>任务信息</h4>'), detailContent.indexOf('<h4>关联信息</h4>'))
     expect(info).toContain("v-if=\"detail.status === 'failed'\"")
     expect(info).toContain('失败原因')
     expect(info).toContain('safeComposeError(detail.error_code)')
@@ -396,7 +395,7 @@ describe('compose tasks page', () => {
     expect(source).toContain('detailPolling.stop()')
     // 定时那一遍不掀整页 Loading、不把用户正在看的页码拨回去。
     expect(source).toContain('load({ quiet: true })')
-    expect(source).toContain('function query() { pagination.value.current = 1; load() }')
+    expect(source).toContain('function query() { selectedTaskKeys.value = []; pagination.value.current = 1; return load({ applyFilters: true }) }')
     // 刷新按钮已移除；页面自己不建 timer（交给 useAutoRefresh）。
     expect(source).not.toContain('@click="load()">刷新')
     expect(source).not.toContain('setInterval')

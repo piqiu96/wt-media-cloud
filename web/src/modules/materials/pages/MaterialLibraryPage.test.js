@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(new URL('./MaterialLibraryPage.vue', import.meta.url), 'utf8')
+const page = readFileSync(new URL('./MaterialLibraryPage.vue', import.meta.url), 'utf8')
+const source = page + '\n' + readFileSync(new URL('../components/MaterialUsageDialog.vue', import.meta.url), 'utf8')
 
 /** 取出两段定界文本之间的内容；找不到就抛，别让断言在空串上静默通过。 */
 function sliceBetween(text, start, end) {
@@ -18,32 +19,15 @@ function sliceBetween(text, start, end) {
 const opBlock = sliceBetween(source, '#op=', '</ResourceRowActions>')
 
 describe('material library page', () => {
-  it('keeps search and ownership basic while grouping usage filters under advanced controls', () => {
-    const bar=source.slice(source.indexOf('class="filter-bar"'),source.indexOf('class="table-scroll-wrap"'))
+  it('keeps usage and publication time basic and only metrics under advanced', () => {
+    const bar=source.slice(source.indexOf('<ResourceFilterBar>'),source.indexOf('</ResourceFilterBar>'))
     const split=bar.indexOf('class="wt-advanced-filters"')
     expect(split).toBeGreaterThan(0)
-    expect(bar.slice(0,split)).toContain('综合搜索')
-    expect(bar.slice(0,split)).toContain('运营团队')
-    expect(bar.slice(0,split)).toContain('类目')
-    expect(bar.slice(0,split)).toContain('我的使用')
-    for(const title of ['加入状态','团队使用','发布时间']) {
-      expect(bar.slice(0,split)).not.toContain(title)
-      expect(bar.slice(split)).toContain(title)
-    }
-    expect(bar).toContain('ResourceAdvancedToggle')
+    for (const label of ['综合搜索','类目','发布时间','我的使用','团队使用','加入状态']) expect(bar.slice(0,split)).toContain(label)
+    expect(bar.slice(split)).toContain('<MaterialMetricFilters')
+    expect(bar).toContain(':count="appliedAdvancedCount"')
   })
-  /**
-   * `?material_id=N` 是一个**真实入口**，不是装饰。
-   *
-   * 内容池里「已转素材」那一列（`ContentPoolPage.vue`）与挖掘任务的发现结果
-   * （`CrawlTasksPage.vue`）都会跳到这个地址。它们的落点要求页面能打开**任何**一条素材，
-   * 而不只是恰好在第一页、又没被筛选掉的那一条 —— 所以走 `getMaterial`（单条接口），
-   * 不是在已经加载的行里找。
-   *
-   * 这段契约原先由 `ContentPoolPage.test.js` 的一条用例钉着，钉的是旧的实现
-   * （内容池页按 `route.path` 把自己渲染成素材库的只读投影）。投影被真实页面取代后，
-   * 那条用例随之删除，契约重建在这里。
-   */
+
   it('opens the material a deep link names, through the single-material endpoint', () => {
     expect(source).toContain('route.query.material_id')
     // 非数字的 id 不请求：`/materials/NaN` 只会换来一个 400，而那个 400 读起来像服务端坏了。
@@ -59,7 +43,8 @@ describe('material library page', () => {
   // 团队范围由服务端按角色决定：普通运营/高级运营固定本团队，只有管理员的 `team_id`
   // 才是「目标团队」。页面必须把团队与类目都交上去，类目只是筛选而不是可见边界。
   it('sends every list filter to the server exactly once', () => {
-    expect(source).toMatch(/client\.list\(\{[\s\S]*?search: search\.value/)
+    expect(page).toContain('search: search.value')
+    expect(page).toContain('client.list(params)')
     for (const param of [
       'team_id: teamFilter.value',
       'category_ids: categoryFilters.value',
@@ -285,9 +270,9 @@ describe('material library page', () => {
     expect(source).toContain('<template #usage="{ row }">')
     expect(source).toContain('usageSummary(row)')
     expect(source).toContain('@click="openUsage(row)"')
-    expect(source).toContain('成功成片 {{ usageOutputCount(usageMaterial) }}')
-    expect(source).toContain('使用人数 {{ usageOperatorCount(usageMaterial) }}')
-    expect(source).toContain('v-for="operator in usageOperators(usageMaterial)"')
+    expect(source).toContain('成功成片 {{ usageOutputCount(material) }}')
+    expect(source).toContain('使用人数 {{ usageOperatorCount(material) }}')
+    expect(source).toContain('v-for="operator in usageOperators(material)"')
     expect(source).toContain("{{ operator.name }}")
     expect(source).toContain("成片 {{ operator.output_count }}")
     // 多人时列表自己滚动，第二行不会被挤出弹窗。

@@ -13,7 +13,9 @@ describe('output asset workspace',()=>{
   expect(source).toContain('page:pagination.value.current,page_size:pagination.value.pageSize')
   expect(source).toContain('total.value=data.total||0')
   expect(source).not.toContain('.slice(start,')
-  expect(material).toContain('material_id:props.material.material_id,page:page.value,page_size:pageSize.value')
+  expect(material).toContain('materialOutputQuery(')
+  expect(material).toContain('props.scope')
+  expect(source).toContain(':scope="appliedScope"')
  })
  it('keeps material rows detail-only and flat asset rows at most three actions',()=>{
   const batch=source.slice(source.indexOf('<template v-if="activeView'),source.indexOf('<ComposeOutputTable v-else'))
@@ -32,13 +34,13 @@ describe('output asset workspace',()=>{
   for(const text of [source,material]){expect(text).toContain('<ResourceSelectionToolbar');expect(text).toContain('<t-button variant="outline" disabled>去发布</t-button>')}
   expect(source).toContain('发布能力尚未交付')
  })
- it('keeps role category boundaries and advanced date/video filters without local-page filtering',()=>{
+ it('keeps role category boundaries and basic date/video filters without local-page filtering',()=>{
   expect(source).toContain('isAdmin.value||isSenior.value||own.has(category.id)')
   expect(source).toContain('missingOperatorOption(filters.value.operator,operatorFilterOptions.value)')
   expect(source).toContain('operatorIdFromOption(filters.value.operator)')
   expect(source).toContain('params.operator_id=namedOperator')
-  expect(source).toContain('class="wt-advanced-filters"')
-  expect(source).toContain('min-width:280px')
+  expect(source).toContain('<ResourceDateRange')
+  expect(source).not.toContain('class="wt-advanced-filters"')
   expect(source).toContain('video_status:filters.value.video_status')
   expect(source).not.toContain('filters.download')
   expect(source).not.toContain('listComposeTasks({})')
@@ -48,7 +50,8 @@ describe('output asset workspace',()=>{
   expect(source).toContain('publicObjectReadUrl(link?.url)')
   expect(source).toContain(':source-output="createSource"')
   expect(source).toContain('createSource.value=data')
-  expect(source).toContain("router.push({name:'Compose',query:{batch_id:id}})")
+  expect(source).toContain('<ComposeRelatedDetail')
+  expect(source).not.toContain('router.push')
   expect(source).not.toContain('archiveComposeOutput')
  })
 })

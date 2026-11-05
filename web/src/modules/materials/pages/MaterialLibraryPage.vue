@@ -1,4 +1,7 @@
 <script setup>
+import MaterialUsageDialog from '../components/MaterialUsageDialog.vue'
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
+import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
 import '../../compose/production.css'
 import MaterialMetricFilters from '../components/MaterialMetricFilters.vue'
 import { publishedRangeParams, emptyMetricRanges, metricRangeParams, metricLabel } from '../materialFilters.js'
@@ -48,6 +51,7 @@ const total = ref(0)
 let loadSequence = 0
 const loading = ref(false)
 const error = ref('')
+const appliedAdvancedCount = ref(0)
 const advancedFilters = ref(false)
 const search = ref(route.query.search ? String(route.query.search) : '')
 const joinedFilter = ref('')
@@ -112,13 +116,14 @@ const pagedRows = computed(() => rows.value)
 const categoryOptions = computed(() => categories.value.map((category) => ({ id: category.id, name: category.name })))
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
-async function load({ quiet = false, keepPage = false } = {}) {
+const appliedQuery = ref(null)
+async function load({ quiet = false, keepPage = false, applyFilters = false } = {}) {
   if (!quiet && !keepPage) pagination.value.current = 1
   const sequence = ++loadSequence
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const data = await client.list({
+    const draft = {
       page: pagination.value.current, page_size: pagination.value.pageSize,
       search: search.value,
       ...publishedRangeParams(publishedRange.value),
@@ -130,10 +135,14 @@ async function load({ quiet = false, keepPage = false } = {}) {
       team_usage: teamUsageFilter.value,
       sort_by: sortBy.value,
       sort_order: sortOrder.value,
-    })
+    }
+    if (applyFilters || !appliedQuery.value) appliedQuery.value = JSON.parse(JSON.stringify(draft))
+    const params = { ...appliedQuery.value, page: pagination.value.current, page_size: pagination.value.pageSize, sort_by: sortBy.value, sort_order: sortOrder.value }
+    const data = await client.list(params)
     if (sequence !== loadSequence) return
     rows.value = data.items || []
     total.value = data.total || 0
+    appliedAdvancedCount.value = ['view_count','like_count','favorite_count'].filter(key => [params[`${key}_min`],params[`${key}_max`]].some(value => value != null && value !== '')).length
   } catch (e) {
     if (!quiet && sequence === loadSequence) error.value = e?.message || '读取素材失败'
   } finally {
@@ -260,7 +269,7 @@ function reset() {
   teamUsageFilter.value = ''
   teamFilter.value = ''
   categoryFilters.value = defaultCategoryFilters()
-  load()
+  load({ applyFilters: true })
 }
 
 function openUsage(row) {
@@ -290,20 +299,23 @@ onMounted(async () => {
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="素材库" description="筛选团队素材，加入我的素材后用于制作。" />
       <ResourceCard class="material-table-card">
-        <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load" /></label>
+        <ResourceFilterBar>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load({ applyFilters: true })" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
-          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
-          <ResourceAdvancedToggle v-model="advancedFilters" />
-          <div v-if="advancedFilters" class="wt-advanced-filters">
-          <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
+<div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+          <ResourceAdvancedToggle v-model="advancedFilters" :count="appliedAdvancedCount" controls="material-advanced-filters" />
+          <div v-if="advancedFilters" id="material-advanced-filters" class="wt-advanced-filters">
+
+
+
           <MaterialMetricFilters v-model="metricFilters" />
           </div>
-        </div>
+        </ResourceFilterBar>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
@@ -358,26 +370,13 @@ onMounted(async () => {
         @go-mine="goToMyMaterials"
       />
 
-      <t-dialog v-model:visible="usageVisible" header="使用情况" width="420px" :footer="false">
-        <div v-if="usageMaterial" class="usage-detail">
-          <p class="usage-detail__total">成功成片 {{ usageOutputCount(usageMaterial) }}</p>
-          <!-- 普通运营的读模型只有计数没有姓名（服务端置空 operators），这一行就是
-               他们能看到的「被引用情况」；缺字段不渲染，不把未知画成 0 人。 -->
-          <p v-if="usageOperatorCount(usageMaterial) > 0" class="usage-detail__total">使用人数 {{ usageOperatorCount(usageMaterial) }}</p>
-          <ul v-if="usageOperators(usageMaterial).length" class="usage-detail__list">
-            <li v-for="operator in usageOperators(usageMaterial)" :key="operator.id" class="usage-detail__row">
-              <span class="usage-detail__name">{{ operator.name }}</span>
-              <span class="usage-detail__count">成片 {{ operator.output_count }}</span>
-            </li>
-          </ul>
-        </div>
-      </t-dialog>
+      <MaterialUsageDialog v-model:visible="usageVisible" :material="usageMaterial" />
     </div>
   </t-loading>
 </template>
 
 <style scoped>
-.material-table-card { padding: 18px 20px; margin-top: 16px; }
+.material-table-card { margin-top: 16px; }
 .material-metrics { display:grid;gap:4px; }
 .material-metrics span+span { font-size:12px;color:var(--wt-text-tertiary); }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -403,6 +402,5 @@ span.material-title { color: var(--wt-text-primary); }
 .material-added-toast { display: flex; align-items: center; gap: 12px; }
 .material-added-toast__text { color: var(--wt-text-primary); }
 @media (max-width: 680px) {
-  .material-table-card { padding: 16px; }
 }
 </style>

@@ -32,6 +32,7 @@ function serverLoader(path, client, overrides = {}) {
   const load = source.slice(start, source.indexOf('\n}', start) + 2)
   const ref = (value) => ({ value })
   const state = {
+    appliedQuery: ref(null), appliedAdvancedCount: ref(0), appliedFilters: ref(null),
     client, sessionClient: { me: async () => ({role:'admin'}) }, currentUser: ref({role:'admin'}), templates: ref([]), categories: ref([]), teams: ref([]), pagination: ref({ current: 3, pageSize: 25 }),
     rows: ref([{ id: 'previous' }]), total: ref(72), loading: ref(false), error: ref('previous notice'),
     filters: ref({ search: ' query ', created_range: [] }), activeView: ref('batches'),
@@ -43,8 +44,8 @@ function serverLoader(path, client, overrides = {}) {
     publishedRangeParams, metricRangeParams, publishedRange: ref([]), metricFilters: ref({}), usageStatusFilter: ref('active'),
     toRows: (items) => items, loadPresence: async () => {}, ...overrides,
   }
-  const run = new Function(...Object.keys(state), `let loadSequence = 0; ${load}; return load({ quiet: true })`)
-  return { state, run: () => run(...Object.values(state)) }
+  const run = new Function(...Object.keys(state), 'options', `let loadSequence = 0; ${load}; return load(options)`)
+  return { state, run: (options={quiet:true}) => run(...Object.values(state), options) }
 }
 
 const SERVER_PAGES = PAGES.filter(([, , , pagination]) => pagination === 'server')
@@ -86,6 +87,25 @@ describe('list pages auto refresh', () => {
     expect(state.total.value).toBe(72)
     expect(state.error.value).toBe('previous notice')
     expect(state.loading.value).toBe(false)
+  })
+
+  it.each(SERVER_PAGES)('%s does not apply an unsubmitted draft during polling', async (_name,path) => {
+    const request=vi.fn().mockResolvedValue({items:[],total:0})
+    const {state,run}=serverLoader(path,{list:request,listMyMaterials:request,listComposeTaskBatches:request,listComposeTasks:request,listStrategies:request,listTemplates:async()=>[],listCategories:async()=>[],listTeams:async()=>[]})
+    await run()
+    state.search.value='not submitted'
+    state.filters.value.search='not submitted'
+    await run()
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({search:'query',page:3}))
+  })
+  it('clears task selection when applying a new query',async()=>{
+    const source=read('src/modules/compose/pages/ComposeTasksPage.vue')
+    const query=source.match(/function query\(\) \{[^\n]+\}/)[0]
+    const selectedTaskKeys={value:[12]},pagination={value:{current:3}},load=vi.fn()
+    new Function('selectedTaskKeys','pagination','load',`${query};query()`)(selectedTaskKeys,pagination,load)
+    expect(selectedTaskKeys.value).toEqual([])
+    expect(pagination.value.current).toBe(1)
+    expect(load).toHaveBeenCalledWith({applyFilters:true})
   })
 
   // 账号属于本机执行面：移除独立刷新入口，仍由查询和操作完成后读取最新结果，

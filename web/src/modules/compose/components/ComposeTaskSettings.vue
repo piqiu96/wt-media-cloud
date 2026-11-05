@@ -4,6 +4,7 @@ import ResourceForm from '../../../shared/ui/resource/ResourceForm.vue'
 import ResourceFieldHelp from '../../../shared/ui/resource/ResourceFieldHelp.vue'
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import { platformText, settingFields, strategySettings } from '../strategySettings.js'
+import { changedTaskParams } from '../effectiveTaskParams.js'
 import { validateTaskGroup } from '../taskGroupOverrides.js'
 const props = defineProps({ strategy: { type: Object, required: true }, template: Object, materialCount: { type: Number, default: 0 }, modelValue: { type: Object, default: () => ({}) } })
 const emit = defineEmits(['update:modelValue'])
@@ -13,6 +14,8 @@ const activeGroup = ref(null), visible = ref(false), draft = ref({}), errors = r
 const editable = (field) => field.editable === true && field.key !== 'guide_video_url'
 const hasEditable = computed(() => fields.value.some(editable))
 const columns = [{ colKey: 'name', title: '成片设置', width: 170 }, { colKey: 'platforms', title: '适用平台', width: 180 }, { colKey: 'copies', title: '每条份数', width: 100 }, { colKey: 'estimated', title: '预计任务', width: 100 }, { colKey: 'op', title: '操作', width: 80 }]
+const changes = (group) => changedTaskParams(group, props.modelValue[group.key], fields.value)
+const displayValue = (value) => typeof value === 'boolean' ? (value ? '开启' : '关闭') : value
 function open(group) {
   activeGroup.value = group
   draft.value = { ...group.params, ...(props.modelValue[group.key] || {}) }
@@ -28,7 +31,7 @@ function save() {
 </script>
 <template>
   <div class="task-settings">
-    <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="groups" :columns="columns" row-key="key" :scroll="{x:'630px'}" size="small"><template #platforms="{row}">{{ platformText(row.platforms) }}</template><template #estimated="{row}">{{ materialCount * row.copies }}</template><template #op="{row}"><t-link theme="primary" @click="open(row)">参数</t-link></template></t-table></div>
+    <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="groups" :columns="columns" row-key="key" :scroll="{x:'630px'}" size="small"><template #name="{row}"><div>{{ row.name }} <t-tag v-if="changes(row).length" size="small" variant="light" theme="primary">已调整</t-tag></div><div v-if="changes(row).length" class="task-settings__changes"><span v-for="field in changes(row)" :key="field.key">{{ field.label }}：{{ displayValue(field.value) }}</span></div></template><template #platforms="{row}">{{ platformText(row.platforms) }}</template><template #estimated="{row}">{{ materialCount * row.copies }}</template><template #op="{row}"><t-link theme="primary" @click="open(row)">参数</t-link></template></t-table></div>
     <ResourceOverlay :visible="visible" :title="`${activeGroup?.name || ''} · 模板参数`" :width="600" :footer="hasEditable" @close="visible = false">
       <p class="task-settings__notice">仅本次任务生效，不修改策略。</p>
       <ResourceForm class="task-settings__form">
@@ -51,6 +54,7 @@ function save() {
   </div>
 </template>
 <style scoped>
+.task-settings__changes { display:grid;gap:3px;margin-top:6px;color:var(--wt-text-tertiary);font-size:12px;overflow-wrap:anywhere; }
 .task-settings__notice { margin:0 0 20px;font-size:13px;color:var(--wt-text-secondary); }
 .task-settings__form { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 24px; }
 .task-settings__form :deep(.t-form__item) { margin-bottom:0;min-width:0; }

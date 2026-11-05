@@ -1,4 +1,7 @@
 <script setup>
+import MaterialUsageDialog from '../components/MaterialUsageDialog.vue'
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
+import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
 import '../../compose/production.css'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import MaterialMetricFilters from '../components/MaterialMetricFilters.vue'
@@ -53,6 +56,9 @@ const loading = ref(false)
 const error = ref('')
 const search = ref('')
 const statusFilter = ref('')
+const usageVisible=ref(false),usageMaterial=ref(null)
+function openUsage(row){usageMaterial.value=row;usageVisible.value=true}
+const appliedAdvancedCount = ref(0)
 const advancedFilters = ref(false), categoryFilters = ref([]), publishedRange = ref([]), metricFilters = ref(emptyMetricRanges())
 const myUsageFilter = ref('unused'), teamUsageFilter = ref(''), usageStatusFilter = ref('active')
 const sortBy = ref('published_at')
@@ -176,27 +182,30 @@ function reset() {
   metricFilters.value = emptyMetricRanges()
   search.value = ''
   statusFilter.value = ''
-  load()
+  load({ applyFilters: true })
 }
 
-watch([search, statusFilter], () => {
-  pagination.value.current = 1
-  selectedRowKeys.value = []
-})
+
 
 const pagedRows = computed(() => rows.value)
 
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
-async function load({ quiet = false, keepPage = false } = {}) {
+const appliedQuery = ref(null)
+async function load({ quiet = false, keepPage = false, applyFilters = false } = {}) {
   if (!quiet && !keepPage) pagination.value.current = 1
+  if (applyFilters) selectedRowKeys.value = []
   const sequence = ++loadSequence
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const data = await client.listMyMaterials({ category_ids: categoryFilters.value.join(','), ...publishedRangeParams(publishedRange.value), ...metricRangeParams(metricFilters.value), my_usage: myUsageFilter.value, team_usage: teamUsageFilter.value, usage_status: usageStatusFilter.value, page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
+    const draft = { category_ids: categoryFilters.value.join(','), ...publishedRangeParams(publishedRange.value), ...metricRangeParams(metricFilters.value), my_usage: myUsageFilter.value, team_usage: teamUsageFilter.value, usage_status: usageStatusFilter.value, page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value }
+    if (applyFilters || !appliedQuery.value) appliedQuery.value = JSON.parse(JSON.stringify(draft))
+    const params = { ...appliedQuery.value, page: pagination.value.current, page_size: pagination.value.pageSize, sort_by: sortBy.value, sort_order: sortOrder.value }
+    const data = await client.listMyMaterials(params)
     if (sequence !== loadSequence) return
     rows.value = toRows(data.items || [])
     total.value = data.total || 0
+    appliedAdvancedCount.value = ['view_count','like_count','favorite_count'].filter(key => [params[`${key}_min`],params[`${key}_max`]].some(value => value != null && value !== '')).length + (params.video_status ? 1 : 0)
     selectedRowKeys.value = selectedRowKeys.value.filter((key) => rows.value.some((row) => String(row.usage_id) === String(key) && canSelectForDownload(row)))
   } catch (e) {
     if (!quiet && sequence === loadSequence) error.value = e?.message || '读取我的素材失败'
@@ -207,7 +216,7 @@ async function load({ quiet = false, keepPage = false } = {}) {
 }
 
 useAutoRefresh(() => load({ quiet: true }), {
-  shouldSkip: () => detailVisible.value || detailLoading.value || selectedRowKeys.value.length > 0 || batchLoading.value,
+  shouldSkip: () => usageVisible.value || detailVisible.value || detailLoading.value || selectedRowKeys.value.length > 0 || batchLoading.value,
 })
 
 function changeSort(sort) {
@@ -323,24 +332,27 @@ onMounted(() => {
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="我的素材" description="管理已加入的素材，查看使用情况并下载。" />
       <ResourceCard class="material-table-card">
-        <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="名称 / 作者 / ID" @enter="load" /></label>
+        <ResourceFilterBar>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="名称 / 作者 / ID" @enter="load({ applyFilters: true })" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categories" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
-          <ResourceAdvancedToggle v-model="advancedFilters" />
-          <div v-if="advancedFilters" class="wt-advanced-filters">
-            <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="usageStatusFilter" :options="[{value:'active',label:'已加入'},{value:'removed',label:'已移出'}]" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="usageStatusFilter" :options="[{value:'active',label:'已加入'},{value:'removed',label:'已移出'}]" clearable placeholder="全部" /></label>
+<div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+          <ResourceAdvancedToggle v-model="advancedFilters" :count="appliedAdvancedCount" controls="material-advanced-filters" />
+          <div v-if="advancedFilters" id="material-advanced-filters" class="wt-advanced-filters">
+
+
+
             <label class="wt-filter-field"><span class="wt-filter-field__label">视频准备</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
             <MaterialMetricFilters v-model="metricFilters" />
           </div>
-        </div>
+        </ResourceFilterBar>
         <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></ResourceSelectionToolbar>
         <p v-if="downloadReason" class="wt-download-reason">{{ downloadReason }}</p>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="我的素材还是空的">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="暂无符合条件的素材">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面、标题与「类目 · 作者」合成一格（走查七轮起副行是这两样；素材库那一页
                  的副行仍是来源平台）。标题就是去来源平台的入口，蓝色可点；没有落地页的
@@ -356,7 +368,7 @@ onMounted(() => {
             </template>
             <template #category="{row}">{{ categoryName(categories,row.category_id) }}</template>
             <template #my_usage="{row}">{{ myUsageLabel(row.my_usage) }}</template>
-            <template #team_usage="{row}">{{ usageSummary(row) }}</template>
+            <template #team_usage="{row}"><t-link theme="primary" @click="openUsage(row)">{{ usageSummary(row) }}</t-link></template>
             <template #metrics="{row}"><div class="material-metrics"><span>{{ metricLabel(row,'view_count') }} 浏览</span><span>{{ metricLabel(row,'like_count') }} 赞 · {{ metricLabel(row,'favorite_count') }} 收藏</span></div></template>
             <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
             <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
@@ -392,6 +404,7 @@ onMounted(() => {
         <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
       </ResourceCard>
 
+      <MaterialUsageDialog v-model:visible="usageVisible" :material="usageMaterial" />
       <MaterialDetailDrawer
         v-model:visible="detailVisible"
         :material="detail"
@@ -410,7 +423,7 @@ onMounted(() => {
 
 <style scoped>
 .wt-download-reason { margin: 12px 16px; font-size: 13px; color: var(--wt-text-secondary); }
-.material-table-card { padding: 18px 20px; margin-top: 16px; }
+.material-table-card { margin-top: 16px; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
 .material-metrics { display:grid;gap:4px; }
@@ -424,6 +437,5 @@ span.material-title { color: var(--wt-text-primary); }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
 .wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
 @media (max-width: 680px) {
-  .material-table-card { padding: 16px; }
 }
 </style>
