@@ -1,4 +1,8 @@
 <script setup>
+import ComposeBatchProgress from './ComposeBatchProgress.vue'
+import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { platformText } from '../strategySettings.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 defineProps({ view: { type: Object, required: true } })
@@ -16,33 +20,33 @@ function conditionText(condition) {
 }
 </script>
 <template>
-  <div class="execution-preview">
+  <div class="execution-preview wt-resource-page resource-visual-approved production-page">
     <template v-if="view.active_batch">
       <t-alert theme="info" message="该策略有任务执行中" />
-      <div class="execution-preview__setting"><strong>{{ view.active_batch.name || `批次 ${view.active_batch.id}` }}</strong><span v-if="view.active_batch.created_at">{{ formatDateTime(view.active_batch.created_at) }}</span><span>排队 {{ view.active_batch.counts?.pending ?? '—' }} · 执行中 {{ view.active_batch.counts?.running ?? '—' }}</span><t-link theme="primary" @click="$emit('progress', view.active_batch)">查看进度</t-link></div>
+      <ResourceDescriptions><t-descriptions-item label="任务批次">{{ view.active_batch.name || view.active_batch.id }}</t-descriptions-item><t-descriptions-item label="创建时间">{{ formatDateTime(view.active_batch.created_at) }}</t-descriptions-item></ResourceDescriptions>
+      <ComposeBatchProgress :counts="view.active_batch.counts || {}" />
+      <t-link theme="primary" @click="$emit('progress', view.active_batch)">查看详情</t-link>
     </template>
     <template v-else>
-      <strong>{{ view.strategy?.name }}</strong>
-      <p v-if="view.selected_count">选入 {{ view.selected_count }} 条素材，预计生成 {{ view.estimated_output_count }} 个成片</p>
-      <t-alert v-else theme="info" message="没有可选素材" />
-      <p v-if="view.daily_remaining !== null && view.daily_remaining !== undefined">每日剩余 {{ view.daily_remaining }} 条素材</p>
-      <div v-for="setting in view.settings || []" :key="setting.key" class="execution-preview__setting"><strong>{{ setting.name }}</strong><span>{{ platformText(setting.platforms) }} · 每条 {{ setting.copies }} 份 · 预计 {{ view.selected_count * setting.copies }} 个成片</span></div>
+      <div class="execution-preview__summary"><span>本次素材 <strong>{{ view.selected_count }} 条</strong></span><span>预计成片 <strong>{{ view.estimated_output_count }} 个</strong></span></div>
+      <t-alert v-if="!view.selected_count" theme="info" message="没有可选素材" />
+      <ResourceDescriptions><t-descriptions-item label="策略">{{ view.strategy?.name }}</t-descriptions-item><t-descriptions-item v-if="view.daily_remaining !== null && view.daily_remaining !== undefined" label="每日剩余">{{ view.daily_remaining }} 条</t-descriptions-item></ResourceDescriptions>
+      <ResourceSection title="成片设置"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="view.settings || []" :columns="[{colKey:'name',title:'成片设置',width:240},{colKey:'platforms',title:'适用平台',width:180},{colKey:'copies',title:'每条份数',width:100},{colKey:'estimate',title:'预计成片',width:110}]" row-key="key" size="small"><template #platforms="{row}">{{ platformText(row.platforms) }}</template><template #estimate="{row}">{{ view.selected_count * row.copies }} 个</template></t-table></div></ResourceSection>
+      <ResourceSection title="选材结果"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="view.materials || []" :columns="[{colKey:'title',title:'素材',width:240},{colKey:'result',title:'结果',width:100},{colKey:'basis',title:'依据',width:320}]" :scroll="{x:'660px'}" row-key="material_id" size="small" empty="暂无候选素材">
+        <template #title="{row}"><div class="execution-preview__material"><strong :title="row.title">{{ row.title || `素材 ${row.material_id}` }}</strong><span>ID {{ row.material_id }}</span></div></template>
+        <template #result="{row}"><ResourceStatusBadge :tone="row.selected ? 'success':'neutral'" :label="row.selected ? '选入':'跳过'" /></template>
+        <template #basis="{row}"><div class="execution-preview__basis"><span>{{ reasons[row.reason] || row.reason }}</span><span v-for="(condition,index) in row.conditions || []" :key="index">{{ conditionText(condition) }}<template v-if="condition.state && !['missing','unknown'].includes(condition.state)"> · {{ condition.state === 'matched' ? '满足' : ['unmatched','not_matched'].includes(condition.state) ? '不满足' : condition.state }}</template></span></div></template>
+      </t-table></div></ResourceSection>
     </template>
-    <div class="execution-preview__materials">
-      <div v-for="material in view.materials || []" :key="material.material_id" class="execution-preview__material">
-        <div class="execution-preview__heading"><strong>{{ material.title || `素材 ${material.material_id}` }}</strong><t-tag :theme="material.selected ? 'primary' : 'default'" variant="light">{{ material.selected ? '选入' : '跳过' }}</t-tag></div>
-        <p>{{ reasons[material.reason] || material.reason }}</p>
-        <p v-for="(condition, index) in material.conditions || []" :key="index">{{ conditionText(condition) }}<template v-if="condition.state && !['missing', 'unknown'].includes(condition.state)"> · {{ condition.state === 'matched' ? '满足' : ['unmatched', 'not_matched'].includes(condition.state) ? '不满足' : condition.state }}</template></p>
-      </div>
-    </div>
   </div>
 </template>
 <style scoped>
-.execution-preview { display: grid; gap: 12px; }
-.execution-preview p { margin: 0; color: var(--wt-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
-.execution-preview__setting { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }
-.execution-preview__setting span { color: var(--wt-text-secondary); }
-.execution-preview__materials { display: grid; gap: 12px; max-height: 40vh; overflow: auto; }
-.execution-preview__material { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); }
-.execution-preview__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.execution-preview { display:grid;gap:20px;min-width:0; }
+.execution-preview__summary { display:flex;gap:40px;flex-wrap:wrap;padding:20px;background:var(--wt-bg-page);border-radius:var(--wt-radius-sm); }
+.execution-preview__summary > span { display:flex;align-items:center;gap:12px;font-size:14px; }
+.execution-preview__summary strong { color:var(--wt-text-primary);font-size:22px;font-weight:600; }
+.execution-preview__material,.execution-preview__basis { display:grid;gap:4px;min-width:0; }
+.execution-preview__material strong { white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500; }
+.execution-preview__material span,.execution-preview__basis span:not(:first-child) { color:var(--wt-text-tertiary);font-size:12px; }
+.execution-preview :deep(.resource-section) { margin-top:0; }
 </style>
