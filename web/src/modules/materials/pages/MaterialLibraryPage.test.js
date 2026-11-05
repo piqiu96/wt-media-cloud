@@ -77,7 +77,7 @@ describe('material library page', () => {
     expect(source).toContain('await Promise.all([loadSession(), loadCategories()])')
     expect(source.indexOf('await Promise.all([loadSession(), loadCategories()])')).toBeLessThan(source.indexOf('load()\n  loadTeams()'))
     // 选项不再从已加载的行里补。
-    expect(source).not.toContain('for (const row of rows.value)')
+    expect(source).not.toContain('for (const row of rows.value) categories')
     expect(source).not.toContain('categoryName(categories.value, id)')
   })
 
@@ -130,7 +130,7 @@ describe('material library page', () => {
 
   // 走查四轮（2026-09-30 用户带设计图 + 裁定）：封面、标题、来源平台合成一个「素材」
   // 单元格，减少列数；素材 ID 仍独立成列且是第一业务列（规范 §5.1，用户明确裁定保留）。
-  it('collapses cover, title and platform into one material cell behind a leading id column', () => {
+  it('keeps cover and author with the title, and shows the source platform separately', () => {
     const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
     const materialAt = source.indexOf("{ colKey: 'material', title: '素材 / 作者'")
     expect(idAt).toBeGreaterThan(-1)
@@ -147,7 +147,7 @@ describe('material library page', () => {
     // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
-    // 副行只带来源平台；类目有自己的一列，同一格里再说一遍就是重复。
+    // 平台独立成列，作者副行不再重复平台。
     expect(source).toContain("row.author_name || '—'")
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })
@@ -157,7 +157,7 @@ describe('material library page', () => {
    * 下载只从「我的素材」发起，服务端也只认那边的关系；素材库这边留一颗「下载」，
    * 点下去必然被拒（直接调下载接口要 403），那比没有按钮更糟。
    *
-   * 反馈里给的是「去我的素材」这一步：加进去之后，下载在那边的行上做。
+   * 加入成功仅确认结果，不增加导航动作。
    */
   it('offers no local download anywhere on the library page', () => {
     expect(opBlock).not.toContain('下载')
@@ -168,11 +168,11 @@ describe('material library page', () => {
     const toast = sliceBetween(source, 'function notifyAdded(', '\n}')
     expect(toast).toContain('feedback.toast.success')
     expect(toast).toContain('已加入我的素材')
-    expect(toast).toContain('去我的素材')
+    expect(toast).not.toContain('去我的素材')
     expect(toast).not.toContain('下载')
   })
 
-  // 「已加入 → 去我的素材」「已移出 → 重新加入」都读服务端投影的 `usage_status`，
+  // 加入状态与重新加入操作都读服务端投影的 `usage_status`，
   // 不再拉一次 `/my-materials` 在客户端 join。团队版的关系查询是服务端的事，
   // 页面再拼一份，等于维护第二个真值来源。
   it('reads the viewer relation from the server projection instead of joining my materials', () => {
@@ -185,18 +185,17 @@ describe('material library page', () => {
     expect(source).not.toContain('isMine(')
   })
 
-  // 走查四轮（用户裁定 + 设计图）：已加入的行主操作是「去我的素材」，
-  // 未加入的行仍是「加入我的素材」，已移出的行是「重新加入」。三个主操作互斥。
-  it('swaps the row primary action with the viewer relation', () => {
+  // 行内仅详情与有效的加入操作；已加入不再额外提供导航按钮。
+  it('offers only detail and an eligible join action', () => {
     expect(opBlock).toContain('@click="openDetail(row)">详情</t-button>')
     expect(opBlock).not.toContain('>查看</t-button>')
     expect(opBlock).toContain("row.usage_status !== 'active'")
     expect(opBlock).toContain("row.usage_status === 'removed' ? '重新加入' : '加入我的素材'")
     expect(opBlock).toContain('@click="addToMine(row)"')
-    expect(opBlock).toContain('@click="goToMyMaterials()">去我的素材</t-button>')
-    expect(source).toMatch(/v-else-if="row\.usage_status === 'active'"[\s\S]{0,180}?goToMyMaterials\(\)/)
-    // 跳转目标就是「我的素材」页，两个端同名（cloud / desktop router 都是 MyMaterial）。
-    expect(source).toContain("{ name: 'MyMaterial' }")
+    expect(opBlock).not.toContain('去我的素材')
+    expect(source).not.toContain('goToMyMaterials')
+    // 不通过自动跳转打断筛选与选择现场。
+    expect(source).not.toContain("router.push")
   })
 
   // 加入成功之后重读列表，让加入状态、我的使用与操作按钮一起翻过来：
@@ -204,7 +203,7 @@ describe('material library page', () => {
   it('re-reads the list after joining so every projected field flips together', () => {
     const add = sliceBetween(source, 'async function addToMine(', '\n}')
     expect(add).toContain('await client.addUsage(row.id)')
-    expect(add).toContain('await load()')
+    expect(add).toContain('await load({ keepPage: true })')
     expect(add).toContain('notifyAdded()')
   })
 
@@ -216,9 +215,9 @@ describe('material library page', () => {
     expect(source).toContain('mode="library"')
     // 使用情况段由 mode 决定，不再由角色开关决定。
     expect(source).not.toContain('show-usage')
-    expect(source).toContain('@add="addToMine"')
-    expect(source).toContain('@go-mine="goToMyMaterials"')
-    expect(source).toContain(':mine="detail?.usage_status === \'active\'"')
+    expect(source).not.toContain('@add="addToMine"')
+    expect(source).not.toContain('@go-mine="goToMyMaterials"')
+    expect(source).not.toContain(':mine="detail?.usage_status === \'active\'"')
     expect(source).not.toContain('material-detail-drawer')
   })
 
@@ -302,12 +301,12 @@ describe('material library page', () => {
    * 禁止的是**新增**，不是导航：已加入的行无论什么状态都还能去「我的素材」——
    * §16.2 那句「历史关系和结果继续保留」说的正是这个。
    */
-  it('refuses a new add on a paused or delisted material but keeps the navigation', () => {
+  it('refuses a new add on a paused or delisted material without adding navigation', () => {
     expect(source).toContain('function canAdd(row)')
     expect(source).toMatch(/canAdd\(row\)[\s\S]{0,140}?row\.status === 'available'/)
-    expect(source).toMatch(/v-else-if="row\.usage_status === 'active'"/)
-    // 没有可做主操作时画「—」，而不是留一颗必然被拒绝的按钮。
-    expect(opBlock).toContain('<template v-else>—</template>')
+    expect(source).not.toContain('goToMyMaterials')
+    // 无可执行主操作时仅保留详情。
+    expect(opBlock).not.toContain('<template v-else>—</template>')
   })
 
   // 走查三轮（交互对齐 §2.3/§5.3/§5.5）：行操作收敛为「详情 | 单一主操作」；
@@ -315,7 +314,7 @@ describe('material library page', () => {
   it('narrows each row to 详情 followed by one primary action', () => {
     expect(opBlock).toContain('@click="openDetail(row)">详情</t-button>')
     expect(opBlock).not.toContain('>查看</t-button>')
-    // 行里只有这两颗：详情 + 主操作（加入或去我的素材），没有第二个业务动作。
-    expect(opBlock.match(/<t-button/g)).toHaveLength(3)
+    // 最多两颗：详情与加入。
+    expect(opBlock.match(/<t-button/g)).toHaveLength(2)
   })
 })

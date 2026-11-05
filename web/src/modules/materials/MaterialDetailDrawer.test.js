@@ -53,8 +53,8 @@ describe('material detail drawer', () => {
   it('keeps missing relation data unknown and displays real successful-output facts', () => {
     expect(template).toContain('v-if="material.usage_status"')
     expect(template).toContain('<template v-else>—</template>')
-    expect(template).toContain('v-for="fact in usageRows"')
-    expect(source).toContain('usageFacts(props.material)')
+    expect(template).toContain('label="团队使用"')
+    expect(template).toContain('usageSummary(material)')
     expect(template).toContain("material.added_at ? formatDateTime(material.added_at) : '—'")
   })
 })

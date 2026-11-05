@@ -37,6 +37,7 @@ function serverLoader(path, client, overrides = {}) {
     rows: ref([{ id: 'previous' }]), total: ref(72), loading: ref(false), error: ref('previous notice'),
     filters: ref({ search: ' query ', created_range: [] }), activeView: ref('batches'),
     isAdmin: ref(false), isSenior: ref(false), knownTaskRows: ref({}),
+    mutationBusy: ref(false), selectionRows: new Map(), joinResult: ref(null), platformFilter: ref(''),
     search: ref('query'), teamFilter: ref(''), categoryFilters: ref([]), joinedFilter: ref(''),
     myUsageFilter: ref(''), teamUsageFilter: ref(''), statusFilter: ref(''),
     sortBy: ref('published_at'), sortOrder: ref('desc'), selectedRowKeys: ref([]),

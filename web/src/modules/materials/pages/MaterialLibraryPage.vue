@@ -1,4 +1,5 @@
 <script setup>
+import { joinMaterials } from '../joinMaterials.js'
 import MaterialUsageDialog from '../components/MaterialUsageDialog.vue'
 import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
 import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
@@ -11,9 +12,8 @@ import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelect
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
-import { computed, h, onMounted, ref, watch } from 'vue'
-import { Button as TButton } from 'tdesign-vue-next'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
@@ -31,8 +31,6 @@ import {
   joinStatus,
   myUsageLabel,
   myUsageTone,
-  usageOperatorCount,
-  usageOperators,
   usageOutputCount,
   usageSummary,
 } from '../labels.js'
@@ -43,7 +41,6 @@ const client = createMaterialsClient()
 const sessionClient = createSessionClient()
 const users = createUsersClient()
 const route = useRoute()
-const router = useRouter()
 
 const rows = ref([])
 const total = ref(0)
@@ -51,6 +48,10 @@ let loadSequence = 0
 const loading = ref(false)
 const error = ref('')
 const search = ref(route.query.search ? String(route.query.search) : '')
+const platformFilter = ref('')
+const selectedRowKeys = ref([]), selectionRows = new Map()
+const batchLoading = ref(false), addingId = ref(null), joinResult = ref(null)
+const mutationBusy = computed(() => batchLoading.value || addingId.value !== null)
 const joinedFilter = ref('')
 const myUsageFilter = ref('unused')
 const teamUsageFilter = ref('')
@@ -89,7 +90,9 @@ function defaultCategoryFilters() {
 
 // Explicit widths keep identity, performance and usage readable under horizontal scrolling.
 const columns = [
+  { colKey: 'row-select', type: 'multiple', width: 44, fixed: 'left', checkProps: () => ({ disabled: mutationBusy.value }) },
   { colKey: 'id', title: '素材 ID', width: 80, sorter: true },
+  { colKey: 'platform', title: '平台', width: 90 },
   { colKey: 'material', title: '素材 / 作者', width: 280 },
   { colKey: 'category', title: '类目', width: 100 },
   { colKey: 'metrics', title: '内容表现', width: 250 },
@@ -115,7 +118,9 @@ const categoryOptions = computed(() => categories.value.map((category) => ({ id:
 // quiet 由定时刷新传入：保留页码与筛选，失败沿用上一次读数。
 const appliedQuery = ref(null)
 async function load({ quiet = false, keepPage = false, applyFilters = false } = {}) {
+  if (applyFilters && mutationBusy.value) return
   if (!quiet && !keepPage) pagination.value.current = 1
+  if (applyFilters) { selectedRowKeys.value = []; selectionRows.clear(); joinResult.value = null }
   const sequence = ++loadSequence
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
@@ -123,6 +128,7 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
     const draft = {
       page: pagination.value.current, page_size: pagination.value.pageSize,
       search: search.value,
+      platform: platformFilter.value,
       ...publishedRangeParams(publishedRange.value),
       team_id: teamFilter.value,
       category_ids: categoryFilters.value,
@@ -137,6 +143,7 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
     const data = await client.list(params)
     if (sequence !== loadSequence) return
     rows.value = data.items || []
+    for (const row of rows.value) selectionRows.set(row.id, row)
     total.value = data.total || 0
   } catch (e) {
     if (!quiet && sequence === loadSequence) error.value = e?.message || '读取素材失败'
@@ -146,7 +153,7 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
 }
 
 useAutoRefresh(() => load({ quiet: true }), {
-  shouldSkip: () => detailVisible.value || detailLoading.value || usageVisible.value,
+  shouldSkip: () => detailVisible.value || detailLoading.value || usageVisible.value || selectedRowKeys.value.length > 0 || mutationBusy.value,
 })
 
 async function loadCategories() {
@@ -183,15 +190,8 @@ async function loadTeams() {
   }
 }
 
-// 规范 §16.2：暂停与下架禁止新增领取，已领取的行仍给「去我的素材」。
-// 与状态徽章放行未知值是两回事：徽章画「可用」是替服务端宣布事实，这里只是一颗按钮。
-// 服务端不兜底：POST /materials/{id}/usages 是无状态校验的 upsert，拦截靠这里。
 function canAdd(row) {
   return !row.status || row.status === 'available'
-}
-
-function goToMyMaterials() {
-  router.push({ name: 'MyMaterial' })
 }
 
 // `/material-library?material_id=7` 是一个真实入口：内容池里「已转素材」那一列跳过来。
@@ -224,39 +224,44 @@ async function openDetail(row) {
   }
 }
 
-/**
- * 加入成功后的即时反馈。素材库不提供本机下载入口（要下载请去「我的素材」），
- * 所以这里只给一个「去我的素材」的下一步，不再是「立即下载」。
- */
 function notifyAdded() {
-  feedback.toast.success({
-    content: () => h('div', { class: 'material-added-toast' }, [
-      h('span', { class: 'material-added-toast__text' }, '已加入我的素材'),
-      h(TButton, {
-        size: 'small', theme: 'primary', variant: 'text', onClick: goToMyMaterials,
-      }, '去我的素材'),
-    ]),
-    duration: 5000,
-  })
+  feedback.toast.success('已加入我的素材')
 }
 
 async function addToMine(row) {
+  if (mutationBusy.value) return
+  addingId.value = row.id
   try {
-    // 200（已在「我的素材」里）与 201（新建或**恢复**）的响应体完全相同，
-    // http.js 两种都返回 data，所以这里不该也无法分支。恢复就是这一条命令：
-    // 冻结合同里没有单独的恢复端点。
     await client.addUsage(row.id)
-    // 重新读取列表，让加入状态、我的使用与操作按钮一起翻过来；不靠本地改一行
-    // 假装服务端已经投影过。
-    await load()
+    await load({ keepPage: true })
     notifyAdded()
   } catch (e) {
     feedback.toast.error(e?.message || '加入我的素材失败')
+  } finally {
+    addingId.value = null
   }
 }
 
+async function batchAddToMine() {
+  if (mutationBusy.value || !selectedRowKeys.value.length) return
+  batchLoading.value = true
+  joinResult.value = null
+  try {
+    const selected = selectedRowKeys.value.map(id => selectionRows.get(id)).filter(Boolean)
+    const result = await joinMaterials(selected, id => client.addUsage(id))
+    joinResult.value = result
+    selectedRowKeys.value = result.failed.map(row => row.id)
+    await load({ keepPage: true })
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const joinSummary = computed(() => joinResult.value ? `已加入 ${joinResult.value.joined.length} 条，跳过 ${joinResult.value.skipped.length} 条，失败 ${joinResult.value.failed.length} 条` : '')
+
 function reset() {
   search.value = ''
+  platformFilter.value = ''
   joinedFilter.value = ''
   myUsageFilter.value = 'unused'
   publishedRange.value = []
@@ -294,25 +299,36 @@ onMounted(async () => {
       <ResourcePageHeader title="素材库" description="筛选团队素材，加入我的素材后用于制作。" />
       <ResourceCard class="material-table-card">
         <ResourceFilterBar>
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 素材 ID / 作者" @enter="load({ applyFilters: true })" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
-          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 作者 / 素材 ID / 平台作品 ID" @enter="load({ applyFilters: true })" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platformFilter" clearable placeholder="全部" :options="[{ value: 'douyin', label: '抖音' }]" /></label>
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
-<label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
-<label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
-<div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="joinedFilter" :options="JOIN_FILTERS" clearable placeholder="全部" /></label>
+          <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
+          <div class="wt-filter-actions"><t-button theme="primary" :disabled="mutationBusy" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" :disabled="mutationBusy" @click="reset">重置</t-button></div>
         </ResourceFilterBar>
+        <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="!mutationBusy && (selectedRowKeys = [])">
+          <t-button variant="outline" :loading="batchLoading" :disabled="addingId !== null" @click="batchAddToMine">加入我的素材</t-button>
+        </ResourceSelectionToolbar>
+        <div v-if="joinResult" class="join-result" role="status">
+          <FeedbackAlert :theme="joinResult.failed.length ? 'warning' : 'success'" :message="joinSummary" closable @close="joinResult = null" />
+          <ul v-if="joinResult.failed.length || joinResult.skipped.length" class="join-result__items">
+            <li v-for="row in [...joinResult.failed, ...joinResult.skipped]" :key="row.id">{{ row.title || `素材 ${row.id}` }}：{{ row.reason }}</li>
+          </ul>
+        </div>
         <div class="table-scroll-wrap">
-          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
+          <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedRowKeys" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
+            <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
             <!-- 标题进入素材详情，原作品入口统一收在基本信息。 -->
             <template #material="{ row }">
               <div class="material-cell">
                 <MaterialCover class="material-cell__cover" :url="row.cover_url" />
                 <div class="material-cell__text">
                   <t-link theme="primary" class="material-title" :title="row.title || '未命名素材'" @click="openDetail(row)">{{ row.title || '未命名素材' }}</t-link>
-                  <span class="material-cell__source">{{ row.author_name || '—' }} · {{ platformLabel(row.platform) }}</span>
+                  <span class="material-cell__source">{{ row.author_name || '—' }}</span>
                 </div>
               </div>
             </template>
@@ -331,14 +347,9 @@ onMounted(async () => {
             <template #created_by_name="{ row }">{{ row.created_by_name || '—' }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <template #op="{ row }">
-              <!-- 详情 | 单一主操作；已加入的行换成「去我的素材」，不再给必然空转的「加入」。
-                   已移出的行给「重新加入」：服务端的同一条 upsert 会把它恢复成 active。 -->
               <ResourceRowActions>
                 <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
-                <t-button v-if="canAdd(row) && row.usage_status !== 'active'" size="small" theme="primary" variant="text" class="is-primary" @click="addToMine(row)">{{ row.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
-                <t-button v-else-if="row.usage_status === 'active'" size="small" theme="primary" variant="text" class="is-primary" @click="goToMyMaterials()">去我的素材</t-button>
-                <!-- 暂停/下架且未加入：没有可做的主操作，画 — 而不是留一颗会被拒的按钮。 -->
-                <template v-else>—</template>
+                <t-button v-if="canAdd(row) && row.usage_status !== 'active'" size="small" theme="primary" variant="text" class="is-primary" :loading="addingId === row.id" :disabled="mutationBusy" @click="addToMine(row)">{{ row.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
               </ResourceRowActions>
             </template>
           </t-table>
@@ -351,10 +362,7 @@ onMounted(async () => {
         :material="detail"
         :loading="detailLoading"
         :categories="categories"
-        :mine="detail?.usage_status === 'active'"
         mode="library"
-        @add="addToMine"
-        @go-mine="goToMyMaterials"
       />
 
       <MaterialUsageDialog v-model:visible="usageVisible" :material="usageMaterial" />
@@ -363,6 +371,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.join-result { margin-bottom: 16px; }
+.join-result__items { max-height: 160px; overflow: auto; margin: 8px 0 0; padding-left: 24px; color: var(--wt-text-secondary); font-size: 13px; line-height: 24px; }
 .material-table-card { margin-top: 16px; }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .material-cell__cover { width: 42px; height: 52px; flex: none; }

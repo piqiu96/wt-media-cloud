@@ -88,11 +88,11 @@ describe('my materials page', () => {
    * 行操作按「使用状态 × 下载状态」矩阵分支（任务状态与业务状态严格隔离），每行只给
    * 一个主操作。
    *
-   * 规范 §5.6：本项目按钮数上限是 3 个（详情 + 一个主操作 + 放弃使用），永远到不了 5，
+   * 规范 §5.6：本项目按钮数上限是 3 个（详情 + 一个主操作 + 放弃），永远到不了 5，
    * 所以**没有「更多」**——「3 个动作也收进更多」的写法按 §5.6 不采用。
    *
    * 已下载那一格再加一维：**本机实测还有没有那份文件**。有 → 不给主操作（只剩
-   * 详情｜放弃使用）；实测没有 → 给「重新下载」。两个分支都由 `needsRedownload` 判，
+   * 详情｜放弃）；实测没有 → 给「重新下载」。两个分支都由 `needsRedownload` 判，
    * 与详情抽屉共用同一个判据（见下一条用例）。
    */
   it('branches each row on the usage × download matrix, flat and never behind 更多', () => {
@@ -108,7 +108,7 @@ describe('my materials page', () => {
     expect(op).toContain('@click="download(row)">重新下载</t-button>')
     expect(op).toContain("row.download_status !== 'downloading' && row.download_status !== 'downloaded'")
     expect(op).toContain('downloadActionLabel(row.download_status)')
-    expect(op).toContain('@click="giveUp(row)">放弃使用</t-button>')
+    expect(op).toContain('@click="giveUp(row)">放弃</t-button>')
     // 创建合成任务的入口整条搬去了合成任务页：行内不该再有任何合成动作。
     expect(op).not.toContain('合成')
     // 矩阵判据从 video_status 切走：行内不再碰云端源文件态。
@@ -134,10 +134,10 @@ describe('my materials page', () => {
   })
 
   // 「移出」是收藏夹的用词。关系是使用关系：放弃的是「使用」，不是把素材从清单里删掉。
-  it('says 放弃使用 instead of 移出', () => {
+  it('says 放弃 instead of 移出', () => {
     expect(source).not.toContain('>移出</t-button>')
     expect(source).not.toContain('已移出我的素材')
-    expect(source).toContain('已放弃使用')
+    expect(source).toContain('已放弃')
   })
 
   // 这一页不是收藏夹，副标题不该说「收藏」。合成的入口在合成任务页，这一页不承诺

@@ -20,11 +20,11 @@ import { isDesktop } from '../../utils.js'
 export function createMaterialsClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
   return {
-    list({ search, team_id, category_ids, category_id, joined, my_usage, team_usage, video_status, sort_by, sort_order, strategy_id, operator_id, page, page_size, published_from, published_before, view_count_min, view_count_max, like_count_min, like_count_max, favorite_count_min, favorite_count_max } = {}) {
+    list({ search, platform, team_id, category_ids, category_id, joined, my_usage, team_usage, video_status, sort_by, sort_order, strategy_id, operator_id, page, page_size, published_from, published_before, view_count_min, view_count_max, like_count_min, like_count_max, favorite_count_min, favorite_count_max } = {}) {
       // `category_ids` 在线上是逗号分隔的一个参数；页面拿数组表达多选，序列化留在这一层，
       // 免得每个调用点各自 join 一次、各自漏掉去重。
       const categories = Array.isArray(category_ids) ? category_ids.filter(Boolean).join(',') : category_ids
-      return api.get('/materials', { search, team_id, category_ids: categories, category_id, joined, my_usage, team_usage, video_status, sort_by, sort_order, strategy_id, operator_id, page, page_size, published_from, published_before, view_count_min, view_count_max, like_count_min, like_count_max, favorite_count_min, favorite_count_max })
+      return api.get('/materials', { search, platform, team_id, category_ids: categories, category_id, joined, my_usage, team_usage, video_status, sort_by, sort_order, strategy_id, operator_id, page, page_size, published_from, published_before, view_count_min, view_count_max, like_count_min, like_count_max, favorite_count_min, favorite_count_max })
     },
     get(id) { return api.get(`/materials/${id}`) },
     addUsage(id, {strategy_id, operator_id} = {}) { return api.post(`/materials/${id}/usages`, {strategy_id, operator_id}) },

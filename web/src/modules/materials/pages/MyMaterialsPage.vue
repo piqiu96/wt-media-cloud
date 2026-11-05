@@ -7,7 +7,6 @@ import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import MaterialPerformance from '../components/MaterialPerformance.vue'
 import { publishedRangeParams, materialVideoState } from '../materialFilters.js'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
-import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
 import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
 import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import { feedback } from '../../../shared/ui/feedback/index.js'
@@ -58,8 +57,7 @@ const search = ref('')
 const statusFilter = ref('')
 const usageVisible=ref(false),usageMaterial=ref(null)
 function openUsage(row){usageMaterial.value=row;usageVisible.value=true}
-const appliedAdvancedCount = ref(0)
-const advancedFilters = ref(false), categoryFilters = ref([]), publishedRange = ref([])
+const categoryFilters = ref([]), publishedRange = ref([])
 const myUsageFilter = ref('unused'), teamUsageFilter = ref(''), usageStatusFilter = ref('active')
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
@@ -84,7 +82,7 @@ const columns = [
   { colKey: 'video_status', title: '视频状态', width: 100 },
   { colKey: 'usage_status', title: '加入状态', width: 100 },
   { colKey: 'added_at', title: '加入时间', width: 155, sorter: true },
-  { colKey: 'op', title: '操作', width: opColumnWidth(['详情','重新下载','放弃使用'], {variant:'text',primary:true}), fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情','重新下载','放弃'], {variant:'text',primary:true}), fixed: 'right' },
 ]
 
 const tableScroll = computed(() => ({
@@ -202,7 +200,6 @@ async function load({ quiet = false, keepPage = false, applyFilters = false } = 
     if (sequence !== loadSequence) return
     rows.value = toRows(data.items || [])
     total.value = data.total || 0
-    appliedAdvancedCount.value = params.video_status ? 1 : 0
     selectedRowKeys.value = selectedRowKeys.value.filter((key) => rows.value.some((row) => String(row.usage_id) === String(key) && canSelectForDownload(row)))
   } catch (e) {
     if (!quiet && sequence === loadSequence) error.value = e?.message || '读取我的素材失败'
@@ -256,10 +253,10 @@ async function giveUp(row) {
   try {
     // 真 204：http.js 对 204 直接返回 null，所以这里没有 body 可读，也不该去读。
     await client.removeUsage(row.usage_id)
-    feedback.toast.success('已放弃使用')
+    feedback.toast.success('已放弃')
     await load()
   } catch (e) {
-    feedback.toast.error(e?.message || '放弃使用失败')
+    feedback.toast.error(e?.message || '放弃失败')
   }
 }
 
@@ -336,11 +333,8 @@ onMounted(() => {
           <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
 <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
 <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="usageStatusFilter" :options="[{value:'active',label:'已加入'},{value:'removed',label:'已移出'}]" clearable placeholder="全部" /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">视频状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
 <div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
-          <ResourceAdvancedToggle v-model="advancedFilters" :count="appliedAdvancedCount" controls="material-advanced-filters" />
-          <div v-if="advancedFilters" id="material-advanced-filters" class="wt-advanced-filters">
-            <label class="wt-filter-field"><span class="wt-filter-field__label">视频准备</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
-          </div>
         </ResourceFilterBar>
         <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></ResourceSelectionToolbar>
         <p v-if="downloadReason" class="wt-download-reason">{{ downloadReason }}</p>
@@ -386,7 +380,7 @@ onMounted(() => {
                 <template v-else>
                   <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">重新下载</t-button>
                   <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
-                  <t-button size="small" class="wt-secondary-button wt-danger-button" variant="text" @click="giveUp(row)">放弃使用</t-button>
+                  <t-button size="small" class="wt-secondary-button wt-danger-button" variant="text" @click="giveUp(row)">放弃</t-button>
                 </template>
               </ResourceRowActions>
             </template>
