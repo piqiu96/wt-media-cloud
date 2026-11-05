@@ -46,6 +46,7 @@ const loading = ref(false)
 const error = ref('')
 const visible = ref(false)
 const saving = ref(false)
+const statusPendingID = ref(null)
 const editingID = ref(null)
 const form = ref(defaultForm())
 const scheduleMode = ref('manual')
@@ -216,7 +217,7 @@ async function load({ quiet = false } = {}) {
 }
 
 useAutoRefresh(() => load({ quiet: true }), {
-  shouldSkip: () => visible.value || detailVisible.value || keywordVisible.value || authorVisible.value || saving.value,
+  shouldSkip: () => visible.value || detailVisible.value || keywordVisible.value || authorVisible.value || saving.value || statusPendingID.value !== null,
 })
 
 function resetFilters() {
@@ -374,13 +375,33 @@ async function save() {
   }
 }
 
-async function toggle(row) {
-  try {
-    await client.setStrategyStatus(row.id, row.status === 'enabled' ? 'disabled' : 'enabled')
-    await load()
-  } catch (e) {
-    error.value = e.message || '状态更新失败'
-  }
+function toggle(row, nextEnabled) {
+  if (!canManage.value || statusPendingID.value !== null) return
+  const next = nextEnabled ? 'enabled' : 'disabled'
+  if (row.status === next) return
+  const dialog = DialogPlugin.confirm({
+    header: nextEnabled ? '启用策略' : '停用策略',
+    body: nextEnabled
+      ? `启用「${row.name}」后可手动执行，定时策略将按计划运行。`
+      : `停用「${row.name}」后不再发起新任务，已有任务继续执行。`,
+    confirmBtn: { content: nextEnabled ? '启用' : '停用', theme: nextEnabled ? 'primary' : 'danger' },
+    onConfirm: async () => {
+      if (!canManage.value || statusPendingID.value !== null) return
+      statusPendingID.value = row.id
+      try {
+        const updated = await client.setStrategyStatus(row.id, next)
+        Object.assign(row, updated)
+        await load()
+        feedback.toast.success(nextEnabled ? '策略已启用' : '策略已停用')
+      } catch (e) {
+        error.value = e.message || '状态更新失败'
+        feedback.toast.error(error.value)
+      } finally {
+        statusPendingID.value = null
+      }
+      dialog.hide()
+    },
+  })
 }
 
 async function run(row) {
@@ -537,7 +558,10 @@ function latestStats(row) {
               <span v-else>-</span>
             </template>
             <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
-            <template #status="{ row }"><ResourceStatusBadge :tone="row.status === 'enabled' ? 'success' : 'neutral'" :label="row.status === 'enabled' ? '启用' : '停用'" /></template>
+            <template #status="{ row }">
+              <t-switch v-if="canManage" :value="row.status === 'enabled'" :label="['启用', '停用']" :loading="statusPendingID === row.id" :disabled="statusPendingID !== null" @change="value => toggle(row, value)" />
+              <t-switch v-else :value="row.status === 'enabled'" :label="['启用', '停用']" disabled title="当前角色只能查看策略状态" />
+            </template>
             <template #op="{ row }">
               <ResourceRowActions>
                 <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
@@ -575,7 +599,6 @@ function latestStats(row) {
             <div class="resource-form-grid">
               <t-form-item required-mark><template #label>执行方式<ResourceFieldHelp content="手动执行由列表发起；定时执行按配置时间自动运行。" /></template><t-radio-group v-model="scheduleMode"><t-radio value="manual">手动执行</t-radio><t-radio value="scheduled">定时执行</t-radio></t-radio-group></t-form-item>
               <t-form-item v-if="scheduleMode === 'scheduled'" label="执行周期" required-mark><div class="mining-time-field"><span>每天</span><t-time-picker v-model="scheduleTime" format="HH:mm" value-type="HH:mm" clearable /></div></t-form-item>
-              <t-form-item label="策略状态"><t-switch v-model="form.status" :custom-value="['enabled', 'disabled']" :label="['启用', '停用']" /></t-form-item>
             </div>
           </ResourceSection>
           <ResourceSection title="转素材规则" variant="form">

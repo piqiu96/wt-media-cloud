@@ -25,7 +25,7 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('规则类型')
     expect(source).toContain('判断方式')
     expect(source).not.toContain('判断条件')
-    expect(source).toContain('策略状态')
+    expect(source).not.toContain('label="策略状态"')
     expect(source).toContain('所属类目')
     expect(source).toContain('listCategories')
     expect(source).toContain('categoryName')
@@ -74,6 +74,18 @@ describe('discovery strategy and task pages', () => {
     expect(source).not.toContain('立即执行')
     expect(source).not.toContain('内容结果')
     expect(source).not.toContain('执行记录')
+  })
+
+  it('keeps the strategy switch in the list and readonly status in details', () => {
+    const source = read('DiscoveryStrategiesPage.vue')
+    const status = source.slice(source.indexOf('<template #status='), source.indexOf('<template #op='))
+    expect(status).toContain('<t-switch v-if="canManage"')
+    expect(status).toContain(':value="row.status === \'enabled\'"')
+    expect(status).toContain(':loading="statusPendingID === row.id"')
+    expect(status).toContain('@change="value => toggle(row, value)"')
+    expect(status).toContain('当前角色只能查看策略状态')
+    expect(source).not.toContain('v-model="form.status"')
+    expect(source).toContain('label="状态"><ResourceStatusBadge')
   })
 
   it('renders tasks with business naming, results, and a tabbed detail drawer', () => {
