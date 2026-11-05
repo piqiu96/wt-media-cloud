@@ -62,11 +62,12 @@ function remove(index) { if (props.modelValue.length > 1) update(props.modelValu
         </t-form-item>
       </ResourceForm>
     </section>
-    <t-button variant="outline" class="strategy-settings__add" :disabled="modelValue.length >= limit" :title="modelValue.length >= limit ? '最多 20 组成片设置' : undefined" @click="add">新增成片设置</t-button>
+    <t-button variant="outline" class="strategy-settings__add" :disabled="modelValue.length >= limit" :title="modelValue.length >= limit ? '最多 20 组成片设置' : undefined" @click="add">添加成片设置</t-button>
   </div>
 </template>
 <style scoped>
 .strategy-settings { display: grid; gap: 12px; }
+.strategy-settings__add { justify-self: start; }
 .strategy-setting { padding: 20px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); overflow-anchor: none; }
 .strategy-setting.is-drop-target { border-color: var(--wt-primary); }
 .strategy-setting__subtitle { grid-column: 1 / -1; padding-top: 20px; border-top: 1px solid var(--wt-border); color: var(--wt-text-primary); font-weight: 600; }

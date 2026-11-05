@@ -46,7 +46,9 @@ describe('compose strategy page', () => {
 
   it('shows the template with other basic strategy filters', () => {
     const bar = source.slice(source.indexOf('<ResourceFilterBar>'), source.indexOf('</ResourceFilterBar>'))
-    for (const field of ['策略名称', '所属类目', '状态', '合成模板']) expect(bar).toContain(field)
+    for (const field of ['策略名称', '类目', '合成模板', '状态']) expect(bar).toContain(field)
+    const labels = [...bar.matchAll(/wt-filter-field__label">([^<]+)</g)].map((match) => match[1])
+    expect(labels).toEqual(['综合搜索', '类目', '合成模板', '状态'])
     expect(bar).not.toContain('wt-advanced-filters')
     expect(bar.indexOf('wt-filter-actions')).toBeGreaterThan(bar.lastIndexOf('wt-filter-field'))
   })
@@ -91,5 +93,10 @@ describe('compose strategy page', () => {
     expect(source).toContain('batch_id: String(run.batch_id)')
     expect(source).not.toContain('client.listStrategyRunTasks')
     expect(source).not.toContain('client.listStrategyRunHistory')
+    const columns = source.slice(source.indexOf('const runColumns = ['), source.indexOf('const runTableScroll'))
+    expect([...columns.matchAll(/colKey: '([^']+)'/g)].map((match) => match[1])).toEqual([
+      'batch_id', 'trigger_type', 'candidate_count', 'skipped_count', 'created_count', 'failed_count', 'created_at', 'op',
+    ])
+    expect(source).toContain("row.batch_id || '—'")
   })
 })

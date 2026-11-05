@@ -643,26 +643,14 @@ function teamName(id) {
   return teams.value.find((team) => team.id === id)?.name || `团队 ${id}`
 }
 
-function conditionParts(condition) {
-  const field = conditionFields.find((item) => item.value === condition.field)?.label || condition.field
-  const operator = conditionOperators(condition.field).find((item) => item.value === condition.operator)?.label || condition.operator
-  const value = condition.field === 'published_at' && !['recent_hours', 'recent_days'].includes(condition.operator)
-    ? formatDateTime(condition.value)
-    : ['recent_hours', 'recent_days'].includes(condition.operator)
-      ? `${condition.value} ${condition.operator === 'recent_hours' ? '小时' : '天'}`
-      : condition.value
-  return { field, operator, value }
-}
-
-function orderedRules(row) { return [...(row.priority_rules || [])].sort((a, b) => a.priority - b.priority) }
-
 const runColumns = [
-  { colKey: 'created_at', title: '执行时间', width: 155 },
+  { colKey: 'batch_id', title: '批次 ID', width: 95 },
   { colKey: 'trigger_type', title: '触发方式', width: 90 },
   { colKey: 'candidate_count', title: '候选数', width: 70 },
   { colKey: 'skipped_count', title: '跳过数', width: 70 },
   { colKey: 'created_count', title: '创建任务数', width: 95 },
   { colKey: 'failed_count', title: '失败数', width: 65 },
+  { colKey: 'created_at', title: '执行时间', width: 155 },
   { colKey: 'op', title: '操作', width: 120 },
 ]
 const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) => sum + column.width, 0)}px` }))
@@ -683,19 +671,16 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       <ResourceCard class="strategy-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="策略名称 / ID" @enter="query" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">所属类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
             <t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" />
           </BusinessSelect></label>
 
+          <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
+            <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
+          </t-select></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
             <t-option value="enabled" label="启用" />
             <t-option value="disabled" label="停用" />
-          </t-select></label>
-
-
-
-          <label class="wt-filter-field"><span class="wt-filter-field__label">合成模板</span><t-select v-model="filters.template_id" clearable placeholder="全部">
-            <t-option v-for="template in templates" :key="template.id" :value="template.id" :label="`${template.name} v${template.version}`" />
           </t-select></label>
 
         <div class="wt-filter-actions">
@@ -741,16 +726,19 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
           <ResourceSection title="基本信息" variant="form">
             <ResourceForm class="resource-form-grid">
               <t-form-item label="策略名称" class="resource-form-full" required-mark><div class="strategy-field"><t-input v-model="form.name" :maxlength="120" placeholder="输入策略名称" :status="nameError ? 'error' : undefined" /><p v-if="nameError" class="strategy-field-error">{{ nameError }}</p></div></t-form-item>
+              <t-form-item label="所属团队" required-mark>
+                <BusinessSelect v-if="isAdmin && !editingID" kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect>
+                <t-input v-else :value="String(teamName(isAdmin ? form.team_id : currentUser?.team_id) || '')" disabled />
+              </t-form-item>
               <t-form-item label="所属类目" required-mark>
                 <BusinessSelect v-if="!editingID" kind="category" v-model="form.category_id" clearable @change="form.operator_id = ''"><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect>
-                <span v-else class="resource-form-value">{{ categoryName(form.category_id) }}</span>
+                <t-input v-else :value="String(categoryName(form.category_id) || '')" disabled />
               </t-form-item>
               <t-form-item required-mark>
                 <template #label><span class="strategy-template-label">合成模板<ResourceFieldHelp content="模板决定制作方式。保存后如需更换模板，请复制策略。" /><t-link v-if="form.compose_template_id" theme="primary" @click="templateInfoVisible = true">模板说明 ↗</t-link></span></template>
                 <t-select v-if="!editingID" v-model="form.compose_template_id" clearable placeholder="选择合成模板" @change="onTemplateChange"><t-option v-for="option in templateOptions" :key="option.value" :value="option.value" :label="option.label" /></t-select>
-                <span v-else class="resource-form-value">{{ templateLabel(templates, form.compose_template_id) }}</span>
+                <t-input v-else :value="templateLabel(templates, form.compose_template_id)" disabled />
               </t-form-item>
-              <t-form-item v-if="isAdmin" label="运营团队" :required-mark="!editingID"><BusinessSelect v-if="!editingID" kind="team" v-model="form.team_id" clearable @change="form.operator_id = ''"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect><span v-else class="resource-form-value">{{ teamName(form.team_id) }}</span></t-form-item>
               <t-form-item label="负责人" required-mark><div class="strategy-field"><BusinessSelect kind="member" v-model="form.operator_id" clearable :loading="operatorsLoading" :disabled="operatorsLoading || !form.category_id || !operatorTeamReady" :placeholder="!form.category_id ? '先选择类目' : (!operatorTeamReady ? '先选择团队' : '选择负责人')" :status="operatorError ? 'error' : undefined" @change="operatorError = ''"><t-option v-for="option in operatorOptions" :key="option.id" :value="option.id" :label="option.display_name" /></BusinessSelect><p v-if="operatorError" class="strategy-field-error">{{ operatorError }}</p><p v-else-if="form.category_id && operatorTeamReady && !operatorsLoading && !operatorOptions.length" class="strategy-bind-hint">该团队与类目下没有可指派的运营</p></div></t-form-item>
 
             </ResourceForm>
@@ -769,7 +757,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                 <t-form-item v-else label="每日执行时间" required-mark><t-time-picker v-model="form.schedule.daily_time" format="HH:mm" /></t-form-item>
                 <t-form-item label="每日素材上限" required-mark><t-input-number v-model="form.daily_limit" :min="1" :max="1000" suffix="条" theme="column" /></t-form-item>
                 <t-form-item required-mark><template #label>时区<ResourceFieldHelp content="使用 IANA 时区名称，例如 Asia/Shanghai、UTC。" /></template><t-input v-model="form.schedule.timezone" placeholder="Asia/Shanghai" /></t-form-item>
-                <t-form-item label="下次执行"><span class="resource-form-value">{{ nextRunPreview ? formatDateTime(nextRunPreview) : nextRunPreviewError || '填写计划后计算' }}</span></t-form-item>
+                <t-form-item label="下次执行" class="resource-form-full"><t-input :value="nextRunPreview ? formatDateTime(nextRunPreview) : nextRunPreviewError || '填写计划后计算'" disabled /></t-form-item>
               </template>
             </ResourceForm>
           </ResourceSection>
@@ -828,7 +816,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
         </template>
       </ResourceOverlay>
 
-      <ResourceOverlay  v-model:visible="detailVisible" :title="detailRow?.name || '策略详情'" kind="drawer" :width="960" :footer="false">
+      <ResourceOverlay v-model:visible="detailVisible" title="合成策略详情" kind="drawer" :width="960" :footer="false">
         <t-tabs v-if="detailRow" v-model="detailTab" class="strategy-detail-tabs">
           <t-tab-panel value="overview" label="策略信息">
             <ComposeStrategySummary :strategy="detailRow" :team="teamName(detailRow.team_id)" :category="categoryName(detailRow.category_id)" :templates="templates" />
@@ -844,6 +832,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
               <t-loading v-else :loading="runHistoryLoading" :show-overlay="true">
                 <div class="table-scroll-wrap">
                   <t-table class="wt-resource-table" :data="runHistory" :columns="runColumns" row-key="run_key" hover size="small" :scroll="runTableScroll" empty="暂无运行记录">
+                    <template #batch_id="{ row }">{{ row.batch_id || '—' }}</template>
                     <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
                     <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
                     <template #skipped_count="{ row }">{{ row.skipped?.length ?? 0 }}</template>
@@ -882,18 +871,8 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
 .strategy-rule__condition { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) auto; gap: 16px; align-items: end; }
 .strategy-rule__condition > * { min-width: 0; }
 .strategy-editor__footer, .strategy-detail__footer { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
-.strategy-overview { display:grid;gap:24px;padding-top:20px; }
-.strategy-overview__section h4 { margin:0 0 16px;padding-left:10px;border-left:3px solid var(--wt-primary);font-size:14px; }
-.strategy-overview__grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px; }
-.strategy-overview__field { display:grid;grid-template-columns:112px minmax(0,1fr);gap:16px;font-size:14px;line-height:24px; }
-.strategy-overview__field span {color:var(--wt-text-tertiary);}
-.strategy-overview__field strong {font-weight:400;overflow-wrap:anywhere;}
-.strategy-overview__field--wide {grid-column:1/-1;}
 .strategy-overview__rule {margin-top:12px;padding:16px;border:1px solid var(--wt-border);border-radius:var(--wt-radius-sm);}
-.strategy-overview__rule-head {display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:12px;font-size:13px;}
-.strategy-overview__rule-head strong {margin-right:auto;}
-.strategy-overview__condition {display:flex;gap:16px;padding:6px 0;font-size:13px;}
-.strategy-history {padding-top:20px;}
+.strategy-history {padding-top:24px;}
 .strategy-run-message {font-size:13px;color:var(--wt-text-tertiary);}
-@media(max-width:680px){.strategy-rule__condition{grid-template-columns:1fr 1fr;}.strategy-overview__grid{grid-template-columns:1fr;}.strategy-rule{padding:16px;}}
+@media(max-width:680px){.strategy-rule__condition{grid-template-columns:1fr 1fr;}.strategy-rule{padding:16px;}}
 </style>
