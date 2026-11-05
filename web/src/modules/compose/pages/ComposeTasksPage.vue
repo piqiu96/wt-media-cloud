@@ -1,4 +1,10 @@
 <script setup>
+import '../production.css'
+import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
+import ComposeBatchProgress from '../components/ComposeBatchProgress.vue'
+import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import ComposeStrategyPicker from '../components/ComposeStrategyPicker.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
@@ -76,24 +82,24 @@ const stageLabels = {
 // 列序固定：识别 → 来源 → 结果 → 状态 → 时间 → 操作（AdminUI 规范 §4.1）。
 // 执行阶段是过程信息，只在详情里；列表放的是决策信息。
 const batchColumns = [
-  { colKey: 'id', title: 'ID', width: 80 }, { colKey: 'name', title: '批次名称', width: 240 },
-  { colKey: 'strategy', title: '合成策略', width: 180 }, { colKey: 'operator', title: '负责人', width: 110 },
+  { colKey: 'id', title: 'ID', width: 80 }, { colKey: 'name', title: '批次名称', width: 220 },
+  { colKey: 'strategy', title: '合成策略', width: 160 }, { colKey: 'operator', title: '负责人', width: 110 },
   { colKey: 'trigger_type', title: '触发来源', width: 110 }, { colKey: 'progress', title: '全批进度', width: 210 },
-  { colKey: 'created_at', title: '创建时间', width: 160 }, { colKey: 'op', title: '操作', width: opColumnWidth(['详情']), fixed: 'right' },
+  { colKey: 'created_at', title: '创建时间', width: 160 }, { colKey: 'op', title: '操作', width: opColumnWidth(['详情'], {variant:'text'}), fixed: 'right' },
 ]
 const taskColumns = computed(() => [
   { colKey: 'row-select', type: 'multiple', width: 44, checkProps: () => ({disabled:bulkBusy.value}) },
   { colKey: 'id', title: '任务 ID', width: 90 },
   { colKey: 'name', title: '任务名称', width: 240 },
-  { colKey: 'trigger_type', title: '触发方式', width: 100 },
+
   { colKey: 'material_id', title: '关联素材', width: 140 },
-  { colKey: 'strategy', title: '合成策略', width: 180 },
+  { colKey: 'strategy', title: '合成策略', width: 160 },
   { colKey: 'operator', title: '负责人', width: 110 },
-  { colKey: 'output', title: '生成成片', width: 120 },
+
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'created_at', title: '创建时间', width: 150 },
-  { colKey: 'finished_at', title: '完成时间', width: 150 },
-  { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消', '重试']), fixed: 'right' },
+
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '取消', '重试'], {variant:'text'}), fixed: 'right' },
 ])
 
 const columns = computed(() => activeView.value === 'batches' ? batchColumns : taskColumns.value)
@@ -499,7 +505,7 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved compose-tasks-page">
+    <div class="wt-resource-page resource-visual-approved production-page compose-tasks-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="合成任务" description="查看任务批次、生产进度和执行结果">
         <template #actions>
@@ -513,7 +519,8 @@ onMounted(() => {
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.team_id" clearable @change="onTeamFilterChange"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
           <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" clearable :loading="operatorsLoading" :disabled="operatorsLoading || (isAdmin && !filters.team_id)" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" :options="statusOptions" clearable placeholder="全部" /></label>
-          <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button><t-button variant="text" :aria-expanded="advancedFilters" aria-controls="compose-advanced-filters" @click="advancedFilters = !advancedFilters">{{ advancedFilters ? '收起筛选' : '高级筛选' }}</t-button></div>
+          <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+          <ResourceAdvancedToggle v-model="advancedFilters" />
           <div v-show="advancedFilters" id="compose-advanced-filters" class="wt-advanced-filters">
             <label class="wt-filter-field"><span class="wt-filter-field__label">合成策略</span><ComposeStrategyPicker v-model="filters.compose_strategy_id" :filters="{ team_id: filters.team_id, operator_id: operatorIdFromOption(filters.operator) || undefined }" placeholder="全部" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">触发方式</span><t-select v-model="filters.trigger_type" :options="TRIGGER_TYPE_OPTIONS" clearable placeholder="全部" /></label>
@@ -524,30 +531,30 @@ onMounted(() => {
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedTaskKeys" reserve-selected-row-on-paginate hover size="small" :scroll="tableScroll" empty="还没有合成任务">
             <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
-            <template #name="{ row }"><span class="compose-task-name" :title="activeView === 'batches' ? row.name : taskName(row)">{{ activeView === 'batches' ? row.name : taskName(row) }}</span></template>
+            <template #name="{ row }"><span class="compose-task-name" :title="activeView === 'batches' ? row.name : taskName(row)">{{ activeView === 'batches' ? row.name : taskName(row) }}</span><span v-if="activeView === 'tasks'" class="compose-task-subline">{{ row.setting_name || '—' }} · {{ triggerLabel(row.trigger_type) }}</span></template>
             <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
             <template #material_id="{ row }"><t-link theme="primary" @click="openMaterial(row.material_id)">素材 {{ row.material_id }}</t-link></template>
             <template #strategy="{ row }"><t-link class="compose-strategy-link" theme="primary" :title="strategyName(row)" @click="openStrategy(row.compose_strategy_id)">{{ strategyName(row) }}</t-link></template>
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
-            <template #progress="{row}"><span>已结束 {{ batchProgress(row.counts).finished }} / {{ batchProgress(row.counts).total }} · 成功 {{ row.counts?.success ?? 0 }}</span></template>
+            <template #progress="{row}"><ComposeBatchProgress :counts="row.counts" compact /></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
-              <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="activeView === 'batches' ? openBatch(row) : openDetail(row)">详情</t-button>
-                <t-button v-if="activeView === 'tasks' && canCancelTask(row)" size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="cancel(row)">取消</t-button>
-                <t-button v-if="activeView === 'tasks' && canRetryTask(row)" size="small" class="wt-secondary-button" variant="outline" @click="retry(row)">重试</t-button>
-              </t-space>
+              <ResourceRowActions>
+                <t-button size="small" class="wt-secondary-button" variant="text" @click="activeView === 'batches' ? openBatch(row) : openDetail(row)">详情</t-button>
+                <t-button v-if="activeView === 'tasks' && canCancelTask(row)" size="small" class="wt-secondary-button wt-danger-button" variant="text" @click="cancel(row)">取消</t-button>
+                <t-button v-if="activeView === 'tasks' && canRetryTask(row)" size="small" class="wt-secondary-button" variant="text" @click="retry(row)">重试</t-button>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="onPageChange" @page-size-change="onPageSizeChange" /></div>
+        <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="onPageChange" @page-size-change="onPageSizeChange" /></div>
       </ResourceCard>
 
       <ComposeTaskBatchDetail v-model:visible="batchVisible" :batch-id="batchID" :can-retry="canRetry" @task="openDetail" @changed="load({quiet:true})" />
-      <t-drawer v-model:visible="detailVisible" header="任务详情" size="min(62vw, 880px)" :close-btn="true" :footer="detailFooterOps.length > 0" @close="closeDetail">
+      <ResourceOverlay kind="drawer" :visible="detailVisible" title="任务详情" :width="880" :footer="detailFooterOps.length > 0" @close="closeDetail">
         <t-loading :loading="!detail" :show-overlay="true">
           <div v-if="detail" class="compose-detail">
             <t-tabs v-model="detailTab" class="compose-detail__tabs">
@@ -555,7 +562,7 @@ onMounted(() => {
                 <div class="compose-detail__section">
                   <h4>任务信息</h4>
                   <div class="compose-detail__grid">
-                    <div><span class="compose-detail__label">任务名称</span><span>{{ taskName(detail) }}</span></div>
+                    <div class="compose-detail__wide"><span class="compose-detail__label">任务名称</span><span>{{ taskName(detail) }}</span></div>
                     <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
                     <div><span class="compose-detail__label">触发方式</span><span>{{ triggerLabel(detail.trigger_type) }}</span></div>
                     <div><span class="compose-detail__label">任务批次</span><t-link v-if="detail.batch_id" theme="primary" @click="closeDetail(); openBatch({id:detail.batch_id})">批次 {{ detail.batch_id }}</t-link><span v-else>未记录</span></div>
@@ -573,9 +580,9 @@ onMounted(() => {
                 </div>
                 <div class="compose-detail__section">
                   <h4>合成配置</h4>
-                  <p class="compose-detail__hint">任务按创建时的配置执行，后续策略修改不会影响该任务。</p>
+
                   <div class="compose-detail__grid compose-detail__snapshot-fields">
-                    <div><span class="compose-detail__label">模板</span><span>{{ detail.template_code }}</span></div>
+                    <div><span class="compose-detail__label">模板</span><span>{{ templates.find(row => row.code === detail.template_code && row.version === detail.template_version)?.name || detail.template_code }}</span></div>
                     <div><span class="compose-detail__label">成片设置</span><span>{{ detail.setting_name || '未记录' }} · 第 {{ detail.copy_index || 1 }} 份</span></div>
                     <div><span class="compose-detail__label">适用平台</span><span>{{ platformText(detail.platforms) }}</span></div>
                     <div><span class="compose-detail__label">模板版本</span><span>v{{ detail.template_version }}</span></div>
@@ -609,7 +616,7 @@ onMounted(() => {
                   </div>
                   <template v-else-if="detail.status === 'failed'">
                     <p class="compose-detail__empty">未生成成片</p>
-                    <p class="compose-detail__hint">任务执行失败，因此没有生成成片。</p>
+
                   </template>
                   <p v-else-if="detail.status === 'cancelled'" class="compose-detail__empty">未生成成片</p>
                   <p v-else class="compose-detail__empty">成片尚未生成</p>
@@ -640,7 +647,7 @@ onMounted(() => {
                         <li v-for="step in attemptSteps(attempt)" :key="step.step">
                           <span class="compose-detail__step-name">{{ step.label || '未记录' }}</span>
                           <span>{{ formatDateTime(step.started_at) }} → {{ formatDateTime(step.finished_at) }}</span>
-                          <span>用时 {{ formatDurationMs(step.duration_ms) }}</span>
+                          <span v-if="step.duration_ms != null">用时 {{ formatDurationMs(step.duration_ms) }}</span>
                           <span v-if="stepMetricsText(step)" class="compose-detail__step-metrics">{{ stepMetricsText(step) }}</span>
                           <span v-if="step.outcome === 'failed'" class="compose-detail__step-error">失败：{{ step.error_label || '原因未记录' }}</span>
                         </li>
@@ -684,7 +691,7 @@ onMounted(() => {
             <t-button v-if="detailFooterOps.includes('retry')" theme="primary" @click="retry(detail)">重试</t-button>
           </div>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
       <!-- 关联实体：叠在任务详情之上的一层只读抽屉，返回时原筛选、原分页、原 Tab 都还在。 -->
       <MaterialDetailDrawer
@@ -697,7 +704,7 @@ onMounted(() => {
         @go-page="goMaterialPage(detail?.material_id)"
       />
 
-      <t-drawer :visible="strategyDrawer.visible" header="策略详情" size="min(62vw, 880px)" :close-btn="true" @update:visible="strategyDrawer.visible = $event">
+      <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="880"  @update:visible="strategyDrawer.visible = $event">
         <t-loading :loading="strategyDrawer.loading" :show-overlay="true">
           <ComposeStrategySummary
             v-if="strategyDrawer.row"
@@ -712,9 +719,9 @@ onMounted(() => {
             <t-button class="wt-secondary-button" variant="outline" @click="goStrategyPage(strategyDrawer.row?.id)">前往策略页面</t-button>
           </div>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
-      <t-drawer :visible="outputDrawer.visible" header="成片详情" size="min(62vw, 880px)" :close-btn="true" @update:visible="outputDrawer.visible = $event">
+      <ResourceOverlay :visible="outputDrawer.visible" title="成片详情" kind="drawer" :width="880"  @update:visible="outputDrawer.visible = $event">
         <t-loading :loading="outputDrawer.loading" :show-overlay="true">
           <ComposeOutputDetail
             v-model:tab="outputDrawer.tab"
@@ -730,7 +737,7 @@ onMounted(() => {
             <t-button class="wt-secondary-button" variant="outline" @click="goOutputPage(outputDrawer.detail?.output?.id)">前往成片页面</t-button>
           </div>
         </template>
-      </t-drawer>
+      </ResourceOverlay>
 
       <ComposeTaskCreateDialog v-model:visible="createVisible" @created="onCreated" />
     </div>
@@ -748,11 +755,13 @@ onMounted(() => {
 .compose-list-limit { margin: 8px 0 0; color: var(--wt-text-secondary); font-size: 12px; }
 .compose-detail { min-height: 320px; }
 .compose-detail__tabs { margin-top: 4px; }
-.compose-detail__section { margin-top: 16px; padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); background: var(--wt-bg-card); }
-.compose-detail__section h4 { margin: 0 0 16px; color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
+.compose-detail__section { margin-top: 24px; min-width:0; }
+.compose-detail__section h4 { padding-left:10px; border-left:3px solid var(--wt-primary); margin: 0 0 16px; color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
 .compose-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; font-size: 14px; line-height: 1.5; }
-.compose-detail__grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--wt-text-primary); overflow-wrap: anywhere; }
-.compose-detail__label { color: var(--wt-text-tertiary); font-size: 12px; }
+.compose-detail__grid > div { display: grid; grid-template-columns:112px minmax(0,1fr); gap:16px; min-width:0; color:var(--wt-text-primary);overflow-wrap:anywhere;align-items:start; }
+.compose-detail__label {color:var(--wt-text-tertiary);font-size:14px;}
+.compose-detail__wide{grid-column:1/-1;}
+.compose-task-subline{display:block;margin-top:5px;font-size:12px;color:var(--wt-text-tertiary);}
 .compose-detail__snapshot-fields { margin-top: 16px; }
 /* 失败态用 --wt-danger：它定义在入口加载的 design-token.css 里，
    且与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
@@ -760,14 +769,15 @@ onMounted(() => {
 .compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__grid + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__section > .compose-detail__hint + .compose-detail__grid { margin-top: 12px; }
 .compose-detail__empty { margin: 0; color: var(--wt-text-secondary); font-size: 14px; }
-.compose-detail__attempt { padding: 16px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-sm); background: var(--wt-bg-page); }
+.compose-detail__attempt { padding: 0 0 20px;border:0;border-bottom:1px solid var(--wt-border); }
 .compose-detail__attempt + .compose-detail__attempt { margin-top: 12px; }
 .compose-detail__attempt-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .compose-detail__attempt-head strong { color: var(--wt-text-primary); font-size: 14px; }
 .compose-detail__attempt-meta { margin: 8px 0 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__attempt-err { margin: 8px 0 0; color: var(--wt-danger); font-size: 12px; }
-.compose-detail__steps { margin: 10px 0 0; padding: 0; list-style: none; }
-.compose-detail__steps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; padding: 8px 0; border-top: 1px dashed var(--wt-border); color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
+.compose-detail__steps { margin: 20px 0 0 6px; padding: 0 0 0 20px;border-left:1px solid var(--wt-border); list-style: none; }
+.compose-detail__steps li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; position:relative;padding:0 0 20px;border:0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
+.compose-detail__steps li::before{content:"";position:absolute;left:-25px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--wt-primary);box-shadow:0 0 0 4px var(--wt-bg-card);}
 .compose-detail__step-name { min-width: 108px; color: var(--wt-text-primary); font-weight: 500; }
 .compose-detail__step-metrics { color: var(--wt-text-tertiary); }
 .compose-detail__step-error { color: var(--wt-danger); }

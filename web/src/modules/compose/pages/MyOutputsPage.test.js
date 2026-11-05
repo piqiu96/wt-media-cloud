@@ -29,7 +29,7 @@ describe('output asset workspace',()=>{
   expect(table).toContain("type:'multiple', width:44")
   expect(table).toContain('reserve-selected-row-on-paginate')
   expect(source).toContain('knownRows.value[row.id]=row')
-  for(const text of [source,material]){expect(text).toContain('class="wt-selection-toolbar"');expect(text).toContain('<t-button variant="outline" disabled>去发布</t-button>')}
+  for(const text of [source,material]){expect(text).toContain('<ResourceSelectionToolbar');expect(text).toContain('<t-button variant="outline" disabled>去发布</t-button>')}
   expect(source).toContain('发布能力尚未交付')
  })
  it('keeps role category boundaries and advanced date/video filters without local-page filtering',()=>{

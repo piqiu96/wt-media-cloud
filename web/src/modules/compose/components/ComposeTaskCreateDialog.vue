@@ -1,6 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { DialogPlugin } from 'tdesign-vue-next'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourceForm from '../../../shared/ui/resource/ResourceForm.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -30,7 +33,7 @@ const sourceSeed = computed(() => outputRemakeSeed(props.sourceOutput, templates
 const selectedStrategy = computed(() => isSource.value ? sourceSeed.value.strategy : strategyDetail.value)
 const selectedTemplate = computed(() => isSource.value ? sourceSeed.value.template : templates.value.find((row) => row.id === selectedStrategy.value?.compose_template_id && row.version === selectedStrategy.value?.compose_template_version))
 
-const context = computed(() => ({ strategy_id:strategyID.value, operator_id:operatorID.value, team_id:teamID.value, category_id:categoryID.value, operator_name:canAssign.value ? operators.value.find((row) => row.id === operatorID.value)?.display_name : currentUser.value?.display_name || currentUser.value?.name, team_name:teams.value.find((row) => row.id === teamID.value)?.name, category_name:categories.value.find((row) => row.id === categoryID.value)?.name }))
+const context = computed(() => ({ strategy_id:strategyID.value, operator_id:operatorID.value, team_id:teamID.value, category_id:categoryID.value, operator_name:canAssign.value ? operators.value.find((row) => row.id === operatorID.value)?.display_name : currentUser.value?.nickname || currentUser.value?.name || currentUser.value?.username, team_name:teams.value.find((row) => row.id === teamID.value)?.name, category_name:categories.value.find((row) => row.id === categoryID.value)?.name }))
 const groups = computed(() => selectedStrategy.value ? strategySettings(selectedStrategy.value) : [])
 const estimated = computed(() => selected.value.length * groups.value.reduce((sum,row) => sum + row.copies,0))
 const hasPriorWork = computed(() => isSource.value || selected.value.some((row) => Number(row.usage?.output_count || 0) > 0 || Object.entries(row.strategy_history || {}).some(([key,value]) => key.endsWith('_count') && Number(value)>0)))
@@ -119,13 +122,13 @@ async function submit() {
 <template>
   <ResourceOverlay kind="drawer" :visible="visible" :title="isSource ? '再次制作' : '新建合成任务'" :width="880" :busy="saving" @close="close">
     <t-loading :loading="loading" :show-overlay="true">
-      <div class="task-create">
+      <div class="task-create wt-resource-page resource-visual-approved production-page">
         <FeedbackAlert v-if="error" theme="error" :message="error" />
-        <t-form label-width="100px">
-          <t-form-item label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="60" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
+        <ResourceSection title="基本信息" variant="form"><ResourceForm class="resource-form-grid">
+          <t-form-item class="resource-form-full" label="任务名称" required-mark><div class="task-create__field"><t-input v-model="taskName" :maxlength="60" placeholder="输入本次任务批次名称" :status="nameError?'error':undefined" /><p v-if="nameError" class="task-create__error">{{ nameError }}</p></div></t-form-item>
           <template v-if="isSource">
             <t-form-item label="运营团队"><span>{{ context.team_name || '—' }}</span></t-form-item>
-            <t-form-item label="业务分类"><span>{{ context.category_name || '—' }}</span></t-form-item>
+            <t-form-item label="所属类目"><span>{{ context.category_name || '—' }}</span></t-form-item>
             <t-form-item label="负责人"><span>{{ sourceOutput.output.operator_name || '—' }}</span></t-form-item>
             <t-form-item label="来源策略"><span>{{ sourceOutput.output.strategy_name || sourceOutput.trace?.strategy?.name || '—' }}</span></t-form-item>
             <t-form-item label="原模板版本"><span>{{ sourceOutput.trace?.compose_task?.template_code }} v{{ sourceOutput.trace?.compose_task?.template_version }}</span></t-form-item>
@@ -133,14 +136,18 @@ async function submit() {
           <template v-else>
           <t-form-item v-if="isAdmin" label="运营团队" required-mark><BusinessSelect kind="team" :value="teamID" clearable @change="changeContext('team',$event)"><t-option v-for="row in teams" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
           <t-form-item v-else label="运营团队"><span>{{ context.team_name || (teamID ? `团队 ${teamID}` : '—') }}</span></t-form-item>
-          <t-form-item label="业务分类" required-mark><BusinessSelect kind="category" :value="categoryID" :disabled="!teamID" clearable @change="changeContext('category',$event)"><t-option v-for="row in categoryOptions" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
+          <t-form-item label="所属类目" required-mark><BusinessSelect kind="category" :value="categoryID" :disabled="!teamID" clearable @change="changeContext('category',$event)"><t-option v-for="row in categoryOptions" :key="row.id" :value="row.id" :label="row.name" /></BusinessSelect></t-form-item>
           <t-form-item label="负责人" required-mark><BusinessSelect v-if="canAssign" kind="member" :value="operatorID" :disabled="!categoryID || operatorsLoading" :loading="operatorsLoading" clearable @change="changeContext('operator',$event)"><t-option v-for="row in operators" :key="row.id" :value="row.id" :label="row.display_name" /></BusinessSelect><span v-else>{{ context.operator_name || '本人' }}</span></t-form-item>
           <t-form-item label="合成策略" required-mark><div class="task-create__field"><ComposeStrategyPicker :model-value="strategyID" :filters="{team_id:teamID,category_id:categoryID,operator_id:operatorID,status:'enabled'}" :disabled="!operatorID || !categoryID" placeholder="搜索负责人可用的策略" :status="strategyError?'error':undefined" @update:model-value="changeContext('strategy',$event)" @detail="strategyDetail=$event" /><p v-if="strategyError" class="task-create__error">{{ strategyError }}</p></div></t-form-item>
           </template>
-        </t-form>
-        <section><div class="task-create__heading"><h4>选用素材</h4><t-button variant="outline" class="wt-secondary-button" v-if="!isSource" :disabled="!selectedStrategy" @click="materialVisible=true">选择素材</t-button></div><p v-if="!selected.length" class="task-create__hint">选择负责人工作集或同团队、同类目的素材。</p><div v-else class="task-create__selected"><div v-for="row in selected" :key="row.id"><span>{{ row.title || `素材 ${row.id}` }}</span><t-button v-if="!isSource" size="small" variant="text" @click="removeSelected(row.id)">移除</t-button></div></div></section>
+        </ResourceForm></ResourceSection>
+        <ResourceSection title="选用素材" variant="form">
+          <div class="task-create__heading"><span class="task-create__hint">已选 {{ selected.length }} 条素材</span><t-button v-if="!isSource" variant="outline" class="wt-secondary-button" :disabled="!selectedStrategy" @click="materialVisible=true">选择素材</t-button></div>
+          <t-table v-if="selected.length" class="wt-resource-table" :data="selected" :columns="[{colKey:'id',title:'素材 ID',width:80},{colKey:'title',title:'素材名称',width:400,ellipsis:true},...(!isSource ? [{colKey:'op',title:'操作',width:80}] : [])]" row-key="id" size="small" :scroll="{x:'560px'}"><template #op="{row}"><ResourceRowActions><t-button variant="text" @click="removeSelected(row.id)">移除</t-button></ResourceRowActions></template></t-table>
+          <p v-else class="task-create__hint">请选择素材</p>
+        </ResourceSection>
         <p v-if="isSource" class="task-create__hint">沿用原素材、原模板版本与原成片设置，生成一份新成片。仅可调整模板开放的参数。确认创建时，原素材将加入负责人的“我的素材”，并准备制作所需视频。</p>
-        <section v-if="selectedStrategy"><h4>成片设置</h4><ComposeTaskSettings v-model="overrides" :strategy="selectedStrategy" :template="selectedTemplate" :material-count="selected.length" /></section>
+        <ResourceSection v-if="selectedStrategy" title="成片设置" variant="form"><ComposeTaskSettings v-model="overrides" :strategy="selectedStrategy" :template="selectedTemplate" :material-count="selected.length" /></ResourceSection>
         <div v-if="selected.length" class="task-create__summary"><strong>已选 {{ selected.length }} 条素材，预计创建 {{ estimated }} 个任务、生成 {{ estimated }} 个成片</strong><t-checkbox v-if="hasPriorWork" v-model="remakeConfirmed">所选素材已有产出或任务，确认本次新建任务，保留旧任务和成片。</t-checkbox></div>
         <div v-if="failures.length" class="task-create__failures"><p v-for="(item,index) in failures" :key="item.material_id || index">素材 {{ item.material_id }} · {{ item.message || item.reason || '未受理' }}</p></div>
       </div>
@@ -150,18 +157,13 @@ async function submit() {
   <ComposeTaskMaterialSelector v-if="!isSource" v-model:visible="materialVisible" :context="context" :selected="selected" @selected="acceptSelection" />
 </template>
 <style scoped>
-.task-create { display:grid; gap:20px; min-width:0; }
-.task-create > * { min-width:0; }
-.task-create section { border:1px solid var(--wt-border); border-radius:var(--wt-radius-md); padding:16px; }
-.task-create h4 { margin:0 0 14px; color:var(--wt-text-primary); font-size:14px; }
-.task-create__heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
-.task-create__heading h4 { margin:0; }
-.task-create__field { display:grid; gap:5px; width:100%; }
-.task-create__error { margin:0; color:var(--td-error-color); font-size:12px; }
-.task-create__hint { color:var(--wt-text-tertiary); font-size:13px; }
-.task-create__selected { display:grid; max-height:220px; overflow:auto; }
-.task-create__selected > div { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--wt-border); padding:6px 0; }
-.task-create__selected span { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.task-create__summary { display:grid; gap:12px; padding:14px; background:var(--wt-info-bg); border-radius:var(--wt-radius-md); font-size:13px; }
-.task-create__failures { max-height:180px; overflow:auto; color:var(--wt-text-secondary); font-size:13px; }
+.task-create {display:grid;gap:28px;min-width:0;}
+.task-create > * {min-width:0;}
+.task-create .resource-section + .resource-section {margin-top:0;}
+.task-create__field{width:100%;display:grid;gap:4px;}
+.task-create__error{margin:0;color:var(--wt-danger);font-size:12px;}
+.task-create__hint{margin:0;font-size:12px;color:var(--wt-text-tertiary);line-height:1.7;}
+.task-create__heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px;}
+.task-create__summary{padding:14px 16px;background:var(--wt-info-bg);border-left:3px solid var(--wt-primary);font-size:14px;}
+.task-create__failures { max-height: 160px; overflow: auto; }
 </style>

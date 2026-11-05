@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import ComposeOutputTable from './ComposeOutputTable.vue'
@@ -15,12 +16,12 @@ function paginate(data){page.value=data.current;pageSize.value=data.pageSize;loa
 </script>
 <template>
  <ResourceOverlay kind="drawer" :visible="visible" title="素材成片详情" :width="1120" :footer="false" @close="emit('update:visible',false)">
-  <div class="output-material"><div><h3>{{ material?.material_title || '来源素材未记录' }}</h3><p>素材 ID {{ material?.material_id }} · {{ categoryName?.(material?.category_id) || '—' }} · {{ total }} 个实际成片</p><p>该素材在不同策略、任务批次下生成的成片。</p></div>
+  <div class="output-material wt-resource-page resource-visual-approved production-page"><div><h3>{{ material?.material_title || '来源素材未记录' }}</h3><p>素材 ID {{ material?.material_id }} · {{ categoryName?.(material?.category_id) || '—' }} · {{ total }} 个实际成片</p></div>
    <FeedbackAlert v-if="error" theme="error" :message="error" />
    <FeedbackAlert v-if="result" theme="info" :message="result" />
-   <div v-if="selectedKeys.length" class="wt-selection-toolbar"><span>已选 {{ selectedKeys.length }} 项</span><t-link theme="primary" @click="selectedKeys=[]">清空选择</t-link><t-button theme="primary" :loading="busy" :disabled="!selectedRows.some(canDownload)" :title="selectedRows.map(downloadReason).filter(Boolean).join('；')" @click="emit('downloads',selectedRows)">下载</t-button><span :title="publishingReason"><t-button variant="outline" disabled>去发布</t-button></span><span class="output-material__reason">{{ publishingReason }}</span></div>
+   <ResourceSelectionToolbar :count="selectedKeys.length" unit="个成片" @clear="selectedKeys=[]"><t-button variant="outline" :loading="busy" :disabled="!selectedRows.some(canDownload)" :title="selectedRows.map(downloadReason).filter(Boolean).join('；')" @click="emit('downloads',selectedRows)">下载（{{ selectedKeys.length }}）</t-button><span :title="publishingReason"><t-button variant="outline" disabled>去发布</t-button></span></ResourceSelectionToolbar>
    <t-loading :loading="loading"><ComposeOutputTable :rows="rows" v-model:selected-keys="selectedKeys" material-mode :video-state="videoState" :can-download="canDownload" :download-reason="downloadReason" :downloading-id="downloadingId" :category-name="categoryName" @detail="emit('detail',$event)" @download="emit('download',$event)" @remake="emit('remake',$event)" @batch="emit('batch',$event)" /></t-loading>
-   <div class="pagination-bar"><t-pagination :current="page" :page-size="pageSize" :total="total" :page-size-options="[10,20,50]" @change="paginate" /></div>
+   <div class="pagination-bar"><t-pagination :show-jumper="false" :current="page" :page-size="pageSize" :total="total" :page-size-options="[10,20,50]" @change="paginate" /></div>
   </div>
  </ResourceOverlay>
 </template>

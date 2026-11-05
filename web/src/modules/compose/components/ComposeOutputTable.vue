@@ -1,5 +1,6 @@
 <script setup>
 import { computed,onMounted,onUnmounted,ref } from 'vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
@@ -21,7 +22,7 @@ const columns = computed(() => [
   { colKey:'operator', title:'负责人', width:65 },
   { colKey:'platforms', title:'适用平台', width:100 },
   { colKey:'video', title:'视频状态', width:75 },
-  { colKey:'op', title:'操作', width:opColumnWidth(['详情','下载','再次制作'],{loading:true}), fixed:'right' },
+  { colKey:'op', title:'操作', width:opColumnWidth(['详情','下载','再次制作'],{loading:true,variant:'text'}), fixed:'right' },
 ].map((col,index,all)=>col.colKey==='output'?{...col,width:Math.max(col.width,availableWidth.value-all.reduce((sum,item)=>sum+(item.colKey==='output'?0:item.width),0))}:col))
 const tableScroll = computed(()=>({x:`${columns.value.reduce((sum,col)=>sum+(col.width||0),0)}px`}))
 </script>
@@ -33,7 +34,7 @@ const tableScroll = computed(()=>({x:`${columns.value.reduce((sum,col)=>sum+(col
   <template #operator="{row}"><span class="output-table__operator" :title="row.operator_name || '历史负责人无法可靠确定'">{{ row.operator_name || '—' }}</span></template>
   <template #platforms="{row}">{{ row.platforms?.length ? platformText(row.platforms) : '—' }}</template>
   <template #video="{row}"><span :title="videoState(row).reason"><ResourceStatusBadge :label="videoState(row).label" :tone="videoState(row).tone" /></span></template>
-  <template #op="{row}"><t-space class="wt-resource-actions" size="small"><t-button size="small" variant="outline" class="wt-secondary-button" @click="emit('detail',row)">详情</t-button><t-button v-if="canDownload(row)||downloadReason(row)" :disabled="!canDownload(row)" :title="downloadReason(row)" size="small" variant="outline" class="wt-secondary-button" :loading="downloadingId===row.id" @click="emit('download',row)">下载</t-button><t-button v-if="row.actions?.remake" size="small" variant="outline" class="wt-secondary-button" @click="emit('remake',row)">再次制作</t-button></t-space></template>
+  <template #op="{row}"><ResourceRowActions><t-button size="small" variant="text" @click="emit('detail',row)">详情</t-button><t-button v-if="canDownload(row)||downloadReason(row)" :disabled="!canDownload(row)" :title="downloadReason(row)" size="small" variant="text" :loading="downloadingId===row.id" @click="emit('download',row)">下载</t-button><t-button v-if="row.actions?.remake" size="small" variant="text" @click="emit('remake',row)">再次制作</t-button></ResourceRowActions></template>
  </t-table></div>
 </template>
 <style scoped>
