@@ -97,7 +97,9 @@ describe('drawer footer convention', () => {
   // 实测 2026-09-30 全站 12 个（materials 1、contentpool 3、profiles 2、proxy 1、
   // accounts 1、transfer 1、users 1、shared 模板 1）。
   it('scans every drawer in the app', () => {
-    expect(drawers.length, '扫描器没找到抽屉，这条约定就是空转').toBeGreaterThanOrEqual(12)
+    const sharedDrawers = vueFiles(SRC).reduce((count, file) => count + (readFileSync(file, 'utf8').match(/<ResourceOverlay\b[^>]*kind="drawer"/g) || []).length, 0)
+    expect(drawers.length + sharedDrawers, '原生与公共抽屉必须被覆盖').toBeGreaterThanOrEqual(12)
+    expect(drawers.some(drawer => drawer.file.endsWith('ResourceOverlay.vue'))).toBe(true)
     expect(new Set(drawers.map((d) => d.file)).size).toBeGreaterThanOrEqual(8)
   })
 

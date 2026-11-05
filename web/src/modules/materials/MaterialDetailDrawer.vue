@@ -12,6 +12,10 @@ import { downloadedFileName, isTerminal, needsRedownload } from '../transfer/dow
 import { transferRow } from '../transfer/transferRows.js'
 import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
 import { handOverCloudVideo } from './cloudVideo.js'
+import ResourceOverlay from '../../shared/ui/resource/ResourceOverlay.vue'
+import ResourceSection from '../../shared/ui/resource/ResourceSection.vue'
+import ResourceDescriptions from '../../shared/ui/resource/ResourceDescriptions.vue'
+import { materialVideoState, metricLabel } from './materialFilters.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { platformLabel } from '../../shared/utils/platforms.js'
@@ -19,22 +23,13 @@ import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
 import {
   downloadActionLabel,
-  downloadStatusLabel,
-  downloadStatusTone,
   categoryName,
   joinStatus,
-  libraryNextStepHint,
-  materialStatusLabel,
-  materialStatusTone,
   myUsageLabel,
   myUsageTone,
-  nextStepHint,
-  shortDigest,
   usageFacts,
   usageStatusLabel,
   usageStatusTone,
-  videoStatusLabel,
-  videoStatusTone,
 } from './labels.js'
 
 const props = defineProps({
@@ -60,7 +55,6 @@ const transfer = createFileTransferClient()
 // 素材库上下文里，`usage_status` 是「当前查看者加没加入」，不是「使用中/已放弃」；
 // 我的素材继续用关系自己的两档文案。两边共用一份数据，但说给用户的话不同。
 const join = computed(() => joinStatus(props.material))
-const nextStep = computed(() => (props.mode === 'mine' ? nextStepHint(props.material) : libraryNextStepHint(props.material)))
 const usageRows = computed(() => usageFacts(props.material))
 // 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
 // `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
@@ -126,23 +120,7 @@ const activeRow = computed(() => (
     : null
 ))
 
-/**
- * 文件状态：下载状态优先（有记录时），素材云侧 `video_status` 兜底。兜底里
- * `failed`（云准备失败）也画「下载失败」——用户裁定「准备失败和本地下载失败都
- * 属于下载失败，不需要分那么细」。与我的素材页同语义。
- */
-const fileStatus = computed(() => {
-  if (downloadStatus.value) {
-    return { label: downloadStatusLabel(downloadStatus.value), tone: downloadStatusTone(downloadStatus.value) }
-  }
-  if (props.material?.video_status === 'failed') {
-    return { label: '下载失败', tone: 'danger' }
-  }
-  return { label: videoStatusLabel(props.material?.video_status), tone: videoStatusTone(props.material?.video_status) }
-})
-
-// 与内容池页同一个量法：千分位。统计键恒在（库列 NOT NULL），0 是「采集时就是 0」。
-function countLabel(value) { return Number(value || 0).toLocaleString() }
+const fileStatus = computed(() => materialVideoState({ ...props.material, download_status: downloadStatus.value }, localFile.value))
 
 /**
  * 云端视频每次点击现取对象路径，不预先拿也不留。
@@ -231,88 +209,39 @@ async function openDirectory() {
 </script>
 
 <template>
-  <t-drawer
-    :visible="visible"
-    class="material-detail-drawer"
-    header="素材详情"
-    size="min(62vw, 880px)"
-    destroy-on-close
-    :close-btn="true"
-    :footer="mode !== 'readonly' || showPageLink"
-    @update:visible="$emit('update:visible', $event)"
-  >
+  <ResourceOverlay :visible="visible" title="素材详情" kind="drawer" :width="880"
+    :footer="mode !== 'readonly' || showPageLink" @update:visible="$emit('update:visible', $event)">
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="material" class="detail-workspace">
         <section class="detail-hero">
           <MaterialCover class="detail-cover" :url="material.cover_url" />
-          <div class="detail-primary">
-            <h3>
-              <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">{{ material.title || '未命名素材' }}</a>
-              <span v-else>{{ material.title || '未命名素材' }}</span>
-            </h3>
-            <!-- 副行只留平台 · 作者：类目在列表里有列、在详情最后一段有行。 -->
-            <p class="detail-source-line">
-              <template v-if="material.platform">{{ platformLabel(material.platform) }}</template>
-              <template v-if="material.platform && (material.author_name || material.author_home_url)"> · </template>
-              <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
-              <template v-else>{{ material.author_name }}</template>
-            </p>
-            <!-- 走查七轮：小型 Badge 组，不是横跨整页的状态色块（§7.1）。素材库读的是
-                 加入状态（active/removed/无关系），我的素材读的是关系状态（使用中/已放弃）；
-                 两个上下文说同一份数据的不同问题，不能把文案混用。 -->
-            <div class="detail-badges">
-              <ResourceStatusBadge v-if="mode === 'mine' && material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
-              <ResourceStatusBadge v-else-if="mode === 'library'" :tone="join.tone" :label="join.label" />
-              <ResourceStatusBadge v-if="material.status" :tone="materialStatusTone(material.status)" :label="materialStatusLabel(material.status)" />
-              <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
-              <ResourceStatusBadge v-if="mode === 'library' && material.my_usage" :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" />
-              <ResourceStatusBadge v-if="mine" tone="info" label="已加入我的素材" />
-            </div>
-          </div>
+          <h3>{{ material.title || '未命名素材' }}</h3>
         </section>
-
-        <!-- 首段回答「我现在处理到哪一步，下一步是什么」（走查七轮用户提示词）：两个状态
-             维度 + 加入时间 + 一句下一步，使用情况的五个事实跟在下面（协议见 labels.js）。 -->
-        <section class="detail-card">
-          <h4 class="detail-card__title">{{ mode === 'library' ? '当前进度 / 使用情况' : '当前进度' }}</h4>
-          <dl class="detail-card__grid" :class="mode === 'library' ? 'detail-card__grid--5' : 'detail-card__grid--4'">
-            <div><dt>文件状态</dt><dd><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></dd></div>
-            <div v-if="mode === 'mine'"><dt>使用状态</dt><dd>
-              <ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" />
-              <template v-else>—</template>
-            </dd></div>
-            <template v-else>
-              <div><dt>加入状态</dt><dd><ResourceStatusBadge :tone="join.tone" :label="join.label" /></dd></div>
-              <div><dt>我的使用</dt><dd><ResourceStatusBadge :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" /></dd></div>
-            </template>
-            <div><dt>加入时间</dt><dd>{{ material.added_at ? formatDateTime(material.added_at) : '—' }}</dd></div>
-            <div><dt>下一步</dt><dd>{{ nextStep }}</dd></div>
-          </dl>
-          <!-- 使用情况只在素材库上下文显示：我的素材读的是关系与下载。所有角色都能看，
-               普通运营的读模型只少姓名、不少计数；没有事实就整段不渲染。 -->
-          <div v-if="mode === 'library' && usageRows.length" class="detail-usage">
-            <div v-for="fact in usageRows" :key="fact.key" class="detail-usage__item">
-              <ResourceStatusBadge v-if="fact.tone" :tone="fact.tone" :label="fact.value" />
-              <strong v-else>{{ fact.value }}</strong>
-              <span class="detail-usage__label">{{ fact.label }}</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="detail-card">
-          <h4 class="detail-card__title">
-            文件信息
-            <ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" />
-          </h4>
-          <dl class="detail-card__grid detail-card__grid--4">
-            <div><dt>文件大小</dt><dd>{{ formatBytes(material.video_size_bytes) }}</dd></div>
-            <div><dt>准备完成于</dt><dd>{{ formatDateTime(material.video_prepared_at) }}</dd></div>
-            <div><dt>校验值</dt><dd :title="material.video_sha256 || ''">{{ shortDigest(material.video_sha256) }}</dd></div>
-            <div><dt>云端视频</dt><dd>
-              <a v-if="material.video_status === 'ready'" class="wt-primary-link" href="#" @click.prevent="openCloudVideo">打开云端视频</a>
-              <template v-else>视频未就绪</template>
-            </dd></div>
-          </dl>
+        <ResourceSection title="基本信息"><ResourceDescriptions>
+          <t-descriptions-item label="素材 ID">{{ material.id }}</t-descriptions-item>
+          <t-descriptions-item label="类目">{{ categoryName(categories, material.category_id) }}</t-descriptions-item>
+          <t-descriptions-item label="来源平台">{{ platformLabel(material.platform) }}</t-descriptions-item>
+          <t-descriptions-item label="作者"><a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a><template v-else>{{ material.author_name || '—' }}</template></t-descriptions-item>
+          <t-descriptions-item label="发布时间">{{ formatDateTime(material.published_at) }}</t-descriptions-item>
+          <t-descriptions-item label="入库时间">{{ formatDateTime(material.created_at) }}</t-descriptions-item>
+          <t-descriptions-item label="操作人">{{ material.created_by_name || '—' }}</t-descriptions-item>
+          <t-descriptions-item label="原作品"><a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a><template v-else>—</template></t-descriptions-item>
+        </ResourceDescriptions></ResourceSection>
+        <ResourceSection title="内容表现"><ResourceDescriptions>
+          <t-descriptions-item v-for="[key,label] in [['view_count','浏览'],['like_count','点赞'],['favorite_count','收藏'],['comment_count','评论'],['share_count','分享']]" :key="key" :label="label">{{ metricLabel(material,key) }}</t-descriptions-item>
+        </ResourceDescriptions></ResourceSection>
+        <ResourceSection title="使用情况"><ResourceDescriptions>
+          <t-descriptions-item :label="mode === 'mine' ? '使用状态' : '加入状态'"><template v-if="mode === 'mine'"><ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" /><template v-else>—</template></template><ResourceStatusBadge v-else :tone="join.tone" :label="join.label" /></t-descriptions-item>
+          <t-descriptions-item label="我的使用"><ResourceStatusBadge :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" /></t-descriptions-item>
+          <t-descriptions-item v-if="mode === 'mine'" label="加入时间">{{ material.added_at ? formatDateTime(material.added_at) : '—' }}</t-descriptions-item>
+          <t-descriptions-item v-for="fact in usageRows" :key="fact.key" :label="fact.label">{{ fact.value }}</t-descriptions-item>
+        </ResourceDescriptions></ResourceSection>
+        <ResourceSection title="视频文件"><ResourceDescriptions>
+          <t-descriptions-item label="视频状态"><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></t-descriptions-item>
+          <t-descriptions-item label="文件大小">{{ formatBytes(material.video_size_bytes) }}</t-descriptions-item>
+          <t-descriptions-item label="准备完成时间">{{ formatDateTime(material.video_prepared_at) }}</t-descriptions-item>
+          <t-descriptions-item label="视频文件"><a v-if="material.video_status === 'ready'" class="wt-primary-link" href="#" @click.prevent="openCloudVideo">打开视频</a><template v-else>—</template></t-descriptions-item>
+        </ResourceDescriptions>
           <!-- 下载进行中：进度/速度/预计时间都是服务端任务表里的读数（与下载中心同一
                套），不是前端编的；取消也是真实请求。它与「下载目录」那一行不同屏 ——
                下载中还没有「已下载」的文件可量。 -->
@@ -330,10 +259,7 @@ async function openDirectory() {
                 <span v-if="activeRow.etaText">· 预计 {{ activeRow.etaText }}</span>
               </p>
             </div>
-            <div class="detail-download__actions">
-              <t-button v-if="activeRow.canCancel" size="small" theme="primary" @click="cancelDownload">取消下载</t-button>
-              <span v-else-if="cancelRequested" class="detail-download__pending">正在取消…</span>
-            </div>
+
           </div>
           <!-- 本机那一份在哪个文件夹里。这一行说的是磁盘上的文件，与上面那条云端地址
                是两份东西：路径可能很长，所以不塞进四列网格，整行铺开、换行不截断。
@@ -346,48 +272,8 @@ async function openDirectory() {
             </div>
             <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDirectory">打开目录</t-button>
           </div>
-        </section>
-        <p v-if="material.last_error" class="detail-error">最近一次准备失败：{{ material.last_error }}</p>
-
-        <section class="detail-card">
-          <h4 class="detail-card__title">来源信息</h4>
-          <dl class="detail-card__grid detail-card__grid--4">
-            <div><dt>平台</dt><dd>{{ platformLabel(material.platform) }}</dd></div>
-            <div><dt>作者</dt><dd>
-              <a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a>
-              <template v-else>{{ material.author_name || '-' }}</template>
-            </dd></div>
-            <div><dt>发布时间</dt><dd>{{ formatDateTime(material.published_at) }}</dd></div>
-            <div><dt>平台原视频</dt><dd>
-              <a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原视频页面</a>
-              <template v-else>-</template>
-            </dd></div>
-          </dl>
-        </section>
-
-        <!-- 来源行采集时的快照；抖音不给 play_count，只展示拿得到数的四项。 -->
-        <section class="detail-card">
-          <h4 class="detail-card__title">来源内容池统计</h4>
-          <div class="detail-metrics">
-            <div class="detail-metrics__item"><strong>{{ countLabel(material.like_count) }}</strong><span>点赞</span></div>
-            <div class="detail-metrics__item"><strong>{{ countLabel(material.favorite_count) }}</strong><span>收藏</span></div>
-            <div class="detail-metrics__item"><strong>{{ countLabel(material.comment_count) }}</strong><span>评论</span></div>
-            <div class="detail-metrics__item"><strong>{{ countLabel(material.share_count) }}</strong><span>分享</span></div>
-          </div>
-        </section>
-
-        <!-- 素材自身的三个字段放最后：走查七轮那份提示词按「先进度、后字段」排序，没有安排
-             它们的位置；直接删掉会丢掉运营要复制去别处查的素材 ID。 -->
-        <section class="detail-card">
-          <h4 class="detail-card__title">基本信息</h4>
-          <dl class="detail-card__grid detail-card__grid--3">
-            <div><dt>素材 ID</dt><dd>{{ material.id }}</dd></div>
-            <div><dt>类目</dt><dd>{{ categoryName(categories, material.category_id) }}</dd></div>
-            <div><dt>入库时间</dt><dd>{{ formatDateTime(material.created_at) }}</dd></div>
-            <!-- 操作人 = 素材创建人；目录里已没有此人时回退 —，不伪造姓名。 -->
-            <div><dt>操作人</dt><dd>{{ material.created_by_name || '-' }}</dd></div>
-          </dl>
-        </section>
+          <p v-if="material.last_error" class="detail-error">{{ material.last_error }}</p>
+        </ResourceSection>
       </div>
     </t-loading>
 
@@ -410,44 +296,23 @@ async function openDirectory() {
           </template>
           <template v-else>
             <t-button v-if="needsRedownload(downloadStatus, localFile?.presence)" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">重新下载</t-button>
-            <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" @click="cancelDownload">取消下载</t-button>
+            <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" :disabled="cancelRequested" @click="cancelDownload">{{ cancelRequested ? '正在取消…' : '取消下载' }}</t-button>
             <t-button v-else-if="downloadStatus !== 'downloaded'" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
             <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
           </template>
         </template>
       </div>
     </template>
-  </t-drawer>
+  </ResourceOverlay>
 </template>
 
 <style scoped>
 .detail-download-reason { color: var(--wt-text-secondary); font-size: 12px; }
-.detail-workspace { display: flex; flex-direction: column; gap: 14px; }
-.detail-hero { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: flex-start; }
-.detail-cover { width: 160px; height: 100px; border-radius: 10px; }
-.detail-primary { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.detail-primary h3 { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
-.detail-source-line { margin: 0; color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.detail-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* 卡片间距由 .detail-workspace 的 gap 给；这里不要再写 + 选择器的 margin。 */
-.detail-card { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
-.detail-card__title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--wt-text-primary); font-size: 15px; font-weight: 650; }
-.detail-card__grid { display: grid; gap: 12px 16px; margin: 0; }
-.detail-card__grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.detail-card__grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.detail-card__grid--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.detail-card__grid dt { color: var(--wt-text-tertiary); font-size: 12px; }
-.detail-card__grid dd { margin: 5px 0 0; color: var(--wt-text-primary); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
-/* 使用情况的五个事实与上面那行进度事实同卡不同组：一条虚线分开，不另起一张卡。 */
-.detail-usage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--wt-border); }
-.detail-usage__item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.detail-usage__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
-/* 标签挂类名而不是后代选择器：ResourceStatusBadge 的根元素也是 span，会被后代选择器染色。 */
-.detail-usage__label { color: var(--wt-text-tertiary); font-size: 12px; }
-.detail-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.detail-metrics__item { display: flex; flex-direction: column; gap: 6px; }
-.detail-metrics__item strong { color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
-.detail-metrics__item span { color: var(--wt-text-tertiary); font-size: 12px; }
+.detail-workspace { display: flex; flex-direction: column; gap: 28px; }
+.detail-workspace :deep(.resource-section) { margin-top: 0; }
+.detail-hero { display: flex; gap: 16px; align-items: center; }
+.detail-cover { width: 42px; height: 52px; flex-shrink: 0; }
+.detail-hero h3 { margin: 0; color: var(--wt-text-primary); font-size: 16px; font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }
 .detail-error { margin: 12px 0 0; color: var(--wt-danger); font-size: 13px; line-height: 1.5; }
 /* 整行铺开而不是塞进四列网格：目录可能很长，截断掉的恰好是「在哪个盘的哪个文件夹」。
    与上面那行网格用一条虚线分开，同 `.detail-usage` 的做法。 */
@@ -464,7 +329,6 @@ async function openDirectory() {
 .detail-download__percent { color: var(--wt-primary); font-size: 14px; font-weight: 600; }
 .detail-download__pending { color: var(--wt-text-tertiary); font-size: 13px; }
 .detail-download__meta { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--wt-text-tertiary); font-size: 12px; }
-.detail-download__actions { flex: 0 0 auto; }
 /* 页脚只放业务动作、靠右收：关闭走抽屉右上角的 ×（规范 §6.3），不再占页脚一格。 */
 .material-detail__actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }

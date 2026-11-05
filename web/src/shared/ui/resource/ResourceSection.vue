@@ -4,7 +4,7 @@ defineProps({ title: { type: String, required: true }, description: { type: Stri
 
 <template>
   <section class="resource-section" :class="`resource-section--${variant}`" :aria-label="title">
-    <header class="resource-section__header"><h3>{{ title }}</h3><p v-if="description">{{ description }}</p></header>
+    <header class="resource-section__header"><h3>{{ title }}<slot name="title-extra" /></h3><p v-if="description">{{ description }}</p></header>
     <div class="resource-section__body"><slot /></div>
   </section>
 </template>
@@ -14,7 +14,7 @@ defineProps({ title: { type: String, required: true }, description: { type: Stri
 .resource-section__header { margin-bottom: 16px; }
 .resource-section--detail .resource-section__header h3 { padding-left: 10px; border-left: 3px solid var(--wt-primary); }
 .resource-section--form .resource-section__header { padding-bottom: 12px; border-bottom: 1px solid var(--wt-border); }
-.resource-section__header h3 { margin: 0; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.6; }
+.resource-section__header h3 { display:flex;align-items:center;gap:6px; margin: 0; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.6; }
 .resource-section__header p { margin: 4px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.6; }
 .resource-section__body { min-width: 0; container-type: inline-size; }
 .resource-section :deep(.t-descriptions__label) { color: var(--wt-text-tertiary); font-size: 14px; }

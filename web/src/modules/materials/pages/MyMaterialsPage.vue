@@ -1,4 +1,12 @@
 <script setup>
+import '../../compose/production.css'
+import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
+import MaterialMetricFilters from '../components/MaterialMetricFilters.vue'
+import { publishedRangeParams, emptyMetricRanges, metricRangeParams, metricLabel, materialVideoState } from '../materialFilters.js'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
+import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -12,11 +20,9 @@ import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { useAutoRefresh } from '../../../shared/utils/useAutoRefresh.js'
 import {
   VIDEO_STATUSES,
+  MY_USAGE_FILTERS, TEAM_USAGE_FILTERS, myUsageLabel, usageSummary,
   downloadActionLabel,
-  downloadStatusLabel,
-  downloadStatusTone,
   categoryName,
-  usageStatusLabel,
   usageStatusTone,
   videoStatusLabel,
   videoStatusTone,
@@ -47,6 +53,8 @@ const loading = ref(false)
 const error = ref('')
 const search = ref('')
 const statusFilter = ref('')
+const advancedFilters = ref(false), categoryFilters = ref([]), publishedRange = ref([]), metricFilters = ref(emptyMetricRanges())
+const myUsageFilter = ref('unused'), teamUsageFilter = ref(''), usageStatusFilter = ref('active')
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
 const categories = ref([])
@@ -57,26 +65,20 @@ const pagination = ref({ current: 1, pageSize: 20 })
 const selectedRowKeys = ref([])
 const batchLoading = ref(false)
 
-// 行内只留识别信息；作者、链接与体积在详情抽屉里（CHG-20260930-069）。素材 ID 是
-// 第一列——与素材库同一行形状，走查反馈：运营扫行时先找编号。
-//
-// 走查七轮：类目不再独立成列，收进「素材」格的副行（与作者同格），腾出的位置给
-// 「使用状态」——这一页第一次同时有两个状态维度要并排（规范 §7.2）。使用状态是
-// 关系自己的状态，文件状态是素材的，两者不合并。
-//
-// 点赞与收藏是选素材时的决策依据（走查反馈），所以并排放在「素材」右边；数据在行上
-// （toRows 展开了嵌入的 material），不必再点开详情。
+// Selection is keyed by the personal relation; all asset and usage facts remain separate.
 const columns = [
   { colKey: 'row-select', type: 'multiple', width: 44, checkProps: ({ row }) => ({ disabled: Boolean(downloadReason.value) || !canSelectForDownload(row) || batchLoading.value }) },
-  { colKey: 'id', title: '素材 ID', width: 90, sorter: true },
-  { colKey: 'material', title: '素材', width: 380 },
-  { colKey: 'like_count', title: '点赞', width: 90 },
-  { colKey: 'favorite_count', title: '收藏', width: 90 },
-  { colKey: 'video_status', title: '文件状态', width: 100 },
-  { colKey: 'usage_status', title: '使用状态', width: 100 },
-  { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
-  { colKey: 'added_at', title: '加入时间', width: 105, sorter: true },
-  { colKey: 'op', title: '操作', width: 285, fixed: 'right' },
+  { colKey: 'id', title: '素材 ID', width: 80, sorter: true },
+  { colKey: 'material', title: '素材 / 作者', width: 280 },
+  { colKey: 'category', title: '类目', width: 100 },
+  { colKey: 'published_at', title: '发布时间', width: 155, sorter: true },
+  { colKey: 'metrics', title: '浏览 / 赞 / 收藏', width: 175 },
+  { colKey: 'my_usage', title: '我的使用', width: 100 },
+  { colKey: 'team_usage', title: '团队使用', width: 150 },
+  { colKey: 'video_status', title: '视频状态', width: 100 },
+  { colKey: 'usage_status', title: '加入状态', width: 100 },
+  { colKey: 'added_at', title: '加入时间', width: 155, sorter: true },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情','重新下载','放弃使用'], {variant:'text',primary:true}), fixed: 'right' },
 ]
 
 const tableScroll = computed(() => ({
@@ -103,24 +105,15 @@ function toRows(usages) {
   }))
 }
 
-/**
- * 「文件状态」列：纯 `download_status`（CHG-069 任务 23）——它回答「**这个运营**在这条
- * 素材上下载到了哪一步」：未下载/下载中/已下载/下载失败。不再回落 `video_status`：
- * 那回答的是云端源文件准备好了没有，是另一件事，混在一起就把「还没下」画成「没准备」。
- * 云端准备态只留在详情抽屉的「文件信息」区。
- */
-// 与素材详情抽屉同一个量法（MaterialDetailDrawer:128）：千分位，空值显示 0 而不是空白。
-function countLabel(value) { return Number(value || 0).toLocaleString() }
+function countLabel(value) { return value === null || value === undefined ? '—' : Number(value).toLocaleString() }
 
 function fileStatus(row) {
-  return { label: downloadStatusLabel(row.download_status), tone: downloadStatusTone(row.download_status) }
+  return materialVideoState(row, localPresence(row))
 }
 
-// 「素材」格副行：类目 · 作者。类目查不到名字时 categoryName 退回 id（那是真实数据），
-// 作者没有就不留一个空的间隔号。
+// Category has its own column; the material subline shows the author.
 function cellSubline(row) {
-  const category = categoryName(categories.value, row.category_id)
-  return row.author_name ? `${category} · ${row.author_name}` : category
+  return row.author_name || '—'
 }
 
 // 「本机那一份文件还在不在」，按任务表里的文件名索引（同 MaterialDetailDrawer 与下载中心）。
@@ -175,6 +168,12 @@ function localPresence(row) {
 
 // 走查七轮起，列表不再只返回使用中的关系，已放弃的行也在（并且可以就地恢复）。
 function reset() {
+  myUsageFilter.value = 'unused'
+  teamUsageFilter.value = ''
+  usageStatusFilter.value = 'active'
+  categoryFilters.value = (currentUser.value?.category_ids || []).filter(id => categories.value.some(row => row.id === id))
+  publishedRange.value = []
+  metricFilters.value = emptyMetricRanges()
   search.value = ''
   statusFilter.value = ''
   load()
@@ -194,7 +193,7 @@ async function load({ quiet = false, keepPage = false } = {}) {
   if (!quiet) loading.value = true
   if (!quiet) error.value = ''
   try {
-    const data = await client.listMyMaterials({ page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
+    const data = await client.listMyMaterials({ category_ids: categoryFilters.value.join(','), ...publishedRangeParams(publishedRange.value), ...metricRangeParams(metricFilters.value), my_usage: myUsageFilter.value, team_usage: teamUsageFilter.value, usage_status: usageStatusFilter.value, page: pagination.value.current, page_size: pagination.value.pageSize, search: search.value.trim(), video_status: statusFilter.value, sort_by: sortBy.value, sort_order: sortOrder.value })
     if (sequence !== loadSequence) return
     rows.value = toRows(data.items || [])
     total.value = data.total || 0
@@ -304,9 +303,7 @@ async function batchDownload() {
 }
 
 onMounted(() => {
-  createSessionClient().me().then(user => { currentUser.value = user }).catch(() => {})
-  load()
-  loadCategories()
+  Promise.all([createSessionClient().me().then(user => { currentUser.value = user }).catch(() => {}), loadCategories()]).then(() => { categoryFilters.value = (currentUser.value?.category_ids || []).filter(id => categories.value.some(row => row.id === id)); load() })
   // `/my-material?material_id=7` 与素材库同源（详情抽屉里的操作会带上它）。
   const raw = route.query.material_id
   if (raw && /^\d+$/.test(String(raw))) {
@@ -322,20 +319,25 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved my-materials-page">
+    <div class="wt-resource-page resource-visual-approved production-page my-materials-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="我的素材" description="已加入的素材，在这里下载、查看使用状态与详情" />
+      <ResourcePageHeader title="我的素材" description="管理已加入的素材，查看使用情况并下载。" />
       <ResourceCard class="material-table-card">
         <div class="filter-bar">
-          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、作者" @enter="load" /></label>
-          <label class="wt-filter-field"><span class="wt-filter-field__label">文件状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+          <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="名称 / 作者 / ID" @enter="load" /></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categories" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
+          <label class="wt-filter-field"><span class="wt-filter-field__label">我的使用</span><t-select v-model="myUsageFilter" :options="MY_USAGE_FILTERS" clearable placeholder="全部" /></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
+          <ResourceAdvancedToggle v-model="advancedFilters" />
+          <div v-if="advancedFilters" class="wt-advanced-filters">
+            <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">团队使用</span><t-select v-model="teamUsageFilter" :options="TEAM_USAGE_FILTERS" clearable placeholder="全部" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">加入状态</span><t-select v-model="usageStatusFilter" :options="[{value:'active',label:'已加入'},{value:'removed',label:'已移出'}]" clearable placeholder="全部" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">视频准备</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
+            <MaterialMetricFilters v-model="metricFilters" />
+          </div>
         </div>
-        <div v-if="selectedRowKeys.length" class="wt-selection-toolbar">
-          <span class="wt-selection-toolbar__count">已选 {{ selectedRowKeys.length }} 项</span>
-          <t-link theme="primary" @click="selectedRowKeys=[]">清空选择</t-link>
-          <t-button theme="primary" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">批量下载</t-button>
-        </div>
+        <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></ResourceSelectionToolbar>
         <p v-if="downloadReason" class="wt-download-reason">{{ downloadReason }}</p>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="我的素材还是空的">
@@ -347,19 +349,22 @@ onMounted(() => {
               <div class="material-cell">
                 <MaterialCover class="material-cell__cover" :url="row.cover_url" />
                 <div class="material-cell__text">
-                  <a v-if="row.source_url" class="wt-primary-link material-title" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</a>
-                  <span v-else class="material-title" :title="row.title || '未命名素材'">{{ row.title || '未命名素材' }}</span>
+                  <t-link theme="primary" class="material-title" :title="row.title || '未命名素材'" @click="openDetail(row)">{{ row.title || '未命名素材' }}</t-link>
                   <span class="material-cell__source">{{ cellSubline(row) }}</span>
                 </div>
               </div>
             </template>
+            <template #category="{row}">{{ categoryName(categories,row.category_id) }}</template>
+            <template #my_usage="{row}">{{ myUsageLabel(row.my_usage) }}</template>
+            <template #team_usage="{row}">{{ usageSummary(row) }}</template>
+            <template #metrics="{row}"><div class="material-metrics"><span>{{ metricLabel(row,'view_count') }} 浏览</span><span>{{ metricLabel(row,'like_count') }} 赞 · {{ metricLabel(row,'favorite_count') }} 收藏</span></div></template>
             <template #like_count="{ row }">{{ countLabel(row.like_count) }}</template>
             <template #favorite_count="{ row }">{{ countLabel(row.favorite_count) }}</template>
             <template #video_status="{ row }"><ResourceStatusBadge :tone="fileStatus(row).tone" :label="fileStatus(row).label" /></template>
             <!-- 有值渲染值，没值画 —；两条分支不能合成一条带默认值的（缺值兜底成「使用中」
                  就是替服务端宣布一条它没说过关系）。 -->
             <template #usage_status="{ row }">
-              <ResourceStatusBadge v-if="row.usage_status" :tone="usageStatusTone(row.usage_status)" :label="usageStatusLabel(row.usage_status)" />
+              <ResourceStatusBadge v-if="row.usage_status" :tone="usageStatusTone(row.usage_status)" :label="row.usage_status === 'active' ? '已加入' : '已移出'" />
               <template v-else>—</template>
             </template>
             <template #added_at="{ row }">{{ formatDateTime(row.added_at) }}</template>
@@ -370,21 +375,21 @@ onMounted(() => {
                  已下载是终态：本机那份文件还在就无事可做，**实测不在了**才给一次「重新下载」
                  （合成的入口在合成任务页，这一页不再有合成按钮）。 -->
             <template #op="{ row }">
-              <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
+              <ResourceRowActions>
+                <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
                 <template v-if="row.usage_status === 'removed'">
-                  <t-button size="small" theme="primary" @click="restore(row)">恢复使用</t-button>
+                  <t-button size="small" theme="primary" variant="text" class="is-primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">重新下载</t-button>
-                  <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
-                  <t-button size="small" class="wt-secondary-button wt-danger-button" variant="outline" @click="giveUp(row)">放弃使用</t-button>
+                  <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">重新下载</t-button>
+                  <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
+                  <t-button size="small" class="wt-secondary-button wt-danger-button" variant="text" @click="giveUp(row)">放弃使用</t-button>
                 </template>
-              </t-space>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
-        <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
+        <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10, 20, 50]" @current-change="load({ keepPage: true })" @page-size-change="load({ keepPage: true })" /></div>
       </ResourceCard>
 
       <MaterialDetailDrawer
@@ -408,8 +413,10 @@ onMounted(() => {
 .material-table-card { padding: 18px 20px; margin-top: 16px; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */
+.material-metrics { display:grid;gap:4px; }
+.material-metrics span+span { font-size:12px;color:var(--wt-text-tertiary); }
 .material-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.material-cell__cover { width: 56px; height: 36px; flex: none; }
+.material-cell__cover { width: 42px; height: 52px; flex: none; }
 .material-cell__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .material-cell__source { color: var(--wt-text-tertiary); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .material-title { display: block; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }

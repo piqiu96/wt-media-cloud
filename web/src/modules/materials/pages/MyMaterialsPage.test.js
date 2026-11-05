@@ -30,9 +30,9 @@ describe('my materials page', () => {
   it('defaults to published_at descending and lets ID/time columns toggle the order', () => {
     expect(source).toContain("const sortBy = ref('published_at')")
     expect(source).toContain("const sortOrder = ref('desc')")
-    expect(source).toContain("{ colKey: 'id', title: '素材 ID', width: 90, sorter: true }")
-    expect(source).toContain("{ colKey: 'published_at', title: '发布时间', width: 150, sorter: true }")
-    expect(source).toContain("{ colKey: 'added_at', title: '加入时间', width: 105, sorter: true }")
+    expect(source).toContain("{ colKey: 'id', title: '素材 ID', width: 80, sorter: true }")
+    expect(source).toContain("{ colKey: 'published_at', title: '发布时间', width: 155, sorter: true }")
+    expect(source).toContain("{ colKey: 'added_at', title: '加入时间', width: 155, sorter: true }")
     expect(source).toContain("sortBy.value = sort?.sortBy || 'published_at'")
     expect(source).toContain("sortOrder.value = sort?.descending === false ? 'asc' : 'desc'")
     expect(source).toContain('@sort-change="changeSort"')
@@ -137,7 +137,7 @@ describe('my materials page', () => {
   // 这一页不是收藏夹，副标题不该说「收藏」。合成的入口在合成任务页，这一页不承诺
   // 「进入后续生产」，只说这里实际能做的事。
   it('describes the page by what it actually offers, not a favourites list', () => {
-    expect(source).toContain('已加入的素材，在这里下载、查看使用状态与详情')
+    expect(source).toContain('管理已加入的素材，查看使用情况并下载。')
     expect(source).not.toContain('你收藏的素材')
     expect(source).not.toContain('进入后续生产')
   })
@@ -150,14 +150,14 @@ describe('my materials page', () => {
    * 而列本身占了 100px。
    */
   it('carries 使用状态 next to 文件状态 and folds the category into the 素材 cell', () => {
-    expect(source).toContain("{ colKey: 'usage_status', title: '使用状态'")
+    expect(source).toContain("{ colKey: 'usage_status', title: '加入状态'")
     expect(source.indexOf("{ colKey: 'usage_status'")).toBeGreaterThan(source.indexOf("{ colKey: 'video_status'"))
     expect(source.indexOf("{ colKey: 'usage_status'")).toBeLessThan(source.indexOf("{ colKey: 'added_at'"))
-    expect(source).not.toContain("{ colKey: 'category'")
-    expect(source).toContain('usageStatusLabel(row.usage_status)')
+    expect(source).toContain("{ colKey: 'category'")
+    expect(source).toContain("row.usage_status === 'active' ? '已加入' : '已移出'")
     expect(source).toContain('usageStatusTone(row.usage_status)')
     // 副行是「类目 · 作者」。
-    expect(source).toContain('categoryName(categories.value, row.category_id)')
+    expect(source).toContain('categoryName(categories,row.category_id)')
     expect(source).toContain('row.author_name')
   })
 
@@ -199,7 +199,7 @@ describe('my materials page', () => {
   // 作者、链接与体积在详情里；下载按钮只叫「下载」，下面不挂提示小字。
   it('shares the library row shape: id first, clickable title, no download hint', () => {
     const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
-    const materialAt = source.indexOf("{ colKey: 'material', title: '素材'")
+    const materialAt = source.indexOf("{ colKey: 'material', title: '素材 / 作者'")
     expect(idAt).toBeGreaterThan(-1)
     expect(materialAt).toBeGreaterThan(-1)
     expect(idAt, '素材 ID 列必须是第一业务列，且排在「素材」格之前').toBeLessThan(materialAt)
@@ -207,9 +207,9 @@ describe('my materials page', () => {
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
     expect(source).toContain('MaterialCover')
-    expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
-    expect(source).toContain('class="wt-primary-link')
-    expect(source).toContain('theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
+    expect(source).toMatch(/<t-link[^>]*@click="openDetail\(row\)"/)
+    expect(source).toContain('<t-link theme="primary" class="material-title"')
+    expect(source).toContain('theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
     expect(source).not.toContain('downloadHint')
     expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')
@@ -220,8 +220,8 @@ describe('my materials page', () => {
   // 进度，叫「文件状态」才不会和并不存在的素材业务状态混起来。
   it('uses the same 素材 cell and 文件状态 column name as the library', () => {
     expect(source).toContain('<template #material="{ row }">')
-    expect(source).toContain("{ colKey: 'video_status', title: '文件状态'")
-    expect(source).not.toContain("title: '视频状态'")
+    expect(source).toContain("{ colKey: 'video_status', title: '视频状态'")
+    expect(source).not.toContain("title: '文件状态'")
     for (const gone of ["title: '封面'", "title: '标题'", "title: '来源平台'"]) {
       expect(source, `不该再有 ${gone} 列`).not.toContain(gone)
     }
@@ -237,13 +237,13 @@ describe('my materials page', () => {
    */
   it('derives the 文件状态 cell purely from the relation download status', () => {
     expect(source).toContain('download_status: usage.download_status || \'\'')
-    expect(source).toContain('downloadStatusLabel(row.download_status)')
-    expect(source).toContain('downloadStatusTone(row.download_status)')
+    expect(source).toContain('materialVideoState(row, localPresence(row))')
+    expect(source).toContain('materialVideoState(row, localPresence(row))')
     const cell = source.slice(source.indexOf('function fileStatus(row)'), source.indexOf('function ', source.indexOf('function fileStatus(row)') + 1))
     // 列只读 download_status；video_status 兜底已经拿掉。
     expect(cell).not.toContain('video_status')
-    expect(cell).toContain('downloadStatusLabel(row.download_status)')
-    expect(cell).toContain('downloadStatusTone(row.download_status)')
+    expect(cell).toContain('materialVideoState(row, localPresence(row))')
+    expect(cell).toContain('materialVideoState(row, localPresence(row))')
     // 下载状态与素材云侧状态不合并：video_status 那四档仍是服务端筛选参数，不参与本格。
     expect(source).toContain('video_status: statusFilter.value')
     expect(source).not.toContain('row.video_status')
@@ -288,7 +288,7 @@ describe('my materials page', () => {
       expect(source).toContain("row-key=\"usage_id\"")
       expect(source).toContain('v-model:selected-row-keys="selectedRowKeys"')
       expect(source).toContain("checkProps: ({ row }) => ({ disabled: Boolean(downloadReason.value) || !canSelectForDownload(row) || batchLoading.value })")
-      expect(source).toContain('class="wt-selection-toolbar"')
-      expect(source).toContain('>批量下载</t-button>')
+      expect(source).toContain('<ResourceSelectionToolbar')
+      expect(source).toContain('@click="batchDownload">下载（')
     })
   })

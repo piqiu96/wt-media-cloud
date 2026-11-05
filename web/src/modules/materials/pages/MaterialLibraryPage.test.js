@@ -15,7 +15,7 @@ function sliceBetween(text, start, end) {
 // 任何本机下载入口，下载只从「我的素材」发起（服务端也只认那边的关系）。
 // 切的终点是 `</t-space>` 而不是第一个 `</template>`：操作格里有嵌套的
 // `<template v-else>—</template>`，按 `</template>` 切会把动作条从「—」处剪断。
-const opBlock = sliceBetween(source, '#op=', '</t-space>')
+const opBlock = sliceBetween(source, '#op=', '</ResourceRowActions>')
 
 describe('material library page', () => {
   it('keeps search and ownership basic while grouping usage filters under advanced controls', () => {
@@ -24,12 +24,13 @@ describe('material library page', () => {
     expect(split).toBeGreaterThan(0)
     expect(bar.slice(0,split)).toContain('综合搜索')
     expect(bar.slice(0,split)).toContain('运营团队')
-    expect(bar.slice(0,split)).toContain('业务分类')
-    for(const title of ['加入状态','我的使用','使用情况']) {
+    expect(bar.slice(0,split)).toContain('类目')
+    expect(bar.slice(0,split)).toContain('我的使用')
+    for(const title of ['加入状态','团队使用','发布时间']) {
       expect(bar.slice(0,split)).not.toContain(title)
       expect(bar.slice(split)).toContain(title)
     }
-    expect(bar).toContain('高级筛选')
+    expect(bar).toContain('ResourceAdvancedToggle')
   })
   /**
    * `?material_id=N` 是一个**真实入口**，不是装饰。
@@ -108,7 +109,7 @@ describe('material library page', () => {
   it('defaults to published_at descending and lets ID/time columns toggle the order', () => {
     expect(source).toContain("const sortBy = ref('published_at')")
     expect(source).toContain("const sortOrder = ref('desc')")
-    expect(source).toContain("{ colKey: 'id', title: '素材 ID', width: 90, sorter: true }")
+    expect(source).toContain("{ colKey: 'id', title: '素材 ID', width: 80, sorter: true }")
     expect(source).toContain("{ colKey: 'published_at', title: '发布时间', width: 150, sorter: true }")
     expect(source).toContain("{ colKey: 'created_at', title: '入库时间', width: 105, sorter: true }")
     expect(source).toContain("sortBy.value = sort?.sortBy || 'published_at'")
@@ -147,7 +148,7 @@ describe('material library page', () => {
   // 单元格，减少列数；素材 ID 仍独立成列且是第一业务列（规范 §5.1，用户明确裁定保留）。
   it('collapses cover, title and platform into one material cell behind a leading id column', () => {
     const idAt = source.indexOf("{ colKey: 'id', title: '素材 ID'")
-    const materialAt = source.indexOf("{ colKey: 'material', title: '素材'")
+    const materialAt = source.indexOf("{ colKey: 'material', title: '素材 / 作者'")
     expect(idAt).toBeGreaterThan(-1)
     expect(materialAt).toBeGreaterThan(-1)
     expect(idAt, '素材 ID 列仍必须是第一业务列').toBeLessThan(materialAt)
@@ -157,13 +158,13 @@ describe('material library page', () => {
     }
     expect(source).toContain('<template #material="{ row }">')
     expect(source).toContain('MaterialCover')
-    expect(source).toMatch(/<a[^>]*:href="row\.source_url"/)
+    expect(source).toMatch(/<t-link[^>]*@click="openDetail\(row\)"/)
     expect(source).toContain('{{ platformLabel(row.platform) }}')
     // 走查反馈：ID 不带 # 前缀——运营要把这串数字复制去别处查，# 只会跟着被复制。
     expect(source).toContain('<template #id="{ row }">{{ row.id }}</template>')
     expect(source).not.toContain('#{{ row.id }}')
     // 副行只带来源平台；类目有自己的一列，同一格里再说一遍就是重复。
-    expect(source).not.toContain('· {{ row.author_name')
+    expect(source).toContain("row.author_name || '—'")
     expect(source).not.toContain('formatBytes(row.video_size_bytes)')
   })
 
@@ -209,7 +210,7 @@ describe('material library page', () => {
     expect(opBlock).toContain("row.usage_status === 'removed' ? '重新加入' : '加入我的素材'")
     expect(opBlock).toContain('@click="addToMine(row)"')
     expect(opBlock).toContain('@click="goToMyMaterials()">去我的素材</t-button>')
-    expect(source).toMatch(/v-else-if="row\.usage_status === 'active'"[\s\S]{0,120}?goToMyMaterials\(\)/)
+    expect(source).toMatch(/v-else-if="row\.usage_status === 'active'"[\s\S]{0,180}?goToMyMaterials\(\)/)
     // 跳转目标就是「我的素材」页，两个端同名（cloud / desktop router 都是 MyMaterial）。
     expect(source).toContain("{ name: 'MyMaterial' }")
   })
@@ -239,14 +240,14 @@ describe('material library page', () => {
 
   // 走查五轮（2026-09-30 用户走查 + 设计图）：列表要给出「素材状态」——这条素材还提供给
   // 运营选用吗。文件状态已从列表撤掉（2026-10-27 用户裁定），业务状态仍在列表上。
-  it('keeps the material status column right after the category column', () => {
+  it('keeps measured material performance after the category', () => {
     const categoryAt = source.indexOf("{ colKey: 'category'")
-    const statusAt = source.indexOf("{ colKey: 'material_status'")
-    expect(source).toContain("{ colKey: 'material_status', title: '素材状态'")
+    const statusAt = source.indexOf("{ colKey: 'metrics'")
+    expect(source).toContain("{ colKey: 'metrics', title: '浏览 / 赞 / 收藏'")
     expect(statusAt).toBeGreaterThan(categoryAt)
     expect(statusAt).toBeLessThan(source.indexOf("{ colKey: 'joined'"))
-    expect(source).toContain('materialStatusLabel(row.status)')
-    expect(source).toContain('materialStatusTone(row.status)')
+    expect(source).toContain("metricLabel(row,'view_count')")
+    expect(source).toContain("metricLabel(row,'like_count')")
   })
 
   /**
@@ -263,8 +264,8 @@ describe('material library page', () => {
     const usageAt = source.indexOf("{ colKey: 'usage'")
     expect(source).toContain("{ colKey: 'joined', title: '加入状态'")
     expect(source).toContain("{ colKey: 'my_usage', title: '我的使用'")
-    expect(source).toContain("{ colKey: 'usage', title: '使用情况'")
-    expect(joinedAt).toBeGreaterThan(source.indexOf("{ colKey: 'material_status'"))
+    expect(source).toContain("{ colKey: 'usage', title: '团队使用'")
+    expect(joinedAt).toBeGreaterThan(source.indexOf("{ colKey: 'metrics'"))
     expect(joinedAt).toBeLessThan(myUsageAt)
     expect(myUsageAt).toBeLessThan(usageAt)
     expect(usageAt).toBeLessThan(source.indexOf("{ colKey: 'created_at'"))
@@ -279,7 +280,7 @@ describe('material library page', () => {
     expect(source).not.toContain('canViewUsage')
     expect(source).not.toContain("role === 'senior_operator'")
     expect(source).not.toContain('tableColumns')
-    expect(source).toContain('<label class="wt-filter-field"><span class="wt-filter-field__label">使用情况')
+    expect(source).toContain('<label class="wt-filter-field"><span class="wt-filter-field__label">团队使用')
     expect(source).toContain('v-model="teamUsageFilter"')
     expect(source).toContain('<template #usage="{ row }">')
     expect(source).toContain('usageSummary(row)')
@@ -307,13 +308,11 @@ describe('material library page', () => {
    * 实际是把一条读不到状态的素材静默画成「可用」，而「可用」正是能触发「加入我的素材」
    * 的那一个取值。
    */
-  it('renders placeholders instead of guessing a state the server never sent', () => {
-    // 断言只量这一格：整份源码里 `row.status || 'available'` 会出现在**讲解这条规则的
-    // 注释里**，拿整份源码做否证会把说明当证据，读数是注释的函数。
-    const cell = sliceBetween(source, '#material_status="{ row }"', '</template>')
-    expect(cell).toContain('v-if="row.status"')
-    expect(cell).toContain('v-else>—')
-    expect(cell, '读不到状态就得是 —，不是被兜底成某个取值').not.toContain('available')
+  it('uses measured metrics without substituting a missing count with zero', () => {
+    expect(source).toContain("metricLabel(row,'view_count')")
+    expect(source).toContain("metricLabel(row,'like_count')")
+    expect(source).toContain("metricLabel(row,'favorite_count')")
+    expect(source).not.toContain('row.view_count || 0')
   })
 
   /**
